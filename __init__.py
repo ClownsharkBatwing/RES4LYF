@@ -17,7 +17,7 @@ NODE_CLASS_MAPPINGS = {
     "Latent to Cuda": latents.latent_to_cuda,
     "Latent Batcher": latents.latent_batch,
     "Set Precision": latents.set_precision,
-    "NoisyLatentPerlinRES": latents.LatentNoiseBatch_perlin,
+    "LatentNoiseBatch_perlin": latents.LatentNoiseBatch_perlin,
     "EmptyLatentImage64": latents.EmptyLatentImage64,
 
     "LatentPhaseMagnitude": latents.LatentPhaseMagnitude,
@@ -27,8 +27,6 @@ NODE_CLASS_MAPPINGS = {
 
     "ClownSampler": samplers.ClownSampler,
     "SharkSampler": samplers.SharkSampler,
-    "SamplerRES_Advanced": samplers.ClownSampler,
-    "SamplerCustomNoiseRES": samplers.SharkSampler,
     "SamplerDPMPP_DualSDE_Advanced": samplers.SamplerDPMPP_DUALSDE_MOMENTUMIZED_ADVANCED,
     "SamplerDPMPP_SDE_Advanced": samplers.SamplerDPMPP_SDE_ADVANCED,
 
