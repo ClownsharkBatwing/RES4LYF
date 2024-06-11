@@ -43,7 +43,7 @@ def sample_dpmpp_sde_advanced(
         if callback is not None:
             callback({'x': x, 'i': i, 'sigma': sigmas[i], 'sigma_hat': sigmas[i], 'denoised': denoised})
         
-        if noise_sampler_type == "power":
+        if noise_sampler_type == "fractal":
             noise_sampler.alpha = alpha[i]
             noise_sampler.k = k
             noise_sampler.scale = scale

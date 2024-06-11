@@ -859,7 +859,7 @@ class LatentNoiseBatch_gauss:
 
         return ({"samples": noise_latents}, )
 
-class LatentNoiseBatch_power:
+class LatentNoiseBatch_fractal:
     @classmethod
     def INPUT_TYPES(s):
         return {
@@ -882,7 +882,7 @@ class LatentNoiseBatch_power:
     CATEGORY = "sampling/custom_sampling/samplers"
 
     @staticmethod
-    def _1f_noise_like(x, seed=42, alpha=0.0, k=1.0, scale=0.1, device='cuda', **kwargs):
+    def fractal_noise_like(x, seed=42, alpha=0.0, k=1.0, scale=0.1, device='cuda', **kwargs):
         b, c, h, w = x.shape
         #tensor = torch.randn(size=size, dtype=dtype, layout=layout, generator=generator, device=device)
         generator = torch.Generator(device=device)
@@ -921,7 +921,7 @@ class LatentNoiseBatch_power:
         noise_latents = torch.zeros([steps, 4, h, w], device=latent_samples.device)
 
         for i in range(steps):
-            noise = self._1f_noise_like(latent_samples.size(), seed+i, alphas[i].item(), ks[i].item(), 0.1, latent_samples.device)
+            noise = self.fractal_noise_like(latent_samples.size(), seed+i, alphas[i].item(), ks[i].item(), 0.1, latent_samples.device)
             noise_latents[i] = latent_samples + noise
 
         return ({"samples": noise_latents}, )
@@ -948,7 +948,7 @@ class LatentNoiseList:
 
     CATEGORY = "sampling/custom_sampling/samplers"
 
-    def generate_1f_noise(self, size, alpha=0.0, k=1.0, scale=0.1, device='cuda', **kwargs):
+    def generate_fractal_noise(self, size, alpha=0.0, k=1.0, scale=0.1, device='cuda', **kwargs):
         # gen 1/f noise for a given tensor size with specified alpha influencing the slope of the spectrum
         x = torch.randn(size, device=device, **kwargs)
         C, H, W = size[1], size[2], size[3]
@@ -985,7 +985,7 @@ class LatentNoiseList:
 
         steps = len(alphas) if steps == 0 else steps
         for i in range(steps):
-            noise = self.generate_1f_noise(size, alphas[i].item(), ks[i].item(), 0.1, 'cuda')
+            noise = self.generate_fractal_noise(size, alphas[i].item(), ks[i].item(), 0.1, 'cuda')
             noisy_latent = latent + noise
             new_latent = {"samples": noisy_latent}
             latents.append(new_latent)

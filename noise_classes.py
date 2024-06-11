@@ -81,7 +81,7 @@ class BrownianNoiseGenerator(NoiseGenerator):
     def __call__(self, *, sigma=None, sigma_next=None):
         return BrownianTreeNoiseSampler(self.x, self.sigma_min, self.sigma_max, seed=self.seed, cpu = self.device.type=='cpu')(sigma, sigma_next)
 
-class PowerNoiseGenerator(NoiseGenerator):
+class FractalNoiseGenerator(NoiseGenerator):
     def __init__(self, x=None, size=None, dtype=None, layout=None, device=None, seed=42, generator=None, sigma_min=None, sigma_max=None, 
                  alpha=0.0, k=1.0, scale=0.1): 
         self.update(alpha=alpha, k=k, scale=scale)
@@ -392,7 +392,7 @@ class PerlinNoiseGenerator(NoiseGenerator):
 
 
 NOISE_GENERATOR_CLASSES = {
-    "power": PowerNoiseGenerator,
+    "fractal": FractalNoiseGenerator,
     "pyramid": PyramidNoiseGenerator,
     "gaussian": GaussianNoiseGenerator,
     "uniform": UniformNoiseGenerator,
@@ -417,7 +417,7 @@ def prepare_noise(latent_image, seed, noise_type, noise_inds=None, alpha=1.0, k=
     #optional arg skip can be used to skip and discard x number of noise generations for a given seed
     noise_func = NOISE_GENERATOR_CLASSES.get(noise_type)(x=latent_image, seed=seed)
 
-    if noise_type == "power":
+    if noise_type == "fractal":
         noise_func.alpha = alpha
         noise_func.k = k
 

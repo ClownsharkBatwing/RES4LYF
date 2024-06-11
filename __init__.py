@@ -11,19 +11,19 @@ extra_samplers.add_samplers()
 
 NODE_CLASS_MAPPINGS = {
     "LatentNoiseList": latents.LatentNoiseList,
-    "LatentNoiseBatch_1f": latents.LatentNoiseBatch_power,
+    "LatentNoiseBatch_1f": latents.LatentNoiseBatch_fractal,
     "LatentNoiseBatch_gauss": latents.LatentNoiseBatch_gauss,
     "LatentNoiseBatch_gaussian_channels": latents.LatentNoiseBatch_gaussian_channels,
     "Latent to Cuda": latents.latent_to_cuda,
     "Latent Batcher": latents.latent_batch,
     "Set Precision": latents.set_precision,
     "NoisyLatentPerlinRES": latents.LatentNoiseBatch_perlin,
+    "EmptyLatentImage64": latents.EmptyLatentImage64,
 
     "LatentPhaseMagnitude": latents.LatentPhaseMagnitude,
     "LatentPhaseMagnitudeMultiply": latents.LatentPhaseMagnitudeMultiply,
     "LatentPhaseMagnitudeOffset": latents.LatentPhaseMagnitudeOffset,
     "LatentPhaseMagnitudePower": latents.LatentPhaseMagnitudePower,
-
 
     "ClownSampler": samplers.ClownSampler,
     "SharkSampler": samplers.SharkSampler,
