@@ -150,7 +150,7 @@ class HiresPyramidNoiseGenerator(NoiseGenerator):
         noise = ((torch.rand(size=self.size, dtype=self.dtype, layout=self.layout, device=self.device, generator=self.generator) - 0.5) * 2 * 1.73)
 
         for i in range(4):
-            r = torch.rand(1, generator=self.generator).item() * 2 + 2
+            r = torch.rand(1, device=self.device, generator=self.generator).item() * 2 + 2
             h, w = min(orig_h * 15, int(h * (r ** i))), min(orig_w * 15, int(w * (r ** i)))
             
             new_noise = torch.randn((b, c, h, w), dtype=self.dtype, layout=self.layout, device=self.device, generator=self.generator)
