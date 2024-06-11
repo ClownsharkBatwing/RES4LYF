@@ -5,8 +5,6 @@ import comfy.sampler_helpers
 import torch
 import math
 
-import pdb
-
 from .noise_classes import *
 
 def initialize_or_scale(tensor, value, steps):
@@ -346,8 +344,6 @@ class LatentPhaseMagnitudeMultiply:
         for i in range(4):
             mixed_phase[:, i]     = latent_0_phase[:,i]     * chan_weights_phase[i]
             mixed_magnitude[:, i] = latent_0_magnitude[:,i] * chan_weights_magnitude[i]
-
-        pdb.set_trace()
 
         new_fft = mixed_magnitude * torch.exp(1j * mixed_phase)
         
@@ -973,8 +969,6 @@ class LatentNoiseList:
         return noise / torch.std(noise)
 
     def main(self, latent, alpha, k_flip, steps, alphas=None, ks=None):
-        #pdb.set_trace()
-
         alphas = initialize_or_scale(alphas, alpha, steps)
         k_flip = -1 if k_flip else 1
         ks = initialize_or_scale(ks, k_flip, steps)    
