@@ -84,7 +84,7 @@ class ClownSampler:
         alphas = initialize_or_scale(alphas, alpha, steps)
 
         #import pdb; pdb.set_trace()
-        
+
         if latent_guide_1 is not None:
             latent_guide_1 = latent_guide_1["samples"]
 
@@ -93,6 +93,8 @@ class ClownSampler:
 
         guide_1_channels = torch.tensor([guide_1_Luminosity, guide_1_CyanRed, guide_1_LimePurple, guide_1_PatternStruct])
 
+        latent_noise_samples = latent_noise["samples"] if latent_noise and "samples" in latent_noise else None
+        
         sampler = comfy.samplers.ksampler(
             "res_momentumized_advanced",
             {
@@ -114,7 +116,7 @@ class ClownSampler:
                 "alpha": alpha,
                 "k": k,
                 "clownseed": clownseed,
-                "latent_noise": latent_noise["samples"],
+                "latent_noise": latent_noise_samples,
             }
         )
         return (sampler, )
