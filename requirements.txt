@@ -1,0 +1,8 @@
+math
+matplotlib
+pywavelets
+functools
+typing
+numpy
+builtins
+itertools
