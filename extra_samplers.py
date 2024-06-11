@@ -9,12 +9,34 @@ import functools
 
 from .noise_classes import *
 
-def cast_fp64(func):
+"""def cast_fp64(func):
     @functools.wraps(func)
     def wrapper(*args, **kwargs):
         # Cast all tensor arguments to float64
         new_args = [arg.to(torch.float64) if torch.is_tensor(arg) else arg for arg in args]
         new_kwargs = {k: v.to(torch.float64) if torch.is_tensor(v) else v for k, v in kwargs.items()}
+        return func(*new_args, **new_kwargs)
+    return wrapper"""
+
+def cast_fp64_and_same_device(func):
+    @functools.wraps(func)
+    def wrapper(*args, **kwargs):
+        # Find the first tensor argument to determine the target device
+        target_device = None
+        for arg in args:
+            if torch.is_tensor(arg):
+                target_device = arg.device
+                break
+        if target_device is None:
+            for v in kwargs.values():
+                if torch.is_tensor(v):
+                    target_device = v.device
+                    break
+        
+        # Cast all tensor arguments to float64 and move them to the target device
+        new_args = [arg.to(torch.float64).to(target_device) if torch.is_tensor(arg) else arg for arg in args]
+        new_kwargs = {k: v.to(torch.float64).to(target_device) if torch.is_tensor(v) else v for k, v in kwargs.items()}
+        
         return func(*new_args, **new_kwargs)
     return wrapper
 
@@ -213,7 +235,9 @@ def sample_dpmpp_dualsde_momentum_advanced (
 from .refined_exp_solver import sample_refined_exp_s_advanced
 
 @cast_fp64
-def sample_res_solver_advanced(model, x, sigmas, itas, c2s, momentums, offsets, 
+def sample_res_solver_advanced(model, 
+                               x, 
+                               sigmas, itas, c2s, momentums, offsets, 
                                guides_1, guides_2, latent_guide_1, latent_guide_2, guide_mode_1, guide_mode_2, guide_1_channels,
                                alpha, k, clownseed=0, alphas=None, latent_noise=None,
                                extra_args=None, callback=None, disable=None, noise_sampler_type="gaussian", noise_sampler=None, denoise_to_zero=True, simple_phi_calc=False, c2=0.5, momentum=0.0, offset=0.0):

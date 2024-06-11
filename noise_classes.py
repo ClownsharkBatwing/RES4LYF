@@ -9,12 +9,34 @@ import numpy as np
 import pywt
 import functools
 
-def cast_fp64(func):
+"""def cast_fp64(func):
     @functools.wraps(func)
     def wrapper(*args, **kwargs):
         # Cast all tensor arguments to float64
         new_args = [arg.to(torch.float64) if torch.is_tensor(arg) else arg for arg in args]
         new_kwargs = {k: v.to(torch.float64) if torch.is_tensor(v) else v for k, v in kwargs.items()}
+        return func(*new_args, **new_kwargs)
+    return wrapper"""
+
+def cast_fp64(func):
+    @functools.wraps(func)
+    def wrapper(*args, **kwargs):
+        # Find the first tensor argument to determine the target device
+        target_device = None
+        for arg in args:
+            if torch.is_tensor(arg):
+                target_device = arg.device
+                break
+        if target_device is None:
+            for v in kwargs.values():
+                if torch.is_tensor(v):
+                    target_device = v.device
+                    break
+        
+        # Cast all tensor arguments to float64 and move them to the target device
+        new_args = [arg.to(torch.float64).to(target_device) if torch.is_tensor(arg) else arg for arg in args]
+        new_kwargs = {k: v.to(torch.float64).to(target_device) if torch.is_tensor(v) else v for k, v in kwargs.items()}
+        
         return func(*new_args, **new_kwargs)
     return wrapper
 
@@ -65,7 +87,6 @@ class NoiseGenerator:
         else:
             self.generator = generator
 
-    
     def __call__(self):
         raise NotImplementedError("This method got clownsharked!")
     
@@ -102,13 +123,13 @@ class FractalNoiseGenerator(NoiseGenerator):
         
         spectral_density = self.k / torch.pow(freq, self.alpha * self.scale)
         spectral_density[0, 0] = 0
-        
+
         noise_fft = torch.fft.fft2(noise)
         modified_fft = noise_fft * spectral_density
         noise = torch.fft.ifft2(modified_fft).real
-        
+
         return noise / torch.std(noise)
-    
+
 class PyramidNoiseGenerator(NoiseGenerator):
     def __init__(self, x=None, size=None, dtype=None, layout=None, device=None, seed=42, generator=None, sigma_min=None, sigma_max=None, 
                  discount=0.8, mode='nearest-exact'):
@@ -152,7 +173,7 @@ class HiresPyramidNoiseGenerator(NoiseGenerator):
         for i in range(4):
             r = torch.rand(1, device=self.device, generator=self.generator).item() * 2 + 2
             h, w = min(orig_h * 15, int(h * (r ** i))), min(orig_w * 15, int(w * (r ** i)))
-            
+
             new_noise = torch.randn((b, c, h, w), dtype=self.dtype, layout=self.layout, device=self.device, generator=self.generator)
             upsampled_noise = u(new_noise)
             noise += upsampled_noise * self.discount ** i
@@ -161,7 +182,7 @@ class HiresPyramidNoiseGenerator(NoiseGenerator):
                 break  # if resolution is too high
         
         return noise / noise.std()
-    
+
 class UniformNoiseGenerator(NoiseGenerator):
     def __init__(self, x=None, size=None, dtype=None, layout=None, device=None, seed=42, generator=None, sigma_min=None, sigma_max=None, 
                  mean=0.0, scale=1.73):
@@ -173,7 +194,7 @@ class UniformNoiseGenerator(NoiseGenerator):
         self.update(mean=mean, scale=scale)
 
         noise = torch.rand(self.size, dtype=self.dtype, layout=self.layout, device=self.device, generator=self.generator)
-        
+
         return self.scale * 2 * (noise - 0.5) + self.mean
 
 class GaussianNoiseGenerator(NoiseGenerator):
@@ -187,7 +208,7 @@ class GaussianNoiseGenerator(NoiseGenerator):
         self.update(mean=mean, std=std)
 
         noise = torch.randn(self.size, dtype=self.dtype, layout=self.layout, device=self.device, generator=self.generator)
-        
+
         return noise * self.std + self.mean
 
 class LaplacianNoiseGenerator(NoiseGenerator):
@@ -232,7 +253,7 @@ class StudentTNoiseGenerator(NoiseGenerator):
         noise = StudentT(loc=0, scale=0.2, df=1).rsample(self.size)
         self.generator.manual_seed(self.generator.initial_seed() + 1)
         torch.random.set_rng_state(rng_state)
-        
+
         s = torch.quantile(noise.flatten(start_dim=1).abs(), 0.75, dim=-1)
         s = s.reshape(*s.shape, 1, 1, 1)
         noise = noise.clamp(-s, s)
@@ -258,7 +279,7 @@ class WaveletNoiseGenerator(NoiseGenerator):
 
         noise_tensor = (noise_tensor - noise_tensor.mean()) / noise_tensor.std()
         return noise_tensor
-    
+
 class PerlinNoiseGenerator(NoiseGenerator):
     def __init__(self, x=None, size=None, dtype=None, layout=None, device=None, seed=42, generator=None, sigma_min=None, sigma_max=None, 
                  detail=0.0):
@@ -389,7 +410,6 @@ class PerlinNoiseGenerator(NoiseGenerator):
         for i in range(2):
             noise += self.perlin_noise((noise_size_H, noise_size_W), (noise_size_H, noise_size_W), batch_size=self.x.shape[1], generator=self.generator).to(self.device)
         return noise / noise.std()
-
 
 NOISE_GENERATOR_CLASSES = {
     "fractal": FractalNoiseGenerator,

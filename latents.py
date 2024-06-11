@@ -914,10 +914,13 @@ class LatentNoiseBatch_fractal:
 
         latent_samples = latent["samples"]
         b, c, h, w = latent_samples.shape  
-        noise_latents = torch.zeros([steps, 4, h, w], device=latent_samples.device)
+        noise_latents = torch.zeros([steps, 4, h, w], dtype=latent_samples.dtype, layout=latent_samples.layout, device=latent_samples.device)
+
+        noise_sampler = NOISE_GENERATOR_CLASSES.get('fractal')(x=latent_samples, seed = seed)
 
         for i in range(steps):
-            noise = self.fractal_noise_like(latent_samples.size(), seed+i, alphas[i].item(), ks[i].item(), 0.1, latent_samples.device)
+            noise = noise_sampler(alpha=alphas[i].item(), k=ks[i].item(), scale=0.1)
+            #noise = self.fractal_noise_like(latent_samples.size(), seed+i, alphas[i].item(), ks[i].item(), 0.1, device=latent_samples.device)
             noise_latents[i] = latent_samples + noise
 
         return ({"samples": noise_latents}, )

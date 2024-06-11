@@ -13,6 +13,13 @@ def initialize_or_scale(tensor, value, steps):
         return torch.full((steps,), value)
     else:
         return value * tensor
+    
+def move_to_same_device(*tensors):
+    if not tensors:
+        return tensors
+
+    device = tensors[0].device
+    return tuple(tensor.to(device) for tensor in tensors)
 
 class ClownSampler:
     @classmethod
@@ -76,6 +83,8 @@ class ClownSampler:
         guides_2 = initialize_or_scale(guides_2, guide_2, steps)
         alphas = initialize_or_scale(alphas, alpha, steps)
 
+        #import pdb; pdb.set_trace()
+        
         if latent_guide_1 is not None:
             latent_guide_1 = latent_guide_1["samples"]
 
@@ -105,7 +114,7 @@ class ClownSampler:
                 "alpha": alpha,
                 "k": k,
                 "clownseed": clownseed,
-                "latent_noise": latent_noise,
+                "latent_noise": latent_noise["samples"],
             }
         )
         return (sampler, )

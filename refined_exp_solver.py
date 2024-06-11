@@ -259,6 +259,8 @@ def sample_refined_exp_s_advanced(
     noise_sampler (`NoiseSampler`, *optional*, defaults to `torch.randn_like`): method used for adding noise
     simple_phi_calc (`bool`, *optional*, defaults to `True`): True = calculate phi_i,j(-h) via simplified formulae specific to j={1,2}. False = Use general solution that works for any j. Mathematically equivalent, but could be numeric differences.
   """
+
+  #import pdb; pdb.set_trace()
   #assert sigmas[-1] == 0
   sigma_min, sigma_max = sigmas[sigmas > 0].min(), sigmas.max()
   noise_sampler = NOISE_GENERATOR_CLASSES.get(noise_sampler_type)(x=x, seed=clownseed, sigma_min=sigma_min, sigma_max=sigma_max)
@@ -277,10 +279,10 @@ def sample_refined_exp_s_advanced(
         sigma = sigmas[i]
 
       if latent_noise is not None:
-        if latent_noise["samples"].size()[0] == 1:
-          eps = latent_noise["samples"][0]
+        if latent_noise.size()[0] == 1:
+          eps = latent_noise[0]
         else:
-          eps = latent_noise["samples"][i]
+          eps = latent_noise[i]
       else:
         if noise_sampler_type == "power":
           noise_sampler.alpha = alpha[i]
