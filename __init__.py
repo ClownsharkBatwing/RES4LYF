@@ -11,6 +11,8 @@ extra_samplers.add_samplers()
 
 NODE_CLASS_MAPPINGS = {
     "LatentNoiseList": latents.LatentNoiseList,
+    "LatentBatch_channels_offset": latents.LatentBatch_channels_offset,
+    "LatentBatch_channels_multiply": latents.LatentBatch_channels_multiply,
     "LatentNoiseBatch_fractal": latents.LatentNoiseBatch_fractal,
     "LatentNoiseBatch_gaussian": latents.LatentNoiseBatch_gaussian,
     "LatentNoiseBatch_gaussian_channels": latents.LatentNoiseBatch_gaussian_channels,
