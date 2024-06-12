@@ -111,7 +111,7 @@ class BrownianNoiseGenerator(NoiseGenerator):
 class FractalNoiseGenerator(NoiseGenerator):
     def __init__(self, x=None, size=None, dtype=None, layout=None, device=None, seed=42, generator=None, sigma_min=None, sigma_max=None, 
                  alpha=0.0, k=1.0, scale=0.1): 
-        self.update(alpha=alpha, k=k, scal00=scale)
+        self.update(alpha=alpha, k=k, scale=scale)
 
         super().__init__(x, size, dtype, layout, device, seed, generator, sigma_min, sigma_max)
 
