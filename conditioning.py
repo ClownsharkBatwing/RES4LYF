@@ -143,7 +143,7 @@ class ConditioningAverageScheduler:
         return [{"start_percent": i * step_size, "end_percent": (i + 1) * step_size} for i in range(steps)]
 
     def main(self, conditioning_0, conditioning_1, ratio):
-        import pdb; pdb.set_trace()
+        #import pdb; pdb.set_trace()
         steps = len(ratio)
 
         percents = self.create_percent_array(steps)
