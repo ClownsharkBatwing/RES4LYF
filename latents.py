@@ -957,29 +957,24 @@ class LatentNoiseList:
             latents.append(new_latent)
 
         return (latents, )
-
-class LatentBatch_channels_offset:
+    
+class LatentBatch_channels:
     @classmethod
     def INPUT_TYPES(s):
         return {
             "required": {
                 "latent": ("LATENT",),
-                "offset": ("FLOAT", {"default": 0.0, "min": -10000.0, "max": 10000.0, "step": 0.001}),
-                "offset_luminosity": ("FLOAT", {"default": 0.0, "min": -10000.0, "max": 10000.0, "step": 0.001}),
-                "offset_cyan_red": ("FLOAT", {"default": 0.0, "min": -10000.0, "max": 10000.0, "step": 0.001}),
-                "offset_lime_purple": ("FLOAT", {"default": 0.0, "min": -10000.0, "max": 10000.0, "step": 0.001}),
-                "offset_pattern_structure": ("FLOAT", {"default": 0.0, "min": -10000.0, "max": 10000.0, "step": 0.001}),
-                "std": ("FLOAT", {"default": 1.0, "min": -10000.0, "max": 10000.0, "step": 0.001}),
-                "steps": ("INT", {"default": 0, "min": -10000, "max": 10000}),
-                "seed": ("INT", {"default": 0, "min": 0, "max": 0xffffffffffffffff}),
+                "mode": (["offset", "multiply", "power"],),
+                "luminosity": ("FLOAT", {"default": 0.0, "min": -10000.0, "max": 10000.0, "step": 0.01}),
+                "cyan_red": ("FLOAT", {"default": 0.0, "min": -10000.0, "max": 10000.0, "step": 0.01}),
+                "lime_purple": ("FLOAT", {"default": 0.0, "min": -10000.0, "max": 10000.0, "step": 0.01}),
+                "pattern_structure": ("FLOAT", {"default": 0.0, "min": -10000.0, "max": 10000.0, "step": 0.01}),
             },
             "optional": {
-                "offsets": ("SIGMAS", ),
-                "offset_luminositys": ("SIGMAS", ),
-                "offset_cyan_reds": ("SIGMAS", ),
-                "offset_lime_purples": ("SIGMAS", ),
-                "offset_pattern_structures": ("SIGMAS", ),
-                "stds": ("SIGMAS", ),
+                "luminositys": ("SIGMAS", ),
+                "cyan_reds": ("SIGMAS", ),
+                "lime_purples": ("SIGMAS", ),
+                "pattern_structures": ("SIGMAS", ),
             }
         }
 
@@ -989,120 +984,60 @@ class LatentBatch_channels_offset:
     CATEGORY = "sampling/custom_sampling/samplers"
     
     @staticmethod
-    def latent_channels_offset(x, offset_luminosity = -0.1, offset_cyan_red = 0.0, offset_lime_purple=0.0, offset_pattern_structure=0.0):
-        #x = torch.squeeze(x, )
-
-        luminosity = x[0:1] + offset_luminosity
-        cyan_red = x[1:2] + offset_cyan_red
-        lime_purple = x[2:3] + offset_lime_purple
-        pattern_structure = x[3:4] + offset_pattern_structure
+    def latent_channels_multiply(x, luminosity = -0.1, cyan_red = 0.0, lime_purple=0.0, pattern_structure=0.0):
+        luminosity = x[0:1] * luminosity
+        cyan_red = x[1:2] * cyan_red
+        lime_purple = x[2:3] * lime_purple
+        pattern_structure = x[3:4] * pattern_structure
 
         x = torch.unsqueeze(torch.cat([luminosity, cyan_red, lime_purple, pattern_structure]), 0)
-        #x = torch.cat([luminosity, cyan_red, lime_purple, pattern_structure])
-
         return x
 
-    def main(self, latent, steps, seed, 
-              offset, offset_luminosity, offset_cyan_red, offset_lime_purple, offset_pattern_structure, std,
-              offsets=None, offset_luminositys=None, offset_cyan_reds=None, offset_lime_purples=None, offset_pattern_structures=None, stds=None):
-        if steps == 0:
-            steps = len(offsets)
+    @staticmethod
+    def latent_channels_offset(x, luminosity = -0.1, cyan_red = 0.0, lime_purple=0.0, pattern_structure=0.0):
+        luminosity = x[0:1] + luminosity
+        cyan_red = x[1:2] + cyan_red
+        lime_purple = x[2:3] + lime_purple
+        pattern_structure = x[3:4] + pattern_structure
 
-        #pdb.set_trace()
-        x = latent["samples"]
-        b, c, h, w = x.shape  
-
-        # x_noised = torch.zeros([steps, 4, h, w], device=x.device)
-
-        noise_latents = torch.zeros([steps, 4, h, w], dtype=x.dtype, layout=x.layout, device=x.device)
-
-        offsets = initialize_or_scale(offsets, offset, steps)
-        offset_luminositys = initialize_or_scale(offset_luminositys, offset_luminosity, steps)
-        offset_cyan_reds = initialize_or_scale(offset_cyan_reds, offset_cyan_red, steps)
-        offset_lime_purples = initialize_or_scale(offset_lime_purples, offset_lime_purple, steps)
-        offset_pattern_structures = initialize_or_scale(offset_pattern_structures, offset_pattern_structure, steps)
-
-        stds = initialize_or_scale(stds, std, steps)
-
-        for i in range(steps):
-            noise = self.latent_channels_offset(x[i], offset_luminositys[i].item(), offset_cyan_reds[i].item(), offset_lime_purples[i].item(), offset_pattern_structures[i].item())
-            #noise = self.latent_channels_offset(x[i:i+1], offset_luminositys[i].item(), offset_cyan_reds[i].item(), offset_lime_purples[i].item(), offset_pattern_structures[i].item())
-            noise_latents[i] = noise
-
-        return ({"samples": noise_latents}, )
-    
-
-class LatentBatch_channels_multiply:
-    @classmethod
-    def INPUT_TYPES(s):
-        return {
-            "required": {
-                "latent": ("LATENT",),
-                "offset": ("FLOAT", {"default": 0.0, "min": -10000.0, "max": 10000.0, "step": 0.001}),
-                "offset_luminosity": ("FLOAT", {"default": 0.0, "min": -10000.0, "max": 10000.0, "step": 0.001}),
-                "offset_cyan_red": ("FLOAT", {"default": 0.0, "min": -10000.0, "max": 10000.0, "step": 0.001}),
-                "offset_lime_purple": ("FLOAT", {"default": 0.0, "min": -10000.0, "max": 10000.0, "step": 0.001}),
-                "offset_pattern_structure": ("FLOAT", {"default": 0.0, "min": -10000.0, "max": 10000.0, "step": 0.001}),
-                "std": ("FLOAT", {"default": 1.0, "min": -10000.0, "max": 10000.0, "step": 0.001}),
-                "steps": ("INT", {"default": 0, "min": -10000, "max": 10000}),
-                "seed": ("INT", {"default": 0, "min": 0, "max": 0xffffffffffffffff}),
-            },
-            "optional": {
-                "offsets": ("SIGMAS", ),
-                "offset_luminositys": ("SIGMAS", ),
-                "offset_cyan_reds": ("SIGMAS", ),
-                "offset_lime_purples": ("SIGMAS", ),
-                "offset_pattern_structures": ("SIGMAS", ),
-                "stds": ("SIGMAS", ),
-            }
-        }
-
-    RETURN_TYPES = ("LATENT",)
-    FUNCTION = "main"
-
-    CATEGORY = "sampling/custom_sampling/samplers"
+        x = torch.unsqueeze(torch.cat([luminosity, cyan_red, lime_purple, pattern_structure]), 0)
+        return x
     
     @staticmethod
-    def latent_channels_offset(x, offset_luminosity = -0.1, offset_cyan_red = 0.0, offset_lime_purple=0.0, offset_pattern_structure=0.0):
-        #x = torch.squeeze(x, )
-
-        luminosity = x[0:1] * offset_luminosity
-        cyan_red = x[1:2] * offset_cyan_red
-        lime_purple = x[2:3] * offset_lime_purple
-        pattern_structure = x[3:4] * offset_pattern_structure
+    def latent_channels_power(x, luminosity = -0.1, cyan_red = 0.0, lime_purple=0.0, pattern_structure=0.0):
+        luminosity = x[0:1] ** luminosity
+        cyan_red = x[1:2] ** cyan_red
+        lime_purple = x[2:3] ** lime_purple
+        pattern_structure = x[3:4] ** pattern_structure
 
         x = torch.unsqueeze(torch.cat([luminosity, cyan_red, lime_purple, pattern_structure]), 0)
-        #x = torch.cat([luminosity, cyan_red, lime_purple, pattern_structure])
-
         return x
 
-    def main(self, latent, steps, seed, 
-              offset, offset_luminosity, offset_cyan_red, offset_lime_purple, offset_pattern_structure, std,
-              offsets=None, offset_luminositys=None, offset_cyan_reds=None, offset_lime_purples=None, offset_pattern_structures=None, stds=None):
-        if steps == 0:
-            steps = len(offsets)
-
+    def main(self, latent, mode,
+              luminosity, cyan_red, lime_purple, pattern_structure, 
+              luminositys=None, cyan_reds=None, lime_purples=None, pattern_structures=None):
+        
         #pdb.set_trace()
         x = latent["samples"]
         b, c, h, w = x.shape  
 
         # x_noised = torch.zeros([steps, 4, h, w], device=x.device)
 
-        noise_latents = torch.zeros([steps, 4, h, w], dtype=x.dtype, layout=x.layout, device=x.device)
+        noise_latents = torch.zeros([b, c, h, w], dtype=x.dtype, layout=x.layout, device=x.device)
 
-        offsets = initialize_or_scale(offsets, offset, steps)
-        offset_luminositys = initialize_or_scale(offset_luminositys, offset_luminosity, steps)
-        offset_cyan_reds = initialize_or_scale(offset_cyan_reds, offset_cyan_red, steps)
-        offset_lime_purples = initialize_or_scale(offset_lime_purples, offset_lime_purple, steps)
-        offset_pattern_structures = initialize_or_scale(offset_pattern_structures, offset_pattern_structure, steps)
+        luminositys = initialize_or_scale(luminositys, luminosity, b)
+        cyan_reds = initialize_or_scale(cyan_reds, cyan_red, b)
+        lime_purples = initialize_or_scale(lime_purples, lime_purple, b)
+        pattern_structures = initialize_or_scale(pattern_structures, pattern_structure, b)
 
-        stds = initialize_or_scale(stds, std, steps)
-
-        for i in range(steps):
-            noise = self.latent_channels_offset(x[i], offset_luminositys[i].item(), offset_cyan_reds[i].item(), offset_lime_purples[i].item(), offset_pattern_structures[i].item())
-            #noise = self.latent_channels_offset(x[i:i+1], offset_luminositys[i].item(), offset_cyan_reds[i].item(), offset_lime_purples[i].item(), offset_pattern_structures[i].item())
+        for i in range(b):
+            if mode == "offset":
+                noise = self.latent_channels_offset(x[i], luminositys[i].item(), cyan_reds[i].item(), lime_purples[i].item(), pattern_structures[i].item())
+            elif mode == "multiply":  
+                noise = self.latent_channels_multiply(x[i], luminositys[i].item(), cyan_reds[i].item(), lime_purples[i].item(), pattern_structures[i].item())
+            elif mode == "power":  
+                noise = self.latent_channels_power(x[i], luminositys[i].item(), cyan_reds[i].item(), lime_purples[i].item(), pattern_structures[i].item())
             noise_latents[i] = noise
 
         return ({"samples": noise_latents}, )
     
-
