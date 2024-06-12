@@ -751,7 +751,7 @@ class LatentNoiseBatch_gaussian_channels:
                 "mean_pattern_structure": ("FLOAT", {"default": 0.0, "min": -10000.0, "max": 10000.0, "step": 0.001}),
                 "std": ("FLOAT", {"default": 1.0, "min": -10000.0, "max": 10000.0, "step": 0.001}),
                 "steps": ("INT", {"default": 0, "min": -10000, "max": 10000}),
-                "seed": ("INT", {"default": 0, "min": -10000, "max": 10000}),
+                "seed": ("INT", {"default": 0, "min": 0, "max": 0xffffffffffffffff}),
             },
             "optional": {
                 "means": ("SIGMAS", ),
@@ -768,8 +768,23 @@ class LatentNoiseBatch_gaussian_channels:
 
     CATEGORY = "sampling/custom_sampling/samplers"
 
-    @staticmethod
+    """    @staticmethod
     def gaussian_noise_channels_like(x, mean=0.0, mean_luminosity = -0.1, mean_cyan_red = 0.0, mean_lime_purple=0.0, mean_pattern_structure=0.0, std_dev=1.0, seed=42):
+        x = x.squeeze(0)
+
+        noise = torch.randn_like(x) * std_dev + mean
+
+        luminosity = noise[0:1] + mean_luminosity
+        cyan_red = noise[1:2] + mean_cyan_red
+        lime_purple = noise[2:3] + mean_lime_purple
+        pattern_structure = noise[3:4] + mean_pattern_structure
+
+        noise = torch.unsqueeze(torch.cat([luminosity, cyan_red, lime_purple, pattern_structure]), 0)
+
+        return noise.to(x.device)"""
+    
+    @staticmethod
+    def gaussian_noise_channels(x, mean=0.0, mean_luminosity = -0.1, mean_cyan_red = 0.0, mean_lime_purple=0.0, mean_pattern_structure=0.0, std_dev=1.0, seed=42):
         x = x.squeeze(0)
 
         noise = torch.randn_like(x) * std_dev + mean
@@ -789,6 +804,14 @@ class LatentNoiseBatch_gaussian_channels:
         if steps == 0:
             steps = len(means)
 
+        x = latent["samples"]
+        b, c, h, w = x.shape  
+        x_noised = torch.zeros([steps, 4, h, w], device=x.device)
+
+        noise_latents = torch.zeros([steps, 4, h, w], dtype=x.dtype, layout=x.layout, device=x.device)
+
+        noise_sampler = NOISE_GENERATOR_CLASSES.get('gaussian')(x=x, seed = seed)
+
         means = initialize_or_scale(means, mean, steps)
         mean_luminositys = initialize_or_scale(mean_luminositys, mean_luminosity, steps)
         mean_cyan_reds = initialize_or_scale(mean_cyan_reds, mean_cyan_red, steps)
@@ -797,17 +820,14 @@ class LatentNoiseBatch_gaussian_channels:
 
         stds = initialize_or_scale(stds, std, steps)
 
-        x = latent["samples"]
-        b, c, h, w = x.shape  
-        x_noised = torch.zeros([steps, 4, h, w], device=x.device)
-
         for i in range(steps):
-            noise = self.gaussian_noise_channels_like(x, means[i].item(), mean_luminositys[i].item(), mean_cyan_reds[i].item(), mean_lime_purples[i].item(), mean_pattern_structures[i].item(), stds[i].item(), seed+i)
-            x_noised[i] = x + noise
+            noise = noise_sampler(mean=means[i].item(), std=stds[i].item())
+            noise = self.gaussian_noise_channels(noise, means[i].item(), mean_luminositys[i].item(), mean_cyan_reds[i].item(), mean_lime_purples[i].item(), mean_pattern_structures[i].item(), stds[i].item(), seed+i)
+            noise_latents[i] = x + noise
 
         return ({"samples": x_noised}, )
 
-class LatentNoiseBatch_gauss:
+class LatentNoiseBatch_gaussian:
     @classmethod
     def INPUT_TYPES(s):
         return {
@@ -816,7 +836,7 @@ class LatentNoiseBatch_gauss:
                 "mean": ("FLOAT", {"default": 1.0, "min": -10000.0, "max": 10000.0, "step": 0.001}),
                 "std": ("FLOAT", {"default": 1.0, "min": -10000.0, "max": 10000.0, "step": 0.001}),
                 "steps": ("INT", {"default": 0, "min": -10000, "max": 10000}),
-                "seed": ("INT", {"default": 0, "min": -10000, "max": 10000}),
+                "seed": ("INT", {"default": 0, "min": 0, "max": 0xffffffffffffffff}),
             },
             "optional": {
                 "means": ("SIGMAS", ),
@@ -829,15 +849,6 @@ class LatentNoiseBatch_gauss:
 
     CATEGORY = "sampling/custom_sampling/samplers"
 
-    @staticmethod
-    def adjustable_gaussian_noise_like(x, mean=0.0, std=1.0, seed=42):
-        generator = torch.Generator(device=x.device)
-        generator.manual_seed(seed)
-
-        noise = torch.randn_like(x) * std + mean
-        print("adjustable_gaussian_noise_like:", noise.sum(), noise[noise > 0].sum(), noise[noise < 0].sum(), noise.max(), noise.min())
-        return noise
-
     def main(self, latent, mean, std, steps, seed, means=None, stds=None):
         if steps == 0:
             steps = len(means)
@@ -847,10 +858,18 @@ class LatentNoiseBatch_gauss:
 
         latent_samples = latent["samples"]
         b, c, h, w = latent_samples.shape  
-        noise_latents = torch.zeros([steps, 4, h, w], device=latent_samples.device)
+        #noise_latents = torch.zeros([steps, 4, h, w], device=latent_samples.device)
+
+        #for i in range(steps):
+        #    noise = self.adjustable_gaussian_noise_like(latent_samples, means[i].item(), stds[i].item(), seed+i)
+        #    noise_latents[i] = latent_samples + noise
+
+        noise_latents = torch.zeros([steps, 4, h, w], dtype=latent_samples.dtype, layout=latent_samples.layout, device=latent_samples.device)
+
+        noise_sampler = NOISE_GENERATOR_CLASSES.get('gaussian')(x=latent_samples, seed = seed)
 
         for i in range(steps):
-            noise = self.adjustable_gaussian_noise_like(latent_samples, means[i].item(), stds[i].item(), seed+i)
+            noise = noise_sampler(mean=means[i].item(), std=stds[i].item())
             noise_latents[i] = latent_samples + noise
 
         return ({"samples": noise_latents}, )
@@ -864,7 +883,7 @@ class LatentNoiseBatch_fractal:
                 "alpha": ("FLOAT", {"default": 1.0, "min": -10000.0, "max": 10000.0, "step": 0.001}),
                 "k_flip": ("BOOLEAN", {"default": False}),
                 "steps": ("INT", {"default": 0, "min": -10000, "max": 10000}),
-                "seed": ("INT", {"default": 0, "min": -10000, "max": 10000}),
+                "seed": ("INT", {"default": 0, "min": 0, "max": 0xffffffffffffffff}),
             },
             "optional": {
                 "alphas": ("SIGMAS", ),
@@ -876,33 +895,6 @@ class LatentNoiseBatch_fractal:
     FUNCTION = "main"
 
     CATEGORY = "sampling/custom_sampling/samplers"
-
-    @staticmethod
-    def fractal_noise_like(x, seed=42, alpha=0.0, k=1.0, scale=0.1, device='cuda', **kwargs):
-        b, c, h, w = x.shape
-        #tensor = torch.randn(size=size, dtype=dtype, layout=layout, generator=generator, device=device)
-        generator = torch.Generator(device=device)
-        generator.manual_seed(seed)
-        # gen 1/f noise for a given tensor size with specified alpha influencing the slope of the spectrum
-        noise = torch.randn(x.shape, device=device, generator=generator, **kwargs)
-
-        # generate a matrix of frequencies
-        y_freq = torch.fft.fftfreq(h, d=1/h).to(device)
-        x_freq = torch.fft.fftfreq(w, d=1/w).to(device)
-        freq = torch.sqrt(y_freq[:, None]**2 + x_freq[None, :]**2).clamp(min=1e-10)  # Avoid division by zero
-
-        # adjust spectral density calculation using the scale parameter
-        spectral_density = k / torch.pow(freq, alpha * scale)
-
-        # zero the DC component to prvent infinite values
-        spectral_density[0, 0] = 0
-
-        # transform the noise to the frequency domain/apply spectral density/transform back
-        noise_fft = torch.fft.fft2(noise)
-        modified_fft = noise_fft * spectral_density
-        noise = torch.fft.ifft2(modified_fft).real  # apply modified spectral density
-        
-        return noise / torch.std(noise)
 
     def main(self, latent, alpha, k_flip, steps, seed=42, alphas=None, ks=None):
         if steps == 0:
@@ -920,7 +912,6 @@ class LatentNoiseBatch_fractal:
 
         for i in range(steps):
             noise = noise_sampler(alpha=alphas[i].item(), k=ks[i].item(), scale=0.1)
-            #noise = self.fractal_noise_like(latent_samples.size(), seed+i, alphas[i].item(), ks[i].item(), 0.1, device=latent_samples.device)
             noise_latents[i] = latent_samples + noise
 
         return ({"samples": noise_latents}, )
@@ -934,6 +925,7 @@ class LatentNoiseList:
                 "alpha": ("FLOAT", {"default": 1.0, "min": -10000.0, "max": 10000.0, "step": 0.001}),
                 "k_flip": ("BOOLEAN", {"default": False}),
                 "steps": ("INT", {"default": 0, "min": -10000, "max": 10000}),
+                "seed": ("INT", {"default": 0, "min": 0, "max": 0xffffffffffffffff}),
             },
             "optional": {
                 "alphas": ("SIGMAS", ),
@@ -947,43 +939,22 @@ class LatentNoiseList:
 
     CATEGORY = "sampling/custom_sampling/samplers"
 
-    def generate_fractal_noise(self, size, alpha=0.0, k=1.0, scale=0.1, device='cuda', **kwargs):
-        # gen 1/f noise for a given tensor size with specified alpha influencing the slope of the spectrum
-        x = torch.randn(size, device=device, **kwargs)
-        C, H, W = size[1], size[2], size[3]
-
-        # generate a matrix of frequencies
-        y_freq = torch.fft.fftfreq(H, d=1/H).to(device)
-        x_freq = torch.fft.fftfreq(W, d=1/W).to(device)
-        freq = torch.sqrt(y_freq[:, None]**2 + x_freq[None, :]**2).clamp(min=1e-10)  # Avoid division by zero
-
-        # adjust spectral density calculation using the scale parameter
-        spectral_density = k / torch.pow(freq, alpha * scale)
-
-        # zero the DC component to prvent infinite values
-        spectral_density[0, 0] = 0
-
-        # transform the noise to the frequency domain/apply spectral density/transform back
-        noise_fft = torch.fft.fft2(x)
-        modified_fft = noise_fft * spectral_density
-        noise = torch.fft.ifft2(modified_fft).real  # Aapply modified spectral density
-        
-        # nrmalize the noise
-        return noise / torch.std(noise)
-
-    def main(self, latent, alpha, k_flip, steps, alphas=None, ks=None):
+    def main(self, seed, latent, alpha, k_flip, steps, alphas=None, ks=None):
         alphas = initialize_or_scale(alphas, alpha, steps)
         k_flip = -1 if k_flip else 1
         ks = initialize_or_scale(ks, k_flip, steps)    
 
-        latent = latent["samples"].cuda()
+        latent_samples = latent["samples"]
         latents = []
-        size = latent.shape
+        size = latent_samples.shape
 
         steps = len(alphas) if steps == 0 else steps
+
+        noise_sampler = NOISE_GENERATOR_CLASSES.get('fractal')(x=latent_samples, seed=seed)
+
         for i in range(steps):
-            noise = self.generate_fractal_noise(size, alphas[i].item(), ks[i].item(), 0.1, 'cuda')
-            noisy_latent = latent + noise
+            noise = noise_sampler(alpha=alphas[i].item(), k=ks[i].item(), scale=0.1)
+            noisy_latent = latent_samples + noise
             new_latent = {"samples": noisy_latent}
             latents.append(new_latent)
 

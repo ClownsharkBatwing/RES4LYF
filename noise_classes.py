@@ -9,14 +9,6 @@ import numpy as np
 import pywt
 import functools
 
-"""def cast_fp64(func):
-    @functools.wraps(func)
-    def wrapper(*args, **kwargs):
-        # Cast all tensor arguments to float64
-        new_args = [arg.to(torch.float64) if torch.is_tensor(arg) else arg for arg in args]
-        new_kwargs = {k: v.to(torch.float64) if torch.is_tensor(v) else v for k, v in kwargs.items()}
-        return func(*new_args, **new_kwargs)
-    return wrapper"""
 
 def cast_fp64(func):
     @functools.wraps(func)
@@ -33,12 +25,21 @@ def cast_fp64(func):
                     target_device = v.device
                     break
         
+        # Recursive function to cast tensors in nested dictionaries
+        def cast_and_move_to_device(data):
+            if torch.is_tensor(data):
+                return data.to(torch.float64).to(target_device)
+            elif isinstance(data, dict):
+                return {k: cast_and_move_to_device(v) for k, v in data.items()}
+            return data
+
         # Cast all tensor arguments to float64 and move them to the target device
-        new_args = [arg.to(torch.float64).to(target_device) if torch.is_tensor(arg) else arg for arg in args]
-        new_kwargs = {k: v.to(torch.float64).to(target_device) if torch.is_tensor(v) else v for k, v in kwargs.items()}
+        new_args = [cast_and_move_to_device(arg) for arg in args]
+        new_kwargs = {k: cast_and_move_to_device(v) for k, v in kwargs.items()}
         
         return func(*new_args, **new_kwargs)
     return wrapper
+
 
 def noise_generator_factory(cls, **fixed_params):
     def create_instance(**kwargs):
@@ -99,13 +100,18 @@ class NoiseGenerator:
         return tuple(updated_values)
 
 class BrownianNoiseGenerator(NoiseGenerator):
-    def __call__(self, *, sigma=None, sigma_next=None):
+    #def __init__(self, x=None, size=None, dtype=None, layout=None, device=None, seed=42, generator=None, sigma_min=None, sigma_max=None, 
+    #             sigma=14.614642, sigma_next=0.0291675): 
+    #    self.update(sigma=sigma, sigma_next=sigma_next)
+    #    super().__init__(x, size, dtype, layout, device, seed, generator, sigma_min, sigma_max)
+
+    def __call__(self, *, sigma=None, sigma_next=None, **kwargs):
         return BrownianTreeNoiseSampler(self.x, self.sigma_min, self.sigma_max, seed=self.seed, cpu = self.device.type=='cpu')(sigma, sigma_next)
 
 class FractalNoiseGenerator(NoiseGenerator):
     def __init__(self, x=None, size=None, dtype=None, layout=None, device=None, seed=42, generator=None, sigma_min=None, sigma_max=None, 
                  alpha=0.0, k=1.0, scale=0.1): 
-        self.update(alpha=alpha, k=k, scale=scale)
+        self.update(alpha=alpha, k=k, scal00=scale)
 
         super().__init__(x, size, dtype, layout, device, seed, generator, sigma_min, sigma_max)
 
@@ -250,14 +256,18 @@ class StudentTNoiseGenerator(NoiseGenerator):
 
         rng_state = torch.random.get_rng_state()
         torch.manual_seed(self.generator.initial_seed())
-        noise = StudentT(loc=0, scale=0.2, df=1).rsample(self.size)
-        self.generator.manual_seed(self.generator.initial_seed() + 1)
-        torch.random.set_rng_state(rng_state)
+
+        noise = StudentT(loc=self.loc, scale=self.scale, df=self.df).rsample(self.size)
 
         s = torch.quantile(noise.flatten(start_dim=1).abs(), 0.75, dim=-1)
         s = s.reshape(*s.shape, 1, 1, 1)
         noise = noise.clamp(-s, s)
-        return torch.copysign(torch.pow(torch.abs(noise), 0.5), noise)
+
+        noise_latent = torch.copysign(torch.pow(torch.abs(noise), 0.5), noise).to(self.device)
+
+        self.generator.manual_seed(self.generator.initial_seed() + 1)
+        torch.random.set_rng_state(rng_state)
+        return (noise_latent - noise_latent.mean()) / noise_latent.std()
 
 class WaveletNoiseGenerator(NoiseGenerator):
     def __init__(self, x=None, size=None, dtype=None, layout=None, device=None, seed=42, generator=None, sigma_min=None, sigma_max=None, 
@@ -273,7 +283,7 @@ class WaveletNoiseGenerator(NoiseGenerator):
         orig_h, orig_w = h, w
 
         # noise for spatial dimensions only
-        coeffs = pywt.wavedecn(torch.randn(self.size, dtype=self.dtype, layout=self.layout, device=self.device, generator=self.generator), wavelet=self.wavelet, mode='periodization')
+        coeffs = pywt.wavedecn(torch.randn(self.size, dtype=self.dtype, layout=self.layout, device=self.device, generator=self.generator).to('cpu'), wavelet=self.wavelet, mode='periodization')
         noise = pywt.waverecn(coeffs, wavelet=self.wavelet, mode='periodization')
         noise_tensor = torch.tensor(noise, dtype=self.dtype, device=self.device)
 
@@ -435,7 +445,7 @@ NOISE_GENERATOR_NAMES = tuple(NOISE_GENERATOR_CLASSES.keys())
 @cast_fp64
 def prepare_noise(latent_image, seed, noise_type, noise_inds=None, alpha=1.0, k=1.0): # From `sample.py`
     #optional arg skip can be used to skip and discard x number of noise generations for a given seed
-    noise_func = NOISE_GENERATOR_CLASSES.get(noise_type)(x=latent_image, seed=seed)
+    noise_func = NOISE_GENERATOR_CLASSES.get(noise_type)(x=latent_image, seed=seed, sigma_min=0.0291675, sigma_max=14.614642)
 
     if noise_type == "fractal":
         noise_func.alpha = alpha
@@ -443,7 +453,7 @@ def prepare_noise(latent_image, seed, noise_type, noise_inds=None, alpha=1.0, k=
 
     # from here until return is very similar to comfy/sample.py 
     if noise_inds is None:
-        return noise_func(x=latent_image)
+        return noise_func(sigma=14.614642, sigma_next=0.0291675)
 
     unique_inds, inverse = np.unique(noise_inds, return_inverse=True)
     noises = []

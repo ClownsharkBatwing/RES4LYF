@@ -9,37 +9,6 @@ import functools
 
 from .noise_classes import *
 
-"""def cast_fp64(func):
-    @functools.wraps(func)
-    def wrapper(*args, **kwargs):
-        # Cast all tensor arguments to float64
-        new_args = [arg.to(torch.float64) if torch.is_tensor(arg) else arg for arg in args]
-        new_kwargs = {k: v.to(torch.float64) if torch.is_tensor(v) else v for k, v in kwargs.items()}
-        return func(*new_args, **new_kwargs)
-    return wrapper"""
-
-def cast_fp64_and_same_device(func):
-    @functools.wraps(func)
-    def wrapper(*args, **kwargs):
-        # Find the first tensor argument to determine the target device
-        target_device = None
-        for arg in args:
-            if torch.is_tensor(arg):
-                target_device = arg.device
-                break
-        if target_device is None:
-            for v in kwargs.values():
-                if torch.is_tensor(v):
-                    target_device = v.device
-                    break
-        
-        # Cast all tensor arguments to float64 and move them to the target device
-        new_args = [arg.to(torch.float64).to(target_device) if torch.is_tensor(arg) else arg for arg in args]
-        new_kwargs = {k: v.to(torch.float64).to(target_device) if torch.is_tensor(v) else v for k, v in kwargs.items()}
-        
-        return func(*new_args, **new_kwargs)
-    return wrapper
-
 @cast_fp64
 @torch.no_grad()
 def sample_dpmpp_sde_advanced(
