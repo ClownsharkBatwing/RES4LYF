@@ -284,7 +284,7 @@ def sample_refined_exp_s_advanced(
         else:
           eps = latent_noise[i]
       else:
-        if noise_sampler_type == "power":
+        if noise_sampler_type == "fractal":
           noise_sampler.alpha = alpha[i]
           noise_sampler.k = k
 

@@ -784,19 +784,17 @@ class LatentNoiseBatch_gaussian_channels:
         return noise.to(x.device)"""
     
     @staticmethod
-    def gaussian_noise_channels(x, mean=0.0, mean_luminosity = -0.1, mean_cyan_red = 0.0, mean_lime_purple=0.0, mean_pattern_structure=0.0, std_dev=1.0, seed=42):
+    def gaussian_noise_channels(x, mean_luminosity = -0.1, mean_cyan_red = 0.0, mean_lime_purple=0.0, mean_pattern_structure=0.0):
         x = x.squeeze(0)
 
-        noise = torch.randn_like(x) * std_dev + mean
+        luminosity = x[0:1] + mean_luminosity
+        cyan_red = x[1:2] + mean_cyan_red
+        lime_purple = x[2:3] + mean_lime_purple
+        pattern_structure = x[3:4] + mean_pattern_structure
 
-        luminosity = noise[0:1] + mean_luminosity
-        cyan_red = noise[1:2] + mean_cyan_red
-        lime_purple = noise[2:3] + mean_lime_purple
-        pattern_structure = noise[3:4] + mean_pattern_structure
+        x = torch.unsqueeze(torch.cat([luminosity, cyan_red, lime_purple, pattern_structure]), 0)
 
-        noise = torch.unsqueeze(torch.cat([luminosity, cyan_red, lime_purple, pattern_structure]), 0)
-
-        return noise.to(x.device)
+        return x
 
     def main(self, latent, steps, seed, 
               mean, mean_luminosity, mean_cyan_red, mean_lime_purple, mean_pattern_structure, std,
@@ -806,7 +804,7 @@ class LatentNoiseBatch_gaussian_channels:
 
         x = latent["samples"]
         b, c, h, w = x.shape  
-        x_noised = torch.zeros([steps, 4, h, w], device=x.device)
+        # x_noised = torch.zeros([steps, 4, h, w], device=x.device)
 
         noise_latents = torch.zeros([steps, 4, h, w], dtype=x.dtype, layout=x.layout, device=x.device)
 
@@ -822,10 +820,10 @@ class LatentNoiseBatch_gaussian_channels:
 
         for i in range(steps):
             noise = noise_sampler(mean=means[i].item(), std=stds[i].item())
-            noise = self.gaussian_noise_channels(noise, means[i].item(), mean_luminositys[i].item(), mean_cyan_reds[i].item(), mean_lime_purples[i].item(), mean_pattern_structures[i].item(), stds[i].item(), seed+i)
+            noise = self.gaussian_noise_channels(noise, mean_luminositys[i].item(), mean_cyan_reds[i].item(), mean_lime_purples[i].item(), mean_pattern_structures[i].item())
             noise_latents[i] = x + noise
 
-        return ({"samples": x_noised}, )
+        return ({"samples": noise_latents}, )
 
 class LatentNoiseBatch_gaussian:
     @classmethod
