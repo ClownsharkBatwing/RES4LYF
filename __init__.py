@@ -2,6 +2,7 @@ from . import extra_samplers
 from . import samplers
 from . import sigmas
 from . import latents
+from . import conditioning
 
 import torch
 
@@ -10,6 +11,8 @@ extra_samplers.add_samplers()
 #torch.set_default_dtype(torch.float64)
 
 NODE_CLASS_MAPPINGS = {
+    "ConditioningAverageScheduler": conditioning.ConditioningAverageScheduler,
+
     "LatentNoiseList": latents.LatentNoiseList,
     #"LatentBatch_channels_offset": latents.LatentBatch_channels_offset,
     "LatentBatch_channels": latents.LatentBatch_channels,
