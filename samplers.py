@@ -161,8 +161,9 @@ class SharkSampler:
             latent = latent_image
             latent_image = latent["samples"].to(torch.float64)
 
+            torch.manual_seed(noise_seed)
+
             if not add_noise:
-                torch.manual_seed(noise_seed)
                 noise = torch.zeros(latent_image.size(), dtype=latent_image.dtype, layout=latent_image.layout, device="cpu")
             elif latent_noise is None:
                 batch_inds = latent["batch_index"] if "batch_index" in latent else None
