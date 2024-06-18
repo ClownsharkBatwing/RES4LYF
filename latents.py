@@ -839,6 +839,7 @@ class LatentNoiseBatch_gaussian:
             "optional": {
                 "means": ("SIGMAS", ),
                 "stds": ("SIGMAS", ),
+                "steps_": ("SIGMAS", ),
             }
         }
 
@@ -847,9 +848,9 @@ class LatentNoiseBatch_gaussian:
 
     CATEGORY = "sampling/custom_sampling/samplers"
 
-    def main(self, latent, mean, std, steps, seed, means=None, stds=None):
-        if steps == 0:
-            steps = len(means)
+    def main(self, latent, mean, std, steps, seed, means=None, stds=None, steps_=None):
+        if steps_ is not None:
+            steps = len(steps_)
 
         means = initialize_or_scale(means, mean, steps)
         stds = initialize_or_scale(stds, std, steps)    
@@ -886,6 +887,7 @@ class LatentNoiseBatch_fractal:
             "optional": {
                 "alphas": ("SIGMAS", ),
                 "ks": ("SIGMAS", ),
+                "steps_": ("SIGMAS", ),
             }
         }
 
@@ -894,9 +896,9 @@ class LatentNoiseBatch_fractal:
 
     CATEGORY = "sampling/custom_sampling/samplers"
 
-    def main(self, latent, alpha, k_flip, steps, seed=42, alphas=None, ks=None):
-        if steps == 0:
-            steps = len(alphas)
+    def main(self, latent, alpha, k_flip, steps, seed=42, alphas=None, ks=None, sigmas_=None, steps_=None):
+        if steps_ is not None:
+            steps = len(steps_)
 
         alphas = initialize_or_scale(alphas, alpha, steps)
         k_flip = -1 if k_flip else 1

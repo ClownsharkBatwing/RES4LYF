@@ -39,6 +39,8 @@ class ClownSampler:
                 "denoise_to_zero": ("BOOLEAN", {"default": True}),
                 "simple_phi_calc": ("BOOLEAN", {"default": False}),
 
+                "latent_self_guide_1": ("BOOLEAN", {"default": False}),
+                "latent_shift_guide_1": ("BOOLEAN", {"default": False}),
                 "guide_1_Luminosity": ("FLOAT", {"default": 1.0, "min": -10000.0, "max": 10000.0, "step": 0.1}),
                 "guide_1_CyanRed": ("FLOAT", {"default": 1.0, "min": -10000.0, "max": 10000.0, "step": 0.1}),
                 "guide_1_LimePurple": ("FLOAT", {"default": 1.0, "min": -10000.0, "max": 10000.0, "step": 0.1}),
@@ -71,7 +73,7 @@ class ClownSampler:
                     guide_1_Luminosity, guide_1_CyanRed, guide_1_LimePurple, guide_1_PatternStruct, 
                     alpha, k,
                     alphas=None, latent_noise=None,
-                    guides_1=None, guides_2=None, latent_guide_1=None, latent_guide_2=None, 
+                    guides_1=None, guides_2=None, latent_guide_1=None, latent_guide_2=None, latent_self_guide_1=False, latent_shift_guide_1=False, 
                     momentums=None, c2s=None, itas=None, offsets=None):
 
         steps = 10000
@@ -117,6 +119,8 @@ class ClownSampler:
                 "k": k,
                 "clownseed": clownseed,
                 "latent_noise": latent_noise_samples,
+                "latent_self_guide_1": latent_self_guide_1,
+                "latent_shift_guide_1": latent_shift_guide_1,
             }
         )
         return (sampler, )

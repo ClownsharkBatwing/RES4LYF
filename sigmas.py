@@ -489,12 +489,15 @@ class sigmas_math3:
                 "y": ("FLOAT", {"default": 1, "min": -10000,"max": 10000,"step": 0.01}),
                 "z": ("FLOAT", {"default": 1, "min": -10000,"max": 10000,"step": 0.01}),
                 "f1": ("STRING", {"default": "s", "multiline": True}),
+                "rescale1" : ("BOOLEAN", {"default": False}),
                 "max1": ("FLOAT", {"default": 14.614642, "min": -10000,"max": 10000,"step": 0.01}),
                 "min1": ("FLOAT", {"default": 0.0291675, "min": -10000,"max": 10000,"step": 0.01}),
                 "f2": ("STRING", {"default": "s", "multiline": True}),
+                "rescale2" : ("BOOLEAN", {"default": False}),
                 "max2": ("FLOAT", {"default": 14.614642, "min": -10000,"max": 10000,"step": 0.01}),
                 "min2": ("FLOAT", {"default": 0.0291675, "min": -10000,"max": 10000,"step": 0.01}),
                 "f3": ("STRING", {"default": "s", "multiline": True}),
+                "rescale3" : ("BOOLEAN", {"default": False}),
                 "max3": ("FLOAT", {"default": 14.614642, "min": -10000,"max": 10000,"step": 0.01}),
                 "min3": ("FLOAT", {"default": 0.0291675, "min": -10000,"max": 10000,"step": 0.01}),
             }
@@ -502,7 +505,7 @@ class sigmas_math3:
     FUNCTION = "main"
     RETURN_TYPES = ("SIGMAS","SIGMAS","SIGMAS")
     CATEGORY = "sampling/custom_sampling/sigmas"
-    def main(self, start=0, stop=0, trim=0, a=None, b=None, c=None, x=1.0, y=1.0, z=1.0, f1="s", f2="s", f3="s", min1=1.0, max1=1.0, min2=1.0, max2=1.0, min3=1.0, max3=1.0):
+    def main(self, start=0, stop=0, trim=0, a=None, b=None, c=None, x=1.0, y=1.0, z=1.0, f1="s", f2="s", f3="s", rescale1=False, rescale2=False, rescale3=False, min1=1.0, max1=1.0, min2=1.0, max2=1.0, min3=1.0, max3=1.0):
         if stop == 0:
             t_lens = [len(tensor) for tensor in [a, b, c] if tensor is not None]
             t_len = stop = min(t_lens) if t_lens else 0
@@ -533,11 +536,14 @@ class sigmas_math3:
         s_out_2 = eval(f2, eval_namespace)
         s_out_3 = eval(f3, eval_namespace)
         
-        scaled_s_out_1 = ((s_out_1 - min(s_out_1)) * (max1 - min1)) / (max(s_out_1) - min(s_out_1)) + min1
-        scaled_s_out_2 = ((s_out_2 - min(s_out_2)) * (max2 - min2)) / (max(s_out_2) - min(s_out_2)) + min2
-        scaled_s_out_3 = ((s_out_3 - min(s_out_3)) * (max3 - min3)) / (max(s_out_3) - min(s_out_3)) + min3        
+        if rescale1 == True:
+            s_out_1 = ((s_out_1 - min(s_out_1)) * (max1 - min1)) / (max(s_out_1) - min(s_out_1)) + min1
+        if rescale2 == True:
+            s_out_2 = ((s_out_2 - min(s_out_2)) * (max2 - min2)) / (max(s_out_2) - min(s_out_2)) + min2
+        if rescale3 == True:
+            s_out_3 = ((s_out_3 - min(s_out_3)) * (max3 - min3)) / (max(s_out_3) - min(s_out_3)) + min3        
         
-        return scaled_s_out_1, scaled_s_out_2, scaled_s_out_3
+        return s_out_1, s_out_2, s_out_3
 
 class sigmas_iteration_karras:
     def __init__(self):

@@ -239,6 +239,261 @@ def sample_refined_exp_s_advanced(
   simple_phi_calc = False,
   k=1.0,
   clownseed=0,
+  latent_noise=None,
+  latent_self_guide_1=False,
+  latent_shift_guide_1=False,
+):
+  """
+  Refined Exponential Solver (S).
+  Algorithm 2 "RES Single-Step Sampler" with Algorithm 1 second-order step
+  https://arxiv.org/abs/2308.02157
+
+  Parameters:
+    model (`DenoiserModel`): a k-diffusion wrapped denoiser model (e.g. a subclass of DiscreteEpsDDPMDenoiser)
+    x (`FloatTensor`): noised latents (or RGB I suppose), e.g. torch.randn((B, C, H, W)) * sigma[0]
+    sigmas (`FloatTensor`): sigmas (ideally an exponential schedule!) e.g. get_sigmas_exponential(n=25, sigma_min=model.sigma_min, sigma_max=model.sigma_max)
+    denoise_to_zero (`bool`, *optional*, defaults to `True`): whether to finish with a first-order step down to 0 (rather than stopping at sigma_min). True = fully denoise image. False = match Algorithm 2 in paper
+    extra_args (`Dict[str, Any]`, *optional*, defaults to `{}`): kwargs to pass to `model#__call__()`
+    callback (`RefinedExpCallback`, *optional*, defaults to `None`): you can supply this callback to see the intermediate denoising results, e.g. to preview each step of the denoising process
+    disable (`bool`, *optional*, defaults to `False`): whether to hide `tqdm`'s progress bar animation from being printed
+    ita (`FloatTensor`, *optional*, defaults to 0.): degree of stochasticity, η, for each timestep. tensor shape must be broadcastable to 1-dimensional tensor with length `len(sigmas) if denoise_to_zero else len(sigmas)-1`. each element should be from 0 to 1.
+    c2 (`float`, *optional*, defaults to .5): partial step size for solving ODE. .5 = midpoint method
+    noise_sampler (`NoiseSampler`, *optional*, defaults to `torch.randn_like`): method used for adding noise
+    simple_phi_calc (`bool`, *optional*, defaults to `True`): True = calculate phi_i,j(-h) via simplified formulae specific to j={1,2}. False = Use general solution that works for any j. Mathematically equivalent, but could be numeric differences.
+  """
+
+  #import pdb; pdb.set_trace()
+  #assert sigmas[-1] == 0
+  sigma_min, sigma_max = sigmas[sigmas > 0].min(), sigmas.max()
+  noise_sampler = NOISE_GENERATOR_CLASSES.get(noise_sampler_type)(x=x, seed=clownseed, sigma_min=sigma_min, sigma_max=sigma_max)
+
+  if latent_guide_1 is not None:
+    latent_guide_crushed_1 = (latent_guide_1 - latent_guide_1.min()) / (latent_guide_1 - latent_guide_1.min()).max()
+  if latent_guide_2 is not None:
+    latent_guide_crushed_2 = (latent_guide_2 - latent_guide_2.min()) / (latent_guide_2 - latent_guide_2.min()).max()
+
+  vel, vel_2 = None, None
+  with tqdm(disable=disable, total=len(sigmas)-(1 if denoise_to_zero else 2)) as pbar:
+    for i, (sigma, sigma_next) in enumerate(pairwise(sigmas[:-1].split(1))):
+      time = sigmas[i] / sigma_max
+
+      if 'sigma' not in locals():
+        sigma = sigmas[i]
+
+      if latent_noise is not None:
+        if latent_noise.size()[0] == 1:
+          eps = latent_noise[0]
+        else:
+          eps = latent_noise[i]
+      else:
+        if noise_sampler_type == "fractal":
+          noise_sampler.alpha = alpha[i]
+          noise_sampler.k = k
+
+        eps = noise_sampler(sigma=sigma, sigma_next=sigma_next)
+
+      sigma_hat = sigma * (1 + ita[i])
+      x_hat = x + ((sigma_hat ** 2 - sigma ** 2).sqrt() * eps)
+
+      x_next, denoised, denoised2, vel, vel_2 = _refined_exp_sosu_step(
+        model,
+        x_hat,
+        sigma_hat,
+        sigma_next,
+        c2=c2[i],
+        extra_args=extra_args,
+        pbar=pbar,
+        simple_phi_calc=simple_phi_calc,
+        momentum = momentum[i],
+        vel = vel,
+        vel_2 = vel_2,
+        time = time
+      )
+      if callback is not None:
+        payload = RefinedExpCallbackPayload(
+          x=x,
+          i=i,
+          sigma=sigma,
+          sigma_hat=sigma_hat,
+          denoised=denoised,
+          denoised2=denoised2,
+        )
+        callback(payload)
+
+      x = x_next - sigma_next*offset[i]
+      if latent_shift_guide_1 is True:
+        #x = x - sigma_next * guide_1[i] * guide_1_channels.view(1,4,1,1)
+        x = x - sigma_next * guide_1[i] * guide_1_channels.view(1,4,1,1)
+        #latent_guide_1 = x
+
+      if latent_self_guide_1 is True:
+        latent_guide_1 = x
+
+      if latent_guide_1 is not None:
+        if(guide_mode_1 == 1):
+          x = x - sigma_next * guide_1[i] * latent_guide_1 * guide_1_channels.view(1,4,1,1)
+
+        if(guide_mode_1 == 2):
+          x = x - sigma_next * guide_1[i] * latent_guide_crushed_1 * guide_1_channels.view(1,4,1,1)
+
+        if(guide_mode_1 == 3):
+          x = (1 - guide_1[i]) * x * guide_1_channels.view(1,4,1,1) + (guide_1[i] * latent_guide_1 * guide_1_channels.view(1,4,1,1))
+
+        if(guide_mode_1 == 4):
+          x = (1 - guide_1[i]) * x * guide_1_channels.view(1,4,1,1) + (guide_1[i] * latent_guide_crushed_1 * guide_1_channels.view(1,4,1,1))   
+
+        if(guide_mode_1 == 5):
+          x = (x - guide_1[i] * sigma_next * x * guide_1_channels.view(1,4,1,1)) + (guide_1[i] * sigma_next * latent_guide_1 * guide_1_channels.view(1,4,1,1))
+        if(guide_mode_1 == 6):
+          x = (x - guide_1[i] * sigma_next * x * guide_1_channels.view(1,4,1,1)) + (guide_1[i] * sigma_next * latent_guide_crushed_1 * guide_1_channels.view(1,4,1,1))
+        if(guide_mode_1 == 7):
+          hard_light_blend_1 = hard_light_blend(x, latent_guide_1)
+          x = (x - guide_1[i] * sigma_next * x * guide_1_channels.view(1,4,1,1)) + (guide_1[i] * sigma_next * hard_light_blend_1 * guide_1_channels.view(1,4,1,1))
+        if(guide_mode_1 == 8):
+          hard_light_blend_1 = hard_light_blend(latent_guide_1, x)
+          x = (x - guide_1[i] * sigma_next * x * guide_1_channels.view(1,4,1,1)) + (guide_1[i] * sigma_next * hard_light_blend_1 * guide_1_channels.view(1,4,1,1))
+        if(guide_mode_1 == 9):
+          soft_light_blend_1 = soft_light_blend(x, latent_guide_1)
+          x = (x - guide_1[i] * sigma_next * x * guide_1_channels.view(1,4,1,1)) + (guide_1[i] * sigma_next * soft_light_blend_1 * guide_1_channels.view(1,4,1,1))
+        if(guide_mode_1 == 10):
+          soft_light_blend_1 = soft_light_blend(latent_guide_1, x)
+          x = (x - guide_1[i] * sigma_next * x * guide_1_channels.view(1,4,1,1)) + (guide_1[i] * sigma_next * soft_light_blend_1 * guide_1_channels.view(1,4,1,1))
+        if(guide_mode_1 == 11):
+          linear_light_blend_1 = linear_light_blend(x, latent_guide_1)
+          x = (x - guide_1[i] * sigma_next * x * guide_1_channels.view(1,4,1,1)) + (guide_1[i] * sigma_next * linear_light_blend_1 * guide_1_channels.view(1,4,1,1))
+        if(guide_mode_1 == 12):
+          linear_light_blend_1 = linear_light_blend(latent_guide_1, x)
+          x = (x - guide_1[i] * sigma_next * x * guide_1_channels.view(1,4,1,1)) + (guide_1[i] * sigma_next * linear_light_blend_1 * guide_1_channels.view(1,4,1,1))
+        if(guide_mode_1 == 13):
+          vivid_light_blend_1 = vivid_light_blend(x, latent_guide_1)
+          x = (x - guide_1[i] * sigma_next * x * guide_1_channels.view(1,4,1,1)) + (guide_1[i] * sigma_next * vivid_light_blend_1 * guide_1_channels.view(1,4,1,1))
+        if(guide_mode_1 == 14):
+          vivid_light_blend_1 = vivid_light_blend(latent_guide_1, x)
+          x = (x - guide_1[i] * sigma_next * x * guide_1_channels.view(1,4,1,1)) + (guide_1[i] * sigma_next * vivid_light_blend_1 * guide_1_channels.view(1,4,1,1))
+        if(guide_mode_1 == 801):
+          hard_light_blend_1 = bold_hard_light_blend(x, latent_guide_1)
+          x = (x - guide_1[i] * sigma_next * x * guide_1_channels.view(1,4,1,1)) + (guide_1[i] * sigma_next * hard_light_blend_1 * guide_1_channels.view(1,4,1,1))
+        if(guide_mode_1 == 802):
+          hard_light_blend_1 = bold_hard_light_blend(latent_guide_1, x)
+          x = (x - guide_1[i] * sigma_next * x * guide_1_channels.view(1,4,1,1)) + (guide_1[i] * sigma_next * hard_light_blend_1 * guide_1_channels.view(1,4,1,1))
+        if(guide_mode_1 == 803):
+          hard_light_blend_1 = fix_hard_light_blend(latent_guide_1, x)
+          x = (x - guide_1[i] * sigma_next * x * guide_1_channels.view(1,4,1,1)) + (guide_1[i] * sigma_next * hard_light_blend_1 * guide_1_channels.view(1,4,1,1))
+        if(guide_mode_1 == 804):
+          hard_light_blend_1 = fix2_hard_light_blend(latent_guide_1, x)
+          x = (x - guide_1[i] * sigma_next * x * guide_1_channels.view(1,4,1,1)) + (guide_1[i] * sigma_next * hard_light_blend_1 * guide_1_channels.view(1,4,1,1))
+        if(guide_mode_1 == 805):
+          hard_light_blend_1 = fix3_hard_light_blend(latent_guide_1, x)
+          x = (x - guide_1[i] * sigma_next * x * guide_1_channels.view(1,4,1,1)) + (guide_1[i] * sigma_next * hard_light_blend_1 * guide_1_channels.view(1,4,1,1))
+        if(guide_mode_1 == 806):
+          hard_light_blend_1 = fix4_hard_light_blend(latent_guide_1, x)
+          x = (x - guide_1[i] * sigma_next * x * guide_1_channels.view(1,4,1,1)) + (guide_1[i] * sigma_next * hard_light_blend_1 * guide_1_channels.view(1,4,1,1))
+        if(guide_mode_1 == 807):
+          hard_light_blend_1 = fix4_hard_light_blend(x, latent_guide_1)
+          x = (x - guide_1[i] * sigma_next * x * guide_1_channels.view(1,4,1,1)) + (guide_1[i] * sigma_next * hard_light_blend_1 * guide_1_channels.view(1,4,1,1))
+
+      if latent_guide_2 is not None:
+        if(guide_mode_2 == 1):
+          x = x - sigma_next * guide_2[i] * latent_guide_2
+        if(guide_mode_2 == 2):
+          x = x - sigma_next * guide_2[i] * latent_guide_crushed_2
+        if(guide_mode_2 == 3):
+          x = (1 - guide_2[i]) * x + (guide_2[i] * latent_guide_2)
+        if(guide_mode_2 == 4):
+          x = (1 - guide_2[i]) * x + (guide_2[i] * latent_guide_crushed_2)   
+        if(guide_mode_2 == 5):
+          x = (x - guide_2[i] * sigma_next * x) + (guide_2[i] * sigma_next * latent_guide_2)
+        if(guide_mode_2 == 6):
+          x = (x - guide_2[i] * sigma_next * x) + (guide_2[i] * sigma_next * latent_guide_crushed_2)   
+        if(guide_mode_2 == 7):
+          hard_light_blend_2 = hard_light_blend(x, latent_guide_2)
+          x = (x - guide_2[i] * sigma_next * x) + (guide_2[i] * sigma_next * hard_light_blend_2)
+        if(guide_mode_2 == 8):
+          hard_light_blend_2 = hard_light_blend(latent_guide_2, x)
+          x = (x - guide_2[i] * sigma_next * x) + (guide_2[i] * sigma_next * hard_light_blend_2)
+        if(guide_mode_2 == 9):
+          soft_light_blend_2 = soft_light_blend(x, latent_guide_2)
+          x = (x - guide_2[i] * sigma_next * x) + (guide_2[i] * sigma_next * soft_light_blend_2)
+        if(guide_mode_2 == 10):
+          soft_light_blend_2 = soft_light_blend(latent_guide_2, x)
+          x = (x - guide_2[i] * sigma_next * x) + (guide_2[i] * sigma_next * soft_light_blend_2)
+        if(guide_mode_2 == 11):
+          linear_light_blend_2 = linear_light_blend(x, latent_guide_2)
+          x = (x - guide_2[i] * sigma_next * x) + (guide_2[i] * sigma_next * linear_light_blend_2)
+        if(guide_mode_2 == 12):
+          linear_light_blend_2 = linear_light_blend(latent_guide_2, x)
+          x = (x - guide_2[i] * sigma_next * x) + (guide_2[i] * sigma_next * linear_light_blend_2)
+        if(guide_mode_2 == 13):
+          vivid_light_blend_2 = vivid_light_blend(x, latent_guide_2)
+          x = (x - guide_2[i] * sigma_next * x) + (guide_2[i] * sigma_next * vivid_light_blend_2)
+        if(guide_mode_2 == 14):
+          vivid_light_blend_2 = vivid_light_blend(latent_guide_2, x)
+          x = (x - guide_2[i] * sigma_next * x) + (guide_2[i] * sigma_next * vivid_light_blend_2)
+
+    if denoise_to_zero:
+      final_ita = ita[-1]
+      eps = noise_sampler(sigma=sigma, sigma_next=sigma_next).double()
+      sigma_hat = sigma * (1 + final_ita)
+      x_hat = x + (sigma_hat ** 2 - sigma ** 2) ** .5 * eps
+      
+      s_in = x.new_ones([x.shape[0]])
+      x_next: FloatTensor = model(x_hat, torch.zeros_like(sigma).to(x_hat.device) * s_in, **extra_args)
+      #x_next: FloatTensor = model(x_hat, sigma.to(x_hat.device), **extra_args)
+      pbar.update()
+      x = x_next
+
+  return x
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+@cast_fp64
+@no_grad()
+def sample_dpmpp_2m_advanced(
+  model: FloatTensor,
+  x: FloatTensor,
+  sigmas: FloatTensor,
+  guide_1: FloatTensor = torch.zeros((1,)),
+  guide_2: FloatTensor = torch.zeros((1,)),
+  guide_mode_1 = 0,
+  guide_mode_2 = 0,
+  guide_1_channels=None,
+  denoise_to_zero: bool = True,
+  extra_args: Dict[str, Any] = {},
+  callback: Optional[RefinedExpCallback] = None,
+  disable: Optional[bool] = None,
+  ita: FloatTensor = torch.zeros((1,)),
+  momentum: FloatTensor = torch.zeros((1,)),
+  c2: FloatTensor = torch.zeros((1,)),
+  offset: FloatTensor = torch.zeros((1,)),
+  alpha: FloatTensor = torch.zeros((1,)),
+  latent_guide_1: FloatTensor = torch.zeros((1,)),  
+  latent_guide_2: FloatTensor = torch.zeros((1,)),  
+  noise_sampler: NoiseSampler = torch.randn_like,
+  noise_sampler_type=None,
+  simple_phi_calc = False,
+  k=1.0,
+  clownseed=0,
   latent_noise=None
 ):
   """
@@ -259,6 +514,31 @@ def sample_refined_exp_s_advanced(
     noise_sampler (`NoiseSampler`, *optional*, defaults to `torch.randn_like`): method used for adding noise
     simple_phi_calc (`bool`, *optional*, defaults to `True`): True = calculate phi_i,j(-h) via simplified formulae specific to j={1,2}. False = Use general solution that works for any j. Mathematically equivalent, but could be numeric differences.
   """
+  extra_args = {} if extra_args is None else extra_args
+  s_in = x.new_ones([x.shape[0]])
+  sigma_fn = lambda t: t.neg().exp()
+  t_fn = lambda sigma: sigma.log().neg()
+  old_denoised = None
+
+
+  from tqdm import trange
+  for i in trange(len(sigmas) - 1, disable=disable):
+      denoised = model(x, sigmas[i] * s_in, **extra_args)
+      if callback is not None:
+          callback({'x': x, 'i': i, 'sigma': sigmas[i], 'sigma_hat': sigmas[i], 'denoised': denoised})
+      t, t_next = t_fn(sigmas[i]), t_fn(sigmas[i + 1])
+      h = t_next - t
+      if old_denoised is None or sigmas[i + 1] == 0:
+          x = (sigma_fn(t_next) / sigma_fn(t)) * x - (-h).expm1() * denoised
+      else:
+          h_last = t - t_fn(sigmas[i - 1])
+          r = h_last / h
+          denoised_d = (1 + 1 / (2 * r)) * denoised - (1 / (2 * r)) * old_denoised
+          x = (sigma_fn(t_next) / sigma_fn(t)) * x - (-h).expm1() * denoised_d
+      old_denoised = denoised
+  return x
+
+
 
   #import pdb; pdb.set_trace()
   #assert sigmas[-1] == 0
@@ -434,6 +714,40 @@ def sample_refined_exp_s_advanced(
       x = x_next
 
   return x
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 def fix4_hard_light_blend(base_latent, blend_latent):
 
