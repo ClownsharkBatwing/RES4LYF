@@ -24,6 +24,8 @@ NODE_CLASS_MAPPINGS = {
     "Set Precision": latents.set_precision,
     "LatentNoiseBatch_perlin": latents.LatentNoiseBatch_perlin,
     "EmptyLatentImage64": latents.EmptyLatentImage64,
+    "EmptyLatentImage64_CascadeC": latents.EmptyLatentImage64_CascadeC,
+    "StableCascade_StageC_VAEEncode_Exact": latents.StableCascade_StageC_VAEEncode_Exact,
 
     "LatentPhaseMagnitude": latents.LatentPhaseMagnitude,
     "LatentPhaseMagnitudeMultiply": latents.LatentPhaseMagnitudeMultiply,

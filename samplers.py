@@ -160,6 +160,7 @@ class SharkSampler:
                sigmas, latent_image, latent_noise=None):
             latent = latent_image
             latent_image = latent["samples"].to(torch.float64)
+            #import pdb; pdb.set_trace()
 
             torch.manual_seed(noise_seed)
 
