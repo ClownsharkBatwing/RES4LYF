@@ -661,22 +661,53 @@ class StableCascade_StageC_VAEEncode_Exact:
         },)
 
 
-class EmptyLatentImage64_CascadeC:
+class EmptyLatentImageCustom:
     def __init__(self):
         self.device = comfy.model_management.intermediate_device()
 
     @classmethod
     def INPUT_TYPES(s):
-        return {"required": { "width": ("INT", {"default": 24, "min": 16, "max": MAX_RESOLUTION, "step": 1}),
-                              "height": ("INT", {"default": 24, "min": 16, "max": MAX_RESOLUTION, "step": 1}),
-                              "batch_size": ("INT", {"default": 1, "min": 1, "max": 4096})}}
+        return {"required": { 
+            "width": ("INT", {"default": 24, "min": 1, "max": MAX_RESOLUTION, "step": 1}),
+            "height": ("INT", {"default": 24, "min": 1, "max": MAX_RESOLUTION, "step": 1}),
+            "batch_size": ("INT", {"default": 1, "min": 1, "max": 4096}),
+
+            "channels": (['4', '16'], {"default": '4'}),
+            "mode": (['sdxl', 'cascade_b', 'cascade_c', 'exact'], {"default": 'default'}),
+            "compression": ("INT", {"default": 42, "min": 4, "max": 128, "step": 1}),
+            "precision": (['fp16', 'fp32', 'fp64'], {"default": 'fp32'}),
+            
+        }}
+    
     RETURN_TYPES = ("LATENT",)
     FUNCTION = "generate"
 
     CATEGORY = "latent"
 
-    def generate(self, width, height, batch_size=1):
-        latent = torch.zeros([batch_size, 16, height, width], dtype=torch.float64, device=self.device)
+    def generate(self, width, height, batch_size, channels, mode, compression, precision):
+        c = int(channels)
+
+        ratio = 1
+        match mode:
+            case "sdxl":
+                ratio = 8
+            case "cascade_b":
+                ratio = 4
+            case "cascade_c":
+                ratio = compression
+            case "exact":
+                ratio = 1
+
+        dtype=torch.float32
+        match precision:
+            case "fp16":
+                dtype=torch.float16
+            case "fp32":
+                dtype=torch.float32
+            case "fp64":
+                dtype=torch.float64
+
+        latent = torch.zeros([batch_size, c, height // ratio, width // ratio], dtype=dtype, device=self.device)
         return ({"samples":latent}, )
 
 class EmptyLatentImage64:
@@ -915,7 +946,7 @@ class LatentNoiseBatch_gaussian:
         #    noise = self.adjustable_gaussian_noise_like(latent_samples, means[i].item(), stds[i].item(), seed+i)
         #    noise_latents[i] = latent_samples + noise
 
-        noise_latents = torch.zeros([steps, 4, h, w], dtype=latent_samples.dtype, layout=latent_samples.layout, device=latent_samples.device)
+        noise_latents = torch.zeros([steps, c, h, w], dtype=latent_samples.dtype, layout=latent_samples.layout, device=latent_samples.device)
 
         noise_sampler = NOISE_GENERATOR_CLASSES.get('gaussian')(x=latent_samples, seed = seed)
 
@@ -958,7 +989,7 @@ class LatentNoiseBatch_fractal:
 
         latent_samples = latent["samples"]
         b, c, h, w = latent_samples.shape  
-        noise_latents = torch.zeros([steps, 4, h, w], dtype=latent_samples.dtype, layout=latent_samples.layout, device=latent_samples.device)
+        noise_latents = torch.zeros([steps, c, h, w], dtype=latent_samples.dtype, layout=latent_samples.layout, device=latent_samples.device)
 
         noise_sampler = NOISE_GENERATOR_CLASSES.get('fractal')(x=latent_samples, seed = seed)
 
@@ -1095,3 +1126,207 @@ class LatentBatch_channels:
 
         return ({"samples": noise_latents}, )
     
+
+class LatentBatch_channels_16:
+    @classmethod
+    def INPUT_TYPES(s):
+        return {
+            "required": {
+                "latent": ("LATENT",),
+                "mode": (["offset", "multiply", "power"],),
+                "chan_1": ("FLOAT", {"default": 0.0, "min": -10000.0, "max": 10000.0, "step": 0.01}),
+                "chan_2": ("FLOAT", {"default": 0.0, "min": -10000.0, "max": 10000.0, "step": 0.01}),
+                "chan_3": ("FLOAT", {"default": 0.0, "min": -10000.0, "max": 10000.0, "step": 0.01}),
+                "chan_4": ("FLOAT", {"default": 0.0, "min": -10000.0, "max": 10000.0, "step": 0.01}),
+                "chan_5": ("FLOAT", {"default": 0.0, "min": -10000.0, "max": 10000.0, "step": 0.01}),
+                "chan_6": ("FLOAT", {"default": 0.0, "min": -10000.0, "max": 10000.0, "step": 0.01}),
+                "chan_7": ("FLOAT", {"default": 0.0, "min": -10000.0, "max": 10000.0, "step": 0.01}),
+                "chan_8": ("FLOAT", {"default": 0.0, "min": -10000.0, "max": 10000.0, "step": 0.01}),
+                "chan_9": ("FLOAT", {"default": 0.0, "min": -10000.0, "max": 10000.0, "step": 0.01}),
+                "chan_10": ("FLOAT", {"default": 0.0, "min": -10000.0, "max": 10000.0, "step": 0.01}),
+                "chan_11": ("FLOAT", {"default": 0.0, "min": -10000.0, "max": 10000.0, "step": 0.01}),
+                "chan_12": ("FLOAT", {"default": 0.0, "min": -10000.0, "max": 10000.0, "step": 0.01}),
+                "chan_13": ("FLOAT", {"default": 0.0, "min": -10000.0, "max": 10000.0, "step": 0.01}),
+                "chan_14": ("FLOAT", {"default": 0.0, "min": -10000.0, "max": 10000.0, "step": 0.01}),
+                "chan_15": ("FLOAT", {"default": 0.0, "min": -10000.0, "max": 10000.0, "step": 0.01}),
+                "chan_16": ("FLOAT", {"default": 0.0, "min": -10000.0, "max": 10000.0, "step": 0.01}),
+            },
+            "optional": {
+                "chan_1s": ("SIGMAS", ),
+                "chan_2s": ("SIGMAS", ),
+                "chan_3s": ("SIGMAS", ),
+                "chan_4s": ("SIGMAS", ),
+                "chan_5s": ("SIGMAS", ),
+                "chan_6s": ("SIGMAS", ),
+                "chan_7s": ("SIGMAS", ),
+                "chan_8s": ("SIGMAS", ),
+                "chan_9s": ("SIGMAS", ),
+                "chan_10s": ("SIGMAS", ),
+                "chan_11s": ("SIGMAS", ),
+                "chan_12s": ("SIGMAS", ),
+                "chan_13s": ("SIGMAS", ),
+                "chan_14s": ("SIGMAS", ),
+                "chan_15s": ("SIGMAS", ),
+                "chan_16s": ("SIGMAS", ),
+
+            }
+        }
+
+    RETURN_TYPES = ("LATENT",)
+    FUNCTION = "main"
+
+    CATEGORY = "sampling/custom_sampling/samplers"
+    
+    @staticmethod
+    def latent_channels_multiply(x, chan_1 = 0.0, chan_2 = 0.0, chan_3 = 0.0, chan_4 = 0.0, chan_5 = 0.0, chan_6 = 0.0, chan_7 = 0.0, chan_8 = 0.0, chan_9 = 0.0, chan_10 = 0.0, chan_11 = 0.0, chan_12 = 0.0, chan_13 = 0.0, chan_14 = 0.0, chan_15 = 0.0, chan_16 = 0.0):
+        chan_1 = x[0:1] * chan_1
+        chan_2 = x[1:2] * chan_2
+        chan_3 = x[2:3] * chan_3
+        chan_4 = x[3:4] * chan_4
+        chan_5 = x[4:5] * chan_5
+        chan_6 = x[5:6] * chan_6
+        chan_7 = x[6:7] * chan_7
+        chan_8 = x[7:8] * chan_8
+        chan_9 = x[8:9] * chan_9
+        chan_10 = x[9:10] * chan_10
+        chan_11 = x[10:11] * chan_11
+        chan_12 = x[11:12] * chan_12
+        chan_13 = x[12:13] * chan_13
+        chan_14 = x[13:14] * chan_14
+        chan_15 = x[14:15] * chan_15
+        chan_16 = x[15:16] * chan_16
+
+        x = torch.unsqueeze(torch.cat([chan_1, chan_2, chan_3, chan_4, chan_5, chan_6, chan_7, chan_8, chan_9, chan_10, chan_11, chan_12, chan_13, chan_14, chan_15, chan_16]), 0)
+        return x
+
+    @staticmethod
+    def latent_channels_offset(x, chan_1 = 0.0, chan_2 = 0.0, chan_3 = 0.0, chan_4 = 0.0, chan_5 = 0.0, chan_6 = 0.0, chan_7 = 0.0, chan_8 = 0.0, chan_9 = 0.0, chan_10 = 0.0, chan_11 = 0.0, chan_12 = 0.0, chan_13 = 0.0, chan_14 = 0.0, chan_15 = 0.0, chan_16 = 0.0):
+        chan_1 = x[0:1] + chan_1
+        chan_2 = x[1:2] + chan_2
+        chan_3 = x[2:3] + chan_3
+        chan_4 = x[3:4] + chan_4
+        chan_5 = x[4:5] + chan_5
+        chan_6 = x[5:6] + chan_6
+        chan_7 = x[6:7] + chan_7
+        chan_8 = x[7:8] + chan_8
+        chan_9 = x[8:9] + chan_9
+        chan_10 = x[9:10] + chan_10
+        chan_11 = x[10:11] + chan_11
+        chan_12 = x[11:12] + chan_12
+        chan_13 = x[12:13] + chan_13
+        chan_14 = x[13:14] + chan_14
+        chan_15 = x[14:15] + chan_15
+        chan_16 = x[15:16] + chan_16
+
+        x = torch.unsqueeze(torch.cat([chan_1, chan_2, chan_3, chan_4, chan_5, chan_6, chan_7, chan_8, chan_9, chan_10, chan_11, chan_12, chan_13, chan_14, chan_15, chan_16]), 0)
+        return x
+
+    @staticmethod
+    def latent_channels_power(x, chan_1 = 0.0, chan_2 = 0.0, chan_3 = 0.0, chan_4 = 0.0, chan_5 = 0.0, chan_6 = 0.0, chan_7 = 0.0, chan_8 = 0.0, chan_9 = 0.0, chan_10 = 0.0, chan_11 = 0.0, chan_12 = 0.0, chan_13 = 0.0, chan_14 = 0.0, chan_15 = 0.0, chan_16 = 0.0):
+        chan_1 = x[0:1] ** chan_1
+        chan_2 = x[1:2] ** chan_2
+        chan_3 = x[2:3] ** chan_3
+        chan_4 = x[3:4] ** chan_4
+        chan_5 = x[4:5] ** chan_5
+        chan_6 = x[5:6] ** chan_6
+        chan_7 = x[6:7] ** chan_7
+        chan_8 = x[7:8] ** chan_8
+        chan_9 = x[8:9] ** chan_9
+        chan_10 = x[9:10] ** chan_10
+        chan_11 = x[10:11] ** chan_11
+        chan_12 = x[11:12] ** chan_12
+        chan_13 = x[12:13] ** chan_13
+        chan_14 = x[13:14] ** chan_14
+        chan_15 = x[14:15] ** chan_15
+        chan_16 = x[15:16] ** chan_16
+
+        x = torch.unsqueeze(torch.cat([chan_1, chan_2, chan_3, chan_4, chan_5, chan_6, chan_7, chan_8, chan_9, chan_10, chan_11, chan_12, chan_13, chan_14, chan_15, chan_16]), 0)
+        return x
+
+    def main(self, latent, mode,
+              chan_1, chan_2, chan_3, chan_4, chan_5, chan_6, chan_7, chan_8, chan_9, chan_10, chan_11, chan_12, chan_13, chan_14, chan_15, chan_16,
+              chan_1s=None, chan_2s=None, chan_3s=None, chan_4s=None, chan_5s=None, chan_6s=None, chan_7s=None, chan_8s=None, chan_9s=None, chan_10s=None, chan_11s=None, chan_12s=None, chan_13s=None, chan_14s=None, chan_15s=None, chan_16s=None):
+        
+        #pdb.set_trace()
+        x = latent["samples"]
+        b, c, h, w = x.shape  
+
+        # x_noised = torch.zeros([steps, 4, h, w], device=x.device)
+
+        noise_latents = torch.zeros([b, c, h, w], dtype=x.dtype, layout=x.layout, device=x.device)
+        chan_1s = initialize_or_scale(chan_1s, chan_1, b)
+        chan_2s = initialize_or_scale(chan_2s, chan_2, b)
+        chan_3s = initialize_or_scale(chan_3s, chan_3, b)
+        chan_4s = initialize_or_scale(chan_4s, chan_4, b)
+        chan_5s = initialize_or_scale(chan_5s, chan_5, b)
+        chan_6s = initialize_or_scale(chan_6s, chan_6, b)
+        chan_7s = initialize_or_scale(chan_7s, chan_7, b)
+        chan_8s = initialize_or_scale(chan_8s, chan_8, b)
+        chan_9s = initialize_or_scale(chan_9s, chan_9, b)
+        chan_10s = initialize_or_scale(chan_10s, chan_10, b)
+        chan_11s = initialize_or_scale(chan_11s, chan_11, b)
+        chan_12s = initialize_or_scale(chan_12s, chan_12, b)
+        chan_13s = initialize_or_scale(chan_13s, chan_13, b)
+        chan_14s = initialize_or_scale(chan_14s, chan_14, b)
+        chan_15s = initialize_or_scale(chan_15s, chan_15, b)
+        chan_16s = initialize_or_scale(chan_16s, chan_16, b)
+
+        for i in range(b):
+            if mode == "offset":
+                noise = self.latent_channels_offset(x[i], chan_1s[i].item(), chan_2s[i].item(), chan_3s[i].item(), chan_4s[i].item(), chan_5s[i].item(), chan_6s[i].item(), chan_7s[i].item(), chan_8s[i].item(), chan_9s[i].item(), chan_10s[i].item(), chan_11s[i].item(), chan_12s[i].item(), chan_13s[i].item(), chan_14s[i].item(), chan_15s[i].item(), chan_16s[i].item())
+            elif mode == "multiply":  
+                noise = self.latent_channels_multiply(x[i], chan_1s[i].item(), chan_2s[i].item(), chan_3s[i].item(), chan_4s[i].item(), chan_5s[i].item(), chan_6s[i].item(), chan_7s[i].item(), chan_8s[i].item(), chan_9s[i].item(), chan_10s[i].item(), chan_11s[i].item(), chan_12s[i].item(), chan_13s[i].item(), chan_14s[i].item(), chan_15s[i].item(), chan_16s[i].item())
+            elif mode == "power":  
+                noise = self.latent_channels_power(x[i], chan_1s[i].item(), chan_2s[i].item(), chan_3s[i].item(), chan_4s[i].item(), chan_5s[i].item(), chan_6s[i].item(), chan_7s[i].item(), chan_8s[i].item(), chan_9s[i].item(), chan_10s[i].item(), chan_11s[i].item(), chan_12s[i].item(), chan_13s[i].item(), chan_14s[i].item(), chan_15s[i].item(), chan_16s[i].item())
+            noise_latents[i] = noise
+
+        return ({"samples": noise_latents}, )
+    
+class latent_normalize_channels:
+    def __init__(self):
+        pass
+    @classmethod
+    def INPUT_TYPES(s):
+        return {
+            "required": {
+                    "latent": ("LATENT", ),     
+                    "mode": (["full", "channels"],), 
+                    "operation": (["normalize", "center", "standardize"],), 
+                     },
+                }
+
+    RETURN_TYPES = ("LATENT",)
+    RETURN_NAMES = ("passthrough",)
+    CATEGORY = "sampling/custom_sampling/"
+
+    FUNCTION = "main"
+
+    def main(self, latent, mode, operation):
+        x = latent["samples"]
+        #lat = latent["samples"]
+        b, c, h, w = x.shape
+
+        if mode == "full":
+            if operation == "normalize":
+                x = (x - x.mean()) / x.std()
+            elif operation == "center":
+                x = x - x.mean()
+            elif operation == "standardize":
+                x = x / x.std()
+
+        elif mode == "channels":
+            if operation == "normalize":
+                for i in range(b):
+                    for j in range(c):
+                        x[i, j] = (x[i, j] - x[i, j].mean()) / x[i, j].std()
+            elif operation == "center":
+                for i in range(b):
+                    for j in range(c):
+                        x[i, j] = x[i, j] - x[i, j].mean()
+            elif operation == "standardize":
+                for i in range(b):
+                    for j in range(c):
+                        x[i, j] = x[i, j] / x[i, j].std()
+
+        #import pdb; pdb.set_trace()
+        return ({"samples": x},)

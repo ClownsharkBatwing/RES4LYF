@@ -272,6 +272,8 @@ def sample_refined_exp_s_advanced(
   if latent_guide_2 is not None:
     latent_guide_crushed_2 = (latent_guide_2 - latent_guide_2.min()) / (latent_guide_2 - latent_guide_2.min()).max()
 
+  b, c, h, w = x.shape
+
   vel, vel_2 = None, None
   with tqdm(disable=disable, total=len(sigmas)-(1 if denoise_to_zero else 2)) as pbar:
     for i, (sigma, sigma_next) in enumerate(pairwise(sigmas[:-1].split(1))):
@@ -322,8 +324,8 @@ def sample_refined_exp_s_advanced(
 
       x = x_next - sigma_next*offset[i]
       if latent_shift_guide_1 is True:
-        #x = x - sigma_next * guide_1[i] * guide_1_channels.view(1,4,1,1)
-        x = x - sigma_next * guide_1[i] * guide_1_channels.view(1,4,1,1)
+        #x = x - sigma_next * guide_1[i] * guide_1_channels.view(1,c,1,1)
+        x = x - sigma_next * guide_1[i] * guide_1_channels.view(1,c,1,1)
         #latent_guide_1 = x
 
       if latent_self_guide_1 is True:
@@ -331,66 +333,66 @@ def sample_refined_exp_s_advanced(
 
       if latent_guide_1 is not None:
         if(guide_mode_1 == 1):
-          x = x - sigma_next * guide_1[i] * latent_guide_1 * guide_1_channels.view(1,4,1,1)
+          x = x - sigma_next * guide_1[i] * latent_guide_1 * guide_1_channels.view(1,c,1,1)
 
         if(guide_mode_1 == 2):
-          x = x - sigma_next * guide_1[i] * latent_guide_crushed_1 * guide_1_channels.view(1,4,1,1)
+          x = x - sigma_next * guide_1[i] * latent_guide_crushed_1 * guide_1_channels.view(1,c,1,1)
 
         if(guide_mode_1 == 3):
-          x = (1 - guide_1[i]) * x * guide_1_channels.view(1,4,1,1) + (guide_1[i] * latent_guide_1 * guide_1_channels.view(1,4,1,1))
+          x = (1 - guide_1[i]) * x * guide_1_channels.view(1,c,1,1) + (guide_1[i] * latent_guide_1 * guide_1_channels.view(1,c,1,1))
 
         if(guide_mode_1 == 4):
-          x = (1 - guide_1[i]) * x * guide_1_channels.view(1,4,1,1) + (guide_1[i] * latent_guide_crushed_1 * guide_1_channels.view(1,4,1,1))   
+          x = (1 - guide_1[i]) * x * guide_1_channels.view(1,c,1,1) + (guide_1[i] * latent_guide_crushed_1 * guide_1_channels.view(1,c,1,1))   
 
         if(guide_mode_1 == 5):
-          x = (x - guide_1[i] * sigma_next * x * guide_1_channels.view(1,4,1,1)) + (guide_1[i] * sigma_next * latent_guide_1 * guide_1_channels.view(1,4,1,1))
+          x = (x - guide_1[i] * sigma_next * x * guide_1_channels.view(1,c,1,1)) + (guide_1[i] * sigma_next * latent_guide_1 * guide_1_channels.view(1,c,1,1))
         if(guide_mode_1 == 6):
-          x = (x - guide_1[i] * sigma_next * x * guide_1_channels.view(1,4,1,1)) + (guide_1[i] * sigma_next * latent_guide_crushed_1 * guide_1_channels.view(1,4,1,1))
+          x = (x - guide_1[i] * sigma_next * x * guide_1_channels.view(1,c,1,1)) + (guide_1[i] * sigma_next * latent_guide_crushed_1 * guide_1_channels.view(1,c,1,1))
         if(guide_mode_1 == 7):
           hard_light_blend_1 = hard_light_blend(x, latent_guide_1)
-          x = (x - guide_1[i] * sigma_next * x * guide_1_channels.view(1,4,1,1)) + (guide_1[i] * sigma_next * hard_light_blend_1 * guide_1_channels.view(1,4,1,1))
+          x = (x - guide_1[i] * sigma_next * x * guide_1_channels.view(1,c,1,1)) + (guide_1[i] * sigma_next * hard_light_blend_1 * guide_1_channels.view(1,c,1,1))
         if(guide_mode_1 == 8):
           hard_light_blend_1 = hard_light_blend(latent_guide_1, x)
-          x = (x - guide_1[i] * sigma_next * x * guide_1_channels.view(1,4,1,1)) + (guide_1[i] * sigma_next * hard_light_blend_1 * guide_1_channels.view(1,4,1,1))
+          x = (x - guide_1[i] * sigma_next * x * guide_1_channels.view(1,c,1,1)) + (guide_1[i] * sigma_next * hard_light_blend_1 * guide_1_channels.view(1,c,1,1))
         if(guide_mode_1 == 9):
           soft_light_blend_1 = soft_light_blend(x, latent_guide_1)
-          x = (x - guide_1[i] * sigma_next * x * guide_1_channels.view(1,4,1,1)) + (guide_1[i] * sigma_next * soft_light_blend_1 * guide_1_channels.view(1,4,1,1))
+          x = (x - guide_1[i] * sigma_next * x * guide_1_channels.view(1,c,1,1)) + (guide_1[i] * sigma_next * soft_light_blend_1 * guide_1_channels.view(1,c,1,1))
         if(guide_mode_1 == 10):
           soft_light_blend_1 = soft_light_blend(latent_guide_1, x)
-          x = (x - guide_1[i] * sigma_next * x * guide_1_channels.view(1,4,1,1)) + (guide_1[i] * sigma_next * soft_light_blend_1 * guide_1_channels.view(1,4,1,1))
+          x = (x - guide_1[i] * sigma_next * x * guide_1_channels.view(1,c,1,1)) + (guide_1[i] * sigma_next * soft_light_blend_1 * guide_1_channels.view(1,c,1,1))
         if(guide_mode_1 == 11):
           linear_light_blend_1 = linear_light_blend(x, latent_guide_1)
-          x = (x - guide_1[i] * sigma_next * x * guide_1_channels.view(1,4,1,1)) + (guide_1[i] * sigma_next * linear_light_blend_1 * guide_1_channels.view(1,4,1,1))
+          x = (x - guide_1[i] * sigma_next * x * guide_1_channels.view(1,c,1,1)) + (guide_1[i] * sigma_next * linear_light_blend_1 * guide_1_channels.view(1,c,1,1))
         if(guide_mode_1 == 12):
           linear_light_blend_1 = linear_light_blend(latent_guide_1, x)
-          x = (x - guide_1[i] * sigma_next * x * guide_1_channels.view(1,4,1,1)) + (guide_1[i] * sigma_next * linear_light_blend_1 * guide_1_channels.view(1,4,1,1))
+          x = (x - guide_1[i] * sigma_next * x * guide_1_channels.view(1,c,1,1)) + (guide_1[i] * sigma_next * linear_light_blend_1 * guide_1_channels.view(1,c,1,1))
         if(guide_mode_1 == 13):
           vivid_light_blend_1 = vivid_light_blend(x, latent_guide_1)
-          x = (x - guide_1[i] * sigma_next * x * guide_1_channels.view(1,4,1,1)) + (guide_1[i] * sigma_next * vivid_light_blend_1 * guide_1_channels.view(1,4,1,1))
+          x = (x - guide_1[i] * sigma_next * x * guide_1_channels.view(1,c,1,1)) + (guide_1[i] * sigma_next * vivid_light_blend_1 * guide_1_channels.view(1,c,1,1))
         if(guide_mode_1 == 14):
           vivid_light_blend_1 = vivid_light_blend(latent_guide_1, x)
-          x = (x - guide_1[i] * sigma_next * x * guide_1_channels.view(1,4,1,1)) + (guide_1[i] * sigma_next * vivid_light_blend_1 * guide_1_channels.view(1,4,1,1))
+          x = (x - guide_1[i] * sigma_next * x * guide_1_channels.view(1,c,1,1)) + (guide_1[i] * sigma_next * vivid_light_blend_1 * guide_1_channels.view(1,c,1,1))
         if(guide_mode_1 == 801):
           hard_light_blend_1 = bold_hard_light_blend(x, latent_guide_1)
-          x = (x - guide_1[i] * sigma_next * x * guide_1_channels.view(1,4,1,1)) + (guide_1[i] * sigma_next * hard_light_blend_1 * guide_1_channels.view(1,4,1,1))
+          x = (x - guide_1[i] * sigma_next * x * guide_1_channels.view(1,c,1,1)) + (guide_1[i] * sigma_next * hard_light_blend_1 * guide_1_channels.view(1,c,1,1))
         if(guide_mode_1 == 802):
           hard_light_blend_1 = bold_hard_light_blend(latent_guide_1, x)
-          x = (x - guide_1[i] * sigma_next * x * guide_1_channels.view(1,4,1,1)) + (guide_1[i] * sigma_next * hard_light_blend_1 * guide_1_channels.view(1,4,1,1))
+          x = (x - guide_1[i] * sigma_next * x * guide_1_channels.view(1,c,1,1)) + (guide_1[i] * sigma_next * hard_light_blend_1 * guide_1_channels.view(1,c,1,1))
         if(guide_mode_1 == 803):
           hard_light_blend_1 = fix_hard_light_blend(latent_guide_1, x)
-          x = (x - guide_1[i] * sigma_next * x * guide_1_channels.view(1,4,1,1)) + (guide_1[i] * sigma_next * hard_light_blend_1 * guide_1_channels.view(1,4,1,1))
+          x = (x - guide_1[i] * sigma_next * x * guide_1_channels.view(1,c,1,1)) + (guide_1[i] * sigma_next * hard_light_blend_1 * guide_1_channels.view(1,c,1,1))
         if(guide_mode_1 == 804):
           hard_light_blend_1 = fix2_hard_light_blend(latent_guide_1, x)
-          x = (x - guide_1[i] * sigma_next * x * guide_1_channels.view(1,4,1,1)) + (guide_1[i] * sigma_next * hard_light_blend_1 * guide_1_channels.view(1,4,1,1))
+          x = (x - guide_1[i] * sigma_next * x * guide_1_channels.view(1,c,1,1)) + (guide_1[i] * sigma_next * hard_light_blend_1 * guide_1_channels.view(1,c,1,1))
         if(guide_mode_1 == 805):
           hard_light_blend_1 = fix3_hard_light_blend(latent_guide_1, x)
-          x = (x - guide_1[i] * sigma_next * x * guide_1_channels.view(1,4,1,1)) + (guide_1[i] * sigma_next * hard_light_blend_1 * guide_1_channels.view(1,4,1,1))
+          x = (x - guide_1[i] * sigma_next * x * guide_1_channels.view(1,c,1,1)) + (guide_1[i] * sigma_next * hard_light_blend_1 * guide_1_channels.view(1,c,1,1))
         if(guide_mode_1 == 806):
           hard_light_blend_1 = fix4_hard_light_blend(latent_guide_1, x)
-          x = (x - guide_1[i] * sigma_next * x * guide_1_channels.view(1,4,1,1)) + (guide_1[i] * sigma_next * hard_light_blend_1 * guide_1_channels.view(1,4,1,1))
+          x = (x - guide_1[i] * sigma_next * x * guide_1_channels.view(1,c,1,1)) + (guide_1[i] * sigma_next * hard_light_blend_1 * guide_1_channels.view(1,c,1,1))
         if(guide_mode_1 == 807):
           hard_light_blend_1 = fix4_hard_light_blend(x, latent_guide_1)
-          x = (x - guide_1[i] * sigma_next * x * guide_1_channels.view(1,4,1,1)) + (guide_1[i] * sigma_next * hard_light_blend_1 * guide_1_channels.view(1,4,1,1))
+          x = (x - guide_1[i] * sigma_next * x * guide_1_channels.view(1,c,1,1)) + (guide_1[i] * sigma_next * hard_light_blend_1 * guide_1_channels.view(1,c,1,1))
 
       if latent_guide_2 is not None:
         if(guide_mode_2 == 1):
@@ -602,66 +604,66 @@ def sample_dpmpp_2m_advanced(
 
       if latent_guide_1 is not None:
         if(guide_mode_1 == 1):
-          x = x - sigma_next * guide_1[i] * latent_guide_1 * guide_1_channels.view(1,4,1,1)
+          x = x - sigma_next * guide_1[i] * latent_guide_1 * guide_1_channels.view(1,c,1,1)
 
         if(guide_mode_1 == 2):
-          x = x - sigma_next * guide_1[i] * latent_guide_crushed_1 * guide_1_channels.view(1,4,1,1)
+          x = x - sigma_next * guide_1[i] * latent_guide_crushed_1 * guide_1_channels.view(1,c,1,1)
 
         if(guide_mode_1 == 3):
-          x = (1 - guide_1[i]) * x * guide_1_channels.view(1,4,1,1) + (guide_1[i] * latent_guide_1 * guide_1_channels.view(1,4,1,1))
+          x = (1 - guide_1[i]) * x * guide_1_channels.view(1,c,1,1) + (guide_1[i] * latent_guide_1 * guide_1_channels.view(1,c,1,1))
 
         if(guide_mode_1 == 4):
-          x = (1 - guide_1[i]) * x * guide_1_channels.view(1,4,1,1) + (guide_1[i] * latent_guide_crushed_1 * guide_1_channels.view(1,4,1,1))   
+          x = (1 - guide_1[i]) * x * guide_1_channels.view(1,c,1,1) + (guide_1[i] * latent_guide_crushed_1 * guide_1_channels.view(1,c,1,1))   
 
         if(guide_mode_1 == 5):
-          x = (x - guide_1[i] * sigma_next * x * guide_1_channels.view(1,4,1,1)) + (guide_1[i] * sigma_next * latent_guide_1 * guide_1_channels.view(1,4,1,1))
+          x = (x - guide_1[i] * sigma_next * x * guide_1_channels.view(1,c,1,1)) + (guide_1[i] * sigma_next * latent_guide_1 * guide_1_channels.view(1,c,1,1))
         if(guide_mode_1 == 6):
-          x = (x - guide_1[i] * sigma_next * x * guide_1_channels.view(1,4,1,1)) + (guide_1[i] * sigma_next * latent_guide_crushed_1 * guide_1_channels.view(1,4,1,1))
+          x = (x - guide_1[i] * sigma_next * x * guide_1_channels.view(1,c,1,1)) + (guide_1[i] * sigma_next * latent_guide_crushed_1 * guide_1_channels.view(1,c,1,1))
         if(guide_mode_1 == 7):
           hard_light_blend_1 = hard_light_blend(x, latent_guide_1)
-          x = (x - guide_1[i] * sigma_next * x * guide_1_channels.view(1,4,1,1)) + (guide_1[i] * sigma_next * hard_light_blend_1 * guide_1_channels.view(1,4,1,1))
+          x = (x - guide_1[i] * sigma_next * x * guide_1_channels.view(1,c,1,1)) + (guide_1[i] * sigma_next * hard_light_blend_1 * guide_1_channels.view(1,c,1,1))
         if(guide_mode_1 == 8):
           hard_light_blend_1 = hard_light_blend(latent_guide_1, x)
-          x = (x - guide_1[i] * sigma_next * x * guide_1_channels.view(1,4,1,1)) + (guide_1[i] * sigma_next * hard_light_blend_1 * guide_1_channels.view(1,4,1,1))
+          x = (x - guide_1[i] * sigma_next * x * guide_1_channels.view(1,c,1,1)) + (guide_1[i] * sigma_next * hard_light_blend_1 * guide_1_channels.view(1,c,1,1))
         if(guide_mode_1 == 9):
           soft_light_blend_1 = soft_light_blend(x, latent_guide_1)
-          x = (x - guide_1[i] * sigma_next * x * guide_1_channels.view(1,4,1,1)) + (guide_1[i] * sigma_next * soft_light_blend_1 * guide_1_channels.view(1,4,1,1))
+          x = (x - guide_1[i] * sigma_next * x * guide_1_channels.view(1,c,1,1)) + (guide_1[i] * sigma_next * soft_light_blend_1 * guide_1_channels.view(1,c,1,1))
         if(guide_mode_1 == 10):
           soft_light_blend_1 = soft_light_blend(latent_guide_1, x)
-          x = (x - guide_1[i] * sigma_next * x * guide_1_channels.view(1,4,1,1)) + (guide_1[i] * sigma_next * soft_light_blend_1 * guide_1_channels.view(1,4,1,1))
+          x = (x - guide_1[i] * sigma_next * x * guide_1_channels.view(1,c,1,1)) + (guide_1[i] * sigma_next * soft_light_blend_1 * guide_1_channels.view(1,c,1,1))
         if(guide_mode_1 == 11):
           linear_light_blend_1 = linear_light_blend(x, latent_guide_1)
-          x = (x - guide_1[i] * sigma_next * x * guide_1_channels.view(1,4,1,1)) + (guide_1[i] * sigma_next * linear_light_blend_1 * guide_1_channels.view(1,4,1,1))
+          x = (x - guide_1[i] * sigma_next * x * guide_1_channels.view(1,c,1,1)) + (guide_1[i] * sigma_next * linear_light_blend_1 * guide_1_channels.view(1,c,1,1))
         if(guide_mode_1 == 12):
           linear_light_blend_1 = linear_light_blend(latent_guide_1, x)
-          x = (x - guide_1[i] * sigma_next * x * guide_1_channels.view(1,4,1,1)) + (guide_1[i] * sigma_next * linear_light_blend_1 * guide_1_channels.view(1,4,1,1))
+          x = (x - guide_1[i] * sigma_next * x * guide_1_channels.view(1,c,1,1)) + (guide_1[i] * sigma_next * linear_light_blend_1 * guide_1_channels.view(1,c,1,1))
         if(guide_mode_1 == 13):
           vivid_light_blend_1 = vivid_light_blend(x, latent_guide_1)
-          x = (x - guide_1[i] * sigma_next * x * guide_1_channels.view(1,4,1,1)) + (guide_1[i] * sigma_next * vivid_light_blend_1 * guide_1_channels.view(1,4,1,1))
+          x = (x - guide_1[i] * sigma_next * x * guide_1_channels.view(1,c,1,1)) + (guide_1[i] * sigma_next * vivid_light_blend_1 * guide_1_channels.view(1,c,1,1))
         if(guide_mode_1 == 14):
           vivid_light_blend_1 = vivid_light_blend(latent_guide_1, x)
-          x = (x - guide_1[i] * sigma_next * x * guide_1_channels.view(1,4,1,1)) + (guide_1[i] * sigma_next * vivid_light_blend_1 * guide_1_channels.view(1,4,1,1))
+          x = (x - guide_1[i] * sigma_next * x * guide_1_channels.view(1,c,1,1)) + (guide_1[i] * sigma_next * vivid_light_blend_1 * guide_1_channels.view(1,c,1,1))
         if(guide_mode_1 == 801):
           hard_light_blend_1 = bold_hard_light_blend(x, latent_guide_1)
-          x = (x - guide_1[i] * sigma_next * x * guide_1_channels.view(1,4,1,1)) + (guide_1[i] * sigma_next * hard_light_blend_1 * guide_1_channels.view(1,4,1,1))
+          x = (x - guide_1[i] * sigma_next * x * guide_1_channels.view(1,c,1,1)) + (guide_1[i] * sigma_next * hard_light_blend_1 * guide_1_channels.view(1,c,1,1))
         if(guide_mode_1 == 802):
           hard_light_blend_1 = bold_hard_light_blend(latent_guide_1, x)
-          x = (x - guide_1[i] * sigma_next * x * guide_1_channels.view(1,4,1,1)) + (guide_1[i] * sigma_next * hard_light_blend_1 * guide_1_channels.view(1,4,1,1))
+          x = (x - guide_1[i] * sigma_next * x * guide_1_channels.view(1,c,1,1)) + (guide_1[i] * sigma_next * hard_light_blend_1 * guide_1_channels.view(1,c,1,1))
         if(guide_mode_1 == 803):
           hard_light_blend_1 = fix_hard_light_blend(latent_guide_1, x)
-          x = (x - guide_1[i] * sigma_next * x * guide_1_channels.view(1,4,1,1)) + (guide_1[i] * sigma_next * hard_light_blend_1 * guide_1_channels.view(1,4,1,1))
+          x = (x - guide_1[i] * sigma_next * x * guide_1_channels.view(1,c,1,1)) + (guide_1[i] * sigma_next * hard_light_blend_1 * guide_1_channels.view(1,c,1,1))
         if(guide_mode_1 == 804):
           hard_light_blend_1 = fix2_hard_light_blend(latent_guide_1, x)
-          x = (x - guide_1[i] * sigma_next * x * guide_1_channels.view(1,4,1,1)) + (guide_1[i] * sigma_next * hard_light_blend_1 * guide_1_channels.view(1,4,1,1))
+          x = (x - guide_1[i] * sigma_next * x * guide_1_channels.view(1,c,1,1)) + (guide_1[i] * sigma_next * hard_light_blend_1 * guide_1_channels.view(1,c,1,1))
         if(guide_mode_1 == 805):
           hard_light_blend_1 = fix3_hard_light_blend(latent_guide_1, x)
-          x = (x - guide_1[i] * sigma_next * x * guide_1_channels.view(1,4,1,1)) + (guide_1[i] * sigma_next * hard_light_blend_1 * guide_1_channels.view(1,4,1,1))
+          x = (x - guide_1[i] * sigma_next * x * guide_1_channels.view(1,c,1,1)) + (guide_1[i] * sigma_next * hard_light_blend_1 * guide_1_channels.view(1,c,1,1))
         if(guide_mode_1 == 806):
           hard_light_blend_1 = fix4_hard_light_blend(latent_guide_1, x)
-          x = (x - guide_1[i] * sigma_next * x * guide_1_channels.view(1,4,1,1)) + (guide_1[i] * sigma_next * hard_light_blend_1 * guide_1_channels.view(1,4,1,1))
+          x = (x - guide_1[i] * sigma_next * x * guide_1_channels.view(1,c,1,1)) + (guide_1[i] * sigma_next * hard_light_blend_1 * guide_1_channels.view(1,c,1,1))
         if(guide_mode_1 == 807):
           hard_light_blend_1 = fix4_hard_light_blend(x, latent_guide_1)
-          x = (x - guide_1[i] * sigma_next * x * guide_1_channels.view(1,4,1,1)) + (guide_1[i] * sigma_next * hard_light_blend_1 * guide_1_channels.view(1,4,1,1))
+          x = (x - guide_1[i] * sigma_next * x * guide_1_channels.view(1,c,1,1)) + (guide_1[i] * sigma_next * hard_light_blend_1 * guide_1_channels.view(1,c,1,1))
 
       if latent_guide_2 is not None:
         if(guide_mode_2 == 1):
