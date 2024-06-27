@@ -135,29 +135,31 @@ class FractalNoiseGenerator(NoiseGenerator):
         noise = torch.fft.ifft2(modified_fft).real
 
         return noise / torch.std(noise)
+    
+from opensimplex import OpenSimplex
 
-class PyramidNoiseGenerator(NoiseGenerator):
+class SimplexNoiseGenerator(NoiseGenerator):
     def __init__(self, x=None, size=None, dtype=None, layout=None, device=None, seed=42, generator=None, sigma_min=None, sigma_max=None, 
-                 discount=0.8, mode='nearest-exact'):
-        self.update(discount=discount, mode=mode)
-
+                 scale=0.01):
         super().__init__(x, size, dtype, layout, device, seed, generator, sigma_min, sigma_max)
-
-    def __call__(self, *, discount=None, mode=None, **kwargs):
-        self.update(discount=discount, mode=mode)
-
-        x = torch.zeros(self.size, dtype=self.dtype, layout=self.layout, device=self.device)
+        self.noise = OpenSimplex(seed=seed)
+        self.scale = scale
+        
+    def __call__(self, *, scale=None, **kwargs):
+        self.update(scale=scale)
+        
         b, c, h, w = self.size
-        orig_h, orig_w = h, w
 
-        r = 1
-        for i in range(5):
-            r *= 2
-            x += torch.nn.functional.interpolate(
-                torch.normal(mean=0, std=0.5 ** i, size=(b, c, h * r, w * r), dtype=self.dtype, layout=self.layout, device=self.device, generator=self.generator),
-                size=(orig_h, orig_w), mode=self.mode
-            ) * self.discount ** i
-        return x / x.std()
+        noise_array = self.noise.noise3array(np.arange(w),np.arange(h),np.arange(c))
+        self.noise = OpenSimplex(seed=self.noise.get_seed()+1)
+        
+        noise_tensor = torch.from_numpy(noise_array).to(self.device)
+        noise_tensor = torch.unsqueeze(noise_tensor, dim=0)
+        
+        return noise_tensor / noise_tensor.std()
+        #return normalize(scale_to_range(noise_tensor))
+
+
 
 class HiresPyramidNoiseGenerator(NoiseGenerator):
     def __init__(self, x=None, size=None, dtype=None, layout=None, device=None, seed=42, generator=None, sigma_min=None, sigma_max=None, 
@@ -188,6 +190,120 @@ class HiresPyramidNoiseGenerator(NoiseGenerator):
                 break  # if resolution is too high
         
         return noise / noise.std()
+
+
+
+
+class PyramidNoiseGenerator(NoiseGenerator):
+    def __init__(self, x=None, size=None, dtype=None, layout=None, device=None, seed=42, generator=None, sigma_min=None, sigma_max=None, 
+                 discount=0.8, mode='nearest-exact'):
+        self.update(discount=discount, mode=mode)
+
+        super().__init__(x, size, dtype, layout, device, seed, generator, sigma_min, sigma_max)
+
+    def __call__(self, *, discount=None, mode=None, **kwargs):
+        self.update(discount=discount, mode=mode)
+
+        x = torch.zeros(self.size, dtype=self.dtype, layout=self.layout, device=self.device)
+        b, c, h, w = self.size
+        orig_h, orig_w = h, w
+
+        r = 1
+        for i in range(5):
+            r *= 2
+            x += torch.nn.functional.interpolate(
+                torch.normal(mean=0, std=0.5 ** i, size=(b, c, h * r, w * r), dtype=self.dtype, layout=self.layout, device=self.device, generator=self.generator),
+                size=(orig_h, orig_w), mode=self.mode
+            ) * self.discount ** i
+        return x / x.std()
+
+
+class InterpolatedPyramidNoiseGenerator(NoiseGenerator):
+    def __init__(self, x=None, size=None, dtype=None, layout=None, device=None, seed=42, generator=None, sigma_min=None, sigma_max=None, 
+                 discount=0.7, mode='nearest-exact'):
+        self.update(discount=discount, mode=mode)
+
+        super().__init__(x, size, dtype, layout, device, seed, generator, sigma_min, sigma_max)
+
+    def __call__(self, *, discount=None, mode=None, **kwargs):
+        self.update(discount=discount, mode=mode)
+
+        b, c, h, w = self.size
+        orig_h, orig_w = h, w
+
+        #u = nn.Upsample(size=(orig_h, orig_w), mode=self.mode).to(self.device)
+        #u = nn.functional.interpolate(size=(orig_h, orig_w), mode=self.mode)
+
+        noise = ((torch.rand(size=self.size, dtype=self.dtype, layout=self.layout, device=self.device, generator=self.generator) - 0.5) * 2 * 1.73)
+        multipliers = [1]
+
+        for i in range(4):
+            r = torch.rand(1, device=self.device, generator=self.generator).item() * 2 + 2
+            h, w = min(orig_h * 15, int(h * (r ** i))), min(orig_w * 15, int(w * (r ** i)))
+
+            new_noise = torch.randn((b, c, h, w), dtype=self.dtype, layout=self.layout, device=self.device, generator=self.generator)
+            #upsampled_noise = u(new_noise)
+            upsampled_noise = nn.functional.interpolate(new_noise, size=(orig_h, orig_w), mode=self.mode)
+
+            noise += upsampled_noise * self.discount ** i
+            multipliers.append(        self.discount ** i)
+            
+            #if h <= 1 or w <= 1:
+            if h >= orig_h * 15 or w >= orig_w * 15:
+                break  # if resolution is too high
+        
+        noise = noise / sum([m ** 2 for m in multipliers]) ** 0.5 
+        return noise #/ noise.std()
+
+class CascadeBPyramidNoiseGenerator(NoiseGenerator):
+    def __init__(self, x=None, size=None, dtype=None, layout=None, device=None, seed=42, generator=None, sigma_min=None, sigma_max=None, 
+                 levels=10, mode='nearest', size_range=[1,16]):
+        self.update(epsilon=x, levels=levels, mode=mode, size_range=size_range)
+
+        super().__init__(x, size, dtype, layout, device, seed, generator, sigma_min, sigma_max)
+
+    def __call__(self, *, levels=10, mode='nearest', size_range=[1,16], **kwargs):
+        self.update(levels=levels, mode=mode)
+
+        b, c, h, w = self.size
+        orig_h, orig_w = h, w
+
+        epsilon = torch.randn(self.size, dtype=self.dtype, layout=self.layout, device=self.device, generator=self.generator)
+        multipliers = [1]
+        for i in range(1, levels):
+            m = 0.75 ** i
+
+            h, w = int(epsilon.size(-2) // (2 ** i)), int(epsilon.size(-2) // (2 ** i))
+            if size_range is None or (size_range[0] <= h <= size_range[1] or size_range[0] <= w <= size_range[1]):
+                offset = torch.randn(epsilon.size(0), epsilon.size(1), h, w, device=self.device, generator=self.generator)
+                epsilon = epsilon + torch.nn.functional.interpolate(offset, size=epsilon.shape[-2:], mode=self.mode) * m
+                multipliers.append(m)
+
+            if h <= 1 or w <= 1:
+                break
+        epsilon = epsilon / sum([m ** 2 for m in multipliers]) ** 0.5 #divides the epsilon tensor by the square root of the sum of the squared multipliers.
+
+        return epsilon
+    
+
+
+    def _pyramid_noise(self, epsilon, size_range=None, levels=10, scale_mode='nearest'):
+        epsilon = epsilon.clone()
+        multipliers = [1]
+        for i in range(1, levels):
+            m = 0.75 ** i
+            h, w = epsilon.size(-2) // (2 ** i), epsilon.size(-2) // (2 ** i)
+            if size_range is None or (size_range[0] <= h <= size_range[1] or size_range[0] <= w <= size_range[1]):
+                offset = torch.randn(epsilon.size(0), epsilon.size(1), h, w, device=self.device)
+                epsilon = epsilon + torch.nn.functional.interpolate(offset, size=epsilon.shape[-2:],
+                                                                    mode=scale_mode) * m
+                multipliers.append(m)
+            if h <= 1 or w <= 1:
+                break
+        epsilon = epsilon / sum([m ** 2 for m in multipliers]) ** 0.5
+        # epsilon = epsilon / epsilon.std()
+        return epsilon
+
 
 class UniformNoiseGenerator(NoiseGenerator):
     def __init__(self, x=None, size=None, dtype=None, layout=None, device=None, seed=42, generator=None, sigma_min=None, sigma_max=None, 
@@ -423,9 +539,11 @@ class PerlinNoiseGenerator(NoiseGenerator):
 
 NOISE_GENERATOR_CLASSES = {
     "fractal": FractalNoiseGenerator,
-    "pyramid": PyramidNoiseGenerator,
+    #"pyramid": PyramidNoiseGenerator,
     "gaussian": GaussianNoiseGenerator,
     "uniform": UniformNoiseGenerator,
+    "pyramid-cascade_B": CascadeBPyramidNoiseGenerator,
+    "pyramid-interpolated": InterpolatedPyramidNoiseGenerator,
     "pyramid-bilinear": noise_generator_factory(PyramidNoiseGenerator, mode='bilinear'),
     "pyramid-bicubic": noise_generator_factory(PyramidNoiseGenerator, mode='bicubic'),   
     "pyramid-nearest": noise_generator_factory(PyramidNoiseGenerator, mode='nearest'),  
@@ -436,7 +554,7 @@ NOISE_GENERATOR_CLASSES = {
     "laplacian": LaplacianNoiseGenerator,
     "studentt": StudentTNoiseGenerator,
     "wavelet": WaveletNoiseGenerator,
-    "wavelet": WaveletNoiseGenerator,
+    "simplex": SimplexNoiseGenerator,
     "perlin": PerlinNoiseGenerator,
 }
 

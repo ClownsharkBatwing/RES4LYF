@@ -914,7 +914,7 @@ class LatentNoiseBatch_gaussian:
         return {
             "required": {
                 "latent": ("LATENT",),
-                "mean": ("FLOAT", {"default": 1.0, "min": -10000.0, "max": 10000.0, "step": 0.001}),
+                "mean": ("FLOAT", {"default": 0.0, "min": -10000.0, "max": 10000.0, "step": 0.001}),
                 "std": ("FLOAT", {"default": 1.0, "min": -10000.0, "max": 10000.0, "step": 0.001}),
                 "steps": ("INT", {"default": 0, "min": -10000, "max": 10000}),
                 "seed": ("INT", {"default": 0, "min": 0, "max": 0xffffffffffffffff}),
@@ -951,8 +951,9 @@ class LatentNoiseBatch_gaussian:
         noise_sampler = NOISE_GENERATOR_CLASSES.get('gaussian')(x=latent_samples, seed = seed)
 
         for i in range(steps):
-            noise = noise_sampler(mean=means[i].item(), std=stds[i].item())
-            noise_latents[i] = latent_samples + noise
+            noise_latents[i] = noise_sampler(mean=means[i].item(), std=stds[i].item())
+            #noise = noise_sampler(mean=means[i].item(), std=stds[i].item())
+            #noise_latents[i] = latent_samples + noise
 
         return ({"samples": noise_latents}, )
 
@@ -994,8 +995,9 @@ class LatentNoiseBatch_fractal:
         noise_sampler = NOISE_GENERATOR_CLASSES.get('fractal')(x=latent_samples, seed = seed)
 
         for i in range(steps):
-            noise = noise_sampler(alpha=alphas[i].item(), k=ks[i].item(), scale=0.1)
-            noise_latents[i] = latent_samples + noise
+            noise_latents[i] = noise_sampler(alpha=alphas[i].item(), k=ks[i].item(), scale=0.1)
+            #noise = noise_sampler(alpha=alphas[i].item(), k=ks[i].item(), scale=0.1)
+            #noise_latents[i] = latent_samples + noise
 
         return ({"samples": noise_latents}, )
 
