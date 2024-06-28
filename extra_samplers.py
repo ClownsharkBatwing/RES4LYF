@@ -8,7 +8,7 @@ from comfy.k_diffusion.sampling import get_ancestral_step, to_d
 import functools
 
 from .noise_classes import *
-from comfy_extras.nodes_advanced_samplers import sample_euler_cfgpp_alt
+#from comfy_extras.nodes_advanced_samplers import sample_euler_cfgpp_alt
 
 @cast_fp64
 @torch.no_grad()
