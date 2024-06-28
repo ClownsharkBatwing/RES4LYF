@@ -535,7 +535,7 @@ extra_samplers = {
     "res_momentumized_advanced": sample_res_solver_advanced,
     "dpmpp_dualsde_momentumized_advanced": sample_dpmpp_dualsdemomentum_advanced,
     "dpmpp_sde_advanced": sample_dpmpp_sde_advanced,
-    "euler_alt_cfg++": sample_euler_cfgpp_alt,
+    #"euler_alt_cfg++": sample_euler_cfgpp_alt,
     "dpmpp_2s_a_cfg++": sample_dpmpp_2s_ancestral_cfgpp,
     "dpmpp_2m_cfg++": sample_dpmpp_2m_cfgpp,
     "dpmpp_sde_cfg++": sample_dpmpp_sde_cfgpp,
