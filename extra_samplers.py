@@ -69,6 +69,84 @@ def sample_dpmpp_sde_advanced(
     return x
 
 @cast_fp64
+@torch.no_grad()
+def sample_dpmpp_sde_cfgpp_advanced(
+    model, x, sigmas, extra_args=None, callback=None, disable=None,
+    eta=1., s_noise=1., noise_sampler=None, r=1/2, k=1.0, scale=0.1, noise_sampler_type="brownian", cfgpp: FloatTensor = torch.zeros((1,)), alpha: FloatTensor = torch.zeros((1,))
+):
+    #DPM-Solver++ (stochastic with ita parameter).
+    if len(sigmas) <= 1:
+        return x
+
+    sigma_min, sigma_max = sigmas[sigmas > 0].min(), sigmas.max()
+    seed = extra_args.get("seed", None)
+
+    noise_sampler = NOISE_GENERATOR_CLASSES.get(noise_sampler_type)(x=x, seed=seed, sigma_min=sigma_min, sigma_max=sigma_max)
+
+    extra_args = {} if extra_args is None else extra_args
+
+    temp = [0]
+    def post_cfg_function(args):
+        temp[0] = args["uncond_denoised"]
+        return args["denoised"]
+
+    model_options = extra_args.get("model_options", {}).copy()
+    extra_args["model_options"] = comfy.model_patcher.set_model_options_post_cfg_function(model_options, post_cfg_function, disable_cfg1_optimization=True)
+
+    s_in = x.new_ones([x.shape[0]])
+    sigma_fn = lambda t: t.neg().exp()
+    t_fn = lambda sigma: sigma.log().neg()
+
+    for i in trange(len(sigmas) - 1, disable=disable):
+        denoised = model(x, sigmas[i] * s_in, **extra_args)
+        if callback is not None:
+            callback({'x': x, 'i': i, 'sigma': sigmas[i], 'sigma_hat': sigmas[i], 'denoised': denoised})
+        
+        if noise_sampler_type == "fractal":
+            noise_sampler.alpha = alpha[i]
+            noise_sampler.k = k
+            noise_sampler.scale = scale
+
+        if sigmas[i + 1] == 0:
+            # Euler method
+            #d = to_d(x, sigmas[i], denoised)
+            d = to_d(x - cfgpp[i]*denoised + cfgpp[i]*temp[0], sigmas[i], denoised)
+            dt = sigmas[i + 1] - sigmas[i]
+            x = x + d * dt
+        else:
+            # DPM-Solver++
+            t, t_next = t_fn(sigmas[i]), t_fn(sigmas[i + 1])
+            h = t_next - t
+            s = t + h * r
+            fac = 1 / (2 * r)
+
+            # Step 1
+            sd, su = get_ancestral_step(sigma_fn(t), sigma_fn(s), eta)
+            s_ = t_fn(sd)
+            #x_2 = (sigma_fn(s_) / sigma_fn(t)) * x - (t - s_).expm1() * denoised
+            x_2 = (sigma_fn(s_) / sigma_fn(t)) * (x + cfgpp[i]*(denoised - temp[0])) - (t - s_).expm1() * denoised
+            x_2 = x_2 + noise_sampler(sigma=sigma_fn(t), sigma_next=sigma_fn(s)) * s_noise * su
+            denoised_2 = model(x_2, sigma_fn(s) * s_in, **extra_args)
+
+            # Step 2
+            sd, su = get_ancestral_step(sigma_fn(t), sigma_fn(t_next), eta)
+            t_next_ = t_fn(sd)
+            denoised_d = (1 - fac) * denoised + fac * denoised_2
+            #x = (sigma_fn(t_next_) / sigma_fn(t)) * x - (t - t_next_).expm1() * denoised_d
+            x = (sigma_fn(t_next_) / sigma_fn(t)) * (x + cfgpp[i]*(denoised - temp[0])) - (t - t_next_).expm1() * denoised_d
+            x = x + noise_sampler(sigma=sigma_fn(t), sigma_next=sigma_fn(t_next)) * s_noise * su
+    return x
+
+def get_ancestral_step(sigma_from, sigma_to, eta=1.):
+    """Calculates the noise level (sigma_down) to step down to and the amount
+    of noise to add (sigma_up) when doing an ancestral sampling step."""
+    if not eta:
+        return sigma_to, 0.
+    sigma_up = min(sigma_to, eta * (sigma_to ** 2 * (sigma_from ** 2 - sigma_to ** 2) / sigma_from ** 2) ** 0.5)
+    sigma_down = (sigma_to ** 2 - sigma_up ** 2) ** 0.5
+    return sigma_down, sigma_up
+
+@cast_fp64
 def sample_dpmpp_dualsdemomentum_advanced(model, x, sigmas, seed=42, extra_args=None, callback=None, disable=None, eta=1., s_noise=1., noise_sampler_type="gaussian", noise_sampler=None, r=1/2, momentum=0.0, momentums=None, etas=None, s_noises=None,rs=None,scheduled_r=False):
     return sample_dpmpp_dualsde_momentum_advanced(model, x, sigmas, seed=seed, extra_args=extra_args, callback=callback, disable=disable, eta=etas, s_noise=s_noises, noise_sampler_type=noise_sampler_type, noise_sampler=noise_sampler, r=rs, momentum=momentums, scheduled_r=False)
 
@@ -207,7 +285,7 @@ from .refined_exp_solver import sample_refined_exp_s_advanced
 @cast_fp64
 def sample_res_solver_advanced(model, 
                                x, 
-                               sigmas, itas, c2s, momentums, offsets, 
+                               sigmas, itas, c2s, momentums, offsets, cfgpp,
                                guides_1, guides_2, latent_guide_1, latent_guide_2, guide_mode_1, guide_mode_2, guide_1_channels,
                                alpha, k, clownseed=0, alphas=None, latent_noise=None, latent_self_guide_1=False,latent_shift_guide_1=False,
                                extra_args=None, callback=None, disable=None, noise_sampler_type="gaussian", noise_sampler=None, denoise_to_zero=True, simple_phi_calc=False, c2=0.5, momentum=0.0, offset=0.0):
@@ -229,6 +307,7 @@ def sample_res_solver_advanced(model,
         noise_sampler=noise_sampler,
         denoise_to_zero=denoise_to_zero, 
         simple_phi_calc=simple_phi_calc, 
+        cfgpp=cfgpp,
         c2=c2s, 
         ita=itas,
         momentum=momentums,
@@ -535,6 +614,7 @@ extra_samplers = {
     "res_momentumized_advanced": sample_res_solver_advanced,
     "dpmpp_dualsde_momentumized_advanced": sample_dpmpp_dualsdemomentum_advanced,
     "dpmpp_sde_advanced": sample_dpmpp_sde_advanced,
+    "dpmpp_sde_cfgpp_advanced": sample_dpmpp_sde_cfgpp_advanced,
     #"euler_alt_cfg++": sample_euler_cfgpp_alt,
     "dpmpp_2s_a_cfg++": sample_dpmpp_2s_ancestral_cfgpp,
     "dpmpp_2m_cfg++": sample_dpmpp_2m_cfgpp,

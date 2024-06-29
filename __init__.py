@@ -38,6 +38,7 @@ NODE_CLASS_MAPPINGS = {
     "SharkSampler": samplers.SharkSampler,
     "SamplerDPMPP_DualSDE_Advanced": samplers.SamplerDPMPP_DUALSDE_MOMENTUMIZED_ADVANCED,
     "SamplerDPMPP_SDE_Advanced": samplers.SamplerDPMPP_SDE_ADVANCED,
+    "SamplerDPMPP_SDE_CFG++_Advanced": samplers.SamplerDPMPP_SDE_CFGPP_ADVANCED,
 
     "Sigmas Truncate": sigmas.sigmas_truncate,
     "Sigmas Start": sigmas.sigmas_start,
