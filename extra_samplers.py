@@ -85,13 +85,14 @@ def sample_dpmpp_sde_cfgpp_advanced(
 
     extra_args = {} if extra_args is None else extra_args
 
-    temp = [0]
-    def post_cfg_function(args):
-        temp[0] = args["uncond_denoised"]
-        return args["denoised"]
+    if cfgpp != 0.0:
+        temp = [0]
+        def post_cfg_function(args):
+            temp[0] = args["uncond_denoised"]
+            return args["denoised"]
 
-    model_options = extra_args.get("model_options", {}).copy()
-    extra_args["model_options"] = comfy.model_patcher.set_model_options_post_cfg_function(model_options, post_cfg_function, disable_cfg1_optimization=True)
+        model_options = extra_args.get("model_options", {}).copy()
+        extra_args["model_options"] = comfy.model_patcher.set_model_options_post_cfg_function(model_options, post_cfg_function, disable_cfg1_optimization=True)
 
     s_in = x.new_ones([x.shape[0]])
     sigma_fn = lambda t: t.neg().exp()
