@@ -38,8 +38,8 @@ class ClownSampler:
                 "noise_sampler_type": (NOISE_GENERATOR_NAMES, ),
                 "denoise_to_zero": ("BOOLEAN", {"default": True}),
                 "simple_phi_calc": ("BOOLEAN", {"default": False}),
-                "cfgpp": ("BOOLEAN", {"default": False}),
-                #"cfgpp": ("FLOAT", {"default": 0.0, "min": -10000.0, "max": 10000.0, "step": 0.01}),
+                #"cfgpp": ("BOOLEAN", {"default": False}),
+                "cfgpp": ("FLOAT", {"default": 0.0, "min": -10000.0, "max": 10000.0, "step": 0.01}),
 
                 "latent_self_guide_1": ("BOOLEAN", {"default": False}),
                 "latent_shift_guide_1": ("BOOLEAN", {"default": False}),
@@ -55,6 +55,7 @@ class ClownSampler:
                 "momentums": ("SIGMAS", ),
                 "itas": ("SIGMAS", ),
                 "c2s": ("SIGMAS", ),
+                "cfgpps": ("SIGMAS", ),
                 "offsets": ("SIGMAS", ),
                 "guides_1": ("SIGMAS", ),
                 "guides_2": ("SIGMAS", ),
@@ -76,12 +77,13 @@ class ClownSampler:
                     alpha, k,
                     alphas=None, latent_noise=None,
                     guides_1=None, guides_2=None, latent_guide_1=None, latent_guide_2=None, latent_self_guide_1=False, latent_shift_guide_1=False, 
-                    momentums=None, c2s=None, itas=None, offsets=None):
+                    momentums=None, itas=None, c2s=None, cfgpps=None, offsets=None):
 
         steps = 10000
         momentums = initialize_or_scale(momentums, momentum, steps)
         itas = initialize_or_scale(itas, ita, steps)
         c2s = initialize_or_scale(c2s, c2, steps)
+        cfgpps = initialize_or_scale(cfgpps, cfgpp, steps)
         offsets = initialize_or_scale(offsets, offset, steps)
         guides_1 = initialize_or_scale(guides_1, guide_1, steps)
         guides_2 = initialize_or_scale(guides_2, guide_2, steps)
@@ -105,10 +107,12 @@ class ClownSampler:
                 "noise_sampler_type": noise_sampler_type,
                 "denoise_to_zero": denoise_to_zero,
                 "simple_phi_calc": simple_phi_calc,
-                "cfgpp": cfgpp,
+                #"cfgpp": cfgpp,
+                #"cfgpp": ("FLOAT", {"default": 0.0, "min": -10000.0, "max": 10000.0, "step": 0.01}),
                 "momentums": momentums,
                 "itas": itas,
                 "c2s": c2s,
+                "cfgpps": cfgpps,
                 "offsets": offsets,
                 "guides_1": guides_1,
                 "guides_2": guides_2,
@@ -118,7 +122,7 @@ class ClownSampler:
                 "guide_mode_2": guide_mode_2,
                 "guide_1_channels": guide_1_channels,
                 "alphas": alphas,
-                "alpha": alpha,
+                #"alpha": alpha,
                 "k": k,
                 "clownseed": clownseed,
                 "latent_noise": latent_noise_samples,

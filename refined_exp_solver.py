@@ -155,7 +155,7 @@ def _refined_exp_sosu_step(
   vel = None,
   vel_2 = None,
   time = None,
-  cfgpp = False
+  cfgpp = 0.0,
 ) -> StepOutput:
 
   #Algorithm 1 "RES Second order Single Update Step with c2"
@@ -170,7 +170,7 @@ def _refined_exp_sosu_step(
   #  extra_args (`Dict[str, Any]`, *optional*, defaults to `{}`): kwargs to pass to `model#__call__()`
   #  pbar (`tqdm`, *optional*, defaults to `None`): progress bar to update after each model call
   #  simple_phi_calc (`bool`, *optional*, defaults to `True`): True = calculate phi_i,j(-h) via simplified formulae specific to j={1,2}. False = Use general solution that works for any j. Mathematically equivalent, but could be numeric differences.
-  if cfgpp == True:
+  if cfgpp != 0.0:
     temp = [0]
     def post_cfg_function(args):
         temp[0] = args["uncond_denoised"]
@@ -179,13 +179,13 @@ def _refined_exp_sosu_step(
     model_options = extra_args.get("model_options", {}).copy()
     extra_args["model_options"] = comfy.model_patcher.set_model_options_post_cfg_function(model_options, post_cfg_function, disable_cfg1_optimization=True)
 
-
-
   def momentum_func(diff, velocity, timescale=1.0, offset=-momentum / 2.0): # Diff is current diff, vel is previous diff
     if velocity is None:
         momentum_vel = diff
     else:
         momentum_vel = momentum * (timescale + offset) * velocity + (1 - momentum * (timescale + offset)) * diff
+    #print(momentum_vel)
+    #return 0
     return momentum_vel
 
   lam_next, lam = (s.log().neg() for s in (sigma_next, sigma))
@@ -211,7 +211,8 @@ def _refined_exp_sosu_step(
   if cfgpp == False:
     x_2: FloatTensor = math.exp(-c2_h)*x + diff_2
   else:
-    x_2: FloatTensor = math.exp(-c2_h) * (x + (denoised - temp[0])) + diff_2
+    #x_2: FloatTensor = math.exp(-c2_h) * (x + (denoised - temp[0])) + diff_2
+    x_2: FloatTensor = math.exp(-c2_h) * (x + cfgpp*denoised - cfgpp*temp[0]) + diff_2
   lam_2: float = lam + c2_h
   sigma_2: float = lam_2.neg().exp()
 
@@ -232,7 +233,8 @@ def _refined_exp_sosu_step(
   if cfgpp == False:
     x_next: FloatTensor = math.exp(-h)*x + diff
   else:
-    x_next: FloatTensor = math.exp(-h) * (x + (denoised - temp[0])) + diff
+    #x_next: FloatTensor = math.exp(-h) * (x + denoised - temp[0])) + diff
+    x_next: FloatTensor = math.exp(-h) * (x + cfgpp*denoised - cfgpp*temp[0]) + diff
   
   return StepOutput(
     x_next=x_next,
@@ -263,6 +265,7 @@ def sample_refined_exp_s_advanced(
   ita: FloatTensor = torch.zeros((1,)),
   momentum: FloatTensor = torch.zeros((1,)),
   c2: FloatTensor = torch.zeros((1,)),
+  cfgpp: FloatTensor = torch.zeros((1,)),
   offset: FloatTensor = torch.zeros((1,)),
   alpha: FloatTensor = torch.zeros((1,)),
   latent_guide_1: FloatTensor = torch.zeros((1,)),  
@@ -270,7 +273,7 @@ def sample_refined_exp_s_advanced(
   noise_sampler: NoiseSampler = torch.randn_like,
   noise_sampler_type=None,
   simple_phi_calc = False,
-  cfgpp = False,
+  #cfgpp = False,
   k=1.0,
   clownseed=0,
   latent_noise=None,
@@ -344,7 +347,7 @@ def sample_refined_exp_s_advanced(
 
       x_next, denoised, denoised2, vel, vel_2 = _refined_exp_sosu_step(model, x_hat, sigma_hat, sigma_next, c2=c2[i],
                                                                       extra_args=extra_args, pbar=pbar, simple_phi_calc=simple_phi_calc,
-                                                                      momentum = momentum[i], vel = vel, vel_2 = vel_2, time = time, cfgpp = cfgpp
+                                                                      momentum = momentum[i], vel = vel, vel_2 = vel_2, time = time, cfgpp = cfgpp[i].item()
                                                                       )
       if callback is not None:
         payload = RefinedExpCallbackPayload(x=x, i=i, sigma=sigma, sigma_hat=sigma_hat, denoised=denoised, denoised2=denoised2,)                               

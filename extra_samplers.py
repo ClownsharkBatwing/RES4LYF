@@ -285,9 +285,9 @@ from .refined_exp_solver import sample_refined_exp_s_advanced
 @cast_fp64
 def sample_res_solver_advanced(model, 
                                x, 
-                               sigmas, itas, c2s, momentums, offsets, cfgpp,
+                               sigmas, itas, c2s, momentums, offsets,
                                guides_1, guides_2, latent_guide_1, latent_guide_2, guide_mode_1, guide_mode_2, guide_1_channels,
-                               alpha, k, clownseed=0, alphas=None, latent_noise=None, latent_self_guide_1=False,latent_shift_guide_1=False,
+                               k, clownseed=0, cfgpps=0.0, alphas=None, latent_noise=None, latent_self_guide_1=False,latent_shift_guide_1=False,
                                extra_args=None, callback=None, disable=None, noise_sampler_type="gaussian", noise_sampler=None, denoise_to_zero=True, simple_phi_calc=False, c2=0.5, momentum=0.0, offset=0.0):
     return sample_refined_exp_s_advanced(
         model=model, 
@@ -307,7 +307,7 @@ def sample_res_solver_advanced(model,
         noise_sampler=noise_sampler,
         denoise_to_zero=denoise_to_zero, 
         simple_phi_calc=simple_phi_calc, 
-        cfgpp=cfgpp,
+        cfgpp=cfgpps,
         c2=c2s, 
         ita=itas,
         momentum=momentums,
