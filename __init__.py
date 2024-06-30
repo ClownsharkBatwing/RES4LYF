@@ -39,6 +39,10 @@ NODE_CLASS_MAPPINGS = {
     "SamplerDPMPP_DualSDE_Advanced": samplers.SamplerDPMPP_DUALSDE_MOMENTUMIZED_ADVANCED,
     "SamplerDPMPP_SDE_Advanced": samplers.SamplerDPMPP_SDE_ADVANCED,
     "SamplerDPMPP_SDE_CFG++_Advanced": samplers.SamplerDPMPP_SDE_CFGPP_ADVANCED,
+    "SamplerEulerAncestral_Advanced": samplers.SamplerEulerAncestral_Advanced,
+    "SamplerDPMPP_2S_Ancestral_Advanced": samplers.SamplerDPMPP_2S_Ancestral_Advanced,
+    "SamplerDPMPP_2M_SDE_Advanced": samplers.SamplerDPMPP_2M_SDE_Advanced,
+    "SamplerDPMPP_3M_SDE_Advanced": samplers.SamplerDPMPP_3M_SDE_Advanced,
 
     "Sigmas Truncate": sigmas.sigmas_truncate,
     "Sigmas Start": sigmas.sigmas_start,
