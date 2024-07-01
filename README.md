@@ -32,6 +32,52 @@ X:\path\to\your\comfy_portable_folder\python_embedded\Scripts\pip.exe install -r
 
 X:\path\to\your\comfy_portable_folder\python_embedded\Scripts\pip.exe install opensimplex --no-deps
 
+**NOISE TYPES:**
+
+fractal (this is also known as 1/f or power noise; positive alpha values contain more low frequency noise, negative contain more high frequency noise)
+
+brown (fractal with alpha = 2.0)
+
+pink (fractal with alpha = 1.0)
+
+white (fractal with alpha = 0.0)
+
+blue (fractal with alpha = -1.0)
+
+violet (fractal with alpha = -2.0)
+
+gaussian
+
+uniform
+
+pyramid-cascade_B
+
+pyramid-interpolated
+
+pyramid-bilinear
+
+pyramid-bicubic
+
+pyramid-nearest
+
+hires-pyramid-bilinear
+
+hires-pyramid-bicubic
+
+hires-pyramid-nearest
+
+brownian
+
+laplacian
+
+studentt
+
+wavelet
+
+simplex
+
+perlin
+
 **GENERAL UTILITY NODES:**
 
 Set Precision
