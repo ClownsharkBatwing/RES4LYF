@@ -5,9 +5,11 @@ These nodes are for advanced manipulation of sigmas, latents, and various advanc
 **Installation:** If you are using a venv, you will need to first run from within your ComfyUI folder (that contains your "venv" folder):
 
 _Linux:_
+
 source venv/bin/activate
 
 _Windows:_
+
 venv\Scripts\activate
 
 Then, "cd" into your "custom_nodes" folder and run the following commands:
