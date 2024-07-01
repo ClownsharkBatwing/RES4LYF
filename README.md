@@ -33,5 +33,16 @@ X:\path\to\your\comfy_portable_folder\python_embedded\Scripts\pip.exe install op
 **Sigmas manipulation nodes:**
 
 Sigmas Truncate
+
 Sigmas Start
+
 Sigmas Split
+
+Sigams Concat
+
+Sigmas Pad
+
+Sigmas Unpad
+
+Sigmas SetFloor
+
