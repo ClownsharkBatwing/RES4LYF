@@ -30,9 +30,33 @@ X:\path\to\your\comfy_portable_folder\python_embedded\Scripts\pip.exe install -r
 
 X:\path\to\your\comfy_portable_folder\python_embedded\Scripts\pip.exe install opensimplex --no-deps
 
+**GENERAL UTILITY NODES:**
+
+Set Precision
+
+**SAMPLER NODES:**
+
+ClownSampler
+
+SharkSampler
+
+SamplerDPMPP_DualSDE_Advanced
+
+SamplerDPMPP_SDE_Advanced
+
+SamplerDPMPP_SDE_CFG++_Advanced
+
+SamplerEulerAncestral_Advanced
+
+SamplerDPMPP_2S_Ancestral_Advanced
+
+SamplerDPMPP_2M_SDE_Advanced
+
+SamplerDPMPP_3M_SDE_Advanced
+
 **SIGMAS MANIPULATION NODES:**
 
-**Sigmas Truncate**
+Sigmas Truncate
 
 Sigmas Start
 
@@ -82,4 +106,43 @@ Tan Scheduler 2
 
 Tan Scheduler 2 Simple
 
-**Conditioning manipulation nodes:**
+**CONDITIONING MANIPULATION NODES:**
+
+ConditioningAverageScheduler
+
+**LATENT MANIPULATION NODES:**
+
+LatentNoiseList
+
+LatentBatch_channels
+
+LatentBatch_channels_16
+
+LatentNoiseBatch_fractal
+
+LatentNoiseBatch_gaussian
+
+LatentNoiseBatch_gaussian_channels
+
+Latent to Cuda
+
+Latent Batcher
+
+Latent Normalize Channels
+
+LatentNoiseBatch_perlin
+
+EmptyLatentImage64
+
+EmptyLatentImageCustom
+
+StableCascade_StageC_VAEEncode_Exact
+
+LatentPhaseMagnitude
+
+LatentPhaseMagnitudeMultiply
+
+LatentPhaseMagnitudeOffset
+
+LatentPhaseMagnitudePower
+
