@@ -30,9 +30,9 @@ X:\path\to\your\comfy_portable_folder\python_embedded\Scripts\pip.exe install -r
 
 X:\path\to\your\comfy_portable_folder\python_embedded\Scripts\pip.exe install opensimplex --no-deps
 
-**Sigmas manipulation nodes:**
+**SIGMAS MANIPULATION NODES:**
 
-Sigmas Truncate
+**Sigmas Truncate**
 
 Sigmas Start
 
@@ -46,3 +46,40 @@ Sigmas Unpad
 
 Sigmas SetFloor
 
+Sigmas DeleteBelowFloor
+
+Sigmas DeleteDuplicates
+
+Sigmas Cleanup
+
+Sigmas Mult
+
+Sigmas Modulus
+
+Sigmas Quotient
+
+Sigmas Add
+
+Sigmas Power
+
+Sigmas Abs
+
+Sigmas2 Mult
+
+Sigmas2 Add
+
+Sigmas Math1
+
+Sigmas Math3
+
+Sigmas Iteration Karras
+
+Sigmas Iteration Polyexp
+
+Tan Scheduler
+
+Tan Scheduler 2
+
+Tan Scheduler 2 Simple
+
+**Conditioning manipulation nodes:**
