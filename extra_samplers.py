@@ -85,7 +85,8 @@ def sample_dpmpp_sde_cfgpp_advanced(
 
     extra_args = {} if extra_args is None else extra_args
 
-    if cfgpp != 0.0:
+    #import pdb; pdb.set_trace()
+    if cfgpp.sum().item() != 0.0:
         temp = [0]
         def post_cfg_function(args):
             temp[0] = args["uncond_denoised"]
@@ -110,8 +111,10 @@ def sample_dpmpp_sde_cfgpp_advanced(
 
         if sigmas[i + 1] == 0:
             # Euler method
-            #d = to_d(x, sigmas[i], denoised)
-            d = to_d(x - cfgpp[i]*denoised + cfgpp[i]*temp[0], sigmas[i], denoised)
+            if cfgpp.sum().item() == 0.0:
+                d = to_d(x, sigmas[i], denoised)
+            else:
+                d = to_d(x - cfgpp[i]*denoised + cfgpp[i]*temp[0], sigmas[i], denoised)
             dt = sigmas[i + 1] - sigmas[i]
             x = x + d * dt
         else:
@@ -124,8 +127,10 @@ def sample_dpmpp_sde_cfgpp_advanced(
             # Step 1
             sd, su = get_ancestral_step(sigma_fn(t), sigma_fn(s), eta)
             s_ = t_fn(sd)
-            #x_2 = (sigma_fn(s_) / sigma_fn(t)) * x - (t - s_).expm1() * denoised
-            x_2 = (sigma_fn(s_) / sigma_fn(t)) * (x + cfgpp[i]*(denoised - temp[0])) - (t - s_).expm1() * denoised
+            if cfgpp.sum().item() == 0.0:
+                x_2 = (sigma_fn(s_) / sigma_fn(t)) * x - (t - s_).expm1() * denoised
+            else:
+                x_2 = (sigma_fn(s_) / sigma_fn(t)) * (x + cfgpp[i]*(denoised - temp[0])) - (t - s_).expm1() * denoised
             x_2 = x_2 + noise_sampler(sigma=sigma_fn(t), sigma_next=sigma_fn(s)) * s_noise * su
             denoised_2 = model(x_2, sigma_fn(s) * s_in, **extra_args)
 
@@ -133,8 +138,10 @@ def sample_dpmpp_sde_cfgpp_advanced(
             sd, su = get_ancestral_step(sigma_fn(t), sigma_fn(t_next), eta)
             t_next_ = t_fn(sd)
             denoised_d = (1 - fac) * denoised + fac * denoised_2
-            #x = (sigma_fn(t_next_) / sigma_fn(t)) * x - (t - t_next_).expm1() * denoised_d
-            x = (sigma_fn(t_next_) / sigma_fn(t)) * (x + cfgpp[i]*(denoised - temp[0])) - (t - t_next_).expm1() * denoised_d
+            if cfgpp.sum().item() == 0.0:
+                x = (sigma_fn(t_next_) / sigma_fn(t)) * x - (t - t_next_).expm1() * denoised_d
+            else:
+                x = (sigma_fn(t_next_) / sigma_fn(t)) * (x + cfgpp[i]*(denoised - temp[0])) - (t - t_next_).expm1() * denoised_d
             x = x + noise_sampler(sigma=sigma_fn(t), sigma_next=sigma_fn(t_next)) * s_noise * su
     return x
 
