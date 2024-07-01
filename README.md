@@ -8,8 +8,11 @@ Installation:
 "cd" into your ComfyUI/custom_nodes folder and run the following commands:
 
 git clone https://github.com/ClownsharkBatwing/RES4LYF/
+
 cd RES4LYF
+
 pip install -r requirements
+
 pip install opensimplex --no-deps
 
 Bear in mind that if you are using the portable version of ComfyUI you will need to replace "pip" with the full path to your embedded pip.exe, and if you are using a venv, you will need to first run:
