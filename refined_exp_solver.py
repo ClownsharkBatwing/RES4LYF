@@ -244,6 +244,15 @@ def _refined_exp_sosu_step(
     vel_2=vel_2,
   )
 
+def get_ancestral_step(sigma_from, sigma_to, eta=1.):
+    """Calculates the noise level (sigma_down) to step down to and the amount
+    of noise to add (sigma_up) when doing an ancestral sampling step."""
+    if not eta:
+        return sigma_to, 0.
+    sigma_up = min(sigma_to, eta * (sigma_to ** 2 * (sigma_from ** 2 - sigma_to ** 2) / sigma_from ** 2) ** 0.5)
+    sigma_down = (sigma_to ** 2 - sigma_up ** 2) ** 0.5
+    return sigma_down, sigma_up
+
 from comfy.k_diffusion.sampling import to_d
 import comfy.model_patcher
 
@@ -264,6 +273,7 @@ def sample_refined_exp_s_advanced(
   disable: Optional[bool] = None,
   ita: FloatTensor = torch.zeros((1,)),
   momentum: FloatTensor = torch.zeros((1,)),
+  eulers_mom: FloatTensor = torch.zeros((1,)),
   c2: FloatTensor = torch.zeros((1,)),
   cfgpp: FloatTensor = torch.zeros((1,)),
   offset: FloatTensor = torch.zeros((1,)),
@@ -325,6 +335,7 @@ def sample_refined_exp_s_advanced(
     for i, (sigma, sigma_next) in enumerate(pairwise(sigmas[:-1].split(1))):
       time = sigmas[i] / sigma_max
 
+      sigma_down, sigma_up = get_ancestral_step(sigmas[i], sigmas[i + 1], eta=ita[i].item())    
       if 'sigma' not in locals():
         sigma = sigmas[i]
 
@@ -341,19 +352,45 @@ def sample_refined_exp_s_advanced(
         eps = noise_sampler(sigma=sigma, sigma_next=sigma_next)
 
       sigma_hat = sigma * (1 + ita[i])
+      #sigma_hat = sigma * (1 + sigma_up)
+
+      #x_hat = x + ((sigma_hat ** 2 - sigma ** 2).sqrt() * eps)
+      #x_hat = x + eps * sigma_up
+
+      print("\nita: ", ita[i], "     sigma_up: ", sigma_up, "     sigma*ita: ", sigma*ita[i], "\n")
+      #sigma_hat = sigma + sigma_up
+
+      #x_hat = x + eps * sigma_up
       x_hat = x + ((sigma_hat ** 2 - sigma ** 2).sqrt() * eps)
-
-
 
       x_next, denoised, denoised2, vel, vel_2 = _refined_exp_sosu_step(model, x_hat, sigma_hat, sigma_next, c2=c2[i],
                                                                       extra_args=extra_args, pbar=pbar, simple_phi_calc=simple_phi_calc,
                                                                       momentum = momentum[i], vel = vel, vel_2 = vel_2, time = time, cfgpp = cfgpp[i].item()
                                                                       )
+      
+      #d = to_d(x, sigmas[i], x_next)
+      #dt = sigma_down - sigmas[i]
+      #x_next = x_next + d * dt
+
+      d = to_d(x_hat, sigma_hat, x_next)
+      dt = sigmas[i + 1] - sigma_hat
+      x_next = x_next + eulers_mom[i].item() * d * dt
+
+
+      #d = to_d(x, sigma_hat, denoised)
+      #dt = sigmas[i + 1] - sigma_hat
+
       if callback is not None:
         payload = RefinedExpCallbackPayload(x=x, i=i, sigma=sigma, sigma_hat=sigma_hat, denoised=denoised, denoised2=denoised2,)                               
         callback(payload)
 
-
+      #s_noise = 1
+      #d = to_d(x, sigmas[i], denoised)
+      # Euler method
+      #dt = sigma_down - sigmas[i]
+      #x = x + d * dt
+      #if sigmas[i + 1] > 0:
+      #    x = x + noise_sampler(sigmas[i], sigmas[i + 1]) * s_noise * sigma_up
 
 
       x = x_next - sigma_next*offset[i]

@@ -293,10 +293,10 @@ from .refined_exp_solver import sample_refined_exp_s_advanced
 @cast_fp64
 def sample_res_solver_advanced(model, 
                                x, 
-                               sigmas, itas, c2s, momentums, offsets,
+                               sigmas, itas, c2s, momentums, eulers_moms, offsets,
                                guides_1, guides_2, latent_guide_1, latent_guide_2, guide_mode_1, guide_mode_2, guide_1_channels,
                                k, clownseed=0, cfgpps=0.0, alphas=None, latent_noise=None, latent_self_guide_1=False,latent_shift_guide_1=False,
-                               extra_args=None, callback=None, disable=None, noise_sampler_type="gaussian", noise_sampler=None, denoise_to_zero=True, simple_phi_calc=False, c2=0.5, momentum=0.0, offset=0.0):
+                               extra_args=None, callback=None, disable=None, noise_sampler_type="gaussian", noise_sampler=None, denoise_to_zero=True, simple_phi_calc=False, c2=0.5, momentum=0.0, eulers_mom=0.0, offset=0.0):
     return sample_refined_exp_s_advanced(
         model=model, 
         x=x, 
@@ -319,6 +319,7 @@ def sample_res_solver_advanced(model,
         c2=c2s, 
         ita=itas,
         momentum=momentums,
+        eulers_mom=eulers_moms,
         offset=offsets,
         alpha=alphas,
         noise_sampler_type=noise_sampler_type,
@@ -669,7 +670,7 @@ def sample_dpmpp_2m_sde_advanced(model, x, sigmas, extra_args=None, callback=Non
 
     old_denoised = None
     h_last = None
-    h = None
+    h = None # step size
 
     for i in trange(len(sigmas) - 1, disable=disable):
         denoised = model(x, sigmas[i] * s_in, **extra_args)
@@ -689,9 +690,10 @@ def sample_dpmpp_2m_sde_advanced(model, x, sigmas, extra_args=None, callback=Non
             if old_denoised is not None:
                 r = h_last / h
                 if solver_type == 'heun':
-                    x = x + ((-h - eta_h).expm1().neg() / (-h - eta_h) + 1) * (1 / r) * (denoised - old_denoised)
+                    #       C2
+                    x = x + 1.0 * ( (-h - eta_h).expm1().neg() / (-h - eta_h) + 1) * (1 / r) * (denoised - old_denoised)
                 elif solver_type == 'midpoint':
-                    x = x + 0.5 * (-h - eta_h).expm1().neg() * (1 / r) * (denoised - old_denoised)
+                    x = x + 0.5 *   (-h - eta_h).expm1().neg()                     * (1 / r) * (denoised - old_denoised)
 
             if eta:
                 x = x + noise_sampler(sigma=sigmas[i], sigma_next=sigmas[i + 1]) * sigmas[i + 1] * (-2 * eta_h).expm1().neg().sqrt() * s_noise
