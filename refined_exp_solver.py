@@ -155,6 +155,7 @@ def _refined_exp_sosu_step(
   vel = None,
   vel_2 = None,
   time = None,
+  eulers_mom = 0.0,
   cfgpp = 0.0,
 ) -> StepOutput:
 
@@ -195,16 +196,22 @@ def _refined_exp_sosu_step(
   a2_1, b1, b2 = _de_second_order(h=h, c2=c2, simple_phi_calc=simple_phi_calc)
   
   denoised: FloatTensor = model(x, sigma * s_in, **extra_args)
+  #d = to_d(x, sigma, denoised) #ADDED
+  #dt = sigma_next - sigma #ADDED
+  #x = x + eulers_mom * d * dt
+
+  #x_2 = x + d * dt
+  #denoised_2 = model(x_2, sigma_next * s_in, **extra_args)
+  #_2 = to_d(x_2, sigma_next, denoised_2) #ALL THREE ADDED
+  #d_prime = (d + d_2) / 2
+  #x = x + d_prime * dt
+  
   if pbar is not None:
     pbar.update(0.5)
 
   c2_h: float = c2*h
 
   diff_2 = momentum_func(a2_1*h*denoised, vel_2, time)
-  #if cfgpp == False:
-  #  diff_2 = momentum_func(a2_1*h*denoised, vel_2, time)
-  #else:
-  #  diff_2 = momentum_func(a2_1 * h * (denoised - temp[0]), vel_2, time)
 
   vel_2 = diff_2
   x_2: FloatTensor = math.exp(-c2_h)*x + diff_2
@@ -218,16 +225,15 @@ def _refined_exp_sosu_step(
 
   #temp_0 = temp[0]
 
+  #x_2 = x + d * dt #ADDED
+
   denoised2: FloatTensor = model(x_2, sigma_2 * s_in, **extra_args)
+
   if pbar is not None:
     pbar.update(0.5)
 
   diff = momentum_func(h*(b1*denoised + b2*denoised2), vel, time)
-  #if cfgpp == False:
-  #  diff = momentum_func(h*(b1*denoised + b2*denoised2), vel, time)
-  #else:
-    #diff = momentum_func(h * (b1 * (denoised - temp[0]) + b2 * (denoised2 - temp[0])), vel, time)
-  #  diff = momentum_func(h * (b1 * (denoised - temp_0) + b2 * (denoised2 - temp[0])), vel, time)
+
   vel = diff
 
   if cfgpp == False:
@@ -330,12 +336,13 @@ def sample_refined_exp_s_advanced(
 
   b, c, h, w = x.shape
 
+  dt = None
   vel, vel_2 = None, None
   with tqdm(disable=disable, total=len(sigmas)-(1 if denoise_to_zero else 2)) as pbar:
     for i, (sigma, sigma_next) in enumerate(pairwise(sigmas[:-1].split(1))):
       time = sigmas[i] / sigma_max
 
-      sigma_down, sigma_up = get_ancestral_step(sigmas[i], sigmas[i + 1], eta=ita[i].item())    
+      sigma_down, sigma_up = get_ancestral_step(sigma, sigma_next, eta=ita[i].item())    
       if 'sigma' not in locals():
         sigma = sigmas[i]
 
@@ -351,31 +358,101 @@ def sample_refined_exp_s_advanced(
 
         eps = noise_sampler(sigma=sigma, sigma_next=sigma_next)
 
-      sigma_hat = sigma * (1 + ita[i])
+      sigma_hat = sigma * (1 + ita[i]) # ita -> gamma (stochastic euler)
       #sigma_hat = sigma * (1 + sigma_up)
 
-      #x_hat = x + ((sigma_hat ** 2 - sigma ** 2).sqrt() * eps)
+      x_hat = x + ((sigma_hat ** 2 - sigma ** 2).sqrt() * eps)
       #x_hat = x + eps * sigma_up
 
-      print("\nita: ", ita[i], "     sigma_up: ", sigma_up, "     sigma*ita: ", sigma*ita[i], "\n")
+      #print("\nita: ", ita[i], "     sigma_up: ", sigma_up, "     sigma*ita: ", sigma*ita[i], "\n")
       #sigma_hat = sigma + sigma_up
 
+
+      if(guide_mode_1 == -3): #SUCKS
+        sigma_hat = sigma+sigma_up
+        sigma_next = sigma_down
+        x_hat = x + eps * sigma_up
+
+      if(guide_mode_1 == -4): #GOOD... framed one that is structurally similar to orig
+        sigma_hat = sigma+sigma_up # GOOD WITH MODE2=-1
+        sigma_next = sigma_down
+        x_hat = x + eps * (sigma_hat ** 2 - sigma ** 2).sqrt()
+
+      if(guide_mode_1 == -5): #GOOD... fairly simple/clean
+        sigma_hat = sigma
+        sigma_next = sigma_down
+        x_hat = x + eps * sigma_up
+
+      if(guide_mode_1 == -6): #SUCKS.... HOWEVER GOOD-ish WITH mode 2 = -1
+        sigma_hat = sigma
+        sigma_next = sigma_down
+        x_hat = x + eps * (sigma_hat ** 2 - sigma ** 2).sqrt()
+
+      if(guide_mode_1 == -7): #SUCKS TOTAL ASS... mode 2 = -1 HORRID
+        sigma_hat = sigma * (1 + sigma_up)
+        sigma_next = sigma_down
+        x_hat = x + eps * sigma_up
+
+      if(guide_mode_1 == -8): #GOOD... closest to standard... MODE2=-1 is very good
+        sigma_hat = sigma * (1 + sigma_up)
+        sigma_next = sigma_down
+        x_hat = x + eps * (sigma_hat ** 2 - sigma ** 2).sqrt()
+
+      if(guide_mode_1 == -9): #
+        sigma_hat = sigma_up
+        sigma_next = sigma_down
+        x_hat = x + eps * sigma_up
+
+      if(guide_mode_1 == -10): #
+        sigma_hat = sigma_up
+        sigma_next = sigma_down
+        x_hat = x + eps * (sigma_hat ** 2 - sigma ** 2).sqrt()
+
+      if(guide_mode_2 == -1): #CONSERVE sigma_next
+        sigma_next = sigmas[i + 1]
+
       #x_hat = x + eps * sigma_up
-      x_hat = x + ((sigma_hat ** 2 - sigma ** 2).sqrt() * eps)
+      if latent_guide_1 is not None:
+        if(guide_mode_1 == -2):
+          x_hat = x + latent_guide_1 * (sigma_hat ** 2 - sigma ** 2).sqrt()
+        else:
+          x_hat = x + ((sigma_hat ** 2 - sigma ** 2).sqrt() * eps) # x -> x_hat (stoch euler)
 
       x_next, denoised, denoised2, vel, vel_2 = _refined_exp_sosu_step(model, x_hat, sigma_hat, sigma_next, c2=c2[i],
                                                                       extra_args=extra_args, pbar=pbar, simple_phi_calc=simple_phi_calc,
-                                                                      momentum = momentum[i], vel = vel, vel_2 = vel_2, time = time, cfgpp = cfgpp[i].item()
+                                                                      momentum = momentum[i], vel = vel, vel_2 = vel_2, time = time, eulers_mom = eulers_mom[i].item(), cfgpp = cfgpp[i].item()
                                                                       )
       
+      """d = to_d(x_hat, sigma_hat, x_next)
+      #dt = sigma - sigma_next
+      #dt = sigma_next - sigma_hat
+      dt = sigmas[i + 1] - sigma_hat
+      #dt2 = sigma_next - sigma_hat
+      x_hat = x - eulers_mom[i].item() * d * dt"""
+
       #d = to_d(x, sigmas[i], x_next)
       #dt = sigma_down - sigmas[i]
       #x_next = x_next + d * dt
 
+      #d = to_d(x_hat, sigma_hat - sigma_next, x_next)
+      """d = to_d(x_hat, sigma_hat, x_next)
+      dt = sigma_next - sigma_hat
+      x_next = x_next + eulers_mom[i].item() * d * dt"""
+
+      if latent_guide_1 is not None:
+        if(guide_mode_1 == -1):
+           d = to_d(x_hat, sigma_hat, latent_guide_1)
+           #d = x_next - latent_guide_1
+           dt = sigma_next - sigma_hat
+           x_next = x_next + guide_1[i].item() * d * dt
+
       d = to_d(x_hat, sigma_hat, x_next)
-      dt = sigmas[i + 1] - sigma_hat
+      dt = sigma_next - sigma_hat
       x_next = x_next + eulers_mom[i].item() * d * dt
 
+      #d = to_d(x_hat, sigma_hat, x_next)
+      #dt = sigma_next - sigma_hat
+      #x_next = x_next + eulers_mom[i].item() * d * dt
 
       #d = to_d(x, sigma_hat, denoised)
       #dt = sigmas[i + 1] - sigma_hat
@@ -391,6 +468,7 @@ def sample_refined_exp_s_advanced(
       #x = x + d * dt
       #if sigmas[i + 1] > 0:
       #    x = x + noise_sampler(sigmas[i], sigmas[i + 1]) * s_noise * sigma_up
+
 
 
       x = x_next - sigma_next*offset[i]

@@ -250,6 +250,7 @@ class SamplerDPMPP_SDE_CFGPP_ADVANCED:
                     {"eta": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 100.0, "step":0.01, "round": False}),
                      "s_noise": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 100.0, "step":0.01, "round": False}),
                      "r": ("FLOAT", {"default": 0.5, "min": 0.0, "max": 100.0, "step":0.01, "round": False}),
+                     "eulers_mom": ("FLOAT", {"default": 0.0, "min": -10000.0, "max": 10000.0, "step":0.01, "round": False}),
                      "cfgpp": ("FLOAT", {"default": 0.0, "min": -10000.0, "max": 10000.0, "step": 0.01}),
                      "alpha": ("FLOAT", {"default": 0.0, "min": -10000.0, "max": 10000.0, "step":0.1, "round": False}),
                      "k": ("FLOAT", {"default": 1.0, "min": -10000.0, "max": 10000.0, "step":2.0, "round": False}),
@@ -258,6 +259,7 @@ class SamplerDPMPP_SDE_CFGPP_ADVANCED:
                       },
                     "optional": 
                     {
+                        "eulers_moms": ("SIGMAS", ),
                         "cfgpps": ("SIGMAS", ),
                         "alphas": ("SIGMAS", ),
                     }  
@@ -267,7 +269,7 @@ class SamplerDPMPP_SDE_CFGPP_ADVANCED:
 
     FUNCTION = "get_sampler"
 
-    def get_sampler(self, eta, s_noise, r, cfgpp, alpha, k, noise_sampler_type, cfgpps=None, alphas=None):
+    def get_sampler(self, eta, s_noise, r, eulers_mom, cfgpp, alpha, k, noise_sampler_type, eulers_moms=None, cfgpps=None, alphas=None):
         sampler_name = "dpmpp_sde_cfgpp_advanced"
         #if noise_device == 'cpu':
         #    sampler_name = "dpmpp_sde_cfgpp_advanced"
@@ -275,10 +277,11 @@ class SamplerDPMPP_SDE_CFGPP_ADVANCED:
         #    sampler_name = "dpmpp_sde_gpu_advanced"
 
         steps = 10000
+        eulers_moms = initialize_or_scale(eulers_moms, eulers_mom, steps)
         alphas = initialize_or_scale(alphas, alpha, steps)
         cfgpps = initialize_or_scale(cfgpps, cfgpp, steps)
 
-        sampler = comfy.samplers.ksampler(sampler_name, {"eta": eta, "s_noise": s_noise, "r": r, "cfgpp": cfgpps, "alpha": alphas, "k": k, "noise_sampler_type": noise_sampler_type})
+        sampler = comfy.samplers.ksampler(sampler_name, {"eta": eta, "s_noise": s_noise, "r": r, "eulers_mom": eulers_moms, "cfgpp": cfgpps, "alpha": alphas, "k": k, "noise_sampler_type": noise_sampler_type})
         return (sampler, )
 
 class SamplerEulerAncestral_Advanced:

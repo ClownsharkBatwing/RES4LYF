@@ -31,6 +31,7 @@ def sample_dpmpp_sde_advanced(
     t_fn = lambda sigma: sigma.log().neg()
 
     for i in trange(len(sigmas) - 1, disable=disable):
+        x_hat = x
         denoised = model(x, sigmas[i] * s_in, **extra_args)
         if callback is not None:
             callback({'x': x, 'i': i, 'sigma': sigmas[i], 'sigma_hat': sigmas[i], 'denoised': denoised})
@@ -64,6 +65,11 @@ def sample_dpmpp_sde_advanced(
             t_next_ = t_fn(sd)
             denoised_d = (1 - fac) * denoised + fac * denoised_2
             x = (sigma_fn(t_next_) / sigma_fn(t)) * x - (t - t_next_).expm1() * denoised_d
+
+            d = to_d(x_hat, sigmas[i], x)
+            dt = sigmas[i + 1] - sigmas[i]
+            x = x + d * dt
+
             x = x + noise_sampler(sigma=sigma_fn(t), sigma_next=sigma_fn(t_next)) * s_noise * su
 
     return x
@@ -71,7 +77,7 @@ def sample_dpmpp_sde_advanced(
 @cast_fp64
 @torch.no_grad()
 def sample_dpmpp_sde_cfgpp_advanced(
-    model, x, sigmas, extra_args=None, callback=None, disable=None,
+    model, x, sigmas, extra_args=None, callback=None, disable=None, eulers_mom=None,
     eta=1., s_noise=1., noise_sampler=None, r=1/2, k=1.0, scale=0.1, noise_sampler_type="brownian", cfgpp: FloatTensor = torch.zeros((1,)), alpha: FloatTensor = torch.zeros((1,))
 ):
     #DPM-Solver++ (stochastic with ita parameter).
@@ -100,6 +106,7 @@ def sample_dpmpp_sde_cfgpp_advanced(
     t_fn = lambda sigma: sigma.log().neg()
 
     for i in trange(len(sigmas) - 1, disable=disable):
+        x_hat = x
         denoised = model(x, sigmas[i] * s_in, **extra_args)
         if callback is not None:
             callback({'x': x, 'i': i, 'sigma': sigmas[i], 'sigma_hat': sigmas[i], 'denoised': denoised})
@@ -142,6 +149,12 @@ def sample_dpmpp_sde_cfgpp_advanced(
                 x = (sigma_fn(t_next_) / sigma_fn(t)) * x - (t - t_next_).expm1() * denoised_d
             else:
                 x = (sigma_fn(t_next_) / sigma_fn(t)) * (x + cfgpp[i]*(denoised - temp[0])) - (t - t_next_).expm1() * denoised_d
+
+            if eulers_mom is not None:
+                d = to_d(x_hat, sigmas[i], x)
+                dt = sigmas[i + 1] - sigmas[i]
+                x = x + eulers_mom[i].item() * d * dt
+
             x = x + noise_sampler(sigma=sigma_fn(t), sigma_next=sigma_fn(t_next)) * s_noise * su
     return x
 
@@ -803,7 +816,7 @@ extra_samplers = {
     "dpmpp_2m_sde_advanced": sample_dpmpp_2m_sde_advanced,
     "dpmpp_3m_sde_advanced": sample_dpmpp_3m_sde_advanced,
     "dpmpp_sde_cfgpp_advanced": sample_dpmpp_sde_cfgpp_advanced,
-    #"euler_alt_cfg++": sample_euler_cfgpp_alt,
+
     "dpmpp_2s_a_cfg++": sample_dpmpp_2s_ancestral_cfgpp,
     "dpmpp_2m_cfg++": sample_dpmpp_2m_cfgpp,
     "dpmpp_sde_cfg++": sample_dpmpp_sde_cfgpp,
