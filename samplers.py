@@ -8,6 +8,10 @@ import comfy.sampler_helpers
 import latent_preview
 import torch
 
+#from sys import settrace 
+import sys
+import os
+
 def initialize_or_scale(tensor, value, steps):
     if tensor is None:
         return torch.full((steps,), value)
@@ -26,11 +30,14 @@ class ClownSampler:
     def INPUT_TYPES(s):
         return {
             "required": {
-                "eulers_mom": ("FLOAT", {"default": 1.0, "min": -10000.0, "max": 10000.0, "step": 0.01}),
-                "momentum": ("FLOAT", {"default": 1.0, "min": -10000.0, "max": 10000.0, "step": 0.01}),
+                "eulers_mom": ("FLOAT", {"default": 0.0, "min": -10000.0, "max": 10000.0, "step": 0.01}),
+                "momentum": ("FLOAT", {"default": 0.0, "min": -10000.0, "max": 10000.0, "step": 0.01}),
                 "ita": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 10000.0, "step": 0.01}),
-                "c2": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 10000.0, "step": 0.01}),
+                "c2": ("FLOAT", {"default": 0.5, "min": 0.0, "max": 10000.0, "step": 0.01}),
                 "clownseed": ("INT", {"default": 0, "min": 0, "max": 0xffffffffffffffff}),
+                "branch_mode": (['mean', 'mean_d', 'median', 'median_d', 'gradient_max', 'gradient_max_d', 'gradient_min', 'gradient_min_d', 'cos_similarity', 'cos_similarity_d','cos_linearity', 'cos_linearity_d', 'cos_perpendicular', 'cos_perpendicular_d'], {"default": 'mean'}),
+                "branch_depth": ("INT", {"default": 3, "min": 1, "max": 0xffffffffffffffff}),
+                "branch_width": ("INT", {"default": 1, "min": 1, "max": 0xffffffffffffffff}),
                 "offset": ("FLOAT", {"default": 0.0, "min": -10000.0, "max": 10000.0, "step": 0.001}),
                 "guide_1": ("FLOAT", {"default": 0.0, "min": -10000.0, "max": 10000.0, "step": 0.001}),
                 "guide_2": ("FLOAT", {"default": 0.0, "min": -10000.0, "max": 10000.0, "step": 0.001}),
@@ -39,7 +46,6 @@ class ClownSampler:
                 "noise_sampler_type": (NOISE_GENERATOR_NAMES, ),
                 "denoise_to_zero": ("BOOLEAN", {"default": True}),
                 "simple_phi_calc": ("BOOLEAN", {"default": False}),
-                #"cfgpp": ("BOOLEAN", {"default": False}),
                 "cfgpp": ("FLOAT", {"default": 0.0, "min": -10000.0, "max": 10000.0, "step": 0.01}),
 
                 "latent_self_guide_1": ("BOOLEAN", {"default": False}),
@@ -73,7 +79,7 @@ class ClownSampler:
 
     FUNCTION = "get_sampler"
 
-    def get_sampler(self, clownseed, noise_sampler_type, denoise_to_zero, simple_phi_calc, cfgpp, eulers_mom, momentum, c2, ita, offset, 
+    def get_sampler(self, clownseed, noise_sampler_type, denoise_to_zero, simple_phi_calc, cfgpp, eulers_mom, momentum, c2, ita, offset, branch_mode, branch_depth, branch_width,
                     guide_1, guide_2, guide_mode_1, guide_mode_2, 
                     guide_1_Luminosity, guide_1_CyanRed, guide_1_LimePurple, guide_1_PatternStruct, 
                     alpha, k,
@@ -110,6 +116,9 @@ class ClownSampler:
                 "noise_sampler_type": noise_sampler_type,
                 "denoise_to_zero": denoise_to_zero,
                 "simple_phi_calc": simple_phi_calc,
+                "branch_mode": branch_mode,
+                "branch_depth": branch_depth,
+                "branch_width": branch_width,
                 #"cfgpp": cfgpp,
                 #"cfgpp": ("FLOAT", {"default": 0.0, "min": -10000.0, "max": 10000.0, "step": 0.01}),
                 "eulers_moms": eulers_moms,
@@ -196,6 +205,7 @@ class SharkSampler:
             callback = latent_preview.prepare_callback(model, sigmas.shape[-1] - 1, x0_output)
 
             disable_pbar = False
+
             samples = comfy.sample.sample_custom(model, noise, cfg, sampler, sigmas, positive, negative, latent_image, 
                                                  noise_mask=noise_mask, callback=callback, disable_pbar=disable_pbar, 
                                                  seed=noise_seed)
@@ -408,3 +418,29 @@ class SamplerDPMPP_DUALSDE_MOMENTUMIZED_ADVANCED:
                 }
             )
             return (sampler, )
+
+
+class StableCascade_StageB_Conditioning64:
+    @classmethod
+    def INPUT_TYPES(s):
+        return {"required": { "conditioning": ("CONDITIONING",),
+                              "stage_c": ("LATENT",),
+                             }}
+    RETURN_TYPES = ("CONDITIONING",)
+
+    FUNCTION = "set_prior"
+
+    CATEGORY = "conditioning/stable_cascade"
+
+    @cast_fp64
+    def set_prior(self, conditioning, stage_c):
+        c = []
+        for t in conditioning:
+            d = t[1].copy()
+            d['stable_cascade_prior'] = stage_c['samples']
+            n = [t[0], d]
+            c.append(n)
+        return (c, )
+
+
+

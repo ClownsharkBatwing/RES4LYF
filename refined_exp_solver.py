@@ -7,6 +7,12 @@ import math
 
 from .noise_classes import *
 
+from comfy.k_diffusion.sampling import to_d
+import comfy.model_patcher
+
+import sys
+
+
 class DenoiserModel(Protocol):
   def __call__(self, x: FloatTensor, t: FloatTensor, *args, **kwargs) -> FloatTensor: ...
 
@@ -15,6 +21,7 @@ class RefinedExpCallbackPayload(TypedDict):
   i: int
   sigma: FloatTensor
   sigma_hat: FloatTensor
+  
 
 class RefinedExpCallback(Protocol):
   def __call__(self, payload: RefinedExpCallbackPayload) -> None: ...
@@ -159,18 +166,18 @@ def _refined_exp_sosu_step(
   cfgpp = 0.0,
 ) -> StepOutput:
 
-  #Algorithm 1 "RES Second order Single Update Step with c2"
-  #https://arxiv.org/abs/2308.02157
+  """Algorithm 1 "RES Second order Single Update Step with c2"
+  https://arxiv.org/abs/2308.02157
 
-  #Parameters:
-  #  model (`DenoiserModel`): a k-diffusion wrapped denoiser model (e.g. a subclass of DiscreteEpsDDPMDenoiser)
-  #  x (`FloatTensor`): noised latents (or RGB I suppose), e.g. torch.randn((B, C, H, W)) * sigma[0]
-  #  sigma (`FloatTensor`): timestep to denoise
-  #  sigma_next (`FloatTensor`): timestep+1 to denoise
-  #  c2 (`float`, *optional*, defaults to .5): partial step size for solving ODE. .5 = midpoint method
-  #  extra_args (`Dict[str, Any]`, *optional*, defaults to `{}`): kwargs to pass to `model#__call__()`
-  #  pbar (`tqdm`, *optional*, defaults to `None`): progress bar to update after each model call
-  #  simple_phi_calc (`bool`, *optional*, defaults to `True`): True = calculate phi_i,j(-h) via simplified formulae specific to j={1,2}. False = Use general solution that works for any j. Mathematically equivalent, but could be numeric differences.
+  Parameters:
+    model (`DenoiserModel`): a k-diffusion wrapped denoiser model (e.g. a subclass of DiscreteEpsDDPMDenoiser)
+    x (`FloatTensor`): noised latents (or RGB I suppose), e.g. torch.randn((B, C, H, W)) * sigma[0]
+    sigma (`FloatTensor`): timestep to denoise
+    sigma_next (`FloatTensor`): timestep+1 to denoise
+    c2 (`float`, *optional*, defaults to .5): partial step size for solving ODE. .5 = midpoint method
+    extra_args (`Dict[str, Any]`, *optional*, defaults to `{}`): kwargs to pass to `model#__call__()`
+    pbar (`tqdm`, *optional*, defaults to `None`): progress bar to update after each model call
+    simple_phi_calc (`bool`, *optional*, defaults to `True`): True = calculate phi_i,j(-h) via simplified formulae specific to j={1,2}. False = Use general solution that works for any j. Mathematically equivalent, but could be numeric differences."""
   if cfgpp != 0.0:
     temp = [0]
     def post_cfg_function(args):
@@ -186,7 +193,6 @@ def _refined_exp_sosu_step(
     else:
         momentum_vel = momentum * (timescale + offset) * velocity + (1 - momentum * (timescale + offset)) * diff
     #print(momentum_vel)
-    #return 0
     return momentum_vel
 
   lam_next, lam = (s.log().neg() for s in (sigma_next, sigma))
@@ -196,15 +202,6 @@ def _refined_exp_sosu_step(
   a2_1, b1, b2 = _de_second_order(h=h, c2=c2, simple_phi_calc=simple_phi_calc)
   
   denoised: FloatTensor = model(x, sigma * s_in, **extra_args)
-  #d = to_d(x, sigma, denoised) #ADDED
-  #dt = sigma_next - sigma #ADDED
-  #x = x + eulers_mom * d * dt
-
-  #x_2 = x + d * dt
-  #denoised_2 = model(x_2, sigma_next * s_in, **extra_args)
-  #_2 = to_d(x_2, sigma_next, denoised_2) #ALL THREE ADDED
-  #d_prime = (d + d_2) / 2
-  #x = x + d_prime * dt
   
   if pbar is not None:
     pbar.update(0.5)
@@ -218,14 +215,9 @@ def _refined_exp_sosu_step(
   if cfgpp == False:
     x_2: FloatTensor = math.exp(-c2_h)*x + diff_2
   else:
-    #x_2: FloatTensor = math.exp(-c2_h) * (x + (denoised - temp[0])) + diff_2
     x_2: FloatTensor = math.exp(-c2_h) * (x + cfgpp*denoised - cfgpp*temp[0]) + diff_2
   lam_2: float = lam + c2_h
   sigma_2: float = lam_2.neg().exp()
-
-  #temp_0 = temp[0]
-
-  #x_2 = x + d * dt #ADDED
 
   denoised2: FloatTensor = model(x_2, sigma_2 * s_in, **extra_args)
 
@@ -239,9 +231,8 @@ def _refined_exp_sosu_step(
   if cfgpp == False:
     x_next: FloatTensor = math.exp(-h)*x + diff
   else:
-    #x_next: FloatTensor = math.exp(-h) * (x + denoised - temp[0])) + diff
     x_next: FloatTensor = math.exp(-h) * (x + cfgpp*denoised - cfgpp*temp[0]) + diff
-  
+
   return StepOutput(
     x_next=x_next,
     denoised=denoised,
@@ -250,26 +241,18 @@ def _refined_exp_sosu_step(
     vel_2=vel_2,
   )
 
-def get_ancestral_step(sigma_from, sigma_to, eta=1.):
-    """Calculates the noise level (sigma_down) to step down to and the amount
-    of noise to add (sigma_up) when doing an ancestral sampling step."""
-    if not eta:
-        return sigma_to, 0.
-    sigma_up = min(sigma_to, eta * (sigma_to ** 2 * (sigma_from ** 2 - sigma_to ** 2) / sigma_from ** 2) ** 0.5)
-    sigma_down = (sigma_to ** 2 - sigma_up ** 2) ** 0.5
-    return sigma_down, sigma_up
 
-from comfy.k_diffusion.sampling import to_d
-import comfy.model_patcher
-
-@cast_fp64
+#@cast_fp64
 @no_grad()
 def sample_refined_exp_s_advanced(
-  model: FloatTensor,
-  x: FloatTensor,
-  sigmas: FloatTensor,
-  guide_1: FloatTensor = torch.zeros((1,)),
-  guide_2: FloatTensor = torch.zeros((1,)),
+  model,
+  x,
+  sigmas,
+  branch_mode,
+  branch_depth,
+  branch_width,
+  guide_1=None,
+  guide_2=None,
   guide_mode_1 = 0,
   guide_mode_2 = 0,
   guide_1_channels=None,
@@ -277,26 +260,26 @@ def sample_refined_exp_s_advanced(
   extra_args: Dict[str, Any] = {},
   callback: Optional[RefinedExpCallback] = None,
   disable: Optional[bool] = None,
-  ita: FloatTensor = torch.zeros((1,)),
-  momentum: FloatTensor = torch.zeros((1,)),
-  eulers_mom: FloatTensor = torch.zeros((1,)),
-  c2: FloatTensor = torch.zeros((1,)),
-  cfgpp: FloatTensor = torch.zeros((1,)),
-  offset: FloatTensor = torch.zeros((1,)),
-  alpha: FloatTensor = torch.zeros((1,)),
-  latent_guide_1: FloatTensor = torch.zeros((1,)),  
-  latent_guide_2: FloatTensor = torch.zeros((1,)),  
+  ita=None,
+  momentum=None,
+  eulers_mom=None,
+  c2=None,
+  cfgpp=None,
+  offset=None,
+  alpha=None,
+  latent_guide_1=None,
+  latent_guide_2=None,
   noise_sampler: NoiseSampler = torch.randn_like,
   noise_sampler_type=None,
   simple_phi_calc = False,
-  #cfgpp = False,
   k=1.0,
   clownseed=0,
   latent_noise=None,
   latent_self_guide_1=False,
   latent_shift_guide_1=False,
-):
+): 
   """
+  
   Refined Exponential Solver (S).
   Algorithm 2 "RES Single-Step Sampler" with Algorithm 1 second-order step
   https://arxiv.org/abs/2308.02157
@@ -314,587 +297,578 @@ def sample_refined_exp_s_advanced(
     noise_sampler (`NoiseSampler`, *optional*, defaults to `torch.randn_like`): method used for adding noise
     simple_phi_calc (`bool`, *optional*, defaults to `True`): True = calculate phi_i,j(-h) via simplified formulae specific to j={1,2}. False = Use general solution that works for any j. Mathematically equivalent, but could be numeric differences.
   """
-  
-  """  temp = [0]
-  def post_cfg_function(args):
-      temp[0] = args["uncond_denoised"]
-      return args["denoised"]
 
-  model_options = extra_args.get("model_options", {}).copy()
-  extra_args["model_options"] = comfy.model_patcher.set_model_options_post_cfg_function(model_options, post_cfg_function, disable_cfg1_optimization=True)
-  """
+  s_in = x.new_ones([x.shape[0]])
 
-  #import pdb; pdb.set_trace()
   #assert sigmas[-1] == 0
   sigma_min, sigma_max = sigmas[sigmas > 0].min(), sigmas.max()
+
   noise_sampler = NOISE_GENERATOR_CLASSES.get(noise_sampler_type)(x=x, seed=clownseed, sigma_min=sigma_min, sigma_max=sigma_max)
 
+  b, c, h, w = x.shape
+
+  dt = None
+  vel, vel_2 = None, None
+  x_hat = None
+  
+  x_n   = [[None for _ in range(branch_width ** depth)] for depth in range(branch_depth + 1)]
+  x_h   = [[None for _ in range(branch_width ** depth)] for depth in range(branch_depth + 1)]
+  vel   = [[None for _ in range(branch_width ** depth)] for depth in range(branch_depth + 1)]
+  vel_2 = [[None for _ in range(branch_width ** depth)] for depth in range(branch_depth + 1)]
+  denoised   = [[None for _ in range(branch_width ** depth)] for depth in range(branch_depth + 1)]
+  denoised2 = [[None for _ in range(branch_width ** depth)] for depth in range(branch_depth + 1)]
+  denoised_ = None
+  denoised2_ = None
+  denoised2_prev = None
+  
+  i=0
+  with tqdm(disable=disable, total=len(sigmas)-(1 if denoise_to_zero else 2)) as pbar:
+    #for i, (sigma, sigma_next) in enumerate(pairwise(sigmas[:-1].split(1))):
+    while i < len(sigmas) - 1:
+
+      sigma = sigmas[i]
+      sigma_next = sigmas[i+1]
+      time = sigmas[i] / sigma_max
+
+      if 'sigma' not in locals():
+        sigma = sigmas[i]
+
+      if latent_noise is not None:
+        if latent_noise.size()[0] == 1:
+          eps = latent_noise[0]
+        else:
+          eps = latent_noise[i]
+      else:
+        if noise_sampler_type == "fractal":
+          noise_sampler.alpha = alpha[i]
+          noise_sampler.k = k
+
+      sigma_hat = sigma * (1 + ita[i])
+
+      x_n[0][0] = x
+      for depth in range(1, branch_depth+1):
+        sigma = sigmas[i]
+        sigma_next = sigmas[i+1]
+        sigma_hat = sigma * (1 + ita[i])
+        
+        for m in range(branch_width**(depth-1)):
+          for n in range(branch_width):
+            idx = m * branch_width + n
+            x_h[depth][idx] = x_n[depth-1][m] + (sigma_hat ** 2 - sigma ** 2).sqrt() * noise_sampler(sigma=sigma, sigma_next=sigma_next)   
+            x_n[depth][idx], denoised[depth][idx], denoised2[depth][idx], vel[depth][idx], vel_2[depth][idx] = _refined_exp_sosu_step(model, x_h[depth][idx], sigma_hat, sigma_next, c2=c2[i],
+                                                                          extra_args=extra_args, pbar=pbar, simple_phi_calc=simple_phi_calc,
+                                                                          momentum = momentum[i], vel = vel[depth][idx], vel_2 = vel_2[depth][idx], time = time, eulers_mom = eulers_mom[i].item(), cfgpp = cfgpp[i].item()
+                                                                          )
+            denoised_ = denoised[depth][idx]
+            denoised2_ = denoised2[depth][idx]
+        i += 1
+        
+      if denoised2_prev is not None:
+        x_n[0][0] = denoised2_prev
+      x_next, x_hat, denoised2_prev = branch_mode_proc(x_n, x_h, denoised2, branch_mode, branch_depth, branch_width)
+      
+      d = to_d(x_hat, sigma_hat, x_next)
+      dt = sigma_next - sigma_hat
+      x_next = x_next + eulers_mom[i].item() * d * dt
+      
+      if callback is not None:
+        payload = RefinedExpCallbackPayload(x=x, i=i, sigma=sigma, sigma_hat=sigma_hat, denoised=denoised_, denoised2=denoised2_prev,)         # added updated denoised2_prev that's selected from the same slot as x_next                      
+        callback(payload)
+
+      x = x_next - sigma_next*offset[i]
+      
+      x = guide_mode_proc(x, guide_mode_1, guide_mode_2, sigma_next, guide_1, guide_2,  latent_guide_1, latent_guide_2, guide_1_channels)
+      
+    if denoise_to_zero:
+      final_ita = ita[-1]
+      eps = noise_sampler(sigma=sigma, sigma_next=sigma_next).double()
+      sigma_hat = sigma * (1 + final_ita)
+      x_hat = x + (sigma_hat ** 2 - sigma ** 2) ** .5 * eps
+      
+      s_in = x.new_ones([x.shape[0]])
+      x_next: FloatTensor = model(x_hat, torch.zeros_like(sigma).to(x_hat.device) * s_in, **extra_args)
+      pbar.update()
+      x = x_next
+
+  return x
+
+
+from torch.nn.functional import cosine_similarity
+
+@no_grad()
+def branch_mode_proc(
+  x_n, x_h,
+  denoised2,
+  branch_mode,
+  branch_depth,
+  branch_width,
+
+):
+  if branch_mode == 'cos_reversal':
+    x_next, x_hat, d_next = select_trajectory_with_reversal(x_n, x_h, branch_depth)
+  if branch_mode == 'cos_similarity':
+    x_next, x_hat, d_next = select_trajectory_based_on_cosine_similarity(x_n, x_h, branch_depth, branch_width)
+  if branch_mode == 'cos_similarity_d':
+    x_next, x_hat, d_next = select_trajectory_based_on_cosine_similarity_d(x_n, x_h, denoised2, branch_depth, branch_width)
+  if branch_mode == 'cos_linearity':
+    x_next, x_hat, d_next = select_most_linear_trajectory(x_n, x_h, branch_depth, branch_width) 
+  if branch_mode == 'cos_linearity_d':
+    x_next, x_hat, d_next = select_most_linear_trajectory_d(x_n, x_h, denoised2, branch_depth, branch_width) 
+  if branch_mode == 'cos_perpendicular':
+    x_next, x_hat, d_next = select_perpendicular_cosine_trajectory(x_n, x_h, branch_depth, branch_width) 
+  if branch_mode == 'cos_perpendicular_d':
+    x_next, x_hat, d_next = select_perpendicular_cosine_trajectory_d(x_n, x_h, denoised2, branch_depth, branch_width) 
+  if branch_mode == 'mean':
+    x_mean = torch.mean(torch.stack(x_n[branch_depth]), dim=0)
+    distances = [torch.norm(tensor - x_mean).item() for tensor in x_n[branch_depth]]
+    closest_index = distances.index(min(distances))
+    x_next = x_n[branch_depth][closest_index]
+    x_hat = x_h[branch_depth][closest_index]
+    d_next = denoised2[branch_depth][closest_index]
+    
+  if branch_mode == 'mean_d':
+    x_mean = torch.mean(torch.stack(denoised2[branch_depth]), dim=0)
+    distances = [torch.norm(tensor - x_mean).item() for tensor in x_n[branch_depth]]
+    closest_index = distances.index(min(distances))
+    x_next = x_n[branch_depth][closest_index]
+    x_hat = x_h[branch_depth][closest_index]
+    d_next = denoised2[branch_depth][closest_index]
+    
+  if branch_mode == 'median': #minimum median distance
+    x_n_3 = [tensor for tensor in x_n[branch_depth] if tensor is not None]
+    x_h_3 = [tensor for tensor in x_h[branch_depth] if tensor is not None]
+    num_tensors = len(x_n_3)
+    distance_matrix = torch.zeros(num_tensors, num_tensors)
+
+    for m in range(num_tensors):
+        for n in range(num_tensors):
+            if m != n:
+                distance_matrix[m, n] = torch.norm(x_n_3[m] - x_n_3[n])
+    median_distances = torch.median(distance_matrix, dim=1).values
+    min_median_distance_index = torch.argmin(median_distances).item()
+    x_next = x_n_3[min_median_distance_index]
+    x_hat = x_h_3[min_median_distance_index]
+    d_next = d_n_3[min_median_distance_index]
+    
+  if branch_mode == 'median_d': #minimum median distance
+    d_n_3 = [tensor for tensor in denoised2[branch_depth] if tensor is not None]
+    x_n_3 = [tensor for tensor in x_n[branch_depth] if tensor is not None]
+    x_h_3 = [tensor for tensor in x_h[branch_depth] if tensor is not None]
+    num_tensors = len(x_n_3)
+    distance_matrix = torch.zeros(num_tensors, num_tensors)
+
+    for m in range(num_tensors):
+        for n in range(num_tensors):
+            if m != n:
+                distance_matrix[m, n] = torch.norm(d_n_3[m] - d_n_3[n])
+    median_distances = torch.median(distance_matrix, dim=1).values
+    min_median_distance_index = torch.argmin(median_distances).item()
+    
+    x_next = x_n_3[min_median_distance_index]
+    x_hat = x_h_3[min_median_distance_index]
+    d_next = d_n_3[min_median_distance_index]
+
+  if branch_mode == 'gradient_max': #greatest gradient descent
+    norms = [torch.norm(tensor).item() for tensor in x_n[branch_depth] if tensor is not None]
+    greatest_norm_index = norms.index(max(norms))
+    x_next = x_n[branch_depth][greatest_norm_index]
+    x_hat  = x_h[branch_depth][greatest_norm_index]
+    d_next = denoised2[branch_depth][greatest_norm_index]
+    
+  if branch_mode == 'gradient_min': #greatest gradient descent
+    norms = [torch.norm(tensor).item() for tensor in x_n[branch_depth] if tensor is not None]
+    min_norm_index = norms.index(min(norms))
+    x_next = x_n[branch_depth][min_norm_index]
+    x_hat  = x_h[branch_depth][min_norm_index]
+    d_next = denoised2[branch_depth][min_norm_index]
+    
+  if branch_mode == 'gradient_max_d': #greatest gradient descent
+    norms = [torch.norm(tensor).item() for tensor in denoised2[branch_depth] if tensor is not None]
+    greatest_norm_index = norms.index(max(norms))
+    x_next = x_n[branch_depth][greatest_norm_index]
+    x_hat  = x_h[branch_depth][greatest_norm_index]
+    d_next = denoised2[branch_depth][greatest_norm_index]
+    
+  if branch_mode == 'gradient_min_d': #greatest gradient descent
+    norms = [torch.norm(tensor).item() for tensor in denoised2[branch_depth] if tensor is not None]
+    min_norm_index = norms.index(min(norms))
+    x_next = x_n[branch_depth][min_norm_index]
+    x_hat  = x_h[branch_depth][min_norm_index]
+    d_next = denoised2[branch_depth][min_norm_index]
+    
+  return x_next, x_hat, d_next
+    
+def select_trajectory_with_reversal(x_n, x_h, denoised2, branch_depth):
+    x_n_depth = [tensor for tensor in x_n[branch_depth] if tensor is not None]
+    x_h_depth = [tensor for tensor in x_h[branch_depth] if tensor is not None]
+    d_n_depth = [tensor for tensor in denoised2[branch_depth] if tensor is not None]
+    num_tensors = len(x_n_depth)
+
+    negative_cos_sim_indices = []
+    cos_sim_values = []
+
+    for i in range(num_tensors):
+        trajectory_cos_sims = []
+        for j in range(1, len(x_n_depth[i]) - 1): 
+            cos_sim = cosine_similarity(x_n_depth[i][j].unsqueeze(0), x_n_depth[i][j + 1].unsqueeze(0))
+            trajectory_cos_sims.append(cos_sim.item())
+        # check for reversal (negative cosine similarity)
+        if any(cos_sim < 0 for cos_sim in trajectory_cos_sims):
+            negative_cos_sim_indices.append(i)
+            cos_sim_values.append(min(trajectory_cos_sims))
+
+    if not negative_cos_sim_indices:
+        # no reversal? fall back to the first available trajectory
+        selected_index = 0
+    else:
+        # choose trajectory with most negative cosine similarity
+        selected_index = negative_cos_sim_indices[torch.argmin(torch.tensor(cos_sim_values)).item()]
+
+    x_next = x_n_depth[selected_index]
+    x_hat = x_h_depth[selected_index]
+    d_next = d_n_depth[selected_index]
+
+    return x_next, x_hat, d_next
+
+def select_trajectory_based_on_cosine_similarity(x_n, x_h, denoised2, branch_depth, branch_width):
+    d_n_depth = [tensor for tensor in denoised2[branch_depth] if tensor is not None]
+    x_n_depth = [tensor for tensor in x_n[branch_depth] if tensor is not None]
+    x_h_depth = [tensor for tensor in x_h[branch_depth] if tensor is not None]
+
+    max_cosine_similarity = float('-inf')
+    best_idx = -1
+
+    for n in range(len(x_n_depth)):
+        direction_vector = x_n_depth[n] - x_n[0][0]
+        total_cosine_similarity = 0.0
+
+        for depth in range(1, branch_depth):
+            for j in range(len(x_n[depth])):
+                x1_direction = x_n[depth][j] - x_n[depth - 1][j // branch_width]
+                x1_to_x3_direction = x_n_depth[n] - x_n[depth][j]
+                cosine_similarity = torch.dot(x1_direction.flatten(), x1_to_x3_direction.flatten()) / (torch.norm(x1_direction) * torch.norm(x1_to_x3_direction))
+                total_cosine_similarity += cosine_similarity
+
+        if total_cosine_similarity > max_cosine_similarity:
+            max_cosine_similarity = total_cosine_similarity
+            best_idx = n
+
+    x_next = x_n_depth[best_idx]
+    x_hat = x_h_depth[best_idx]
+    d_next = d_n_depth[best_idx]
+
+    return x_next, x_hat, d_next
+
+  
+def select_trajectory_based_on_cosine_similarity_d(x_n, x_h, denoised2, branch_depth, branch_width):
+    d_n_depth = [tensor for tensor in denoised2[branch_depth] if tensor is not None]
+    x_n_depth = [tensor for tensor in x_n[branch_depth] if tensor is not None]
+    x_h_depth = [tensor for tensor in x_h[branch_depth] if tensor is not None]
+    
+    denoised2[0][0] = x_n[0][0]
+
+    max_cosine_similarity = float('-inf')
+    best_idx = -1
+
+    for n in range(len(d_n_depth)):
+        direction_vector = d_n_depth[n] - x_n[0][0]
+        total_cosine_similarity = 0.0
+
+        for depth in range(1, branch_depth):
+            for j in range(len(denoised2[depth])):
+                x1_direction = denoised2[depth][j] - denoised2[depth - 1][j // branch_width]
+                x1_to_x3_direction = d_n_depth[n] - denoised2[depth][j]
+                cosine_similarity = torch.dot(x1_direction.flatten(), x1_to_x3_direction.flatten()) / (torch.norm(x1_direction) * torch.norm(x1_to_x3_direction))
+                total_cosine_similarity += cosine_similarity
+
+        if total_cosine_similarity > max_cosine_similarity:
+            max_cosine_similarity = total_cosine_similarity
+            best_idx = n
+
+    x_next = x_n_depth[best_idx]
+    x_hat = x_h_depth[best_idx]
+    d_next = d_n_depth[best_idx]
+
+    return x_next, x_hat, d_next
+
+  
+
+def select_most_linear_trajectory(x_n, x_h, denoised2, branch_depth, branch_width):
+    d_n_depth = [tensor for tensor in denoised2[branch_depth] if tensor is not None]
+    x_n_depth = [tensor for tensor in x_n[branch_depth] if tensor is not None]
+    x_h_depth = [tensor for tensor in x_h[branch_depth] if tensor is not None]
+
+    max_cosine_similarity_sum = float('-inf')
+    best_idx = -1
+
+    base_vector = x_n[0][0]
+
+    # sum up  absolute cosine similarities for each trajectory
+    for n in range(len(x_n_depth)):
+        total_cosine_similarity = 0.0
+        current_vector = x_n_depth[n]
+
+        #cormpare trajectory's endpoint vs all intermediate steps
+        for depth in range(1, branch_depth + 1):
+            for j in range(len(x_n[depth])):
+                if depth == 1:
+                    previous_vector = base_vector
+                else:
+                    previous_vector = x_n[depth - 1][j // branch_width]
+
+                direction_vector = x_n[depth][j] - previous_vector
+                cosine_similarity = torch.dot(direction_vector.flatten(), (current_vector - previous_vector).flatten()) / (
+                    torch.norm(direction_vector) * torch.norm(current_vector - previous_vector))
+
+                total_cosine_similarity += torch.abs(cosine_similarity) #abs val is key here... allows reversals (180 degree swap in direction, i.e., convergence)
+
+        if total_cosine_similarity > max_cosine_similarity_sum:
+            max_cosine_similarity_sum = total_cosine_similarity
+            best_idx = n
+
+    x_next = x_n_depth[best_idx]
+    x_hat = x_h_depth[best_idx]
+    d_next = d_n_depth[best_idx]
+
+    return x_next, x_hat, d_next
+
+  
+  
+def select_most_linear_trajectory_d(x_n, x_h, denoised2, branch_depth, branch_width):
+    d_n_depth = [tensor for tensor in denoised2[branch_depth] if tensor is not None]
+    x_n_depth = [tensor for tensor in x_n[branch_depth] if tensor is not None]
+    x_h_depth = [tensor for tensor in x_h[branch_depth] if tensor is not None]
+
+    max_cosine_similarity_sum = float('-inf')
+    best_idx = -1
+
+    base_vector = x_n[0][0]
+
+    # sum up  absolute cosine similarities for each trajectory
+    for n in range(len(d_n_depth)):
+        total_cosine_similarity = 0.0
+        current_vector = d_n_depth[n]
+
+        #cormpare trajectory's endpoint vs all intermediate steps
+        for depth in range(1, branch_depth + 1):
+            for j in range(len(denoised2[depth])):
+                if depth == 1:
+                    previous_vector = base_vector
+                else:
+                    previous_vector = denoised2[depth - 1][j // branch_width]
+
+                direction_vector = denoised2[depth][j] - previous_vector
+                cosine_similarity = torch.dot(direction_vector.flatten(), (current_vector - previous_vector).flatten()) / (
+                    torch.norm(direction_vector) * torch.norm(current_vector - previous_vector))
+
+                total_cosine_similarity += torch.abs(cosine_similarity) #abs val is key here... allows reversals (180 degree swap in direction, i.e., convergence)
+
+        if total_cosine_similarity > max_cosine_similarity_sum:
+            max_cosine_similarity_sum = total_cosine_similarity
+            best_idx = n
+
+    x_next = x_n_depth[best_idx]
+    x_hat = x_h_depth[best_idx]
+    d_next = d_n_depth[best_idx]
+
+    return x_next, x_hat, d_next
+
+
+def select_perpendicular_cosine_trajectory(x_n, x_h, denoised2, branch_width, branch_depth):
+    d_n_depth = [tensor for tensor in denoised2[branch_depth] if tensor is not None]
+    x_n_depth = [tensor for tensor in x_n[branch_depth] if tensor is not None]
+    x_h_depth = [tensor for tensor in x_h[branch_depth] if tensor is not None]
+
+    min_cosine_deviation_from_zero = float('inf')
+    best_idx = -1
+
+    # Calculate cosine similarities aiming for orthogonality at each step
+    for n in range(len(x_n_depth)):
+        total_cosine_deviation = 0.0
+
+        # Iterate through the trajectory path
+        for depth in range(1, branch_depth):
+            for j in range(len(x_n[depth])):
+                if depth == 1:
+                    previous_vector = x_n[0][0]
+                else:
+                    previous_vector = x_n[depth - 1][j // branch_width]
+
+                current_vector = x_n[depth][j] - previous_vector
+                target_vector = x_n_depth[n] - x_n[depth][j]
+                
+                cosine_similarity = torch.dot(current_vector.flatten(), target_vector.flatten()) / (
+                    torch.norm(current_vector) * torch.norm(target_vector))
+
+                # Accumulate deviation from zero (ideal for perpendicular direction)
+                total_cosine_deviation += (cosine_similarity ** 2)  # Squaring to emphasize smaller values
+
+        # Update to select the trajectory with the minimum deviation from zero cosine similarity (most perpendicular)
+        if total_cosine_deviation < min_cosine_deviation_from_zero:
+            min_cosine_deviation_from_zero = total_cosine_deviation
+            best_idx = n
+
+    x_next = x_n_depth[best_idx]
+    x_hat = x_h_depth[best_idx]
+    d_next = d_n_depth[best_idx]
+
+    return x_next, x_hat, d_next
+
+  
+  
+def select_perpendicular_cosine_trajectory_d(x_n, x_h, denoised2, branch_width, branch_depth):
+  d_n_depth = [tensor for tensor in denoised2[branch_depth] if tensor is not None]
+  x_n_depth = [tensor for tensor in x_n[branch_depth] if tensor is not None]
+  x_h_depth = [tensor for tensor in x_h[branch_depth] if tensor is not None]
+
+  min_cosine_deviation_from_zero = float('inf')
+  best_idx = -1
+
+  # Calculate cosine similarities aiming for orthogonality at each step
+  for n in range(len(d_n_depth)):
+      total_cosine_deviation = 0.0
+
+      # Iterate through the trajectory path
+      for depth in range(1, branch_depth):
+          for j in range(len(denoised2[depth])):
+              if depth == 1:
+                  previous_vector = x_n[0][0] #did i do this right???
+              else:
+                  previous_vector = denoised2[depth - 1][j // branch_width]
+
+              current_vector = denoised2[depth][j] - previous_vector
+              target_vector = d_n_depth[n] - denoised2[depth][j]
+              
+              cosine_similarity = torch.dot(current_vector.flatten(), target_vector.flatten()) / (
+                  torch.norm(current_vector) * torch.norm(target_vector))
+
+              # Accumulate deviation from zero (ideal for perpendicular direction)
+              total_cosine_deviation += (cosine_similarity ** 2)  # Squaring to emphasize smaller values
+
+      # Update to select the trajectory with the minimum deviation from zero cosine similarity (most perpendicular)
+      if total_cosine_deviation < min_cosine_deviation_from_zero:
+          min_cosine_deviation_from_zero = total_cosine_deviation
+          best_idx = n
+
+  x_next = x_n_depth[best_idx]
+  x_hat = x_h_depth[best_idx]
+  d_next = d_n_depth[best_idx]
+
+  return x_next, x_hat, d_next
+
+
+
+
+
+def guide_mode_proc(x, guide_mode_1, guide_mode_2, sigma_next, guide_1, guide_2,  latent_guide_1, latent_guide_2, guide_1_channels):
   if latent_guide_1 is not None:
     latent_guide_crushed_1 = (latent_guide_1 - latent_guide_1.min()) / (latent_guide_1 - latent_guide_1.min()).max()
   if latent_guide_2 is not None:
     latent_guide_crushed_2 = (latent_guide_2 - latent_guide_2.min()) / (latent_guide_2 - latent_guide_2.min()).max()
 
   b, c, h, w = x.shape
-
-  dt = None
-  vel, vel_2 = None, None
-  with tqdm(disable=disable, total=len(sigmas)-(1 if denoise_to_zero else 2)) as pbar:
-    for i, (sigma, sigma_next) in enumerate(pairwise(sigmas[:-1].split(1))):
-      time = sigmas[i] / sigma_max
-
-      sigma_down, sigma_up = get_ancestral_step(sigma, sigma_next, eta=ita[i].item())    
-      if 'sigma' not in locals():
-        sigma = sigmas[i]
-
-      if latent_noise is not None:
-        if latent_noise.size()[0] == 1:
-          eps = latent_noise[0]
-        else:
-          eps = latent_noise[i]
-      else:
-        if noise_sampler_type == "fractal":
-          noise_sampler.alpha = alpha[i]
-          noise_sampler.k = k
-
-        eps = noise_sampler(sigma=sigma, sigma_next=sigma_next)
-
-      sigma_hat = sigma * (1 + ita[i]) # ita -> gamma (stochastic euler)
-      #sigma_hat = sigma * (1 + sigma_up)
-
-      x_hat = x + ((sigma_hat ** 2 - sigma ** 2).sqrt() * eps)
-      #x_hat = x + eps * sigma_up
-
-      #print("\nita: ", ita[i], "     sigma_up: ", sigma_up, "     sigma*ita: ", sigma*ita[i], "\n")
-      #sigma_hat = sigma + sigma_up
-
-
-      if(guide_mode_1 == -3): #SUCKS
-        sigma_hat = sigma+sigma_up
-        sigma_next = sigma_down
-        x_hat = x + eps * sigma_up
-
-      if(guide_mode_1 == -4): #GOOD... framed one that is structurally similar to orig
-        sigma_hat = sigma+sigma_up # GOOD WITH MODE2=-1
-        sigma_next = sigma_down
-        x_hat = x + eps * (sigma_hat ** 2 - sigma ** 2).sqrt()
-
-      if(guide_mode_1 == -5): #GOOD... fairly simple/clean
-        sigma_hat = sigma
-        sigma_next = sigma_down
-        x_hat = x + eps * sigma_up
-
-      if(guide_mode_1 == -6): #SUCKS.... HOWEVER GOOD-ish WITH mode 2 = -1
-        sigma_hat = sigma
-        sigma_next = sigma_down
-        x_hat = x + eps * (sigma_hat ** 2 - sigma ** 2).sqrt()
-
-      if(guide_mode_1 == -7): #SUCKS TOTAL ASS... mode 2 = -1 HORRID
-        sigma_hat = sigma * (1 + sigma_up)
-        sigma_next = sigma_down
-        x_hat = x + eps * sigma_up
-
-      if(guide_mode_1 == -8): #GOOD... closest to standard... MODE2=-1 is very good
-        sigma_hat = sigma * (1 + sigma_up)
-        sigma_next = sigma_down
-        x_hat = x + eps * (sigma_hat ** 2 - sigma ** 2).sqrt()
-
-      if(guide_mode_1 == -9): #
-        sigma_hat = sigma_up
-        sigma_next = sigma_down
-        x_hat = x + eps * sigma_up
-
-      if(guide_mode_1 == -10): #
-        sigma_hat = sigma_up
-        sigma_next = sigma_down
-        x_hat = x + eps * (sigma_hat ** 2 - sigma ** 2).sqrt()
-
-      if(guide_mode_2 == -1): #CONSERVE sigma_next
-        sigma_next = sigmas[i + 1]
-
-      #x_hat = x + eps * sigma_up
-      if latent_guide_1 is not None:
-        if(guide_mode_1 == -2):
-          x_hat = x + latent_guide_1 * (sigma_hat ** 2 - sigma ** 2).sqrt()
-        else:
-          x_hat = x + ((sigma_hat ** 2 - sigma ** 2).sqrt() * eps) # x -> x_hat (stoch euler)
-
-      x_next, denoised, denoised2, vel, vel_2 = _refined_exp_sosu_step(model, x_hat, sigma_hat, sigma_next, c2=c2[i],
-                                                                      extra_args=extra_args, pbar=pbar, simple_phi_calc=simple_phi_calc,
-                                                                      momentum = momentum[i], vel = vel, vel_2 = vel_2, time = time, eulers_mom = eulers_mom[i].item(), cfgpp = cfgpp[i].item()
-                                                                      )
-      
-      """d = to_d(x_hat, sigma_hat, x_next)
-      #dt = sigma - sigma_next
-      #dt = sigma_next - sigma_hat
-      dt = sigmas[i + 1] - sigma_hat
-      #dt2 = sigma_next - sigma_hat
-      x_hat = x - eulers_mom[i].item() * d * dt"""
-
-      #d = to_d(x, sigmas[i], x_next)
-      #dt = sigma_down - sigmas[i]
-      #x_next = x_next + d * dt
-
-      #d = to_d(x_hat, sigma_hat - sigma_next, x_next)
-      """d = to_d(x_hat, sigma_hat, x_next)
-      dt = sigma_next - sigma_hat
-      x_next = x_next + eulers_mom[i].item() * d * dt"""
-
-      if latent_guide_1 is not None:
-        if(guide_mode_1 == -1):
-           d = to_d(x_hat, sigma_hat, latent_guide_1)
-           #d = x_next - latent_guide_1
-           dt = sigma_next - sigma_hat
-           x_next = x_next + guide_1[i].item() * d * dt
-
-      d = to_d(x_hat, sigma_hat, x_next)
-      dt = sigma_next - sigma_hat
-      x_next = x_next + eulers_mom[i].item() * d * dt
-
-      #d = to_d(x_hat, sigma_hat, x_next)
-      #dt = sigma_next - sigma_hat
-      #x_next = x_next + eulers_mom[i].item() * d * dt
-
-      #d = to_d(x, sigma_hat, denoised)
-      #dt = sigmas[i + 1] - sigma_hat
-
-      if callback is not None:
-        payload = RefinedExpCallbackPayload(x=x, i=i, sigma=sigma, sigma_hat=sigma_hat, denoised=denoised, denoised2=denoised2,)                               
-        callback(payload)
-
-      #s_noise = 1
-      #d = to_d(x, sigmas[i], denoised)
-      # Euler method
-      #dt = sigma_down - sigmas[i]
-      #x = x + d * dt
-      #if sigmas[i + 1] > 0:
-      #    x = x + noise_sampler(sigmas[i], sigmas[i + 1]) * s_noise * sigma_up
-
-
-
-      x = x_next - sigma_next*offset[i]
-      if latent_shift_guide_1 is True:
-        x = x - sigma_next * guide_1[i] * guide_1_channels.view(1,c,1,1)
-        #latent_guide_1 = x
-
-      if latent_self_guide_1 is True:
-        latent_guide_1 = x
-
-      if latent_guide_1 is not None:
-        if(guide_mode_1 == 1):
-          x = x - sigma_next * guide_1[i] * latent_guide_1 * guide_1_channels.view(1,c,1,1)
-
-        if(guide_mode_1 == 2):
-          x = x - sigma_next * guide_1[i] * latent_guide_crushed_1 * guide_1_channels.view(1,c,1,1)
-
-        if(guide_mode_1 == 3):
-          x = (1 - guide_1[i]) * x * guide_1_channels.view(1,c,1,1) + (guide_1[i] * latent_guide_1 * guide_1_channels.view(1,c,1,1))
-
-        if(guide_mode_1 == 4):
-          x = (1 - guide_1[i]) * x * guide_1_channels.view(1,c,1,1) + (guide_1[i] * latent_guide_crushed_1 * guide_1_channels.view(1,c,1,1))   
-
-        if(guide_mode_1 == 5):
-          x = (x - guide_1[i] * sigma_next * x * guide_1_channels.view(1,c,1,1)) + (guide_1[i] * sigma_next * latent_guide_1 * guide_1_channels.view(1,c,1,1))
-        if(guide_mode_1 == 6):
-          x = (x - guide_1[i] * sigma_next * x * guide_1_channels.view(1,c,1,1)) + (guide_1[i] * sigma_next * latent_guide_crushed_1 * guide_1_channels.view(1,c,1,1))
-        if(guide_mode_1 == 7):
-          hard_light_blend_1 = hard_light_blend(x, latent_guide_1)
-          x = (x - guide_1[i] * sigma_next * x * guide_1_channels.view(1,c,1,1)) + (guide_1[i] * sigma_next * hard_light_blend_1 * guide_1_channels.view(1,c,1,1))
-        if(guide_mode_1 == 8):
-          hard_light_blend_1 = hard_light_blend(latent_guide_1, x)
-          x = (x - guide_1[i] * sigma_next * x * guide_1_channels.view(1,c,1,1)) + (guide_1[i] * sigma_next * hard_light_blend_1 * guide_1_channels.view(1,c,1,1))
-        if(guide_mode_1 == 9):
-          soft_light_blend_1 = soft_light_blend(x, latent_guide_1)
-          x = (x - guide_1[i] * sigma_next * x * guide_1_channels.view(1,c,1,1)) + (guide_1[i] * sigma_next * soft_light_blend_1 * guide_1_channels.view(1,c,1,1))
-        if(guide_mode_1 == 10):
-          soft_light_blend_1 = soft_light_blend(latent_guide_1, x)
-          x = (x - guide_1[i] * sigma_next * x * guide_1_channels.view(1,c,1,1)) + (guide_1[i] * sigma_next * soft_light_blend_1 * guide_1_channels.view(1,c,1,1))
-        if(guide_mode_1 == 11):
-          linear_light_blend_1 = linear_light_blend(x, latent_guide_1)
-          x = (x - guide_1[i] * sigma_next * x * guide_1_channels.view(1,c,1,1)) + (guide_1[i] * sigma_next * linear_light_blend_1 * guide_1_channels.view(1,c,1,1))
-        if(guide_mode_1 == 12):
-          linear_light_blend_1 = linear_light_blend(latent_guide_1, x)
-          x = (x - guide_1[i] * sigma_next * x * guide_1_channels.view(1,c,1,1)) + (guide_1[i] * sigma_next * linear_light_blend_1 * guide_1_channels.view(1,c,1,1))
-        if(guide_mode_1 == 13):
-          vivid_light_blend_1 = vivid_light_blend(x, latent_guide_1)
-          x = (x - guide_1[i] * sigma_next * x * guide_1_channels.view(1,c,1,1)) + (guide_1[i] * sigma_next * vivid_light_blend_1 * guide_1_channels.view(1,c,1,1))
-        if(guide_mode_1 == 14):
-          vivid_light_blend_1 = vivid_light_blend(latent_guide_1, x)
-          x = (x - guide_1[i] * sigma_next * x * guide_1_channels.view(1,c,1,1)) + (guide_1[i] * sigma_next * vivid_light_blend_1 * guide_1_channels.view(1,c,1,1))
-        if(guide_mode_1 == 801):
-          hard_light_blend_1 = bold_hard_light_blend(x, latent_guide_1)
-          x = (x - guide_1[i] * sigma_next * x * guide_1_channels.view(1,c,1,1)) + (guide_1[i] * sigma_next * hard_light_blend_1 * guide_1_channels.view(1,c,1,1))
-        if(guide_mode_1 == 802):
-          hard_light_blend_1 = bold_hard_light_blend(latent_guide_1, x)
-          x = (x - guide_1[i] * sigma_next * x * guide_1_channels.view(1,c,1,1)) + (guide_1[i] * sigma_next * hard_light_blend_1 * guide_1_channels.view(1,c,1,1))
-        if(guide_mode_1 == 803):
-          hard_light_blend_1 = fix_hard_light_blend(latent_guide_1, x)
-          x = (x - guide_1[i] * sigma_next * x * guide_1_channels.view(1,c,1,1)) + (guide_1[i] * sigma_next * hard_light_blend_1 * guide_1_channels.view(1,c,1,1))
-        if(guide_mode_1 == 804):
-          hard_light_blend_1 = fix2_hard_light_blend(latent_guide_1, x)
-          x = (x - guide_1[i] * sigma_next * x * guide_1_channels.view(1,c,1,1)) + (guide_1[i] * sigma_next * hard_light_blend_1 * guide_1_channels.view(1,c,1,1))
-        if(guide_mode_1 == 805):
-          hard_light_blend_1 = fix3_hard_light_blend(latent_guide_1, x)
-          x = (x - guide_1[i] * sigma_next * x * guide_1_channels.view(1,c,1,1)) + (guide_1[i] * sigma_next * hard_light_blend_1 * guide_1_channels.view(1,c,1,1))
-        if(guide_mode_1 == 806):
-          hard_light_blend_1 = fix4_hard_light_blend(latent_guide_1, x)
-          x = (x - guide_1[i] * sigma_next * x * guide_1_channels.view(1,c,1,1)) + (guide_1[i] * sigma_next * hard_light_blend_1 * guide_1_channels.view(1,c,1,1))
-        if(guide_mode_1 == 807):
-          hard_light_blend_1 = fix4_hard_light_blend(x, latent_guide_1)
-          x = (x - guide_1[i] * sigma_next * x * guide_1_channels.view(1,c,1,1)) + (guide_1[i] * sigma_next * hard_light_blend_1 * guide_1_channels.view(1,c,1,1))
-
-      if latent_guide_2 is not None:
-        if(guide_mode_2 == 1):
-          x = x - sigma_next * guide_2[i] * latent_guide_2
-        if(guide_mode_2 == 2):
-          x = x - sigma_next * guide_2[i] * latent_guide_crushed_2
-        if(guide_mode_2 == 3):
-          x = (1 - guide_2[i]) * x + (guide_2[i] * latent_guide_2)
-        if(guide_mode_2 == 4):
-          x = (1 - guide_2[i]) * x + (guide_2[i] * latent_guide_crushed_2)   
-        if(guide_mode_2 == 5):
-          x = (x - guide_2[i] * sigma_next * x) + (guide_2[i] * sigma_next * latent_guide_2)
-        if(guide_mode_2 == 6):
-          x = (x - guide_2[i] * sigma_next * x) + (guide_2[i] * sigma_next * latent_guide_crushed_2)   
-        if(guide_mode_2 == 7):
-          hard_light_blend_2 = hard_light_blend(x, latent_guide_2)
-          x = (x - guide_2[i] * sigma_next * x) + (guide_2[i] * sigma_next * hard_light_blend_2)
-        if(guide_mode_2 == 8):
-          hard_light_blend_2 = hard_light_blend(latent_guide_2, x)
-          x = (x - guide_2[i] * sigma_next * x) + (guide_2[i] * sigma_next * hard_light_blend_2)
-        if(guide_mode_2 == 9):
-          soft_light_blend_2 = soft_light_blend(x, latent_guide_2)
-          x = (x - guide_2[i] * sigma_next * x) + (guide_2[i] * sigma_next * soft_light_blend_2)
-        if(guide_mode_2 == 10):
-          soft_light_blend_2 = soft_light_blend(latent_guide_2, x)
-          x = (x - guide_2[i] * sigma_next * x) + (guide_2[i] * sigma_next * soft_light_blend_2)
-        if(guide_mode_2 == 11):
-          linear_light_blend_2 = linear_light_blend(x, latent_guide_2)
-          x = (x - guide_2[i] * sigma_next * x) + (guide_2[i] * sigma_next * linear_light_blend_2)
-        if(guide_mode_2 == 12):
-          linear_light_blend_2 = linear_light_blend(latent_guide_2, x)
-          x = (x - guide_2[i] * sigma_next * x) + (guide_2[i] * sigma_next * linear_light_blend_2)
-        if(guide_mode_2 == 13):
-          vivid_light_blend_2 = vivid_light_blend(x, latent_guide_2)
-          x = (x - guide_2[i] * sigma_next * x) + (guide_2[i] * sigma_next * vivid_light_blend_2)
-        if(guide_mode_2 == 14):
-          vivid_light_blend_2 = vivid_light_blend(latent_guide_2, x)
-          x = (x - guide_2[i] * sigma_next * x) + (guide_2[i] * sigma_next * vivid_light_blend_2)
-
-    if denoise_to_zero:
-      final_ita = ita[-1]
-      eps = noise_sampler(sigma=sigma, sigma_next=sigma_next).double()
-      sigma_hat = sigma * (1 + final_ita)
-      x_hat = x + (sigma_hat ** 2 - sigma ** 2) ** .5 * eps
-      
-      s_in = x.new_ones([x.shape[0]])
-      x_next: FloatTensor = model(x_hat, torch.zeros_like(sigma).to(x_hat.device) * s_in, **extra_args)
-      #x_next: FloatTensor = model(x_hat, sigma.to(x_hat.device), **extra_args)
-      pbar.update()
-      x = x_next
-
-  return x
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-@cast_fp64
-@no_grad()
-def sample_dpmpp_2m_advanced(
-  model: FloatTensor,
-  x: FloatTensor,
-  sigmas: FloatTensor,
-  guide_1: FloatTensor = torch.zeros((1,)),
-  guide_2: FloatTensor = torch.zeros((1,)),
-  guide_mode_1 = 0,
-  guide_mode_2 = 0,
-  guide_1_channels=None,
-  denoise_to_zero: bool = True,
-  extra_args: Dict[str, Any] = {},
-  callback: Optional[RefinedExpCallback] = None,
-  disable: Optional[bool] = None,
-  ita: FloatTensor = torch.zeros((1,)),
-  momentum: FloatTensor = torch.zeros((1,)),
-  c2: FloatTensor = torch.zeros((1,)),
-  offset: FloatTensor = torch.zeros((1,)),
-  alpha: FloatTensor = torch.zeros((1,)),
-  latent_guide_1: FloatTensor = torch.zeros((1,)),  
-  latent_guide_2: FloatTensor = torch.zeros((1,)),  
-  noise_sampler: NoiseSampler = torch.randn_like,
-  noise_sampler_type=None,
-  simple_phi_calc = False,
-  k=1.0,
-  clownseed=0,
-  latent_noise=None
-):
-  """
-  Refined Exponential Solver (S).
-  Algorithm 2 "RES Single-Step Sampler" with Algorithm 1 second-order step
-  https://arxiv.org/abs/2308.02157
-
-  Parameters:
-    model (`DenoiserModel`): a k-diffusion wrapped denoiser model (e.g. a subclass of DiscreteEpsDDPMDenoiser)
-    x (`FloatTensor`): noised latents (or RGB I suppose), e.g. torch.randn((B, C, H, W)) * sigma[0]
-    sigmas (`FloatTensor`): sigmas (ideally an exponential schedule!) e.g. get_sigmas_exponential(n=25, sigma_min=model.sigma_min, sigma_max=model.sigma_max)
-    denoise_to_zero (`bool`, *optional*, defaults to `True`): whether to finish with a first-order step down to 0 (rather than stopping at sigma_min). True = fully denoise image. False = match Algorithm 2 in paper
-    extra_args (`Dict[str, Any]`, *optional*, defaults to `{}`): kwargs to pass to `model#__call__()`
-    callback (`RefinedExpCallback`, *optional*, defaults to `None`): you can supply this callback to see the intermediate denoising results, e.g. to preview each step of the denoising process
-    disable (`bool`, *optional*, defaults to `False`): whether to hide `tqdm`'s progress bar animation from being printed
-    ita (`FloatTensor`, *optional*, defaults to 0.): degree of stochasticity, η, for each timestep. tensor shape must be broadcastable to 1-dimensional tensor with length `len(sigmas) if denoise_to_zero else len(sigmas)-1`. each element should be from 0 to 1.
-    c2 (`float`, *optional*, defaults to .5): partial step size for solving ODE. .5 = midpoint method
-    noise_sampler (`NoiseSampler`, *optional*, defaults to `torch.randn_like`): method used for adding noise
-    simple_phi_calc (`bool`, *optional*, defaults to `True`): True = calculate phi_i,j(-h) via simplified formulae specific to j={1,2}. False = Use general solution that works for any j. Mathematically equivalent, but could be numeric differences.
-  """
-  extra_args = {} if extra_args is None else extra_args
-  s_in = x.new_ones([x.shape[0]])
-  sigma_fn = lambda t: t.neg().exp()
-  t_fn = lambda sigma: sigma.log().neg()
-  old_denoised = None
-
-
-  from tqdm import trange
-  for i in trange(len(sigmas) - 1, disable=disable):
-      denoised = model(x, sigmas[i] * s_in, **extra_args)
-      if callback is not None:
-          callback({'x': x, 'i': i, 'sigma': sigmas[i], 'sigma_hat': sigmas[i], 'denoised': denoised})
-      t, t_next = t_fn(sigmas[i]), t_fn(sigmas[i + 1])
-      h = t_next - t
-      if old_denoised is None or sigmas[i + 1] == 0:
-          x = (sigma_fn(t_next) / sigma_fn(t)) * x - (-h).expm1() * denoised
-      else:
-          h_last = t - t_fn(sigmas[i - 1])
-          r = h_last / h
-          denoised_d = (1 + 1 / (2 * r)) * denoised - (1 / (2 * r)) * old_denoised
-          x = (sigma_fn(t_next) / sigma_fn(t)) * x - (-h).expm1() * denoised_d
-      old_denoised = denoised
-  return x
-
-
-
-  #import pdb; pdb.set_trace()
-  #assert sigmas[-1] == 0
-  sigma_min, sigma_max = sigmas[sigmas > 0].min(), sigmas.max()
-  noise_sampler = NOISE_GENERATOR_CLASSES.get(noise_sampler_type)(x=x, seed=clownseed, sigma_min=sigma_min, sigma_max=sigma_max)
-
+  
   if latent_guide_1 is not None:
-    latent_guide_crushed_1 = (latent_guide_1 - latent_guide_1.min()) / (latent_guide_1 - latent_guide_1.min()).max()
+    if(guide_mode_1 == 1):
+      x = x - sigma_next * guide_1[i] * latent_guide_1 * guide_1_channels.view(1,c,1,1)
+
+    if(guide_mode_1 == 2):
+      x = x - sigma_next * guide_1[i] * latent_guide_crushed_1 * guide_1_channels.view(1,c,1,1)
+
+    if(guide_mode_1 == 3):
+      x = (1 - guide_1[i]) * x * guide_1_channels.view(1,c,1,1) + (guide_1[i] * latent_guide_1 * guide_1_channels.view(1,c,1,1))
+
+    if(guide_mode_1 == 4):
+      x = (1 - guide_1[i]) * x * guide_1_channels.view(1,c,1,1) + (guide_1[i] * latent_guide_crushed_1 * guide_1_channels.view(1,c,1,1))   
+
+    if(guide_mode_1 == 5):
+      x = (x - guide_1[i] * sigma_next * x * guide_1_channels.view(1,c,1,1)) + (guide_1[i] * sigma_next * latent_guide_1 * guide_1_channels.view(1,c,1,1))
+    if(guide_mode_1 == 6):
+      x = (x - guide_1[i] * sigma_next * x * guide_1_channels.view(1,c,1,1)) + (guide_1[i] * sigma_next * latent_guide_crushed_1 * guide_1_channels.view(1,c,1,1))
+    if(guide_mode_1 == 7):
+      hard_light_blend_1 = hard_light_blend(x, latent_guide_1)
+      x = (x - guide_1[i] * sigma_next * x * guide_1_channels.view(1,c,1,1)) + (guide_1[i] * sigma_next * hard_light_blend_1 * guide_1_channels.view(1,c,1,1))
+    if(guide_mode_1 == 8):
+      hard_light_blend_1 = hard_light_blend(latent_guide_1, x)
+      x = (x - guide_1[i] * sigma_next * x * guide_1_channels.view(1,c,1,1)) + (guide_1[i] * sigma_next * hard_light_blend_1 * guide_1_channels.view(1,c,1,1))
+    if(guide_mode_1 == 9):
+      soft_light_blend_1 = soft_light_blend(x, latent_guide_1)
+      x = (x - guide_1[i] * sigma_next * x * guide_1_channels.view(1,c,1,1)) + (guide_1[i] * sigma_next * soft_light_blend_1 * guide_1_channels.view(1,c,1,1))
+    if(guide_mode_1 == 10):
+      soft_light_blend_1 = soft_light_blend(latent_guide_1, x)
+      x = (x - guide_1[i] * sigma_next * x * guide_1_channels.view(1,c,1,1)) + (guide_1[i] * sigma_next * soft_light_blend_1 * guide_1_channels.view(1,c,1,1))
+    if(guide_mode_1 == 11):
+      linear_light_blend_1 = linear_light_blend(x, latent_guide_1)
+      x = (x - guide_1[i] * sigma_next * x * guide_1_channels.view(1,c,1,1)) + (guide_1[i] * sigma_next * linear_light_blend_1 * guide_1_channels.view(1,c,1,1))
+    if(guide_mode_1 == 12):
+      linear_light_blend_1 = linear_light_blend(latent_guide_1, x)
+      x = (x - guide_1[i] * sigma_next * x * guide_1_channels.view(1,c,1,1)) + (guide_1[i] * sigma_next * linear_light_blend_1 * guide_1_channels.view(1,c,1,1))
+    if(guide_mode_1 == 13):
+      vivid_light_blend_1 = vivid_light_blend(x, latent_guide_1)
+      x = (x - guide_1[i] * sigma_next * x * guide_1_channels.view(1,c,1,1)) + (guide_1[i] * sigma_next * vivid_light_blend_1 * guide_1_channels.view(1,c,1,1))
+    if(guide_mode_1 == 14):
+      vivid_light_blend_1 = vivid_light_blend(latent_guide_1, x)
+      x = (x - guide_1[i] * sigma_next * x * guide_1_channels.view(1,c,1,1)) + (guide_1[i] * sigma_next * vivid_light_blend_1 * guide_1_channels.view(1,c,1,1))
+    if(guide_mode_1 == 801):
+      hard_light_blend_1 = bold_hard_light_blend(x, latent_guide_1)
+      x = (x - guide_1[i] * sigma_next * x * guide_1_channels.view(1,c,1,1)) + (guide_1[i] * sigma_next * hard_light_blend_1 * guide_1_channels.view(1,c,1,1))
+    if(guide_mode_1 == 802):
+      hard_light_blend_1 = bold_hard_light_blend(latent_guide_1, x)
+      x = (x - guide_1[i] * sigma_next * x * guide_1_channels.view(1,c,1,1)) + (guide_1[i] * sigma_next * hard_light_blend_1 * guide_1_channels.view(1,c,1,1))
+    if(guide_mode_1 == 803):
+      hard_light_blend_1 = fix_hard_light_blend(latent_guide_1, x)
+      x = (x - guide_1[i] * sigma_next * x * guide_1_channels.view(1,c,1,1)) + (guide_1[i] * sigma_next * hard_light_blend_1 * guide_1_channels.view(1,c,1,1))
+    if(guide_mode_1 == 804):
+      hard_light_blend_1 = fix2_hard_light_blend(latent_guide_1, x)
+      x = (x - guide_1[i] * sigma_next * x * guide_1_channels.view(1,c,1,1)) + (guide_1[i] * sigma_next * hard_light_blend_1 * guide_1_channels.view(1,c,1,1))
+    if(guide_mode_1 == 805):
+      hard_light_blend_1 = fix3_hard_light_blend(latent_guide_1, x)
+      x = (x - guide_1[i] * sigma_next * x * guide_1_channels.view(1,c,1,1)) + (guide_1[i] * sigma_next * hard_light_blend_1 * guide_1_channels.view(1,c,1,1))
+    if(guide_mode_1 == 806):
+      hard_light_blend_1 = fix4_hard_light_blend(latent_guide_1, x)
+      x = (x - guide_1[i] * sigma_next * x * guide_1_channels.view(1,c,1,1)) + (guide_1[i] * sigma_next * hard_light_blend_1 * guide_1_channels.view(1,c,1,1))
+    if(guide_mode_1 == 807):
+      hard_light_blend_1 = fix4_hard_light_blend(x, latent_guide_1)
+      x = (x - guide_1[i] * sigma_next * x * guide_1_channels.view(1,c,1,1)) + (guide_1[i] * sigma_next * hard_light_blend_1 * guide_1_channels.view(1,c,1,1))
+
   if latent_guide_2 is not None:
-    latent_guide_crushed_2 = (latent_guide_2 - latent_guide_2.min()) / (latent_guide_2 - latent_guide_2.min()).max()
-
-  vel, vel_2 = None, None
-  with tqdm(disable=disable, total=len(sigmas)-(1 if denoise_to_zero else 2)) as pbar:
-    for i, (sigma, sigma_next) in enumerate(pairwise(sigmas[:-1].split(1))):
-      time = sigmas[i] / sigma_max
-
-      if 'sigma' not in locals():
-        sigma = sigmas[i]
-
-      if latent_noise is not None:
-        if latent_noise.size()[0] == 1:
-          eps = latent_noise[0]
-        else:
-          eps = latent_noise[i]
-      else:
-        if noise_sampler_type == "fractal":
-          noise_sampler.alpha = alpha[i]
-          noise_sampler.k = k
-
-        eps = noise_sampler(sigma=sigma, sigma_next=sigma_next)
-
-      sigma_hat = sigma * (1 + ita[i])
-      x_hat = x + ((sigma_hat ** 2 - sigma ** 2).sqrt() * eps)
-
-      x_next, denoised, denoised2, vel, vel_2 = _refined_exp_sosu_step(
-        model,
-        x_hat,
-        sigma_hat,
-        sigma_next,
-        c2=c2[i],
-        extra_args=extra_args,
-        pbar=pbar,
-        simple_phi_calc=simple_phi_calc,
-        momentum = momentum[i],
-        vel = vel,
-        vel_2 = vel_2,
-        time = time
-      )
-      if callback is not None:
-        payload = RefinedExpCallbackPayload(
-          x=x,
-          i=i,
-          sigma=sigma,
-          sigma_hat=sigma_hat,
-          denoised=denoised,
-          denoised2=denoised2,
-        )
-        callback(payload)
-
-      x = x_next - sigma_next*offset[i]
-
-      if latent_guide_1 is not None:
-        if(guide_mode_1 == 1):
-          x = x - sigma_next * guide_1[i] * latent_guide_1 * guide_1_channels.view(1,c,1,1)
-
-        if(guide_mode_1 == 2):
-          x = x - sigma_next * guide_1[i] * latent_guide_crushed_1 * guide_1_channels.view(1,c,1,1)
-
-        if(guide_mode_1 == 3):
-          x = (1 - guide_1[i]) * x * guide_1_channels.view(1,c,1,1) + (guide_1[i] * latent_guide_1 * guide_1_channels.view(1,c,1,1))
-
-        if(guide_mode_1 == 4):
-          x = (1 - guide_1[i]) * x * guide_1_channels.view(1,c,1,1) + (guide_1[i] * latent_guide_crushed_1 * guide_1_channels.view(1,c,1,1))   
-
-        if(guide_mode_1 == 5):
-          x = (x - guide_1[i] * sigma_next * x * guide_1_channels.view(1,c,1,1)) + (guide_1[i] * sigma_next * latent_guide_1 * guide_1_channels.view(1,c,1,1))
-        if(guide_mode_1 == 6):
-          x = (x - guide_1[i] * sigma_next * x * guide_1_channels.view(1,c,1,1)) + (guide_1[i] * sigma_next * latent_guide_crushed_1 * guide_1_channels.view(1,c,1,1))
-        if(guide_mode_1 == 7):
-          hard_light_blend_1 = hard_light_blend(x, latent_guide_1)
-          x = (x - guide_1[i] * sigma_next * x * guide_1_channels.view(1,c,1,1)) + (guide_1[i] * sigma_next * hard_light_blend_1 * guide_1_channels.view(1,c,1,1))
-        if(guide_mode_1 == 8):
-          hard_light_blend_1 = hard_light_blend(latent_guide_1, x)
-          x = (x - guide_1[i] * sigma_next * x * guide_1_channels.view(1,c,1,1)) + (guide_1[i] * sigma_next * hard_light_blend_1 * guide_1_channels.view(1,c,1,1))
-        if(guide_mode_1 == 9):
-          soft_light_blend_1 = soft_light_blend(x, latent_guide_1)
-          x = (x - guide_1[i] * sigma_next * x * guide_1_channels.view(1,c,1,1)) + (guide_1[i] * sigma_next * soft_light_blend_1 * guide_1_channels.view(1,c,1,1))
-        if(guide_mode_1 == 10):
-          soft_light_blend_1 = soft_light_blend(latent_guide_1, x)
-          x = (x - guide_1[i] * sigma_next * x * guide_1_channels.view(1,c,1,1)) + (guide_1[i] * sigma_next * soft_light_blend_1 * guide_1_channels.view(1,c,1,1))
-        if(guide_mode_1 == 11):
-          linear_light_blend_1 = linear_light_blend(x, latent_guide_1)
-          x = (x - guide_1[i] * sigma_next * x * guide_1_channels.view(1,c,1,1)) + (guide_1[i] * sigma_next * linear_light_blend_1 * guide_1_channels.view(1,c,1,1))
-        if(guide_mode_1 == 12):
-          linear_light_blend_1 = linear_light_blend(latent_guide_1, x)
-          x = (x - guide_1[i] * sigma_next * x * guide_1_channels.view(1,c,1,1)) + (guide_1[i] * sigma_next * linear_light_blend_1 * guide_1_channels.view(1,c,1,1))
-        if(guide_mode_1 == 13):
-          vivid_light_blend_1 = vivid_light_blend(x, latent_guide_1)
-          x = (x - guide_1[i] * sigma_next * x * guide_1_channels.view(1,c,1,1)) + (guide_1[i] * sigma_next * vivid_light_blend_1 * guide_1_channels.view(1,c,1,1))
-        if(guide_mode_1 == 14):
-          vivid_light_blend_1 = vivid_light_blend(latent_guide_1, x)
-          x = (x - guide_1[i] * sigma_next * x * guide_1_channels.view(1,c,1,1)) + (guide_1[i] * sigma_next * vivid_light_blend_1 * guide_1_channels.view(1,c,1,1))
-        if(guide_mode_1 == 801):
-          hard_light_blend_1 = bold_hard_light_blend(x, latent_guide_1)
-          x = (x - guide_1[i] * sigma_next * x * guide_1_channels.view(1,c,1,1)) + (guide_1[i] * sigma_next * hard_light_blend_1 * guide_1_channels.view(1,c,1,1))
-        if(guide_mode_1 == 802):
-          hard_light_blend_1 = bold_hard_light_blend(latent_guide_1, x)
-          x = (x - guide_1[i] * sigma_next * x * guide_1_channels.view(1,c,1,1)) + (guide_1[i] * sigma_next * hard_light_blend_1 * guide_1_channels.view(1,c,1,1))
-        if(guide_mode_1 == 803):
-          hard_light_blend_1 = fix_hard_light_blend(latent_guide_1, x)
-          x = (x - guide_1[i] * sigma_next * x * guide_1_channels.view(1,c,1,1)) + (guide_1[i] * sigma_next * hard_light_blend_1 * guide_1_channels.view(1,c,1,1))
-        if(guide_mode_1 == 804):
-          hard_light_blend_1 = fix2_hard_light_blend(latent_guide_1, x)
-          x = (x - guide_1[i] * sigma_next * x * guide_1_channels.view(1,c,1,1)) + (guide_1[i] * sigma_next * hard_light_blend_1 * guide_1_channels.view(1,c,1,1))
-        if(guide_mode_1 == 805):
-          hard_light_blend_1 = fix3_hard_light_blend(latent_guide_1, x)
-          x = (x - guide_1[i] * sigma_next * x * guide_1_channels.view(1,c,1,1)) + (guide_1[i] * sigma_next * hard_light_blend_1 * guide_1_channels.view(1,c,1,1))
-        if(guide_mode_1 == 806):
-          hard_light_blend_1 = fix4_hard_light_blend(latent_guide_1, x)
-          x = (x - guide_1[i] * sigma_next * x * guide_1_channels.view(1,c,1,1)) + (guide_1[i] * sigma_next * hard_light_blend_1 * guide_1_channels.view(1,c,1,1))
-        if(guide_mode_1 == 807):
-          hard_light_blend_1 = fix4_hard_light_blend(x, latent_guide_1)
-          x = (x - guide_1[i] * sigma_next * x * guide_1_channels.view(1,c,1,1)) + (guide_1[i] * sigma_next * hard_light_blend_1 * guide_1_channels.view(1,c,1,1))
-
-      if latent_guide_2 is not None:
-        if(guide_mode_2 == 1):
-          x = x - sigma_next * guide_2[i] * latent_guide_2
-        if(guide_mode_2 == 2):
-          x = x - sigma_next * guide_2[i] * latent_guide_crushed_2
-        if(guide_mode_2 == 3):
-          x = (1 - guide_2[i]) * x + (guide_2[i] * latent_guide_2)
-        if(guide_mode_2 == 4):
-          x = (1 - guide_2[i]) * x + (guide_2[i] * latent_guide_crushed_2)   
-        if(guide_mode_2 == 5):
-          x = (x - guide_2[i] * sigma_next * x) + (guide_2[i] * sigma_next * latent_guide_2)
-        if(guide_mode_2 == 6):
-          x = (x - guide_2[i] * sigma_next * x) + (guide_2[i] * sigma_next * latent_guide_crushed_2)   
-        if(guide_mode_2 == 7):
-          hard_light_blend_2 = hard_light_blend(x, latent_guide_2)
-          x = (x - guide_2[i] * sigma_next * x) + (guide_2[i] * sigma_next * hard_light_blend_2)
-        if(guide_mode_2 == 8):
-          hard_light_blend_2 = hard_light_blend(latent_guide_2, x)
-          x = (x - guide_2[i] * sigma_next * x) + (guide_2[i] * sigma_next * hard_light_blend_2)
-        if(guide_mode_2 == 9):
-          soft_light_blend_2 = soft_light_blend(x, latent_guide_2)
-          x = (x - guide_2[i] * sigma_next * x) + (guide_2[i] * sigma_next * soft_light_blend_2)
-        if(guide_mode_2 == 10):
-          soft_light_blend_2 = soft_light_blend(latent_guide_2, x)
-          x = (x - guide_2[i] * sigma_next * x) + (guide_2[i] * sigma_next * soft_light_blend_2)
-        if(guide_mode_2 == 11):
-          linear_light_blend_2 = linear_light_blend(x, latent_guide_2)
-          x = (x - guide_2[i] * sigma_next * x) + (guide_2[i] * sigma_next * linear_light_blend_2)
-        if(guide_mode_2 == 12):
-          linear_light_blend_2 = linear_light_blend(latent_guide_2, x)
-          x = (x - guide_2[i] * sigma_next * x) + (guide_2[i] * sigma_next * linear_light_blend_2)
-        if(guide_mode_2 == 13):
-          vivid_light_blend_2 = vivid_light_blend(x, latent_guide_2)
-          x = (x - guide_2[i] * sigma_next * x) + (guide_2[i] * sigma_next * vivid_light_blend_2)
-        if(guide_mode_2 == 14):
-          vivid_light_blend_2 = vivid_light_blend(latent_guide_2, x)
-          x = (x - guide_2[i] * sigma_next * x) + (guide_2[i] * sigma_next * vivid_light_blend_2)
-
-    if denoise_to_zero:
-      final_ita = ita[-1]
-      eps = noise_sampler(sigma=sigma, sigma_next=sigma_next).double()
-      sigma_hat = sigma * (1 + final_ita)
-      x_hat = x + (sigma_hat ** 2 - sigma ** 2) ** .5 * eps
-      
-      s_in = x.new_ones([x.shape[0]])
-      x_next: FloatTensor = model(x_hat, torch.zeros_like(sigma).to(x_hat.device) * s_in, **extra_args)
-      #x_next: FloatTensor = model(x_hat, sigma.to(x_hat.device), **extra_args)
-      pbar.update()
-      x = x_next
-
+    if(guide_mode_2 == 1):
+      x = x - sigma_next * guide_2[i] * latent_guide_2
+    if(guide_mode_2 == 2):
+      x = x - sigma_next * guide_2[i] * latent_guide_crushed_2
+    if(guide_mode_2 == 3):
+      x = (1 - guide_2[i]) * x + (guide_2[i] * latent_guide_2)
+    if(guide_mode_2 == 4):
+      x = (1 - guide_2[i]) * x + (guide_2[i] * latent_guide_crushed_2)   
+    if(guide_mode_2 == 5):
+      x = (x - guide_2[i] * sigma_next * x) + (guide_2[i] * sigma_next * latent_guide_2)
+    if(guide_mode_2 == 6):
+      x = (x - guide_2[i] * sigma_next * x) + (guide_2[i] * sigma_next * latent_guide_crushed_2)   
+    if(guide_mode_2 == 7):
+      hard_light_blend_2 = hard_light_blend(x, latent_guide_2)
+      x = (x - guide_2[i] * sigma_next * x) + (guide_2[i] * sigma_next * hard_light_blend_2)
+    if(guide_mode_2 == 8):
+      hard_light_blend_2 = hard_light_blend(latent_guide_2, x)
+      x = (x - guide_2[i] * sigma_next * x) + (guide_2[i] * sigma_next * hard_light_blend_2)
+    if(guide_mode_2 == 9):
+      soft_light_blend_2 = soft_light_blend(x, latent_guide_2)
+      x = (x - guide_2[i] * sigma_next * x) + (guide_2[i] * sigma_next * soft_light_blend_2)
+    if(guide_mode_2 == 10):
+      soft_light_blend_2 = soft_light_blend(latent_guide_2, x)
+      x = (x - guide_2[i] * sigma_next * x) + (guide_2[i] * sigma_next * soft_light_blend_2)
+    if(guide_mode_2 == 11):
+      linear_light_blend_2 = linear_light_blend(x, latent_guide_2)
+      x = (x - guide_2[i] * sigma_next * x) + (guide_2[i] * sigma_next * linear_light_blend_2)
+    if(guide_mode_2 == 12):
+      linear_light_blend_2 = linear_light_blend(latent_guide_2, x)
+      x = (x - guide_2[i] * sigma_next * x) + (guide_2[i] * sigma_next * linear_light_blend_2)
+    if(guide_mode_2 == 13):
+      vivid_light_blend_2 = vivid_light_blend(x, latent_guide_2)
+      x = (x - guide_2[i] * sigma_next * x) + (guide_2[i] * sigma_next * vivid_light_blend_2)
+    if(guide_mode_2 == 14):
+      vivid_light_blend_2 = vivid_light_blend(latent_guide_2, x)
+      x = (x - guide_2[i] * sigma_next * x) + (guide_2[i] * sigma_next * vivid_light_blend_2)
   return x
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 
 

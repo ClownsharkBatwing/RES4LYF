@@ -8,7 +8,7 @@ from comfy.k_diffusion.sampling import get_sigmas_polyexponential, get_sigmas_ka
 
 def rescale_linear(input, input_min, input_max, output_min, output_max):
     output = ((input - input_min) / (input_max - input_min)) * (output_max - output_min) + output_min;
-    return output;
+    return output
 
 class sigmas_concatenate:
     def __init__(self):

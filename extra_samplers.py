@@ -5,6 +5,7 @@ from math import pi
 
 from comfy.k_diffusion.sampling import get_ancestral_step, to_d
 
+
 import functools
 
 from .noise_classes import *
@@ -306,7 +307,7 @@ from .refined_exp_solver import sample_refined_exp_s_advanced
 @cast_fp64
 def sample_res_solver_advanced(model, 
                                x, 
-                               sigmas, itas, c2s, momentums, eulers_moms, offsets,
+                               sigmas, itas, c2s, momentums, eulers_moms, offsets, branch_mode, branch_depth, branch_width,
                                guides_1, guides_2, latent_guide_1, latent_guide_2, guide_mode_1, guide_mode_2, guide_1_channels,
                                k, clownseed=0, cfgpps=0.0, alphas=None, latent_noise=None, latent_self_guide_1=False,latent_shift_guide_1=False,
                                extra_args=None, callback=None, disable=None, noise_sampler_type="gaussian", noise_sampler=None, denoise_to_zero=True, simple_phi_calc=False, c2=0.5, momentum=0.0, eulers_mom=0.0, offset=0.0):
@@ -315,6 +316,9 @@ def sample_res_solver_advanced(model,
         x=x, 
         clownseed=clownseed,
         sigmas=sigmas, 
+        branch_mode=branch_mode,
+        branch_depth=branch_depth,
+        branch_width=branch_width,
         latent_guide_1=latent_guide_1,
         latent_guide_2=latent_guide_2,
         guide_1=guides_1,
@@ -769,6 +773,525 @@ def sample_dpmpp_3m_sde_advanced(model, x, sigmas, extra_args=None, callback=Non
         h_1, h_2 = h, h_1
     return x
 
+def sample_rk4(model, x, sigmas, extra_args=None, callback=None, disable=None, s_churn=0., s_tmin=0., s_tmax=float('inf'), s_noise=1.):
+    """Implements the fourth-order Runge-Kutta method."""
+    extra_args = {} if extra_args is None else extra_args
+    s_in = x.new_ones([x.shape[0]])
+    
+    for i in trange(len(sigmas) - 1, disable=disable):
+        sigma = sigmas[i]
+        sigma_next = sigmas[i + 1]
+        
+        # Step size
+        dt = sigma_next - sigma
+        
+        # Runge-Kutta 4th order calculations
+        k1 = to_d(x, sigma, model(x, sigma * s_in, **extra_args))
+        k2 = to_d(x + 0.5 * dt * k1, sigma + 0.5 * dt, model(x + 0.5 * dt * k1, (sigma + 0.5 * dt) * s_in, **extra_args))
+        k3 = to_d(x + 0.5 * dt * k2, sigma + 0.5 * dt, model(x + 0.5 * dt * k2, (sigma + 0.5 * dt) * s_in, **extra_args))
+        k4 = to_d(x + dt * k3, sigma_next, model(x + dt * k3, sigma_next * s_in, **extra_args))
+        
+        # Combine steps
+        dx = (1.0 / 6.0) * (k1 + 2 * k2 + 2 * k3 + k4)
+        
+        # Update x
+        x = x + dx * dt
+        
+        #if callback is not None:
+        #    callback({'x': x, 'i': i, 'sigma': sigma, 'sigma_next': sigma_next, 'dx': dx})
+    
+    return x
+
+#sigmas = comfy.samplers.calculate_sigmas(model.get_model_object("model_sampling"), scheduler, total_steps).cpu()
+#sigmas = sigmas[-(steps + 1):]
+
+@torch.no_grad()
+#def sample_euler_ancestral_recursive(model, x, sigmas, extra_args=None, callback=None, disable=None, eta=1., s_noise=1., noise_sampler=None):
+def sample_euler_ancestral_recursive(model, x, sigmas, i=0, extra_args=None, callback=None, disable=None, eta=1., s_noise=1., noise_sampler=None, noise_sampler_type="gaussian", ):
+    extra_args = {} if extra_args is None else extra_args
+    s_in = x.new_ones([x.shape[0]])
+
+    if noise_sampler is None:
+        sigma_min, sigma_max = sigmas[sigmas > 0].min(), sigmas.max()
+        seed = extra_args.get("seed", None)
+        noise_sampler = NOISE_GENERATOR_CLASSES.get(noise_sampler_type)(x=x, seed=seed, sigma_min=sigma_min, sigma_max=sigma_max)
+    #noise_sampler = default_noise_sampler(x) if noise_sampler is None else noise_sampler
+
+    #for i in trange(len(sigmas) - 1, disable=disable):
+    denoised = model(x, sigmas[i] * s_in, **extra_args)
+    sigma_down, sigma_up = get_ancestral_step(sigmas[i], sigmas[i + 1], eta=eta)
+
+    if callback is not None:
+        callback({'x': x, 'i': i, 'sigma': sigmas[i], 'sigma_hat': sigmas[i], 'denoised': denoised})
+
+    d = to_d(x, sigmas[i], denoised)
+    # Euler method
+    dt = sigma_down - sigmas[i]
+    x = x + d * dt
+    if sigmas[i + 1] > 0:
+        x = x + noise_sampler(sigma=sigmas[i], sigma_next=sigmas[i + 1]) * s_noise * sigma_up
+
+    i += 1
+
+    if i == len(sigmas) - 1:
+        return x
+    else:
+        x = sample_euler_ancestral_recursive(model, x, sigmas, i=i, extra_args=extra_args, callback=callback, disable=disable, eta=eta, s_noise=s_noise, noise_sampler=noise_sampler)
+
+    return x
+
+#def sample_euler_ancestral_recursive_call(model, x, sigmas, extra_args=None, callback=None, disable=None, eta=1., s_noise=1., noise_sampler=None, noise_sampler_type="gaussian", ):
+
+@torch.no_grad()
+#def sample_euler_ancestral_recursive(model, x, sigmas, extra_args=None, callback=None, disable=None, eta=1., s_noise=1., noise_sampler=None):
+def sample_euler_ancestral_recursive_get2(model, x, sigmas, i=0, extra_args=None, callback=None, disable=None, eta=1., s_noise=1., noise_sampler1=None, noise_sampler2=None, noise_sampler_type="gaussian", ):
+    extra_args = {} if extra_args is None else extra_args
+    s_in = x.new_ones([x.shape[0]])
+
+    if noise_sampler1 is None:
+        sigma_min, sigma_max = sigmas[sigmas > 0].min(), sigmas.max()
+        seed = extra_args.get("seed", None)
+        noise_sampler1 = NOISE_GENERATOR_CLASSES.get(noise_sampler_type)(x=x, seed=seed, sigma_min=sigma_min, sigma_max=sigma_max)
+        noise_sampler2 = NOISE_GENERATOR_CLASSES.get(noise_sampler_type)(x=x, seed=seed+1000, sigma_min=sigma_min, sigma_max=sigma_max)
+    #noise_sampler = default_noise_sampler(x) if noise_sampler is None else noise_sampler
+
+    #for i in trange(len(sigmas) - 1, disable=disable):
+
+    #sigma_down, sigma_up = get_ancestral_step(sigmas[i], sigmas[i + 1], eta=eta)
+    #sigma_hat = sigmas[i] * (1 + sigma_up)
+    sigma_hat = sigmas[i] * 1.25
+
+    if sigmas[i + 1] > 0:
+        eps1 = noise_sampler1(sigma=sigmas[i], sigma_next=sigmas[i + 1])
+        eps2 = noise_sampler2(sigma=sigmas[i], sigma_next=sigmas[i + 1])
+        x1 = x + eps1 * (sigma_hat ** 2 - sigmas[i] ** 2).sqrt()
+        x2 = x + eps2 * (sigma_hat ** 2 - sigmas[i] ** 2).sqrt()
+    else:
+        return x
+
+    denoised1 = model(x1, sigma_hat * s_in, **extra_args)
+    denoised2 = model(x2, sigma_hat * s_in, **extra_args)
+
+    if callback is not None:
+        callback({'x': x, 'i': i, 'sigma': sigmas[i], 'sigma_hat': sigmas[i], 'denoised': denoised1})
+
+    dt = sigmas[i+1] - sigmas[i]
+    d1 = to_d(x, sigmas[i], denoised1)
+    d2 = to_d(x, sigmas[i], denoised2)
+    x1 = x + d1 * dt
+    x2 = x + d2 * dt
+
+    i += 1
+
+    if i == len(sigmas) - 1:
+        return x
+    else:
+        if torch.norm(x - x1) > torch.norm(x - x2):
+            x_next = x1
+        else:
+            x_next = x2
+        x = sample_euler_ancestral_recursive_get2(model, x_next, sigmas, i=i, extra_args=extra_args, callback=callback, disable=disable, eta=eta, s_noise=s_noise, noise_sampler1=noise_sampler1, noise_sampler2=noise_sampler2)
+
+    #depth -= 1
+    return x
+
+
+@torch.no_grad()
+#def sample_euler_ancestral_recursive(model, x, sigmas, extra_args=None, callback=None, disable=None, eta=1., s_noise=1., noise_sampler=None):
+def sample_euler_ancestral_recursive_depth_get2_call(model, x, sigmas, x_root=None, depth=2, i=0, extra_args=None, callback=None, disable=None, eta=1., s_noise=1., noise_sampler1=None, noise_sampler2=None, noise_sampler_type="gaussian", ):
+    extra_args = {} if extra_args is None else extra_args
+    s_in = x.new_ones([x.shape[0]])
+
+    if x_root is None:
+        x_root = x
+
+    if noise_sampler1 is None:
+        sigma_min, sigma_max = sigmas[sigmas > 0].min(), sigmas.max()
+        seed = extra_args.get("seed", None)
+        noise_sampler1 = NOISE_GENERATOR_CLASSES.get(noise_sampler_type)(x=x, seed=seed, sigma_min=sigma_min, sigma_max=sigma_max)
+        noise_sampler2 = NOISE_GENERATOR_CLASSES.get(noise_sampler_type)(x=x, seed=seed+1000, sigma_min=sigma_min, sigma_max=sigma_max)
+    #noise_sampler = default_noise_sampler(x) if noise_sampler is None else noise_sampler
+
+    #for i in trange(len(sigmas) - 1, disable=disable):
+
+    #sigma_down, sigma_up = get_ancestral_step(sigmas[i], sigmas[i + 1], eta=eta)
+    #sigma_hat = sigmas[i] * (1 + sigma_up)
+    sigma_hat = sigmas[i] * 1.25
+
+    x = model(x, sigmas[0] * s_in, **extra_args)
+    sigma_down, sigma_up = get_ancestral_step(sigmas[i], sigmas[i + 1], eta=1)
+    sigmas = sigmas[1:]
+
+    for i in trange(len(sigmas) - 1, disable=disable):
+        if 2*i > len(sigmas) - 1:
+            return x
+        x = sample_euler_ancestral_recursive_depth_get2(model, x, sigmas, sigma_down, sigma_up, x_root=x, depth=2, i=2*i, extra_args=extra_args, callback=callback, disable=disable, eta=eta, s_noise=s_noise, noise_sampler1=noise_sampler1, noise_sampler2=noise_sampler2)
+        sigma_down, sigma_up = get_ancestral_step(sigmas[i], sigmas[i + 1], eta=1)
+    return x
+
+
+
+
+@torch.no_grad()
+#def sample_euler_ancestral_recursive(model, x, sigmas, extra_args=None, callback=None, disable=None, eta=1., s_noise=1., noise_sampler=None):
+def sample_euler_ancestral_recursive_depth_get2(model, x, sigmas, sigma_down, sigma_up, x_root=None, depth=2, i=0, extra_args=None, callback=None, disable=None, eta=1., s_noise=1., noise_sampler1=None, noise_sampler2=None, noise_sampler_type="gaussian", ):
+    extra_args = {} if extra_args is None else extra_args
+    s_in = x.new_ones([x.shape[0]])
+
+    if x_root is None:
+        x_root = x
+
+    if noise_sampler1 is None:
+        sigma_min, sigma_max = sigmas[sigmas > 0].min(), sigmas.max()
+        seed = extra_args.get("seed", None)
+        noise_sampler1 = NOISE_GENERATOR_CLASSES.get(noise_sampler_type)(x=x, seed=seed, sigma_min=sigma_min, sigma_max=sigma_max)
+        noise_sampler2 = NOISE_GENERATOR_CLASSES.get(noise_sampler_type)(x=x, seed=seed+1000, sigma_min=sigma_min, sigma_max=sigma_max)
+    #noise_sampler = default_noise_sampler(x) if noise_sampler is None else noise_sampler
+
+    #for i in trange(len(sigmas) - 1, disable=disable):
+
+    #sigma_hat = sigmas[i] * (1 + sigma_up)
+    sigma_hat = sigmas[i] * 1.25
+
+    if sigmas[i + 1] > 0:
+        eps1 = noise_sampler1(sigma=sigmas[i], sigma_next=sigmas[i + 1])
+        eps2 = noise_sampler2(sigma=sigmas[i], sigma_next=sigmas[i + 1])
+        #x1 = x + eps1 * (sigma_hat ** 2 - sigmas[i] ** 2).sqrt()
+        #x2 = x + eps2 * (sigma_hat ** 2 - sigmas[i] ** 2).sqrt()
+        x1 = x + eps1 * sigma_up
+        x2 = x + eps2 * sigma_up
+    else:
+        return x
+
+    denoised1 = model(x1, sigmas[i] * s_in, **extra_args)
+    denoised2 = model(x2, sigmas[i] * s_in, **extra_args)
+
+    if callback is not None:
+        callback({'x': x, 'i': i, 'sigma': sigmas[i], 'sigma_hat': sigmas[i], 'denoised': denoised1})
+
+    #dt = sigmas[i+1] - sigmas[i]
+    dt = sigma_down - sigmas[i]
+    d1 = to_d(x, sigmas[i], denoised1)
+    d2 = to_d(x, sigmas[i], denoised2)
+    x1 = x + d1 * dt
+    x2 = x + d2 * dt
+
+    i += 1
+    depth -= 1
+
+    if i < len(sigmas) - 1 and depth > 0:
+        sigma_down, sigma_up = get_ancestral_step(sigmas[i], sigmas[i + 1], eta=1)
+        x1 = sample_euler_ancestral_recursive_depth_get2(model, x1, sigmas, sigma_down, sigma_up, x_root=x_root, depth=depth, i=i, extra_args=extra_args, callback=callback, disable=disable, eta=eta, s_noise=s_noise, noise_sampler1=noise_sampler1, noise_sampler2=noise_sampler2)
+        x2 = sample_euler_ancestral_recursive_depth_get2(model, x2, sigmas, sigma_down, sigma_up, x_root=x_root, depth=depth, i=i, extra_args=extra_args, callback=callback, disable=disable, eta=eta, s_noise=s_noise, noise_sampler1=noise_sampler1, noise_sampler2=noise_sampler2)
+
+    if torch.norm(x_root - x1) > torch.norm(x_root - x2):
+        return x1
+    else:
+        return x2
+    
+    if i == len(sigmas) - 1:
+        return x
+    else:
+        if torch.norm(x - x1) > torch.norm(x - x2):
+            x_next = x1
+        else:
+            x_next = x2
+        x = sample_euler_ancestral_recursive_get2(model, x_next, sigmas, i=i, extra_args=extra_args, callback=callback, disable=disable, eta=eta, s_noise=s_noise, noise_sampler1=noise_sampler1, noise_sampler2=noise_sampler2)
+
+    #depth -= 1
+    return x
+
+
+@torch.no_grad()
+def sample_euler_ancestral2(model, x, sigmas, extra_args=None, callback=None, disable=None, eta=1., s_noise=1., noise_sampler=None):
+    """Ancestral sampling with Euler method steps."""
+    extra_args = {} if extra_args is None else extra_args
+    #noise_sampler = default_noise_sampler(x) if noise_sampler is None else noise_sampler
+    sigma_min, sigma_max = sigmas[sigmas > 0].min(), sigmas.max()
+    seed = extra_args.get("seed", None)
+    noise_sampler1 = NOISE_GENERATOR_CLASSES.get('gaussian')(x=x, seed=seed, sigma_min=sigma_min, sigma_max=sigma_max)
+    noise_sampler2 = NOISE_GENERATOR_CLASSES.get('gaussian')(x=x, seed=seed+1000, sigma_min=sigma_min, sigma_max=sigma_max)
+
+    s_in = x.new_ones([x.shape[0]])
+
+    i=0
+    denoised = model(x, sigmas[i] * s_in, **extra_args)
+    sigma_down, sigma_up = get_ancestral_step(sigmas[i], sigmas[i + 1], eta=eta)
+
+    if callback is not None:
+        callback({'x': x, 'i': i, 'sigma': sigmas[i], 'sigma_hat': sigmas[i], 'denoised': denoised})
+
+    d = to_d(x, sigmas[i], denoised)
+    dt = sigma_down - sigmas[i]
+    x = x + d * dt
+
+    if sigmas[i + 1] > 0:
+        x1 = x + noise_sampler1(sigma=sigmas[i], sigma_next=sigmas[i + 1]) * s_noise * sigma_up
+        x2 = x + noise_sampler1(sigma=sigmas[i], sigma_next=sigmas[i + 1]) * s_noise * sigma_up
+
+    sigmas = sigmas[1:]
+
+    for i in trange(len(sigmas) - 1, disable=disable):
+        denoised1 = model(x1, sigmas[i] * s_in, **extra_args)
+        denoised2 = model(x2, sigmas[i] * s_in, **extra_args)
+        sigma_down, sigma_up = get_ancestral_step(sigmas[i], sigmas[i + 1], eta=eta)
+
+        if callback is not None:
+            callback({'x': x, 'i': i, 'sigma': sigmas[i], 'sigma_hat': sigmas[i], 'denoised': denoised})
+
+        d1 = to_d(x1, sigmas[i], denoised1)
+        dt = sigma_down - sigmas[i]
+        x1 = x1 + d1 * dt
+
+        d2 = to_d(x2, sigmas[i], denoised2)
+        dt = sigma_down - sigmas[i]
+        x2 = x2 + d2 * dt
+
+        if torch.norm(x - x1) > torch.norm(x - x2):
+            x = x1
+        else:
+            x = x2
+
+        if sigmas[i + 1] > 0:
+            x1 = x + noise_sampler1(sigma=sigmas[i], sigma_next=sigmas[i + 1]) * s_noise * sigma_up
+            x2 = x + noise_sampler1(sigma=sigmas[i], sigma_next=sigmas[i + 1]) * s_noise * sigma_up
+
+    return x
+
+
+@torch.no_grad()
+def sample_euler_ancestral6(model, x, sigmas, extra_args=None, callback=None, disable=None, eta=1., s_noise=1., noise_sampler=None):
+    """Ancestral sampling with Euler method steps."""
+    extra_args = {} if extra_args is None else extra_args
+    #noise_sampler = default_noise_sampler(x) if noise_sampler is None else noise_sampler
+    sigma_min, sigma_max = sigmas[sigmas > 0].min(), sigmas.max()
+    seed = extra_args.get("seed", None)
+    noise_sampler1 = NOISE_GENERATOR_CLASSES.get('gaussian')(x=x, seed=seed, sigma_min=sigma_min, sigma_max=sigma_max)
+    noise_sampler2 = NOISE_GENERATOR_CLASSES.get('gaussian')(x=x, seed=seed+1000, sigma_min=sigma_min, sigma_max=sigma_max)
+
+    s_in = x.new_ones([x.shape[0]])
+
+    i=0
+    denoised = model(x, sigmas[i] * s_in, **extra_args)
+    sigma_down, sigma_up = get_ancestral_step(sigmas[i], sigmas[i + 1], eta=eta)
+
+    if callback is not None:
+        callback({'x': x, 'i': i, 'sigma': sigmas[i], 'sigma_hat': sigmas[i], 'denoised': denoised})
+
+    d = to_d(x, sigmas[i], denoised)
+    dt = sigma_down - sigmas[i]
+    x = x + d * dt
+
+    if sigmas[i + 1] > 0:
+        x1 = x + noise_sampler1(sigma=sigmas[i], sigma_next=sigmas[i + 1]) * s_noise * sigma_up
+        x2 = x + noise_sampler2(sigma=sigmas[i], sigma_next=sigmas[i + 1]) * s_noise * sigma_up
+
+    sigmas = sigmas[1:]
+
+    #for i in trange(int((len(sigmas) - 1)/2), disable=disable):
+    while i < len(sigmas) - 1:
+        print("i is = ", i)
+        denoised1 = model(x1, sigmas[i] * s_in, **extra_args)
+        denoised2 = model(x2, sigmas[i] * s_in, **extra_args)
+        sigma_down, sigma_up = get_ancestral_step(sigmas[i], sigmas[i + 1], eta=eta)
+
+        if callback is not None:
+            callback({'x': x, 'i': i, 'sigma': sigmas[i], 'sigma_hat': sigmas[i], 'denoised': denoised})
+
+        d1 = to_d(x1, sigmas[i], denoised1)
+        dt = sigma_down - sigmas[i]
+        x1 = x1 + d1 * dt
+
+        d2 = to_d(x2, sigmas[i], denoised2)
+        dt = sigma_down - sigmas[i]
+        x2 = x2 + d2 * dt
+
+        x1_hat_1 = x1 + noise_sampler1(sigma=sigmas[i], sigma_next=sigmas[i + 1]) * s_noise * sigma_up
+        x1_hat_2 = x1 + noise_sampler2(sigma=sigmas[i], sigma_next=sigmas[i + 1]) * s_noise * sigma_up
+
+        x2_hat_1 = x2 + noise_sampler1(sigma=sigmas[i], sigma_next=sigmas[i + 1]) * s_noise * sigma_up
+        x2_hat_2 = x2 + noise_sampler2(sigma=sigmas[i], sigma_next=sigmas[i + 1]) * s_noise * sigma_up
+
+        ### next segment
+        i += 1
+        sigma_down, sigma_up = get_ancestral_step(sigmas[i], sigmas[i + 1], eta=eta)
+
+        ### SEGMENT 1
+
+        denoised1_1 = model(x1_hat_1, sigmas[i] * s_in, **extra_args)
+        denoised1_2 = model(x1_hat_2, sigmas[i] * s_in, **extra_args)
+        denoised2_1 = model(x2_hat_1, sigmas[i] * s_in, **extra_args)
+        denoised2_2 = model(x2_hat_2, sigmas[i] * s_in, **extra_args)
+
+        #if callback is not None:
+        #    callback({'x': x, 'i': i, 'sigma': sigmas[i], 'sigma_hat': sigmas[i], 'denoised': denoised})
+
+        d1_1 = to_d(x1_hat_1, sigmas[i], denoised1_1)
+        dt = sigma_down - sigmas[i]
+        x1_1 = x1_hat_1 + d1_1 * dt
+
+        d1_2 = to_d(x1_hat_2, sigmas[i], denoised1_2)
+        dt = sigma_down - sigmas[i]
+        x1_2 = x1_hat_2 + d1_2 * dt
+
+        d2_1 = to_d(x2_hat_1, sigmas[i], denoised2_1)
+        dt = sigma_down - sigmas[i]
+        x2_1 = x2_hat_1 + d2_1 * dt
+
+        d2_2 = to_d(x2_hat_2, sigmas[i], denoised2_2)
+        dt = sigma_down - sigmas[i]
+        x2_2 = x2_hat_2 + d2_2 * dt
+
+        #if callback is not None:
+        #    callback({'x': x, 'i': i, 'sigma': sigmas[i], 'sigma_hat': sigmas[i], 'denoised': denoised})
+
+        ### END SEGMENT 1 & 2
+
+        norm1_1 = torch.norm(x - x1_1)
+        norm1_2 = torch.norm(x - x1_2)
+        norm2_1 = torch.norm(x - x2_1)
+        norm2_2 = torch.norm(x - x2_2)
+
+        if norm1_1 > norm1_2 and norm1_1 > norm2_1 and norm1_1 > norm2_2:
+            x = x1_1
+        if norm1_2 > norm1_1 and norm1_2 > norm2_1 and norm1_2 > norm2_2:
+            x = x1_2
+        if norm2_1 > norm1_1 and norm2_1 > norm1_2 and norm2_1 > norm2_2:
+            x = x2_1
+        if norm2_2 > norm1_1 and norm2_2 > norm1_2 and norm2_2 > norm2_1:
+            x = x2_2
+
+        if sigmas[i + 1] > 0:
+            x1 = x + noise_sampler1(sigma=sigmas[i], sigma_next=sigmas[i + 1]) * s_noise * sigma_up
+            x2 = x + noise_sampler2(sigma=sigmas[i], sigma_next=sigmas[i + 1]) * s_noise * sigma_up
+        
+        i += 1
+
+    return x
+
+
+
+
+@torch.no_grad()
+def sample_euler_stochastic6(model, x, sigmas, extra_args=None, callback=None, disable=None, eta=1.25, s_noise=1., noise_sampler=None):
+    """Ancestral sampling with Euler method steps."""
+    extra_args = {} if extra_args is None else extra_args
+    #noise_sampler = default_noise_sampler(x) if noise_sampler is None else noise_sampler
+    sigma_min, sigma_max = sigmas[sigmas > 0].min(), sigmas.max()
+    seed = extra_args.get("seed", None)
+    noise_sampler1 = NOISE_GENERATOR_CLASSES.get('gaussian')(x=x, seed=seed, sigma_min=sigma_min, sigma_max=sigma_max)
+    noise_sampler2 = NOISE_GENERATOR_CLASSES.get('gaussian')(x=x, seed=seed+1000, sigma_min=sigma_min, sigma_max=sigma_max)
+
+    s_in = x.new_ones([x.shape[0]])
+
+    i=0
+    denoised = model(x, sigmas[i] * s_in, **extra_args)
+    sigma_down, sigma_up = get_ancestral_step(sigmas[i], sigmas[i + 1], eta=eta)
+
+    if callback is not None:
+        callback({'x': x, 'i': i, 'sigma': sigmas[i], 'sigma_hat': sigmas[i], 'denoised': denoised})
+
+    d = to_d(x, sigmas[i], denoised)
+    dt = sigma_down - sigmas[i]
+    x = x + d * dt
+
+    sigma_hat = sigmas[i] * eta
+    if sigmas[i + 1] > 0:
+        x1 = x + noise_sampler1(sigma=sigmas[i], sigma_next=sigmas[i + 1]) * (sigma_hat ** 2 - sigmas[i] ** 2).sqrt()
+        x2 = x + noise_sampler2(sigma=sigmas[i], sigma_next=sigmas[i + 1]) * (sigma_hat ** 2 - sigmas[i] ** 2).sqrt()
+
+    sigmas = sigmas[1:]
+
+    #if sigmas[i + 1] > 0:
+    #    eps1 = noise_sampler1(sigma=sigmas[i], sigma_next=sigmas[i + 1])
+    #    eps2 = noise_sampler2(sigma=sigmas[i], sigma_next=sigmas[i + 1])
+        #x1 = x + eps1 * (sigma_hat ** 2 - sigmas[i] ** 2).sqrt()
+
+    #for i in trange(int((len(sigmas) - 1)/2), disable=disable):
+    while i < len(sigmas) - 1:
+        print("i is = ", i)
+        denoised1 = model(x1, sigma_hat * s_in, **extra_args)
+        denoised2 = model(x2, sigma_hat * s_in, **extra_args)
+        sigma_down, sigma_up = get_ancestral_step(sigmas[i], sigmas[i + 1], eta=eta)
+
+        if callback is not None:
+            callback({'x': x, 'i': i, 'sigma': sigmas[i], 'sigma_hat': sigmas[i], 'denoised': denoised})
+
+        d1 = to_d(x1, sigma_hat, denoised1)
+        dt = sigmas[i + 1] - sigma_hat
+        x1 = x1 + d1 * dt
+
+        d2 = to_d(x2, sigma_hat, denoised2)
+        dt = sigmas[i + 1] - sigma_hat
+        x2 = x2 + d2 * dt
+
+        i += 1
+        sigma_hat = sigmas[i] * eta
+        x1_hat_1 = x1 + noise_sampler1(sigma=sigmas[i], sigma_next=sigmas[i + 1]) * (sigma_hat ** 2 - sigmas[i] ** 2).sqrt()
+        x1_hat_2 = x1 + noise_sampler2(sigma=sigmas[i], sigma_next=sigmas[i + 1]) * (sigma_hat ** 2 - sigmas[i] ** 2).sqrt()
+
+        x2_hat_1 = x2 + noise_sampler1(sigma=sigmas[i], sigma_next=sigmas[i + 1]) * (sigma_hat ** 2 - sigmas[i] ** 2).sqrt()
+        x2_hat_2 = x2 + noise_sampler2(sigma=sigmas[i], sigma_next=sigmas[i + 1]) * (sigma_hat ** 2 - sigmas[i] ** 2).sqrt()
+
+        ### next segment
+        sigma_down, sigma_up = get_ancestral_step(sigmas[i], sigmas[i + 1], eta=eta)
+
+        ### SEGMENT 1
+
+        denoised1_1 = model(x1_hat_1, sigma_hat * s_in, **extra_args)
+        denoised1_2 = model(x1_hat_2, sigma_hat * s_in, **extra_args)
+        denoised2_1 = model(x2_hat_1, sigma_hat * s_in, **extra_args)
+        denoised2_2 = model(x2_hat_2, sigma_hat * s_in, **extra_args)
+
+        #if callback is not None:
+        #    callback({'x': x, 'i': i, 'sigma': sigmas[i], 'sigma_hat': sigmas[i], 'denoised': denoised})
+
+        d1_1 = to_d(x1_hat_1, sigma_hat, denoised1_1)
+        dt = sigmas[i + 1] - sigma_hat
+        x1_1 = x1_hat_1 + d1_1 * dt
+
+        d1_2 = to_d(x1_hat_2, sigma_hat, denoised1_2)
+        dt = sigmas[i + 1] - sigma_hat
+        x1_2 = x1_hat_2 + d1_2 * dt
+
+        d2_1 = to_d(x2_hat_1, sigma_hat, denoised2_1)
+        dt = sigmas[i + 1] - sigma_hat
+        x2_1 = x2_hat_1 + d2_1 * dt
+
+        d2_2 = to_d(x2_hat_2, sigma_hat, denoised2_2)
+        dt = sigmas[i + 1] - sigma_hat
+        x2_2 = x2_hat_2 + d2_2 * dt
+
+        #if callback is not None:
+        #    callback({'x': x, 'i': i, 'sigma': sigmas[i], 'sigma_hat': sigmas[i], 'denoised': denoised})
+
+        ### END SEGMENT 1 & 2
+
+        norm1_1 = torch.norm(x - x1_1)
+        norm1_2 = torch.norm(x - x1_2)
+        norm2_1 = torch.norm(x - x2_1)
+        norm2_2 = torch.norm(x - x2_2)
+
+        if norm1_1 > norm1_2 and norm1_1 > norm2_1 and norm1_1 > norm2_2:
+            x = x1_1
+        if norm1_2 > norm1_1 and norm1_2 > norm2_1 and norm1_2 > norm2_2:
+            x = x1_2
+        if norm2_1 > norm1_1 and norm2_1 > norm1_2 and norm2_1 > norm2_2:
+            x = x2_1
+        if norm2_2 > norm1_1 and norm2_2 > norm1_2 and norm2_2 > norm2_1:
+            x = x2_2
+
+        if sigmas[i + 1] > 0:
+            sigma_hat = sigmas[i] * eta
+            x1 = x + noise_sampler1(sigma=sigmas[i], sigma_next=sigmas[i + 1]) * (sigma_hat ** 2 - sigmas[i] ** 2).sqrt()
+            x2 = x + noise_sampler2(sigma=sigmas[i], sigma_next=sigmas[i + 1]) * (sigma_hat ** 2 - sigmas[i] ** 2).sqrt()
+        
+        i += 1
+
+    return x
+
+
+
 # The following function adds the samplers during initialization, in __init__.py
 def add_samplers():
     from comfy.samplers import KSampler, k_diffusion_sampling
@@ -809,6 +1332,13 @@ def add_schedulers():
 #from .refined_exp_solver import sample_refined_exp_s, sample_refined_exp_s_advanced
 extra_samplers = {
     "euler_ancestral_advanced": sample_euler_ancestral_advanced,
+    "euler_recursive": sample_euler_ancestral_recursive,
+    "sample_euler_ancestral2": sample_euler_ancestral2,
+    "sample_euler_ancestral6": sample_euler_ancestral6,
+    "sample_euler_stochastic6": sample_euler_stochastic6,
+    "sample_euler_ancestral_recursive_get2": sample_euler_ancestral_recursive_get2,
+    "sample_euler_ancestral_recursive_depth_get2": sample_euler_ancestral_recursive_depth_get2,
+    "sample_euler_ancestral_recursive_depth_get2_call": sample_euler_ancestral_recursive_depth_get2_call,
     "dpmpp_2s_ancestral_advanced": sample_dpmpp_2s_ancestral_advanced,
     "res_momentumized_advanced": sample_res_solver_advanced,
     "dpmpp_dualsde_momentumized_advanced": sample_dpmpp_dualsdemomentum_advanced,
@@ -821,7 +1351,9 @@ extra_samplers = {
     "dpmpp_2m_cfg++": sample_dpmpp_2m_cfgpp,
     "dpmpp_sde_cfg++": sample_dpmpp_sde_cfgpp,
     "dpmpp_2m_sde_cfg++": sample_dpmpp_2m_sde_cfgpp,
-    "dpmpp_3m_sde_cfg++": sample_dpmpp_3m_sde_cfgpp
+    "dpmpp_3m_sde_cfg++": sample_dpmpp_3m_sde_cfgpp,
+
+    "rk4":  sample_rk4,
 }
 
 discard_penultimate_sigma_samplers = set((

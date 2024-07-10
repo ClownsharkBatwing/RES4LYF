@@ -75,6 +75,8 @@ NODE_CLASS_MAPPINGS = {
     "Tan Scheduler": sigmas.tan_scheduler,
     "Tan Scheduler 2": sigmas.tan_scheduler_2stage,
     "Tan Scheduler 2 Simple": sigmas.tan_scheduler_2stage_simple,
+    
+    "StableCascade_StageB_Conditioning64": samplers.StableCascade_StageB_Conditioning64,
 
 }
 __all__ = ['NODE_CLASS_MAPPINGS']
