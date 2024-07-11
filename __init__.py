@@ -34,6 +34,7 @@ NODE_CLASS_MAPPINGS = {
     "LatentPhaseMagnitudeOffset": latents.LatentPhaseMagnitudeOffset,
     "LatentPhaseMagnitudePower": latents.LatentPhaseMagnitudePower,
 
+    "ClownGuides": samplers.ClownGuides,
     "ClownSampler": samplers.ClownSampler,
     "SharkSampler": samplers.SharkSampler,
     "SamplerDPMPP_DualSDE_Advanced": samplers.SamplerDPMPP_DUALSDE_MOMENTUMIZED_ADVANCED,
@@ -76,7 +77,7 @@ NODE_CLASS_MAPPINGS = {
     "Tan Scheduler 2": sigmas.tan_scheduler_2stage,
     "Tan Scheduler 2 Simple": sigmas.tan_scheduler_2stage_simple,
     
-    "StableCascade_StageB_Conditioning64": samplers.StableCascade_StageB_Conditioning64,
+    "StableCascade_StageB_Conditioning64": conditioning.StableCascade_StageB_Conditioning64,
 
 }
 __all__ = ['NODE_CLASS_MAPPINGS']

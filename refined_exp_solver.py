@@ -365,7 +365,7 @@ def sample_refined_exp_s_advanced(
         
       if denoised2_prev is not None:
         x_n[0][0] = denoised2_prev
-      x_next, x_hat, denoised2_prev = branch_mode_proc(x_n, x_h, denoised2, branch_mode, branch_depth, branch_width)
+      x_next, x_hat, denoised2_prev = branch_mode_proc(x_n, x_h, denoised2, latent_guide_2, branch_mode, branch_depth, branch_width)
       
       d = to_d(x_hat, sigma_hat, x_next)
       dt = sigma_next - sigma_hat
@@ -399,6 +399,7 @@ from torch.nn.functional import cosine_similarity
 def branch_mode_proc(
   x_n, x_h,
   denoised2,
+  latent,
   branch_mode,
   branch_depth,
   branch_width,
@@ -418,6 +419,55 @@ def branch_mode_proc(
     x_next, x_hat, d_next = select_perpendicular_cosine_trajectory(x_n, x_h, branch_depth, branch_width) 
   if branch_mode == 'cos_perpendicular_d':
     x_next, x_hat, d_next = select_perpendicular_cosine_trajectory_d(x_n, x_h, denoised2, branch_depth, branch_width) 
+    
+  if branch_mode == 'latent_match':
+    distances = [torch.norm(tensor - latent).item() for tensor in x_n[branch_depth]]
+    closest_index = distances.index(min(distances))
+    x_next = x_n[branch_depth][closest_index]
+    x_hat = x_h[branch_depth][closest_index]
+    d_next = denoised2[branch_depth][closest_index]
+    
+  if branch_mode == 'latent_match_d':
+    distances = [torch.norm(tensor - latent).item() for tensor in denoised2[branch_depth]]
+    closest_index = distances.index(min(distances))
+    x_next = x_n[branch_depth][closest_index]
+    x_hat = x_h[branch_depth][closest_index]
+    d_next = denoised2[branch_depth][closest_index]
+    
+  if branch_mode == 'latent_match_sdxl_color_d':
+      relevant_latent = latent[:, 1:3, :, :] 
+      denoised2_relevant = [tensor[:, 1:3, :, :] for tensor in denoised2[branch_depth]]
+
+      distances = [torch.norm(tensor - relevant_latent).item() for tensor in denoised2_relevant]
+      closest_index = distances.index(min(distances))
+      
+      x_next = x_n[branch_depth][closest_index]
+      x_hat = x_h[branch_depth][closest_index]
+      d_next = denoised2[branch_depth][closest_index]
+      
+  if branch_mode == 'latent_match_sdxl_luminosity_d':
+      relevant_latent = latent[:, 0:1, :, :] 
+      denoised2_relevant = [tensor[:, 0:1, :, :] for tensor in denoised2[branch_depth]]
+
+      distances = [torch.norm(tensor - relevant_latent).item() for tensor in denoised2_relevant]
+      closest_index = distances.index(min(distances))
+      
+      x_next = x_n[branch_depth][closest_index]
+      x_hat = x_h[branch_depth][closest_index]
+      d_next = denoised2[branch_depth][closest_index]
+      
+  if branch_mode == 'latent_match_sdxl_pattern_d':
+      relevant_latent = latent[:, 3:4, :, :] 
+      denoised2_relevant = [tensor[:, 3:4, :, :] for tensor in denoised2[branch_depth]]
+
+      distances = [torch.norm(tensor - relevant_latent).item() for tensor in denoised2_relevant]
+      closest_index = distances.index(min(distances))
+      
+      x_next = x_n[branch_depth][closest_index]
+      x_hat = x_h[branch_depth][closest_index]
+      d_next = denoised2[branch_depth][closest_index]
+
+    
   if branch_mode == 'mean':
     x_mean = torch.mean(torch.stack(x_n[branch_depth]), dim=0)
     distances = [torch.norm(tensor - x_mean).item() for tensor in x_n[branch_depth]]
@@ -427,14 +477,15 @@ def branch_mode_proc(
     d_next = denoised2[branch_depth][closest_index]
     
   if branch_mode == 'mean_d':
-    x_mean = torch.mean(torch.stack(denoised2[branch_depth]), dim=0)
-    distances = [torch.norm(tensor - x_mean).item() for tensor in x_n[branch_depth]]
+    d_mean = torch.mean(torch.stack(denoised2[branch_depth]), dim=0)
+    distances = [torch.norm(tensor - d_mean).item() for tensor in denoised2[branch_depth]]
     closest_index = distances.index(min(distances))
     x_next = x_n[branch_depth][closest_index]
     x_hat = x_h[branch_depth][closest_index]
     d_next = denoised2[branch_depth][closest_index]
     
   if branch_mode == 'median': #minimum median distance
+    d_n_3 = [tensor for tensor in denoised2[branch_depth] if tensor is not None]
     x_n_3 = [tensor for tensor in x_n[branch_depth] if tensor is not None]
     x_h_3 = [tensor for tensor in x_h[branch_depth] if tensor is not None]
     num_tensors = len(x_n_3)
@@ -714,7 +765,7 @@ def select_most_linear_trajectory_d(x_n, x_h, denoised2, branch_depth, branch_wi
     return x_next, x_hat, d_next
 
 
-def select_perpendicular_cosine_trajectory(x_n, x_h, denoised2, branch_width, branch_depth):
+def select_perpendicular_cosine_trajectory(x_n, x_h, denoised2, branch_depth, branch_width):
     d_n_depth = [tensor for tensor in denoised2[branch_depth] if tensor is not None]
     x_n_depth = [tensor for tensor in x_n[branch_depth] if tensor is not None]
     x_h_depth = [tensor for tensor in x_h[branch_depth] if tensor is not None]
@@ -756,7 +807,7 @@ def select_perpendicular_cosine_trajectory(x_n, x_h, denoised2, branch_width, br
 
   
   
-def select_perpendicular_cosine_trajectory_d(x_n, x_h, denoised2, branch_width, branch_depth):
+def select_perpendicular_cosine_trajectory_d(x_n, x_h, denoised2, branch_depth, branch_width):
   d_n_depth = [tensor for tensor in denoised2[branch_depth] if tensor is not None]
   x_n_depth = [tensor for tensor in x_n[branch_depth] if tensor is not None]
   x_h_depth = [tensor for tensor in x_h[branch_depth] if tensor is not None]
