@@ -36,7 +36,7 @@ class ClownSampler:
                 "c2": ("FLOAT", {"default": 0.5, "min": 0.0, "max": 10000.0, "step": 0.01}),
                 "clownseed": ("INT", {"default": 0, "min": 0, "max": 0xffffffffffffffff}),
                 "branch_mode": (['mean', 'mean_d', 'median', 'median_d', 'gradient_max', 'gradient_max_d', 'gradient_min', 'gradient_min_d', 'cos_similarity', 'cos_similarity_d','cos_linearity', 'cos_linearity_d', 'cos_perpendicular', 'cos_perpendicular_d'], {"default": 'mean'}),
-                "branch_depth": ("INT", {"default": 3, "min": 1, "max": 0xffffffffffffffff}),
+                "branch_depth": ("INT", {"default": 1, "min": 1, "max": 0xffffffffffffffff}),
                 "branch_width": ("INT", {"default": 1, "min": 1, "max": 0xffffffffffffffff}),
                 "offset": ("FLOAT", {"default": 0.0, "min": -10000.0, "max": 10000.0, "step": 0.001}),
                 "guide_1": ("FLOAT", {"default": 0.0, "min": -10000.0, "max": 10000.0, "step": 0.001}),
