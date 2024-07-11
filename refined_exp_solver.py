@@ -260,7 +260,7 @@ def sample_refined_exp_s_advanced(
   extra_args: Dict[str, Any] = {},
   callback: Optional[RefinedExpCallback] = None,
   disable: Optional[bool] = None,
-  ita=None,
+  eta=None,
   momentum=None,
   eulers_mom=None,
   c2=None,
@@ -292,7 +292,7 @@ def sample_refined_exp_s_advanced(
     extra_args (`Dict[str, Any]`, *optional*, defaults to `{}`): kwargs to pass to `model#__call__()`
     callback (`RefinedExpCallback`, *optional*, defaults to `None`): you can supply this callback to see the intermediate denoising results, e.g. to preview each step of the denoising process
     disable (`bool`, *optional*, defaults to `False`): whether to hide `tqdm`'s progress bar animation from being printed
-    ita (`FloatTensor`, *optional*, defaults to 0.): degree of stochasticity, η, for each timestep. tensor shape must be broadcastable to 1-dimensional tensor with length `len(sigmas) if denoise_to_zero else len(sigmas)-1`. each element should be from 0 to 1.
+    eta (`FloatTensor`, *optional*, defaults to 0.): degree of stochasticity, η, for each timestep. tensor shape must be broadcastable to 1-dimensional tensor with length `len(sigmas) if denoise_to_zero else len(sigmas)-1`. each element should be from 0 to 1.
     c2 (`float`, *optional*, defaults to .5): partial step size for solving ODE. .5 = midpoint method
     noise_sampler (`NoiseSampler`, *optional*, defaults to `torch.randn_like`): method used for adding noise
     simple_phi_calc (`bool`, *optional*, defaults to `True`): True = calculate phi_i,j(-h) via simplified formulae specific to j={1,2}. False = Use general solution that works for any j. Mathematically equivalent, but could be numeric differences.
@@ -343,13 +343,13 @@ def sample_refined_exp_s_advanced(
           noise_sampler.alpha = alpha[i]
           noise_sampler.k = k
 
-      sigma_hat = sigma * (1 + ita[i])
+      sigma_hat = sigma * (1 + eta[i])
 
       x_n[0][0] = x
       for depth in range(1, branch_depth+1):
         sigma = sigmas[i]
         sigma_next = sigmas[i+1]
-        sigma_hat = sigma * (1 + ita[i])
+        sigma_hat = sigma * (1 + eta[i])
         
         for m in range(branch_width**(depth-1)):
           for n in range(branch_width):
@@ -377,12 +377,12 @@ def sample_refined_exp_s_advanced(
 
       x = x_next - sigma_next*offset[i]
       
-      x = guide_mode_proc(x, guide_mode_1, guide_mode_2, sigma_next, guide_1, guide_2,  latent_guide_1, latent_guide_2, guide_1_channels)
+      x = guide_mode_proc(x, i, guide_mode_1, guide_mode_2, sigma_next, guide_1, guide_2,  latent_guide_1, latent_guide_2, guide_1_channels)
       
     if denoise_to_zero:
-      final_ita = ita[-1]
+      final_eta = eta[-1]
       eps = noise_sampler(sigma=sigma, sigma_next=sigma_next).double()
-      sigma_hat = sigma * (1 + final_ita)
+      sigma_hat = sigma * (1 + final_eta)
       x_hat = x + (sigma_hat ** 2 - sigma ** 2) ** .5 * eps
       
       s_in = x.new_ones([x.shape[0]])
@@ -467,6 +467,46 @@ def branch_mode_proc(
     x_next = x_n_3[min_median_distance_index]
     x_hat = x_h_3[min_median_distance_index]
     d_next = d_n_3[min_median_distance_index]
+    
+  if branch_mode == 'gradient_max_full_d': # greatest gradient descent
+    start_point = x_n[0][0]
+    norms = [torch.norm(tensor - start_point).item() for tensor in denoised2[branch_depth] if tensor is not None]
+    
+    greatest_norm_index = norms.index(max(norms))
+    
+    x_next = x_n[branch_depth][greatest_norm_index]
+    x_hat = x_h[branch_depth][greatest_norm_index]
+    d_next = denoised2[branch_depth][greatest_norm_index]
+    
+  if branch_mode == 'gradient_min_full_d': # greatest gradient descent
+    start_point = x_n[0][0]
+    norms = [torch.norm(tensor - start_point).item() for tensor in denoised2[branch_depth] if tensor is not None]
+    
+    greatest_norm_index = norms.index(min(norms))
+    
+    x_next = x_n[branch_depth][greatest_norm_index]
+    x_hat = x_h[branch_depth][greatest_norm_index]
+    d_next = denoised2[branch_depth][greatest_norm_index]
+
+  if branch_mode == 'gradient_max_full': # greatest gradient descent
+    start_point = x_n[0][0]
+    norms = [torch.norm(tensor - start_point).item() for tensor in x_n[branch_depth] if tensor is not None]
+    
+    greatest_norm_index = norms.index(max(norms))
+    
+    x_next = x_n[branch_depth][greatest_norm_index]
+    x_hat = x_h[branch_depth][greatest_norm_index]
+    d_next = denoised2[branch_depth][greatest_norm_index]
+    
+  if branch_mode == 'gradient_min_full': # greatest gradient descent
+    start_point = x_n[0][0]
+    norms = [torch.norm(tensor - start_point).item() for tensor in x_n[branch_depth] if tensor is not None]
+    
+    greatest_norm_index = norms.index(min(norms))
+    
+    x_next = x_n[branch_depth][greatest_norm_index]
+    x_hat = x_h[branch_depth][greatest_norm_index]
+    d_next = denoised2[branch_depth][greatest_norm_index]
 
   if branch_mode == 'gradient_max': #greatest gradient descent
     norms = [torch.norm(tensor).item() for tensor in x_n[branch_depth] if tensor is not None]
@@ -760,7 +800,7 @@ def select_perpendicular_cosine_trajectory_d(x_n, x_h, denoised2, branch_width, 
 
 
 
-def guide_mode_proc(x, guide_mode_1, guide_mode_2, sigma_next, guide_1, guide_2,  latent_guide_1, latent_guide_2, guide_1_channels):
+def guide_mode_proc(x, i, guide_mode_1, guide_mode_2, sigma_next, guide_1, guide_2,  latent_guide_1, latent_guide_2, guide_1_channels):
   if latent_guide_1 is not None:
     latent_guide_crushed_1 = (latent_guide_1 - latent_guide_1.min()) / (latent_guide_1 - latent_guide_1.min()).max()
   if latent_guide_2 is not None:

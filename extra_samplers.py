@@ -17,7 +17,7 @@ def sample_dpmpp_sde_advanced(
     model, x, sigmas, extra_args=None, callback=None, disable=None,
     eta=1., s_noise=1., noise_sampler=None, r=1/2, k=1.0, scale=0.1, noise_sampler_type="brownian", alpha: FloatTensor = torch.zeros((1,))
 ):
-    #DPM-Solver++ (stochastic with ita parameter).
+    #DPM-Solver++ (stochastic with eta parameter).
     if len(sigmas) <= 1:
         return x
 
@@ -81,7 +81,7 @@ def sample_dpmpp_sde_cfgpp_advanced(
     model, x, sigmas, extra_args=None, callback=None, disable=None, eulers_mom=None,
     eta=1., s_noise=1., noise_sampler=None, r=1/2, k=1.0, scale=0.1, noise_sampler_type="brownian", cfgpp: FloatTensor = torch.zeros((1,)), alpha: FloatTensor = torch.zeros((1,))
 ):
-    #DPM-Solver++ (stochastic with ita parameter).
+    #DPM-Solver++ (stochastic with eta parameter).
     if len(sigmas) <= 1:
         return x
 
@@ -307,7 +307,7 @@ from .refined_exp_solver import sample_refined_exp_s_advanced
 @cast_fp64
 def sample_res_solver_advanced(model, 
                                x, 
-                               sigmas, itas, c2s, momentums, eulers_moms, offsets, branch_mode, branch_depth, branch_width,
+                               sigmas, etas, c2s, momentums, eulers_moms, offsets, branch_mode, branch_depth, branch_width,
                                guides_1, guides_2, latent_guide_1, latent_guide_2, guide_mode_1, guide_mode_2, guide_1_channels,
                                k, clownseed=0, cfgpps=0.0, alphas=None, latent_noise=None, latent_self_guide_1=False,latent_shift_guide_1=False,
                                extra_args=None, callback=None, disable=None, noise_sampler_type="gaussian", noise_sampler=None, denoise_to_zero=True, simple_phi_calc=False, c2=0.5, momentum=0.0, eulers_mom=0.0, offset=0.0):
@@ -334,7 +334,7 @@ def sample_res_solver_advanced(model,
         simple_phi_calc=simple_phi_calc, 
         cfgpp=cfgpps,
         c2=c2s, 
-        ita=itas,
+        eta=etas,
         momentum=momentums,
         eulers_mom=eulers_moms,
         offset=offsets,

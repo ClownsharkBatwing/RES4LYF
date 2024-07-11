@@ -32,10 +32,10 @@ class ClownSampler:
             "required": {
                 "eulers_mom": ("FLOAT", {"default": 0.0, "min": -10000.0, "max": 10000.0, "step": 0.01}),
                 "momentum": ("FLOAT", {"default": 0.0, "min": -10000.0, "max": 10000.0, "step": 0.01}),
-                "ita": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 10000.0, "step": 0.01}),
+                "eta": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 10000.0, "step": 0.01}),
                 "c2": ("FLOAT", {"default": 0.5, "min": 0.0, "max": 10000.0, "step": 0.01}),
                 "clownseed": ("INT", {"default": 0, "min": 0, "max": 0xffffffffffffffff}),
-                "branch_mode": (['mean', 'mean_d', 'median', 'median_d', 'gradient_max', 'gradient_max_d', 'gradient_min', 'gradient_min_d', 'cos_similarity', 'cos_similarity_d','cos_linearity', 'cos_linearity_d', 'cos_perpendicular', 'cos_perpendicular_d'], {"default": 'mean'}),
+                "branch_mode": (['mean', 'mean_d', 'median', 'median_d', 'gradient_max_full', 'gradient_max_full_d', 'gradient_min_full', 'gradient_min_full_d', 'gradient_max', 'gradient_max_d', 'gradient_min', 'gradient_min_d', 'cos_similarity', 'cos_similarity_d','cos_linearity', 'cos_linearity_d', 'cos_perpendicular', 'cos_perpendicular_d'], {"default": 'mean'}),
                 "branch_depth": ("INT", {"default": 1, "min": 1, "max": 0xffffffffffffffff}),
                 "branch_width": ("INT", {"default": 1, "min": 1, "max": 0xffffffffffffffff}),
                 "offset": ("FLOAT", {"default": 0.0, "min": -10000.0, "max": 10000.0, "step": 0.001}),
@@ -61,7 +61,7 @@ class ClownSampler:
             "optional": {
                 "eulers_moms": ("SIGMAS", ),
                 "momentums": ("SIGMAS", ),
-                "itas": ("SIGMAS", ),
+                "etas": ("SIGMAS", ),
                 "c2s": ("SIGMAS", ),
                 "cfgpps": ("SIGMAS", ),
                 "offsets": ("SIGMAS", ),
@@ -79,18 +79,18 @@ class ClownSampler:
 
     FUNCTION = "get_sampler"
 
-    def get_sampler(self, clownseed, noise_sampler_type, denoise_to_zero, simple_phi_calc, cfgpp, eulers_mom, momentum, c2, ita, offset, branch_mode, branch_depth, branch_width,
+    def get_sampler(self, clownseed, noise_sampler_type, denoise_to_zero, simple_phi_calc, cfgpp, eulers_mom, momentum, c2, eta, offset, branch_mode, branch_depth, branch_width,
                     guide_1, guide_2, guide_mode_1, guide_mode_2, 
                     guide_1_Luminosity, guide_1_CyanRed, guide_1_LimePurple, guide_1_PatternStruct, 
                     alpha, k,
                     alphas=None, latent_noise=None,
                     guides_1=None, guides_2=None, latent_guide_1=None, latent_guide_2=None, latent_self_guide_1=False, latent_shift_guide_1=False, 
-                    eulers_moms=None, momentums=None, itas=None, c2s=None, cfgpps=None, offsets=None):
+                    eulers_moms=None, momentums=None, etas=None, c2s=None, cfgpps=None, offsets=None):
 
         steps = 10000
         eulers_moms = initialize_or_scale(eulers_moms, eulers_mom, steps)
         momentums = initialize_or_scale(momentums, momentum, steps)
-        itas = initialize_or_scale(itas, ita, steps)
+        etas = initialize_or_scale(etas, eta, steps)
         c2s = initialize_or_scale(c2s, c2, steps)
         cfgpps = initialize_or_scale(cfgpps, cfgpp, steps)
         offsets = initialize_or_scale(offsets, offset, steps)
@@ -123,7 +123,7 @@ class ClownSampler:
                 #"cfgpp": ("FLOAT", {"default": 0.0, "min": -10000.0, "max": 10000.0, "step": 0.01}),
                 "eulers_moms": eulers_moms,
                 "momentums": momentums,
-                "itas": itas,
+                "etas": etas,
                 "c2s": c2s,
                 "cfgpps": cfgpps,
                 "offsets": offsets,
