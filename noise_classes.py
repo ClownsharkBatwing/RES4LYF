@@ -136,16 +136,26 @@ class FractalNoiseGenerator(NoiseGenerator):
 
         return noise / torch.std(noise)
     
-from opensimplex import OpenSimplex
+try:
+    from opensimplex import OpenSimplex
+    OPEN_SIMPLEX_AVAILABLE = True
+except ImportError:
+    OPEN_SIMPLEX_AVAILABLE = False
 
 class SimplexNoiseGenerator(NoiseGenerator):
     def __init__(self, x=None, size=None, dtype=None, layout=None, device=None, seed=42, generator=None, sigma_min=None, sigma_max=None, 
                  scale=0.01):
         super().__init__(x, size, dtype, layout, device, seed, generator, sigma_min, sigma_max)
-        self.noise = OpenSimplex(seed=seed)
+        if OPEN_SIMPLEX_AVAILABLE:
+            self.noise = OpenSimplex(seed=seed)
+        else:
+            self.noise = None
         self.scale = scale
         
     def __call__(self, *, scale=None, **kwargs):
+        if not OPEN_SIMPLEX_AVAILABLE:
+            raise RuntimeError("OpenSimplex is not available. Please run pip install opensimplex --no-deps to use SimplexNoiseGenerator.")
+
         self.update(scale=scale)
         
         b, c, h, w = self.size
