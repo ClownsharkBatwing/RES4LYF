@@ -324,7 +324,7 @@ def sample_refined_exp_s_advanced(
   i=0
   with tqdm(disable=disable, total=len(sigmas)-(1 if denoise_to_zero else 2)) as pbar:
     #for i, (sigma, sigma_next) in enumerate(pairwise(sigmas[:-1].split(1))):
-    while i < len(sigmas) - 1:
+    while i < len(sigmas) - 1 and sigmas[i+1] > 0.0:
 
       sigma = sigmas[i]
       sigma_next = sigmas[i+1]
@@ -518,6 +518,32 @@ def branch_mode_proc(
     x_next = x_n_3[min_median_distance_index]
     x_hat = x_h_3[min_median_distance_index]
     d_next = d_n_3[min_median_distance_index]
+    
+  if branch_mode == 'zmean_d':
+    d_mean = torch.mean(torch.stack(denoised2[branch_depth]), dim=0)
+    distances = [torch.norm(tensor - d_mean).item() for tensor in denoised2[branch_depth]]
+    closest_index = distances.index(max(distances))
+    x_next = x_n[branch_depth][closest_index]
+    x_hat = x_h[branch_depth][closest_index]
+    d_next = denoised2[branch_depth][closest_index]
+    
+  if branch_mode == 'zmedian_d': #minimum median distance
+    d_n_3 = [tensor for tensor in denoised2[branch_depth] if tensor is not None]
+    x_n_3 = [tensor for tensor in x_n[branch_depth] if tensor is not None]
+    x_h_3 = [tensor for tensor in x_h[branch_depth] if tensor is not None]
+    num_tensors = len(x_n_3)
+    distance_matrix = torch.zeros(num_tensors, num_tensors)
+
+    for m in range(num_tensors):
+        for n in range(num_tensors):
+            if m != n:
+                distance_matrix[m, n] = torch.norm(d_n_3[m] - d_n_3[n])
+    median_distances = torch.median(distance_matrix, dim=1).values
+    min_median_distance_index = torch.argmax(median_distances).item()
+    
+    x_next = x_n_3[min_median_distance_index]
+    x_hat = x_h_3[min_median_distance_index]
+    d_next = d_n_3[min_median_distance_index]    
     
   if branch_mode == 'gradient_max_full_d': # greatest gradient descent
     start_point = x_n[0][0]
