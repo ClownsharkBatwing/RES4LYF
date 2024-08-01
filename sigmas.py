@@ -10,6 +10,37 @@ def rescale_linear(input, input_min, input_max, output_min, output_max):
     output = ((input - input_min) / (input_max - input_min)) * (output_max - output_min) + output_min;
     return output
 
+class set_precision_sigmas:
+    def __init__(self):
+        pass
+    @classmethod
+    def INPUT_TYPES(s):
+        return {
+            "required": {
+                    "sigmas": ("SIGMAS", ),      
+                    "precision": (["16", "32", "64"], ),
+                     },
+                }
+
+    RETURN_TYPES = ("SIGMAS",)
+    RETURN_NAMES = ("passthrough",)
+    CATEGORY = "sampling/custom_sampling/"
+
+    FUNCTION = "main"
+
+    def main(self, precision="32", sigmas=None):
+        match precision:
+            case "16":
+                torch.set_default_dtype(torch.float16)
+                sigmas = sigmas.to(torch.float16)
+            case "32":
+                torch.set_default_dtype(torch.float32)
+                sigmas = sigmas.to(torch.float32)
+            case "64":
+                torch.set_default_dtype(torch.float64)
+                sigmas = sigmas.to(torch.float64)
+        return (sigmas, )
+
 class sigmas_concatenate:
     def __init__(self):
         pass

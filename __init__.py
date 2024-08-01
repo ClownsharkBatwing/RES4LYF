@@ -45,6 +45,8 @@ NODE_CLASS_MAPPINGS = {
     "SamplerDPMPP_2M_SDE_Advanced": samplers.SamplerDPMPP_2M_SDE_Advanced,
     "SamplerDPMPP_3M_SDE_Advanced": samplers.SamplerDPMPP_3M_SDE_Advanced,
 
+    "Sigmas Recast": sigmas.set_precision_sigmas,
+
     "Sigmas Truncate": sigmas.sigmas_truncate,
     "Sigmas Start": sigmas.sigmas_start,
     "Sigmas Split": sigmas.sigmas_split,
@@ -79,5 +81,7 @@ NODE_CLASS_MAPPINGS = {
     
     "StableCascade_StageB_Conditioning64": conditioning.StableCascade_StageB_Conditioning64,
 
+
+    #"UNetSave": latents.UnetSave,
 }
 __all__ = ['NODE_CLASS_MAPPINGS']
