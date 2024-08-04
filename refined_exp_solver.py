@@ -150,10 +150,10 @@ def _de_second_order(
   )  
 
 def _refined_exp_sosu_step(
-  model: DenoiserModel,
-  x: FloatTensor,
-  sigma: FloatTensor,
-  sigma_next: FloatTensor,
+  model,
+  x,
+  sigma,
+  sigma_next,
   c2 = 0.5,
   extra_args: Dict[str, Any] = {},
   pbar: Optional[tqdm] = None,
@@ -198,28 +198,29 @@ def _refined_exp_sosu_step(
   lam_next, lam = (s.log().neg() for s in (sigma_next, sigma))
 
   s_in = x.new_ones([x.shape[0]])
-  h: float = lam_next - lam
+  h = lam_next - lam
   a2_1, b1, b2 = _de_second_order(h=h, c2=c2, simple_phi_calc=simple_phi_calc)
   
-  denoised: FloatTensor = model(x, sigma * s_in, **extra_args)
+  print("s_in!!!!!!!!!!         ", s_in.shape)
+  denoised = model(x, sigma * s_in, **extra_args)
   
   if pbar is not None:
     pbar.update(0.5)
 
-  c2_h: float = c2*h
+  c2_h = c2*h
 
   diff_2 = momentum_func(a2_1*h*denoised, vel_2, time)
 
   vel_2 = diff_2
-  x_2: FloatTensor = math.exp(-c2_h)*x + diff_2
+  x_2 = math.exp(-c2_h)*x + diff_2
   if cfgpp == False:
-    x_2: FloatTensor = math.exp(-c2_h)*x + diff_2
+    x_2 = math.exp(-c2_h)*x + diff_2
   else:
-    x_2: FloatTensor = math.exp(-c2_h) * (x + cfgpp*denoised - cfgpp*temp[0]) + diff_2
-  lam_2: float = lam + c2_h
-  sigma_2: float = lam_2.neg().exp()
+    x_2 = math.exp(-c2_h) * (x + cfgpp*denoised - cfgpp*temp[0]) + diff_2
+  lam_2 = lam + c2_h
+  sigma_2 = lam_2.neg().exp()
 
-  denoised2: FloatTensor = model(x_2, sigma_2 * s_in, **extra_args)
+  denoised2 = model(x_2, sigma_2 * s_in, **extra_args)
 
   if pbar is not None:
     pbar.update(0.5)
@@ -229,9 +230,9 @@ def _refined_exp_sosu_step(
   vel = diff
 
   if cfgpp == False:
-    x_next: FloatTensor = math.exp(-h)*x + diff
+    x_next = math.exp(-h)*x + diff
   else:
-    x_next: FloatTensor = math.exp(-h) * (x + cfgpp*denoised - cfgpp*temp[0]) + diff
+    x_next = math.exp(-h) * (x + cfgpp*denoised - cfgpp*temp[0]) + diff
 
   return StepOutput(
     x_next=x_next,
@@ -386,7 +387,7 @@ def sample_refined_exp_s_advanced(
       x_hat = x + (sigma_hat ** 2 - sigma ** 2) ** .5 * eps
       
       s_in = x.new_ones([x.shape[0]])
-      x_next: FloatTensor = model(x_hat, torch.zeros_like(sigma).to(x_hat.device) * s_in, **extra_args)
+      x_next = model(x_hat, torch.zeros_like(sigma).to(x_hat.device) * s_in, **extra_args)
       pbar.update()
       x = x_next
 

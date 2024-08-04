@@ -89,7 +89,7 @@ class ClownSampler:
                 "eta": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 10000.0, "step": 0.01}),
                 "c2": ("FLOAT", {"default": 0.5, "min": 0.0, "max": 10000.0, "step": 0.01}),
                 "cfgpp": ("FLOAT", {"default": 0.0, "min": -10000.0, "max": 10000.0, "step": 0.01}),
-                "branch_mode": (['latent_match', 'latent_match_d', 'latent_match_sdxl_color_d', 'latent_match_sdxl_luminosity_d','latent_match_sdxl_pattern_d','cos_reversal', 'mean', 'mean_d', 'median', 'median_d', 'gradient_max_full', 'gradient_max_full_d', 'gradient_min_full', 'gradient_min_full_d', 'gradient_max', 'gradient_max_d', 'gradient_min', 'gradient_min_d', 'cos_similarity', 'cos_similarity_d','cos_linearity', 'cos_linearity_d', 'cos_perpendicular', 'cos_perpendicular_d'], {"default": 'mean'}),
+                "branch_mode": (['latent_match', 'latent_match_d', 'latent_match_sdxl_color_d', 'latent_match_sdxl_luminosity_d','latent_match_sdxl_pattern_d','cos_reversal', 'mean', 'mean_d', 'median', 'median_d', 'zmean_d','zmedian_d','gradient_max_full', 'gradient_max_full_d', 'gradient_min_full', 'gradient_min_full_d', 'gradient_max', 'gradient_max_d', 'gradient_min', 'gradient_min_d', 'cos_similarity', 'cos_similarity_d','cos_linearity', 'cos_linearity_d', 'cos_perpendicular', 'cos_perpendicular_d'], {"default": 'mean'}),
                 "branch_depth": ("INT", {"default": 1, "min": 1, "max": 0xffffffffffffffff}),
                 "branch_width": ("INT", {"default": 1, "min": 1, "max": 0xffffffffffffffff}),
 
@@ -177,7 +177,7 @@ class ClownSampler:
                 "guide_1_channels": guide_1_channels,
                 "alphas": alphas,
                 "k": k,
-                "clownseed": clownseed,
+                "clownseed": clownseed+1,
                 "latent_noise": latent_noise_samples,
                 "latent_self_guide_1": latent_self_guide_1,
                 "latent_shift_guide_1": latent_shift_guide_1,
@@ -205,6 +205,8 @@ class SharkSampler:
                      },
                 "optional": 
                     {"latent_noise": ("LATENT", ),
+                     #"guide_weights": ("SIGMAS", ),
+                     
                     }
                 }
 
@@ -215,12 +217,14 @@ class SharkSampler:
 
     CATEGORY = "sampling/custom_sampling"
     
-    @cast_fp64
+    #@cast_fp64
     def sample(self, model, add_noise, noise_is_latent, noise_type, noise_seed, cfg, alpha, k, positive, negative, sampler, 
-               sigmas, latent_image, latent_noise=None):
+               sigmas, latent_image, latent_noise=None): #, guide_weights=None):
             latent = latent_image
-            latent_image = latent["samples"].to(torch.float64)
+            latent_image = latent["samples"]#.to(torch.float64)
             #import pdb; pdb.set_trace()
+            #if hasattr(model.model.diffusion_model, 'set_guide_weights'):
+            #    model.model.diffusion_model.set_guide_weights(guide_weights=guide_weights)                
 
             torch.manual_seed(noise_seed)
 
@@ -230,7 +234,7 @@ class SharkSampler:
                 batch_inds = latent["batch_index"] if "batch_index" in latent else None
                 noise = prepare_noise(latent_image, noise_seed, noise_type, batch_inds, alpha, k)
             else:
-                noise = latent_noise["samples"].to(torch.float64)
+                noise = latent_noise["samples"]#.to(torch.float64)
 
             if noise_is_latent:
                 noise += latent_image.cpu()
