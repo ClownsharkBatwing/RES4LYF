@@ -192,7 +192,6 @@ def _refined_exp_sosu_step(
         momentum_vel = diff
     else:
         momentum_vel = momentum * (timescale + offset) * velocity + (1 - momentum * (timescale + offset)) * diff
-    #print(momentum_vel)
     return momentum_vel
 
   lam_next, lam = (s.log().neg() for s in (sigma_next, sigma))
@@ -201,7 +200,6 @@ def _refined_exp_sosu_step(
   h = lam_next - lam
   a2_1, b1, b2 = _de_second_order(h=h, c2=c2, simple_phi_calc=simple_phi_calc)
   
-  print("s_in!!!!!!!!!!         ", s_in.shape)
   denoised = model(x, sigma * s_in, **extra_args)
   
   if pbar is not None:
