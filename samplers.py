@@ -197,6 +197,7 @@ class SharkSampler:
                     "k": ("FLOAT", {"default": 1.0, "min": -10000.0, "max": 10000.0, "step":2.0, "round": 0.01}),
                     "noise_seed": ("INT", {"default": 0, "min": 0, "max": 0xffffffffffffffff}),
                     "cfg": ("FLOAT", {"default": 6.0, "min": 0.0, "max": 100.0, "step":0.5, "round": 0.01}),
+                    "guide_weight": ("FLOAT", {"default": 0.0, "min": -100.0, "max": 100.0, "step":0.01, "round": 0.01}),
                     "positive": ("CONDITIONING", ),
                     "negative": ("CONDITIONING", ),
                     "sampler": ("SAMPLER", ),
@@ -205,7 +206,7 @@ class SharkSampler:
                      },
                 "optional": 
                     {"latent_noise": ("LATENT", ),
-                     #"guide_weights": ("SIGMAS", ),
+                     "guide_weights": ("SIGMAS", ),
                      
                     }
                 }
@@ -213,18 +214,20 @@ class SharkSampler:
     RETURN_TYPES = ("LATENT","LATENT","LATENT")
     RETURN_NAMES = ("output", "denoised_output", "latent_batch")
 
-    FUNCTION = "sample"
+    FUNCTION = "main"
 
     CATEGORY = "sampling/custom_sampling"
     
     #@cast_fp64
-    def sample(self, model, add_noise, noise_is_latent, noise_type, noise_seed, cfg, alpha, k, positive, negative, sampler, 
-               sigmas, latent_image, latent_noise=None): #, guide_weights=None):
+    def main(self, model, add_noise, noise_is_latent, noise_type, noise_seed, cfg, guide_weight, alpha, k, positive, negative, sampler, 
+               sigmas, latent_image, latent_noise=None, guide_weights=None): #, guide_weights=None):
             latent = latent_image
             latent_image = latent["samples"]#.to(torch.float64)
             #import pdb; pdb.set_trace()
-            #if hasattr(model.model.diffusion_model, 'set_guide_weights'):
-            #    model.model.diffusion_model.set_guide_weights(guide_weights=guide_weights)                
+            
+            guide_weights = initialize_or_scale(guide_weights, guide_weight, 10000)
+            if hasattr(model.model.diffusion_model, 'set_guide_weights'):
+                model.model.diffusion_model.set_guide_weights(guide_weights=guide_weights)                
 
             torch.manual_seed(noise_seed)
 
