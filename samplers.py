@@ -206,7 +206,7 @@ class SharkSampler:
                      },
                 "optional": 
                     {"latent_noise": ("LATENT", ),
-                     "guide_weights": ("SIGMAS", ),
+                     #"guide_weights": ("SIGMAS", ),
                      
                     }
                 }
@@ -225,9 +225,9 @@ class SharkSampler:
             latent_image = latent["samples"]#.to(torch.float64)
             #import pdb; pdb.set_trace()
             
-            guide_weights = initialize_or_scale(guide_weights, guide_weight, 10000)
-            if hasattr(model.model.diffusion_model, 'set_guide_weights'):
-                model.model.diffusion_model.set_guide_weights(guide_weights=guide_weights)                
+            #guide_weights = initialize_or_scale(guide_weights, guide_weight, 10000)
+            #if hasattr(model.model.diffusion_model, 'set_guide_weights'):
+            #    model.model.diffusion_model.set_guide_weights(guide_weights=guide_weights)                
 
             torch.manual_seed(noise_seed)
 
