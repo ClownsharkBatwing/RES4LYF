@@ -68,7 +68,7 @@ class ConditioningMultiply :
     @classmethod
     def INPUT_TYPES(s):
         return {"required": {"conditioning": ("CONDITIONING", ), 
-                              "multiplier": ("FLOAT", {"default": 1.0, "min": -1000.0, "max": 1000.0, "step": 0.01})
+                              "multiplier": ("FLOAT", {"default": 1.0, "min": -1000000000.0, "max": 1000000000.0, "step": 0.01})
                              }}
     RETURN_TYPES = ("CONDITIONING",)
     FUNCTION = "main"
