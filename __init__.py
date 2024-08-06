@@ -12,6 +12,7 @@ extra_samplers.add_samplers()
 
 NODE_CLASS_MAPPINGS = {
     "ConditioningAverageScheduler": conditioning.ConditioningAverageScheduler,
+    "ConditioningMultiply": conditioning.ConditioningMultiply,
 
     "LatentNoiseList": latents.LatentNoiseList,
     #"LatentBatch_channels_offset": latents.LatentBatch_channels_offset,

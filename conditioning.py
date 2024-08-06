@@ -53,6 +53,34 @@ def conditioning_set_values(conditioning, values={}):
 
     return c
 
+def multiply_nested_tensors(structure, scalar):
+    if isinstance(structure, torch.Tensor):
+        return structure * scalar
+    elif isinstance(structure, list):
+        return [multiply_nested_tensors(item, scalar) for item in structure]
+    elif isinstance(structure, dict):
+        return {key: multiply_nested_tensors(value, scalar) for key, value in structure.items()}
+    else:
+        return structure
+
+
+class ConditioningMultiply :
+    @classmethod
+    def INPUT_TYPES(s):
+        return {"required": {"conditioning": ("CONDITIONING", ), 
+                              "multiplier": ("FLOAT", {"default": 1.0, "min": -1000.0, "max": 1000.0, "step": 0.01})
+                             }}
+    RETURN_TYPES = ("CONDITIONING",)
+    FUNCTION = "main"
+
+    CATEGORY = "conditioning"
+
+    def main(self, conditioning, multiplier):
+        c = multiply_nested_tensors(conditioning, multiplier)
+        return (c,)
+
+
+
 class ConditioningCombine:
     @classmethod
     def INPUT_TYPES(s):
