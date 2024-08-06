@@ -197,7 +197,6 @@ class SharkSampler:
                     "k": ("FLOAT", {"default": 1.0, "min": -10000.0, "max": 10000.0, "step":2.0, "round": 0.01}),
                     "noise_seed": ("INT", {"default": 0, "min": 0, "max": 0xffffffffffffffff}),
                     "cfg": ("FLOAT", {"default": 6.0, "min": 0.0, "max": 100.0, "step":0.5, "round": 0.01}),
-                    "guide_weight": ("FLOAT", {"default": 0.0, "min": -100.0, "max": 100.0, "step":0.01, "round": 0.01}),
                     "positive": ("CONDITIONING", ),
                     "negative": ("CONDITIONING", ),
                     "sampler": ("SAMPLER", ),
@@ -206,8 +205,6 @@ class SharkSampler:
                      },
                 "optional": 
                     {"latent_noise": ("LATENT", ),
-                     #"guide_weights": ("SIGMAS", ),
-                     
                     }
                 }
 
@@ -219,15 +216,16 @@ class SharkSampler:
     CATEGORY = "sampling/custom_sampling"
     
     #@cast_fp64
-    def main(self, model, add_noise, noise_is_latent, noise_type, noise_seed, cfg, guide_weight, alpha, k, positive, negative, sampler, 
-               sigmas, latent_image, latent_noise=None, guide_weights=None): #, guide_weights=None):
+    def main(self, model, add_noise, noise_is_latent, noise_type, noise_seed, cfg, alpha, k, positive, negative, sampler, 
+               sigmas, latent_image, latent_noise=None): 
             latent = latent_image
             latent_image = latent["samples"]#.to(torch.float64)
             #import pdb; pdb.set_trace()
             
             #guide_weights = initialize_or_scale(guide_weights, guide_weight, 10000)
-            #if hasattr(model.model.diffusion_model, 'set_guide_weights'):
-            #    model.model.diffusion_model.set_guide_weights(guide_weights=guide_weights)                
+            if hasattr(model.model.diffusion_model, 'set_guide_weights'):
+                model.model.diffusion_model.set_guide_weights(guide_weights=None)
+                model.model.diffusion_model.set_x_lr(x_lr=None)       
 
             torch.manual_seed(noise_seed)
 
@@ -265,6 +263,95 @@ class SharkSampler:
             else:
                 out_denoised = out
             return (out, out_denoised)
+
+
+class UltraSharkSampler:
+    @classmethod
+    def INPUT_TYPES(s):
+        return {
+            "required": {
+                "model": ("MODEL",),
+                "add_noise": ("BOOLEAN", {"default": True}),
+                "noise_is_latent": ("BOOLEAN", {"default": False}),
+                "noise_type": (NOISE_GENERATOR_NAMES, ),
+                "alpha": ("FLOAT", {"default": 1.0, "min": -10000.0, "max": 10000.0, "step":0.1, "round": 0.01}),
+                "k": ("FLOAT", {"default": 1.0, "min": -10000.0, "max": 10000.0, "step":2.0, "round": 0.01}),
+                "noise_seed": ("INT", {"default": 0, "min": 0, "max": 0xffffffffffffffff}),
+                "cfg": ("FLOAT", {"default": 6.0, "min": 0.0, "max": 100.0, "step":0.5, "round": 0.01}),
+                "positive": ("CONDITIONING", ),
+                "negative": ("CONDITIONING", ),
+                "sampler": ("SAMPLER", ),
+                "sigmas": ("SIGMAS", ),
+                "latent_image": ("LATENT", ),               
+                "x_lr": ("LATENT",),
+                "guide_type": (['residual', 'weighted'], ),
+                "guide_weight": ("FLOAT", {"default": 0.0, "min": -100.0, "max": 100.0, "step":0.01, "round": 0.01}),
+            },
+            "optional": {
+                "latent_noise": ("LATENT", ),
+                "guide_weights": ("SIGMAS",),
+            }
+        }
+
+    RETURN_TYPES = ("LATENT","LATENT","LATENT")
+    RETURN_NAMES = ("output", "denoised_output", "latent_batch")
+
+    FUNCTION = "main"
+
+    CATEGORY = "sampling/custom_sampling"
+    
+    #@cast_fp64
+    def main(self, model, add_noise, noise_is_latent, noise_type, noise_seed, cfg, alpha, k, positive, negative, sampler, 
+               sigmas, guide_type, guide_weight, latent_image, latent_noise=None, x_lr=None, guide_weights=None): 
+            latent = latent_image
+            latent_image = latent["samples"]#.to(torch.float64)
+            #import pdb; pdb.set_trace()
+            
+            guide_weights = initialize_or_scale(guide_weights, guide_weight, 10000)
+            model.model.diffusion_model.set_guide_type(guide_type=guide_type)
+            model.model.diffusion_model.set_x_lr(x_lr=x_lr['samples'])
+            model.model.diffusion_model.set_guide_weights(guide_weights=guide_weights)
+
+            torch.manual_seed(noise_seed)
+
+            if not add_noise:
+                noise = torch.zeros(latent_image.size(), dtype=latent_image.dtype, layout=latent_image.layout, device="cpu")
+            elif latent_noise is None:
+                batch_inds = latent["batch_index"] if "batch_index" in latent else None
+                noise = prepare_noise(latent_image, noise_seed, noise_type, batch_inds, alpha, k)
+            else:
+                noise = latent_noise["samples"]#.to(torch.float64)
+
+            if noise_is_latent:
+                noise += latent_image.cpu()
+                noise.sub_(noise.mean()).div_(noise.std())
+
+            noise_mask = None
+            if "noise_mask" in latent:
+                noise_mask = latent["noise_mask"]
+
+            x0_output = {}
+
+            callback = latent_preview.prepare_callback(model, sigmas.shape[-1] - 1, x0_output)
+
+            disable_pbar = False
+
+            samples = comfy.sample.sample_custom(model, noise, cfg, sampler, sigmas, positive, negative, latent_image, 
+                                                 noise_mask=noise_mask, callback=callback, disable_pbar=disable_pbar, 
+                                                 seed=noise_seed)
+
+            out = latent.copy()
+            out["samples"] = samples
+            if "x0" in x0_output:
+                out_denoised = latent.copy()
+                out_denoised["samples"] = model.model.process_latent_out(x0_output["x0"].cpu())
+            else:
+                out_denoised = out
+                
+            model.model.diffusion_model.set_x_lr(x_lr=None)
+            model.model.diffusion_model.set_guide_weights(None)
+            return (out, out_denoised)
+
 
 class SamplerDPMPP_SDE_ADVANCED:
     @classmethod
