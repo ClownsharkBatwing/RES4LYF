@@ -37,6 +37,7 @@ NODE_CLASS_MAPPINGS = {
     "ClownGuides": samplers.ClownGuides,
     "ClownSampler": samplers.ClownSampler,
     "SharkSampler": samplers.SharkSampler,
+    "UltraSharkSampler": samplers.UltraSharkSampler,
     "SamplerDPMPP_DualSDE_Advanced": samplers.SamplerDPMPP_DUALSDE_MOMENTUMIZED_ADVANCED,
     "SamplerDPMPP_SDE_Advanced": samplers.SamplerDPMPP_SDE_ADVANCED,
     "SamplerDPMPP_SDE_CFG++_Advanced": samplers.SamplerDPMPP_SDE_CFGPP_ADVANCED,
