@@ -221,11 +221,6 @@ class SharkSampler:
             latent = latent_image
             latent_image = latent["samples"]#.to(torch.float64)
             #import pdb; pdb.set_trace()
-            
-            #guide_weights = initialize_or_scale(guide_weights, guide_weight, 10000)
-            if hasattr(model.model.diffusion_model, 'set_guide_weights'):
-                model.model.diffusion_model.set_guide_weights(guide_weights=None)
-                model.model.diffusion_model.set_x_lr(x_lr=None)       
 
             torch.manual_seed(noise_seed)
 
@@ -283,11 +278,11 @@ class UltraSharkSampler:
                 "sampler": ("SAMPLER", ),
                 "sigmas": ("SIGMAS", ),
                 "latent_image": ("LATENT", ),               
-                "x_lr": ("LATENT",),
                 "guide_type": (['residual', 'weighted'], ),
                 "guide_weight": ("FLOAT", {"default": 0.0, "min": -100.0, "max": 100.0, "step":0.01, "round": 0.01}),
             },
             "optional": {
+                "guide": ("LATENT",),
                 "latent_noise": ("LATENT", ),
                 "guide_weights": ("SIGMAS",),
             }
@@ -302,15 +297,42 @@ class UltraSharkSampler:
     
     #@cast_fp64
     def main(self, model, add_noise, noise_is_latent, noise_type, noise_seed, cfg, alpha, k, positive, negative, sampler, 
-               sigmas, guide_type, guide_weight, latent_image, latent_noise=None, x_lr=None, guide_weights=None): 
+               sigmas, guide_type, guide_weight, latent_image, latent_noise=None, guide=None, guide_weights=None): 
+        
+
+            if model.model.model_config.unet_config['stable_cascade_stage'] == 'up':
+                x_lr = guide['samples'] if guide is not None else None
+                guide_weights = initialize_or_scale(None, guide_weight, 10000)
+                model.model.diffusion_model.set_guide_weights(guide_weights=guide_weights)
+                model.model.diffusion_model.set_guide_type(guide_type=guide_type)
+                model.model.diffusion_model.set_x_lr(x_lr=x_lr)
+            elif model.model.model_config.unet_config['stable_cascade_stage'] == 'b':
+                c_pos, c_neg = [], []
+                for t in positive:
+                    d_pos = t[1].copy()
+                    d_neg = t[1].copy()
+                    
+                    d_pos['stable_cascade_prior'] = guide['samples']
+
+                    pooled_output = d_neg.get("pooled_output", None)
+                    if pooled_output is not None:
+                        d_neg["pooled_output"] = torch.zeros_like(pooled_output)
+                    
+                    c_pos.append([t[0], d_pos])            
+                    c_neg.append([torch.zeros_like(t[0]), d_neg])
+                positive = c_pos
+                negative = c_neg
+                
+        
+        
             latent = latent_image
             latent_image = latent["samples"]#.to(torch.float64)
             #import pdb; pdb.set_trace()
             
-            guide_weights = initialize_or_scale(guide_weights, guide_weight, 10000)
-            model.model.diffusion_model.set_guide_type(guide_type=guide_type)
-            model.model.diffusion_model.set_x_lr(x_lr=x_lr['samples'])
-            model.model.diffusion_model.set_guide_weights(guide_weights=guide_weights)
+            #guide_weights = initialize_or_scale(guide_weights, guide_weight, 10000)
+            #model.model.diffusion_model.set_guide_type(guide_type=guide_type)
+            #model.model.diffusion_model.set_x_lr(x_lr=x_lr['samples'])
+            #model.model.diffusion_model.set_guide_weights(guide_weights=guide_weights)
 
             torch.manual_seed(noise_seed)
 
@@ -348,8 +370,8 @@ class UltraSharkSampler:
             else:
                 out_denoised = out
                 
-            model.model.diffusion_model.set_x_lr(x_lr=None)
-            model.model.diffusion_model.set_guide_weights(None)
+            #model.model.diffusion_model.set_x_lr(x_lr=None)
+            #model.model.diffusion_model.set_guide_weights(None)
             return (out, out_denoised)
 
 
