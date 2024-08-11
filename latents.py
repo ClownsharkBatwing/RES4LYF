@@ -58,6 +58,58 @@ class set_precision:
                 torch.set_default_dtype(torch.float64)
                 x = latent_image["samples"].to(torch.float64)
         return ({"samples": x}, )
+
+class set_precision_advanced:
+    def __init__(self):
+        pass
+    @classmethod
+    def INPUT_TYPES(s):
+        return {
+            "required": {
+                    "latent_image": ("LATENT", ),      
+                    "global_precision": (["64", "32", "16"], ),
+                    "shark_precision": (["64", "32", "16"], ),
+                     },
+                }
+
+    RETURN_TYPES = ("LATENT","LATENT","LATENT","LATENT","LATENT",)
+    RETURN_NAMES = ("PASSTHROUGH","LATENT_CAST_TO_GLOBAL","LATENT_16","LATENT_32","LATENT_64",)
+    CATEGORY = "sampling/custom_sampling/"
+
+    FUNCTION = "main"
+
+    def main(self, global_precision="32", shark_precision="64", latent_image=None):
+        dtype_map = {
+            "16": torch.float16,
+            "32": torch.float32,
+            "64": torch.float64
+        }
+        precision_map = {
+            "16": 'fp16',
+            "32": 'fp32',
+            "64": 'fp64'
+        }
+
+        # Set default dtype based on global_precision
+        torch.set_default_dtype(dtype_map[global_precision])
+        # Set precision_tool cast type based on shark_precision
+        precision_tool.set_cast_type(precision_map[shark_precision])
+
+        latent_passthrough = latent_image["samples"]
+
+        # Convert latent_image["samples"] dtypes for static latent outputs
+        latent_out16 = latent_image["samples"].to(torch.float16)
+        latent_out32 = latent_image["samples"].to(torch.float32)
+        latent_out64 = latent_image["samples"].to(torch.float64)
+
+        # Convert latent for cast to global output according to global_precision
+        target_dtype = dtype_map[global_precision]
+        if latent_image["samples"].dtype != target_dtype:
+            latent_image["samples"] = latent_image["samples"].to(target_dtype)
+
+        latent_cast_to_global = latent_image["samples"]
+
+        return ({"samples": latent_passthrough}, {"samples": latent_cast_to_global}, {"samples": latent_out16}, {"samples": latent_out32}, {"samples": latent_out64})
     
 class latent_to_cuda:
     def __init__(self):

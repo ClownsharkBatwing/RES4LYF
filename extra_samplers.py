@@ -11,7 +11,7 @@ import functools
 from .noise_classes import *
 #from comfy_extras.nodes_advanced_samplers import sample_euler_cfgpp_alt
 
-@cast_fp64
+@precision_tool.cast_tensor
 @torch.no_grad()
 def sample_dpmpp_sde_advanced(
     model, x, sigmas, extra_args=None, callback=None, disable=None,
@@ -75,7 +75,7 @@ def sample_dpmpp_sde_advanced(
 
     return x
 
-@cast_fp64
+@precision_tool.cast_tensor
 @torch.no_grad()
 def sample_dpmpp_sde_cfgpp_advanced(
     model, x, sigmas, extra_args=None, callback=None, disable=None, eulers_mom=None,
@@ -168,11 +168,11 @@ def get_ancestral_step(sigma_from, sigma_to, eta=1.):
     sigma_down = (sigma_to ** 2 - sigma_up ** 2) ** 0.5
     return sigma_down, sigma_up
 
-@cast_fp64
+@precision_tool.cast_tensor
 def sample_dpmpp_dualsdemomentum_advanced(model, x, sigmas, seed=42, extra_args=None, callback=None, disable=None, eta=1., s_noise=1., noise_sampler_type="gaussian", noise_sampler=None, r=1/2, momentum=0.0, momentums=None, etas=None, s_noises=None,rs=None,scheduled_r=False):
     return sample_dpmpp_dualsde_momentum_advanced(model, x, sigmas, seed=seed, extra_args=extra_args, callback=callback, disable=disable, eta=etas, s_noise=s_noises, noise_sampler_type=noise_sampler_type, noise_sampler=noise_sampler, r=rs, momentum=momentums, scheduled_r=False)
 
-@cast_fp64
+@precision_tool.cast_tensor
 @torch.no_grad()
 def sample_dpmpp_dualsde_momentum_advanced (
     model, 
@@ -304,7 +304,7 @@ def sample_dpmpp_dualsde_momentum_advanced (
 # Many thanks to Kat + Birch-San for this wonderful sampler implementation! https://github.com/Birch-san/sdxl-play/commits/res/
 from .refined_exp_solver import sample_refined_exp_s_advanced
 
-@cast_fp64
+@precision_tool.cast_tensor
 def sample_res_solver_advanced(model, 
                                x, 
                                sigmas, etas, c2s, momentums, eulers_moms, offsets, branch_mode, branch_depth, branch_width,

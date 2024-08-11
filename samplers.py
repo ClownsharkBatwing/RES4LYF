@@ -300,13 +300,18 @@ class UltraSharkSampler:
                sigmas, guide_type, guide_weight, latent_image, latent_noise=None, guide=None, guide_weights=None): 
         
 
-            if model.model.model_config.unet_config['stable_cascade_stage'] == 'up':
+            if model.model.model_config.unet_config.get('stable_cascade_stage') == 'up':
                 x_lr = guide['samples'] if guide is not None else None
                 guide_weights = initialize_or_scale(None, guide_weight, 10000)
-                model.model.diffusion_model.set_guide_weights(guide_weights=guide_weights)
-                model.model.diffusion_model.set_guide_type(guide_type=guide_type)
-                model.model.diffusion_model.set_x_lr(x_lr=x_lr)
-            elif model.model.model_config.unet_config['stable_cascade_stage'] == 'b':
+
+                patch = patch = model.model_options.get("transformer_options", {}).get("patches_replace", {}).get("cascadeultra", {}).get("main")
+                if patch is not None:
+                    patch.update(x_lr=x_lr, guide_weights=guide_weights, guide_type=guide_type)
+                else:
+                    model.model.diffusion_model.set_guide_weights(guide_weights=guide_weights)
+                    model.model.diffusion_model.set_guide_type(guide_type=guide_type)
+                    model.model.diffusion_model.set_x_lr(x_lr=x_lr)
+            elif model.model.model_config.unet_config.get('stable_cascade_stage') == 'b':
                 c_pos, c_neg = [], []
                 for t in positive:
                     d_pos = t[1].copy()
@@ -322,6 +327,8 @@ class UltraSharkSampler:
                     c_neg.append([torch.zeros_like(t[0]), d_neg])
                 positive = c_pos
                 negative = c_neg
+            else:
+                raise ValueError("Expected model to be in stable cascade stage 'up' or 'b'")
                 
         
         

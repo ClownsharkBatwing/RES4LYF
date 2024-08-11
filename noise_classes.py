@@ -10,36 +10,54 @@ import pywt
 import functools
 
 
-def cast_fp64(func):
-    @functools.wraps(func)
-    def wrapper(*args, **kwargs):
-        # Find the first tensor argument to determine the target device
-        target_device = None
-        for arg in args:
-            if torch.is_tensor(arg):
-                target_device = arg.device
-                break
-        if target_device is None:
-            for v in kwargs.values():
-                if torch.is_tensor(v):
-                    target_device = v.device
+class PrecisionTool:
+    def __init__(self, cast_type='fp64'):
+        self.cast_type = cast_type
+
+    def cast_tensor(self, func):
+        @functools.wraps(func)
+        def wrapper(*args, **kwargs):
+            if self.cast_type not in ['fp64', 'fp32', 'fp16']:
+                return func(*args, **kwargs)
+            # Find the first tensor argument to determine the target device
+            target_device = None
+            for arg in args:
+                if torch.is_tensor(arg):
+                    target_device = arg.device
                     break
-        
+            if target_device is None:
+                for v in kwargs.values():
+                    if torch.is_tensor(v):
+                        target_device = v.device
+                        break
+            
         # Recursive function to cast tensors in nested dictionaries
-        def cast_and_move_to_device(data):
-            if torch.is_tensor(data):
-                return data.to(torch.float64).to(target_device)
-            elif isinstance(data, dict):
-                return {k: cast_and_move_to_device(v) for k, v in data.items()}
-            return data
+            def cast_and_move_to_device(data):
+                if torch.is_tensor(data):
+                    if self.cast_type == 'fp64':
+                        return data.to(torch.float64).to(target_device)
+                    elif self.cast_type == 'fp32':
+                        return data.to(torch.float32).to(target_device)
+                    elif self.cast_type == 'fp16':
+                        return data.to(torch.float16).to(target_device)
+                elif isinstance(data, dict):
+                    return {k: cast_and_move_to_device(v) for k, v in data.items()}
+                return data
 
-        # Cast all tensor arguments to float64 and move them to the target device
-        new_args = [cast_and_move_to_device(arg) for arg in args]
-        new_kwargs = {k: cast_and_move_to_device(v) for k, v in kwargs.items()}
-        
-        return func(*new_args, **new_kwargs)
-    return wrapper
+            # Cast all tensor arguments and move them to the target device
+            new_args = [cast_and_move_to_device(arg) for arg in args]
+            new_kwargs = {k: cast_and_move_to_device(v) for k, v in kwargs.items()}
+            
+            return func(*new_args, **new_kwargs)
+        return wrapper
 
+    def set_cast_type(self, new_value):
+        if new_value in ['fp64', 'fp32', 'fp16']:
+            self.cast_type = new_value
+        else:
+            self.cast_type = 'fp64'
+
+precision_tool = PrecisionTool(cast_type='fp64')
 
 def noise_generator_factory(cls, **fixed_params):
     def create_instance(**kwargs):
@@ -570,7 +588,7 @@ NOISE_GENERATOR_CLASSES = {
 
 NOISE_GENERATOR_NAMES = tuple(NOISE_GENERATOR_CLASSES.keys())
 
-@cast_fp64
+@precision_tool.cast_tensor
 def prepare_noise(latent_image, seed, noise_type, noise_inds=None, alpha=1.0, k=1.0): # From `sample.py`
     #optional arg skip can be used to skip and discard x number of noise generations for a given seed
     noise_func = NOISE_GENERATOR_CLASSES.get(noise_type)(x=latent_image, seed=seed, sigma_min=0.0291675, sigma_max=14.614642)
