@@ -3,6 +3,7 @@ from . import samplers
 from . import sigmas
 from . import latents
 from . import conditioning
+from . import images
 
 import torch
 
@@ -82,6 +83,8 @@ NODE_CLASS_MAPPINGS = {
     "Tan Scheduler 2 Simple": sigmas.tan_scheduler_2stage_simple,
     
     "StableCascade_StageB_Conditioning64": conditioning.StableCascade_StageB_Conditioning64,
+    
+    "Film Grain": images.Film_Grain,
 
 
     #"UNetSave": latents.UnetSave,
