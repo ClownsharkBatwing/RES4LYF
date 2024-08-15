@@ -241,7 +241,6 @@ def _refined_exp_sosu_step(
   )
 
 
-#@cast_fp64
 @no_grad()
 def sample_refined_exp_s_advanced(
   model,

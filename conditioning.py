@@ -6,36 +6,7 @@ import comfy.sampler_helpers
 import node_helpers
 
 import functools
-def cast_fp64(func):
-    @functools.wraps(func)
-    def wrapper(*args, **kwargs):
-        # Find the first tensor argument to determine the target device
-        target_device = None
-        for arg in args:
-            if torch.is_tensor(arg):
-                target_device = arg.device
-                break
-        if target_device is None:
-            for v in kwargs.values():
-                if torch.is_tensor(v):
-                    target_device = v.device
-                    break
-        
-        # Recursive function to cast tensors in nested dictionaries
-        def cast_and_move_to_device(data):
-            if torch.is_tensor(data):
-                return data.to(torch.float64).to(target_device)
-            elif isinstance(data, dict):
-                return {k: cast_and_move_to_device(v) for k, v in data.items()}
-            return data
-
-        # Cast all tensor arguments to float64 and move them to the target device
-        new_args = [cast_and_move_to_device(arg) for arg in args]
-        new_kwargs = {k: cast_and_move_to_device(v) for k, v in kwargs.items()}
-        
-        return func(*new_args, **new_kwargs)
-    return wrapper
-
+from .noise_classes import precision_tool
 
 def initialize_or_scale(tensor, value, steps):
     if tensor is None:
@@ -227,7 +198,7 @@ class StableCascade_StageB_Conditioning64:
 
     CATEGORY = "conditioning/stable_cascade"
 
-    @cast_fp64
+    @precision_tool.cast_tensor
     def set_prior(self, conditioning, stage_c):
         c = []
         for t in conditioning:

@@ -215,7 +215,6 @@ class SharkSampler:
 
     CATEGORY = "sampling/custom_sampling"
     
-    #@cast_fp64
     def main(self, model, add_noise, noise_is_latent, noise_type, noise_seed, cfg, alpha, k, positive, negative, sampler, 
                sigmas, latent_image, latent_noise=None): 
             latent = latent_image
@@ -295,12 +294,11 @@ class UltraSharkSampler:
 
     CATEGORY = "sampling/custom_sampling"
     
-    #@cast_fp64
     def main(self, model, add_noise, noise_is_latent, noise_type, noise_seed, cfg, alpha, k, positive, negative, sampler, 
                sigmas, guide_type, guide_weight, latent_image, latent_noise=None, guide=None, guide_weights=None): 
         
 
-            if model.model.model_config.unet_config['stable_cascade_stage'] == 'up':
+            if model.model.model_config.unet_config.get('stable_cascade_stage') == 'up':
                 x_lr = guide['samples'] if guide is not None else None
                 guide_weights = initialize_or_scale(None, guide_weight, 10000)
                 model.model.diffusion_model.set_guide_weights(guide_weights=guide_weights)

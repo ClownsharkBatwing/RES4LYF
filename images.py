@@ -34,6 +34,9 @@ class Film_Grain: #Rewrite of the WAS Film Grain node, much improved speed and e
         return (pil2tensor(self.apply_film_grain(tensor2pil(image), density, intensity, highlights, supersample_factor)), )
 
     def apply_film_grain(self, img, density=0.1, intensity=1.0, highlights=1.0, supersample_factor=4):
+
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        
         #Apply grayscale noise with specified density, intensity, and highlights to a PIL image.
         img_gray = img.convert('L')
         original_size = img.size
@@ -41,7 +44,7 @@ class Film_Grain: #Rewrite of the WAS Film Grain node, much improved speed and e
             ((img.size[0] * supersample_factor), (img.size[1] * supersample_factor)), Image.Resampling(2))
         num_pixels = int(density * img_gray.size[0] * img_gray.size[1])
 
-        img_gray_tensor = torch.from_numpy(np.array(img_gray).astype(np.float32) / 255.0).to("cuda")
+        img_gray_tensor = torch.from_numpy(np.array(img_gray).astype(np.float32) / 255.0).to(device)
         img_gray_flat = img_gray_tensor.view(-1)
         num_pixels = int(density * img_gray_flat.numel())
         indices = torch.randint(0, img_gray_flat.numel(), (num_pixels,), device=img_gray_flat.device)

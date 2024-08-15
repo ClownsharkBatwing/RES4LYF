@@ -26,6 +26,7 @@ NODE_CLASS_MAPPINGS = {
     "Latent Batcher": latents.latent_batch,
     "Latent Normalize Channels": latents.latent_normalize_channels,
     "Set Precision": latents.set_precision,
+    "Set Precision Advanced": latents.set_precision_advanced,
     "LatentNoiseBatch_perlin": latents.LatentNoiseBatch_perlin,
     "EmptyLatentImage64": latents.EmptyLatentImage64,
     "EmptyLatentImageCustom": latents.EmptyLatentImageCustom,
