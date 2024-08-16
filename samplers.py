@@ -297,7 +297,7 @@ class UltraSharkSampler:
                 x_lr = guide['samples'] if guide is not None else None
                 guide_weights = initialize_or_scale(None, guide_weight, 10000)
 
-                patch = patch = model.model_options.get("transformer_options", {}).get("patches_replace", {}).get("cascadeultra", {}).get("main")
+                patch = patch = model.model_options.get("transformer_options", {}).get("patches_replace", {}).get("ultracascade", {}).get("main")
                 if patch is not None:
                     patch.update(x_lr=x_lr, guide_weights=guide_weights, guide_type=guide_type)
                 else:
