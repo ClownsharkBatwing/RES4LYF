@@ -1,5 +1,6 @@
 from . import extra_samplers
 from . import samplers
+from . import samplers_tiled
 from . import sigmas
 from . import latents
 from . import conditioning
@@ -41,6 +42,7 @@ NODE_CLASS_MAPPINGS = {
     "ClownSampler": samplers.ClownSampler,
     "SharkSampler": samplers.SharkSampler,
     "UltraSharkSampler": samplers.UltraSharkSampler,
+    "UltraSharkSampler Tiled": samplers_tiled.UltraSharkSampler_Tiled,
     "SamplerDPMPP_DualSDE_Advanced": samplers.SamplerDPMPP_DUALSDE_MOMENTUMIZED_ADVANCED,
     "SamplerDPMPP_SDE_Advanced": samplers.SamplerDPMPP_SDE_ADVANCED,
     "SamplerDPMPP_SDE_CFG++_Advanced": samplers.SamplerDPMPP_SDE_CFGPP_ADVANCED,
@@ -91,3 +93,6 @@ NODE_CLASS_MAPPINGS = {
     #"UNetSave": latents.UnetSave,
 }
 __all__ = ['NODE_CLASS_MAPPINGS']
+
+
+

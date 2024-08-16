@@ -215,11 +215,9 @@ class SharkSampler:
 
     CATEGORY = "sampling/custom_sampling"
     
-    def main(self, model, add_noise, noise_is_latent, noise_type, noise_seed, cfg, alpha, k, positive, negative, sampler, 
-               sigmas, latent_image, latent_noise=None): 
+    def main(self, model, add_noise, noise_is_latent, noise_type, noise_seed, cfg, alpha, k, positive, negative, sampler, sigmas, latent_image, latent_noise=None): 
             latent = latent_image
-            latent_image = latent["samples"]#.to(torch.float64)
-            #import pdb; pdb.set_trace()
+            latent_image = latent["samples"]
 
             torch.manual_seed(noise_seed)
 
@@ -229,15 +227,13 @@ class SharkSampler:
                 batch_inds = latent["batch_index"] if "batch_index" in latent else None
                 noise = prepare_noise(latent_image, noise_seed, noise_type, batch_inds, alpha, k)
             else:
-                noise = latent_noise["samples"]#.to(torch.float64)
+                noise = latent_noise["samples"]
 
-            if noise_is_latent:
+            if noise_is_latent: #add noise and latent together and normalize --> noise
                 noise += latent_image.cpu()
                 noise.sub_(noise.mean()).div_(noise.std())
 
-            noise_mask = None
-            if "noise_mask" in latent:
-                noise_mask = latent["noise_mask"]
+            noise_mask = latent["noise_mask"] if "noise_mask" in latent else None
 
             x0_output = {}
 
@@ -246,8 +242,7 @@ class SharkSampler:
             disable_pbar = False
 
             samples = comfy.sample.sample_custom(model, noise, cfg, sampler, sigmas, positive, negative, latent_image, 
-                                                 noise_mask=noise_mask, callback=callback, disable_pbar=disable_pbar, 
-                                                 seed=noise_seed)
+                                                 noise_mask=noise_mask, callback=callback, disable_pbar=disable_pbar, seed=noise_seed)
 
             out = latent.copy()
             out["samples"] = samples
@@ -281,8 +276,8 @@ class UltraSharkSampler:
                 "guide_weight": ("FLOAT", {"default": 0.0, "min": -100.0, "max": 100.0, "step":0.01, "round": 0.01}),
             },
             "optional": {
-                "guide": ("LATENT",),
                 "latent_noise": ("LATENT", ),
+                "guide": ("LATENT",),
                 "guide_weights": ("SIGMAS",),
             }
         }
