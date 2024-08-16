@@ -222,7 +222,7 @@ def sample_common(model, x, noise, noise_mask, noise_seed, tile_width, tile_heig
         guide_weight = 1.0 if guide_weight is None else guide_weight
         guide_type = 'residual' if guide_type is None else guide_type
         guide = guide['samples'] if guide is not None else None
-        patch = patch = work_model.model_options.get("transformer_options", {}).get("patches_replace", {}).get("cascadeultra", {}).get("main")
+        patch = patch = work_model.model_options.get("transformer_options", {}).get("patches_replace", {}).get("ultracascade", {}).get("main")
         if patch is not None:
             patch.update(x_lr=guide, guide_weights=guide_weights, guide_type=guide_type)
         else:
