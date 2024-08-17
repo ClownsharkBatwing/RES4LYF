@@ -226,13 +226,19 @@ def sample_common(model, x, noise, noise_mask, noise_seed, tile_width, tile_heig
 
     modelPatches, inference_memory = comfy.sampler_helpers.get_additional_models(conds, model.model_dtype())
     comfy.model_management.load_models_gpu([model] + modelPatches, model.memory_required(noise.shape) + inference_memory)
-    
 
     if model.model.model_config.unet_config['stable_cascade_stage'] == 'up':
         compression = 1
         guide_weight = 1.0 if guide_weight is None else guide_weight
         guide_type = 'residual' if guide_type is None else guide_type
         guide = guide['samples'] if guide is not None else None
+        patch = patch = model.model_options.get("transformer_options", {}).get("patches_replace", {}).get("ultracascade", {}).get("main")
+        if patch is not None:
+            patch.update(x_lr=guide, guide_weights=guide_weights, guide_type=guide_type)
+        else:
+            model.model.diffusion_model.set_guide_weights(guide_weights=guide_weights)
+            model.model.diffusion_model.set_guide_type(guide_type=guide_type)
+
         guide_weights = initialize_or_scale(None, guide_weight, 10000)
         #model.model.diffusion_model.set_guide_weights(guide_weights=guide_weights)
         #model.model.diffusion_model.set_guide_type(guide_type=guide_type)
@@ -240,14 +246,14 @@ def sample_common(model, x, noise, noise_mask, noise_seed, tile_width, tile_heig
         if patch is not None:
             patch.update(x_lr=guide, guide_weights=guide_weights, guide_type=guide_type)
         else:
-            model = model.clone()
-            model.model.diffusion_model.set_guide_weights(guide_weights=guide_weights)
-            model.model.diffusion_model.set_guide_type(guide_type=guide_type)
+            work_model = model.clone()
+            work_model.model.diffusion_model.set_guide_weights(guide_weights=guide_weights)
+            work_model.model.diffusion_model.set_guide_type(guide_type=guide_type)
         
-    elif model.model.model_config.unet_config['stable_cascade_stage'] == 'c':
+    elif work_model.model.model_config.unet_config['stable_cascade_stage'] == 'c':
         compression = 1
         
-    elif model.model.model_config.unet_config['stable_cascade_stage'] == 'b':
+    elif work_model.model.model_config.unet_config['stable_cascade_stage'] == 'b':
         compression = 4
         
         c_pos, c_neg = [], []
@@ -267,7 +273,7 @@ def sample_common(model, x, noise, noise_mask, noise_seed, tile_width, tile_heig
         negative = c_neg
         effnet_samples = positive[0][1]['stable_cascade_prior'].clone()
         effnet_interpolated = nn.functional.interpolate(effnet_samples.clone().to(torch.float16).to(device), size=torch.Size((x.shape[-2] // 2, x.shape[-1] // 2,)), mode='bilinear', align_corners=True)
-        effnet_full_map = model.model.diffusion_model.effnet_mapper(effnet_interpolated)
+        effnet_full_map = work_model.model.diffusion_model.effnet_mapper(effnet_interpolated)
     else:
         compression = 8 #sd1.5, sdxl, sd3, flux, etc
         
@@ -278,6 +284,17 @@ def sample_common(model, x, noise, noise_mask, noise_seed, tile_width, tile_heig
         
 
 
+    conds0 = \
+        {"positive": comfy.sampler_helpers.convert_cond(positive),
+         "negative": comfy.sampler_helpers.convert_cond(negative)}
+
+    conds = {}
+    for k in conds0:
+        conds[k] = list(map(lambda a: a.copy(), conds0[k]))
+
+    modelPatches, inference_memory = comfy.sampler_helpers.get_additional_models(conds, work_model.model_dtype())
+    comfy.model_management.load_models_gpu([work_model] + modelPatches, work_model.memory_required(noise.shape) + inference_memory)
+    
 
     cnets,             cnet_imgs         = cnets_and_cnet_imgs (positive, negative, x.shape)
     T2Is,              T2I_imgs          = T2Is_and_T2I_imgs   (positive, negative, x.shape)
@@ -291,9 +308,9 @@ def sample_common(model, x, noise, noise_mask, noise_seed, tile_width, tile_heig
     
     if tiling_strategy != 'padded':
         if noise_mask is not None:
-            x += sigmas[0] * noise_mask * model.model.process_latent_out(noise)
+            x += sigmas[0] * noise_mask * work_model.model.process_latent_out(noise)
         else:
-            x += sigmas[0] * model.model.process_latent_out(noise)
+            x += sigmas[0] * work_model.model.process_latent_out(noise)
     
 
 
@@ -314,7 +331,7 @@ def sample_common(model, x, noise, noise_mask, noise_seed, tile_width, tile_heig
             current_step[0] += step_inc
             preview_bytes = None
             if preview == True:
-                previewer = latent_preview.get_previewer(device, model.model.latent_format)
+                previewer = latent_preview.get_previewer(device, work_model.model.latent_format)
                 preview_bytes = previewer.decode_latent_to_preview_image("JPEG", x0)
             pbar.update_absolute(current_step[0], preview=preview_bytes)
             pbar_tqdm.update(step_inc)
@@ -409,16 +426,16 @@ def sample_common(model, x, noise, noise_mask, noise_seed, tile_width, tile_heig
                         cv_out_slice = clip_vision.encode_image(image_slice)
                         pos = cv_cond(cv_out_slice, pos, strength, noise_augment) 
                     
-                    if model.model.model_config.unet_config['stable_cascade_stage'] == 'up': #slice and dice stage UP guide
+                    if work_model.model.model_config.unet_config['stable_cascade_stage'] == 'up': #slice and dice stage UP guide
                         tile_h_cascade, tile_w_cascade, tile_h_len_cascade, tile_w_len_cascade = cascade_tiles(x, guide, tile_h, tile_w, tile_h_len, tile_w_len)
 
                         guide_slice = copy.deepcopy(guide)
                         guide_slice = tiling.get_slice(guide_slice.clone(), tile_h_cascade, tile_h_len_cascade, tile_w_cascade, tile_w_len_cascade).to(device)
-                        model.model.diffusion_model.set_x_lr(x_lr=guide_slice)
+                        work_model.model.diffusion_model.set_x_lr(x_lr=guide_slice)
                         
-                        tile_result = comfy.sample.sample_custom(model, tiled_noise, cfg, sampler, sigmas, pos, neg, tiled_latent, noise_mask=tiled_mask, callback=callback, disable_pbar=True, seed=noise_seed)  
+                        tile_result = comfy.sample.sample_custom(work_model, tiled_noise, cfg, sampler, sigmas, pos, neg, tiled_latent, noise_mask=tiled_mask, callback=callback, disable_pbar=True, seed=noise_seed)  
 
-                    elif model.model.model_config.unet_config['stable_cascade_stage'] == 'b':  #slice and dice stage B conditioning
+                    elif work_model.model.model_config.unet_config['stable_cascade_stage'] == 'b':  #slice and dice stage B conditioning
                         tile_h_cascade, tile_w_cascade, tile_h_len_cascade, tile_w_len_cascade = cascade_tiles(x, effnet_samples.clone(), tile_h, tile_w, tile_h_len, tile_w_len)
                         effnet_slice = tiling.get_slice(effnet_samples.clone(), tile_h_cascade, tile_h_len_cascade, tile_w_cascade, tile_w_len_cascade).to(device)
                         effnet_slices.append(effnet_slice)
@@ -428,9 +445,9 @@ def sample_common(model, x, noise, noise_mask, noise_seed, tile_width, tile_heig
                         effnet_map_slices.append(effnet_map_slice)
 
                     else: # not stage UP or stage B, default
-                        tile_result = comfy.sample.sample_custom(model, tiled_noise, cfg, sampler, sigmas, pos, neg, tiled_latent, noise_mask=tiled_mask, callback=callback, disable_pbar=True, seed=noise_seed)  
+                        tile_result = comfy.sample.sample_custom(work_model, tiled_noise, cfg, sampler, sigmas, pos, neg, tiled_latent, noise_mask=tiled_mask, callback=callback, disable_pbar=True, seed=noise_seed)  
 
-                    if model.model.model_config.unet_config['stable_cascade_stage'] != 'b':
+                    if work_model.model.model_config.unet_config['stable_cascade_stage'] != 'b':
                         tile_result = tile_result.cpu()
                         if tiled_mask is not None:
                             tiled_mask = tiled_mask.cpu()
@@ -453,7 +470,7 @@ def sample_common(model, x, noise, noise_mask, noise_seed, tile_width, tile_heig
                 if tiling_strategy == "random strict":   # IS THIS ONE LEVEL OVER??
                     x = x_next.clone()
             
-            if model.model.model_config.unet_config['stable_cascade_stage'] == 'b':
+            if work_model.model.model_config.unet_config['stable_cascade_stage'] == 'b':
 
                 for start_idx in range(0, len(tiled_latent_list), max_tile_batch_size):
                     
@@ -471,10 +488,10 @@ def sample_common(model, x, noise, noise_mask, noise_seed, tile_width, tile_heig
                     neg[0][1]['stable_cascade_prior'] = torch.cat(effnet_slices[start_idx:end_idx])
                     
                     effnet_map_slices_cat = torch.cat(effnet_map_slices[start_idx:end_idx])
-                    model.model.diffusion_model.set_effnet_batch_maps(effnet_map_slices_cat)
+                    work_model.model.diffusion_model.set_effnet_batch_maps(effnet_map_slices_cat)
                     #model.model.diffusion_model.set_effnet_batch_maps(None)
-                    tile_result = comfy.sample.sample_custom(model, tiled_noise_batch, cfg, sampler, sigmas, pos, neg, tiled_latent_batch, noise_mask=tiled_mask_batch, callback=partial(callback, step_inc=tiled_latent_batch.shape[0]), disable_pbar=True, seed=noise_seed)
-                    model.model.diffusion_model.set_effnet_batch_maps(None)
+                    tile_result = comfy.sample.sample_custom(work_model, tiled_noise_batch, cfg, sampler, sigmas, pos, neg, tiled_latent_batch, noise_mask=tiled_mask_batch, callback=partial(callback, step_inc=tiled_latent_batch.shape[0]), disable_pbar=True, seed=noise_seed)
+                    work_model.model.diffusion_model.set_effnet_batch_maps(None)
                     
                     for i in range(tile_result.shape[0]):
                         idx = start_idx + i
