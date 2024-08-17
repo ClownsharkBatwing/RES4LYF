@@ -215,6 +215,18 @@ def sample_common(model, x, noise, noise_mask, noise_seed, tile_width, tile_heig
 
     device = comfy.model_management.get_torch_device()
     steps = len(sigmas)-1
+    
+    conds0 = \
+        {"positive": comfy.sampler_helpers.convert_cond(positive),
+         "negative": comfy.sampler_helpers.convert_cond(negative)}
+
+    conds = {}
+    for k in conds0:
+        conds[k] = list(map(lambda a: a.copy(), conds0[k]))
+
+    modelPatches, inference_memory = comfy.sampler_helpers.get_additional_models(conds, model.model_dtype())
+    comfy.model_management.load_models_gpu([model] + modelPatches, model.memory_required(noise.shape) + inference_memory)
+    
 
     if model.model.model_config.unet_config['stable_cascade_stage'] == 'up':
         compression = 1
@@ -222,8 +234,15 @@ def sample_common(model, x, noise, noise_mask, noise_seed, tile_width, tile_heig
         guide_type = 'residual' if guide_type is None else guide_type
         guide = guide['samples'] if guide is not None else None
         guide_weights = initialize_or_scale(None, guide_weight, 10000)
-        model.model.diffusion_model.set_guide_weights(guide_weights=guide_weights)
-        model.model.diffusion_model.set_guide_type(guide_type=guide_type)
+        #model.model.diffusion_model.set_guide_weights(guide_weights=guide_weights)
+        #model.model.diffusion_model.set_guide_type(guide_type=guide_type)
+        patch = model.model_options.get("transformer_options", {}).get("patches_replace", {}).get("ultracascade", {}).get("main")  #CHANGED HERE
+        if patch is not None:
+            patch.update(x_lr=guide, guide_weights=guide_weights, guide_type=guide_type)
+        else:
+            model = model.clone()
+            model.model.diffusion_model.set_guide_weights(guide_weights=guide_weights)
+            model.model.diffusion_model.set_guide_type(guide_type=guide_type)
         
     elif model.model.model_config.unet_config['stable_cascade_stage'] == 'c':
         compression = 1
@@ -247,7 +266,8 @@ def sample_common(model, x, noise, noise_mask, noise_seed, tile_width, tile_heig
         positive = c_pos
         negative = c_neg
         effnet_samples = positive[0][1]['stable_cascade_prior'].clone()
-        
+        effnet_interpolated = nn.functional.interpolate(effnet_samples.clone().to(torch.float16).to(device), size=torch.Size((x.shape[-2] // 2, x.shape[-1] // 2,)), mode='bilinear', align_corners=True)
+        effnet_full_map = model.model.diffusion_model.effnet_mapper(effnet_interpolated)
     else:
         compression = 8 #sd1.5, sdxl, sd3, flux, etc
         
@@ -258,17 +278,6 @@ def sample_common(model, x, noise, noise_mask, noise_seed, tile_width, tile_heig
         
 
 
-    conds0 = \
-        {"positive": comfy.sampler_helpers.convert_cond(positive),
-         "negative": comfy.sampler_helpers.convert_cond(negative)}
-
-    conds = {}
-    for k in conds0:
-        conds[k] = list(map(lambda a: a.copy(), conds0[k]))
-
-    modelPatches, inference_memory = comfy.sampler_helpers.get_additional_models(conds, model.model_dtype())
-    comfy.model_management.load_models_gpu([model] + modelPatches, model.memory_required(noise.shape) + inference_memory)
-    
 
     cnets,             cnet_imgs         = cnets_and_cnet_imgs (positive, negative, x.shape)
     T2Is,              T2I_imgs          = T2Is_and_T2I_imgs   (positive, negative, x.shape)
@@ -277,8 +286,8 @@ def sample_common(model, x, noise, noise_mask, noise_seed, tile_width, tile_heig
     
     
     
-    tile_width = min(x.shape[-1] * compression, tile_width) 
-    tile_height = min(x.shape[2] * compression, tile_height)
+    tile_width  = min(x.shape[-1] * compression, tile_width) 
+    tile_height = min(x.shape[2]  * compression, tile_height)
     
     if tiling_strategy != 'padded':
         if noise_mask is not None:
@@ -316,7 +325,7 @@ def sample_common(model, x, noise, noise_mask, noise_seed, tile_width, tile_heig
             x_next = x.clone()
             
         for img_pass in tiles: # img_pass is a set of non-intersecting tiles
-            effnet_slices, tiled_noise_list, tiled_latent_list, tiled_mask_list, tile_h_list, tile_w_list, tile_h_len_list, tile_w_len_list = [],[],[],[],[],[],[],[]
+            effnet_slices, effnet_map_slices, tiled_noise_list, tiled_latent_list, tiled_mask_list, tile_h_list, tile_w_list, tile_h_len_list, tile_w_len_list = [],[],[],[],[],[],[],[],[]
 
             for i in range(len(img_pass)):     
                 for iteration, (tile_h, tile_h_len, tile_w, tile_w_len, tile_steps, tile_mask) in enumerate(img_pass[i]):
@@ -413,6 +422,10 @@ def sample_common(model, x, noise, noise_mask, noise_seed, tile_width, tile_heig
                         tile_h_cascade, tile_w_cascade, tile_h_len_cascade, tile_w_len_cascade = cascade_tiles(x, effnet_samples.clone(), tile_h, tile_w, tile_h_len, tile_w_len)
                         effnet_slice = tiling.get_slice(effnet_samples.clone(), tile_h_cascade, tile_h_len_cascade, tile_w_cascade, tile_w_len_cascade).to(device)
                         effnet_slices.append(effnet_slice)
+                        
+                        tile_h_cascade, tile_w_cascade, tile_h_len_cascade, tile_w_len_cascade = cascade_tiles(x, effnet_full_map.clone(), tile_h, tile_w, tile_h_len, tile_w_len)
+                        effnet_map_slice = tiling.get_slice(effnet_full_map.clone(), tile_h_cascade, tile_h_len_cascade, tile_w_cascade, tile_w_len_cascade).to(device)
+                        effnet_map_slices.append(effnet_map_slice)
 
                     else: # not stage UP or stage B, default
                         tile_result = comfy.sample.sample_custom(model, tiled_noise, cfg, sampler, sigmas, pos, neg, tiled_latent, noise_mask=tiled_mask, callback=callback, disable_pbar=True, seed=noise_seed)  
@@ -457,7 +470,11 @@ def sample_common(model, x, noise, noise_mask, noise_seed, tile_width, tile_heig
                     pos[0][1]['stable_cascade_prior'] = torch.cat(effnet_slices[start_idx:end_idx])
                     neg[0][1]['stable_cascade_prior'] = torch.cat(effnet_slices[start_idx:end_idx])
                     
+                    effnet_map_slices_cat = torch.cat(effnet_map_slices[start_idx:end_idx])
+                    model.model.diffusion_model.set_effnet_batch_maps(effnet_map_slices_cat)
+                    #model.model.diffusion_model.set_effnet_batch_maps(None)
                     tile_result = comfy.sample.sample_custom(model, tiled_noise_batch, cfg, sampler, sigmas, pos, neg, tiled_latent_batch, noise_mask=tiled_mask_batch, callback=partial(callback, step_inc=tiled_latent_batch.shape[0]), disable_pbar=True, seed=noise_seed)
+                    model.model.diffusion_model.set_effnet_batch_maps(None)
                     
                     for i in range(tile_result.shape[0]):
                         idx = start_idx + i
