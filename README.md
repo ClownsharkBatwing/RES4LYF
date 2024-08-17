@@ -50,7 +50,7 @@ gaussian
 
 uniform
 
-pyramid-cascade_B
+pyramid-cascade_B (designed specifically for use with Stable Cascade's "Stage B")
 
 pyramid-interpolated
 
