@@ -227,26 +227,27 @@ def sample_common(model, x, noise, noise_mask, noise_seed, tile_width, tile_heig
     modelPatches, inference_memory = comfy.sampler_helpers.get_additional_models(conds, model.model_dtype())
     comfy.model_management.load_models_gpu([model] + modelPatches, model.memory_required(noise.shape) + inference_memory)
 
-    if model.model.model_config.unet_config['stable_cascade_stage'] == 'up':
+    work_model = model.clone()
+
+    if work_model.model.model_config.unet_config['stable_cascade_stage'] == 'up':
         compression = 1
         guide_weight = 1.0 if guide_weight is None else guide_weight
         guide_type = 'residual' if guide_type is None else guide_type
         guide = guide['samples'] if guide is not None else None
-        patch = patch = model.model_options.get("transformer_options", {}).get("patches_replace", {}).get("ultracascade", {}).get("main")
+        patch = patch = work_model.model_options.get("transformer_options", {}).get("patches_replace", {}).get("ultracascade", {}).get("main")
         if patch is not None:
             patch.update(x_lr=guide, guide_weights=guide_weights, guide_type=guide_type)
         else:
-            model.model.diffusion_model.set_guide_weights(guide_weights=guide_weights)
-            model.model.diffusion_model.set_guide_type(guide_type=guide_type)
+            work_model.model.diffusion_model.set_guide_weights(guide_weights=guide_weights)
+            work_model.model.diffusion_model.set_guide_type(guide_type=guide_type)
 
         guide_weights = initialize_or_scale(None, guide_weight, 10000)
         #model.model.diffusion_model.set_guide_weights(guide_weights=guide_weights)
         #model.model.diffusion_model.set_guide_type(guide_type=guide_type)
-        patch = model.model_options.get("transformer_options", {}).get("patches_replace", {}).get("ultracascade", {}).get("main")  #CHANGED HERE
+        patch = work_model.model_options.get("transformer_options", {}).get("patches_replace", {}).get("ultracascade", {}).get("main")  #CHANGED HERE
         if patch is not None:
             patch.update(x_lr=guide, guide_weights=guide_weights, guide_type=guide_type)
         else:
-            work_model = model.clone()
             work_model.model.diffusion_model.set_guide_weights(guide_weights=guide_weights)
             work_model.model.diffusion_model.set_guide_type(guide_type=guide_type)
         
@@ -488,10 +489,10 @@ def sample_common(model, x, noise, noise_mask, noise_seed, tile_width, tile_heig
                     neg[0][1]['stable_cascade_prior'] = torch.cat(effnet_slices[start_idx:end_idx])
                     
                     effnet_map_slices_cat = torch.cat(effnet_map_slices[start_idx:end_idx])
-                    work_model.model.diffusion_model.set_effnet_batch_maps(effnet_map_slices_cat)
+                    work_model.model.diffusion_model.set_effnet_batch(effnet_map_slices_cat)
                     #model.model.diffusion_model.set_effnet_batch_maps(None)
                     tile_result = comfy.sample.sample_custom(work_model, tiled_noise_batch, cfg, sampler, sigmas, pos, neg, tiled_latent_batch, noise_mask=tiled_mask_batch, callback=partial(callback, step_inc=tiled_latent_batch.shape[0]), disable_pbar=True, seed=noise_seed)
-                    work_model.model.diffusion_model.set_effnet_batch_maps(None)
+                    work_model.model.diffusion_model.set_effnet_batch(None)
                     
                     for i in range(tile_result.shape[0]):
                         idx = start_idx + i
