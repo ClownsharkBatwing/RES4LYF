@@ -291,9 +291,9 @@ class UltraSharkSampler:
     
     def main(self, model, add_noise, noise_is_latent, noise_type, noise_seed, cfg, alpha, k, positive, negative, sampler, 
                sigmas, guide_type, guide_weight, latent_image, latent_noise=None, guide=None, guide_weights=None): 
-        
 
             if model.model.model_config.unet_config.get('stable_cascade_stage') == 'up':
+                model = model.clone()
                 x_lr = guide['samples'] if guide is not None else None
                 guide_weights = initialize_or_scale(None, guide_weight, 10000)
 
@@ -320,18 +320,9 @@ class UltraSharkSampler:
                     c_neg.append([torch.zeros_like(t[0]), d_neg])
                 positive = c_pos
                 negative = c_neg
-                
-        
         
             latent = latent_image
-            latent_image = latent["samples"]#.to(torch.float64)
-            #import pdb; pdb.set_trace()
-            
-            #guide_weights = initialize_or_scale(guide_weights, guide_weight, 10000)
-            #model.model.diffusion_model.set_guide_type(guide_type=guide_type)
-            #model.model.diffusion_model.set_x_lr(x_lr=x_lr['samples'])
-            #model.model.diffusion_model.set_guide_weights(guide_weights=guide_weights)
-
+            latent_image = latent["samples"]
             torch.manual_seed(noise_seed)
 
             if not add_noise:
@@ -351,9 +342,7 @@ class UltraSharkSampler:
                 noise_mask = latent["noise_mask"]
 
             x0_output = {}
-
             callback = latent_preview.prepare_callback(model, sigmas.shape[-1] - 1, x0_output)
-
             disable_pbar = False
 
             samples = comfy.sample.sample_custom(model, noise, cfg, sampler, sigmas, positive, negative, latent_image, 
@@ -368,8 +357,6 @@ class UltraSharkSampler:
             else:
                 out_denoised = out
                 
-            #model.model.diffusion_model.set_x_lr(x_lr=None)
-            #model.model.diffusion_model.set_guide_weights(None)
             return (out, out_denoised)
 
 
