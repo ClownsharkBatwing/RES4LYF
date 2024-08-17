@@ -441,9 +441,9 @@ def sample_common(model, x, noise, noise_mask, noise_seed, tile_width, tile_heig
                         effnet_slice = tiling.get_slice(effnet_samples.clone(), tile_h_cascade, tile_h_len_cascade, tile_w_cascade, tile_w_len_cascade).to(device)
                         effnet_slices.append(effnet_slice)
                         
-                        tile_h_cascade, tile_w_cascade, tile_h_len_cascade, tile_w_len_cascade = cascade_tiles(x, effnet_full_map.clone(), tile_h, tile_w, tile_h_len, tile_w_len)
-                        effnet_map_slice = tiling.get_slice(effnet_full_map.clone(), tile_h_cascade, tile_h_len_cascade, tile_w_cascade, tile_w_len_cascade).to(device)
-                        effnet_map_slices.append(effnet_map_slice)
+                        #tile_h_cascade, tile_w_cascade, tile_h_len_cascade, tile_w_len_cascade = cascade_tiles(x, effnet_full_map.clone(), tile_h, tile_w, tile_h_len, tile_w_len)
+                        #effnet_map_slice = tiling.get_slice(effnet_full_map.clone(), tile_h_cascade, tile_h_len_cascade, tile_w_cascade, tile_w_len_cascade).to(device)
+                        #effnet_map_slices.append(effnet_map_slice)
 
                     else: # not stage UP or stage B, default
                         tile_result = comfy.sample.sample_custom(work_model, tiled_noise, cfg, sampler, sigmas, pos, neg, tiled_latent, noise_mask=tiled_mask, callback=callback, disable_pbar=True, seed=noise_seed)  
@@ -488,11 +488,11 @@ def sample_common(model, x, noise, noise_mask, noise_seed, tile_width, tile_heig
                     pos[0][1]['stable_cascade_prior'] = torch.cat(effnet_slices[start_idx:end_idx])
                     neg[0][1]['stable_cascade_prior'] = torch.cat(effnet_slices[start_idx:end_idx])
                     
-                    effnet_map_slices_cat = torch.cat(effnet_map_slices[start_idx:end_idx])
-                    work_model.model.diffusion_model.set_effnet_batch(effnet_map_slices_cat)
+                    #effnet_map_slices_cat = torch.cat(effnet_map_slices[start_idx:end_idx])
+                    #work_model.model.diffusion_model.set_effnet_batch(effnet_map_slices_cat)
                     #model.model.diffusion_model.set_effnet_batch_maps(None)
                     tile_result = comfy.sample.sample_custom(work_model, tiled_noise_batch, cfg, sampler, sigmas, pos, neg, tiled_latent_batch, noise_mask=tiled_mask_batch, callback=partial(callback, step_inc=tiled_latent_batch.shape[0]), disable_pbar=True, seed=noise_seed)
-                    work_model.model.diffusion_model.set_effnet_batch(None)
+                    #work_model.model.diffusion_model.set_effnet_batch(None)
                     
                     for i in range(tile_result.shape[0]):
                         idx = start_idx + i
