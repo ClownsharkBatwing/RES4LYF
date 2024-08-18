@@ -91,7 +91,10 @@ NODE_CLASS_MAPPINGS = {
     
     "Film Grain": images.Film_Grain,
     "Frequency Separation Hard Light": images.Frequency_Separation_Hard_Light,
-
+    "Frequency Separation Hard Light LAB": images.Frequency_Separation_Hard_Light_LAB,
+    
+    "Image Channels LAB": images.Image_Channels_LAB,
+    "Image Median Blur": images.ImageMedianBlur,
 
     "UNetSave": models.UNetSave,
 }
