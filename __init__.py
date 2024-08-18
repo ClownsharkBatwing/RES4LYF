@@ -54,7 +54,7 @@ NODE_CLASS_MAPPINGS = {
 
     "Sigmas Recast": sigmas.set_precision_sigmas,
 
-    "Sigmas Interpolate": sigmas.sigmas_interpolate,
+    #Sigmas Interpolate": sigmas.sigmas_interpolate,
     "Sigmas Truncate": sigmas.sigmas_truncate,
     "Sigmas Start": sigmas.sigmas_start,
     "Sigmas Split": sigmas.sigmas_split,
