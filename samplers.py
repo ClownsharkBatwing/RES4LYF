@@ -295,7 +295,7 @@ class UltraSharkSampler:
             if model.model.model_config.unet_config.get('stable_cascade_stage') == 'up':
                 model = model.clone()
                 x_lr = guide['samples'] if guide is not None else None
-                guide_weights = initialize_or_scale(None, guide_weight, 10000)
+                guide_weights = initialize_or_scale(guide_weights, guide_weight, 10000)
 
                 patch = patch = model.model_options.get("transformer_options", {}).get("patches_replace", {}).get("ultracascade", {}).get("main")
                 if patch is not None:
