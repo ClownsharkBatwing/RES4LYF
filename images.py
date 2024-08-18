@@ -65,3 +65,55 @@ class Film_Grain: #Rewrite of the WAS Film Grain node, much improved speed and e
         img_highlights = enhancer.enhance(highlights)
 
         return img_highlights
+
+
+def color_dodge_blend(base, blend):
+    return torch.clamp(base / (1 - blend + 1e-8), 0, 1)
+    
+def color_scorch_blend(base, blend):
+    return torch.clamp(1 - (1 - base) / (1 - blend + 1e-8), 0, 1)
+
+def divide_blend(base, blend):
+    return torch.clamp(base / (blend + 1e-8), 0, 1)
+
+def color_burn_blend(base, blend):
+    return torch.clamp(1 - (1 - base) / (blend + 1e-8), 0, 1)
+
+def hard_light_blend(base, blend):
+    return torch.where(blend <= 0.5, 2 * base * blend, 1 - 2 * (1 - base) * (1 - blend))
+
+def hard_light_freq_sep(original, low_pass):
+    high_pass = (color_burn_blend(original, (1 - low_pass)) + divide_blend(original, low_pass)) / 2
+    return high_pass
+
+class Frequency_Separation_Hard_Light:
+    def __init__(self):
+        pass
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "optional": {
+                "high_pass": ("IMAGE",),
+                "original": ("IMAGE",),
+                "low_pass": ("IMAGE",),
+            },
+            "required": {
+            },
+        }
+    RETURN_TYPES = ("IMAGE","IMAGE","IMAGE",)
+    RETURN_NAMES = ("high_pass", "original", "low_pass",)
+    FUNCTION = "main"
+
+    CATEGORY = "UltraCascade"
+
+    def main(self, high_pass=None, original=None, low_pass=None):
+
+        if high_pass is None:
+            high_pass = hard_light_freq_sep(original, low_pass)
+        
+        if original is None:
+            original = hard_light_blend(low_pass, high_pass)
+
+        return (high_pass, original, low_pass,)
+

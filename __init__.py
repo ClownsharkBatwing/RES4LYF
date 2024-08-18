@@ -5,6 +5,7 @@ from . import sigmas
 from . import latents
 from . import conditioning
 from . import images
+from . import models
 
 import torch
 
@@ -88,9 +89,10 @@ NODE_CLASS_MAPPINGS = {
     "StableCascade_StageB_Conditioning64": conditioning.StableCascade_StageB_Conditioning64,
     
     "Film Grain": images.Film_Grain,
+    "Frequency Separation Hard Light": images.Frequency_Separation_Hard_Light,
 
 
-    #"UNetSave": latents.UnetSave,
+    "UNetSave": models.UNetSave,
 }
 __all__ = ['NODE_CLASS_MAPPINGS']
 
