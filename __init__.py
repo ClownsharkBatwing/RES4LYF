@@ -63,7 +63,6 @@ NODE_CLASS_MAPPINGS = {
     "EmptyLatentImage64": latents.EmptyLatentImage64,
     "EmptyLatentImageCustom": latents.EmptyLatentImageCustom,
     "StableCascade_StageC_VAEEncode_Exact": latents.StableCascade_StageC_VAEEncode_Exact,
-    "StableCascade_StageC_VAEEncode_Exact_Tiled": latents.StableCascade_StageC_VAEEncode_Exact_Tiled,
 
     "LatentPhaseMagnitude": latents.LatentPhaseMagnitude,
     "LatentPhaseMagnitudeMultiply": latents.LatentPhaseMagnitudeMultiply,
