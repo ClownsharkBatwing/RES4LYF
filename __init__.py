@@ -129,7 +129,7 @@ NODE_CLASS_MAPPINGS = {
     
     "Image Channels LAB": images.Image_Channels_LAB,
     "Image Median Blur": images.ImageMedianBlur,
-    "Image Smudge Blur": images.FastSmudgeBlur,
+    #"Image Smudge Blur": images.FastSmudgeBlur,
 
     "UNetSave": models.UNetSave,
 }
