@@ -16,6 +16,8 @@ extra_samplers.add_samplers()
 NODE_CLASS_MAPPINGS = {
     "ConditioningAverageScheduler": conditioning.ConditioningAverageScheduler,
     "ConditioningMultiply": conditioning.ConditioningMultiply,
+    "ConditioningToBase64": conditioning.ConditioningToBase64,
+    "Base64ToConditioning": conditioning.Base64ToConditioning,
 
     "LatentNoiseList": latents.LatentNoiseList,
     #"LatentBatch_channels_offset": latents.LatentBatch_channels_offset,
@@ -33,6 +35,7 @@ NODE_CLASS_MAPPINGS = {
     "EmptyLatentImage64": latents.EmptyLatentImage64,
     "EmptyLatentImageCustom": latents.EmptyLatentImageCustom,
     "StableCascade_StageC_VAEEncode_Exact": latents.StableCascade_StageC_VAEEncode_Exact,
+    "StableCascade_StageC_VAEEncode_Exact_Tiled": latents.StableCascade_StageC_VAEEncode_Exact_Tiled,
 
     "LatentPhaseMagnitude": latents.LatentPhaseMagnitude,
     "LatentPhaseMagnitudeMultiply": latents.LatentPhaseMagnitudeMultiply,
@@ -90,11 +93,16 @@ NODE_CLASS_MAPPINGS = {
     "StableCascade_StageB_Conditioning64": conditioning.StableCascade_StageB_Conditioning64,
     
     "Film Grain": images.Film_Grain,
+    "Frequency Separation Vivid Light": images.Frequency_Separation_Vivid_Light,
     "Frequency Separation Hard Light": images.Frequency_Separation_Hard_Light,
+    "Frequency Separation FFT": images.Frequency_Separation_FFT,
+    "Frequency Separation Wavelet": images.Frequency_Separation_Wavelet,
+    "Frequency Separation TV": images.Frequency_Separation_TV,
     "Frequency Separation Hard Light LAB": images.Frequency_Separation_Hard_Light_LAB,
     
     "Image Channels LAB": images.Image_Channels_LAB,
     "Image Median Blur": images.ImageMedianBlur,
+    "Image Smudge Blur": images.FastSmudgeBlur,
 
     "UNetSave": models.UNetSave,
 }

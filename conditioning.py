@@ -1,4 +1,6 @@
 import torch
+import base64
+import pickle # used strictly for serializing conditioning in the ConditioningToBase64 and Base64ToConditioning nodes for API use. (Offloading T5 processing to another machine to avoid model shuffling.)
 
 import comfy.samplers
 import comfy.sample
@@ -35,7 +37,42 @@ def multiply_nested_tensors(structure, scalar):
         return structure
 
 
-class ConditioningMultiply :
+#"text_a": ("STRING", {"forceInput": True}),
+class ConditioningToBase64:
+    @classmethod
+    def INPUT_TYPES(s):
+        return {"required": {"conditioning": ("CONDITIONING", ), 
+                             }}
+    RETURN_TYPES = ("STRING",)
+    RETURN_NAMES = ("conditioning_base64",)
+    FUNCTION = "main"
+
+    CATEGORY = "conditioning"
+
+    def main(self, conditioning):
+        conditioning_pickle = pickle.dumps(conditioning)
+        conditioning_base64 = base64.b64encode(conditioning_pickle).decode('utf-8')
+        return (conditioning_base64,)
+
+
+class Base64ToConditioning:
+    @classmethod
+    def INPUT_TYPES(s):
+        return {"required": {"conditioning_base64": ("STRING", {"forceInput": True}), 
+                             }}
+    RETURN_TYPES = ("CONDITIONING",)
+    RETURN_NAMES = ("conditioning",)
+    FUNCTION = "main"
+
+    CATEGORY = "conditioning"
+
+    def main(self, conditioning_base64):
+        conditioning_pickle = base64.b64decode(conditioning_base64)
+        conditioning = pickle.loads(conditioning_pickle)
+        return (conditioning,)
+
+
+class ConditioningMultiply:
     @classmethod
     def INPUT_TYPES(s):
         return {"required": {"conditioning": ("CONDITIONING", ), 
