@@ -120,11 +120,11 @@ NODE_CLASS_MAPPINGS = {
     "StableCascade_StageB_Conditioning64": conditioning.StableCascade_StageB_Conditioning64,
     
     "Film Grain": images.Film_Grain,
-    "Frequency Separation Vivid Light": images.Frequency_Separation_Vivid_Light,
+    #"Frequency Separation Vivid Light": images.Frequency_Separation_Vivid_Light,
     "Frequency Separation Hard Light": images.Frequency_Separation_Hard_Light,
     "Frequency Separation FFT": images.Frequency_Separation_FFT,
-    "Frequency Separation Wavelet": images.Frequency_Separation_Wavelet,
-    "Frequency Separation TV": images.Frequency_Separation_TV,
+    #"Frequency Separation Wavelet": images.Frequency_Separation_Wavelet,
+    #"Frequency Separation TV": images.Frequency_Separation_TV,
     "Frequency Separation Hard Light LAB": images.Frequency_Separation_Hard_Light_LAB,
     
     "Image Channels LAB": images.Image_Channels_LAB,
