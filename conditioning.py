@@ -9,6 +9,7 @@ import node_helpers
 
 import functools
 from .noise_classes import precision_tool
+from copy import deepcopy
 
 def initialize_or_scale(tensor, value, steps):
     if tensor is None:
@@ -37,39 +38,69 @@ def multiply_nested_tensors(structure, scalar):
         return structure
 
 
-#"text_a": ("STRING", {"forceInput": True}),
 class ConditioningToBase64:
     @classmethod
     def INPUT_TYPES(s):
-        return {"required": {"conditioning": ("CONDITIONING", ), 
-                             }}
+        return {
+            "required": {
+                "conditioning": ("CONDITIONING",),
+            },
+            "hidden": {
+                "unique_id": "UNIQUE_ID",
+                "extra_pnginfo": "EXTRA_PNGINFO",
+            },
+        }
+
     RETURN_TYPES = ("STRING",)
-    RETURN_NAMES = ("conditioning_base64",)
-    FUNCTION = "main"
+    FUNCTION = "notify"
+    OUTPUT_NODE = True
+    OUTPUT_IS_LIST = (True,)
 
     CATEGORY = "conditioning"
 
-    def main(self, conditioning):
+    def notify(self, unique_id=None, extra_pnginfo=None, conditioning=None):
         conditioning_pickle = pickle.dumps(conditioning)
         conditioning_base64 = base64.b64encode(conditioning_pickle).decode('utf-8')
-        return (conditioning_base64,)
+        text = [conditioning_base64]
+        
+        if unique_id is not None and extra_pnginfo is not None:
+            if not isinstance(extra_pnginfo, list):
+                print("Error: extra_pnginfo is not a list")
+            elif (
+                not isinstance(extra_pnginfo[0], dict)
+                or "workflow" not in extra_pnginfo[0]
+            ):
+                print("Error: extra_pnginfo[0] is not a dict or missing 'workflow' key")
+            else:
+                workflow = extra_pnginfo[0]["workflow"]
+                node = next(
+                    (x for x in workflow["nodes"] if str(x["id"]) == str(unique_id[0])),
+                    None,
+                )
+                if node:
+                    node["widgets_values"] = [text]
 
+        return {"ui": {"text": text}, "result": (text,)}
 
 class Base64ToConditioning:
     @classmethod
     def INPUT_TYPES(s):
-        return {"required": {"conditioning_base64": ("STRING", {"forceInput": True}), 
-                             }}
+        return {
+            "required": {
+                "data": ("STRING", {"default": ""}),
+            }
+        }
     RETURN_TYPES = ("CONDITIONING",)
     RETURN_NAMES = ("conditioning",)
     FUNCTION = "main"
 
     CATEGORY = "conditioning"
 
-    def main(self, conditioning_base64):
-        conditioning_pickle = base64.b64decode(conditioning_base64)
+    def main(self, data):
+        conditioning_pickle = base64.b64decode(data)
         conditioning = pickle.loads(conditioning_pickle)
         return (conditioning,)
+    
 
 
 class ConditioningMultiply:

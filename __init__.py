@@ -6,8 +6,36 @@ from . import latents
 from . import conditioning
 from . import images
 from . import models
+from .res4lyf import init, get_ext_dir
 
 import torch
+
+import os
+import shutil
+
+"""def get_ext_dir(subpath=None, mkdir=False):
+    dir = os.path.dirname(__file__)
+    if subpath is not None:
+        dir = os.path.join(dir, subpath)
+
+    dir = os.path.abspath(dir)
+
+    if mkdir and not os.path.exists(dir):
+        os.makedirs(dir)
+    return dir
+
+def get_web_ext_dir():
+    return os.path.abspath(os.path.join(os.path.dirname(__file__), "../../../web/extensions/res4lyf"))
+
+def install_js():
+    src_dir = get_ext_dir("web/js")
+    dst_dir = get_web_ext_dir()
+    if not os.path.exists(dst_dir):
+        os.makedirs(dst_dir)
+    if not os.path.islink(dst_dir):
+        shutil.copytree(src_dir, dst_dir, dirs_exist_ok=True)
+
+install_js()"""
 
 extra_samplers.add_samplers()
 
@@ -106,7 +134,7 @@ NODE_CLASS_MAPPINGS = {
 
     "UNetSave": models.UNetSave,
 }
-__all__ = ['NODE_CLASS_MAPPINGS']
 
-
+WEB_DIRECTORY = "./web"
+__all__ = ["NODE_CLASS_MAPPINGS",  "WEB_DIRECTORY"]
 
