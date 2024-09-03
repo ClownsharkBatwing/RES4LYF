@@ -45,8 +45,10 @@ NODE_CLASS_MAPPINGS = {
     "ConditioningAverageScheduler": conditioning.ConditioningAverageScheduler,
     "ConditioningMultiply": conditioning.ConditioningMultiply,
     "ConditioningToBase64": conditioning.ConditioningToBase64,
+    "Conditioning Recast": conditioning.Conditioning_Recast,
     "Base64ToConditioning": conditioning.Base64ToConditioning,
 
+    "LatentNoised": samplers.LatentNoised,
     "LatentNoiseList": latents.LatentNoiseList,
     #"LatentBatch_channels_offset": latents.LatentBatch_channels_offset,
     "LatentBatch_channels": latents.LatentBatch_channels,
@@ -130,7 +132,9 @@ NODE_CLASS_MAPPINGS = {
     
     "Image Channels LAB": images.Image_Channels_LAB,
     "Image Median Blur": images.ImageMedianBlur,
+    "Image Pair Split": images.Image_Pair_Split,
     #"Image Smudge Blur": images.FastSmudgeBlur,
+    "Image Crop Location Exact": images.Image_Crop_Location_Exact,
 
     "UNetSave": models.UNetSave,
 }

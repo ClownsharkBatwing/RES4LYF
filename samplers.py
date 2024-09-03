@@ -216,6 +216,52 @@ class ClownSampler:
         )
         return (sampler, )
 
+class LatentNoised:
+    @classmethod
+    def INPUT_TYPES(s):
+        return {"required":
+                    {
+                    "add_noise": ("BOOLEAN", {"default": True}),
+                    "noise_is_latent": ("BOOLEAN", {"default": False}),
+                    "noise_type": (NOISE_GENERATOR_NAMES, ),
+                    "alpha": ("FLOAT", {"default": 1.0, "min": -10000.0, "max": 10000.0, "step":0.1, "round": 0.01}),
+                    "k": ("FLOAT", {"default": 1.0, "min": -10000.0, "max": 10000.0, "step":2.0, "round": 0.01}),
+                    "noise_seed": ("INT", {"default": 0, "min": 0, "max": 0xffffffffffffffff}),
+                    "latent_image": ("LATENT", ),               
+                     },
+                "optional": 
+                    {"latent_noise": ("LATENT", ),
+                    }
+                }
+
+    RETURN_TYPES = ("LATENT",)
+    RETURN_NAMES = ("latent_noised",)
+
+    FUNCTION = "main"
+
+    CATEGORY = "sampling/custom_sampling"
+    
+    def main(self, add_noise, noise_is_latent, noise_type, noise_seed, alpha, k, latent_image, latent_noise=None): 
+            latent = latent_image
+            latent_image = latent["samples"]
+
+            torch.manual_seed(noise_seed)
+
+            if not add_noise:
+                noise = torch.zeros(latent_image.size(), dtype=latent_image.dtype, layout=latent_image.layout, device="cpu")
+            elif latent_noise is None:
+                batch_inds = latent["batch_index"] if "batch_index" in latent else None
+                noise = prepare_noise(latent_image, noise_seed, noise_type, batch_inds, alpha, k)
+            else:
+                noise = latent_noise["samples"]
+
+            if noise_is_latent: #add noise and latent together and normalize --> noise
+                noise += latent_image.cpu()
+                noise.sub_(noise.mean()).div_(noise.std())
+
+            return ({'samples': noise},)
+
+
 class SharkSampler:
     @classmethod
     def INPUT_TYPES(s):
