@@ -2,6 +2,8 @@ import comfy.samplers
 import comfy.sample
 import comfy.sampler_helpers
 import comfy.utils
+    
+import itertools
 
 import torch
 import math
@@ -37,6 +39,7 @@ class set_precision:
             "required": {
                     "latent_image": ("LATENT", ),      
                     "precision": (["16", "32", "64"], ),
+                    "set_default": ("BOOLEAN", {"default": False})
                      },
                 }
 
@@ -46,16 +49,19 @@ class set_precision:
 
     FUNCTION = "main"
 
-    def main(self, precision="32", latent_image=None):
+    def main(self, precision="32", latent_image=None, set_default=False):
         match precision:
             case "16":
-                torch.set_default_dtype(torch.float16)
+                if set_default is True:
+                    torch.set_default_dtype(torch.float16)
                 x = latent_image["samples"].to(torch.float16)
             case "32":
-                torch.set_default_dtype(torch.float32)
+                if set_default is True:
+                    torch.set_default_dtype(torch.float32)
                 x = latent_image["samples"].to(torch.float32)
             case "64":
-                torch.set_default_dtype(torch.float64)
+                if set_default is True:
+                    torch.set_default_dtype(torch.float64)
                 x = latent_image["samples"].to(torch.float64)
         return ({"samples": x}, )
     
@@ -702,15 +708,99 @@ class StableCascade_StageC_VAEEncode_Exact:
     def generate(self, image, vae, width, height):
         img_width = image.shape[-2]
         img_height = image.shape[-3]
-        out_width = (width) * vae.downscale_ratio
+        out_width = (width) * vae.downscale_ratio #downscale_ratio = 32
         out_height = (height) * vae.downscale_ratio
+        #movedim(-1,1) goes from 1,1024,1024,3 to 1,3,1024,1024
+        s = comfy.utils.common_upscale(image.movedim(-1,1), out_width, out_height, "lanczos", "center").movedim(1,-1)
 
-        s = comfy.utils.common_upscale(image.movedim(-1,1), out_width, out_height, "bicubic", "center").movedim(1,-1)
-
-        c_latent = vae.encode(s[:,:,:,:3])
+        c_latent = vae.encode(s[:,:,:,:3]) #to slice off alpha channel?
         return ({
             "samples": c_latent,
         },)
+        
+
+
+class StableCascade_StageC_VAEEncode_Exact_Tiled:
+    def __init__(self, device="cpu"):
+        self.device = device
+
+    @classmethod
+    def INPUT_TYPES(s):
+        return {"required": {
+            "image": ("IMAGE",),
+            "vae": ("VAE", ),
+            "tile_size": ("INT", {"default": 512, "min": 320, "max": 4096, "step": 64}),
+            "overlap": ("INT", {"default": 16, "min": 8, "max": 128, "step": 8}),
+        }}
+    RETURN_TYPES = ("LATENT",)
+    RETURN_NAMES = ("stage_c",)
+    FUNCTION = "generate"
+
+    CATEGORY = "latent/stable_cascade"
+
+    def generate(self, image, vae, tile_size, overlap):
+        img_width = image.shape[-2]
+        img_height = image.shape[-3]
+        upscale_amount = vae.downscale_ratio  # downscale_ratio = 32
+
+        # Prepare the image for tiling (move channels to the correct position).
+        image = image.movedim(-1, 1)  # Change shape from (B, H, W, C) to (B, C, H, W)
+
+        # Define the encoding function for tiled processing
+        encode_fn = lambda img: vae.encode(img.to(vae.device)).to("cpu")
+
+        # Use the tiled_scale_multidim function for encoding.
+        c_latent = tiled_scale_multidim(
+            image, encode_fn,
+            tile=(tile_size // 8, tile_size // 8),
+            overlap=overlap,
+            upscale_amount=upscale_amount,
+            out_channels=16,  # Assume VAE outputs num_latent_channels
+            output_device=self.device
+        )
+
+        return ({
+            "samples": c_latent,
+        },)
+
+@torch.inference_mode()
+def tiled_scale_multidim(samples, function, tile=(64, 64), overlap=8, upscale_amount=4, out_channels=3, output_device="cpu", pbar=None):
+    dims = len(tile)
+    output_shape = [samples.shape[0], out_channels] + list(map(lambda a: round(a * upscale_amount), samples.shape[2:]))
+    output = torch.zeros(output_shape, device=output_device)
+
+    for b in range(samples.shape[0]):
+        for it in itertools.product(*map(lambda a: range(0, a[0], a[1] - overlap), zip(samples.shape[2:], tile))):
+            s_in = samples[b:b+1]
+            upscaled = []
+
+            for d in range(dims):
+                pos = max(0, min(s_in.shape[d + 2] - overlap, it[d]))
+                l = min(tile[d], s_in.shape[d + 2] - pos)
+                s_in = s_in.narrow(d + 2, pos, l)
+                upscaled.append(round(pos * upscale_amount))
+
+            ps = function(s_in).to(output_device)
+            mask = torch.ones_like(ps)
+            feather = round(overlap * upscale_amount)
+
+            for t in range(feather):
+                for d in range(2, dims + 2):
+                    mask.narrow(d, t, 1).mul_((1.0 / feather) * (t + 1))
+                    mask.narrow(d, mask.shape[d] - 1 - t, 1).mul_((1.0 / feather) * (t + 1))
+
+            o = output[b:b+1]
+            for d in range(dims):
+                o = o.narrow(d + 2, upscaled[d], mask.shape[d + 2])
+
+            o.add_(ps * mask)
+
+            if pbar is not None:
+                pbar.update(1)
+
+    return output
+
+    
 
 
 class EmptyLatentImageCustom:
@@ -1384,42 +1474,3 @@ class latent_normalize_channels:
 
         #import pdb; pdb.set_trace()
         return ({"samples": x},)
-
-
-
-
-"""class UNetSave:
-    def __init__(self):
-        self.output_dir = folder_paths.get_output_directory()
-
-    @classmethod
-    def INPUT_TYPES(s):
-        return {"required": { "vae": ("VAE",),
-                              "filename_prefix": ("STRING", {"default": "vae/ComfyUI_vae"}),},
-                "hidden": {"prompt": "PROMPT", "extra_pnginfo": "EXTRA_PNGINFO"},}
-    RETURN_TYPES = ()
-    FUNCTION = "save"
-    OUTPUT_NODE = True
-
-    CATEGORY = "advanced/model_merging"
-
-    def save(self, vae, filename_prefix, prompt=None, extra_pnginfo=None):
-        full_output_folder, filename, counter, subfolder, filename_prefix = folder_paths.get_save_image_path(filename_prefix, self.output_dir)
-        prompt_info = ""
-        if prompt is not None:
-            prompt_info = json.dumps(prompt)
-
-        metadata = {}
-        if not args.disable_metadata:
-            metadata["prompt"] = prompt_info
-            if extra_pnginfo is not None:
-                for x in extra_pnginfo:
-                    metadata[x] = json.dumps(extra_pnginfo[x])
-
-        output_checkpoint = f"{filename}_{counter:05}_.safetensors"
-        output_checkpoint = os.path.join(full_output_folder, output_checkpoint)
-
-        comfy.utils.save_torch_file(vae.get_sd(), output_checkpoint, metadata=metadata)
-        return {}"""
-    
-    

@@ -254,6 +254,7 @@ class ConditioningAverageScheduler:
         return (cond,)
 
 
+
 class StableCascade_StageB_Conditioning64:
     @classmethod
     def INPUT_TYPES(s):
@@ -276,4 +277,30 @@ class StableCascade_StageB_Conditioning64:
             c.append(n)
         return (c, )
 
+
+
+class Conditioning_Recast:
+    @classmethod
+    def INPUT_TYPES(s):
+        return {"required": { "cond_0": ("CONDITIONING",),
+                             },
+                "optional": { "cond_1": ("CONDITIONING",),}
+                }
+    RETURN_TYPES = ("CONDITIONING","CONDITIONING",)
+    RETURN_NAMES = ("cond_0_recast","cond_1_recast",)
+
+    FUNCTION = "main"
+
+    CATEGORY = "conditioning/"
+
+    @precision_tool.cast_tensor
+    def main(self, cond_0, cond_1 = None):
+        cond_0[0][0] = cond_0[0][0].to(torch.float64)
+        cond_0[0][1]["pooled_output"] = cond_0[0][1]["pooled_output"].to(torch.float64)
+        
+        if cond_1 is not None:
+            cond_1[0][0] = cond_1[0][0].to(torch.float64)
+            cond_1[0][1]["pooled_output"] = cond_1[0][1]["pooled_output"].to(torch.float64)
+
+        return (cond_0, cond_1,)
 
