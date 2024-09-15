@@ -45,7 +45,7 @@ NODE_CLASS_MAPPINGS = {
     "ConditioningAverageScheduler": conditioning.ConditioningAverageScheduler,
     "ConditioningMultiply": conditioning.ConditioningMultiply,
     "ConditioningToBase64": conditioning.ConditioningToBase64,
-    "Conditioning Recast": conditioning.Conditioning_Recast,
+    "Conditioning Recast FP64": conditioning.Conditioning_Recast64,
     "Base64ToConditioning": conditioning.Base64ToConditioning,
 
     "LatentNoised": samplers.LatentNoised,
@@ -56,10 +56,12 @@ NODE_CLASS_MAPPINGS = {
     "LatentNoiseBatch_fractal": latents.LatentNoiseBatch_fractal,
     "LatentNoiseBatch_gaussian": latents.LatentNoiseBatch_gaussian,
     "LatentNoiseBatch_gaussian_channels": latents.LatentNoiseBatch_gaussian_channels,
+    
     "Latent to Cuda": latents.latent_to_cuda,
     "Latent Batcher": latents.latent_batch,
     "Latent Normalize Channels": latents.latent_normalize_channels,
     "Set Precision": latents.set_precision,
+    "Set Precision Universal": latents.set_precision_universal,
     "Set Precision Advanced": latents.set_precision_advanced,
     "LatentNoiseBatch_perlin": latents.LatentNoiseBatch_perlin,
     "EmptyLatentImage64": latents.EmptyLatentImage64,
@@ -71,6 +73,7 @@ NODE_CLASS_MAPPINGS = {
     "LatentPhaseMagnitudeOffset": latents.LatentPhaseMagnitudeOffset,
     "LatentPhaseMagnitudePower": latents.LatentPhaseMagnitudePower,
 
+    "AdvancedNoise": samplers.AdvancedNoise,
     "ClownGuides": samplers.ClownGuides,
     "ClownSampler": samplers.ClownSampler,
     "SharkSampler": samplers.SharkSampler,
@@ -83,7 +86,6 @@ NODE_CLASS_MAPPINGS = {
     "SamplerDPMPP_2S_Ancestral_Advanced": samplers.SamplerDPMPP_2S_Ancestral_Advanced,
     "SamplerDPMPP_2M_SDE_Advanced": samplers.SamplerDPMPP_2M_SDE_Advanced,
     "SamplerDPMPP_3M_SDE_Advanced": samplers.SamplerDPMPP_3M_SDE_Advanced,
-    "AdvancedNoise": samplers.AdvancedNoise,
 
     "Sigmas Recast": sigmas.set_precision_sigmas,
 

@@ -36,14 +36,14 @@ class AdvancedNoise:
                 "noise_type": (NOISE_GENERATOR_NAMES, ),
             },
         }
-    
+
     RETURN_TYPES = ("NOISE",)
     FUNCTION = "get_noise"
     CATEGORY = "sampling/custom_sampling/noise"
-    
+
     def get_noise(self, noise_seed, noise_type, alpha, k):
         return (Noise_RandomNoise(noise_seed, noise_type, alpha, k),)
-    
+
 class Noise_RandomNoise:
     def __init__(self, seed, noise_type, alpha, k):
         self.seed = seed
@@ -466,7 +466,7 @@ class SamplerDPMPP_SDE_ADVANCED:
 
     def get_sampler(self, eta, s_noise, r, alpha, k, noise_device, noise_sampler_type, alphas=None):
         if noise_device == 'cpu':
-            sampler_name = "dpmpp_sde_advanced"
+            sampler_name = "dpmpp_sde_advanced_RF"
         else:
             sampler_name = "dpmpp_sde_gpu_advanced"
 
@@ -523,17 +523,64 @@ class SamplerEulerAncestral_Advanced:
         return {"required":
                     {"eta": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 100.0, "step":0.01, "round": False}),
                      "s_noise": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 100.0, "step":0.01, "round": False}),
+                     "alpha": ("FLOAT", {"default": 0.0, "min": -10000.0, "max": 10000.0, "step":0.1, "round": False}),
+                     "k": ("FLOAT", {"default": 1.0, "min": -10000.0, "max": 10000.0, "step":2.0, "round": False}),
                       "noise_sampler_type": (NOISE_GENERATOR_NAMES, ),
-                      }
+                      },
+                    "optional": 
+                    {
+                        "alphas": ("SIGMAS", ),
+                    }  
                }
     RETURN_TYPES = ("SAMPLER",)
     CATEGORY = "sampling/custom_sampling/samplers"
 
     FUNCTION = "get_sampler"
 
-    def get_sampler(self, eta, s_noise, noise_sampler_type):
-        sampler = comfy.samplers.ksampler("euler_ancestral_advanced", {"eta": eta, "s_noise": s_noise, "noise_sampler_type": noise_sampler_type})
+    def get_sampler(self, eta, s_noise, alpha, k, noise_sampler_type, alphas=None):
+        
+        steps = 10000
+        alphas = initialize_or_scale(alphas, alpha, steps)
+
+        sampler = comfy.samplers.ksampler("euler_ancestral_advanced", {"eta": eta, "s_noise": s_noise, "alpha": alphas, "k": k, "noise_sampler_type": noise_sampler_type})
         return (sampler, )
+    
+    
+
+class SamplerDPMPP_SDE_ADVANCED:
+    @classmethod
+    def INPUT_TYPES(s):
+        return {"required":
+                    {"eta":     ("FLOAT", {"default": 1.0, "min": 0.0,      "max": 100.0,   "step":0.01, "round": False}),
+                     "s_noise": ("FLOAT", {"default": 1.0, "min": 0.0,      "max": 100.0,   "step":0.01, "round": False}),
+                     "r":       ("FLOAT", {"default": 0.5, "min": 0.0,      "max": 100.0,   "step":0.01, "round": False}),
+                     "alpha":   ("FLOAT", {"default": 0.0, "min": -10000.0, "max": 10000.0, "step":0.1,  "round": False}),
+                     "k":       ("FLOAT", {"default": 1.0, "min": -10000.0, "max": 10000.0, "step":2.0,  "round": False}),
+                     "noise_device": (['gpu', 'cpu'], ),
+                     "noise_sampler_type": (NOISE_GENERATOR_NAMES, ),
+                      },
+                    "optional": 
+                    {
+                        "alphas": ("SIGMAS", ),
+                    }  
+               }
+    RETURN_TYPES = ("SAMPLER",)
+    CATEGORY = "sampling/custom_sampling/samplers"
+
+    FUNCTION = "get_sampler"
+
+    def get_sampler(self, eta, s_noise, r, alpha, k, noise_device, noise_sampler_type, alphas=None):
+        if noise_device == 'cpu':
+            sampler_name = "dpmpp_sde_advanced"
+        else:
+            sampler_name = "dpmpp_sde_gpu_advanced"
+
+        steps = 10000
+        alphas = initialize_or_scale(alphas, alpha, steps)
+
+        sampler = comfy.samplers.ksampler(sampler_name, {"eta": eta, "s_noise": s_noise, "r": r, "alpha": alphas, "k": k, "noise_sampler_type": noise_sampler_type})
+        return (sampler, )
+    
 
 class SamplerDPMPP_2S_Ancestral_Advanced:
     @classmethod
