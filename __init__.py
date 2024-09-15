@@ -83,6 +83,7 @@ NODE_CLASS_MAPPINGS = {
     "SamplerDPMPP_2S_Ancestral_Advanced": samplers.SamplerDPMPP_2S_Ancestral_Advanced,
     "SamplerDPMPP_2M_SDE_Advanced": samplers.SamplerDPMPP_2M_SDE_Advanced,
     "SamplerDPMPP_3M_SDE_Advanced": samplers.SamplerDPMPP_3M_SDE_Advanced,
+    "AdvancedNoise": samplers.AdvancedNoise,
 
     "Sigmas Recast": sigmas.set_precision_sigmas,
 
