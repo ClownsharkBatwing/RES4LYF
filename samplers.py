@@ -7,6 +7,7 @@ import comfy.sampler_helpers
 
 import latent_preview
 import torch
+import torch.nn.functional as F
 
 #from sys import settrace 
 import sys
@@ -227,10 +228,14 @@ class LatentNoised:
                     "alpha": ("FLOAT", {"default": 1.0, "min": -10000.0, "max": 10000.0, "step":0.1, "round": 0.01}),
                     "k": ("FLOAT", {"default": 1.0, "min": -10000.0, "max": 10000.0, "step":2.0, "round": 0.01}),
                     "noise_seed": ("INT", {"default": 0, "min": 0, "max": 0xffffffffffffffff}),
-                    "latent_image": ("LATENT", ),               
+                    "latent_image": ("LATENT", ),
+                    "noise_strength": ("FLOAT", {"default": 1.0, "min": -20.0, "max": 20.0, "step": 0.01, "round": 0.01}),
+                    "normalize": (["false", "true"], {"default": "false"}),
                      },
                 "optional": 
-                    {"latent_noise": ("LATENT", ),
+                    {
+                    "latent_noise": ("LATENT", ),
+                    "mask": ("MASK", ),
                     }
                 }
 
@@ -241,7 +246,7 @@ class LatentNoised:
 
     CATEGORY = "sampling/custom_sampling"
     
-    def main(self, add_noise, noise_is_latent, noise_type, noise_seed, alpha, k, latent_image, latent_noise=None): 
+    def main(self, add_noise, noise_is_latent, noise_type, noise_seed, alpha, k, latent_image, noise_strength, normalize, latent_noise=None, mask=None):
             latent = latent_image
             latent_image = latent["samples"]
 
@@ -255,11 +260,35 @@ class LatentNoised:
             else:
                 noise = latent_noise["samples"]
 
-            if noise_is_latent: #add noise and latent together and normalize --> noise
+            if normalize == "true":
+                latent_mean = latent_image.mean()
+                latent_std = latent_image.std()
+                noise = noise * latent_std + latent_mean
+
+            if noise_is_latent:
                 noise += latent_image.cpu()
                 noise.sub_(noise.mean()).div_(noise.std())
+            
+            # Apply noise_strength
+            noise = noise * noise_strength
 
-            return ({'samples': noise},)
+            # Apply mask if provided
+            if mask is not None:
+                mask = F.interpolate(mask.reshape((-1, 1, mask.shape[-2], mask.shape[-1])), 
+                                     size=(latent_image.shape[2], latent_image.shape[3]), 
+                                     mode="bilinear")
+                mask = mask.expand((-1, latent_image.shape[1], -1, -1)).to(latent_image.device)
+                if mask.shape[0] < latent_image.shape[0]:
+                    mask = mask.repeat((latent_image.shape[0] - 1) // mask.shape[0] + 1, 1, 1, 1)[:latent_image.shape[0]]
+                elif mask.shape[0] > latent_image.shape[0]:
+                    mask = mask[:latent_image.shape[0]]
+                
+                noise = mask * noise + (1 - mask) * torch.zeros_like(noise)
+
+            # Combine noise with latent image
+            noised_latent = latent_image.cpu() + noise
+
+            return ({'samples': noised_latent},)
 
 
 class SharkSampler:
