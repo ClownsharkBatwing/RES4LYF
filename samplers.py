@@ -291,6 +291,7 @@ class LatentNoised:
             return ({'samples': noised_latent},)
 
 
+
 class SharkSampler:
     @classmethod
     def INPUT_TYPES(s):
