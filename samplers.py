@@ -26,6 +26,37 @@ def move_to_same_device(*tensors):
     device = tensors[0].device
     return tuple(tensor.to(device) for tensor in tensors)
 
+class AdvancedNoise:
+    @classmethod
+    def INPUT_TYPES(s):
+        return {
+            "required":{
+                "alpha": ("FLOAT", {"default": 1.0, "min": -10000.0, "max": 10000.0, "step":0.1, "round": 0.01}),
+                "k": ("FLOAT", {"default": 1.0, "min": -10000.0, "max": 10000.0, "step":2.0, "round": 0.01}),
+                "noise_seed": ("INT", {"default": 0, "min": 0, "max": 0xffffffffffffffff}),
+                "noise_type": (NOISE_GENERATOR_NAMES, ),
+            },
+        }
+    
+    RETURN_TYPES = ("NOISE",)
+    FUNCTION = "get_noise"
+    CATEGORY = "sampling/custom_sampling/noise"
+    
+    def get_noise(self, noise_seed, noise_type, alpha, k):
+        return (Noise_RandomNoise(noise_seed, noise_type, alpha, k),)
+    
+class Noise_RandomNoise:
+    def __init__(self, seed, noise_type, alpha, k):
+        self.seed = seed
+        self.noise_type = noise_type
+        self.alpha = alpha
+        self.k = k
+
+    def generate_noise(self, input_latent):
+        latent_image = input_latent["samples"]
+        batch_inds = input_latent["batch_index"] if "batch_index" in input_latent else None
+        return prepare_noise(latent_image, self.seed, self.noise_type, batch_inds, self.alpha, self.k)
+
 class ClownGuides:
     @classmethod
     def INPUT_TYPES(s):
