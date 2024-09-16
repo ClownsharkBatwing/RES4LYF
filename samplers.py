@@ -517,8 +517,9 @@ class SamplerDEIS_SDE:
                       },
                     "optional": 
                     {
-                        "alphas": ("SIGMAS", ),
+                        "momentums": ("SIGMAS", ),
                         "etas": ("SIGMAS", ),
+                        "alphas": ("SIGMAS", ),
                     }  
                }
     RETURN_TYPES = ("SAMPLER",)
@@ -526,14 +527,15 @@ class SamplerDEIS_SDE:
 
     FUNCTION = "get_sampler"
 
-    def get_sampler(self, momentum, eta, s_noise, alpha, k, noise_sampler_type, alphas=None, etas=None):
+    def get_sampler(self, momentum, eta, s_noise, alpha, k, noise_sampler_type, momentums=None, etas=None, alphas=None, ):
         sampler_name = "deis_sde"
 
         steps = 10000
-        alphas = initialize_or_scale(alphas, alpha, steps)
+        momentums = initialize_or_scale(momentums, momentum, steps)
         etas = initialize_or_scale(etas, eta, steps)
+        alphas = initialize_or_scale(alphas, alpha, steps)
 
-        sampler = comfy.samplers.ksampler(sampler_name, {"momentum": momentum, "etas": etas, "s_noise": s_noise, "alpha": alphas, "k": k, "noise_sampler_type": noise_sampler_type})
+        sampler = comfy.samplers.ksampler(sampler_name, {"momentums": momentums, "etas": etas, "s_noise": s_noise, "alpha": alphas, "k": k, "noise_sampler_type": noise_sampler_type})
         return (sampler, )
     
 """class SamplerDPMPP_SDE_ADVANCED:
