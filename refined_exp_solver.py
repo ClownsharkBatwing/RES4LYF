@@ -36,6 +36,15 @@ class StepOutput(NamedTuple):
   vel: FloatTensor
   vel_2: FloatTensor
 
+def get_RF_step(sigma, sigma_next, eta):
+    downstep_ratio = 1 + (sigma_next / sigma - 1) * eta
+    sigma_down = sigma_next * downstep_ratio
+    alpha_ip1 = 1 - sigma_next
+    alpha_down = 1 - sigma_down
+    alpha_ratio = alpha_ip1 / alpha_down
+    sigma_up = (sigma_next ** 2 - sigma_down ** 2 * alpha_ip1 ** 2 / alpha_down ** 2).abs() ** 0.5
+    return (sigma_down, sigma_up, alpha_ratio, )
+
 def _gamma(
   n: int,
 ) -> int:
@@ -148,19 +157,26 @@ def _de_second_order(
     b1=b1,
     b2=b2,
   )  
+  
+def get_sigma_s(sigma, sigma_next, r):
+  t_fn = lambda sigma: sigma.log().neg()
+  sigma_fn = lambda t: t.neg().exp()
+  
+  t, t_next = t_fn(sigma), t_fn(sigma_next)
+  h = t_next - t
+  s = t + h * r    #timestep scaled by r between full step and partial
+  #fac = 1 / (2 * r)
+  
+  sigma_s = sigma_fn(s)    #NEW...
+  if sigma == 1.0:
+      sigma_s = 0.9999
+  return sigma_s
 
-def _refined_exp_sosu_step(
-  model,
-  x,
-  sigma,
-  sigma_next,
-  c2 = 0.5,
+def _refined_exp_sosu_step(model, x, sigma, sigma_next, c2 = 0.5,
   extra_args: Dict[str, Any] = {},
   pbar: Optional[tqdm] = None,
   simple_phi_calc = False,
-  momentum = 0.0,
-  vel = None,
-  vel_2 = None,
+  momentum = 0.0, vel = None, vel_2 = None,
   time = None,
   eulers_mom = 0.0,
   cfgpp = 0.0,
@@ -194,8 +210,12 @@ def _refined_exp_sosu_step(
         momentum_vel = momentum * (timescale + offset) * velocity + (1 - momentum * (timescale + offset)) * diff
     return momentum_vel
 
-  lam_next, lam = (s.log().neg() for s in (sigma_next, sigma))
-
+  sigma_fn = lambda t: t.neg().exp()
+  t_fn = lambda sigma: sigma.log().neg()
+  #lam_next, lam = (s.log().neg() for s in (sigma_next, sigma))
+  lam_next = t_fn(sigma_next)
+  lam      = t_fn(sigma)
+  
   s_in = x.new_ones([x.shape[0]])
   h = lam_next - lam
   a2_1, b1, b2 = _de_second_order(h=h, c2=c2, simple_phi_calc=simple_phi_calc)
@@ -216,7 +236,8 @@ def _refined_exp_sosu_step(
   else:
     x_2 = math.exp(-c2_h) * (x + cfgpp*denoised - cfgpp*temp[0]) + diff_2
   lam_2 = lam + c2_h
-  sigma_2 = lam_2.neg().exp()
+  #sigma_2 = lam_2.neg().exp()
+  sigma_2 = sigma_fn(lam_2)
 
   denoised2 = model(x_2, sigma_2 * s_in, **extra_args)
 
@@ -239,6 +260,206 @@ def _refined_exp_sosu_step(
     vel=vel,
     vel_2=vel_2,
   )
+
+
+@no_grad()
+def sample_refined_exp_s_advanced_RF(
+  model,
+  x,
+  sigmas,
+  branch_mode,
+  branch_depth,
+  branch_width,
+  guide_1=None,
+  guide_2=None,
+  guide_mode_1 = 0,
+  guide_mode_2 = 0,
+  guide_1_channels=None,
+  denoise_to_zero: bool = True,
+  extra_args: Dict[str, Any] = {},
+  callback: Optional[RefinedExpCallback] = None,
+  disable: Optional[bool] = None,
+  eta=None,
+  momentum=None,
+  eulers_mom=None,
+  c2=None,
+  cfgpp=None,
+  offset=None,
+  alpha=None,
+  latent_guide_1=None,
+  latent_guide_2=None,
+  noise_sampler: NoiseSampler = torch.randn_like,
+  noise_sampler_type=None,
+  simple_phi_calc = False,
+  k=1.0,
+  clownseed=0,
+  latent_noise=None,
+  latent_self_guide_1=False,
+  latent_shift_guide_1=False,
+): 
+  """
+  
+  Refined Exponential Solver (S).
+  Algorithm 2 "RES Single-Step Sampler" with Algorithm 1 second-order step
+  https://arxiv.org/abs/2308.02157
+
+  Parameters:
+    model (`DenoiserModel`): a k-diffusion wrapped denoiser model (e.g. a subclass of DiscreteEpsDDPMDenoiser)
+    x (`FloatTensor`): noised latents (or RGB I suppose), e.g. torch.randn((B, C, H, W)) * sigma[0]
+    sigmas (`FloatTensor`): sigmas (ideally an exponential schedule!) e.g. get_sigmas_exponential(n=25, sigma_min=model.sigma_min, sigma_max=model.sigma_max)
+    denoise_to_zero (`bool`, *optional*, defaults to `True`): whether to finish with a first-order step down to 0 (rather than stopping at sigma_min). True = fully denoise image. False = match Algorithm 2 in paper
+    extra_args (`Dict[str, Any]`, *optional*, defaults to `{}`): kwargs to pass to `model#__call__()`
+    callback (`RefinedExpCallback`, *optional*, defaults to `None`): you can supply this callback to see the intermediate denoising results, e.g. to preview each step of the denoising process
+    disable (`bool`, *optional*, defaults to `False`): whether to hide `tqdm`'s progress bar animation from being printed
+    eta (`FloatTensor`, *optional*, defaults to 0.): degree of stochasticity, η, for each timestep. tensor shape must be broadcastable to 1-dimensional tensor with length `len(sigmas) if denoise_to_zero else len(sigmas)-1`. each element should be from 0 to 1.
+    c2 (`float`, *optional*, defaults to .5): partial step size for solving ODE. .5 = midpoint method
+    noise_sampler (`NoiseSampler`, *optional*, defaults to `torch.randn_like`): method used for adding noise
+    simple_phi_calc (`bool`, *optional*, defaults to `True`): True = calculate phi_i,j(-h) via simplified formulae specific to j={1,2}. False = Use general solution that works for any j. Mathematically equivalent, but could be numeric differences.
+  """
+
+  s_in = x.new_ones([x.shape[0]])
+
+  #assert sigmas[-1] == 0
+  sigma_min, sigma_max = sigmas[sigmas > 0].min(), sigmas.max()
+
+  noise_sampler = NOISE_GENERATOR_CLASSES.get(noise_sampler_type)(x=x, seed=clownseed, sigma_min=sigma_min, sigma_max=sigma_max)
+
+  b, c, h, w = x.shape
+
+  dt = None
+  vel, vel_2 = None, None
+  x_hat = None
+  
+  x_n   = [[None for _ in range(branch_width ** depth)] for depth in range(branch_depth + 1)]
+  x_h   = [[None for _ in range(branch_width ** depth)] for depth in range(branch_depth + 1)]
+  vel   = [[None for _ in range(branch_width ** depth)] for depth in range(branch_depth + 1)]
+  vel_2 = [[None for _ in range(branch_width ** depth)] for depth in range(branch_depth + 1)]
+  denoised   = [[None for _ in range(branch_width ** depth)] for depth in range(branch_depth + 1)]
+  denoised2 = [[None for _ in range(branch_width ** depth)] for depth in range(branch_depth + 1)]
+  denoised_ = None
+  denoised2_ = None
+  denoised2_prev = None
+  
+  sigma_fn = lambda t: t.neg().exp()
+  t_fn = lambda sigma: sigma.log().neg()
+  
+  i=0
+  with tqdm(disable=disable, total=len(sigmas)-(1 if denoise_to_zero else 2)) as pbar:
+    #for i, (sigma, sigma_next) in enumerate(pairwise(sigmas[:-1].split(1))):
+    while i < len(sigmas) - 1 and sigmas[i+1] > 0.0:
+
+      sigma = sigmas[i]
+      sigma_next = sigmas[i+1]
+      time = sigmas[i] / sigma_max
+
+      if 'sigma' not in locals():
+        sigma = sigmas[i]
+
+      if latent_noise is not None:
+        if latent_noise.size()[0] == 1:
+          eps = latent_noise[0]
+        else:
+          eps = latent_noise[i]
+      else:
+        if noise_sampler_type == "fractal":
+          noise_sampler.alpha = alpha[i]
+          noise_sampler.k = k
+
+      sigma_hat = sigma * (1 + eta[i])
+
+      x_n[0][0] = x
+      for depth in range(1, branch_depth+1):
+        sigma = sigmas[i]
+        sigma_next = sigmas[i+1]
+        sigma_hat = sigma * (1 + eta[i])
+        
+        for m in range(branch_width**(depth-1)):
+          for n in range(branch_width):
+            idx = m * branch_width + n
+            
+            #sigma_hat = torch.clamp(sigma_hat, max=1.0) #FLUX
+            #x_h[depth][idx] = (1.0 - (sigma_hat - sigma)) * x_n[depth-1][m] + (sigma_hat - sigma) * noise_sampler(sigma=sigma, sigma_next=sigma_next)   #FLUX MODE TEST
+            r = c2[i] # usually 0.5
+            t, t_next = t_fn(sigmas[i]), t_fn(sigmas[i + 1])
+            h = t_next - t
+            s = t + h * r
+            
+            sigma_s = sigma_fn(s)
+            if sigmas[i] == 1.0:
+                sigma_s = 0.9999
+                
+            #sigma_s = get_sigma_s(sigma, sigma_next, c2[i])
+            sigma_hat = torch.clamp(sigma_hat, max=1.0)
+
+            print(sigma_hat.item(), sigma_next.item())
+            #if sigma_hat == 1.0:
+            #  x_h[depth][idx] = x_n[depth-1][m]
+              
+            sd, su, alpha_ratio = get_RF_step(sigma_fn(t), sigma_fn(t_next), eta[i])
+            print(sd.item(), su.item(), alpha_ratio.item(), sigma_hat.item(), sigma_next.item())
+            #sigma_hat = sigma + su
+            #sigma_next = sd
+            
+            x_h[depth][idx] = alpha_ratio * x_n[depth-1][m] + noise_sampler(sigma=sigma_fn(t_fn(sigma)), sigma_next=sigma_fn(t_next)) * su
+            """if sigma_hat < 1.0:
+              x_h[depth][idx] = alpha_ratio * x_n[depth-1][m] + noise_sampler(sigma=sigma_fn(t_fn(sigma)), sigma_next=sigma_fn(t_next)) * su
+            else:
+              x_h[depth][idx] = x_n[depth-1][m]
+              sigma_hat = sigma
+              sigma_next = sigmas[i+1]"""
+            #sigma_hat = sigma_hat.clamp(1.0)
+            
+            #x_h[depth][idx] = x_n[depth-1][m] + (sigma_hat ** 2 - sigma ** 2).sqrt() * noise_sampler(sigma=sigma, sigma_next=sigma_next)       #return sigma * noise + (1.0 - sigma) * latent_image
+            x_n[depth][idx], denoised[depth][idx], denoised2[depth][idx], vel[depth][idx], vel_2[depth][idx] = _refined_exp_sosu_step(model, x_h[depth][idx], sigma, sd, c2=c2[i],
+                                                                          extra_args=extra_args, pbar=pbar, simple_phi_calc=simple_phi_calc,
+                                                                          momentum = momentum[i], vel = vel[depth][idx], vel_2 = vel_2[depth][idx], time = time, eulers_mom = eulers_mom[i].item(), cfgpp = cfgpp[i].item()
+                                                                          )
+            """x_n[depth][idx], denoised[depth][idx], denoised2[depth][idx], vel[depth][idx], vel_2[depth][idx] = _refined_exp_sosu_step(model, x_h[depth][idx], sigma_hat, sigma_next, c2=c2[i],
+                                                                          extra_args=extra_args, pbar=pbar, simple_phi_calc=simple_phi_calc,
+                                                                          momentum = momentum[i], vel = vel[depth][idx], vel_2 = vel_2[depth][idx], time = time, eulers_mom = eulers_mom[i].item(), cfgpp = cfgpp[i].item()
+                                                                          )"""
+
+                                                               
+            denoised_ = denoised[depth][idx]
+            denoised2_ = denoised2[depth][idx]
+
+            import gc
+            gc.collect()
+            torch.cuda.empty_cache()
+        i += 1
+        
+      if denoised2_prev is not None:
+        x_n[0][0] = denoised2_prev
+      x_next, x_hat, denoised2_prev = branch_mode_proc(x_n, x_h, denoised2, latent_guide_2, branch_mode, branch_depth, branch_width)
+      
+      d = to_d(x_hat, sigma_hat, x_next) #this is the "euler's momma" method. it effectively projects more noise removal from a noised state.
+      dt = sigma_next - sigma_hat
+      x_next = x_next + eulers_mom[i].item() * d * dt
+      
+      if callback is not None:
+        payload = RefinedExpCallbackPayload(x=x, i=i, sigma=sigma, sigma_hat=sigma_hat, denoised=denoised_, denoised2=denoised2_prev,)         # added updated denoised2_prev that's selected from the same slot as x_next                      
+        callback(payload)
+
+      x = x_next - sigma_next*offset[i]
+      
+      x = guide_mode_proc(x, i, guide_mode_1, guide_mode_2, sigma_next, guide_1, guide_2,  latent_guide_1, latent_guide_2, guide_1_channels)
+      
+    if denoise_to_zero:
+      final_eta = eta[-1]
+      eps = noise_sampler(sigma=sigma, sigma_next=sigma_next).double()
+      sigma_hat = sigma * (1 + final_eta)
+      x_hat = x + (sigma_hat ** 2 - sigma ** 2) ** .5 * eps
+      
+      s_in = x.new_ones([x.shape[0]])
+      x_next = model(x_hat, torch.zeros_like(sigma).to(x_hat.device) * s_in, **extra_args)
+      pbar.update()
+      x = x_next
+
+  return x
+
+
+
+
 
 
 @no_grad()
@@ -365,7 +586,7 @@ def sample_refined_exp_s_advanced(
         x_n[0][0] = denoised2_prev
       x_next, x_hat, denoised2_prev = branch_mode_proc(x_n, x_h, denoised2, latent_guide_2, branch_mode, branch_depth, branch_width)
       
-      d = to_d(x_hat, sigma_hat, x_next)
+      d = to_d(x_hat, sigma_hat, x_next) #this is the "euler's momma" method. it effectively projects more noise removal from a noised state.
       dt = sigma_next - sigma_hat
       x_next = x_next + eulers_mom[i].item() * d * dt
       

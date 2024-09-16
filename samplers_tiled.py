@@ -470,11 +470,7 @@ def sample_common(model, x, noise, noise_mask, noise_seed, tile_width, tile_heig
                     pos[0][1]['stable_cascade_prior'] = torch.cat(effnet_slices[start_idx:end_idx])
                     neg[0][1]['stable_cascade_prior'] = torch.cat(effnet_slices[start_idx:end_idx])
                     
-                    effnet_map_slices_cat = torch.cat(effnet_map_slices[start_idx:end_idx])
-                    model.model.diffusion_model.set_effnet_batch_maps(effnet_map_slices_cat)
-                    #model.model.diffusion_model.set_effnet_batch_maps(None)
                     tile_result = comfy.sample.sample_custom(model, tiled_noise_batch, cfg, sampler, sigmas, pos, neg, tiled_latent_batch, noise_mask=tiled_mask_batch, callback=partial(callback, step_inc=tiled_latent_batch.shape[0]), disable_pbar=True, seed=noise_seed)
-                    model.model.diffusion_model.set_effnet_batch_maps(None)
                     
                     for i in range(tile_result.shape[0]):
                         idx = start_idx + i

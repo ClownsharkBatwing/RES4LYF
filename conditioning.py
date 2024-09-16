@@ -279,7 +279,7 @@ class StableCascade_StageB_Conditioning64:
 
 
 
-class Conditioning_Recast:
+class Conditioning_Recast64:
     @classmethod
     def INPUT_TYPES(s):
         return {"required": { "cond_0": ("CONDITIONING",),

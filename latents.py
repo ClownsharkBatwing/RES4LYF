@@ -65,6 +65,65 @@ class set_precision:
                 x = latent_image["samples"].to(torch.float64)
         return ({"samples": x}, )
     
+
+class set_precision_universal:
+    def __init__(self):
+        pass
+    @classmethod
+    def INPUT_TYPES(s):
+        return {
+            "required": {
+                    "precision": (["bf16", "fp16", "fp32", "fp64", "passthrough"], {"default": "fp32"}),
+                    "set_default": ("BOOLEAN", {"default": False})
+                    },
+            "optional": {
+                    "cond_pos": ("CONDITIONING",),
+                    "cond_neg": ("CONDITIONING",),
+                    "sigmas": ("SIGMAS", ),
+                    "latent_image": ("LATENT", ),
+                    },
+                }
+
+    RETURN_TYPES = ("CONDITIONING", "CONDITIONING", "SIGMAS", "LATENT",)
+    RETURN_NAMES = ("cond_pos","cond_neg","sigmas","latent_image",)
+    CATEGORY = "sampling/custom_sampling/"
+
+    FUNCTION = "main"
+
+    def main(self, precision="fp32", cond_pos=None, cond_neg=None, sigmas=None, latent_image=None, set_default=False):
+        dtype = None
+        match precision:
+            case "bf16":
+                dtype = torch.bfloat16
+            case "fp16":
+                dtype = torch.float16
+            case "fp32":
+                dtype = torch.float32
+            case "fp64":
+                dtype = torch.float64
+            case "passthrough":
+                return (cond_pos, cond_neg, sigmas, latent_image, )
+        
+        if cond_pos is not None:
+            cond_pos[0][0] = cond_pos[0][0].clone().to(dtype)
+            cond_pos[0][1]["pooled_output"] = cond_pos[0][1]["pooled_output"].clone().to(dtype)
+        
+        if cond_neg is not None:
+            cond_neg[0][0] = cond_neg[0][0].clone().to(dtype)
+            cond_neg[0][1]["pooled_output"] = cond_neg[0][1]["pooled_output"].clone().to(dtype)
+            
+        if sigmas is not None:
+            sigmas = sigmas.clone().to(dtype)
+        
+        if latent_image is not None:
+            x = latent_image["samples"].clone().to(dtype)    
+
+        if set_default is True:
+            torch.set_default_dtype(dtype)
+        
+        return (cond_pos, cond_neg, sigmas, {"samples": x}, )
+    
+    
 class set_precision_advanced:
     def __init__(self):
         pass
