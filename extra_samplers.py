@@ -35,10 +35,10 @@ def get_RF_step(sigma, sigma_next, eta):
 @torch.no_grad()
 def sample_dpmpp_sde_advanced(
     model, x, sigmas, extra_args=None, callback=None, disable=None,
-    eta=1., s_noise=1., noise_sampler=None, r=1/2, noise_sampler_type="brownian", k=1.0, scale=0.1, alpha=None,
+    momentum=1.0, eta=1., s_noise=1., noise_sampler=None, r=1/2, noise_sampler_type="brownian", k=1.0, scale=0.1, alpha=None,
 ):
     if isinstance(model.inner_model.inner_model.model_sampling, comfy.model_sampling.CONST):
-        return sample_dpmpp_sde_advanced_RF(model, x, sigmas, extra_args, callback, disable, eta, s_noise, noise_sampler, r, noise_sampler_type, k, scale, alpha)
+        return sample_dpmpp_sde_advanced_RF(model, x, sigmas, extra_args, callback, disable, momentum, eta, s_noise, noise_sampler, r, noise_sampler_type, k, scale, alpha)
     #DPM-Solver++ (stochastic with eta parameter).
     if len(sigmas) <= 1:
         return x
@@ -102,9 +102,16 @@ def sample_dpmpp_sde_advanced(
 @torch.no_grad()
 def sample_dpmpp_sde_advanced_RF(
     model, x, sigmas, extra_args=None, callback=None, disable=None,
-    eta=1., s_noise=1., noise_sampler=None, r=1/2, noise_sampler_type="brownian", k=1.0, scale=0.1, alpha=None,
+    momentum=1.0, eta=1., s_noise=1., noise_sampler=None, r=1/2, noise_sampler_type="brownian", k=1.0, scale=0.1, alpha=None,
 ):
     """DPM-Solver++ (stochastic with eta parameter) adapted for Rectified Flow."""
+    diff, diff_2, vel, vel_2 = None, None, None, None
+    def momentum_func(diff, velocity, timescale=1.0, offset=-momentum / 2.0): # Diff is current diff, vel is previous diff
+        if velocity is None:
+            momentum_vel = diff
+        else:
+            momentum_vel = momentum * (timescale + offset) * velocity + (1 - momentum * (timescale + offset)) * diff
+        return momentum_vel
     
     if len(sigmas) <= 1:
         return x
@@ -128,6 +135,11 @@ def sample_dpmpp_sde_advanced_RF(
             noise_sampler.scale = scale
             
         denoised = model(x, sigmas[i] * s_in, **extra_args)
+        
+        diff_2 = momentum_func(denoised, vel_2, sigmas[i])
+        vel_2 = diff_2
+        denoised = diff_2
+        
         if callback is not None:
             callback({'x': x, 'i': i, 'sigma': sigmas[i], 'sigma_hat': sigmas[i], 'denoised': denoised})
         if sigmas[i + 1] == 0:
@@ -152,6 +164,10 @@ def sample_dpmpp_sde_advanced_RF(
             x_2 = (sigma_fn(s_) / sigma_fn(t)) * x - (t - s_).expm1() * denoised
             x_2 = alpha_ratio * x_2 + noise_sampler(sigma=sigma_fn(t), sigma_next=sigma_s) * s_noise * su         #SIGMA_S subs for SIGMA_FN(S)
             denoised_2 = model(x_2, sigma_s * s_in, **extra_args)
+            
+            diff = momentum_func(denoised_2, vel, sigmas[i])
+            vel = diff
+            denoised_2 = diff
 
             # Step 2
             sd, su, alpha_ratio = get_RF_step(sigma_fn(t), sigma_fn(t_next), eta)
