@@ -1016,7 +1016,7 @@ from comfy.k_diffusion.sampling import deis
 #From https://github.com/zju-pi/diff-sampler/blob/main/diff-solvers-main/solvers.py
 #under Apache 2 license
 @torch.no_grad()
-def sample_deis_sde(model, x, sigmas, extra_args=None, callback=None, disable=None, max_order=3, deis_mode='tab', eta=0.25, s_noise=1.0, noise_sampler_type="gaussian",k=1.0, scale=0.1, alpha=None,):
+def sample_deis_sde(model, x, sigmas, extra_args=None, callback=None, disable=None, max_order=3, deis_mode='tab', etas=None, s_noise=1.0, noise_sampler_type="gaussian",k=1.0, scale=0.1, alpha=None,):
     extra_args = {} if extra_args is None else extra_args
     s_in = x.new_ones([x.shape[0]])
     
@@ -1046,7 +1046,7 @@ def sample_deis_sde(model, x, sigmas, extra_args=None, callback=None, disable=No
         if callback is not None:
             callback({'x': x, 'i': i, 'sigma': sigmas[i], 'sigma_hat': sigmas[i], 'denoised': denoised})
             
-        downstep_ratio = 1 + (sigmas[i + 1] / sigmas[i] - 1) * eta
+        downstep_ratio = 1 + (sigmas[i + 1] / sigmas[i] - 1) * etas[i]
         sigma_down =     sigmas[i + 1] * downstep_ratio
         alpha_ip1  = 1 - sigmas[i + 1]
         alpha_down = 1 - sigma_down
@@ -1082,7 +1082,7 @@ def sample_deis_sde(model, x, sigmas, extra_args=None, callback=None, disable=No
         else:
             buffer_model.append(d_cur.detach())
             
-        if sigmas[i + 1] > 0 and eta > 0:
+        if sigmas[i + 1] > 0 and etas[i] > 0:
             x_next = x_next * (alpha_ip1 / alpha_down)   +   noise_sampler(sigma=sigmas[i], sigma_next=sigmas[i + 1]) * s_noise * renoise_coeff
         import gc
         gc.collect()
