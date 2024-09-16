@@ -1011,6 +1011,86 @@ def sample_euler_ancestral_recursive(model, x, sigmas, i=0, extra_args=None, cal
 
     return x
 
+from comfy.k_diffusion.sampling import deis
+
+#From https://github.com/zju-pi/diff-sampler/blob/main/diff-solvers-main/solvers.py
+#under Apache 2 license
+@torch.no_grad()
+def sample_deis_sde(model, x, sigmas, extra_args=None, callback=None, disable=None, max_order=3, deis_mode='tab', eta=0.25, s_noise=1.0, noise_sampler_type="gaussian",k=1.0, scale=0.1, alpha=None,):
+    extra_args = {} if extra_args is None else extra_args
+    s_in = x.new_ones([x.shape[0]])
+    
+    alpha = torch.zeros_like(sigmas) if alpha is None else alpha
+    sigma_min, sigma_max = sigmas[sigmas > 0].min(), sigmas.max()
+    seed = extra_args.get("seed", None) + 1
+    noise_sampler = NOISE_GENERATOR_CLASSES.get(noise_sampler_type)(x=x, seed=seed, sigma_min=sigma_min, sigma_max=sigma_max)
+
+    x_next = x
+    t_steps = sigmas
+
+    coeff_list = deis.get_deis_coeff_list(t_steps, max_order, deis_mode=deis_mode)
+
+    buffer_model = []
+    for i in trange(len(sigmas) - 1, disable=disable):
+        if noise_sampler_type == "fractal":
+            noise_sampler.alpha = alpha[i]
+            noise_sampler.k = k
+            noise_sampler.scale = scale
+            
+        t_cur = sigmas[i]
+        t_next = sigmas[i + 1]
+
+        x_cur = x_next
+
+        denoised = model(x_cur, t_cur * s_in, **extra_args)
+        if callback is not None:
+            callback({'x': x, 'i': i, 'sigma': sigmas[i], 'sigma_hat': sigmas[i], 'denoised': denoised})
+            
+        downstep_ratio = 1 + (sigmas[i + 1] / sigmas[i] - 1) * eta
+        sigma_down =     sigmas[i + 1] * downstep_ratio
+        alpha_ip1  = 1 - sigmas[i + 1]
+        alpha_down = 1 - sigma_down
+        renoise_coeff = (sigmas[i + 1] ** 2 - sigma_down ** 2 * alpha_ip1 ** 2 / alpha_down ** 2).abs() ** 0.5
+
+        #d_cur = (x_cur - denoised) / t_cur
+        difference_ratio = (sigma_down - t_cur) / (t_next - t_cur)
+        d_cur = ((x_cur - denoised) / t_cur) * difference_ratio     
+        #d_cur = ((x_cur - denoised) / t_cur) * (sigma_down / t_cur)
+        dt = sigma_down - sigmas[i]  #from the euler ancestral RF sampler
+
+        order = min(max_order, i+1)
+        if t_next <= 0:
+            order = 1
+
+        if order == 1:          # First Euler step.
+            #x_next = x_cur + (t_next - t_cur) * d_cur
+            x_next = x_cur + dt * d_cur
+        elif order == 2:        # Use one history point.
+            coeff_cur, coeff_prev1 = coeff_list[i]
+            x_next = x_cur + coeff_cur * d_cur + coeff_prev1 * buffer_model[-1]
+        elif order == 3:        # Use two history points.
+            coeff_cur, coeff_prev1, coeff_prev2 = coeff_list[i]
+            x_next = x_cur + coeff_cur * d_cur + coeff_prev1 * buffer_model[-1] + coeff_prev2 * buffer_model[-2]
+        elif order == 4:        # Use three history points.
+            coeff_cur, coeff_prev1, coeff_prev2, coeff_prev3 = coeff_list[i]
+            x_next = x_cur + coeff_cur * d_cur + coeff_prev1 * buffer_model[-1] + coeff_prev2 * buffer_model[-2] + coeff_prev3 * buffer_model[-3]
+
+        if len(buffer_model) == max_order - 1:
+            for k in range(max_order - 2):
+                buffer_model[k] = buffer_model[k+1]
+            buffer_model[-1] = d_cur.detach()
+        else:
+            buffer_model.append(d_cur.detach())
+            
+        if sigmas[i + 1] > 0 and eta > 0:
+            x_next = x_next * (alpha_ip1 / alpha_down)   +   noise_sampler(sigma=sigmas[i], sigma_next=sigmas[i + 1]) * s_noise * renoise_coeff
+        import gc
+        gc.collect()
+        torch.cuda.empty_cache()
+
+    return x_next
+
+
 
 # The following function adds the samplers during initialization, in __init__.py
 def add_samplers():
@@ -1065,6 +1145,7 @@ extra_samplers = {
     "dpmpp_sde_cfg++": sample_dpmpp_sde_cfgpp,
     "dpmpp_2m_sde_cfg++": sample_dpmpp_2m_sde_cfgpp,
     "dpmpp_3m_sde_cfg++": sample_dpmpp_3m_sde_cfgpp,
+    "deis_sde": sample_deis_sde,
 
     "rk4":  sample_rk4,
 }

@@ -503,6 +503,37 @@ class SamplerDPMPP_SDE_ADVANCED:
         sampler = comfy.samplers.ksampler(sampler_name, {"momentum": momentum, "eta": eta, "s_noise": s_noise, "r": r, "alpha": alphas, "k": k, "noise_sampler_type": noise_sampler_type})
         return (sampler, )
     
+class SamplerDEIS_SDE:
+    @classmethod
+    def INPUT_TYPES(s):
+        return {"required":
+                    {#"momentum": ("FLOAT", {"default": 1.0, "min": -100.0, "max": 100.0, "step":0.01, "round": False}),
+                     "eta": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 100.0, "step":0.01, "round": False}),
+                     "s_noise": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 100.0, "step":0.01, "round": False}),
+                     #"r": ("FLOAT", {"default": 0.5, "min": 0.0, "max": 100.0, "step":0.01, "round": False}),
+                     "alpha": ("FLOAT", {"default": 0.0, "min": -10000.0, "max": 10000.0, "step":0.1, "round": False}),
+                     "k": ("FLOAT", {"default": 1.0, "min": -10000.0, "max": 10000.0, "step":2.0, "round": False}),
+                     "noise_sampler_type": (NOISE_GENERATOR_NAMES, ),
+                      },
+                    "optional": 
+                    {
+                        "alphas": ("SIGMAS", ),
+                    }  
+               }
+    RETURN_TYPES = ("SAMPLER",)
+    CATEGORY = "sampling/custom_sampling/samplers"
+
+    FUNCTION = "get_sampler"
+
+    def get_sampler(self, eta, s_noise, alpha, k, noise_sampler_type, alphas=None,):
+        sampler_name = "deis_sde"
+
+        steps = 10000
+        alphas = initialize_or_scale(alphas, alpha, steps)
+
+        sampler = comfy.samplers.ksampler(sampler_name, {"eta": eta, "s_noise": s_noise, "alpha": alphas, "k": k, "noise_sampler_type": noise_sampler_type})
+        return (sampler, )
+    
 """class SamplerDPMPP_SDE_ADVANCED:
     @classmethod
     def INPUT_TYPES(s):

@@ -79,6 +79,7 @@ NODE_CLASS_MAPPINGS = {
     "SharkSampler": samplers.SharkSampler,
     "UltraSharkSampler": samplers.UltraSharkSampler,
     "UltraSharkSampler Tiled": samplers_tiled.UltraSharkSampler_Tiled,
+    "SamplerDEIS_SDE": samplers.SamplerDEIS_SDE,
     "SamplerDPMPP_DualSDE_Advanced": samplers.SamplerDPMPP_DUALSDE_MOMENTUMIZED_ADVANCED,
     "SamplerDPMPP_SDE_Advanced": samplers.SamplerDPMPP_SDE_ADVANCED,
     "SamplerDPMPP_SDE_CFG++_Advanced": samplers.SamplerDPMPP_SDE_CFGPP_ADVANCED,

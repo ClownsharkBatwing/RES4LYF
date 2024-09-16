@@ -262,6 +262,114 @@ def _refined_exp_sosu_step(model, x, sigma, sigma_next, c2 = 0.5,
   )
 
 
+def _refined_exp_sosu_step_RF(model, x, sigma, sigma_next, c2 = 0.5, eta = 0.25, noise_sampler=None,
+  extra_args: Dict[str, Any] = {},
+  pbar: Optional[tqdm] = None,
+  simple_phi_calc = False,
+  momentum = 0.0, vel = None, vel_2 = None,
+  time = None,
+  eulers_mom = 0.0,
+  cfgpp = 0.0,
+) -> StepOutput:
+
+  """Algorithm 1 "RES Second order Single Update Step with c2"
+  https://arxiv.org/abs/2308.02157
+
+  Parameters:
+    model (`DenoiserModel`): a k-diffusion wrapped denoiser model (e.g. a subclass of DiscreteEpsDDPMDenoiser)
+    x (`FloatTensor`): noised latents (or RGB I suppose), e.g. torch.randn((B, C, H, W)) * sigma[0]
+    sigma (`FloatTensor`): timestep to denoise
+    sigma_next (`FloatTensor`): timestep+1 to denoise
+    c2 (`float`, *optional*, defaults to .5): partial step size for solving ODE. .5 = midpoint method
+    extra_args (`Dict[str, Any]`, *optional*, defaults to `{}`): kwargs to pass to `model#__call__()`
+    pbar (`tqdm`, *optional*, defaults to `None`): progress bar to update after each model call
+    simple_phi_calc (`bool`, *optional*, defaults to `True`): True = calculate phi_i,j(-h) via simplified formulae specific to j={1,2}. False = Use general solution that works for any j. Mathematically equivalent, but could be numeric differences."""
+  if cfgpp != 0.0:
+    temp = [0]
+    def post_cfg_function(args):
+        temp[0] = args["uncond_denoised"]
+        return args["denoised"]
+
+    model_options = extra_args.get("model_options", {}).copy()
+    extra_args["model_options"] = comfy.model_patcher.set_model_options_post_cfg_function(model_options, post_cfg_function, disable_cfg1_optimization=True)
+
+  def momentum_func(diff, velocity, timescale=1.0, offset=-momentum / 2.0): # Diff is current diff, vel is previous diff
+    if velocity is None:
+        momentum_vel = diff
+    else:
+        momentum_vel = momentum * (timescale + offset) * velocity + (1 - momentum * (timescale + offset)) * diff
+    return momentum_vel
+
+  sigma_fn = lambda t: t.neg().exp()
+  t_fn = lambda sigma: sigma.log().neg()
+  #sigma_s = get_sigma_s(sigma, sigma_next, c2)
+  r = c2 # usually 0.5
+  t, t_next = t_fn(sigma), t_fn(sigma_next)
+  h = t_next - t
+  s = t + h * r
+  
+  sigma_s = sigma_fn(s)
+  if sigma == 1.0:
+      sigma_s = 0.9999
+  sd, su, alpha_ratio = get_RF_step(sigma_fn(t), sigma_s, eta)
+  
+  sigma_fn = lambda t: t.neg().exp()
+  t_fn = lambda sigma: sigma.log().neg()
+  #lam_next, lam = (s.log().neg() for s in (sigma_next, sigma))
+  #lam_next = t_fn(sigma_next)
+  lam_next = t_fn(sigma_s)
+  lam      = t_fn(sigma)
+  
+  s_in = x.new_ones([x.shape[0]])
+  h = lam_next - lam
+  a2_1, b1, b2 = _de_second_order(h=h, c2=c2, simple_phi_calc=simple_phi_calc)
+  
+  x = alpha_ratio * x + noise_sampler(sigma=sigma_fn(t), sigma_next=sigma_s) * su 
+  denoised = model(x, sigma_s * s_in, **extra_args)
+  #denoised = model(x, sigma * s_in, **extra_args)
+  
+  if pbar is not None:
+    pbar.update(0.5)
+
+  c2_h = c2*h
+
+  diff_2 = momentum_func(a2_1*h*denoised, vel_2, time)
+
+  vel_2 = diff_2
+  x_2 = math.exp(-c2_h)*x + diff_2
+  if cfgpp == False:
+    x_2 = math.exp(-c2_h)*x + diff_2
+  else:
+    x_2 = math.exp(-c2_h) * (x + cfgpp*denoised - cfgpp*temp[0]) + diff_2
+  lam_2 = lam + c2_h
+  #sigma_2 = lam_2.neg().exp()
+  sigma_2 = sigma_fn(lam_2)
+
+  sd, su, alpha_ratio = get_RF_step(sigma_fn(t), sigma_fn(t_next), eta)
+  x = alpha_ratio * x + noise_sampler(sigma=sigma_fn(t), sigma_next=sigma_fn(t_next)) * su
+  denoised2 = model(x_2, sigma_2 * s_in, **extra_args)
+
+  if pbar is not None:
+    pbar.update(0.5)
+
+  diff = momentum_func(h*(b1*denoised + b2*denoised2), vel, time)
+
+  vel = diff
+
+  if cfgpp == False:
+    x_next = math.exp(-h)*x + diff
+  else:
+    x_next = math.exp(-h) * (x + cfgpp*denoised - cfgpp*temp[0]) + diff
+
+  return StepOutput(
+    x_next=x_next,
+    denoised=denoised,
+    denoised2=denoised2,
+    vel=vel,
+    vel_2=vel_2,
+  )
+
+
 @no_grad()
 def sample_refined_exp_s_advanced_RF(
   model,
@@ -391,12 +499,12 @@ def sample_refined_exp_s_advanced_RF(
             #sigma_s = get_sigma_s(sigma, sigma_next, c2[i])
             sigma_hat = torch.clamp(sigma_hat, max=1.0)
 
-            print(sigma_hat.item(), sigma_next.item())
+            #print(sigma_hat.item(), sigma_next.item())
             #if sigma_hat == 1.0:
             #  x_h[depth][idx] = x_n[depth-1][m]
               
             sd, su, alpha_ratio = get_RF_step(sigma_fn(t), sigma_fn(t_next), eta[i])
-            print(sd.item(), su.item(), alpha_ratio.item(), sigma_hat.item(), sigma_next.item())
+            #print(sd.item(), su.item(), alpha_ratio.item(), sigma_hat.item(), sigma_next.item())
             #sigma_hat = sigma + su
             #sigma_next = sd
             
@@ -414,6 +522,11 @@ def sample_refined_exp_s_advanced_RF(
                                                                           extra_args=extra_args, pbar=pbar, simple_phi_calc=simple_phi_calc,
                                                                           momentum = momentum[i], vel = vel[depth][idx], vel_2 = vel_2[depth][idx], time = time, eulers_mom = eulers_mom[i].item(), cfgpp = cfgpp[i].item()
                                                                           )
+            
+            """x_n[depth][idx], denoised[depth][idx], denoised2[depth][idx], vel[depth][idx], vel_2[depth][idx] = _refined_exp_sosu_step_RF(model, x_h[depth][idx], sigma, sigma_next, c2=c2[i], eta=eta[i], noise_sampler=noise_sampler,
+                                                                          extra_args=extra_args, pbar=pbar, simple_phi_calc=simple_phi_calc,
+                                                                          momentum = momentum[i], vel = vel[depth][idx], vel_2 = vel_2[depth][idx], time = time, eulers_mom = eulers_mom[i].item(), cfgpp = cfgpp[i].item()
+                                                                          )"""
             """x_n[depth][idx], denoised[depth][idx], denoised2[depth][idx], vel[depth][idx], vel_2[depth][idx] = _refined_exp_sosu_step(model, x_h[depth][idx], sigma_hat, sigma_next, c2=c2[i],
                                                                           extra_args=extra_args, pbar=pbar, simple_phi_calc=simple_phi_calc,
                                                                           momentum = momentum[i], vel = vel[depth][idx], vel_2 = vel_2[depth][idx], time = time, eulers_mom = eulers_mom[i].item(), cfgpp = cfgpp[i].item()
