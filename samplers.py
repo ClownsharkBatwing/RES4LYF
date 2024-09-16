@@ -507,7 +507,7 @@ class SamplerDEIS_SDE:
     @classmethod
     def INPUT_TYPES(s):
         return {"required":
-                    {#"momentum": ("FLOAT", {"default": 1.0, "min": -100.0, "max": 100.0, "step":0.01, "round": False}),
+                    {"momentum": ("FLOAT", {"default": 1.0, "min": -100.0, "max": 100.0, "step":0.01, "round": False}),
                      "eta": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 100.0, "step":0.01, "round": False}),
                      "s_noise": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 100.0, "step":0.01, "round": False}),
                      #"r": ("FLOAT", {"default": 0.5, "min": 0.0, "max": 100.0, "step":0.01, "round": False}),
@@ -526,14 +526,14 @@ class SamplerDEIS_SDE:
 
     FUNCTION = "get_sampler"
 
-    def get_sampler(self, eta, s_noise, alpha, k, noise_sampler_type, alphas=None, etas=None):
+    def get_sampler(self, momentum, eta, s_noise, alpha, k, noise_sampler_type, alphas=None, etas=None):
         sampler_name = "deis_sde"
 
         steps = 10000
         alphas = initialize_or_scale(alphas, alpha, steps)
         etas = initialize_or_scale(etas, eta, steps)
 
-        sampler = comfy.samplers.ksampler(sampler_name, {"etas": etas, "s_noise": s_noise, "alpha": alphas, "k": k, "noise_sampler_type": noise_sampler_type})
+        sampler = comfy.samplers.ksampler(sampler_name, {"momentum": momentum, "etas": etas, "s_noise": s_noise, "alpha": alphas, "k": k, "noise_sampler_type": noise_sampler_type})
         return (sampler, )
     
 """class SamplerDPMPP_SDE_ADVANCED:

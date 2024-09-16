@@ -1016,7 +1016,7 @@ from comfy.k_diffusion.sampling import deis
 #From https://github.com/zju-pi/diff-sampler/blob/main/diff-solvers-main/solvers.py
 #under Apache 2 license
 @torch.no_grad()
-def sample_deis_sde(model, x, sigmas, extra_args=None, callback=None, disable=None, max_order=3, deis_mode='tab', etas=None, s_noise=1.0, noise_sampler_type="gaussian",k=1.0, scale=0.1, alpha=None,):
+def sample_deis_sde(model, x, sigmas, extra_args=None, callback=None, disable=None, max_order=3, deis_mode='tab', momentum=1.0, etas=None, s_noise=1.0, noise_sampler_type="gaussian",k=1.0, scale=0.1, alpha=None,):
     extra_args = {} if extra_args is None else extra_args
     s_in = x.new_ones([x.shape[0]])
     
@@ -1025,6 +1025,14 @@ def sample_deis_sde(model, x, sigmas, extra_args=None, callback=None, disable=No
     seed = extra_args.get("seed", None) + 1
     noise_sampler = NOISE_GENERATOR_CLASSES.get(noise_sampler_type)(x=x, seed=seed, sigma_min=sigma_min, sigma_max=sigma_max)
 
+    diff, vel  = None, None
+    def momentum_func(diff, velocity, timescale=1.0, offset=-momentum / 2.0): # Diff is current diff, vel is previous diff
+        if velocity is None:
+            momentum_vel = diff
+        else:
+            momentum_vel = momentum * (timescale + offset) * velocity + (1 - momentum * (timescale + offset)) * diff
+        return momentum_vel
+    
     x_next = x
     t_steps = sigmas
 
@@ -1043,6 +1051,10 @@ def sample_deis_sde(model, x, sigmas, extra_args=None, callback=None, disable=No
         x_cur = x_next
 
         denoised = model(x_cur, t_cur * s_in, **extra_args)
+        diff = momentum_func(denoised, vel, sigmas[i])
+        vel = diff
+        denoised = diff
+        
         if callback is not None:
             callback({'x': x, 'i': i, 'sigma': sigmas[i], 'sigma_hat': sigmas[i], 'denoised': denoised})
             
