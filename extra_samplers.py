@@ -35,11 +35,19 @@ def get_RF_step(sigma, sigma_next, eta):
 @torch.no_grad()
 def sample_dpmpp_sde_advanced(
     model, x, sigmas, extra_args=None, callback=None, disable=None,
-    momentum=1.0, eta=1., s_noise=1., noise_sampler=None, r=1/2, noise_sampler_type="brownian", k=1.0, scale=0.1, alpha=None,
+    momentum=1.0, eta=1., s_noise=1., noise_sampler=None, r=1/2, noise_sampler_type="brownian", k=1.0, scale=0.1, momentums=None, etas=None, s_noises=None, alpha=None,
 ):
     if isinstance(model.inner_model.inner_model.model_sampling, comfy.model_sampling.CONST):
-        return sample_dpmpp_sde_advanced_RF(model, x, sigmas, extra_args, callback, disable, momentum, eta, s_noise, noise_sampler, r, noise_sampler_type, k, scale, alpha)
+        return sample_dpmpp_sde_advanced_RF(model, x, sigmas, extra_args, callback, disable, momentum, eta, s_noise, noise_sampler, r, noise_sampler_type, k, scale, momentums, etas, s_noises, alpha)
     #DPM-Solver++ (stochastic with eta parameter).
+    diff, diff_2, vel, vel_2 = None, None, None, None
+    def momentum_func(diff, velocity, timescale=1.0, offset=-momentum / 2.0): # Diff is current diff, vel is previous diff
+        if velocity is None:
+            momentum_vel = diff
+        else:
+            momentum_vel = momentum * (timescale + offset) * velocity + (1 - momentum * (timescale + offset)) * diff
+        return momentum_vel
+    
     if len(sigmas) <= 1:
         return x
     alpha = torch.zeros_like(sigmas) if alpha is None else alpha
@@ -57,6 +65,11 @@ def sample_dpmpp_sde_advanced(
     for i in trange(len(sigmas) - 1, disable=disable):
         x_hat = x
         denoised = model(x, sigmas[i] * s_in, **extra_args)
+        
+        diff_2 = momentum_func(denoised, vel_2, sigmas[i], -momentums[i]/2.0)
+        vel_2 = diff_2
+        denoised = diff_2
+        
         if callback is not None:
             callback({'x': x, 'i': i, 'sigma': sigmas[i], 'sigma_hat': sigmas[i], 'denoised': denoised})
         
@@ -78,14 +91,18 @@ def sample_dpmpp_sde_advanced(
             fac = 1 / (2 * r)
 
             # Step 1
-            sd, su = get_ancestral_step(sigma_fn(t), sigma_fn(s), eta)
+            sd, su = get_ancestral_step(sigma_fn(t), sigma_fn(s), etas[i])
             s_ = t_fn(sd)
             x_2 = (sigma_fn(s_) / sigma_fn(t)) * x - (t - s_).expm1() * denoised
-            x_2 = x_2 + noise_sampler(sigma=sigma_fn(t), sigma_next=sigma_fn(s)) * s_noise * su
+            x_2 = x_2 + noise_sampler(sigma=sigma_fn(t), sigma_next=sigma_fn(s)) * s_noises[i] * su
             denoised_2 = model(x_2, sigma_fn(s) * s_in, **extra_args)
+            
+            diff = momentum_func(denoised_2, vel, sigmas[i], -momentums[i]/2.0)
+            vel = diff
+            denoised_2 = diff
 
             # Step 2
-            sd, su = get_ancestral_step(sigma_fn(t), sigma_fn(t_next), eta)
+            sd, su = get_ancestral_step(sigma_fn(t), sigma_fn(t_next), etas[i])
             t_next_ = t_fn(sd)
             denoised_d = (1 - fac) * denoised + fac * denoised_2
             x = (sigma_fn(t_next_) / sigma_fn(t)) * x - (t - t_next_).expm1() * denoised_d
@@ -94,7 +111,7 @@ def sample_dpmpp_sde_advanced(
             dt = sigmas[i + 1] - sigmas[i]
             x = x + d * dt
 
-            x = x + noise_sampler(sigma=sigma_fn(t), sigma_next=sigma_fn(t_next)) * s_noise * su
+            x = x + noise_sampler(sigma=sigma_fn(t), sigma_next=sigma_fn(t_next)) * s_noises[i] * su
 
     return x
 
@@ -102,7 +119,7 @@ def sample_dpmpp_sde_advanced(
 @torch.no_grad()
 def sample_dpmpp_sde_advanced_RF(
     model, x, sigmas, extra_args=None, callback=None, disable=None,
-    momentum=1.0, eta=1., s_noise=1., noise_sampler=None, r=1/2, noise_sampler_type="brownian", k=1.0, scale=0.1, alpha=None,
+    momentum=1.0, eta=1., s_noise=1., noise_sampler=None, r=1/2, noise_sampler_type="brownian", k=1.0, scale=0.1, momentums=None, etas=None, s_noises=None, alpha=None,
 ):
     """DPM-Solver++ (stochastic with eta parameter) adapted for Rectified Flow."""
     diff, diff_2, vel, vel_2 = None, None, None, None
@@ -136,7 +153,7 @@ def sample_dpmpp_sde_advanced_RF(
             
         denoised = model(x, sigmas[i] * s_in, **extra_args)
         
-        diff_2 = momentum_func(denoised, vel_2, sigmas[i])
+        diff_2 = momentum_func(denoised, vel_2, sigmas[i], -momentums[i]/2.0)
         vel_2 = diff_2
         denoised = diff_2
         
@@ -159,22 +176,22 @@ def sample_dpmpp_sde_advanced_RF(
                 sigma_s = 0.9999
 
             # Step 1
-            sd, su, alpha_ratio = get_RF_step(sigma_fn(t), sigma_s, eta)
+            sd, su, alpha_ratio = get_RF_step(sigma_fn(t), sigma_s, etas[i])
             s_ = t_fn(sd)
             x_2 = (sigma_fn(s_) / sigma_fn(t)) * x - (t - s_).expm1() * denoised
-            x_2 = alpha_ratio * x_2 + noise_sampler(sigma=sigma_fn(t), sigma_next=sigma_s) * s_noise * su         #SIGMA_S subs for SIGMA_FN(S)
+            x_2 = alpha_ratio * x_2 + noise_sampler(sigma=sigma_fn(t), sigma_next=sigma_s) * s_noises[i] * su         #SIGMA_S subs for SIGMA_FN(S)
             denoised_2 = model(x_2, sigma_s * s_in, **extra_args)
             
-            diff = momentum_func(denoised_2, vel, sigmas[i])
+            diff = momentum_func(denoised_2, vel, sigmas[i], -momentums[i]/2.0)
             vel = diff
             denoised_2 = diff
 
             # Step 2
-            sd, su, alpha_ratio = get_RF_step(sigma_fn(t), sigma_fn(t_next), eta)
+            sd, su, alpha_ratio = get_RF_step(sigma_fn(t), sigma_fn(t_next), etas[i])
             t_next_ = t_fn(sd)
             denoised_d = (1 - fac) * denoised + fac * denoised_2
             x = (sigma_fn(t_next_) / sigma_fn(t)) * x - (t - t_next_).expm1() * denoised_d
-            x = alpha_ratio * x + noise_sampler(sigma=sigma_fn(t), sigma_next=sigma_fn(t_next)) * s_noise * su
+            x = alpha_ratio * x + noise_sampler(sigma=sigma_fn(t), sigma_next=sigma_fn(t_next)) * s_noises[i] * su
             
             print("alpha__: ", alpha_ratio, sd, su)
             del denoised, denoised_d, denoised_2, x_2
@@ -407,7 +424,7 @@ from .refined_exp_solver import sample_refined_exp_s_advanced, sample_refined_ex
 @precision_tool.cast_tensor
 def sample_res_solver_advanced(model, 
                                x, 
-                               sigmas, etas, c2s, momentums, eulers_moms, offsets, branch_mode, branch_depth, branch_width,
+                               sigmas, etas, s_noises, c2s, momentums, eulers_moms, offsets, branch_mode, branch_depth, branch_width,
                                guides_1, guides_2, latent_guide_1, latent_guide_2, guide_mode_1, guide_mode_2, guide_1_channels,
                                k, clownseed=0, cfgpps=0.0, alphas=None, latent_noise=None, latent_self_guide_1=False,latent_shift_guide_1=False,
                                extra_args=None, callback=None, disable=None, noise_sampler_type="gaussian", noise_sampler=None, denoise_to_zero=True, simple_phi_calc=False, c2=0.5, momentum=0.0, eulers_mom=0.0, offset=0.0):
@@ -436,6 +453,7 @@ def sample_res_solver_advanced(model,
             cfgpp=cfgpps,
             c2=c2s, 
             eta=etas,
+            s_noises=s_noises,
             momentum=momentums,
             eulers_mom=eulers_moms,
             offset=offsets,
@@ -471,6 +489,7 @@ def sample_res_solver_advanced(model,
             cfgpp=cfgpps,
             c2=c2s, 
             eta=etas,
+            s_noises=s_noises,
             momentum=momentums,
             eulers_mom=eulers_moms,
             offset=offsets,
@@ -1016,7 +1035,7 @@ from comfy.k_diffusion.sampling import deis
 #From https://github.com/zju-pi/diff-sampler/blob/main/diff-solvers-main/solvers.py
 #under Apache 2 license
 @torch.no_grad()
-def sample_deis_sde(model, x, sigmas, extra_args=None, callback=None, disable=None, max_order=3, deis_mode='tab', momentums=None, etas=None, s_noise=1.0, noise_sampler_type="gaussian",k=1.0, scale=0.1, alpha=None,):
+def sample_deis_sde(model, x, sigmas, extra_args=None, callback=None, disable=None, max_order=3, deis_mode='tab', momentums=None, etas=None, s_noises=None, noise_offsets=None, s_noise=1.0, noise_sampler_type="gaussian", k=1.0, scale=0.1, alpha=None,):
     extra_args = {} if extra_args is None else extra_args
     s_in = x.new_ones([x.shape[0]])
     
@@ -1087,15 +1106,26 @@ def sample_deis_sde(model, x, sigmas, extra_args=None, callback=None, disable=No
             coeff_cur, coeff_prev1, coeff_prev2, coeff_prev3 = coeff_list[i]
             x_next = x_cur + coeff_cur * d_cur + coeff_prev1 * buffer_model[-1] + coeff_prev2 * buffer_model[-2] + coeff_prev3 * buffer_model[-3]
 
-        if len(buffer_model) == max_order - 1:
-            for k in range(max_order - 2):
-                buffer_model[k] = buffer_model[k+1]
-            buffer_model[-1] = d_cur.detach()
-        else:
-            buffer_model.append(d_cur.detach())
+        if max_order > 1:
+            if len(buffer_model) == max_order - 1:
+                for k in range(max_order - 2):
+                    buffer_model[k] = buffer_model[k+1]
+                buffer_model[-1] = d_cur.detach()
+            else:
+                buffer_model.append(d_cur.detach())
             
         if sigmas[i + 1] > 0 and etas[i] > 0:
-            x_next = x_next * (alpha_ip1 / alpha_down)   +   noise_sampler(sigma=sigmas[i], sigma_next=sigmas[i + 1]) * s_noise * renoise_coeff
+            
+            #x_next_mean_alpha_ip_down = (x_next * (alpha_ip1 / alpha_down)).mean()
+            noise = noise_sampler(sigma=sigmas[i], sigma_next=sigmas[i + 1]) * s_noises[i] * renoise_coeff
+            #print("x_next_mean: ", x_next.mean(), "noise_mean: ", noise.mean())
+            #noise = noise + (x_next.mean() - noise.mean() )
+            #print("noise_mean: ", noise.mean())
+            x_next = x_next * (alpha_ip1 / alpha_down)   +  noise
+            #x_next = x_next + (noise_offsets[i] - x_next.mean())
+            #x_next = x_next + noise_offsets[i]
+            #print("x_next_mean: ", x_next.mean())
+            
         import gc
         gc.collect()
         torch.cuda.empty_cache()

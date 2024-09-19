@@ -388,6 +388,7 @@ def sample_refined_exp_s_advanced_RF(
   callback: Optional[RefinedExpCallback] = None,
   disable: Optional[bool] = None,
   eta=None,
+  s_noises=None,
   momentum=None,
   eulers_mom=None,
   c2=None,
@@ -508,7 +509,7 @@ def sample_refined_exp_s_advanced_RF(
             #sigma_hat = sigma + su
             #sigma_next = sd
             
-            x_h[depth][idx] = alpha_ratio * x_n[depth-1][m] + noise_sampler(sigma=sigma_fn(t_fn(sigma)), sigma_next=sigma_fn(t_next)) * su
+            x_h[depth][idx] = alpha_ratio * x_n[depth-1][m] + noise_sampler(sigma=sigma_fn(t_fn(sigma)), sigma_next=sigma_fn(t_next)) * s_noises[i] * su
             """if sigma_hat < 1.0:
               x_h[depth][idx] = alpha_ratio * x_n[depth-1][m] + noise_sampler(sigma=sigma_fn(t_fn(sigma)), sigma_next=sigma_fn(t_next)) * su
             else:
@@ -593,6 +594,7 @@ def sample_refined_exp_s_advanced(
   callback: Optional[RefinedExpCallback] = None,
   disable: Optional[bool] = None,
   eta=None,
+  s_noises=None,
   momentum=None,
   eulers_mom=None,
   c2=None,
@@ -686,7 +688,7 @@ def sample_refined_exp_s_advanced(
         for m in range(branch_width**(depth-1)):
           for n in range(branch_width):
             idx = m * branch_width + n
-            x_h[depth][idx] = x_n[depth-1][m] + (sigma_hat ** 2 - sigma ** 2).sqrt() * noise_sampler(sigma=sigma, sigma_next=sigma_next)   
+            x_h[depth][idx] = x_n[depth-1][m] + (sigma_hat ** 2 - sigma ** 2).sqrt() * noise_sampler(sigma=sigma, sigma_next=sigma_next) * s_noises[i]
             x_n[depth][idx], denoised[depth][idx], denoised2[depth][idx], vel[depth][idx], vel_2[depth][idx] = _refined_exp_sosu_step(model, x_h[depth][idx], sigma_hat, sigma_next, c2=c2[i],
                                                                           extra_args=extra_args, pbar=pbar, simple_phi_calc=simple_phi_calc,
                                                                           momentum = momentum[i], vel = vel[depth][idx], vel_2 = vel_2[depth][idx], time = time, eulers_mom = eulers_mom[i].item(), cfgpp = cfgpp[i].item()
