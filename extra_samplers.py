@@ -1036,6 +1036,9 @@ from comfy.k_diffusion.sampling import deis
 #under Apache 2 license
 @torch.no_grad()
 def sample_deis_sde(model, x, sigmas, extra_args=None, callback=None, disable=None, max_order=3, deis_mode='tab', momentums=None, etas=None, s_noises=None, noise_offsets=None, s_noise=1.0, noise_sampler_type="gaussian", k=1.0, scale=0.1, alpha=None,):
+    sigma_fn = lambda t: t.neg().exp()
+    t_fn = lambda sigma: sigma.log().neg()
+    
     extra_args = {} if extra_args is None else extra_args
     s_in = x.new_ones([x.shape[0]])
     
@@ -1082,12 +1085,15 @@ def sample_deis_sde(model, x, sigmas, extra_args=None, callback=None, disable=No
         alpha_ip1  = 1 - sigmas[i + 1]
         alpha_down = 1 - sigma_down
         renoise_coeff = (sigmas[i + 1] ** 2 - sigma_down ** 2 * alpha_ip1 ** 2 / alpha_down ** 2).abs() ** 0.5
+        
+        #sd, su, alpha_ratio = get_RF_step(sigmas[i], sigmas[i+1], etas[i])
 
         #d_cur = (x_cur - denoised) / t_cur
         difference_ratio = (sigma_down - t_cur) / (t_next - t_cur)
         d_cur = ((x_cur - denoised) / t_cur) * difference_ratio     
         #d_cur = ((x_cur - denoised) / t_cur) * (sigma_down / t_cur)
-        dt = sigma_down - sigmas[i]  #from the euler ancestral RF sampler
+        #dt = sigma_down - sigmas[i]  #from the euler ancestral RF sampler
+        dt = sigmas[i+1] - sigmas[i]  #from the euler ancestral RF sampler
 
         order = min(max_order, i+1)
         if t_next <= 0:
