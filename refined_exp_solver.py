@@ -212,9 +212,13 @@ def _refined_exp_sosu_step(model, x, sigma, sigma_next, c2 = 0.5,
 
   sigma_fn = lambda t: t.neg().exp()
   t_fn = lambda sigma: sigma.log().neg()
+  sigma_fn_RF = lambda t: (t.exp() + 1) ** -1
+  t_fn_RF = lambda sigma: ((1-sigma)/sigma).log()
   #lam_next, lam = (s.log().neg() for s in (sigma_next, sigma))
   lam_next = t_fn(sigma_next)
   lam      = t_fn(sigma)
+  #lam_next = t_fn_RF(sigma_next)
+  #lam      = t_fn_RF(sigma)
   
   s_in = x.new_ones([x.shape[0]])
   h = lam_next - lam
@@ -325,8 +329,8 @@ def _refined_exp_sosu_step_RF(model, x, sigma, sigma_next, c2 = 0.5, eta = 0.25,
   a2_1, b1, b2 = _de_second_order(h=h, c2=c2, simple_phi_calc=simple_phi_calc)
   
   x = alpha_ratio * x + noise_sampler(sigma=sigma_fn(t), sigma_next=sigma_s) * su 
-  denoised = model(x, sigma_s * s_in, **extra_args)
-  #denoised = model(x, sigma * s_in, **extra_args)
+  #denoised = model(x, sigma_s * s_in, **extra_args)   #WATCH OUT FOR THIS EDIT!!!! THIS WAS UNCOMMENTED BEFORE
+  denoised = model(x, sigma * s_in, **extra_args)    #WATCH OUT FOR THIS EDIT!!!!
   
   if pbar is not None:
     pbar.update(0.5)
