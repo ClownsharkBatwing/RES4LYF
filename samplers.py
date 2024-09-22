@@ -489,7 +489,7 @@ class SamplerDPMPP_SDE_ADVANCED:
                      "r": ("FLOAT", {"default": 0.5, "min": 0.0, "max": 100.0, "step":0.01, "round": False}),
                      "alpha": ("FLOAT", {"default": 0.0, "min": -10000.0, "max": 10000.0, "step":0.1, "round": False}),
                      "k": ("FLOAT", {"default": 1.0, "min": -10000.0, "max": 10000.0, "step":2.0, "round": False}),
-                     "noise_sampler_type": (NOISE_GENERATOR_NAMES, ),
+                     "noise_sampler_type": (NOISE_GENERATOR_NAMES, {"default": "brownian"}),
                       },
                     "optional": 
                     {
