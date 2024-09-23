@@ -231,9 +231,8 @@ def _refined_exp_sosu_step(model, x, sigma, sigma_next, c2 = 0.5,
 
   c2_h = c2*h
 
-  diff_2 = momentum_func(a2_1*h*denoised, vel_2, time)
+  diff_2 = vel_2 = momentum_func(a2_1*h*denoised, vel_2, time)
 
-  vel_2 = diff_2
   x_2 = math.exp(-c2_h)*x + diff_2
   if cfgpp == False:
     x_2 = math.exp(-c2_h)*x + diff_2
@@ -248,9 +247,7 @@ def _refined_exp_sosu_step(model, x, sigma, sigma_next, c2 = 0.5,
   if pbar is not None:
     pbar.update(0.5)
 
-  diff = momentum_func(h*(b1*denoised + b2*denoised2), vel, time)
-
-  vel = diff
+  diff = vel = momentum_func(h*(b1*denoised + b2*denoised2), vel, time)
 
   if cfgpp == False:
     x_next = math.exp(-h)*x + diff
@@ -265,8 +262,7 @@ def _refined_exp_sosu_step(model, x, sigma, sigma_next, c2 = 0.5,
     vel_2=vel_2,
   )
 
-
-def _refined_exp_sosu_step_RF(model, x, sigma, sigma_next, c2 = 0.5, eta = 0.25, noise_sampler=None,
+def _refined_exp_sosu_step_RF(model, x, sigma, sigma_next, c2 = 0.5, eta=1.0,noise_sampler=None,
   extra_args: Dict[str, Any] = {},
   pbar: Optional[tqdm] = None,
   simple_phi_calc = False,
@@ -288,6 +284,213 @@ def _refined_exp_sosu_step_RF(model, x, sigma, sigma_next, c2 = 0.5, eta = 0.25,
     extra_args (`Dict[str, Any]`, *optional*, defaults to `{}`): kwargs to pass to `model#__call__()`
     pbar (`tqdm`, *optional*, defaults to `None`): progress bar to update after each model call
     simple_phi_calc (`bool`, *optional*, defaults to `True`): True = calculate phi_i,j(-h) via simplified formulae specific to j={1,2}. False = Use general solution that works for any j. Mathematically equivalent, but could be numeric differences."""
+  if cfgpp != 0.0:
+    temp = [0]
+    def post_cfg_function(args):
+        temp[0] = args["uncond_denoised"]
+        return args["denoised"]
+
+    model_options = extra_args.get("model_options", {}).copy()
+    extra_args["model_options"] = comfy.model_patcher.set_model_options_post_cfg_function(model_options, post_cfg_function, disable_cfg1_optimization=True)
+
+  def momentum_func(diff, velocity, timescale=1.0, offset=-momentum / 2.0): # Diff is current diff, vel is previous diff
+    if velocity is None:
+        momentum_vel = diff
+    else:
+        momentum_vel = momentum * (timescale + offset) * velocity + (1 - momentum * (timescale + offset)) * diff
+    return momentum_vel
+
+  sigma_fn = lambda t: t.neg().exp()
+  t_fn = lambda sigma: sigma.log().neg()
+  #sigma_fn = lambda t: (t.exp() + 1) ** -1
+  #t_fn = lambda sigma: ((1-sigma)/sigma).log()
+  #sigma_fn = lambda t: 2/(t.exp() + 1)
+  #t_fn = lambda sigma: ((1-0.5*sigma)/(0.5*sigma)).log()
+
+  r = c2
+  s_in = x.new_ones([x.shape[0]])
+  
+  denoised = model(x, sigma * s_in, **extra_args)        #initial denoise same as sde
+  
+  t, t_next = t_fn(sigma), t_fn(sigma_next)
+  h = t_next - t
+  s = t + h * r
+  a2_1, b1, b2 = _de_second_order(h=h, c2=c2, simple_phi_calc=simple_phi_calc)
+  
+  sigma_s = sigma_fn(s)
+  
+  if sigma_s.isnan():
+      sigma_s = 0.9999
+
+  if pbar is not None:
+    pbar.update(0.5)
+
+  sd, su, alpha_ratio = get_RF_step(sigma, sigma_s, eta)
+  
+  t, t_next = t_fn(sigma), t_fn(sd)
+  h = t_next - t
+  s = t + h * r
+  a2_1, b1, b2 = _de_second_order(h=h, c2=c2, simple_phi_calc=simple_phi_calc)
+
+  diff_2 = vel_2 = momentum_func(a2_1*h*denoised, vel_2, time)
+
+  #sigma_ratio = (sd - sigma) / (sigma_s - sigma)
+
+  x_2 = ((sd/sigma)**r)*x + diff_2 
+
+  x_2 = alpha_ratio * x_2 + noise_sampler(sigma=sigma, sigma_next=sigma_s) * su
+  
+  denoised2 = model(x_2, sigma_s * s_in, **extra_args)
+
+  if pbar is not None:
+    pbar.update(0.5)
+
+  sd, su, alpha_ratio = get_RF_step(sigma, sigma_next, eta)
+  t, t_next = t_fn(sigma), t_fn(sd)
+  h = t_next - t
+  s = t + h * r
+  a2_1, b1, b2 = _de_second_order(h=h, c2=c2, simple_phi_calc=simple_phi_calc)
+  #sigma_ratio = (sd - sigma) / (sigma_next - sigma)
+  diff = vel = momentum_func(h*(b1*denoised + b2*denoised2), vel, time)
+
+  x_next =  (sd/sigma) * x + diff
+  
+  x_next = alpha_ratio * x_next + noise_sampler(sigma=sigma, sigma_next=sigma_next) * su
+
+  return StepOutput(
+    x_next=x_next,
+    denoised=denoised,
+    denoised2=denoised2,
+    vel=vel,
+    vel_2=vel_2,
+  )
+
+def _refined_exp_sosu_step_RF_botched(model, x, sigma, sigma_next, c2 = 0.5, eta=1.0,noise_sampler=None,
+  extra_args: Dict[str, Any] = {},
+  pbar: Optional[tqdm] = None,
+  simple_phi_calc = False,
+  momentum = 0.0, vel = None, vel_2 = None,
+  time = None,
+  eulers_mom = 0.0,
+  cfgpp = 0.0,
+) -> StepOutput:
+
+  """Algorithm 1 "RES Second order Single Update Step with c2"
+  https://arxiv.org/abs/2308.02157
+
+  Parameters:
+    model (`DenoiserModel`): a k-diffusion wrapped denoiser model (e.g. a subclass of DiscreteEpsDDPMDenoiser)
+    x (`FloatTensor`): noised latents (or RGB I suppose), e.g. torch.randn((B, C, H, W)) * sigma[0]
+    sigma (`FloatTensor`): timestep to denoise
+    sigma_next (`FloatTensor`): timestep+1 to denoise
+    c2 (`float`, *optional*, defaults to .5): partial step size for solving ODE. .5 = midpoint method
+    extra_args (`Dict[str, Any]`, *optional*, defaults to `{}`): kwargs to pass to `model#__call__()`
+    pbar (`tqdm`, *optional*, defaults to `None`): progress bar to update after each model call
+    simple_phi_calc (`bool`, *optional*, defaults to `True`): True = calculate phi_i,j(-h) via simplified formulae specific to j={1,2}. False = Use general solution that works for any j. Mathematically equivalent, but could be numeric differences."""
+  if cfgpp != 0.0:
+    temp = [0]
+    def post_cfg_function(args):
+        temp[0] = args["uncond_denoised"]
+        return args["denoised"]
+
+    model_options = extra_args.get("model_options", {}).copy()
+    extra_args["model_options"] = comfy.model_patcher.set_model_options_post_cfg_function(model_options, post_cfg_function, disable_cfg1_optimization=True)
+
+  def momentum_func(diff, velocity, timescale=1.0, offset=-momentum / 2.0): # Diff is current diff, vel is previous diff
+    if velocity is None:
+        momentum_vel = diff
+    else:
+        momentum_vel = momentum * (timescale + offset) * velocity + (1 - momentum * (timescale + offset)) * diff
+    return momentum_vel
+
+  h_fn_EPS = lambda sigma, sigma_next: sigma_next.log().neg() - sigma.log().neg()
+  sigma_fn = lambda t: t.neg().exp()
+  t_fn = lambda sigma: sigma.log().neg()
+  #sigma_fn = lambda t: (t.exp() + 1) ** -1
+  #t_fn = lambda sigma: ((1-sigma)/sigma).log()
+  #sigma_fn = lambda t: 2/(t.exp() + 1)
+  #t_fn = lambda sigma: ((1-0.5*sigma)/(0.5*sigma)).log()
+
+  r = c2
+  s_in = x.new_ones([x.shape[0]])
+  
+  denoised = model(x, sigma * s_in, **extra_args)        #initial denoise same as sde
+  
+  t, t_next = t_fn(sigma), t_fn(sigma_next)
+  h = t_next - t
+  s = t + h * r
+  a2_1, b1, b2 = _de_second_order(h=h_fn_EPS(sigma, sigma_next), c2=c2, simple_phi_calc=simple_phi_calc)
+  
+  sigma_s = sigma_fn(s)
+  
+  if sigma_s.isnan():
+      sigma_s = 0.9999
+
+  if pbar is not None:
+    pbar.update(0.5)
+
+  sd, su, alpha_ratio = get_RF_step(sigma, sigma_s, eta)
+  
+  """t, t_next = t_fn(sigma), t_fn(sd)
+  h = t_next - t
+  s = t + h * r
+  a2_1, b1, b2 = _de_second_order(h=h_fn_EPS(sigma, sd), c2=c2, simple_phi_calc=simple_phi_calc)"""
+
+  diff_2 = vel_2 = momentum_func(a2_1*h*denoised, vel_2, time)
+
+  #sigma_ratio = (sd - sigma) / (sigma_s - sigma)
+  #x_2 = sigma_fn(h*r)*x + diff_2
+  #x_2 = ((sigma_next/sigma)**r)*x + diff_2 * sigma_ratio
+  #x_2 = ((sigma_s/sigma)) * x + (1 - (sigma_s / sigma)) * diff_2
+  #x_2 = ((sigma_next/sigma)**r) * x + (1-((sigma_next/sigma)**r)) * diff_2
+  #x_2 = ((sd/sigma)**r)*x + (1-((sd/sigma)**r))*diff_2 
+  #x_2 = ((sigma_s/sigma)**r) * x + diff_2
+  #x_2 = ((sd/sigma)**r)*x + diff_2 
+  x_2 = ((sd/sigma)**r)*x + diff_2 
+  x_2 = alpha_ratio * x_2 + noise_sampler(sigma=sigma, sigma_next=sigma_s) * su
+  
+  denoised2 = model(x_2, sigma_s * s_in, **extra_args)
+
+  if pbar is not None:
+    pbar.update(0.5)
+
+  #sd, su, alpha_ratio = get_RF_step(sigma, sigma_next, eta)
+  sd, su, alpha_ratio = get_RF_step(sigma, sigma_next, eta)
+  """t, t_next = t_fn(sigma), t_fn(sd)
+  h = t_next - t
+  s = t + h * r
+  a2_1, b1, b2 = _de_second_order(h=h_fn_EPS(sigma, sd), c2=c2, simple_phi_calc=simple_phi_calc)"""
+  #sigma_ratio = (sd - sigma) / (sigma_next - sigma)
+  diff = vel = momentum_func(h*(b1*denoised + b2*denoised2), vel, time)
+
+  #x_next = sigma_fn(h)*x + diff
+  #x_next = (sigma_next/sigma)*x + diff * sigma_ratio
+  #x_next =  (sigma_next/sigma) * x + (1-(sigma_next/sigma)) * diff
+  #x_next =  (sd/sigma) * x + diff
+  x_next =  (sd/sigma) * x + diff
+  #x_next =  (sd/sigma) * x + (1-(sd/sigma))* diff
+  
+  x_next = alpha_ratio * x_next + noise_sampler(sigma=sigma_s, sigma_next=sigma_next) * su
+
+  return StepOutput(
+    x_next=x_next,
+    denoised=denoised,
+    denoised2=denoised2,
+    vel=vel,
+    vel_2=vel_2,
+  )
+
+
+"""def _refined_exp_sosu_step_RF(model, x, sigma, sigma_next, c2 = 0.5, eta = 0.25, noise_sampler=None,
+  extra_args: Dict[str, Any] = {},
+  pbar: Optional[tqdm] = None,
+  simple_phi_calc = False,
+  momentum = 0.0, vel = None, vel_2 = None,
+  time = None,
+  eulers_mom = 0.0,
+  cfgpp = 0.0,
+) -> StepOutput:
+
   if cfgpp != 0.0:
     temp = [0]
     def post_cfg_function(args):
@@ -371,7 +574,7 @@ def _refined_exp_sosu_step_RF(model, x, sigma, sigma_next, c2 = 0.5, eta = 0.25,
     denoised2=denoised2,
     vel=vel,
     vel_2=vel_2,
-  )
+  )"""
 
 
 @no_grad()
@@ -513,7 +716,8 @@ def sample_refined_exp_s_advanced_RF(
             #sigma_hat = sigma + su
             #sigma_next = sd
             
-            x_h[depth][idx] = alpha_ratio * x_n[depth-1][m] + noise_sampler(sigma=sigma_fn(t_fn(sigma)), sigma_next=sigma_fn(t_next)) * s_noises[i] * su
+            x_h[depth][idx] = x_n[depth-1][m]
+            #x_h[depth][idx] = alpha_ratio * x_n[depth-1][m] + noise_sampler(sigma=sigma_fn(t_fn(sigma)), sigma_next=sigma_fn(t_next)) * s_noises[i] * su  #COMMENT OUT FOR NOW
             """if sigma_hat < 1.0:
               x_h[depth][idx] = alpha_ratio * x_n[depth-1][m] + noise_sampler(sigma=sigma_fn(t_fn(sigma)), sigma_next=sigma_fn(t_next)) * su
             else:
@@ -523,7 +727,11 @@ def sample_refined_exp_s_advanced_RF(
             #sigma_hat = sigma_hat.clamp(1.0)
             
             #x_h[depth][idx] = x_n[depth-1][m] + (sigma_hat ** 2 - sigma ** 2).sqrt() * noise_sampler(sigma=sigma, sigma_next=sigma_next)       #return sigma * noise + (1.0 - sigma) * latent_image
-            x_n[depth][idx], denoised[depth][idx], denoised2[depth][idx], vel[depth][idx], vel_2[depth][idx] = _refined_exp_sosu_step(model, x_h[depth][idx], sigma, sd, c2=c2[i],
+            """x_n[depth][idx], denoised[depth][idx], denoised2[depth][idx], vel[depth][idx], vel_2[depth][idx] = _refined_exp_sosu_step(model, x_h[depth][idx], sigma, sd, c2=c2[i],
+                                                                          extra_args=extra_args, pbar=pbar, simple_phi_calc=simple_phi_calc,
+                                                                          momentum = momentum[i], vel = vel[depth][idx], vel_2 = vel_2[depth][idx], time = time, eulers_mom = eulers_mom[i].item(), cfgpp = cfgpp[i].item()
+                                                                          )"""
+            x_n[depth][idx], denoised[depth][idx], denoised2[depth][idx], vel[depth][idx], vel_2[depth][idx] = _refined_exp_sosu_step_RF(model, x_h[depth][idx], sigma, sigma_next, c2=c2[i],eta=eta[i], noise_sampler=noise_sampler,
                                                                           extra_args=extra_args, pbar=pbar, simple_phi_calc=simple_phi_calc,
                                                                           momentum = momentum[i], vel = vel[depth][idx], vel_2 = vel_2[depth][idx], time = time, eulers_mom = eulers_mom[i].item(), cfgpp = cfgpp[i].item()
                                                                           )

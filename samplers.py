@@ -498,6 +498,8 @@ class SamplerDPMPP_SDE_ADVANCED:
                         "etas2": ("SIGMAS", ),
                         "s_noises1": ("SIGMAS", ),
                         "s_noises2": ("SIGMAS", ),
+                        "denoise_boosts": ("SIGMAS", ),
+                        "rs": ("SIGMAS", ),
                         "alphas": ("SIGMAS", ),
                     }  
                }
@@ -506,7 +508,8 @@ class SamplerDPMPP_SDE_ADVANCED:
 
     FUNCTION = "get_sampler"
 
-    def get_sampler(self, momentum, eta1, eta2, s_noise1, s_noise2, denoise_boost, r, alpha, k, noise_sampler_type, momentums=None, etas1=None, etas2=None, s_noises1=None, s_noises2=None, alphas=None):
+    def get_sampler(self, momentum=0.0, eta1=1.0, eta2=1.0, s_noise1=1.0, s_noise2=1.0, denoise_boost=0.0, r=0.5, alpha=-1.0, k=1.0, noise_sampler_type="brownian", 
+                    momentums=None, etas1=None, etas2=None, s_noises1=None, s_noises2=None, denoise_boosts=None, rs=None, alphas=None):
         sampler_name = "dpmpp_sde_advanced"
 
         steps = 10000
@@ -515,10 +518,11 @@ class SamplerDPMPP_SDE_ADVANCED:
         etas2 = initialize_or_scale(etas2, eta2, steps)
         s_noises1 = initialize_or_scale(s_noises1, s_noise1, steps)
         s_noises2 = initialize_or_scale(s_noises2, s_noise2, steps)
+        denoise_boosts = initialize_or_scale(denoise_boosts, denoise_boost, steps)
+        rs = initialize_or_scale(rs, r, steps)
         alphas = initialize_or_scale(alphas, alpha, steps)
 
-        #sampler = comfy.samplers.ksampler(sampler_name, {"momentum": momentum, "eta": eta, "s_noise": s_noise, "r": r, "alpha": alphas, "k": k, "noise_sampler_type": noise_sampler_type})
-        sampler = comfy.samplers.ksampler(sampler_name, {"momentums": momentums, "etas1": etas1, "etas2": etas2, "s_noises1": s_noises1, "s_noises2": s_noises2, "denoise_boost": denoise_boost, "alpha": alphas, "k": k, "noise_sampler_type": noise_sampler_type})
+        sampler = comfy.samplers.ksampler(sampler_name, {"momentums": momentums, "etas1": etas1, "etas2": etas2, "s_noises1": s_noises1, "s_noises2": s_noises2, "denoise_boosts": denoise_boosts, "alphas": alphas, "rs": rs, "k": k, "noise_sampler_type": noise_sampler_type})
         return (sampler, )
     
 class SamplerDEIS_SDE:
