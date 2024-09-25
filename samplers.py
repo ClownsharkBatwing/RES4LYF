@@ -127,6 +127,9 @@ class ClownSampler:
                 "branch_width": ("INT", {"default": 1, "min": 1, "max": 0xffffffffffffffff}),
 
                 "noise_sampler_type": (NOISE_GENERATOR_NAMES, ),
+                "noise_mode": (["hard", "soft"], {"default": 'soft'}), 
+                "prenoise": ("BOOLEAN", {"default": False}),   
+
                 "clownseed": ("INT", {"default": 0, "min": 0, "max": 0xffffffffffffffff}),
                 "alpha": ("FLOAT", {"default": 0.0, "min": -10000.0, "max": 10000.0, "step": 0.1}),
                 "k": ("FLOAT", {"default": 1.0, "min": -10000.0, "max": 10000.0, "step": 2}),      
@@ -151,7 +154,7 @@ class ClownSampler:
 
     FUNCTION = "get_sampler"
 
-    def get_sampler(self, clownseed, noise_sampler_type, denoise_to_zero, simple_phi_calc, cfgpp, eulers_mom, momentum, c2, eta, s_noise, branch_mode, branch_depth, branch_width,
+    def get_sampler(self, clownseed, noise_sampler_type, noise_mode, prenoise, denoise_to_zero, simple_phi_calc, cfgpp, eulers_mom, momentum, c2, eta, s_noise, branch_mode, branch_depth, branch_width,
                     alpha, k,
                     alphas=None, latent_noise=None,
                     eulers_moms=None, momentums=None, etas=None, s_noises=None, c2s=None, cfgpps=None, offsets=None, guides=None):
@@ -192,6 +195,8 @@ class ClownSampler:
             "res_momentumized_advanced",
             {
                 "noise_sampler_type": noise_sampler_type,
+                "noise_mode": noise_mode,
+                "prenoise": prenoise,
                 "denoise_to_zero": denoise_to_zero,
                 "simple_phi_calc": simple_phi_calc,
                 "branch_mode": branch_mode,
@@ -490,6 +495,7 @@ class SamplerDPMPP_SDE_ADVANCED:
                      "alpha": ("FLOAT", {"default": 0.0, "min": -10000.0, "max": 10000.0, "step":0.1, "round": False}),
                      "k": ("FLOAT", {"default": 1.0, "min": -10000.0, "max": 10000.0, "step":2.0, "round": False}),
                      "noise_sampler_type": (NOISE_GENERATOR_NAMES, {"default": "brownian"}),
+                     "noise_mode": (["hard", "soft"], {"default": 'soft'}), 
                       },
                     "optional": 
                     {
@@ -508,7 +514,7 @@ class SamplerDPMPP_SDE_ADVANCED:
 
     FUNCTION = "get_sampler"
 
-    def get_sampler(self, momentum=0.0, eta1=1.0, eta2=1.0, s_noise1=1.0, s_noise2=1.0, denoise_boost=0.0, r=0.5, alpha=-1.0, k=1.0, noise_sampler_type="brownian", 
+    def get_sampler(self, momentum=0.0, eta1=1.0, eta2=1.0, s_noise1=1.0, s_noise2=1.0, denoise_boost=0.0, r=0.5, alpha=-1.0, k=1.0, noise_sampler_type="brownian", noise_mode="soft", 
                     momentums=None, etas1=None, etas2=None, s_noises1=None, s_noises2=None, denoise_boosts=None, rs=None, alphas=None):
         sampler_name = "dpmpp_sde_advanced"
 
@@ -522,7 +528,8 @@ class SamplerDPMPP_SDE_ADVANCED:
         rs = initialize_or_scale(rs, r, steps)
         alphas = initialize_or_scale(alphas, alpha, steps)
 
-        sampler = comfy.samplers.ksampler(sampler_name, {"momentums": momentums, "etas1": etas1, "etas2": etas2, "s_noises1": s_noises1, "s_noises2": s_noises2, "denoise_boosts": denoise_boosts, "alphas": alphas, "rs": rs, "k": k, "noise_sampler_type": noise_sampler_type})
+        sampler = comfy.samplers.ksampler(sampler_name, {"momentums": momentums, "etas1": etas1, "etas2": etas2, "s_noises1": s_noises1, "s_noises2": s_noises2, 
+                                                         "denoise_boosts": denoise_boosts, "alphas": alphas, "rs": rs, "k": k, "noise_sampler_type": noise_sampler_type, "noise_mode": noise_mode,})
         return (sampler, )
     
 class SamplerDEIS_SDE:
@@ -537,6 +544,7 @@ class SamplerDEIS_SDE:
                      "alpha": ("FLOAT", {"default": 0.0, "min": -10000.0, "max": 10000.0, "step":0.1, "round": False}),
                      "k": ("FLOAT", {"default": 1.0, "min": -10000.0, "max": 10000.0, "step":2.0, "round": False}),
                      "noise_sampler_type": (NOISE_GENERATOR_NAMES, ),
+                     "noise_mode": (["hard", "soft"], {"default": 'soft'}), 
                      "max_order": ("INT", {"default": 3, "min": 1, "max": 4, "step":1}),
                       },
                     "optional": 
@@ -553,7 +561,7 @@ class SamplerDEIS_SDE:
 
     FUNCTION = "get_sampler"
 
-    def get_sampler(self, momentum, eta, s_noise, alpha, k, noise_sampler_type, max_order, momentums=None, etas=None, noise_offset=0.0, noise_offsets=None, s_noises=None, alphas=None, ):
+    def get_sampler(self, momentum, eta, s_noise, alpha, k, noise_sampler_type, noise_mode, max_order, momentums=None, etas=None, noise_offset=0.0, noise_offsets=None, s_noises=None, alphas=None, ):
         sampler_name = "deis_sde"
 
         steps = 10000
@@ -563,7 +571,8 @@ class SamplerDEIS_SDE:
         noise_offsets = initialize_or_scale(noise_offsets, noise_offset, steps)
         alphas = initialize_or_scale(alphas, alpha, steps)
 
-        sampler = comfy.samplers.ksampler(sampler_name, {"momentums": momentums, "etas": etas, "s_noises": s_noises, "noise_offsets": noise_offsets, "s_noise": s_noise, "alpha": alphas, "k": k, "noise_sampler_type": noise_sampler_type, "max_order": max_order,})
+        sampler = comfy.samplers.ksampler(sampler_name, {"momentums": momentums, "etas": etas, "s_noises": s_noises, "noise_offsets": noise_offsets, "s_noise": s_noise, "alpha": alphas, "k": k, 
+                                                         "noise_sampler_type": noise_sampler_type, "noise_mode": noise_mode, "max_order": max_order,})
         return (sampler, )
     
 """class SamplerDPMPP_SDE_ADVANCED:
@@ -651,7 +660,8 @@ class SamplerEulerAncestral_Advanced:
                      "s_noise": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 100.0, "step":0.01, "round": False}),
                      "alpha": ("FLOAT", {"default": 0.0, "min": -10000.0, "max": 10000.0, "step":0.1, "round": False}),
                      "k": ("FLOAT", {"default": 1.0, "min": -10000.0, "max": 10000.0, "step":2.0, "round": False}),
-                      "noise_sampler_type": (NOISE_GENERATOR_NAMES, ),
+                     "noise_sampler_type": (NOISE_GENERATOR_NAMES, ),
+                     "noise_mode": (["hard", "soft"], {"default": 'soft'}), 
                       },
                     "optional": 
                     {
@@ -663,12 +673,12 @@ class SamplerEulerAncestral_Advanced:
 
     FUNCTION = "get_sampler"
 
-    def get_sampler(self, eta, s_noise, alpha, k, noise_sampler_type, alphas=None):
+    def get_sampler(self, eta, s_noise, alpha, k, noise_sampler_type, noise_mode, alphas=None):
         
         steps = 10000
         alphas = initialize_or_scale(alphas, alpha, steps)
 
-        sampler = comfy.samplers.ksampler("euler_ancestral_advanced", {"eta": eta, "s_noise": s_noise, "alpha": alphas, "k": k, "noise_sampler_type": noise_sampler_type})
+        sampler = comfy.samplers.ksampler("euler_ancestral_advanced", {"eta": eta, "s_noise": s_noise, "alpha": alphas, "k": k, "noise_sampler_type": noise_sampler_type, "noise_mode": noise_mode,})
         return (sampler, )
     
     

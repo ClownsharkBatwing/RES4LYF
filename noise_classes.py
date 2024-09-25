@@ -1,6 +1,7 @@
 import torch
 from torch import nn, Tensor, Generator, lerp
 from torch.nn.functional import unfold
+import torch.nn.functional as F
 from typing import Callable, Tuple
 from math import pi
 from comfy.k_diffusion.sampling import BrownianTreeNoiseSampler
@@ -71,7 +72,7 @@ def noise_generator_factory(cls, **fixed_params):
 def like(x):
     return {'size': x.shape, 'dtype': x.dtype, 'layout': x.layout, 'device': x.device}
 
-def scale_to_range(x, scaled_min = -1.73, scaled_max = 1.73):
+def scale_to_range(x, scaled_min = -1.73, scaled_max = 1.73): #1.73 is roughly the square root of 3
     return scaled_min + (x - x.min()) * (scaled_max - scaled_min) / (x.max() - x.min())
 
 def normalize(x):
@@ -556,6 +557,108 @@ class PerlinNoiseGenerator(NoiseGenerator):
         for i in range(2):
             noise += self.perlin_noise((noise_size_H, noise_size_W), (noise_size_H, noise_size_W), batch_size=self.x.shape[1], generator=self.generator).to(self.device)
         return noise / noise.std()
+    
+class GreenNoiseGenerator(NoiseGenerator):
+    def __init__(self, x=None, size=None, dtype=None, layout=None, device=None, seed=42, generator=None, sigma_min=None, sigma_max=None):
+        super().__init__(x, size, dtype, layout, device, seed, generator, sigma_min, sigma_max)
+
+    def __call__(self, **kwargs):
+        b, c, h, w = self.size
+
+        # Generate random noise
+        noise = torch.randn(size=self.size, dtype=self.dtype, layout=self.layout, device=self.device, generator=self.generator)
+        
+        # Generate frequency grid
+        y_freq = torch.fft.fftfreq(h, 1/h, device=self.device)
+        x_freq = torch.fft.fftfreq(w, 1/w, device=self.device)
+        freq = torch.sqrt(y_freq[:, None]**2 + x_freq[None, :]**2).clamp(min=1e-10)
+
+        # Create a mid-frequency emphasis for green noise (centered on mid frequencies)
+        power = torch.sqrt(freq)
+        power[0, 0] = 1  # Avoid division by zero
+
+        # Apply the frequency emphasis
+        noise_fft = torch.fft.fft2(noise)
+        modified_fft = noise_fft / torch.sqrt(power)
+        noise = torch.fft.ifft2(modified_fft).real
+
+        # Normalize and return the latent noise
+        #return noise / noise.std()
+        return normalize(noise)
+
+
+class VelvetNoiseGenerator(NoiseGenerator):
+    def __init__(self, x=None, size=None, dtype=None, layout=None, device=None, seed=42, generator=None, sigma_min=None, sigma_max=None, num_impulses=100):
+        self.update(num_impulses=num_impulses)
+        super().__init__(x, size, dtype, layout, device, seed, generator, sigma_min, sigma_max)
+
+    def __call__(self, *, num_impulses=None, **kwargs):
+        self.update(num_impulses=num_impulses)
+        
+        b, c, h, w = self.size
+        noise = torch.zeros(size=self.size, dtype=self.dtype, layout=self.layout, device=self.device)
+        
+        # Randomly place impulses across the image
+        for _ in range(self.num_impulses):
+            # Generate random positions for the impulses
+            i = torch.randint(0, h, (1,), generator=self.generator, device=self.device).item()
+            j = torch.randint(0, w, (1,), generator=self.generator, device=self.device).item()
+            # Generate random values for the impulses
+            noise[..., i, j] = torch.randn((1,), generator=self.generator, device=self.device)
+
+        #return noise / noise.std()
+        return normalize(noise)
+
+class LatentFilmGrainGenerator(NoiseGenerator):
+    def __init__(self, x=None, size=None, dtype=None, layout=None, device=None, seed=42, generator=None, sigma_min=None, sigma_max=None, 
+                 density=1.0, intensity=1.0, highlights=1.0, supersample_factor=4):
+        # Initialize the generator with noise parameters
+        self.update(density=density, intensity=intensity, highlights=highlights, supersample_factor=supersample_factor)
+        super().__init__(x, size, dtype, layout, device, seed, generator, sigma_min, sigma_max)
+
+    def __call__(self, *, density=None, intensity=None, highlights=None, supersample_factor=None, **kwargs):
+        # Update parameters
+        self.update(density=density, intensity=intensity, highlights=highlights, supersample_factor=supersample_factor)
+
+        # Generate film grain in latent space
+        latent_noise = self.apply_film_grain_to_latent()
+        return latent_noise
+
+    def apply_film_grain_to_latent(self):
+        # Get latent space size
+        b, c, h, w = self.size
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+        # Generate initial latent tensor
+        latent_tensor = torch.randn(self.size, dtype=self.dtype, layout=self.layout, device=self.device, generator=self.generator)
+
+        # Supersample latent space for higher resolution film grain
+        supersampled_size = (h * self.supersample_factor, w * self.supersample_factor)
+        latent_tensor = F.interpolate(latent_tensor, size=supersampled_size, mode="bilinear", align_corners=False)
+
+        # Flatten the latent tensor to add noise to a subset of pixels
+        latent_tensor_flat = latent_tensor.view(-1)  # Flatten into a 1D tensor
+        num_pixels = int(self.density * latent_tensor_flat.size(0))
+
+        # Select random indices for applying noise
+        indices = torch.randint(0, latent_tensor_flat.size(0), (num_pixels,), dtype=torch.int64, device=device)
+        noise_values = torch.randn(num_pixels, dtype=self.dtype, device=self.device, generator=self.generator) * self.intensity
+
+        # Add noise to latent space
+        latent_tensor_flat.index_add_(0, indices, noise_values)  # Index into the 1D tensor
+        latent_tensor = latent_tensor_flat.view(b, c, *supersampled_size)  # Reshape back to original size
+
+        # Downsample back to original latent space resolution
+        latent_tensor = F.interpolate(latent_tensor, size=(h, w), mode="bilinear", align_corners=False)
+
+        # Apply highlights (contrast adjustment in latent space)
+        latent_tensor = latent_tensor * self.highlights
+
+        return latent_tensor / latent_tensor.std()
+
+
+
+
 
 NOISE_GENERATOR_CLASSES = {
     "fractal": FractalNoiseGenerator,
@@ -576,6 +679,9 @@ NOISE_GENERATOR_CLASSES = {
     "wavelet": WaveletNoiseGenerator,
     "simplex": SimplexNoiseGenerator,
     "perlin": PerlinNoiseGenerator,
+    "green": GreenNoiseGenerator,
+    "velvet": VelvetNoiseGenerator,
+    "film_grain": LatentFilmGrainGenerator,
 }
 
 NOISE_GENERATOR_NAMES = tuple(NOISE_GENERATOR_CLASSES.keys())
