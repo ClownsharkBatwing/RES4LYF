@@ -536,15 +536,14 @@ class SamplerDEIS_SDE:
     @classmethod
     def INPUT_TYPES(s):
         return {"required":
-                    {"momentum": ("FLOAT", {"default": 1.0, "min": -100.0, "max": 100.0, "step":0.01, "round": False}),
-                     "eta": ("FLOAT", {"default": 1.0, "min": -100.0, "max": 100.0, "step":0.01, "round": False}),
+                    {"momentum": ("FLOAT", {"default": 0.0, "min": -100.0, "max": 100.0, "step":0.01, "round": False}),
+                     "eta": ("FLOAT", {"default": 0.5, "min": -100.0, "max": 100.0, "step":0.01, "round": False}),
                      "s_noise": ("FLOAT", {"default": 1.0, "min": -100.0, "max": 100.0, "step":0.01, "round": False}),
-                     #"noise_offset": ("FLOAT", {"default": 0.0, "min": -100.0, "max": 100.0, "step":0.01, "round": False}),
-                     #"r": ("FLOAT", {"default": 0.5, "min": 0.0, "max": 100.0, "step":0.01, "round": False}),
                      "alpha": ("FLOAT", {"default": 0.0, "min": -10000.0, "max": 10000.0, "step":0.1, "round": False}),
                      "k": ("FLOAT", {"default": 1.0, "min": -10000.0, "max": 10000.0, "step":2.0, "round": False}),
-                     "noise_sampler_type": (NOISE_GENERATOR_NAMES, ),
-                     "noise_mode": (["hard", "soft"], {"default": 'soft'}), 
+                     "noise_sampler_type": (NOISE_GENERATOR_NAMES, {"default": "brownian"}),
+                     "noise_mode": (["hard", "soft"], {"default": "hard"}), 
+                     "deis_mode": (["tab", "rhoab"], {"default": "tab"}), 
                      "max_order": ("INT", {"default": 3, "min": 1, "max": 4, "step":1}),
                       },
                     "optional": 
@@ -552,7 +551,6 @@ class SamplerDEIS_SDE:
                         "momentums": ("SIGMAS", ),
                         "etas": ("SIGMAS", ),
                         "s_noises": ("SIGMAS", ),
-                        #"noise_offsets": ("SIGMAS", ),
                         "alphas": ("SIGMAS", ),
                     }  
                }
@@ -561,56 +559,20 @@ class SamplerDEIS_SDE:
 
     FUNCTION = "get_sampler"
 
-    def get_sampler(self, momentum, eta, s_noise, alpha, k, noise_sampler_type, noise_mode, max_order, momentums=None, etas=None, noise_offset=0.0, noise_offsets=None, s_noises=None, alphas=None, ):
+    def get_sampler(self, momentum, eta, s_noise, alpha, k, noise_sampler_type, noise_mode, deis_mode, max_order, momentums=None, etas=None, s_noises=None, alphas=None, ):
         sampler_name = "deis_sde"
 
         steps = 10000
         momentums = initialize_or_scale(momentums, momentum, steps)
         etas = initialize_or_scale(etas, eta, steps)
         s_noises = initialize_or_scale(s_noises, s_noise, steps)
-        noise_offsets = initialize_or_scale(noise_offsets, noise_offset, steps)
         alphas = initialize_or_scale(alphas, alpha, steps)
 
-        sampler = comfy.samplers.ksampler(sampler_name, {"momentums": momentums, "etas": etas, "s_noises": s_noises, "noise_offsets": noise_offsets, "s_noise": s_noise, "alpha": alphas, "k": k, 
-                                                         "noise_sampler_type": noise_sampler_type, "noise_mode": noise_mode, "max_order": max_order,})
+        sampler = comfy.samplers.ksampler(sampler_name, {"momentums": momentums, "etas": etas, "s_noises": s_noises, "alpha": alphas, "k": k, 
+                                                         "noise_sampler_type": noise_sampler_type, "noise_mode": noise_mode, "deis_mode": deis_mode, "max_order": max_order,})
         return (sampler, )
-    
-"""class SamplerDPMPP_SDE_ADVANCED:
-    @classmethod
-    def INPUT_TYPES(s):
-        return {"required":
-                    {"eta":     ("FLOAT", {"default": 1.0, "min": 0.0,      "max": 100.0,   "step":0.01, "round": False}),
-                     "s_noise": ("FLOAT", {"default": 1.0, "min": 0.0,      "max": 100.0,   "step":0.01, "round": False}),
-                     "r":       ("FLOAT", {"default": 0.5, "min": 0.0,      "max": 100.0,   "step":0.01, "round": False}),
-                     "alpha":   ("FLOAT", {"default": 0.0, "min": -10000.0, "max": 10000.0, "step":0.1,  "round": False}),
-                     "k":       ("FLOAT", {"default": 1.0, "min": -10000.0, "max": 10000.0, "step":2.0,  "round": False}),
-                     "noise_device": (['gpu', 'cpu'], ),
-                     "noise_sampler_type": (NOISE_GENERATOR_NAMES, ),
-                      },
-                    "optional": 
-                    {
-                        "alphas": ("SIGMAS", ),
-                    }  
-               }
-    RETURN_TYPES = ("SAMPLER",)
-    CATEGORY = "sampling/custom_sampling/samplers"
 
-    FUNCTION = "get_sampler"
-
-    def get_sampler(self, eta, s_noise, r, alpha, k, noise_device, noise_sampler_type, alphas=None):
-        if noise_device == 'cpu':
-            sampler_name = "dpmpp_sde_advanced"
-        else:
-            sampler_name = "dpmpp_sde_gpu_advanced"
-
-        steps = 10000
-        alphas = initialize_or_scale(alphas, alpha, steps)
-
-        sampler = comfy.samplers.ksampler(sampler_name, {"eta": eta, "s_noise": s_noise, "r": r, "alpha": alphas, "k": k, "noise_sampler_type": noise_sampler_type})
-        return (sampler, )"""
-    
-
-    
+ 
 class SamplerDPMPP_SDE_CFGPP_ADVANCED:
     @classmethod
     def INPUT_TYPES(s):
@@ -622,7 +584,6 @@ class SamplerDPMPP_SDE_CFGPP_ADVANCED:
                      "cfgpp": ("FLOAT", {"default": 0.0, "min": -10000.0, "max": 10000.0, "step": 0.01}),
                      "alpha": ("FLOAT", {"default": 0.0, "min": -10000.0, "max": 10000.0, "step":0.1, "round": False}),
                      "k": ("FLOAT", {"default": 1.0, "min": -10000.0, "max": 10000.0, "step":2.0, "round": False}),
-                     #"noise_device": (['gpu', 'cpu'], ),
                      "noise_sampler_type": (NOISE_GENERATOR_NAMES, ),
                       },
                     "optional": 
@@ -639,10 +600,6 @@ class SamplerDPMPP_SDE_CFGPP_ADVANCED:
 
     def get_sampler(self, eta, s_noise, r, eulers_mom, cfgpp, alpha, k, noise_sampler_type, eulers_moms=None, cfgpps=None, alphas=None):
         sampler_name = "dpmpp_sde_cfgpp_advanced"
-        #if noise_device == 'cpu':
-        #    sampler_name = "dpmpp_sde_cfgpp_advanced"
-        #else:
-        #    sampler_name = "dpmpp_sde_gpu_advanced"
 
         steps = 10000
         eulers_moms = initialize_or_scale(eulers_moms, eulers_mom, steps)
@@ -682,8 +639,6 @@ class SamplerEulerAncestral_Advanced:
         return (sampler, )
     
     
-
-
 class SamplerDPMPP_2S_Ancestral_Advanced:
     @classmethod
     def INPUT_TYPES(s):
@@ -720,23 +675,6 @@ class SamplerDPMPP_2M_SDE_Advanced:
         sampler = comfy.samplers.ksampler("dpmpp_2m_sde_advanced", {"eta": eta, "s_noise": s_noise, "noise_sampler_type": noise_sampler_type})
         return (sampler, )
     
-"""class SamplerDPMPP_3M_SDE_Advanced:
-    @classmethod
-    def INPUT_TYPES(s):
-        return {"required":
-                    {"eta": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 100.0, "step":0.01, "round": False}),
-                     "s_noise": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 100.0, "step":0.01, "round": False}),
-                      "noise_sampler_type": (NOISE_GENERATOR_NAMES, ),
-                      }
-               }
-    RETURN_TYPES = ("SAMPLER",)
-    CATEGORY = "sampling/custom_sampling/samplers"
-
-    FUNCTION = "get_sampler"
-
-    def get_sampler(self, eta, s_noise, noise_sampler_type):
-        sampler = comfy.samplers.ksampler("dpmpp_3m_sde_advanced", {"eta": eta, "s_noise": s_noise, "noise_sampler_type": noise_sampler_type})
-        return (sampler, )"""
 
 class SamplerDPMPP_3M_SDE_Advanced:
     @classmethod
@@ -745,8 +683,6 @@ class SamplerDPMPP_3M_SDE_Advanced:
                     {"momentum": ("FLOAT", {"default": 1.0, "min": -100.0, "max": 100.0, "step":0.01, "round": False}),
                      "eta": ("FLOAT", {"default": 1.0, "min": -100.0, "max": 100.0, "step":0.01, "round": False}),
                      "s_noise": ("FLOAT", {"default": 1.0, "min": -100.0, "max": 100.0, "step":0.01, "round": False}),
-                     #"noise_offset": ("FLOAT", {"default": 0.0, "min": -100.0, "max": 100.0, "step":0.01, "round": False}),
-                     #"r": ("FLOAT", {"default": 0.5, "min": 0.0, "max": 100.0, "step":0.01, "round": False}),
                      "alpha": ("FLOAT", {"default": 0.0, "min": -10000.0, "max": 10000.0, "step":0.1, "round": False}),
                      "k": ("FLOAT", {"default": 1.0, "min": -10000.0, "max": 10000.0, "step":2.0, "round": False}),
                      "noise_sampler_type": (NOISE_GENERATOR_NAMES, ),
@@ -756,7 +692,6 @@ class SamplerDPMPP_3M_SDE_Advanced:
                         "momentums": ("SIGMAS", ),
                         "etas": ("SIGMAS", ),
                         "s_noises": ("SIGMAS", ),
-                        #"noise_offsets": ("SIGMAS", ),
                         "alphas": ("SIGMAS", ),
                     }  
                }

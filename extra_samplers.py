@@ -10,6 +10,8 @@ from comfy.k_diffusion.sampling import get_ancestral_step, to_d
 import functools
 
 from .noise_classes import *
+from .extra_samplers_helpers import get_deis_coeff_list
+
 #from comfy_extras.nodes_advanced_samplers import sample_euler_cfgpp_alt
 
 def get_ancestral_step(sigma, sigma_next, eta=1.):
@@ -133,41 +135,7 @@ def sample_dpmpp_sde_advanced(
             x = x + d * dt
 
             x = x + noise_sampler(sigma=sigma_fn(t), sigma_next=sigma_fn(t_next)) * s_noises2[i] * su
-@torch.no_grad()
-def sample_euler_ancestral_advanced_RF_hard(model, x, sigmas, extra_args=None, callback=None, disable=None, eta=1., s_noise=1., noise_sampler=None, noise_sampler_type="gaussian", k=1.0, scale=0.1, alpha=None):
-    extra_args = {} if extra_args is None else extra_args
-    seed = extra_args.get("seed", None) + 1
-    
-    s_in = x.new_ones([x.shape[0]])
-    alpha = torch.zeros_like(sigmas) if alpha is None else alpha
-    sigma_min, sigma_max = sigmas[sigmas > 0].min(), sigmas.max()
-    noise_sampler = NOISE_GENERATOR_CLASSES.get(noise_sampler_type)(x=x, seed=seed, sigma_min=sigma_min, sigma_max=sigma_max)
-    
-    for i in trange(len(sigmas) - 1, disable=disable):
-        if noise_sampler_type == "fractal":
-            noise_sampler.alpha = alpha[i]
-            noise_sampler.k = k
-            noise_sampler.scale = scale
-        
-        denoised = model(x, sigmas[i] * s_in, **extra_args)
-        
-        sigma_up = sigmas[i] * eta
-        sigma_down, alpha_ratio = get_RF_step2(sigma_up, sigmas[i+1])
 
-        if callback is not None:
-            callback({'x': x, 'i': i, 'sigma': sigmas[i], 'sigma_hat': sigmas[i], 'denoised': denoised})
-        
-        d = to_d(x, sigmas[i], denoised)
-        dt = sigma_down - sigmas[i]
-        x = x + d * dt
-        
-        if sigmas[i + 1] > 0 and eta > 0:
-            x = alpha_ratio * x   +   noise_sampler(sigma=sigmas[i], sigma_next=sigmas[i + 1]) * s_noise * sigma_up
-            
-        print(sigmas[i], sigmas[i+1], sigma_up, sigma_down, alpha_ratio)
-        gc.collect()
-        torch.cuda.empty_cache()
-    return x
 
 @torch.no_grad()
 def sample_dpmpp_sde_advanced_RF(
@@ -901,6 +869,41 @@ def sample_euler_ancestral_advanced(model, x, sigmas, extra_args=None, callback=
     return x
 
 @torch.no_grad()
+def sample_euler_ancestral_advanced_RF_hard(model, x, sigmas, extra_args=None, callback=None, disable=None, eta=1., s_noise=1., noise_sampler=None, noise_sampler_type="gaussian", k=1.0, scale=0.1, alpha=None):
+    extra_args = {} if extra_args is None else extra_args
+    seed = extra_args.get("seed", None) + 1
+    
+    s_in = x.new_ones([x.shape[0]])
+    alpha = torch.zeros_like(sigmas) if alpha is None else alpha
+    sigma_min, sigma_max = sigmas[sigmas > 0].min(), sigmas.max()
+    noise_sampler = NOISE_GENERATOR_CLASSES.get(noise_sampler_type)(x=x, seed=seed, sigma_min=sigma_min, sigma_max=sigma_max)
+    
+    for i in trange(len(sigmas) - 1, disable=disable):
+        if noise_sampler_type == "fractal":
+            noise_sampler.alpha = alpha[i]
+            noise_sampler.k = k
+            noise_sampler.scale = scale
+        
+        denoised = model(x, sigmas[i] * s_in, **extra_args)
+        
+        sigma_up = sigmas[i] * eta
+        sigma_down, alpha_ratio = get_RF_step2(sigma_up, sigmas[i+1])
+
+        if callback is not None:
+            callback({'x': x, 'i': i, 'sigma': sigmas[i], 'sigma_hat': sigmas[i], 'denoised': denoised})
+        
+        d = to_d(x, sigmas[i], denoised)
+        dt = sigma_down - sigmas[i]
+        x = x + d * dt
+        
+        if sigmas[i + 1] > 0 and eta > 0:
+            x = alpha_ratio * x   +   noise_sampler(sigma=sigmas[i], sigma_next=sigmas[i + 1]) * s_noise * sigma_up
+            
+        gc.collect()
+        torch.cuda.empty_cache()
+    return x
+
+@torch.no_grad()
 def sample_euler_ancestral_advanced_RF_soft(model, x, sigmas, extra_args=None, callback=None, disable=None, eta=1., s_noise=1., noise_sampler=None, noise_sampler_type="gaussian", k=1.0, scale=0.1, alpha=None):
     extra_args = {} if extra_args is None else extra_args
     seed = extra_args.get("seed", None) + 1
@@ -970,7 +973,6 @@ def sample_euler_ancestral_advanced_RF(model, x, sigmas, extra_args=None, callba
         if sigmas[i + 1] > 0 and eta > 0:
             x = alpha_ratio * x   +   noise_sampler(sigma=sigmas[i], sigma_next=sigmas[i + 1]) * s_noise * sigma_up
             
-        print(sigmas[i], sigmas[i+1], sigma_up, sigma_down, alpha_ratio)
         gc.collect()
         torch.cuda.empty_cache()
     return x
@@ -1283,10 +1285,9 @@ def sample_rk4(model, x, sigmas, extra_args=None, callback=None, disable=None, s
     s_in = x.new_ones([x.shape[0]])
     
     for i in trange(len(sigmas) - 1, disable=disable):
-        sigma = sigmas[i]
+        sigma      = sigmas[i]
         sigma_next = sigmas[i + 1]
         
-        # Step size
         dt = sigma_next - sigma
         
         # Runge-Kutta 4th order calculations
@@ -1295,10 +1296,8 @@ def sample_rk4(model, x, sigmas, extra_args=None, callback=None, disable=None, s
         k3 = to_d(x + 0.5 * dt * k2, sigma + 0.5 * dt, model(x + 0.5 * dt * k2, (sigma + 0.5 * dt) * s_in, **extra_args))
         k4 = to_d(x + dt * k3, sigma_next, model(x + dt * k3, sigma_next * s_in, **extra_args))
         
-        # Combine steps
         dx = (1.0 / 6.0) * (k1 + 2 * k2 + 2 * k3 + k4)
         
-        # Update x
         x = x + dx * dt
         
         #if callback is not None:
@@ -1318,7 +1317,6 @@ def sample_rk4_RF(model, x, sigmas, extra_args=None, callback=None, disable=None
         sigma = sigmas[i]
         sigma_next = sigmas[i + 1]
         
-        # Step size
         dt = sigma_next - sigma
         
         # Runge-Kutta 4th order calculations
@@ -1332,10 +1330,8 @@ def sample_rk4_RF(model, x, sigmas, extra_args=None, callback=None, disable=None
         k3 = to_d(x + 0.5 * dt * k2, sigma + 0.5 * dt, model(x + 0.5 * dt * k2, (sigma + 0.5 * dt) * s_in, **extra_args))
         k4 = to_d(x + dt * k3, sigma_next, model(x + dt * k3, sigma_next * s_in, **extra_args))
         
-        # Combine steps
         dx = (1.0 / 6.0) * (k1 + 2 * k2 + 2 * k3 + k4)
         
-        # Update x
         x = x + dx * dt * sigma_ratio
         
         #if callback is not None:
@@ -1382,7 +1378,7 @@ from comfy.k_diffusion.sampling import deis
 #under Apache 2 license
 @torch.no_grad()
 def sample_deis_sde(model, x, sigmas, extra_args=None, callback=None, disable=None, max_order=3, deis_mode='tab', 
-                    momentums=None, etas=None, s_noises=None, noise_offsets=None, s_noise=1.0, noise_sampler_type="gaussian", noise_mode="hard", k=1.0, scale=0.1, alpha=None,):
+                    momentums=None, etas=None, s_noises=None, noise_sampler_type="gaussian", noise_mode="hard", k=1.0, scale=0.1, alpha=None,):
 
     extra_args = {} if extra_args is None else extra_args
     s_in = x.new_ones([x.shape[0]])
@@ -1402,7 +1398,7 @@ def sample_deis_sde(model, x, sigmas, extra_args=None, callback=None, disable=No
     
     x_next = x
 
-    coeff_list = deis.get_deis_coeff_list(sigmas, max_order, deis_mode=deis_mode)
+    coeff_list = get_deis_coeff_list(sigmas, max_order, deis_mode=deis_mode)
 
     buffer_model = []
     for i in trange(len(sigmas) - 1, disable=disable):
@@ -1419,7 +1415,6 @@ def sample_deis_sde(model, x, sigmas, extra_args=None, callback=None, disable=No
             sigma_up = sigmas[i] * etas[i]
             sigma_down, alpha_ratio = get_RF_step2(sigma_up, sigmas[i+1])
         
-        print(sigmas[i], sigmas[i+1], sigma_up, sigma_down, alpha_ratio)
         sigma_ratio = (sigma_down - sigma) / (sigma_next - sigma)
 
         x_cur = x_next
@@ -1459,11 +1454,10 @@ def sample_deis_sde(model, x, sigmas, extra_args=None, callback=None, disable=No
                 buffer_model.append(d_cur.detach())
             
         if sigma_next > 0 and etas[i] > 0:
-            noise = noise_sampler(sigma=sigma, sigma_next=sigma_next) * s_noises[i] * sigma_up   ######
-            x_next = x_next * alpha_ratio   +   noise                                            ######
+            noise = noise_sampler(sigma=sigma, sigma_next=sigma_next) * s_noises[i] * sigma_up   
+            x_next = x_next * alpha_ratio   +   noise                                            
             
-        import gc
-        gc.collect()
+        gc.collect() #necessary after every step to minimize OOM errors with flux dev
         torch.cuda.empty_cache()
 
     return x_next

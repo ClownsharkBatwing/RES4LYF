@@ -679,9 +679,9 @@ NOISE_GENERATOR_CLASSES = {
     "wavelet": WaveletNoiseGenerator,
     "simplex": SimplexNoiseGenerator,
     "perlin": PerlinNoiseGenerator,
-    "green": GreenNoiseGenerator,
-    "velvet": VelvetNoiseGenerator,
-    "film_grain": LatentFilmGrainGenerator,
+    #"green": GreenNoiseGenerator,
+    #"velvet": VelvetNoiseGenerator,
+    #"film_grain": LatentFilmGrainGenerator,
 }
 
 NOISE_GENERATOR_NAMES = tuple(NOISE_GENERATOR_CLASSES.keys())
