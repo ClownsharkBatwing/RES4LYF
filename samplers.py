@@ -128,7 +128,7 @@ class ClownSampler:
 
                 "noise_sampler_type": (NOISE_GENERATOR_NAMES, ),
                 "noise_mode": (["hard", "soft"], {"default": 'soft'}), 
-                "prenoise": ("BOOLEAN", {"default": False}),   
+                "ancestral_noise": ("BOOLEAN", {"default": True}),   
 
                 "clownseed": ("INT", {"default": 0, "min": 0, "max": 0xffffffffffffffff}),
                 "alpha": ("FLOAT", {"default": 0.0, "min": -10000.0, "max": 10000.0, "step": 0.1}),
@@ -145,7 +145,8 @@ class ClownSampler:
                 "cfgpps": ("SIGMAS", ),
                 "alphas": ("SIGMAS", ),
                 "latent_noise": ("LATENT", ),  
-                "guides": ("GUIDES", ),              
+                "guides": ("GUIDES", ),
+                "alpha_ratios": ("SIGMAS", ),
             }
         }
     
@@ -154,10 +155,10 @@ class ClownSampler:
 
     FUNCTION = "get_sampler"
 
-    def get_sampler(self, clownseed, noise_sampler_type, noise_mode, prenoise, denoise_to_zero, simple_phi_calc, cfgpp, eulers_mom, momentum, c2, eta, s_noise, branch_mode, branch_depth, branch_width,
+    def get_sampler(self, clownseed, noise_sampler_type, noise_mode, ancestral_noise, denoise_to_zero, simple_phi_calc, cfgpp, eulers_mom, momentum, c2, eta, s_noise, branch_mode, branch_depth, branch_width,
                     alpha, k,
                     alphas=None, latent_noise=None,
-                    eulers_moms=None, momentums=None, etas=None, s_noises=None, c2s=None, cfgpps=None, offsets=None, guides=None):
+                    eulers_moms=None, momentums=None, etas=None, s_noises=None, c2s=None, cfgpps=None, offsets=None, guides=None, alpha_ratios=None,):
         
         if guides is not None:
             (offset, guide_1, guide_2, guide_mode_1, guide_mode_2, 
@@ -196,7 +197,7 @@ class ClownSampler:
             {
                 "noise_sampler_type": noise_sampler_type,
                 "noise_mode": noise_mode,
-                "prenoise": prenoise,
+                "ancestral_noise": ancestral_noise,
                 "denoise_to_zero": denoise_to_zero,
                 "simple_phi_calc": simple_phi_calc,
                 "branch_mode": branch_mode,
@@ -222,6 +223,7 @@ class ClownSampler:
                 "latent_noise": latent_noise_samples,
                 "latent_self_guide_1": latent_self_guide_1,
                 "latent_shift_guide_1": latent_shift_guide_1,
+                "alpha_ratios": alpha_ratios,
             }
         )
         return (sampler, )
@@ -543,7 +545,7 @@ class SamplerDEIS_SDE:
                      "k": ("FLOAT", {"default": 1.0, "min": -10000.0, "max": 10000.0, "step":2.0, "round": False}),
                      "noise_sampler_type": (NOISE_GENERATOR_NAMES, {"default": "brownian"}),
                      "noise_mode": (["hard", "soft"], {"default": "hard"}), 
-                     "deis_mode": (["tab", "rhoab"], {"default": "tab"}), 
+                     "deis_mode": (["rhoab", "tab"], {"default": "rhoab"}), 
                      "max_order": ("INT", {"default": 3, "min": 1, "max": 4, "step":1}),
                       },
                     "optional": 

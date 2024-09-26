@@ -1,3 +1,6 @@
+"""Algorithm 1 "RES Second order Single Update Step with c2"
+https://arxiv.org/abs/2308.02157"""
+
 import torch
 from torch import no_grad, FloatTensor
 from tqdm import tqdm
@@ -33,14 +36,43 @@ class StepOutput(NamedTuple):
   vel: FloatTensor
   vel_2: FloatTensor
 
-def get_RF_step(sigma, sigma_next, eta):
+"""def get_RF_step(sigma, sigma_next, eta):
     downstep_ratio = 1 + (sigma_next / sigma - 1) * eta
     sigma_down = sigma_next * downstep_ratio
     alpha_ip1 = 1 - sigma_next
     alpha_down = 1 - sigma_down
     alpha_ratio = alpha_ip1 / alpha_down
     sigma_up = (sigma_next ** 2 - sigma_down ** 2 * alpha_ip1 ** 2 / alpha_down ** 2).abs() ** 0.5
-    return (sigma_down, sigma_up, alpha_ratio, )
+    return sigma_down, sigma_up, alpha_ratio """
+  
+def get_RF_step(sigma, sigma_next, eta, alpha_ratio=None):
+    """Calculates the noise level (sigma_down) to step down to and the amount of noise to add (sigma_up) when doing a rectified flow sampling step, 
+    and a mixing ratio (alpha_ratio) for scaling the latent during noise addition."""
+    down_ratio = (1 - eta) + eta * (sigma_next / sigma)   ###NOTE THE CHANGE HERE WITH SQUARING THE SHIT
+    sigma_down = sigma_next * down_ratio
+
+    if alpha_ratio is None:
+        alpha_ratio = (1 - sigma_next) / (1 - sigma_down)
+    else:
+      sigma_down = - (1-sigma_next-alpha_ratio)/alpha_ratio
+        
+    sigma_up = (sigma_next ** 2 - sigma_down ** 2 * alpha_ratio ** 2) ** 0.5 
+
+    return sigma_down, sigma_up, alpha_ratio
+
+"""def get_RF_step(sigma, sigma_next, eta, alpha_ratio=None):
+    #Calculates the noise level (sigma_down) to step down to and the amount of noise to add (sigma_up) when doing a rectified flow sampling step, 
+    #and a mixing ratio (alpha_ratio) for scaling the latent during noise addition.
+    down_ratio = (1 - eta) + eta * (sigma_next / sigma)   ###NOTE THE CHANGE HERE WITH SQUARING THE SHIT
+    sigma_down = sigma_next * down_ratio
+
+    if alpha_ratio is None:
+        alpha_ratio = (1 - sigma_next) / (1 - sigma_down)
+        
+    sigma_up = (sigma_next ** 2 - sigma_down ** 2 * alpha_ratio ** 2) ** 0.5 
+
+    return sigma_down, sigma_up, alpha_ratio"""
+
 
 def get_RF_step2(sigma_up, sigma_next):
     """Calculates the noise level (sigma_down) to step down to and the amount of noise to add (sigma_up) when doing a rectified flow sampling step, 
@@ -258,7 +290,7 @@ def _refined_exp_sosu_step(model, x, sigma, sigma_next, c2 = 0.5,
   return StepOutput(x_next=x_next, denoised=denoised, denoised2=denoised2, vel=vel, vel_2=vel_2,)
 
 
-def _refined_exp_sosu_step_RF_hard(model, x, sigma, sigma_next, sigma_next2, c2 = 0.5, eta=1.0, noise_sampler=None, noise_mode="hard", prenoise=False, #COMFY 
+def _refined_exp_sosu_step_RF_hard(model, x, sigma, sigma_next, sigma_next2, c2 = 0.5, eta=1.0, noise_sampler=None, noise_mode="hard", ancestral_noise=True, s_noise=1.0, #COMFY 
   extra_args: Dict[str, Any] = {},
   pbar: Optional[tqdm] = None,
   simple_phi_calc = False,
@@ -308,23 +340,13 @@ def _refined_exp_sosu_step_RF_hard(model, x, sigma, sigma_next, sigma_next2, c2 
 
   s_in = x.new_ones([x.shape[0]])
   
-  #prenoise = True ##################### TEST LINE FOR CFG W/O GUIDANCE
-  if prenoise == True: #add noise before first step, results in a very clean image, great for some styles but looks fake with photography
-    #sd, su, alpha_ratio = get_RF_step(sigma, sigma_next, eta)
-    #su = sigma * eta
-    #sd, alpha_ratio = get_RF_step2(su, sigma_next)
-    su, sd, alpha_ratio = get_ancestral_step_RF(sigma_next, eta)
-    
-    #x = alpha_ratio * x + noise_sampler(sigma=sigma, sigma_next=sigma_s) * su #####################
-    x = alpha_ratio * x + noise_sampler(sigma=sigma, sigma_next=sigma_next) * su ##################### TEST LINE FOR CFG W/O GUIDANCE
-  
-  denoised = model(x, sigma * s_in, **extra_args)
-  
-  #sd, su, alpha_ratio = get_RF_step(sigma, sigma_next, eta)
-  #su = sigma * eta
-  #sd, alpha_ratio = get_RF_step2(su, sigma_next)
   su, sd, alpha_ratio = get_ancestral_step_RF(sigma_next, eta)
+
+  if ancestral_noise == False: # add noise before first step, results in a very clean image, great for some styles but looks fake with photography
+    x = alpha_ratio * x + noise_sampler(sigma=sigma, sigma_next=sigma_next) * s_noise * su
   
+  denoised = model(x, sigma * s_in, **extra_args)
+
   h = h_fn(sigma, sd) 
   a2_1, b1, b2 = _de_second_order(h=h, c2=c2, simple_phi_calc=simple_phi_calc)
   #sigma_s = sigma_s_fn(sigma, sd, c2)
@@ -334,11 +356,7 @@ def _refined_exp_sosu_step_RF_hard(model, x, sigma, sigma_next, sigma_next2, c2 
     pbar.update(0.5)
 
   diff_2 = vel_2 = momentum_func(h*a2_1*denoised, vel_2, time)
-
-  #sd_sigma_s, su_sigma_s, alpha_ratio_sigma_s = get_RF_step(sigma, sigma_s, eta)
   x_2 = ((sd/sigma)**c2)*x + diff_2 
-  #x_2 = alpha_ratio_sigma_s * x_2 + noise_sampler(sigma=sigma, sigma_next=sigma_s) * su_sigma_s #COMMENTED OUT FOR TEST LINE FOR CFG W/O GUIDANCE
-  #x_2 = alpha_ratio * x_2 + noise_sampler(sigma=sigma, sigma_next=sigma_s) * su
   
   denoised2 = model(x_2, sigma_s * s_in, **extra_args)
 
@@ -349,26 +367,21 @@ def _refined_exp_sosu_step_RF_hard(model, x, sigma, sigma_next, sigma_next2, c2 
 
   x_next =  (sd/sigma) * x + diff
   
-  if prenoise == False and sigma_next > 0.00001: #results in leftover noise with low step counts (<= 30), but very good for photography styles
-    #sd_from_sigma_s, su_from_sigma_s, alpha_ratio_from_sigma_s = get_RF_step(sigma, sigma_next, eta)
-    
-    #su_from_sigma_s = sigma * eta
-    #sd_from_sigma_s, alpha_ratio_from_sigma_s = get_RF_step2(su, sigma_next)
-    su_from_sigma_s, sd_from_sigma_s, alpha_ratio_from_sigma_s = get_ancestral_step_RF(sigma_next, eta)
-    x_next = alpha_ratio_from_sigma_s * x_next + noise_sampler(sigma=sigma_s, sigma_next=sigma_next) * su_from_sigma_s
-    #x_next = alpha_ratio * x_next + noise_sampler(sigma=sigma, sigma_next=sigma_next) * su
+  if ancestral_noise == True and sigma_next > 0.00001: # very good for photography styles
+    su_2, sd_2, alpha_ratio_2 = get_ancestral_step_RF(sigma_next, eta)
+    x_next = alpha_ratio_2 * x_next + noise_sampler(sigma=sigma_s, sigma_next=sigma_next) * s_noise * su_2
     
   if sigma_next2 == 0.0:
     sigma_tiny = torch.tensor(min(0.00001, (sigma_next**2).item()), dtype=sigma_next.dtype).to(sigma_next.device)
     print("denoise from: ", sigma_next.item(), "   denoise_to: ", sigma_tiny.item())
     gc.collect(); torch.cuda.empty_cache()
-    return _refined_exp_sosu_step_RF_hard(model, x_next, sigma_next, sigma_tiny, sigma_tiny, c2=c2, eta=eta, noise_sampler=noise_sampler, 
+    return _refined_exp_sosu_step_RF_hard(model, x_next, sigma_next, sigma_tiny, sigma_tiny, c2=c2, eta=eta, noise_sampler=noise_sampler, s_noise=s_noise,
                                       extra_args=extra_args, pbar=pbar, simple_phi_calc=simple_phi_calc, momentum=momentum, vel=vel, vel_2=vel_2, time=time, eulers_mom=eulers_mom, cfgpp=cfgpp) 
 
   return StepOutput(x_next=x_next, denoised=denoised, denoised2=denoised2, vel=vel, vel_2=vel_2,)
 
 
-def _refined_exp_sosu_step_RF(model, x, sigma, sigma_next, sigma_next2, c2 = 0.5, eta=1.0, noise_sampler=None, prenoise=False, #COMFY 08407 PNG
+def _refined_exp_sosu_step_RF(model, x, sigma, sigma_next, sigma_next2, c2 = 0.5, eta=1.0, noise_sampler=None, s_noise=1.0, ancestral_noise=True, alpha_ratios=None, #COMFY 08407 PNG
   extra_args: Dict[str, Any] = {},
   pbar: Optional[tqdm] = None,
   simple_phi_calc = False,
@@ -378,18 +391,7 @@ def _refined_exp_sosu_step_RF(model, x, sigma, sigma_next, sigma_next2, c2 = 0.5
   cfgpp = 0.0,
 ) -> StepOutput:
 
-  """Algorithm 1 "RES Second order Single Update Step with c2"
-  https://arxiv.org/abs/2308.02157
 
-  Parameters:
-    model (`DenoiserModel`): a k-diffusion wrapped denoiser model (e.g. a subclass of DiscreteEpsDDPMDenoiser)
-    x (`FloatTensor`): noised latents (or RGB I suppose), e.g. torch.randn((B, C, H, W)) * sigma[0]
-    sigma (`FloatTensor`): timestep to denoise
-    sigma_next (`FloatTensor`): timestep+1 to denoise
-    c2 (`float`, *optional*, defaults to .5): partial step size for solving ODE. .5 = midpoint method
-    extra_args (`Dict[str, Any]`, *optional*, defaults to `{}`): kwargs to pass to `model#__call__()`
-    pbar (`tqdm`, *optional*, defaults to `None`): progress bar to update after each model call
-    simple_phi_calc (`bool`, *optional*, defaults to `True`): True = calculate phi_i,j(-h) via simplified formulae specific to j={1,2}. False = Use general solution that works for any j. Mathematically equivalent, but could be numeric differences."""
   if cfgpp != 0.0:
     temp = [0]
     def post_cfg_function(args):
@@ -419,11 +421,10 @@ def _refined_exp_sosu_step_RF(model, x, sigma, sigma_next, sigma_next2, c2 = 0.5
 
   s_in = x.new_ones([x.shape[0]])
   
-  prenoise = True ##################### TEST LINE FOR CFG W/O GUIDANCE
-  if prenoise == True: #add noise before first step, results in a very clean image, great for some styles but looks fake with photography
-    sd, su, alpha_ratio = get_RF_step(sigma, sigma_next, eta)
+  if ancestral_noise == False: #add noise before first step, results in a very clean image, great for some styles but looks fake with photography
+    sd, su, alpha_ratio = get_RF_step(sigma, sigma_next, eta, alpha_ratios)
     #x = alpha_ratio * x + noise_sampler(sigma=sigma, sigma_next=sigma_s) * su #####################
-    x = alpha_ratio * x + noise_sampler(sigma=sigma, sigma_next=sigma_next) * su ##################### TEST LINE FOR CFG W/O GUIDANCE
+    x = alpha_ratio * x + noise_sampler(sigma=sigma, sigma_next=sigma_next) * s_noise * su ##################### TEST LINE FOR CFG W/O GUIDANCE
   
   denoised = model(x, sigma * s_in, **extra_args)
   
@@ -438,7 +439,7 @@ def _refined_exp_sosu_step_RF(model, x, sigma, sigma_next, sigma_next2, c2 = 0.5
 
   diff_2 = vel_2 = momentum_func(h*a2_1*denoised, vel_2, time)
 
-  sd_sigma_s, su_sigma_s, alpha_ratio_sigma_s = get_RF_step(sigma, sigma_s, eta)
+  sd_sigma_s, su_sigma_s, alpha_ratio_sigma_s = get_RF_step(sigma, sigma_s, eta, alpha_ratios)
   x_2 = ((sd/sigma)**c2)*x + diff_2 
   #x_2 = alpha_ratio_sigma_s * x_2 + noise_sampler(sigma=sigma, sigma_next=sigma_s) * su_sigma_s #COMMENTED OUT FOR TEST LINE FOR CFG W/O GUIDANCE
   #x_2 = alpha_ratio * x_2 + noise_sampler(sigma=sigma, sigma_next=sigma_s) * su
@@ -452,294 +453,21 @@ def _refined_exp_sosu_step_RF(model, x, sigma, sigma_next, sigma_next2, c2 = 0.5
 
   x_next =  (sd/sigma) * x + diff
   
-  if prenoise == False and sigma_next > 0.00001: #results in leftover noise with low step counts (<= 30), but very good for photography styles
-    sd_from_sigma_s, su_from_sigma_s, alpha_ratio_from_sigma_s = get_RF_step(sigma, sigma_next, eta)
-    x_next = alpha_ratio_from_sigma_s * x_next + noise_sampler(sigma=sigma_s, sigma_next=sigma_next) * su_from_sigma_s
+  if ancestral_noise == True and sigma_next > 0.00001: #results in leftover noise with low step counts (<= 30), but very good for photography styles
+    sd_from_sigma_s, su_from_sigma_s, alpha_ratio_from_sigma_s = get_RF_step(sigma, sigma_next, eta, alpha_ratios)
+    x_next = alpha_ratio_from_sigma_s * x_next + noise_sampler(sigma=sigma_s, sigma_next=sigma_next) * s_noise * su_from_sigma_s
     #x_next = alpha_ratio * x_next + noise_sampler(sigma=sigma, sigma_next=sigma_next) * su
     
   if sigma_next2 == 0.0:
     sigma_tiny = torch.tensor(min(0.00001, (sigma_next**2).item()), dtype=sigma_next.dtype).to(sigma_next.device)
     print("denoise from: ", sigma_next.item(), "   denoise_to: ", sigma_tiny.item())
     gc.collect(); torch.cuda.empty_cache()
-    return _refined_exp_sosu_step_RF(model, x_next, sigma_next, sigma_tiny, sigma_tiny, c2=c2, eta=eta, noise_sampler=noise_sampler, 
+    return _refined_exp_sosu_step_RF(model, x_next, sigma_next, sigma_tiny, sigma_tiny, c2=c2, eta=eta, noise_sampler=noise_sampler, s_noise=s_noise,
                                       extra_args=extra_args, pbar=pbar, simple_phi_calc=simple_phi_calc, momentum=momentum, vel=vel, vel_2=vel_2, time=time, eulers_mom=eulers_mom, cfgpp=cfgpp) 
 
   return StepOutput(x_next=x_next, denoised=denoised, denoised2=denoised2, vel=vel, vel_2=vel_2,)
 
-def _refined_exp_sosu_step_RF3(model, x, sigma, sigma_next, sigma_next2, c2 = 0.5, eta=1.0, noise_sampler=None, prenoise=False, #ComfyUI 08391 .PNG
-  extra_args: Dict[str, Any] = {}, 
-  pbar: Optional[tqdm] = None,
-  simple_phi_calc = False,
-  momentum = 0.0, vel = None, vel_2 = None,
-  time = None,
-  eulers_mom = 0.0,
-  cfgpp = 0.0,
-) -> StepOutput:
 
-  """Algorithm 1 "RES Second order Single Update Step with c2"
-  https://arxiv.org/abs/2308.02157
-
-  Parameters:
-    model (`DenoiserModel`): a k-diffusion wrapped denoiser model (e.g. a subclass of DiscreteEpsDDPMDenoiser)
-    x (`FloatTensor`): noised latents (or RGB I suppose), e.g. torch.randn((B, C, H, W)) * sigma[0]
-    sigma (`FloatTensor`): timestep to denoise
-    sigma_next (`FloatTensor`): timestep+1 to denoise
-    c2 (`float`, *optional*, defaults to .5): partial step size for solving ODE. .5 = midpoint method
-    extra_args (`Dict[str, Any]`, *optional*, defaults to `{}`): kwargs to pass to `model#__call__()`
-    pbar (`tqdm`, *optional*, defaults to `None`): progress bar to update after each model call
-    simple_phi_calc (`bool`, *optional*, defaults to `True`): True = calculate phi_i,j(-h) via simplified formulae specific to j={1,2}. False = Use general solution that works for any j. Mathematically equivalent, but could be numeric differences."""
-  if cfgpp != 0.0:
-    temp = [0]
-    def post_cfg_function(args):
-        temp[0] = args["uncond_denoised"]
-        return args["denoised"]
-
-    model_options = extra_args.get("model_options", {}).copy()
-    extra_args["model_options"] = comfy.model_patcher.set_model_options_post_cfg_function(model_options, post_cfg_function, disable_cfg1_optimization=True)
-
-  def momentum_func(diff, velocity, timescale=1.0, offset=-momentum / 2.0): # Diff is current diff, vel is previous diff
-    if velocity is None:
-        momentum_vel = diff
-    else:
-        momentum_vel = momentum * (timescale + offset) * velocity + (1 - momentum * (timescale + offset)) * diff
-    return momentum_vel
-
-  sigma_fn = lambda t: t.neg().exp()
-  t_fn = lambda sigma: sigma.log().neg()
-  h_fn = lambda sigma, sigma_next: t_fn(sigma_next) - t_fn(sigma)
-  sigma_s_fn = lambda sigma, sigma_next, c2: torch.nan_to_num(sigma_fn(t_fn(sigma) + c2 * h_fn(sigma, sigma_next)), 0.9999) #if sigma == 1.0, and nan results with RF sigma_fn_RF(), set to 0.9999
-
-  sigma_fn_RF = lambda t: (t.exp() + 1) ** -1
-  t_fn_RF = lambda sigma: ((1-sigma)/sigma).log()
-  h_fn_RF = lambda sigma, sigma_next: t_fn_RF(sigma_next) - t_fn_RF(sigma)
-  sigma_s_fn_RF = lambda sigma, sigma_next, c2: torch.nan_to_num(sigma_fn_RF(t_fn_RF(sigma) + c2 * h_fn_RF(sigma, sigma_next)), 0.9999) #if sigma == 1.0, and nan results with RF sigma_fn_RF(), set to 0.9999
-
-
-  s_in = x.new_ones([x.shape[0]])
-  
-  if prenoise == True: #add noise before first step, results in a very clean image, great for some styles but looks fake with photography
-    sd, su, alpha_ratio = get_RF_step(sigma, sigma_next, eta)
-    x = alpha_ratio * x + noise_sampler(sigma=sigma, sigma_next=sigma_s) * su #####################
-  
-  denoised = model(x, sigma * s_in, **extra_args)
-  
-  sd, su, alpha_ratio = get_RF_step(sigma, sigma_next, eta)
-  h = h_fn(sigma, sd) 
-  a2_1, b1, b2 = _de_second_order(h=h, c2=c2, simple_phi_calc=simple_phi_calc)
-  #sigma_s = sigma_s_fn(sigma, sd, c2)
-  sigma_s = sigma_s_fn_RF(sigma, sd, c2)
-
-  if pbar is not None:
-    pbar.update(0.5)
-
-  diff_2 = vel_2 = momentum_func(h*a2_1*denoised, vel_2, time)
-
-  x_2 = ((sd/sigma)**c2)*x + diff_2 
-  x_2 = alpha_ratio * x_2 + noise_sampler(sigma=sigma, sigma_next=sigma_s) * su
-  
-  denoised2 = model(x_2, sigma_s * s_in, **extra_args)
-
-  if pbar is not None:
-    pbar.update(0.5)
-
-  diff = vel = momentum_func(h*(b1*denoised + b2*denoised2), vel, time)
-
-  x_next =  (sd/sigma) * x + diff
-  
-  if prenoise == False and sigma_next > 0.00001: #results in leftover noise with low step counts (<= 30), but very good for photography styles
-    x_next = alpha_ratio * x_next + noise_sampler(sigma=sigma_s, sigma_next=sigma_next) * su
-    
-  if sigma_next2 == 0.0:
-    sigma_tiny = torch.tensor(min(0.00001, (sigma_next**2).item()), dtype=sigma_next.dtype).to(sigma_next.device)
-    print("denoise from: ", sigma_next.item(), "   denoise_to: ", sigma_tiny.item())
-    gc.collect(); torch.cuda.empty_cache()
-    return _refined_exp_sosu_step_RF(model, x_next, sigma_next, sigma_tiny, sigma_tiny, c2=c2, eta=eta, noise_sampler=noise_sampler, 
-                                      extra_args=extra_args, pbar=pbar, simple_phi_calc=simple_phi_calc, momentum=momentum, vel=vel, vel_2=vel_2, time=time, eulers_mom=eulers_mom, cfgpp=cfgpp) 
-
-  return StepOutput(x_next=x_next, denoised=denoised, denoised2=denoised2, vel=vel, vel_2=vel_2,)
-  
-  
-def _refined_exp_sosu_step_RF2(model, x, sigma, sigma_next, sigma_next2, c2 = 0.5, eta=1.0, noise_sampler=None, prenoise=False,
-  extra_args: Dict[str, Any] = {},
-  pbar: Optional[tqdm] = None,
-  simple_phi_calc = False,
-  momentum = 0.0, vel = None, vel_2 = None,
-  time = None,
-  eulers_mom = 0.0,
-  cfgpp = 0.0,
-) -> StepOutput:
-
-  """Algorithm 1 "RES Second order Single Update Step with c2"
-  https://arxiv.org/abs/2308.02157
-
-  Parameters:
-    model (`DenoiserModel`): a k-diffusion wrapped denoiser model (e.g. a subclass of DiscreteEpsDDPMDenoiser)
-    x (`FloatTensor`): noised latents (or RGB I suppose), e.g. torch.randn((B, C, H, W)) * sigma[0]
-    sigma (`FloatTensor`): timestep to denoise
-    sigma_next (`FloatTensor`): timestep+1 to denoise
-    c2 (`float`, *optional*, defaults to .5): partial step size for solving ODE. .5 = midpoint method
-    extra_args (`Dict[str, Any]`, *optional*, defaults to `{}`): kwargs to pass to `model#__call__()`
-    pbar (`tqdm`, *optional*, defaults to `None`): progress bar to update after each model call
-    simple_phi_calc (`bool`, *optional*, defaults to `True`): True = calculate phi_i,j(-h) via simplified formulae specific to j={1,2}. False = Use general solution that works for any j. Mathematically equivalent, but could be numeric differences."""
-  if cfgpp != 0.0:
-    temp = [0]
-    def post_cfg_function(args):
-        temp[0] = args["uncond_denoised"]
-        return args["denoised"]
-
-    model_options = extra_args.get("model_options", {}).copy()
-    extra_args["model_options"] = comfy.model_patcher.set_model_options_post_cfg_function(model_options, post_cfg_function, disable_cfg1_optimization=True)
-
-  def momentum_func(diff, velocity, timescale=1.0, offset=-momentum / 2.0): # Diff is current diff, vel is previous diff
-    if velocity is None:
-        momentum_vel = diff
-    else:
-        momentum_vel = momentum * (timescale + offset) * velocity + (1 - momentum * (timescale + offset)) * diff
-    return momentum_vel
-
-  sigma_fn = lambda t: t.neg().exp()
-  t_fn = lambda sigma: sigma.log().neg()
-  h_fn = lambda sigma, sigma_next: t_fn(sigma_next) - t_fn(sigma)
-  sigma_s_fn = lambda sigma, sigma_next, c2: torch.nan_to_num(sigma_fn(t_fn(sigma) + c2 * h_fn(sigma, sigma_next)), 0.9999) #if sigma == 1.0, and nan results with RF sigma_fn_RF(), set to 0.9999
-
-  s_in = x.new_ones([x.shape[0]])
-  
-  if prenoise == True: #add noise before first step, results in a very clean image, great for some styles but looks fake with photography
-    sd, su, alpha_ratio = get_RF_step(sigma, sigma_next, eta)
-    x = alpha_ratio * x + noise_sampler(sigma=sigma, sigma_next=sigma_next) * su
-  
-  denoised = model(x, sigma * s_in, **extra_args)
-  
-  sd, su, alpha_ratio = get_RF_step(sigma, sigma_next, eta)
-  h = h_fn(sigma, sd)
-  a2_1, b1, b2 = _de_second_order(h=h_fn(sigma, sd), c2=c2, simple_phi_calc=simple_phi_calc)
-  sigma_s = sigma_s_fn(sigma, sd, c2)
-
-  if pbar is not None:
-    pbar.update(0.5)
-
-  sd, su, alpha_ratio = get_RF_step(sigma, sigma_s, eta)
-  #h = h_fn(sigma, sd)
-  #a2_1, b1, b2 = _de_second_order(h=h, c2=c2, simple_phi_calc=simple_phi_calc)
-  diff_2 = vel_2 = momentum_func(h*a2_1*denoised, vel_2, time)
-
-  x_2 = ((sd/sigma)**c2)*x + diff_2 
-  x_2 = alpha_ratio * x_2 + noise_sampler(sigma=sigma, sigma_next=sigma_s) * su
-  
-  denoised2 = model(x_2, sigma_s * s_in, **extra_args)
-
-  if pbar is not None:
-    pbar.update(0.5)
-
-  sd, su, alpha_ratio = get_RF_step(sigma, sigma_next, eta)
-  #h = h_fn(sigma, sd)
-  #a2_1, b1, b2 = _de_second_order(h=h, c2=c2, simple_phi_calc=simple_phi_calc)
-  diff = vel = momentum_func(h*(b1*denoised + b2*denoised2), vel, time)
-
-  x_next =  (sd/sigma) * x + diff
-  
-  if prenoise == False and sigma_next > 0.00001: #results in leftover noise with low step counts (<= 30), but very good for photography styles
-    x_next = alpha_ratio * x_next + noise_sampler(sigma=sigma, sigma_next=sigma_next) * su
-    
-  if sigma_next2 == 0.0:
-    sigma_tiny = torch.tensor(min(0.00001, (sigma_next**2).item()), dtype=sigma_next.dtype).to(sigma_next.device)
-    print("denoise from: ", sigma_next.item(), "   denoise_to: ", sigma_tiny.item())
-    gc.collect(); torch.cuda.empty_cache()
-    return _refined_exp_sosu_step_RF(model, x_next, sigma_next, sigma_tiny, sigma_tiny, c2=c2, eta=eta, noise_sampler=noise_sampler, 
-                                      extra_args=extra_args, pbar=pbar, simple_phi_calc=simple_phi_calc, momentum=momentum, vel=vel, vel_2=vel_2, time=time, eulers_mom=eulers_mom, cfgpp=cfgpp) 
-
-  return StepOutput(x_next=x_next, denoised=denoised, denoised2=denoised2, vel=vel, vel_2=vel_2,)
-  
-
-def _refined_exp_sosu_step_RF_works(model, x, sigma, sigma_next, sigma_next2, c2 = 0.5, eta=1.0, noise_sampler=None, prenoise=False,
-  extra_args: Dict[str, Any] = {},
-  pbar: Optional[tqdm] = None,
-  simple_phi_calc = False,
-  momentum = 0.0, vel = None, vel_2 = None,
-  time = None,
-  eulers_mom = 0.0,
-  cfgpp = 0.0,
-) -> StepOutput:
-
-  """Algorithm 1 "RES Second order Single Update Step with c2"
-  https://arxiv.org/abs/2308.02157
-
-  Parameters:
-    model (`DenoiserModel`): a k-diffusion wrapped denoiser model (e.g. a subclass of DiscreteEpsDDPMDenoiser)
-    x (`FloatTensor`): noised latents (or RGB I suppose), e.g. torch.randn((B, C, H, W)) * sigma[0]
-    sigma (`FloatTensor`): timestep to denoise
-    sigma_next (`FloatTensor`): timestep+1 to denoise
-    c2 (`float`, *optional*, defaults to .5): partial step size for solving ODE. .5 = midpoint method
-    extra_args (`Dict[str, Any]`, *optional*, defaults to `{}`): kwargs to pass to `model#__call__()`
-    pbar (`tqdm`, *optional*, defaults to `None`): progress bar to update after each model call
-    simple_phi_calc (`bool`, *optional*, defaults to `True`): True = calculate phi_i,j(-h) via simplified formulae specific to j={1,2}. False = Use general solution that works for any j. Mathematically equivalent, but could be numeric differences."""
-  if cfgpp != 0.0:
-    temp = [0]
-    def post_cfg_function(args):
-        temp[0] = args["uncond_denoised"]
-        return args["denoised"]
-
-    model_options = extra_args.get("model_options", {}).copy()
-    extra_args["model_options"] = comfy.model_patcher.set_model_options_post_cfg_function(model_options, post_cfg_function, disable_cfg1_optimization=True)
-
-  def momentum_func(diff, velocity, timescale=1.0, offset=-momentum / 2.0): # Diff is current diff, vel is previous diff
-    if velocity is None:
-        momentum_vel = diff
-    else:
-        momentum_vel = momentum * (timescale + offset) * velocity + (1 - momentum * (timescale + offset)) * diff
-    return momentum_vel
-
-  sigma_fn = lambda t: t.neg().exp()
-  t_fn = lambda sigma: sigma.log().neg()
-  h_fn = lambda sigma, sigma_next: t_fn(sigma_next) - t_fn(sigma)
-  sigma_s_fn = lambda sigma, sigma_next, c2: torch.nan_to_num(sigma_fn(t_fn(sigma) + c2 * h_fn(sigma, sigma_next)), 0.9999) #if sigma == 1.0, and nan results with RF sigma_fn_RF(), set to 0.9999
-
-  s_in = x.new_ones([x.shape[0]])
-  
-  if prenoise == True: #add noise before first step, results in a very clean image, great for some styles but looks fake with photography
-    sd, su, alpha_ratio = get_RF_step(sigma, sigma_next, eta)
-    x = alpha_ratio * x + noise_sampler(sigma=sigma, sigma_next=sigma_next) * su
-  
-  denoised = model(x, sigma * s_in, **extra_args)
-  
-  a2_1, b1, b2 = _de_second_order(h=h_fn(sigma, sigma_next), c2=c2, simple_phi_calc=simple_phi_calc)
-  sigma_s = sigma_s_fn(sigma, sigma_next, c2)
-
-  if pbar is not None:
-    pbar.update(0.5)
-
-  sd, su, alpha_ratio = get_RF_step(sigma, sigma_s, eta)
-  h = h_fn(sigma, sd)
-  a2_1, b1, b2 = _de_second_order(h=h, c2=c2, simple_phi_calc=simple_phi_calc)
-  diff_2 = vel_2 = momentum_func(h*a2_1*denoised, vel_2, time)
-
-  x_2 = ((sd/sigma)**c2)*x + diff_2 
-  x_2 = alpha_ratio * x_2 + noise_sampler(sigma=sigma, sigma_next=sigma_s) * su
-  
-  denoised2 = model(x_2, sigma_s * s_in, **extra_args)
-
-  if pbar is not None:
-    pbar.update(0.5)
-
-  sd, su, alpha_ratio = get_RF_step(sigma, sigma_next, eta)
-  h = h_fn(sigma, sd)
-  a2_1, b1, b2 = _de_second_order(h=h, c2=c2, simple_phi_calc=simple_phi_calc)
-  diff = vel = momentum_func(h*(b1*denoised + b2*denoised2), vel, time)
-
-  x_next =  (sd/sigma) * x + diff
-  
-  if prenoise == False and sigma_next > 0.00001: #results in leftover noise with low step counts (<= 30), but very good for photography styles
-    x_next = alpha_ratio * x_next + noise_sampler(sigma=sigma, sigma_next=sigma_next) * su
-    
-  if sigma_next2 == 0.0:
-    sigma_tiny = torch.tensor(min(0.00001, (sigma_next**2).item()), dtype=sigma_next.dtype).to(sigma_next.device)
-    print("denoise from: ", sigma_next.item(), "   denoise_to: ", sigma_tiny.item())
-    gc.collect(); torch.cuda.empty_cache()
-    return _refined_exp_sosu_step_RF(model, x_next, sigma_next, sigma_tiny, sigma_tiny, c2=c2, eta=eta, noise_sampler=noise_sampler, 
-                                      extra_args=extra_args, pbar=pbar, simple_phi_calc=simple_phi_calc, momentum=momentum, vel=vel, vel_2=vel_2, time=time, eulers_mom=eulers_mom, cfgpp=cfgpp) 
-
-  return StepOutput(x_next=x_next, denoised=denoised, denoised2=denoised2, vel=vel, vel_2=vel_2,)
-  
 @no_grad()
 def sample_refined_exp_s_advanced_RF(
   model,
@@ -770,7 +498,8 @@ def sample_refined_exp_s_advanced_RF(
   noise_sampler: NoiseSampler = torch.randn_like,
   noise_sampler_type=None,
   noise_mode="hard",
-  prenoise=False,
+  ancestral_noise=True,
+  alpha_ratios=None,
   simple_phi_calc = False,
   k=1.0,
   clownseed=0,
@@ -858,7 +587,6 @@ def sample_refined_exp_s_advanced_RF(
             x_n[depth-1][m] = alpha_ratio * x_n[depth-1][m]   +   noise_sampler(sigma=sigmas[i], sigma_next=sigmas[i + 1]) * s_noises[i] * sigma_up"""
             x_h[depth][idx] = x_n[depth-1][m]
 
-
             """print(sigmas[i], sigmas[i+1], sigma_up, sigma_down, alpha_ratio)
             print(sigmas[i] + sigma_up)
             x_n[depth][idx], denoised[depth][idx], denoised2[depth][idx], vel[depth][idx], vel_2[depth][idx] = _refined_exp_sosu_step(model, x_h[depth][idx], sigma_hat, sigma_down, c2=c2[i],
@@ -866,12 +594,16 @@ def sample_refined_exp_s_advanced_RF(
                                                                           momentum = momentum[i], vel = vel[depth][idx], vel_2 = vel_2[depth][idx], time = time, eulers_mom = eulers_mom[i].item(), cfgpp = cfgpp[i].item()
                                                                           )"""
             if noise_mode == "hard":
-              x_n[depth][idx], denoised[depth][idx], denoised2[depth][idx], vel[depth][idx], vel_2[depth][idx] = _refined_exp_sosu_step_RF_hard(model, x_h[depth][idx], sigma, sigma_next, sigmas[i+2], c2=c2[i],eta=eta[i], noise_sampler=noise_sampler, noise_mode=noise_mode, prenoise=prenoise,
+              x_n[depth][idx], denoised[depth][idx], denoised2[depth][idx], vel[depth][idx], vel_2[depth][idx] = _refined_exp_sosu_step_RF_hard(model, x_h[depth][idx], sigma, sigma_next, sigmas[i+2], c2=c2[i],eta=eta[i], noise_sampler=noise_sampler, s_noise=s_noises[i], noise_mode=noise_mode, ancestral_noise=ancestral_noise,
                                                                             extra_args=extra_args, pbar=pbar, simple_phi_calc=simple_phi_calc,
                                                                             momentum = momentum[i], vel = vel[depth][idx], vel_2 = vel_2[depth][idx], time = time, eulers_mom = eulers_mom[i].item(), cfgpp = cfgpp[i].item()
                                                                             )
-            elif noise_mode == "soft":                                                                                                                           
-              x_n[depth][idx], denoised[depth][idx], denoised2[depth][idx], vel[depth][idx], vel_2[depth][idx] = _refined_exp_sosu_step_RF(model, x_h[depth][idx], sigma, sigma_next, sigmas[i+2], c2=c2[i],eta=eta[i], noise_sampler=noise_sampler,
+            elif noise_mode == "soft":           
+              if alpha_ratios == None:
+                alpha_ratios_ = None
+              else:
+                alpha_ratios_ = alpha_ratios[i]                                                                                                                
+              x_n[depth][idx], denoised[depth][idx], denoised2[depth][idx], vel[depth][idx], vel_2[depth][idx] = _refined_exp_sosu_step_RF(model, x_h[depth][idx], sigma, sigma_next, sigmas[i+2], c2=c2[i],eta=eta[i], noise_sampler=noise_sampler, s_noise=s_noises[i], alpha_ratios=alpha_ratios_,
                                                                             extra_args=extra_args, pbar=pbar, simple_phi_calc=simple_phi_calc,
                                                                             momentum = momentum[i], vel = vel[depth][idx], vel_2 = vel_2[depth][idx], time = time, eulers_mom = eulers_mom[i].item(), cfgpp = cfgpp[i].item()
                                                                             )
