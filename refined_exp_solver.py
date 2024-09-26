@@ -60,6 +60,20 @@ def get_RF_step2(sigma_up, sigma_next):
     #return (sigma_down.real.to(device=device, dtype=dtype), alpha_ratio.real.to(device=device, dtype=dtype), )
     return (torch.abs(sigma_down).to(device=device, dtype=dtype), torch.abs(alpha_ratio).to(device=device, dtype=dtype), )
 
+def get_sigma_down_RF(sigma_next, eta):
+    eta_scale = torch.sqrt(1 - eta**2)
+    sigma_down = (sigma_next * eta_scale) / (1 - sigma_next + sigma_next * eta_scale)
+    return sigma_down
+
+def get_sigma_up_RF(sigma_next, eta):
+    return sigma_next * eta
+
+def get_ancestral_step_RF(sigma_next, eta):
+    sigma_up = sigma_next * eta
+    eta_scaled = (1 - eta**2)**0.5
+    sigma_down = (sigma_next * eta_scaled) / (1 - sigma_next + sigma_next * eta_scaled)
+    alpha_ratio = (1 - sigma_next) / (1 - sigma_down)
+    return sigma_up, sigma_down, alpha_ratio
 
 def _gamma(n: int,) -> int:
   """
@@ -297,8 +311,9 @@ def _refined_exp_sosu_step_RF_hard(model, x, sigma, sigma_next, sigma_next2, c2 
   #prenoise = True ##################### TEST LINE FOR CFG W/O GUIDANCE
   if prenoise == True: #add noise before first step, results in a very clean image, great for some styles but looks fake with photography
     #sd, su, alpha_ratio = get_RF_step(sigma, sigma_next, eta)
-    su = sigma * eta
-    sd, alpha_ratio = get_RF_step2(su, sigma_next)
+    #su = sigma * eta
+    #sd, alpha_ratio = get_RF_step2(su, sigma_next)
+    su, sd, alpha_ratio = get_ancestral_step_RF(sigma_next, eta)
     
     #x = alpha_ratio * x + noise_sampler(sigma=sigma, sigma_next=sigma_s) * su #####################
     x = alpha_ratio * x + noise_sampler(sigma=sigma, sigma_next=sigma_next) * su ##################### TEST LINE FOR CFG W/O GUIDANCE
@@ -306,8 +321,9 @@ def _refined_exp_sosu_step_RF_hard(model, x, sigma, sigma_next, sigma_next2, c2 
   denoised = model(x, sigma * s_in, **extra_args)
   
   #sd, su, alpha_ratio = get_RF_step(sigma, sigma_next, eta)
-  su = sigma * eta
-  sd, alpha_ratio = get_RF_step2(su, sigma_next)
+  #su = sigma * eta
+  #sd, alpha_ratio = get_RF_step2(su, sigma_next)
+  su, sd, alpha_ratio = get_ancestral_step_RF(sigma_next, eta)
   
   h = h_fn(sigma, sd) 
   a2_1, b1, b2 = _de_second_order(h=h, c2=c2, simple_phi_calc=simple_phi_calc)
@@ -334,10 +350,11 @@ def _refined_exp_sosu_step_RF_hard(model, x, sigma, sigma_next, sigma_next2, c2 
   x_next =  (sd/sigma) * x + diff
   
   if prenoise == False and sigma_next > 0.00001: #results in leftover noise with low step counts (<= 30), but very good for photography styles
-    sd_from_sigma_s, su_from_sigma_s, alpha_ratio_from_sigma_s = get_RF_step(sigma, sigma_next, eta)
+    #sd_from_sigma_s, su_from_sigma_s, alpha_ratio_from_sigma_s = get_RF_step(sigma, sigma_next, eta)
     
-    su_from_sigma_s = sigma * eta
-    sd_from_sigma_s, alpha_ratio_from_sigma_s = get_RF_step2(su, sigma_next)
+    #su_from_sigma_s = sigma * eta
+    #sd_from_sigma_s, alpha_ratio_from_sigma_s = get_RF_step2(su, sigma_next)
+    su_from_sigma_s, sd_from_sigma_s, alpha_ratio_from_sigma_s = get_ancestral_step_RF(sigma_next, eta)
     x_next = alpha_ratio_from_sigma_s * x_next + noise_sampler(sigma=sigma_s, sigma_next=sigma_next) * su_from_sigma_s
     #x_next = alpha_ratio * x_next + noise_sampler(sigma=sigma, sigma_next=sigma_next) * su
     

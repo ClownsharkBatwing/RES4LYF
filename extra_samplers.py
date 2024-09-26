@@ -51,6 +51,43 @@ def get_RF_step2(sigma_up, sigma_next):
     #return (sigma_down.real.to(device=device, dtype=dtype), alpha_ratio.real.to(device=device, dtype=dtype), )
     return (torch.abs(sigma_down).to(device=device, dtype=dtype), torch.abs(alpha_ratio).to(device=device, dtype=dtype), )
 
+import torch
+
+def get_sigma_down_RF(sigma_next, eta):
+    eta_scale = torch.sqrt(1 - eta**2)
+    sigma_down = (sigma_next * eta_scale) / (1 - sigma_next + sigma_next * eta_scale)
+    return sigma_down
+
+def get_sigma_up_RF(sigma_next, eta):
+    return sigma_next * eta
+
+def get_ancestral_step_RF(sigma_next, eta):
+    sigma_up = sigma_next * eta
+    eta_scaled = (1 - eta**2)**0.5
+    sigma_down = (sigma_next * eta_scaled) / (1 - sigma_next + sigma_next * eta_scaled)
+    alpha_ratio = (1 - sigma_next) / (1 - sigma_down)
+    return sigma_up, sigma_down, alpha_ratio
+
+def get_RF_step3(sigma, sigma_next, eta, noise_mode="hard"):
+    """Calculates the noise level (sigma_down) to step down to and the amount of noise to add (sigma_up) when doing a rectified flow sampling step, 
+    and a mixing ratio (alpha_ratio) for scaling the latent during noise addition."""
+    
+    eta = eta * sigma_next / sigma #keep things safe to avoid the need for complex numbers
+    sigma_up = sigma * eta
+    device = sigma_next.device
+    dtype = sigma_next.dtype
+    sqrt_term = torch.sqrt(sigma_next ** 2 - sigma_up ** 2)  #THIS IS THE SAME AS SIGMA_DOWN FOR ANCESTRAL STEP
+
+    sqrt_term = torch.sqrt(sigma_next ** 2 - sigma_up ** 2)
+    
+    sigma_down = sqrt_term / ((1 - sigma_next) + sqrt_term)
+    
+    alpha_ratio = (1 - sigma_next) / (1 - sigma_down)
+
+    #return (sigma_down.real.to(device=device, dtype=dtype), alpha_ratio.real.to(device=device, dtype=dtype), )
+    return (torch.abs(sigma_down).to(device=device, dtype=dtype), torch.abs(alpha_ratio).to(device=device, dtype=dtype), )
+
+
 @precision_tool.cast_tensor
 @torch.no_grad()
 def sample_dpmpp_sde_advanced(
@@ -172,7 +209,6 @@ def sample_dpmpp_sde_advanced_RF(
         t_fn = lambda sigma: sigma.log().neg()
 
     vel = None
-    alpha_ratio = 1.0
     for i in trange(len(sigmas) - 1, disable=disable):
         denoised = model(x, sigmas[i] * s_in, **extra_args)
         
@@ -210,7 +246,8 @@ def sample_dpmpp_sde_advanced_RF(
             elif noise_mode == "hard":
                 su = sigmas[i] * etas1[i]
                 if isinstance(model.inner_model.inner_model.model_sampling, comfy.model_sampling.CONST):
-                    sd, alpha_ratio = get_RF_step2(su, sigmas[i+1])
+                    su, sd, alpha_ratio = get_ancestral_step_RF(sigmas[i+1], etas1[i])
+                    #sd, alpha_ratio = get_RF_step2(su, sigmas[i+1])
                 else: 
                     sd = sigmas[i+1] #this may not work well...
                 
@@ -227,7 +264,8 @@ def sample_dpmpp_sde_advanced_RF(
             elif noise_mode == "hard":
                 su = sigmas[i] * etas2[i]
                 if isinstance(model.inner_model.inner_model.model_sampling, comfy.model_sampling.CONST):
-                    sd, alpha_ratio = get_RF_step2(su, sigmas[i+1])
+                    su, sd, alpha_ratio = get_ancestral_step_RF(sigmas[i+1], etas2[i])
+                    #sd, alpha_ratio = get_RF_step2(su, sigmas[i+1])
                 else: 
                     sd = sigmas[i+1] #this may not work well...
                 
@@ -1181,7 +1219,7 @@ def sample_dpmpp_3m_sde_advanced_RF(model, x, sigmas, extra_args=None, callback=
         if callback is not None:
             callback({'x': x, 'i': i, 'sigma': sigmas[i], 'sigma_hat': sigmas[i], 'denoised': denoised})
         if sigmas[i + 1] == 0:
-            # Denoising step
+            # Denoising step0
             x = denoised
         else:
             t, s = -sigmas[i].log(), -sigmas[i + 1].log()
@@ -1412,8 +1450,9 @@ def sample_deis_sde(model, x, sigmas, extra_args=None, callback=None, disable=No
         if noise_mode == "soft": 
             sigma_down, sigma_up, alpha_ratio = get_RF_step(sigma, sigma_next, etas[i])
         elif noise_mode == "hard":
-            sigma_up = sigmas[i] * etas[i]
-            sigma_down, alpha_ratio = get_RF_step2(sigma_up, sigmas[i+1])
+            sigma_up, sigma_down, alpha_ratio = get_ancestral_step_RF(sigma_next, etas[i])
+            #sigma_up = sigmas[i] * etas[i]
+            #sigma_down, alpha_ratio = get_RF_step2(sigma_up, sigmas[i+1])
         
         sigma_ratio = (sigma_down - sigma) / (sigma_next - sigma)
 
