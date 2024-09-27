@@ -1658,8 +1658,9 @@ def sample_deis_sde(model, x, sigmas, extra_args=None, callback=None, disable=No
         gc.collect() #necessary after every step to minimize OOM errors with flux dev
         torch.cuda.empty_cache()
         
-        if sigmas[i+2] == 0 and step_type == "res_a":
-            return x_next
+        if step_type == "res_a":
+            if sigmas[i+2] == 0:
+                return x_next
 
     return x_next
 
