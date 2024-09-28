@@ -273,6 +273,36 @@ class sigmas_interpolate:
         sigmas_0 = interpolate(sigmas_0, len(sigmas_1))
         return (sigmas_0, sigmas_1,)
     
+def compute_sigma_next_variance_floor(sigma):
+    return (-1 + torch.sqrt(1 + 4 * sigma)) / 2
+
+class sigmas_variance_floor:
+    def __init__(self):
+        pass
+
+    @classmethod
+    def INPUT_TYPES(s):
+        return {
+            "required": {
+                "sigmas": ("SIGMAS", {"forceInput": True}),
+            }
+        }
+
+    FUNCTION = "main"
+    RETURN_TYPES = ("SIGMAS",)
+    CATEGORY = "sampling/custom_sampling/sigmas"
+    
+    def main(self, sigmas):
+        dtype = sigmas.dtype
+        sigmas = sigmas.clone().to(torch.float64)
+        for i in range(len(sigmas) - 1):
+            sigma_next = (-1 + torch.sqrt(1 + 4 * sigmas[i])) / 2
+            
+            if sigmas[i+1] < sigma_next and sigmas[i+1] > 0.0:
+                print("swapped i+1 with sigma_next+0.001: ", sigmas[i+1], sigma_next + 0.001)
+                sigmas[i+1] = sigma_next + 0.001
+        return (sigmas.to(dtype),)
+
 
 class sigmas_concatenate:
     def __init__(self):
@@ -374,7 +404,7 @@ class sigmas_pad:
     CATEGORY = "sampling/custom_sampling/sigmas"
     
     def main(self, sigmas, value):
-        return (torch.cat((sigmas, torch.tensor([value]))),)
+        return (torch.cat((sigmas, torch.tensor([value], dtype=sigmas.dtype))),)
     
 class sigmas_unpad:
     def __init__(self):

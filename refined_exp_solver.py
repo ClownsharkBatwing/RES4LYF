@@ -60,6 +60,27 @@ class StepOutput(NamedTuple):
 
     return sigma_down, sigma_up, alpha_ratio"""
   
+def get_ancestral_step_RF_var(sigma, sigma_next, eta):
+    dtype = sigma.dtype #calculate variance adjusted sigma up... sigma_up = sqrt(dt)
+    eps = 1e-10
+
+    sigma, sigma_next = sigma.to(torch.float64), sigma_next.to(torch.float64)
+
+    sigma_diff = (sigma - sigma_next).abs() + eps 
+    sigma_up = torch.sqrt(sigma_diff).to(torch.float64) * eta
+
+    #print(f"sigma_up dtype: {sigma_up.dtype}")
+
+    sigma_down_num = (sigma_next**2 - sigma_up**2).to(torch.float64)
+    sigma_down = torch.sqrt(sigma_down_num) / ((1 - sigma_next).to(torch.float64) + torch.sqrt(sigma_down_num).to(torch.float64))
+
+    #print(f"sigma_down dtype: {sigma_down.dtype}")
+
+    alpha_ratio = (1 - sigma_next).to(torch.float64) / (1 - sigma_down).to(torch.float64)
+    #print(f"alpha_ratio dtype: {alpha_ratio.dtype}")
+    return sigma_up.to(dtype), sigma_down.to(dtype), alpha_ratio.to(dtype)
+
+  
 def get_RF_step(sigma, sigma_next, eta, noise_scale=1.0, alpha_ratio=None):
     """Calculates the noise level (sigma_down) to step down to and the amount of noise to add (sigma_up) when doing a rectified flow sampling step, 
     and a mixing ratio (alpha_ratio) for scaling the latent during noise addition. Scale is to shape the sigma_down curve."""
@@ -319,7 +340,7 @@ def _refined_exp_sosu_step(model, x, sigma, sigma_next, c2 = 0.5,
   return StepOutput(x_next=x_next, denoised=denoised, denoised2=denoised2, vel=vel, vel_2=vel_2,)
 
 
-def _refined_exp_sosu_step_RF_hard(model, x, sigma, sigma_next, sigma_next2, c2 = 0.5, eta=1.0, noise_sampler=None, noise_mode="hard", ancestral_noise=True, s_noise=1.0, #COMFY 
+def _refined_exp_sosu_step_RF_hard(model, x, sigma, sigma_next, sigma_next2, c2 = 0.5, eta1=1.0, eta2=1.0, noise_sampler=None, noise_mode="hard", ancestral_noise=True, s_noise1=1.0, s_noise2=1.0, #COMFY 
   extra_args: Dict[str, Any] = {},
   pbar: Optional[tqdm] = None,
   simple_phi_calc = False,
@@ -369,10 +390,15 @@ def _refined_exp_sosu_step_RF_hard(model, x, sigma, sigma_next, sigma_next2, c2 
 
   s_in = x.new_ones([x.shape[0]])
   
-  su, sd, alpha_ratio = get_ancestral_step_RF(sigma_next, eta)
+  sigma_var = (-1 + torch.sqrt(1 + 4 * sigma)) / 2
+  
+  su, sd, alpha_ratio = get_ancestral_step_RF(sigma_next, eta2)
+  if sigma_next > sigma_var and noise_mode == "hard_var":
+    su, sd, alpha_ratio = get_ancestral_step_RF_var(sigma, sigma_next, eta2)
+  print(su.item(), sd.item(), alpha_ratio.item(), sigma.item(), sigma_next.item())
 
   if ancestral_noise == False: # add noise before first step, results in a very clean image, great for some styles but looks fake with photography
-    x = alpha_ratio * x + noise_sampler(sigma=sigma, sigma_next=sigma_next) * s_noise * su
+    x = alpha_ratio * x + noise_sampler(sigma=sigma, sigma_next=sigma_next) * s_noise2 * su
   
   denoised = model(x, sigma * s_in, **extra_args)
 
@@ -386,6 +412,21 @@ def _refined_exp_sosu_step_RF_hard(model, x, sigma, sigma_next, sigma_next2, c2 
 
   diff_2 = vel_2 = momentum_func(h*a2_1*denoised, vel_2, time)
   x_2 = ((sd/sigma)**c2)*x + diff_2 
+   
+  if ancestral_noise == True and sigma_next > 0.00001: # very good for photography styles
+    if   noise_mode == "soft":
+      sd_2, su_2, alpha_ratio_2 = get_RF_step(sigma, sigma_s, eta1)
+    elif noise_mode == "softer":
+      sd_2, su_2, alpha_ratio_2 = get_RF_step_traditional(sigma, sigma_s, eta1)
+    elif noise_mode == "hard":
+      su_2, sd_2, alpha_ratio_2 = get_ancestral_step_RF(sigma_s, eta1)
+    elif noise_mode == "hard_var":
+      su_2, sd_2, alpha_ratio_2 = get_ancestral_step_RF(sigma_s, eta1)
+      sigma_var = (-1 + torch.sqrt(1 + 4 * sigma)) / 2
+      if sigma_s > sigma_var:
+        su_2, sd_2, alpha_ratio_2 = get_ancestral_step_RF_var(sigma, sigma_s, eta1)
+    #su_2, sd_2, alpha_ratio_2 = get_ancestral_step_RF(sigma_next, eta)
+    x_2 = alpha_ratio_2 * x_2 + noise_sampler(sigma=sigma, sigma_next=sigma_s) * s_noise1 * su_2   # why is this here? i'm adding noise in the main DEIS loop anyway.
   
   denoised2 = model(x_2, sigma_s * s_in, **extra_args)
 
@@ -397,14 +438,18 @@ def _refined_exp_sosu_step_RF_hard(model, x, sigma, sigma_next, sigma_next2, c2 
   x_next =  (sd/sigma) * x + diff
   
   if ancestral_noise == True and sigma_next > 0.00001: # very good for photography styles
-    su_2, sd_2, alpha_ratio_2 = get_ancestral_step_RF(sigma_next, eta)
-    x_next = alpha_ratio_2 * x_next + noise_sampler(sigma=sigma_s, sigma_next=sigma_next) * s_noise * su_2
+    noise = noise_sampler(sigma=sigma_s, sigma_next=sigma_next) * s_noise2 
+    su_2, sd_2, alpha_ratio_2 = get_ancestral_step_RF(sigma_next, eta2)
+    if sigma_next > sigma_var and noise_mode == "hard_var":
+      su_2, sd_2, alpha_ratio_2 = get_ancestral_step_RF_var(sigma, sigma_next, eta2)
+      noise = normalize(noise)
+    x_next = alpha_ratio_2 * x_next + noise * su_2
     
   if sigma_next2 == 0.0:
     sigma_tiny = torch.tensor(min(0.00001, (sigma_next**2).item()), dtype=sigma_next.dtype).to(sigma_next.device)
     print("denoise from: ", sigma_next.item(), "   denoise_to: ", sigma_tiny.item())
     gc.collect(); torch.cuda.empty_cache()
-    return _refined_exp_sosu_step_RF_hard(model, x_next, sigma_next, sigma_tiny, sigma_tiny, c2=c2, eta=eta, noise_sampler=noise_sampler, s_noise=s_noise,
+    return _refined_exp_sosu_step_RF_hard(model, x_next, sigma_next, sigma_tiny, sigma_tiny, c2=c2, eta1=eta1, eta2=eta2, noise_sampler=noise_sampler, s_noise1=s_noise1, s_noise2=s_noise2,
                                       extra_args=extra_args, pbar=pbar, simple_phi_calc=simple_phi_calc, momentum=momentum, vel=vel, vel_2=vel_2, time=time, eulers_mom=eulers_mom, cfgpp=cfgpp) 
 
   return StepOutput(x_next=x_next, denoised=denoised, denoised2=denoised2, vel=vel, vel_2=vel_2,)
@@ -467,9 +512,14 @@ def _refined_exp_sosu_step_RF_hard_deis(model, x, sigma, sigma_next, sigma_next2
     sd, su, alpha_ratio = get_RF_step_traditional(sigma, sigma_next, eta)
   elif noise_mode == "hard":
     su, sd, alpha_ratio = get_ancestral_step_RF(sigma_next, eta)
+  elif noise_mode == "hard_var":
+    su, sd, alpha_ratio = get_ancestral_step_RF(sigma_next, eta)
+    sigma_var = (-1 + torch.sqrt(1 + 4 * sigma)) / 2
+    if sigma_next > sigma_var:
+      su, sd, alpha_ratio = get_ancestral_step_RF_var(sigma, sigma_next, eta)
 
-  if ancestral_noise == False: # add noise before first step, results in a very clean image, great for some styles but looks fake with photography
-    x = alpha_ratio * x + noise_sampler(sigma=sigma, sigma_next=sigma_next) * s_noise * su
+  #if ancestral_noise == False: # add noise before first step, results in a very clean image, great for some styles but looks fake with photography
+  #  x = alpha_ratio * x + noise_sampler(sigma=sigma, sigma_next=sigma_next) * s_noise * su
   
   denoised = model(x, sigma * s_in, **extra_args)
 
@@ -484,6 +534,22 @@ def _refined_exp_sosu_step_RF_hard_deis(model, x, sigma, sigma_next, sigma_next2
   diff_2 = vel_2 = momentum_func(h*a2_1*denoised, vel_2, time)
   x_2 = ((sd/sigma)**c2)*x + diff_2 
   
+  eta = eta / 2 #adjust for now so 0.5 / 2 = 0.25
+  if ancestral_noise == True and sigma_next > 0.00001: # very good for photography styles
+    if   noise_mode == "soft":
+      sd_2, su_2, alpha_ratio_2 = get_RF_step(sigma, sigma_s, eta)
+    elif noise_mode == "softer":
+      sd_2, su_2, alpha_ratio_2 = get_RF_step_traditional(sigma, sigma_s, eta)
+    elif noise_mode == "hard":
+      su_2, sd_2, alpha_ratio_2 = get_ancestral_step_RF(sigma_s, eta)
+    elif noise_mode == "hard_var":
+      su_2, sd_2, alpha_ratio_2 = get_ancestral_step_RF(sigma_s, eta)
+      sigma_var = (-1 + torch.sqrt(1 + 4 * sigma)) / 2
+      if sigma_s > sigma_var:
+        su_2, sd_2, alpha_ratio_2 = get_ancestral_step_RF_var(sigma, sigma_s, eta)
+    #su_2, sd_2, alpha_ratio_2 = get_ancestral_step_RF(sigma_next, eta)
+    x_2 = alpha_ratio_2 * x_2 + noise_sampler(sigma=sigma, sigma_next=sigma_s) * s_noise * su_2   # why is this here? i'm adding noise in the main DEIS loop anyway.
+  
   denoised2 = model(x_2, sigma_s * s_in, **extra_args)
 
   if pbar is not None:
@@ -495,16 +561,6 @@ def _refined_exp_sosu_step_RF_hard_deis(model, x, sigma, sigma_next, sigma_next2
 
   x_next =  (sd/sigma) * x + diff
   
-  if ancestral_noise == True and sigma_next > 0.00001: # very good for photography styles
-    if   noise_mode == "soft":
-      sd_2, su_2, alpha_ratio_2 = get_RF_step(sigma, sigma_next, eta)
-    elif noise_mode == "softer":
-      sd_2, su_2, alpha_ratio_2 = get_RF_step_traditional(sigma, sigma_next, eta)
-    elif noise_mode == "hard":
-      su_2, sd_2, alpha_ratio_2 = get_ancestral_step_RF(sigma_next, eta)
-    #su_2, sd_2, alpha_ratio_2 = get_ancestral_step_RF(sigma_next, eta)
-    x_next = alpha_ratio_2 * x_next + noise_sampler(sigma=sigma_s, sigma_next=sigma_next) * s_noise * su_2
-    
   if sigma_next2 == 0.0:
     sigma_tiny = torch.tensor(min(0.00001, (sigma_next**2).item()), dtype=sigma_next.dtype).to(sigma_next.device)
     print("denoise from: ", sigma_next.item(), "   denoise_to: ", sigma_tiny.item())
@@ -514,8 +570,23 @@ def _refined_exp_sosu_step_RF_hard_deis(model, x, sigma, sigma_next, sigma_next2
   return x_next, denoised, denoised2, denoised1_2, vel, vel_2,
   #return StepOutput(x_next=x_next, denoised=denoised, denoised2=denoised2, vel=vel, vel_2=vel_2,)
 
+"""  if ancestral_noise == True and sigma_next > 0.00001: # very good for photography styles
+    if   noise_mode == "soft":
+      sd_2, su_2, alpha_ratio_2 = get_RF_step(sigma, sigma_next, eta)
+    elif noise_mode == "softer":
+      sd_2, su_2, alpha_ratio_2 = get_RF_step_traditional(sigma, sigma_next, eta)
+    elif noise_mode == "hard":
+      su_2, sd_2, alpha_ratio_2 = get_ancestral_step_RF(sigma_next, eta)
+    elif noise_mode == "hard_var":
+      su_2, sd_2, alpha_ratio_2 = get_ancestral_step_RF(sigma_next, eta)
+      sigma_var = (-1 + torch.sqrt(1 + 4 * sigma)) / 2
+      if sigma_next > sigma_var:
+        su_2, sd_2, alpha_ratio_2 = get_ancestral_step_RF_var(sigma, sigma_next, eta)
+    #su_2, sd_2, alpha_ratio_2 = get_ancestral_step_RF(sigma_next, eta)
+    x_next = alpha_ratio_2 * x_next + noise_sampler(sigma=sigma_s, sigma_next=sigma_next) * s_noise * su_2   # why is this here? i'm adding noise in the main DEIS loop anyway."""
+    
 
-def _refined_exp_sosu_step_RF(model, x, sigma, sigma_next, sigma_next2, c2 = 0.5, eta=1.0, noise_sampler=None, noise_mode="soft", s_noise=1.0, noise_scale=1.0, ancestral_noise=True, 
+def _refined_exp_sosu_step_RF(model, x, sigma, sigma_next, sigma_next2, c2 = 0.5, eta1=1.0, eta2=1.0, noise_sampler=None, noise_mode="soft", s_noise1=1.0, s_noise2=1.0, noise_scale=1.0, ancestral_noise=True, 
                               alpha_ratios=None, #COMFY 08407 PNG
   extra_args: Dict[str, Any] = {},
   pbar: Optional[tqdm] = None,
@@ -557,13 +628,13 @@ def _refined_exp_sosu_step_RF(model, x, sigma, sigma_next, sigma_next2, c2 = 0.5
   s_in = x.new_ones([x.shape[0]])
   
   if   noise_mode == "soft":
-    sd, su, alpha_ratio = get_RF_step(sigma, sigma_next, eta, noise_scale, alpha_ratios)
+    sd, su, alpha_ratio = get_RF_step(sigma, sigma_next, eta2, noise_scale, alpha_ratios)
   elif noise_mode == "softer":
-    sd, su, alpha_ratio = get_RF_step_traditional(sigma, sigma_next, eta, noise_scale, alpha_ratios)
+    sd, su, alpha_ratio = get_RF_step_traditional(sigma, sigma_next, eta2, noise_scale, alpha_ratios)
   if ancestral_noise == False: #add noise before first step, results in a very clean image, great for some styles but looks fake with photography
-
     #x = alpha_ratio * x + noise_sampler(sigma=sigma, sigma_next=sigma_s) * su #####################
-    x = alpha_ratio * x + noise_sampler(sigma=sigma, sigma_next=sigma_next) * s_noise * su ##################### TEST LINE FOR CFG W/O GUIDANCE
+    x = alpha_ratio * x + noise_sampler(sigma=sigma, sigma_next=sigma_next) * s_noise2 * su ##################### TEST LINE FOR CFG W/O GUIDANCE
+  print(su.item(), sd.item(), alpha_ratio.item(), sigma.item(), sigma_next.item())
   
   denoised = model(x, sigma * s_in, **extra_args)
     
@@ -581,6 +652,22 @@ def _refined_exp_sosu_step_RF(model, x, sigma, sigma_next, sigma_next2, c2 = 0.5
   #x_2 = alpha_ratio_sigma_s * x_2 + noise_sampler(sigma=sigma, sigma_next=sigma_s) * su_sigma_s #COMMENTED OUT FOR TEST LINE FOR CFG W/O GUIDANCE
   #x_2 = alpha_ratio * x_2 + noise_sampler(sigma=sigma, sigma_next=sigma_s) * su
   
+  
+  if ancestral_noise == True and sigma_next > 0.00001: # very good for photography styles
+    if   noise_mode == "soft":
+      sd_2, su_2, alpha_ratio_2 = get_RF_step(sigma, sigma_s, eta1)
+    elif noise_mode == "softer":
+      sd_2, su_2, alpha_ratio_2 = get_RF_step_traditional(sigma, sigma_s, eta1)
+    elif noise_mode == "hard":
+      su_2, sd_2, alpha_ratio_2 = get_ancestral_step_RF(sigma_s, eta1)
+    elif noise_mode == "hard_var":
+      su_2, sd_2, alpha_ratio_2 = get_ancestral_step_RF(sigma_s, eta1)
+      sigma_var = (-1 + torch.sqrt(1 + 4 * sigma)) / 2
+      if sigma_s > sigma_var:
+        su_2, sd_2, alpha_ratio_2 = get_ancestral_step_RF_var(sigma, sigma_s, eta1)
+    #su_2, sd_2, alpha_ratio_2 = get_ancestral_step_RF(sigma_next, eta)
+    x_2 = alpha_ratio_2 * x_2 + noise_sampler(sigma=sigma, sigma_next=sigma_s) * s_noise1 * su_2   # why is this here? i'm adding noise in the main DEIS loop anyway.
+  
   denoised2 = model(x_2, sigma_s * s_in, **extra_args)
 
   if pbar is not None:
@@ -592,19 +679,19 @@ def _refined_exp_sosu_step_RF(model, x, sigma, sigma_next, sigma_next2, c2 = 0.5
   
   if ancestral_noise == True and sigma_next > 0.00001: #results in leftover noise with low step counts (<= 30), but very good for photography styles
     if   noise_mode == "soft":
-      sd_2, su_2, alpha_ratio_2 = get_RF_step(sigma, sigma_next, eta, noise_scale, alpha_ratios)
+      sd_2, su_2, alpha_ratio_2 = get_RF_step(sigma, sigma_next, eta2, noise_scale, alpha_ratios)
     elif noise_mode == "softer":
-      sd_2, su_2, alpha_ratio_2 = get_RF_step_traditional(sigma, sigma_next, eta, noise_scale, alpha_ratios)
+      sd_2, su_2, alpha_ratio_2 = get_RF_step_traditional(sigma, sigma_next, eta2, noise_scale, alpha_ratios)
       
-    sd_2, su_2, alpha_ratio_2 = get_RF_step(sigma, sigma_next, eta, noise_scale, alpha_ratios)
-    x_next = alpha_ratio_2 * x_next + noise_sampler(sigma=sigma_s, sigma_next=sigma_next) * s_noise * su_2
+    sd_2, su_2, alpha_ratio_2 = get_RF_step(sigma, sigma_next, eta2, noise_scale, alpha_ratios)
+    x_next = alpha_ratio_2 * x_next + noise_sampler(sigma=sigma_s, sigma_next=sigma_next) * s_noise2 * su_2
     #x_next = alpha_ratio * x_next + noise_sampler(sigma=sigma, sigma_next=sigma_next) * su
     
   if sigma_next2 == 0.0:
     sigma_tiny = torch.tensor(min(0.00001, (sigma_next**2).item()), dtype=sigma_next.dtype).to(sigma_next.device)
     print("denoise from: ", sigma_next.item(), "   denoise_to: ", sigma_tiny.item())
     gc.collect(); torch.cuda.empty_cache()
-    return _refined_exp_sosu_step_RF(model, x_next, sigma_next, sigma_tiny, sigma_tiny, c2=c2, eta=eta, noise_sampler=noise_sampler, s_noise=s_noise,
+    return _refined_exp_sosu_step_RF(model, x_next, sigma_next, sigma_tiny, sigma_tiny, c2=c2, eta1=eta1, eta2=eta2, noise_sampler=noise_sampler, s_noise1=s_noise1, s_noise2=s_noise2,
                                       extra_args=extra_args, pbar=pbar, simple_phi_calc=simple_phi_calc, momentum=momentum, vel=vel, vel_2=vel_2, time=time, eulers_mom=eulers_mom, cfgpp=cfgpp) 
 
   return StepOutput(x_next=x_next, denoised=denoised, denoised2=denoised2, vel=vel, vel_2=vel_2,)
@@ -627,8 +714,10 @@ def sample_refined_exp_s_advanced_RF(
   extra_args: Dict[str, Any] = {},
   callback: Optional[RefinedExpCallback] = None,
   disable: Optional[bool] = None,
-  eta=None,
-  s_noises=None,
+  etas1=None,
+  etas2=None,
+  s_noises1=None,
+  s_noises2=None,
   momentum=None,
   eulers_mom=None,
   c2=None,
@@ -672,7 +761,11 @@ def sample_refined_exp_s_advanced_RF(
 
   s_in = x.new_ones([x.shape[0]])
   sigma_min, sigma_max = sigmas[sigmas > 0].min(), sigmas.max()
+  
+  if clownseed < 0.0:
+    clownseed = extra_args.get("seed", None) + 1
   noise_sampler = NOISE_GENERATOR_CLASSES.get(noise_sampler_type)(x=x, seed=clownseed, sigma_min=sigma_min, sigma_max=sigma_max)
+  print("ClownSeed set to: ", clownseed)
 
   dt = None
   vel, vel_2 = None, None
@@ -710,13 +803,13 @@ def sample_refined_exp_s_advanced_RF(
           noise_sampler.alpha = alpha[i]
           noise_sampler.k = k
 
-      sigma_hat = sigma * (1 + eta[i])
+      sigma_hat = sigma * (1 + etas2[i])  #using etas2 as the "main" eta
 
       x_n[0][0] = x
       for depth in range(1, branch_depth+1):
         sigma = sigmas[i]
         sigma_next = sigmas[i+1]
-        sigma_hat = sigma * (1 + eta[i])
+        sigma_hat = sigma * (1 + etas2[i])
         
         for m in range(branch_width**(depth-1)):
           for n in range(branch_width):
@@ -736,8 +829,8 @@ def sample_refined_exp_s_advanced_RF(
                                                                           extra_args=extra_args, pbar=pbar, simple_phi_calc=simple_phi_calc,
                                                                           momentum = momentum[i], vel = vel[depth][idx], vel_2 = vel_2[depth][idx], time = time, eulers_mom = eulers_mom[i].item(), cfgpp = cfgpp[i].item()
                                                                           )"""
-            if noise_mode == "hard":
-              x_n[depth][idx], denoised[depth][idx], denoised2[depth][idx], vel[depth][idx], vel_2[depth][idx] = _refined_exp_sosu_step_RF_hard(model, x_h[depth][idx], sigma, sigma_next, sigmas[i+2], c2=c2[i],eta=eta[i], noise_sampler=noise_sampler, s_noise=s_noises[i], noise_mode=noise_mode, ancestral_noise=ancestral_noise,
+            if noise_mode == "hard" or noise_mode == "hard_var":
+              x_n[depth][idx], denoised[depth][idx], denoised2[depth][idx], vel[depth][idx], vel_2[depth][idx] = _refined_exp_sosu_step_RF_hard(model, x_h[depth][idx], sigma, sigma_next, sigmas[i+2], c2=c2[i],eta1=etas1[i], eta2=etas2[i], noise_sampler=noise_sampler, s_noise1=s_noises1[i], s_noise2=s_noises2[i], noise_mode=noise_mode, ancestral_noise=ancestral_noise,
                                                                             extra_args=extra_args, pbar=pbar, simple_phi_calc=simple_phi_calc,
                                                                             momentum = momentum[i], vel = vel[depth][idx], vel_2 = vel_2[depth][idx], time = time, eulers_mom = eulers_mom[i].item(), cfgpp = cfgpp[i].item()
                                                                             )
@@ -746,7 +839,7 @@ def sample_refined_exp_s_advanced_RF(
                 alpha_ratios_ = None
               else:
                 alpha_ratios_ = alpha_ratios[i]                                                                                                                
-              x_n[depth][idx], denoised[depth][idx], denoised2[depth][idx], vel[depth][idx], vel_2[depth][idx] = _refined_exp_sosu_step_RF(model, x_h[depth][idx], sigma, sigma_next, sigmas[i+2], c2=c2[i],eta=eta[i], noise_sampler=noise_sampler, s_noise=s_noises[i], noise_scale=noise_scale, alpha_ratios=alpha_ratios_,
+              x_n[depth][idx], denoised[depth][idx], denoised2[depth][idx], vel[depth][idx], vel_2[depth][idx] = _refined_exp_sosu_step_RF(model, x_h[depth][idx], sigma, sigma_next, sigmas[i+2], c2=c2[i],eta1=etas1[i], eta2=etas2[i], noise_sampler=noise_sampler, s_noise1=s_noises1[i], s_noise2=s_noises2[i], noise_scale=noise_scale, alpha_ratios=alpha_ratios_,
                                                                             extra_args=extra_args, pbar=pbar, simple_phi_calc=simple_phi_calc,
                                                                             momentum = momentum[i], vel = vel[depth][idx], vel_2 = vel_2[depth][idx], time = time, eulers_mom = eulers_mom[i].item(), cfgpp = cfgpp[i].item()
                                                                             )
