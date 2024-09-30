@@ -132,7 +132,7 @@ class ClownSampler:
                 "noise_mode": (["hard", "hard_var", "soft", "softer"], {"default": 'hard'}), 
                 "noise_scale": ("FLOAT", {"default": 1.0, "min": -10000.0, "max": 10000.0, "step":0.1, "round": False}),
                 "ancestral_noise": ("BOOLEAN", {"default": True}),   
-
+                "noisy_cfg": ("BOOLEAN", {"default": False}),
                 "clownseed": ("INT", {"default": -1.0, "min": -10000.0, "max": 0xffffffffffffffff}),
                 "alpha": ("FLOAT", {"default": 0.0, "min": -10000.0, "max": 10000.0, "step": 0.1}),
                 "k": ("FLOAT", {"default": 1.0, "min": -10000.0, "max": 10000.0, "step": 2}),      
@@ -161,7 +161,7 @@ class ClownSampler:
     FUNCTION = "get_sampler"
 
     def get_sampler(self, clownseed, noise_sampler_type, noise_mode, noise_scale, ancestral_noise, denoise_to_zero, simple_phi_calc, cfgpp, eulers_mom, momentum, c2, eta1, eta2, s_noise1, s_noise2, branch_mode, branch_depth, branch_width,
-                    alpha, k,
+                    alpha, k, noisy_cfg, 
                     alphas=None, latent_noise=None,
                     eulers_moms=None, momentums=None, etas1=None, etas2=None, s_noises1=None, s_noises2=None, c2s=None, cfgpps=None, offsets=None, guides=None, alpha_ratios=None,):
         
@@ -206,6 +206,7 @@ class ClownSampler:
                 "noise_mode": noise_mode,
                 "noise_scale": noise_scale, 
                 "ancestral_noise": ancestral_noise,
+                "noisy_cfg": noisy_cfg,
                 "denoise_to_zero": denoise_to_zero,
                 "simple_phi_calc": simple_phi_calc,
                 "branch_mode": branch_mode,
@@ -508,7 +509,10 @@ class SamplerDPMPP_SDE_ADVANCED:
                      "k": ("FLOAT", {"default": 1.0, "min": -10000.0, "max": 10000.0, "step":2.0, "round": False}),
                      "noise_sampler_type": (NOISE_GENERATOR_NAMES, {"default": "brownian"}),
                      "noise_mode": (["hard", "hard_var", "soft", "softer"], {"default": 'hard'}), 
+                     "noisy_cfg": ("BOOLEAN", {"default": False}),
                      "noise_scale": ("FLOAT", {"default": 1.0, "min": -10000.0, "max": 10000.0, "step":0.1, "round": False}),
+                     "t_fn_formula": ("STRING", {"default": "", "multiline": True}),
+                     "sigma_fn_formula": ("STRING", {"default": "", "multiline": True}),
                       },
                     "optional": 
                     {
@@ -527,8 +531,9 @@ class SamplerDPMPP_SDE_ADVANCED:
 
     FUNCTION = "get_sampler"
 
-    def get_sampler(self, momentum=0.0, eta1=1.0, eta2=1.0, s_noise1=1.0, s_noise2=1.0, denoise_boost=0.0, r=0.5, alpha=-1.0, k=1.0, noise_sampler_type="brownian", noise_mode="soft", noise_scale=1.0,
-                    momentums=None, etas1=None, etas2=None, s_noises1=None, s_noises2=None, denoise_boosts=None, rs=None, alphas=None):
+    def get_sampler(self, momentum=0.0, eta1=1.0, eta2=1.0, s_noise1=1.0, s_noise2=1.0, denoise_boost=0.0, r=0.5, alpha=-1.0, k=1.0, noise_sampler_type="brownian", noise_mode="soft", noise_scale=1.0, noisy_cfg=False,
+                    momentums=None, etas1=None, etas2=None, s_noises1=None, s_noises2=None, denoise_boosts=None, rs=None, alphas=None, t_fn_formula=None, sigma_fn_formula=None,
+                    ):
         sampler_name = "dpmpp_sde_advanced"
 
         steps = 10000
@@ -541,8 +546,9 @@ class SamplerDPMPP_SDE_ADVANCED:
         rs = initialize_or_scale(rs, r, steps)
         alphas = initialize_or_scale(alphas, alpha, steps)
 
-        sampler = comfy.samplers.ksampler(sampler_name, {"momentums": momentums, "etas1": etas1, "etas2": etas2, "s_noises1": s_noises1, "s_noises2": s_noises2, 
-                                                         "denoise_boosts": denoise_boosts, "alphas": alphas, "rs": rs, "k": k, "noise_sampler_type": noise_sampler_type, "noise_mode": noise_mode, "noise_scale": noise_scale,})
+        sampler = comfy.samplers.ksampler(sampler_name, {"momentums": momentums, "etas1": etas1, "etas2": etas2, "s_noises1": s_noises1, "s_noises2": s_noises2, "noisy_cfg": noisy_cfg,
+                                                         "denoise_boosts": denoise_boosts, "alphas": alphas, "rs": rs, "k": k, "noise_sampler_type": noise_sampler_type, "noise_mode": noise_mode, "noise_scale": noise_scale,
+                                                         "t_fn_formula": t_fn_formula, "sigma_fn_formula": sigma_fn_formula,})
         return (sampler, )
     
 class SamplerDEIS_SDE:

@@ -72,8 +72,6 @@ def get_ancestral_step_backwards(sigma, sigma_next, eta=1.):
 
 def get_RF_step_traditional(sigma, sigma_next, eta, scale=0.0, alpha_ratio=None):
     # uses math similar to what is used for the get ancestral step code in comfyui. WORKS!
-    #down_ratio = (1 - eta) + eta * (sigma_next / sigma)   #maybe this is the most appropriate target for scaling?
-    #sigma_down = sigma_next * down_ratio
     sigma_down = sigma_next * torch.sqrt(1 - (eta**2 * (sigma**2 - sigma_next**2)) / sigma**2)
 
     if alpha_ratio is None:
@@ -134,32 +132,6 @@ def get_RF_step2(sigma_up, sigma_next):
 
 import torch
 
-def get_scaled_ancestral_step_RF(sigma_next, eta, scale_exponent):
-    #this shit be fucked
-    eta_scaled = torch.sqrt(1 - eta**2)
-    
-    sigma_up = sigma_next * eta
-    sigma_down = sigma_next * eta_scaled / (1-sigma_next + sigma_next * eta_scaled) 
-    
-    #alpha_ratio = 1-sigma_next + sigma_next * eta_scaled
-    alpha_ratio = (1 - sigma_next) / (1 - sigma_down)
-
-    # a^x * b^y = c, solve for y
-    # y = (ln(c) - x*ln(a)) / ln(b)
-    c = sigma_next * eta_scaled
-    a = alpha_ratio
-    b = sigma_down
-    
-    if a != 0 and b != 0:
-        y = (torch.log(c) - scale_exponent * torch.log(a)) / torch.log(b)
-    else:
-        y = 1 
-
-    scaled_alpha_ratio = alpha_ratio ** scale_exponent
-    scaled_sigma_down = sigma_down ** y
-
-    return sigma_up, scaled_sigma_down, scaled_alpha_ratio
-
 def get_sigma_down_RF(sigma_next, eta):
     eta_scale = torch.sqrt(1 - eta**2)
     sigma_down = (sigma_next * eta_scale) / (1 - sigma_next + sigma_next * eta_scale)
@@ -176,21 +148,6 @@ def get_ancestral_step_RF(sigma_next, eta):
     #alpha_ratio = (1 - sigma_next) / (1 - sigma_down)
     return sigma_up, sigma_down, alpha_ratio
 
-"""def get_ancestral_step_RF_trash(sigma_next, eta):
-    #Modified trash-like RF step function where sigma_down = sigma_next, and alpha_ratio is used to control variance preservation.
-    sigma_up = eta * sigma_next
-    sigma_down = sigma_next
-    alpha_ratio = torch.sqrt((sigma_next**2 - sigma_up**2) / sigma_next**2)
-    return sigma_down, sigma_up, alpha_ratio"""
-
-
-"""def get_ancestral_step_RF(sigma_next, eta):
-    sigma_up = sigma_next * eta
-    eta_scaled = (1 - eta**2)**0.5
-    sigma_down = (sigma_next * eta_scaled) / (1 - sigma_next + sigma_next * eta_scaled)
-    alpha_ratio = (1 - sigma_next) / (1 - sigma_down)
-    #alpha_ratio = 1 - sigma_next + sigma_next * (1 - eta**2) ** 0.5
-    return sigma_up, sigma_down, alpha_ratio"""
 
 
 def get_ancestral_step_RF2(sigma_next, sigma, eta):
@@ -244,12 +201,13 @@ def get_RF_step3(sigma, sigma_next, eta, noise_mode="hard"):
 @precision_tool.cast_tensor
 @torch.no_grad()
 def sample_dpmpp_sde_advanced(
-    model, x, sigmas, extra_args=None, callback=None, disable=None,
-    momentum=1.0, noise_sampler=None, r=1/2, noise_sampler_type="brownian", noise_mode="hard", noise_scale=1.0, k=1.0, scale=0.1, momentums=None, etas1=None, etas2=None, s_noises1=None, s_noises2=None, rs=None, alphas=None, denoise_boosts=None,
+    model, x, sigmas, extra_args=None, callback=None, disable=None, noisy_cfg=False,
+    momentum=1.0, noise_sampler=None, r=1/2, noise_sampler_type="brownian", noise_mode="hard", noise_scale=1.0, k=1.0, scale=0.1, momentums=None, etas1=None, etas2=None, s_noises1=None, s_noises2=None, 
+    rs=None, alphas=None, denoise_boosts=None, t_fn_formula=None, sigma_fn_formula=None,
 ):
     if isinstance(model.inner_model.inner_model.model_sampling, comfy.model_sampling.CONST):
         return sample_dpmpp_sde_advanced_RF(model, x, sigmas, extra_args, callback, disable, momentum, noise_sampler, r, noise_sampler_type, noise_mode, noise_scale, k, scale,
-                                            momentums, etas1, etas2, s_noises1, s_noises2, rs, alphas, denoise_boosts)
+                                            momentums, etas1, etas2, s_noises1, s_noises2, rs, alphas, denoise_boosts, noisy_cfg, t_fn_formula, sigma_fn_formula)
     
     #DPM-Solver++ (stochastic with eta parameter).20
     def momentum_func(diff, velocity, timescale=1.0, offset=-momentum / 2.0): # Diff is current diff, vel is previous diff
@@ -258,6 +216,11 @@ def sample_dpmpp_sde_advanced(
         else:
             momentum_vel = momentum * (timescale + offset) * velocity + (1 - momentum * (timescale + offset)) * diff
         return momentum_vel
+    
+    if len(sigmas) <= 1:
+        return x
+
+    sigma_min, sigma_max = sigmas[sigmas > 0].min(), sigmas.max()
     seed = extra_args.get("seed", None) + 1
 
     noise_sampler = NOISE_GENERATOR_CLASSES.get(noise_sampler_type)(x=x, seed=seed, sigma_min=sigma_min, sigma_max=sigma_max)
@@ -324,9 +287,9 @@ def sample_dpmpp_sde_advanced(
 def sample_dpmpp_sde_advanced_RF(
     model, x, sigmas, extra_args=None, callback=None, disable=None,
     momentum=0.0, noise_sampler=None, r=1/2, noise_sampler_type="brownian", noise_mode="hard", noise_scale=1.0, k=1.0, scale=0.1, 
-    momentums=None, etas1=None, etas2=None, s_noises1=None, s_noises2=None, rs=None, alphas=None,denoise_boosts=None,
+    momentums=None, etas1=None, etas2=None, s_noises1=None, s_noises2=None, rs=None, alphas=None,denoise_boosts=None, noisy_cfg=False, sigma_fn_formula=None, t_fn_formula=None,
 ):
-    """DPM-Solver++ (stochastic with eta parameter) adapted for Rectified Flow."""
+    """DPM-Solver++ (stochastic with eta parameter) adapted for Rectified Flow."""   ###^^^swapped sigma_fn and t_fn by accident!
     def momentum_func(diff, velocity, timescale=1.0, offset=-momentum / 2.0): # Diff is current diff, vel is previous diff
         if velocity is None:
             momentum_vel = diff
@@ -347,16 +310,40 @@ def sample_dpmpp_sde_advanced_RF(
 
     if isinstance(model.inner_model.inner_model.model_sampling, comfy.model_sampling.CONST):
         get_down_step = get_RF_step
-        sigma_fn = lambda t: (t.exp() + 1) ** -1
+        sigma_fn = lambda t: 1/ (t.exp() + 1)
         t_fn = lambda sigma: ((1-sigma)/sigma).log()
+        #sigma_fn = lambda t: t
+        #t_fn = lambda sigma: sigma
     else:
         get_down_step = lambda sigma, sigma_next, eta: (*get_ancestral_step(sigma, sigma_next, eta), 1.0) # wrap function so it returns a third fixed value: alpha_ratio = 1.0 
         sigma_fn = lambda t: t.neg().exp()
+        #sigma_fn = lambda t: t.neg().exp()
         t_fn = lambda sigma: sigma.log().neg()
+        
+    if sigma_fn_formula:
+        print(sigma_fn_formula)
+        sigma_fn = eval(f"lambda t: {sigma_fn_formula}", {"t": None})
+    if t_fn_formula:
+        print(t_fn_formula)
+        t_fn = eval(f"lambda sigma: {t_fn_formula}", {"sigma": None})
 
     vel = None
+    alpha_ratio = 1.0
+    su = 0.0
+    noise1 = torch.zeros_like(x)
     for i in trange(len(sigmas) - 1, disable=disable):
-        denoised = model(x, sigmas[i] * s_in, **extra_args)
+        noise1 = noise_sampler(sigma=sigmas[i], sigma_next=sigmas[i+1])
+        if noisy_cfg == True:
+            with torch.no_grad():
+                x.grad = noise1
+                x.grad[0][0][0][0] = etas1[i] if sigmas[i] < 1.0 else 0.0
+                x.grad[0][0][0][1] = sigmas[i]
+                x.grad[0][0][0][2] = sigmas[i+1]
+                #x.grad[0][0][0][3] = float(seed + i*2)
+                denoised = model(x, sigmas[i] * s_in, **extra_args)
+                x = alpha_ratio * x + noise1 * s_noises2[i] * su
+        else:
+            denoised = model(x, sigmas[i] * s_in, **extra_args)
         
         vel = denoised = momentum_func(denoised, vel, sigmas[i], -momentums[i]/2.0)
         
@@ -380,6 +367,11 @@ def sample_dpmpp_sde_advanced_RF(
             fac = 1 / (2 * rs[i])
             
             sigma_s = sigma_fn(s)
+
+            
+            if t_fn_formula or sigma_fn_formula:
+                print("sigma_s, s, t, t_next, h, fac: ", sigma_s.item(), s.item(), t.item(), t_next.item(), h.item(), fac.item())
+                print("sigma, sigma_next: ", sigmas[i].item(), sigmas[i+1].item())
 
             if sigma_s.isnan():
                 sigma_s = 0.9999
@@ -408,9 +400,23 @@ def sample_dpmpp_sde_advanced_RF(
             sigma_sd_s = denoise_boosts[i] * sd + (1 - denoise_boosts[i]) * sigma_s #interpolate between sd and sigma_s; default is to step down to sigma_s, sd is farther down
             
             x_2 = (sigma_sd_s / sigmas[i]) * x + (1 - (sigma_sd_s / sigmas[i])) * denoised
-            x_2 = alpha_ratio * x_2 + noise_sampler(sigma=sigmas[i], sigma_next=sigma_s) * s_noises1[i] * su
-            denoised_2 = model(x_2, sigma_s * s_in, **extra_args)
-
+            
+            
+            #x_2 = alpha_ratio * x_2 + noise_sampler(sigma=sigmas[i], sigma_next=sigma_s) * s_noises1[i] * su
+            
+            noise2 = noise_sampler(sigma=sigmas[i], sigma_next=sigma_s)
+            if noisy_cfg == True:
+                with torch.no_grad():
+                    x_2.grad = noise2
+                    x_2.grad[0][0][0][0] = etas2[i]
+                    x_2.grad[0][0][0][1] = sigmas[i]
+                    x_2.grad[0][0][0][2] = sigma_s
+                    denoised_2 = model(x_2, sigma_s * s_in, **extra_args)
+                    x_2 = alpha_ratio * x_2 + noise2 * s_noises1[i] * su
+            else:
+                x_2 = alpha_ratio * x_2 + noise2 * s_noises1[i] * su
+                denoised_2 = model(x_2, sigma_s * s_in, **extra_args)
+                
             # Step 2
             #sd, su, alpha_ratio = get_down_step(sigmas[i], sigmas[i+1], etas2[i])
             if noise_mode == "soft": 
@@ -432,7 +438,13 @@ def sample_dpmpp_sde_advanced_RF(
                 
             denoised_d = (1 - fac) * denoised + fac * denoised_2
             x = (sd / sigmas[i]) * x + (1 - (sd / sigmas[i]))  * denoised_d
-            x = alpha_ratio * x + noise_sampler(sigma=sigmas[i], sigma_next=sigmas[i+1]) * s_noises2[i] * su
+            
+            if noisy_cfg == True:
+                noise1 = noise_sampler(sigma=sigmas[i], sigma_next=sigmas[i+1])
+            else:
+                x = alpha_ratio * x + noise_sampler(sigma=sigmas[i], sigma_next=sigmas[i+1]) * s_noises2[i] * su
+            
+            
             
             del denoised, denoised_d, denoised_2, x_2
             gc.collect()
@@ -702,7 +714,7 @@ def sample_res_solver_advanced(model,
                                sigmas, etas1, etas2, s_noises1, s_noises2, c2s, momentums, eulers_moms, offsets, branch_mode, branch_depth, branch_width,
                                guides_1, guides_2, latent_guide_1, latent_guide_2, guide_mode_1, guide_mode_2, guide_1_channels,
                                k, clownseed=0, cfgpps=0.0, alphas=None, latent_noise=None, latent_self_guide_1=False,latent_shift_guide_1=False,
-                               extra_args=None, callback=None, disable=None, noise_sampler_type="gaussian", noise_mode="hard", noise_scale=1.0, ancestral_noise=False, alpha_ratios=None, noise_sampler=None, 
+                               extra_args=None, callback=None, disable=None, noise_sampler_type="gaussian", noise_mode="hard", noise_scale=1.0, ancestral_noise=False, noisy_cfg=False, alpha_ratios=None, noise_sampler=None, 
                                denoise_to_zero=True, simple_phi_calc=False, c2=0.5, momentum=0.0, eulers_mom=0.0, offset=0.0):
     if isinstance(model.inner_model.inner_model.model_sampling, comfy.model_sampling.CONST):
         return sample_refined_exp_s_advanced_RF(
@@ -727,6 +739,7 @@ def sample_res_solver_advanced(model,
             noise_mode=noise_mode,
             noise_scale=noise_scale,
             ancestral_noise=ancestral_noise,
+            noisy_cfg=noisy_cfg,
             alpha_ratios=alpha_ratios,
             denoise_to_zero=denoise_to_zero, 
             simple_phi_calc=simple_phi_calc, 
@@ -1626,7 +1639,7 @@ def sample_euler_ancestral_recursive(model, x, sigmas, i=0, extra_args=None, cal
     return x
 
 from comfy.k_diffusion.sampling import deis
-from .refined_exp_solver import _refined_exp_sosu_step_RF, _refined_exp_sosu_step_RF_hard, _refined_exp_sosu_step_RF_hard_deis
+from .refined_exp_solver import _refined_exp_sosu_step_RF_hard_deis
 
 #From https://github.com/zju-pi/diff-sampler/blob/main/diff-solvers-main/solvers.py
 #under Apache 2 license
@@ -1795,7 +1808,7 @@ def sample_deis_sde(model, x, sigmas, extra_args=None, callback=None, disable=No
                     
                 denoised_d = (1 - fac) * denoised + fac * denoised_2
                 x = (sd / sigmas[i]) * x + (1 - (sd / sigmas[i]))  * denoised_d
-                x = alpha_ratio * x + noise_sampler(sigma=sigmas[i], sigma_next=sigmas[i+1]) * s_noise2 * su
+                x = alpha_ratio * x + noise_sampler(sigma=sigmas[i], sigma_next=sigmas[i+1]) * s_noise2 * su   
                 
                 #del denoised, denoised_d, denoised_2, x_2
                 denoised = denoised_d
