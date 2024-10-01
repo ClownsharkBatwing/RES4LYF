@@ -63,7 +63,7 @@ def get_RF_step(sigma, sigma_next, eta, noise_scale=1.0, alpha_ratio=None):
         alpha_ratio = (1 - sigma_next) / (1 - sigma_down)
         
     sigma_up = (sigma_next ** 2 - sigma_down ** 2 * alpha_ratio ** 2) ** 0.5 
-    return sigma_down, sigma_up, alpha_ratio
+    return sigma_up, sigma_down, alpha_ratio
 
 def get_RF_step_traditional(sigma, sigma_next, eta, scale=0.0,  alpha_ratio=None):
     # uses math similar to what is used for the get ancestral step code in comfyui. WORKS!
@@ -75,7 +75,7 @@ def get_RF_step_traditional(sigma, sigma_next, eta, scale=0.0,  alpha_ratio=None
         
     sigma_up = (sigma_next ** 2 - sigma_down ** 2 * alpha_ratio ** 2) ** 0.5 
 
-    return sigma_down, sigma_up, alpha_ratio
+    return sigma_up, sigma_down, alpha_ratio
 
 def get_sigma_down_RF(sigma_next, eta):
     eta_scale = torch.sqrt(1 - eta**2)
@@ -275,471 +275,90 @@ def _refined_exp_sosu_step(model, x, sigma, sigma_next, c2 = 0.5,
   return StepOutput(x_next=x_next, denoised=denoised, denoised2=denoised2, vel=vel, vel_2=vel_2,)
 
 
-def _refined_exp_sosu_step_RF(model, x, sigma, sigma_next, sigma_next2, c2 = 0.5, eta1=1.0, eta2=1.0, noise_sampler=None, noise1=None, alpha_ratio_2=1.0, su_2=0.0, noise_mode="hard", 
-                                   noisy_cfg=False, ancestral_noise=True, s_noise1=1.0, s_noise2=1.0, skip_corrector=False,
-  extra_args: Dict[str, Any] = {},
-  pbar: Optional[tqdm] = None,
-  simple_phi_calc = False,
-  momentum = 0.0, vel = None, vel_2 = None,
-  time = None,
-  eulers_mom = 0.0,
-  cfgpp = 0.0,
-  sigma_fn_formula="", t_fn_formula="",
-) -> StepOutput:
-
-  if cfgpp != 0.0:
-    temp = [0]
-    def post_cfg_function(args):
-        temp[0] = args["uncond_denoised"]
-        return args["denoised"]
-
-    model_options = extra_args.get("model_options", {}).copy()
-    extra_args["model_options"] = comfy.model_patcher.set_model_options_post_cfg_function(model_options, post_cfg_function, disable_cfg1_optimization=True)
-
-  def momentum_func(diff, velocity, timescale=1.0, offset=-momentum / 2.0): # Diff is current diff, vel is previous diff
-    if velocity is None:
-        momentum_vel = diff
-    else:
-        momentum_vel = momentum * (timescale + offset) * velocity + (1 - momentum * (timescale + offset)) * diff
-    return momentum_vel
-
-  sigma_fn_x = sigma_fn = lambda t: t.neg().exp()
-  t_fn_x     = t_fn     = lambda sigma: sigma.log().neg()
-  h_fn = lambda sigma, sigma_next: t_fn(sigma_next) - t_fn(sigma)
-  sigma_s_fn = lambda sigma, sigma_next, c2: torch.nan_to_num(sigma_fn(t_fn(sigma) + c2 * h_fn(sigma, sigma_next)), 0.9999) #if sigma == 1.0, and nan results with RF sigma_fn_RF(), set to 0.9999
-
-  s_in = x.new_ones([x.shape[0]])
-  
+def get_res4lyf_step(sigma, sigma_next, eta=0.0, eta_var=1.0, noise_mode="hard"):
   sigma_var = (-1 + torch.sqrt(1 + 4 * sigma)) / 2
-  
-  su, sd, alpha_ratio = get_ancestral_step_RF(sigma_next, eta2)
-  if sigma_next > sigma_var and noise_mode == "hard_var":
-    su, sd, alpha_ratio = get_ancestral_step_RF_var(sigma, sigma_next, eta2)
-  print(su.item(), sd.item(), alpha_ratio.item(), sigma.item(), sigma_next.item())
-
-  if noise1 is None:
-    noise1 = torch.zeros_like(x)
-  if noisy_cfg == True:
-    x.grad = torch.zeros_like(x)
-    x.grad = noise1
-    x.grad[0][0][0][0] = eta1 if sigma < 1.0 else 0.0
-    x.grad[0][0][0][1] = sigma
-    x.grad[0][0][0][2] = sigma_next
-    denoised = model(x, sigma * s_in, **extra_args)
-    x = alpha_ratio_2 * x + noise1 * s_noise2 * su_2
+  if eta_var > 0.0 and sigma_next > sigma_var:
+    su, sd, alpha_ratio = get_ancestral_step_RF_var(sigma, sigma_next, eta_var)
   else:
-    denoised = model(x, sigma * s_in, **extra_args)
-    x = alpha_ratio_2 * x + noise1 * s_noise2 * su_2
-  
-  if sigma_fn_formula:
-      print(sigma_fn_formula)
-      sigma_fn_x = eval(f"lambda t: {sigma_fn_formula}", {"t": None})
-  if t_fn_formula:
-      print(t_fn_formula)
-      t_fn_x = eval(f"lambda sigma: {t_fn_formula}", {"sigma": None})
-  t, t_next = t_fn_x(sigma), t_fn_x(sd)
-  h = t_next - t
-  s = t + h * c2
-  sigma_s = sigma_fn_x(s)
-  
-  h = (t_fn(sigma_s) - t_fn(sigma)) / c2 # h = (s - t) / c2    #remapped timestep-space
-
-  #sigma_s = sigma_s_fn(sigma, sd, c2)
-  #h = h_fn(sigma, sd)"""
-  a2_1, b1, b2 = _de_second_order(h=h, c2=c2, simple_phi_calc=simple_phi_calc)
-
-  if pbar is not None:
-    pbar.update(0.5)
-
-  diff_2 = vel_2 = momentum_func(h*a2_1*denoised, vel_2, time)
-  x_2 = ((sd/sigma)**c2)*x + diff_2 
-    
-  if skip_corrector == True:
-    x_next = x_2
-    denoised2 = denoised
-    c2 = 1.0
-  else:
-    alpha_ratio_2 = 1.0
-    su_2 = 0.0
-    if ancestral_noise == True and sigma_next > 0.00001: # very good for photography styles
-      if   noise_mode == "soft":
-        sd_2, su_2, alpha_ratio_2 = get_RF_step(sigma, sigma_s, eta1)
-      elif noise_mode == "softer":
-        sd_2, su_2, alpha_ratio_2 = get_RF_step_traditional(sigma, sigma_s, eta1)
-      elif noise_mode == "hard":
-        su_2, sd_2, alpha_ratio_2 = get_ancestral_step_RF(sigma_s, eta1)
-      elif noise_mode == "hard_var":
-        su_2, sd_2, alpha_ratio_2 = get_ancestral_step_RF(sigma_s, eta1)
-        sigma_var = (-1 + torch.sqrt(1 + 4 * sigma)) / 2
-        if sigma_s > sigma_var:
-          su_2, sd_2, alpha_ratio_2 = get_ancestral_step_RF_var(sigma, sigma_s, eta1)
-          
-      noise2 = noise_sampler(sigma=sigma, sigma_next=sigma_s)
-      if noisy_cfg == True:
-        x_2.grad = noise2
-        x_2.grad[0][0][0][0] = eta2
-        x_2.grad[0][0][0][1] = sigma
-        x_2.grad[0][0][0][2] = sigma_s
-        denoised2 = model(x_2, sigma_s * s_in, **extra_args)
-        x_2 = alpha_ratio_2 * x_2 + noise2 * s_noise1 * su_2
-      else:
-        x_2 = alpha_ratio_2 * x_2 + noise2 * s_noise1 * su_2
-        denoised2 = model(x_2, sigma_s * s_in, **extra_args)
-    else:
-      x_2.grad = None
-      denoised2 = model(x_2, sigma_s * s_in, **extra_args)
-
-    if pbar is not None:
-      pbar.update(0.5)
-
-    diff = vel = momentum_func(h*(b1*denoised + b2*denoised2), vel, time)
-    #denoised1_2 = momentum_func((b1*denoised + b2*denoised2), vel, time) / (b1 + b2)
-
-    x_next =  (sd/sigma) * x + diff
-  
-  noise1 = noise_sampler(sigma=sigma, sigma_next=sigma_next)
-  alpha_ratio_2 = 1.0
-  su_2 = 0.0
-  """if ancestral_noise == True and sigma_next > 0.00001: # very good for photography styles
-    su_2, sd_2, alpha_ratio_2 = get_ancestral_step_RF(sigma_next, eta2)
-    if sigma_next > sigma_var and noise_mode == "hard_var":
-      su_2, sd_2, alpha_ratio_2 = get_ancestral_step_RF_var(sigma, sigma_next, eta2)"""
-  if ancestral_noise == True and sigma_next > 0.00001: # very good for photography styles
     if   noise_mode == "soft":
-      sd_2, su_2, alpha_ratio_2 = get_RF_step(sigma, sigma_next, eta2)
+      su, sd, alpha_ratio = get_RF_step(sigma, sigma_next, eta)
     elif noise_mode == "softer":
-      sd_2, su_2, alpha_ratio_2 = get_RF_step_traditional(sigma, sigma_next, eta2)
+      su, sd, alpha_ratio = get_RF_step_traditional(sigma, sigma_next, eta)
     elif noise_mode == "hard":
-      su_2, sd_2, alpha_ratio_2 = get_ancestral_step_RF(sigma_next, eta2)
-    elif noise_mode == "hard_var":
-      su_2, sd_2, alpha_ratio_2 = get_ancestral_step_RF(sigma_next, eta2)
-      sigma_var = (-1 + torch.sqrt(1 + 4 * sigma)) / 2
-      if sigma_s > sigma_var:
-        su_2, sd_2, alpha_ratio_2 = get_ancestral_step_RF_var(sigma, sigma_next, eta2)
-  #x_next = x_2
-  #denoised2=denoised
-
-  if sigma_next2 == 0.0:
-    sigma_tiny = torch.tensor(min(0.00001, (sigma_next**2).item()), dtype=sigma_next.dtype).to(sigma_next.device)
-    print("denoise from: ", sigma_next.item(), "   denoise_to: ", sigma_tiny.item())
-    gc.collect(); torch.cuda.empty_cache()
-    return _refined_exp_sosu_step_RF(model, x_next, sigma_next, sigma_tiny, sigma_tiny, c2=c2, eta1=eta1, eta2=eta2, noise_sampler=noise_sampler, noise1=noise1, s_noise1=s_noise1, s_noise2=s_noise2, noisy_cfg=noisy_cfg,
-                                      extra_args=extra_args, pbar=pbar, simple_phi_calc=simple_phi_calc, momentum=momentum, vel=vel, vel_2=vel_2, time=time, eulers_mom=eulers_mom, cfgpp=cfgpp) 
-
-  return x_next, denoised, denoised2, vel, vel_2, noise1, alpha_ratio_2, su_2
+      su, sd, alpha_ratio = get_ancestral_step_RF(sigma_next, eta)
+  return su, sd, alpha_ratio
 
 
-def _refined_exp_sosu_step_RF_hard_deis(model, x, sigma, sigma_next, sigma_next2, c2 = 0.5, eta=1.0, noise_sampler=None, noise_mode="hard", ancestral_noise=True, s_noise=1.0, #COMFY 
-  extra_args: Dict[str, Any] = {},
-  pbar: Optional[tqdm] = None,
-  simple_phi_calc = False,
-  momentum = 0.0, vel = None, vel_2 = None,
-  time = None,
-  eulers_mom = 0.0,
-  cfgpp = 0.0,
-) -> StepOutput:
-
-  """Algorithm 1 "RES Second order Single Update Step with c2"
-  https://arxiv.org/abs/2308.02157
-
-  Parameters:
-    model (`DenoiserModel`): a k-diffusion wrapped denoiser model (e.g. a subclass of DiscreteEpsDDPMDenoiser)
-    x (`FloatTensor`): noised latents (or RGB I suppose), e.g. torch.randn((B, C, H, W)) * sigma[0]
-    sigma (`FloatTensor`): timestep to denoise
-    sigma_next (`FloatTensor`): timestep+1 to denoise
-    c2 (`float`, *optional*, defaults to .5): partial step size for solving ODE. .5 = midpoint method
-    extra_args (`Dict[str, Any]`, *optional*, defaults to `{}`): kwargs to pass to `model#__call__()`
-    pbar (`tqdm`, *optional*, defaults to `None`): progress bar to update after each model call
-    simple_phi_calc (`bool`, *optional*, defaults to `True`): True = calculate phi_i,j(-h) via simplified formulae specific to j={1,2}. False = Use general solution that works for any j. Mathematically equivalent, but could be numeric differences."""
-  if cfgpp != 0.0:
-    temp = [0]
-    def post_cfg_function(args):
-        temp[0] = args["uncond_denoised"]
-        return args["denoised"]
-
-    model_options = extra_args.get("model_options", {}).copy()
-    extra_args["model_options"] = comfy.model_patcher.set_model_options_post_cfg_function(model_options, post_cfg_function, disable_cfg1_optimization=True)
-
-  def momentum_func(diff, velocity, timescale=1.0, offset=-momentum / 2.0): # Diff is current diff, vel is previous diff
-    if velocity is None:
-        momentum_vel = diff
-    else:
-        momentum_vel = momentum * (timescale + offset) * velocity + (1 - momentum * (timescale + offset)) * diff
-    return momentum_vel
-
+def get_res4lyf_half_step(sigma, sigma_next, c2=0.5, auto_c2=False, h_last=None, t_fn_formula="", sigma_fn_formula="", ):
   sigma_fn = lambda t: t.neg().exp()
-  t_fn = lambda sigma: sigma.log().neg()
-  h_fn = lambda sigma, sigma_next: t_fn(sigma_next) - t_fn(sigma)
-  sigma_s_fn = lambda sigma, sigma_next, c2: torch.nan_to_num(sigma_fn(t_fn(sigma) + c2 * h_fn(sigma, sigma_next)), 0.9999) #if sigma == 1.0, and nan results with RF sigma_fn_RF(), set to 0.9999
-
-  sigma_fn_RF = lambda t: (t.exp() + 1) ** -1
-  t_fn_RF = lambda sigma: ((1-sigma)/sigma).log()
-  h_fn_RF = lambda sigma, sigma_next: t_fn_RF(sigma_next) - t_fn_RF(sigma)
-  sigma_s_fn_RF = lambda sigma, sigma_next, c2: torch.nan_to_num(sigma_fn_RF(t_fn_RF(sigma) + c2 * h_fn_RF(sigma, sigma_next)), 0.9999) #if sigma == 1.0, and nan results with RF sigma_fn_RF(), set to 0.9999
-
-  s_in = x.new_ones([x.shape[0]])
-   
-  alpha_ratio = 1.0
-  if   noise_mode == "soft":
-    sd, su, alpha_ratio = get_RF_step(sigma, sigma_next, eta)
-  elif noise_mode == "softer":
-    sd, su, alpha_ratio = get_RF_step_traditional(sigma, sigma_next, eta)
-  elif noise_mode == "hard":
-    su, sd, alpha_ratio = get_ancestral_step_RF(sigma_next, eta)
-  elif noise_mode == "hard_var":
-    su, sd, alpha_ratio = get_ancestral_step_RF(sigma_next, eta)
-    sigma_var = (-1 + torch.sqrt(1 + 4 * sigma)) / 2
-    if sigma_next > sigma_var:
-      su, sd, alpha_ratio = get_ancestral_step_RF_var(sigma, sigma_next, eta)
-
-  #if ancestral_noise == False: # add noise before first step, results in a very clean image, great for some styles but looks fake with photography
-  #  x = alpha_ratio * x + noise_sampler(sigma=sigma, sigma_next=sigma_next) * s_noise * su
-  
-  denoised = model(x, sigma * s_in, **extra_args)
-  
-  sigma_s = sigma_s_fn_RF(sigma, sd, c2)
-  h = h_fn(sigma, sd) 
-  a2_1, b1, b2 = _de_second_order(h=h, c2=c2, simple_phi_calc=simple_phi_calc)
-  #sigma_s = sigma_s_fn(sigma, sd, c2)
-
-
-  if pbar is not None:
-    pbar.update(0.5)
-
-  diff_2 = vel_2 = momentum_func(h*a2_1*denoised, vel_2, time)
-  x_2 = ((sd/sigma)**c2)*x + diff_2 
-  
-  eta = eta / 2 #adjust for now so 0.5 / 2 = 0.25
-  if ancestral_noise == True and sigma_next > 0.00001: # very good for photography styles
-    if   noise_mode == "soft":
-      sd_2, su_2, alpha_ratio_2 = get_RF_step(sigma, sigma_s, eta)
-    elif noise_mode == "softer":
-      sd_2, su_2, alpha_ratio_2 = get_RF_step_traditional(sigma, sigma_s, eta)
-    elif noise_mode == "hard":
-      su_2, sd_2, alpha_ratio_2 = get_ancestral_step_RF(sigma_s, eta)
-    elif noise_mode == "hard_var":
-      su_2, sd_2, alpha_ratio_2 = get_ancestral_step_RF(sigma_s, eta)
-      sigma_var = (-1 + torch.sqrt(1 + 4 * sigma)) / 2
-      if sigma_s > sigma_var:
-        su_2, sd_2, alpha_ratio_2 = get_ancestral_step_RF_var(sigma, sigma_s, eta)
-    #su_2, sd_2, alpha_ratio_2 = get_ancestral_step_RF(sigma_next, eta)
-    x_2 = alpha_ratio_2 * x_2 + noise_sampler(sigma=sigma, sigma_next=sigma_s) * s_noise * su_2   # why is this here? i'm adding noise in the main DEIS loop anyway.
-  
-  denoised2 = model(x_2, sigma_s * s_in, **extra_args)
-
-  if pbar is not None:
-    pbar.update(0.5)
-
-  diff = vel = momentum_func(h*(b1*denoised + b2*denoised2), vel, time)
-  denoised1_2 = momentum_func((b1*denoised + b2*denoised2), vel, time) / (b1 + b2)
-
-  x_next =  (sd/sigma) * x + diff
-  
-  if sigma_next2 == 0.0:
-    sigma_tiny = torch.tensor(min(0.00001, (sigma_next**2).item()), dtype=sigma_next.dtype).to(sigma_next.device)
-    print("denoise from: ", sigma_next.item(), "   denoise_to: ", sigma_tiny.item())
-    gc.collect(); torch.cuda.empty_cache()
-    return _refined_exp_sosu_step_RF_hard_deis(model, x_next, sigma_next, sigma_tiny, sigma_tiny, c2=c2, eta=eta, noise_sampler=noise_sampler, s_noise=s_noise,
-                                      extra_args=extra_args, pbar=pbar, simple_phi_calc=simple_phi_calc, momentum=momentum, vel=vel, vel_2=vel_2, time=time, eulers_mom=eulers_mom, cfgpp=cfgpp) 
-  return x_next, denoised, denoised2, denoised1_2, vel, vel_2,
-
-
-
-
-def _refined_exp_sosu_step_RF_running(model, x, sigma, sigma_next, sigma_next2, c2 = 0.5, eta1=1.0, eta2=1.0, noise_sampler=None, noise1=None, alpha_ratio_2=1.0, su_2=0.0, noise_mode="hard", 
-                                   noisy_cfg=False, ancestral_noise=True, s_noise1=1.0, s_noise2=1.0, skip_corrector=False, sigma_prev=None, denoised2=None, h_last=None, auto_c2=False,
-  extra_args: Dict[str, Any] = {},
-  pbar: Optional[tqdm] = None,
-  simple_phi_calc = False,
-  momentum = 0.0, vel = None, vel_2 = None,
-  time = None,
-  eulers_mom = 0.0,
-  cfgpp = 0.0,
-  sigma_fn_formula="", t_fn_formula="",
-) -> StepOutput:
-
-  if cfgpp != 0.0:
-    temp = [0]
-    def post_cfg_function(args):
-        temp[0] = args["uncond_denoised"]
-        return args["denoised"]
-
-    model_options = extra_args.get("model_options", {}).copy()
-    extra_args["model_options"] = comfy.model_patcher.set_model_options_post_cfg_function(model_options, post_cfg_function, disable_cfg1_optimization=True)
-
-  def momentum_func(diff, velocity, timescale=1.0, offset=-momentum / 2.0): # Diff is current diff, vel is previous diff
-    if velocity is None:
-        momentum_vel = diff
-    else:
-        momentum_vel = momentum * (timescale + offset) * velocity + (1 - momentum * (timescale + offset)) * diff
-    return momentum_vel
-
-  sigma_fn_x = sigma_fn = lambda t: t.neg().exp()
   t_fn_x     = t_fn     = lambda sigma: sigma.log().neg()
-  h_fn = lambda sigma, sigma_next: t_fn(sigma_next) - t_fn(sigma)
-  sigma_s_fn = lambda sigma, sigma_next, c2: torch.nan_to_num(sigma_fn(t_fn(sigma) + c2 * h_fn(sigma, sigma_next)), 0.9999) #if sigma == 1.0, and nan results with RF sigma_fn_RF(), set to 0.9999
-
-  if sigma_fn_formula:
-      print(sigma_fn_formula)
-      sigma_fn_x = eval(f"lambda t: {sigma_fn_formula}", {"t": None})
-  if t_fn_formula:
-      print(t_fn_formula)
-      t_fn_x = eval(f"lambda sigma: {t_fn_formula}", {"sigma": None})
-
-  s_in = x.new_ones([x.shape[0]])
   
-  sigma_var = (-1 + torch.sqrt(1 + 4 * sigma)) / 2
-  
-  """if sigma_prev is not None:
-    t, s = -sigma.log(), -sigma_next.log()
-    h = s - t
-    #sigma_s = sigma
-    #sigma = sigma_prev
-    denoised = denoised2
-    #t, t_next = -sigma_prev.log(), -sigma_next.log()
-    #h = t_next - t
-    
-    sigma_s = sigma_next
-    
-  if sigma_prev is not None:
-    denoised = denoised2
-    sigma_s = sigma
-    #sigma = sigma_prev
-    
-    t, t_next = -sigma.log(), -sigma_next.log()
-    h = t_next - t
-    s = -sigma_s.log()
-    c2 = (s - t)/h
-    #sigma_s = sigma_next"""
-    
-  if sigma_prev is not None:
-    denoised = denoised2
-    
-  su, sd, alpha_ratio = get_ancestral_step_RF(sigma_next, eta2)
-  if sigma_next > sigma_var and noise_mode == "hard_var":
-    su, sd, alpha_ratio = get_ancestral_step_RF_var(sigma, sigma_next, eta2)
-  print(su.item(), sd.item(), alpha_ratio.item(), sigma.item(), sigma_next.item())
-
-  if noise1 is None:
-    noise1 = torch.zeros_like(x)
-  
-  #START INITIAL PREDICTOR STEP
-  #if sigma_prev is None: #run initial predictor step
-  if noisy_cfg == True:
-    x.grad = torch.zeros_like(x)
-    x.grad = noise1
-    x.grad[0][0][0][0] = eta1 if sigma < 1.0 else 0.0
-    x.grad[0][0][0][1] = sigma
-    x.grad[0][0][0][2] = sigma_next
-    if sigma_prev is None:
-      denoised = model(x, sigma * s_in, **extra_args)
-    x = alpha_ratio_2 * x + noise1 * s_noise2 * su_2
-  else:
-    if sigma_prev is None:
-      denoised = model(x, sigma * s_in, **extra_args)
-    x = alpha_ratio_2 * x + noise1 * s_noise2 * su_2
-  #END INITIAL PREDICTOR STEP
-  
-  #if sigma_prev is None:
-  t, t_next = t_fn_x(sigma), t_fn_x(sd)
+  sigma_fn_x = eval(f"lambda t: {sigma_fn_formula}", {"t": None}) if sigma_fn_formula else sigma_fn
+  t_fn_x = eval(f"lambda sigma: {t_fn_formula}", {"sigma": None}) if t_fn_formula else t_fn
+      
+  t, t_next = t_fn_x(sigma), t_fn_x(sigma_next)
   h = t_next - t
-  if sigma_prev is not None and auto_c2 == True:
+  if h_last is not None and auto_c2 == True:
     c2 = h_last / h 
   s = t + h * c2
   sigma_s = sigma_fn_x(s)
 
   h = (t_fn(sigma_s) - t_fn(sigma)) / c2 # h = (s - t) / c2    #remapped timestep-space
+    
+  print("sigma:", sigma.item(), "sigma_s:", sigma_s.item(), "sigma_next:", sigma_next.item(),)
+  print("t:", t.item(), "s:", s.item(), "t_next:", t_next.item(), "h:", h.item(), "c2:", c2.item())
   
+  return sigma_s, h, c2
 
-  #sigma_s = sigma_s_fn(sigma, sd, c2)
-  #h = h_fn(sigma, sd)"""
+
+
+def _refined_exp_sosu_step_RF(model, x, sigma, sigma_next, c2 = 0.5, eta1=0.25, eta2=0.5, eta_var1=0.0, eta_var2=0.0, noise_sampler=None, noise_mode="hard", order=2, 
+                                   s_noise1=1.0, s_noise2=1.0, denoised1_2=None, h_last=None, auto_c2=False,
+  extra_args: Dict[str, Any] = {},
+  pbar: Optional[tqdm] = None,
+  simple_phi_calc = False,
+  momentum = 0.0, vel = None, vel_2 = None,
+  time = None,
+  t_fn_formula="", sigma_fn_formula="", 
+):
+  def momentum_func(diff, velocity, timescale=1.0, offset=-momentum / 2.0): # Diff is current diff, vel is previous diff
+    if velocity is None:
+        momentum_vel = diff
+    else:
+        momentum_vel = momentum * (timescale + offset) * velocity + (1 - momentum * (timescale + offset)) * diff
+    return momentum_vel
+
+  su, sd, alpha_ratio = get_res4lyf_step(sigma, sigma_next, eta2, eta_var2, noise_mode)
+  sigma_s, h, c2 = get_res4lyf_half_step(sigma, sd, c2, auto_c2, h_last, t_fn_formula, sigma_fn_formula, )
   a2_1, b1, b2 = _de_second_order(h=h, c2=c2, simple_phi_calc=simple_phi_calc)
-
-
-  if pbar is not None:
-    pbar.update(0.5)
-
-  #if sigma_prev is None:
+  
+  s_in = x.new_ones([x.shape[0]])
+  
+  if order == 1 or h_last is None:
+    denoised = model(x, sigma * s_in, **extra_args)
+  else:
+    denoised = denoised1_2
+  
   diff_2 = vel_2 = momentum_func(h*a2_1*denoised, vel_2, time)
   x_2 = ((sd/sigma)**c2)*x + diff_2 
-  #else:
-  #  x_2 = x
     
-  if skip_corrector == True:
-    x_next = x_2
-    denoised2 = denoised
-  else:
-    alpha_ratio_2 = 1.0
-    su_2 = 0.0
-    if ancestral_noise == True and sigma_next > 0.00001: # very good for photography styles
-      if   noise_mode == "soft":
-        sd_2, su_2, alpha_ratio_2 = get_RF_step(sigma, sigma_s, eta1)
-      elif noise_mode == "softer":
-        sd_2, su_2, alpha_ratio_2 = get_RF_step_traditional(sigma, sigma_s, eta1)
-      elif noise_mode == "hard":
-        su_2, sd_2, alpha_ratio_2 = get_ancestral_step_RF(sigma_s, eta1)
-      elif noise_mode == "hard_var":
-        su_2, sd_2, alpha_ratio_2 = get_ancestral_step_RF(sigma_s, eta1)
-        sigma_var = (-1 + torch.sqrt(1 + 4 * sigma)) / 2
-        if sigma_s > sigma_var:
-          su_2, sd_2, alpha_ratio_2 = get_ancestral_step_RF_var(sigma, sigma_s, eta1)
-          
-      noise2 = noise_sampler(sigma=sigma, sigma_next=sigma_s)
-      if noisy_cfg == True:
-        x_2.grad = noise2
-        x_2.grad[0][0][0][0] = eta2
-        x_2.grad[0][0][0][1] = sigma
-        x_2.grad[0][0][0][2] = sigma_s
-        denoised2 = model(x_2, sigma_s * s_in, **extra_args)
-        x_2 = alpha_ratio_2 * x_2 + noise2 * s_noise1 * su_2
-      else:
-        x_2 = alpha_ratio_2 * x_2 + noise2 * s_noise1 * su_2
-        denoised2 = model(x_2, sigma_s * s_in, **extra_args)
-    else:
-      x_2.grad = None
-      denoised2 = model(x_2, sigma_s * s_in, **extra_args)
-
-    if pbar is not None:
-      pbar.update(0.5)
+  if sigma_next > 0.00001:
+    su_2, sd_2, alpha_ratio_2 = get_res4lyf_step(sigma, sigma_next, eta1, eta_var1, noise_mode)
+    x_2 = alpha_ratio_2 * x_2 + noise_sampler(sigma=sigma, sigma_next=sigma_s) * s_noise2 * su_2
+    denoised2 = model(x_2, sigma_s * s_in, **extra_args)
+  else: 
+    denoised2 = model(x_2, sigma_s * s_in, **extra_args)   #last step!
 
   diff = vel = momentum_func(h*(b1*denoised + b2*denoised2), vel, time)
-    #denoised1_2 = momentum_func((b1*denoised + b2*denoised2), vel, time) / (b1 + b2)
-
   x_next =  (sd/sigma) * x + diff
+  x_next = alpha_ratio * x_next + noise_sampler(sigma=sigma, sigma_next=sigma_next) * s_noise1 * su
   
-  noise1 = noise_sampler(sigma=sigma, sigma_next=sigma_next)
-  alpha_ratio_2 = 1.0
-  su_2 = 0.0
-  """if ancestral_noise == True and sigma_next > 0.00001: # very good for photography styles
-    su_2, sd_2, alpha_ratio_2 = get_ancestral_step_RF(sigma_next, eta2)
-    if sigma_next > sigma_var and noise_mode == "hard_var":
-      su_2, sd_2, alpha_ratio_2 = get_ancestral_step_RF_var(sigma, sigma_next, eta2)"""
-  if ancestral_noise == True and sigma_next > 0.00001: # very good for photography styles
-    if   noise_mode == "soft":
-      sd_2, su_2, alpha_ratio_2 = get_RF_step(sigma, sigma_next, eta2)
-    elif noise_mode == "softer":
-      sd_2, su_2, alpha_ratio_2 = get_RF_step_traditional(sigma, sigma_next, eta2)
-    elif noise_mode == "hard":
-      su_2, sd_2, alpha_ratio_2 = get_ancestral_step_RF(sigma_next, eta2)
-    elif noise_mode == "hard_var":
-      su_2, sd_2, alpha_ratio_2 = get_ancestral_step_RF(sigma_next, eta2)
-      sigma_var = (-1 + torch.sqrt(1 + 4 * sigma)) / 2
-      if sigma_s > sigma_var:
-        su_2, sd_2, alpha_ratio_2 = get_ancestral_step_RF_var(sigma, sigma_next, eta2)
-  #x_next = x_2
-  #denoised2=denoised
+  denoised1_2 = momentum_func((b1*denoised + b2*denoised2), vel, time) / (b1 + b2)
 
-  if sigma_next2 == 0.0:
-    sigma_tiny = torch.tensor(min(0.00001, (sigma_next**2).item()), dtype=sigma_next.dtype).to(sigma_next.device)
-    print("denoise from: ", sigma_next.item(), "   denoise_to: ", sigma_tiny.item())
-    gc.collect(); torch.cuda.empty_cache()
-    return _refined_exp_sosu_step_RF_running(model, x_next, sigma_next, sigma_tiny, sigma_tiny, c2=c2, eta1=eta1, eta2=eta2, noise_sampler=noise_sampler, noise1=noise1, s_noise1=s_noise1, s_noise2=s_noise2, noisy_cfg=noisy_cfg,
-                                      extra_args=extra_args, pbar=pbar, simple_phi_calc=simple_phi_calc, momentum=momentum, vel=vel, vel_2=vel_2, time=time, eulers_mom=eulers_mom, cfgpp=cfgpp,
-                                      skip_corrector=skip_corrector, t_fn_formula=t_fn_formula, sigma_fn_formula=sigma_fn_formula, sigma_prev=sigma_prev, denoised2=denoised2, h_last=h) 
+  if pbar is not None:
+    pbar.update(1.0)
 
-  return x_next, denoised, denoised2, vel, vel_2, noise1, alpha_ratio_2, su_2, sigma, h
-
-
+  return x_next, denoised, denoised2, denoised1_2, vel, vel_2, h
 
 
 @no_grad()
@@ -761,6 +380,8 @@ def sample_refined_exp_s_advanced_RF(
   disable: Optional[bool] = None,
   etas1=None,
   etas2=None,
+  eta_vars1=None,
+  eta_vars2=None,
   s_noises1=None,
   s_noises2=None,
   momentum=None,
@@ -788,6 +409,7 @@ def sample_refined_exp_s_advanced_RF(
   sigma_fn_formula=None,
   skip_corrector=False,
   corrector_is_predictor=False,
+  order=1,
   auto_c2=False,
 ): 
   """
@@ -821,7 +443,6 @@ def sample_refined_exp_s_advanced_RF(
   dt = None
   vel, vel_2 = None, None
   x_hat = None
-  noise1, alpha_ratio_2, su_2 = None, 1.0, 0.0
   
   x_n        = [[None for _ in range(branch_width ** depth)] for depth in range(branch_depth + 1)]
   x_h        = [[None for _ in range(branch_width ** depth)] for depth in range(branch_depth + 1)]
@@ -829,15 +450,14 @@ def sample_refined_exp_s_advanced_RF(
   vel_2      = [[None for _ in range(branch_width ** depth)] for depth in range(branch_depth + 1)]
   denoised   = [[None for _ in range(branch_width ** depth)] for depth in range(branch_depth + 1)]
   denoised2  = [[None for _ in range(branch_width ** depth)] for depth in range(branch_depth + 1)]
+  denoised1_2= [[None for _ in range(branch_width ** depth)] for depth in range(branch_depth + 1)]
   denoised_  = None
   denoised2_ = None
+  denoised1_2= None
   denoised2_prev = None
-  denoised2_running = None
-  sigma_prev = None
   h_last = None
   
-  x[0][0][0][0] = -1.0
-  x[0][0][0][1] = -1.0
+
   i=0
   with tqdm(disable=disable, total=len(sigmas)-(1 if denoise_to_zero else 2)) as pbar:
     #for i, (sigma, sigma_next) in enumerate(pairwise(sigmas[:-1].split(1))):
@@ -872,23 +492,15 @@ def sample_refined_exp_s_advanced_RF(
           for n in range(branch_width):
             idx = m * branch_width + n
 
+            sigma_next = torch.tensor(0.00001) if sigma_next == 0.00001 else sigma_next
             x_h[depth][idx] = x_n[depth-1][m]
-            if corrector_is_predictor == True:
-              if noise_mode == "hard" or noise_mode == "hard_var" or noise_mode == "soft" or noise_mode == "softer":
-                x_n[depth][idx], denoised[depth][idx], denoised2[depth][idx], vel[depth][idx], vel_2[depth][idx], noise1, alpha_ratio_2, su_2, sigma_prev, h_last = _refined_exp_sosu_step_RF_running(model, x_h[depth][idx], sigma, sigma_next, sigmas[i+2], c2=c2[i],eta1=etas1[i], eta2=etas2[i], noise_sampler=noise_sampler, noise1=noise1, alpha_ratio_2=alpha_ratio_2, su_2=su_2, s_noise1=s_noises1[i], s_noise2=s_noises2[i], noise_mode=noise_mode, ancestral_noise=ancestral_noise, noisy_cfg=noisy_cfg,
-                                                                              extra_args=extra_args, pbar=pbar, simple_phi_calc=simple_phi_calc,
-                                                                              momentum = momentum[i], vel = vel[depth][idx], vel_2 = vel_2[depth][idx], time = time, eulers_mom = eulers_mom[i].item(), cfgpp = cfgpp[i].item(),
-                                                                              t_fn_formula=t_fn_formula, sigma_fn_formula=sigma_fn_formula, skip_corrector=skip_corrector, sigma_prev=sigma_prev, denoised2=denoised2_running, h_last=h_last,auto_c2=auto_c2,
-                                                                              )
-            else:
-              if noise_mode == "hard" or noise_mode == "hard_var" or noise_mode == "soft" or noise_mode == "softer":
-                x_n[depth][idx], denoised[depth][idx], denoised2[depth][idx], vel[depth][idx], vel_2[depth][idx], noise1, alpha_ratio_2, su_2 = _refined_exp_sosu_step_RF(model, x_h[depth][idx], sigma, sigma_next, sigmas[i+2], c2=c2[i],eta1=etas1[i], eta2=etas2[i], noise_sampler=noise_sampler, noise1=noise1, alpha_ratio_2=alpha_ratio_2, su_2=su_2, s_noise1=s_noises1[i], s_noise2=s_noises2[i], noise_mode=noise_mode, ancestral_noise=ancestral_noise, noisy_cfg=noisy_cfg,
-                                                                              extra_args=extra_args, pbar=pbar, simple_phi_calc=simple_phi_calc,
-                                                                              momentum = momentum[i], vel = vel[depth][idx], vel_2 = vel_2[depth][idx], time = time, eulers_mom = eulers_mom[i].item(), cfgpp = cfgpp[i].item(),
-                                                                              t_fn_formula=t_fn_formula, sigma_fn_formula=sigma_fn_formula, skip_corrector=skip_corrector,
-                                                                              )
+            x_n[depth][idx], denoised[depth][idx], denoised2[depth][idx], denoised1_2, vel[depth][idx], vel_2[depth][idx], h_last = _refined_exp_sosu_step_RF(model, x_h[depth][idx], sigma, sigma_next, c2=c2[i],eta1=etas1[i], eta2=etas2[i], eta_var1=eta_vars1[i], eta_var2=eta_vars2[i], 
+                                                                          noise_sampler=noise_sampler, s_noise1=s_noises1[i], s_noise2=s_noises2[i], noise_mode=noise_mode,
+                                                                          extra_args=extra_args, pbar=pbar, simple_phi_calc=simple_phi_calc,
+                                                                          momentum = momentum[i], vel = vel[depth][idx], vel_2 = vel_2[depth][idx], time = time,
+                                                                          t_fn_formula=t_fn_formula, sigma_fn_formula=sigma_fn_formula, denoised1_2=denoised1_2, h_last=h_last, order=order, auto_c2=auto_c2,
+                                                                          )
 
-            denoised2_running = denoised2[depth][idx]
             denoised_  = denoised [depth][idx]
             denoised2_ = denoised2[depth][idx]
             gc.collect()

@@ -120,27 +120,29 @@ class ClownSampler:
                 "momentum": ("FLOAT", {"default": 0.0, "min": -10000.0, "max": 10000.0, "step": 0.01}),
                 "eta1": ("FLOAT", {"default": 0.25, "min": -100.0, "max": 100.0, "step":0.01, "round": False}),
                 "eta2": ("FLOAT", {"default": 0.5, "min": -100.0, "max": 100.0, "step":0.01, "round": False}),
+                "eta_var1": ("FLOAT", {"default": 0.5, "min": -100.0, "max": 100.0, "step":0.01, "round": False}),
+                "eta_var2": ("FLOAT", {"default": 0.5, "min": -100.0, "max": 100.0, "step":0.01, "round": False}),
                 "s_noise1": ("FLOAT", {"default": 1.0, "min": -100.0, "max": 100.0, "step":0.01, "round": False}),
                 "s_noise2": ("FLOAT", {"default": 1.0, "min": -100.0, "max": 100.0, "step":0.01, "round": False}),
                 "c2": ("FLOAT", {"default": 0.5, "min": 0.0, "max": 10000.0, "step": 0.01}),
+                "auto_c2": ("BOOLEAN", {"default": True}),
                 "cfgpp": ("FLOAT", {"default": 0.0, "min": -10000.0, "max": 10000.0, "step": 0.01}),
                 "branch_mode": (['latent_match', 'latent_match_d', 'latent_match_sdxl_color_d', 'latent_match_sdxl_luminosity_d','latent_match_sdxl_pattern_d','cos_reversal', 'mean', 'mean_d', 'median', 'median_d', 'zmean_d','zmedian_d','gradient_max_full', 'gradient_max_full_d', 'gradient_min_full', 'gradient_min_full_d', 'gradient_max', 'gradient_max_d', 'gradient_min', 'gradient_min_d', 'cos_similarity', 'cos_similarity_d','cos_linearity', 'cos_linearity_d', 'cos_perpendicular', 'cos_perpendicular_d'], {"default": 'mean'}),
                 "branch_depth": ("INT", {"default": 1, "min": 1, "max": 0xffffffffffffffff}),
                 "branch_width": ("INT", {"default": 1, "min": 1, "max": 0xffffffffffffffff}),
 
                 "noise_sampler_type": (NOISE_GENERATOR_NAMES, {"default": "brownian"}),
-                "noise_mode": (["hard", "hard_var", "soft", "softer"], {"default": 'hard'}), 
+                "noise_mode": (["hard", "soft", "softer"], {"default": 'hard'}), 
                 "noise_scale": ("FLOAT", {"default": 1.0, "min": -10000.0, "max": 10000.0, "step":0.1, "round": False}),
                 "ancestral_noise": ("BOOLEAN", {"default": True}),   
-                "noisy_cfg": ("BOOLEAN", {"default": False}),
+                #"noisy_cfg": ("BOOLEAN", {"default": False}),
                 "clownseed": ("INT", {"default": -1.0, "min": -10000.0, "max": 0xffffffffffffffff}),
                 "alpha": ("FLOAT", {"default": 0.0, "min": -10000.0, "max": 10000.0, "step": 0.1}),
                 "k": ("FLOAT", {"default": 1.0, "min": -10000.0, "max": 10000.0, "step": 2}),      
                 "denoise_to_zero": ("BOOLEAN", {"default": False}),
                 "simple_phi_calc": ("BOOLEAN", {"default": False}),    
-                "skip_corrector": ("BOOLEAN", {"default": False}), 
-                "corrector_is_predictor": ("BOOLEAN", {"default": False}), 
-                "auto_c2": ("BOOLEAN", {"default": True}),
+                #"skip_corrector": ("BOOLEAN", {"default": False}), 
+                "order": ("INT", {"default": 2, "min": 1, "max": 2}),
                 "t_fn_formula": ("STRING", {"default": "sigma.log().neg()", "multiline": True}),
                 "sigma_fn_formula": ("STRING", {"default": "t.neg().exp()", "multiline": True}),   
             },
@@ -149,6 +151,8 @@ class ClownSampler:
                 "momentums": ("SIGMAS", ),
                 "etas1": ("SIGMAS", ),
                 "etas2": ("SIGMAS", ),
+                "eta_vars1": ("SIGMAS", ),
+                "eta_vars2": ("SIGMAS", ),
                 "s_noises1": ("SIGMAS", ),
                 "s_noises2": ("SIGMAS", ),
                 "c2s": ("SIGMAS", ),
@@ -165,11 +169,11 @@ class ClownSampler:
 
     FUNCTION = "get_sampler"
 
-    def get_sampler(self, clownseed, noise_sampler_type, noise_mode, noise_scale, ancestral_noise, denoise_to_zero, simple_phi_calc, cfgpp, eulers_mom, momentum, c2, eta1, eta2, s_noise1, s_noise2, branch_mode, branch_depth, branch_width,
-                    alpha, k, noisy_cfg, 
+    def get_sampler(self, clownseed, noise_sampler_type, noise_mode, noise_scale, ancestral_noise, denoise_to_zero, simple_phi_calc, cfgpp, eulers_mom, momentum, c2, eta1, eta2, eta_var1, eta_var2, s_noise1, s_noise2, branch_mode, branch_depth, branch_width,
+                    alpha, k, noisy_cfg=False, 
                     alphas=None, latent_noise=None,
-                    eulers_moms=None, momentums=None, etas1=None, etas2=None, s_noises1=None, s_noises2=None, c2s=None, cfgpps=None, offsets=None, guides=None, alpha_ratios=None, t_fn_formula=None, sigma_fn_formula=None,skip_corrector=False,
-                    corrector_is_predictor=False, auto_c2=False,
+                    eulers_moms=None, momentums=None, etas1=None, etas2=None, eta_vars1=None, eta_vars2=None, s_noises1=None, s_noises2=None, c2s=None, cfgpps=None, offsets=None, guides=None, alpha_ratios=None, t_fn_formula=None, sigma_fn_formula=None,skip_corrector=False,
+                    corrector_is_predictor=False, order=1, auto_c2=False,
                     ):
         
         if guides is not None:
@@ -185,6 +189,9 @@ class ClownSampler:
         momentums = initialize_or_scale(momentums, momentum, steps)
         etas1 = initialize_or_scale(etas1, eta1, steps)
         etas2 = initialize_or_scale(etas2, eta2, steps)
+        eta_vars1 = initialize_or_scale(eta_vars1, eta_var1, steps)
+        eta_vars2 = initialize_or_scale(eta_vars2, eta_var2, steps)
+
         s_noises1 = initialize_or_scale(s_noises1, s_noise1, steps)
         s_noises2 = initialize_or_scale(s_noises2, s_noise2, steps)
         c2s = initialize_or_scale(c2s, c2, steps)
@@ -223,6 +230,8 @@ class ClownSampler:
                 "momentums": momentums,
                 "etas1": etas1,
                 "etas2": etas2,
+                "eta_vars1": eta_vars1,
+                "eta_vars2": eta_vars2,
                 "s_noises1": s_noises1,
                 "s_noises2": s_noises2,
                 "c2s": c2s,
@@ -246,6 +255,7 @@ class ClownSampler:
                 "sigma_fn_formula": sigma_fn_formula,
                 "skip_corrector": skip_corrector,
                 "corrector_is_predictor": corrector_is_predictor,
+                "order": order,
                 "auto_c2": auto_c2,
             }
         )

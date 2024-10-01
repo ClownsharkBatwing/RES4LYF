@@ -711,12 +711,12 @@ from .refined_exp_solver import sample_refined_exp_s_advanced, sample_refined_ex
 @precision_tool.cast_tensor
 def sample_res_solver_advanced(model, 
                                x, 
-                               sigmas, etas1, etas2, s_noises1, s_noises2, c2s, momentums, eulers_moms, offsets, branch_mode, branch_depth, branch_width,
+                               sigmas, etas1, etas2, eta_vars1, eta_vars2, s_noises1, s_noises2, c2s, momentums, eulers_moms, offsets, branch_mode, branch_depth, branch_width,
                                guides_1, guides_2, latent_guide_1, latent_guide_2, guide_mode_1, guide_mode_2, guide_1_channels,
                                k, clownseed=0, cfgpps=0.0, alphas=None, latent_noise=None, latent_self_guide_1=False,latent_shift_guide_1=False,
                                extra_args=None, callback=None, disable=None, noise_sampler_type="gaussian", noise_mode="hard", noise_scale=1.0, ancestral_noise=False, noisy_cfg=False, alpha_ratios=None, noise_sampler=None, 
                                denoise_to_zero=True, simple_phi_calc=False, c2=0.5, momentum=0.0, eulers_mom=0.0, offset=0.0, t_fn_formula=None, sigma_fn_formula=None, skip_corrector=False,corrector_is_predictor=False,
-                               auto_c2=False,
+                               order=1, auto_c2=False,
                                ):
     if isinstance(model.inner_model.inner_model.model_sampling, comfy.model_sampling.CONST):
         return sample_refined_exp_s_advanced_RF(
@@ -749,6 +749,8 @@ def sample_res_solver_advanced(model,
             c2=c2s, 
             etas1=etas1,
             etas2=etas2,
+            eta_vars1=eta_vars1,
+            eta_vars2=eta_vars2,
             s_noises1=s_noises1,
             s_noises2=s_noises2,
             momentum=momentums,
@@ -764,6 +766,7 @@ def sample_res_solver_advanced(model,
             sigma_fn_formula=sigma_fn_formula,
             skip_corrector=skip_corrector,
             corrector_is_predictor=corrector_is_predictor,
+            order=order,
             auto_c2=auto_c2,
         )
     else:
@@ -1647,7 +1650,7 @@ def sample_euler_ancestral_recursive(model, x, sigmas, i=0, extra_args=None, cal
     return x
 
 from comfy.k_diffusion.sampling import deis
-from .refined_exp_solver import _refined_exp_sosu_step_RF_hard_deis
+from .refined_exp_solver import _refined_exp_sosu_step_RF
 
 #From https://github.com/zju-pi/diff-sampler/blob/main/diff-solvers-main/solvers.py
 #under Apache 2 license
@@ -1665,7 +1668,7 @@ def sample_deis_sde(model, x, sigmas, extra_args=None, callback=None, disable=No
     print("DEIS_SDE seed set to: ", seed)
 
     vel = None
-    vel, vel_2, x_n, denoised, denoised2 = None, None, None, None, None
+    vel, vel_2, x_n, denoised, denoised2, denoised1_2, h_last = None, None, None, None, None, None, None
     def momentum_func(diff, velocity, timescale=1.0, offset=-momentums[0] / 2.0): # Diff is current diff, vel is previous diff
         if velocity is None:
             momentum_vel = diff
@@ -1717,9 +1720,13 @@ def sample_deis_sde(model, x, sigmas, extra_args=None, callback=None, disable=No
             denoised = model(x_cur, sigma * s_in, **extra_args)
             denoised = momentum_func(denoised, vel, sigmas[i], -momentums[i] / 2.0)
         elif step_type == "res_a":
-            x, denoised, denoised2, denoised1_2, vel, vel_2 = _refined_exp_sosu_step_RF_hard_deis(model, x_cur, sigma, sigma_next, sigmas[i+2], c2=0.5,eta=etas[i], noise_sampler=noise_sampler, s_noise=s_noises[i], noise_mode=noise_mode, ancestral_noise=True,
+            """x, denoised, denoised2, denoised1_2, vel, vel_2 = _refined_exp_sosu_step_RF_hard_deis(model, x_cur, sigma, sigma_next, sigmas[i+2], c2=0.5,eta=etas[i], noise_sampler=noise_sampler, s_noise=s_noises[i], noise_mode=noise_mode, ancestral_noise=True,
                                                                                 extra_args=extra_args, pbar=None, simple_phi_calc=False,
                                                                                 momentum = momentums[i], vel = vel, vel_2 = vel_2, time = time, eulers_mom = 0.0, cfgpp = 0.0
+                                                                                )"""
+            x, denoised, denoised2, denoised1_2, vel, vel_2, h_last = _refined_exp_sosu_step_RF(model, x_cur, sigma, sigma_next, c2=torch.tensor(0.5),eta1=etas[i]/2, eta2=etas[i], noise_sampler=noise_sampler, s_noise1=s_noises[i], s_noise2=s_noises[i], noise_mode=noise_mode,
+                                                                                extra_args=extra_args, pbar=None, simple_phi_calc=False,
+                                                                                momentum = momentums[i], vel = vel, vel_2 = vel_2, time = time, order=2, denoised1_2=denoised, h_last=h_last,
                                                                                 )
             if denoised_type == "2":
                 denoised = denoised2
