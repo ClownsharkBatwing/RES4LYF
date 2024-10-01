@@ -287,7 +287,7 @@ def sample_dpmpp_sde_advanced(
 def sample_dpmpp_sde_advanced_RF(
     model, x, sigmas, extra_args=None, callback=None, disable=None,
     momentum=0.0, noise_sampler=None, r=1/2, noise_sampler_type="brownian", noise_mode="hard", noise_scale=1.0, k=1.0, scale=0.1, 
-    momentums=None, etas1=None, etas2=None, s_noises1=None, s_noises2=None, rs=None, alphas=None,denoise_boosts=None, noisy_cfg=False, sigma_fn_formula=None, t_fn_formula=None,
+    momentums=None, etas1=None, etas2=None, s_noises1=None, s_noises2=None, rs=None, alphas=None,denoise_boosts=None, noisy_cfg=False, t_fn_formula=None, sigma_fn_formula=None, 
 ):
     """DPM-Solver++ (stochastic with eta parameter) adapted for Rectified Flow."""   ###^^^swapped sigma_fn and t_fn by accident!
     def momentum_func(diff, velocity, timescale=1.0, offset=-momentum / 2.0): # Diff is current diff, vel is previous diff
@@ -715,7 +715,7 @@ def sample_res_solver_advanced(model,
                                guides_1, guides_2, latent_guide_1, latent_guide_2, guide_mode_1, guide_mode_2, guide_1_channels,
                                k, clownseed=0, cfgpps=0.0, alphas=None, latent_noise=None, latent_self_guide_1=False,latent_shift_guide_1=False,
                                extra_args=None, callback=None, disable=None, noise_sampler_type="gaussian", noise_mode="hard", noise_scale=1.0, ancestral_noise=False, noisy_cfg=False, alpha_ratios=None, noise_sampler=None, 
-                               denoise_to_zero=True, simple_phi_calc=False, c2=0.5, momentum=0.0, eulers_mom=0.0, offset=0.0):
+                               denoise_to_zero=True, simple_phi_calc=False, c2=0.5, momentum=0.0, eulers_mom=0.0, offset=0.0, t_fn_formula=None, sigma_fn_formula=None, skip_corrector=False,):
     if isinstance(model.inner_model.inner_model.model_sampling, comfy.model_sampling.CONST):
         return sample_refined_exp_s_advanced_RF(
             model=model, 
@@ -757,7 +757,10 @@ def sample_res_solver_advanced(model,
             k=k,
             latent_noise=latent_noise,
             latent_self_guide_1=latent_self_guide_1,
-            latent_shift_guide_1=latent_shift_guide_1
+            latent_shift_guide_1=latent_shift_guide_1,
+            t_fn_formula=t_fn_formula,
+            sigma_fn_formula=sigma_fn_formula,
+            skip_corrector=skip_corrector,
         )
     else:
         return sample_refined_exp_s_advanced(
