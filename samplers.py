@@ -140,6 +140,7 @@ class ClownSampler:
                 "simple_phi_calc": ("BOOLEAN", {"default": False}),    
                 "skip_corrector": ("BOOLEAN", {"default": False}), 
                 "corrector_is_predictor": ("BOOLEAN", {"default": False}), 
+                "auto_c2": ("BOOLEAN", {"default": True}),
                 "t_fn_formula": ("STRING", {"default": "sigma.log().neg()", "multiline": True}),
                 "sigma_fn_formula": ("STRING", {"default": "t.neg().exp()", "multiline": True}),   
             },
@@ -168,7 +169,7 @@ class ClownSampler:
                     alpha, k, noisy_cfg, 
                     alphas=None, latent_noise=None,
                     eulers_moms=None, momentums=None, etas1=None, etas2=None, s_noises1=None, s_noises2=None, c2s=None, cfgpps=None, offsets=None, guides=None, alpha_ratios=None, t_fn_formula=None, sigma_fn_formula=None,skip_corrector=False,
-                    corrector_is_predictor=False,
+                    corrector_is_predictor=False, auto_c2=False,
                     ):
         
         if guides is not None:
@@ -245,6 +246,7 @@ class ClownSampler:
                 "sigma_fn_formula": sigma_fn_formula,
                 "skip_corrector": skip_corrector,
                 "corrector_is_predictor": corrector_is_predictor,
+                "auto_c2": auto_c2,
             }
         )
         return (sampler, )

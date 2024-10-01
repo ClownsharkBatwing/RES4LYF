@@ -715,7 +715,9 @@ def sample_res_solver_advanced(model,
                                guides_1, guides_2, latent_guide_1, latent_guide_2, guide_mode_1, guide_mode_2, guide_1_channels,
                                k, clownseed=0, cfgpps=0.0, alphas=None, latent_noise=None, latent_self_guide_1=False,latent_shift_guide_1=False,
                                extra_args=None, callback=None, disable=None, noise_sampler_type="gaussian", noise_mode="hard", noise_scale=1.0, ancestral_noise=False, noisy_cfg=False, alpha_ratios=None, noise_sampler=None, 
-                               denoise_to_zero=True, simple_phi_calc=False, c2=0.5, momentum=0.0, eulers_mom=0.0, offset=0.0, t_fn_formula=None, sigma_fn_formula=None, skip_corrector=False,corrector_is_predictor=False,):
+                               denoise_to_zero=True, simple_phi_calc=False, c2=0.5, momentum=0.0, eulers_mom=0.0, offset=0.0, t_fn_formula=None, sigma_fn_formula=None, skip_corrector=False,corrector_is_predictor=False,
+                               auto_c2=False,
+                               ):
     if isinstance(model.inner_model.inner_model.model_sampling, comfy.model_sampling.CONST):
         return sample_refined_exp_s_advanced_RF(
             model=model, 
@@ -762,6 +764,7 @@ def sample_res_solver_advanced(model,
             sigma_fn_formula=sigma_fn_formula,
             skip_corrector=skip_corrector,
             corrector_is_predictor=corrector_is_predictor,
+            auto_c2=auto_c2,
         )
     else:
         return sample_refined_exp_s_advanced(

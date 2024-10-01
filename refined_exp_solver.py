@@ -400,10 +400,22 @@ def _refined_exp_sosu_step_RF(model, x, sigma, sigma_next, sigma_next2, c2 = 0.5
   noise1 = noise_sampler(sigma=sigma, sigma_next=sigma_next)
   alpha_ratio_2 = 1.0
   su_2 = 0.0
-  if ancestral_noise == True and sigma_next > 0.00001: # very good for photography styles
+  """if ancestral_noise == True and sigma_next > 0.00001: # very good for photography styles
     su_2, sd_2, alpha_ratio_2 = get_ancestral_step_RF(sigma_next, eta2)
     if sigma_next > sigma_var and noise_mode == "hard_var":
-      su_2, sd_2, alpha_ratio_2 = get_ancestral_step_RF_var(sigma, sigma_next, eta2)
+      su_2, sd_2, alpha_ratio_2 = get_ancestral_step_RF_var(sigma, sigma_next, eta2)"""
+  if ancestral_noise == True and sigma_next > 0.00001: # very good for photography styles
+    if   noise_mode == "soft":
+      sd_2, su_2, alpha_ratio_2 = get_RF_step(sigma, sigma_next, eta2)
+    elif noise_mode == "softer":
+      sd_2, su_2, alpha_ratio_2 = get_RF_step_traditional(sigma, sigma_next, eta2)
+    elif noise_mode == "hard":
+      su_2, sd_2, alpha_ratio_2 = get_ancestral_step_RF(sigma_next, eta2)
+    elif noise_mode == "hard_var":
+      su_2, sd_2, alpha_ratio_2 = get_ancestral_step_RF(sigma_next, eta2)
+      sigma_var = (-1 + torch.sqrt(1 + 4 * sigma)) / 2
+      if sigma_s > sigma_var:
+        su_2, sd_2, alpha_ratio_2 = get_ancestral_step_RF_var(sigma, sigma_next, eta2)
   #x_next = x_2
   #denoised2=denoised
 
@@ -535,7 +547,7 @@ def _refined_exp_sosu_step_RF_hard_deis(model, x, sigma, sigma_next, sigma_next2
 
 
 def _refined_exp_sosu_step_RF_running(model, x, sigma, sigma_next, sigma_next2, c2 = 0.5, eta1=1.0, eta2=1.0, noise_sampler=None, noise1=None, alpha_ratio_2=1.0, su_2=0.0, noise_mode="hard", 
-                                   noisy_cfg=False, ancestral_noise=True, s_noise1=1.0, s_noise2=1.0, skip_corrector=False, sigma_prev=None, denoised2=None, h_last=None,
+                                   noisy_cfg=False, ancestral_noise=True, s_noise1=1.0, s_noise2=1.0, skip_corrector=False, sigma_prev=None, denoised2=None, h_last=None, auto_c2=False,
   extra_args: Dict[str, Any] = {},
   pbar: Optional[tqdm] = None,
   simple_phi_calc = False,
@@ -612,24 +624,26 @@ def _refined_exp_sosu_step_RF_running(model, x, sigma, sigma_next, sigma_next2, 
     noise1 = torch.zeros_like(x)
   
   #START INITIAL PREDICTOR STEP
-  if sigma_prev is None: #run initial predictor step
-    if noisy_cfg == True:
-      x.grad = torch.zeros_like(x)
-      x.grad = noise1
-      x.grad[0][0][0][0] = eta1 if sigma < 1.0 else 0.0
-      x.grad[0][0][0][1] = sigma
-      x.grad[0][0][0][2] = sigma_next
+  #if sigma_prev is None: #run initial predictor step
+  if noisy_cfg == True:
+    x.grad = torch.zeros_like(x)
+    x.grad = noise1
+    x.grad[0][0][0][0] = eta1 if sigma < 1.0 else 0.0
+    x.grad[0][0][0][1] = sigma
+    x.grad[0][0][0][2] = sigma_next
+    if sigma_prev is None:
       denoised = model(x, sigma * s_in, **extra_args)
-      x = alpha_ratio_2 * x + noise1 * s_noise2 * su_2
-    else:
+    x = alpha_ratio_2 * x + noise1 * s_noise2 * su_2
+  else:
+    if sigma_prev is None:
       denoised = model(x, sigma * s_in, **extra_args)
-      x = alpha_ratio_2 * x + noise1 * s_noise2 * su_2
+    x = alpha_ratio_2 * x + noise1 * s_noise2 * su_2
   #END INITIAL PREDICTOR STEP
   
   #if sigma_prev is None:
   t, t_next = t_fn_x(sigma), t_fn_x(sd)
   h = t_next - t
-  if sigma_prev is not None:
+  if sigma_prev is not None and auto_c2 == True:
     c2 = h_last / h 
   s = t + h * c2
   sigma_s = sigma_fn_x(s)
@@ -696,10 +710,22 @@ def _refined_exp_sosu_step_RF_running(model, x, sigma, sigma_next, sigma_next2, 
   noise1 = noise_sampler(sigma=sigma, sigma_next=sigma_next)
   alpha_ratio_2 = 1.0
   su_2 = 0.0
-  if ancestral_noise == True and sigma_next > 0.00001: # very good for photography styles
+  """if ancestral_noise == True and sigma_next > 0.00001: # very good for photography styles
     su_2, sd_2, alpha_ratio_2 = get_ancestral_step_RF(sigma_next, eta2)
     if sigma_next > sigma_var and noise_mode == "hard_var":
-      su_2, sd_2, alpha_ratio_2 = get_ancestral_step_RF_var(sigma, sigma_next, eta2)
+      su_2, sd_2, alpha_ratio_2 = get_ancestral_step_RF_var(sigma, sigma_next, eta2)"""
+  if ancestral_noise == True and sigma_next > 0.00001: # very good for photography styles
+    if   noise_mode == "soft":
+      sd_2, su_2, alpha_ratio_2 = get_RF_step(sigma, sigma_next, eta2)
+    elif noise_mode == "softer":
+      sd_2, su_2, alpha_ratio_2 = get_RF_step_traditional(sigma, sigma_next, eta2)
+    elif noise_mode == "hard":
+      su_2, sd_2, alpha_ratio_2 = get_ancestral_step_RF(sigma_next, eta2)
+    elif noise_mode == "hard_var":
+      su_2, sd_2, alpha_ratio_2 = get_ancestral_step_RF(sigma_next, eta2)
+      sigma_var = (-1 + torch.sqrt(1 + 4 * sigma)) / 2
+      if sigma_s > sigma_var:
+        su_2, sd_2, alpha_ratio_2 = get_ancestral_step_RF_var(sigma, sigma_next, eta2)
   #x_next = x_2
   #denoised2=denoised
 
@@ -762,6 +788,7 @@ def sample_refined_exp_s_advanced_RF(
   sigma_fn_formula=None,
   skip_corrector=False,
   corrector_is_predictor=False,
+  auto_c2=False,
 ): 
   """
   
@@ -851,7 +878,7 @@ def sample_refined_exp_s_advanced_RF(
                 x_n[depth][idx], denoised[depth][idx], denoised2[depth][idx], vel[depth][idx], vel_2[depth][idx], noise1, alpha_ratio_2, su_2, sigma_prev, h_last = _refined_exp_sosu_step_RF_running(model, x_h[depth][idx], sigma, sigma_next, sigmas[i+2], c2=c2[i],eta1=etas1[i], eta2=etas2[i], noise_sampler=noise_sampler, noise1=noise1, alpha_ratio_2=alpha_ratio_2, su_2=su_2, s_noise1=s_noises1[i], s_noise2=s_noises2[i], noise_mode=noise_mode, ancestral_noise=ancestral_noise, noisy_cfg=noisy_cfg,
                                                                               extra_args=extra_args, pbar=pbar, simple_phi_calc=simple_phi_calc,
                                                                               momentum = momentum[i], vel = vel[depth][idx], vel_2 = vel_2[depth][idx], time = time, eulers_mom = eulers_mom[i].item(), cfgpp = cfgpp[i].item(),
-                                                                              t_fn_formula=t_fn_formula, sigma_fn_formula=sigma_fn_formula, skip_corrector=skip_corrector, sigma_prev=sigma_prev, denoised2=denoised2_running, h_last=h_last,
+                                                                              t_fn_formula=t_fn_formula, sigma_fn_formula=sigma_fn_formula, skip_corrector=skip_corrector, sigma_prev=sigma_prev, denoised2=denoised2_running, h_last=h_last,auto_c2=auto_c2,
                                                                               )
             else:
               if noise_mode == "hard" or noise_mode == "hard_var" or noise_mode == "soft" or noise_mode == "softer":
