@@ -139,6 +139,7 @@ class ClownSampler:
                 "denoise_to_zero": ("BOOLEAN", {"default": False}),
                 "simple_phi_calc": ("BOOLEAN", {"default": False}),    
                 "skip_corrector": ("BOOLEAN", {"default": False}), 
+                "corrector_is_predictor": ("BOOLEAN", {"default": False}), 
                 "t_fn_formula": ("STRING", {"default": "sigma.log().neg()", "multiline": True}),
                 "sigma_fn_formula": ("STRING", {"default": "t.neg().exp()", "multiline": True}),   
             },
@@ -166,7 +167,9 @@ class ClownSampler:
     def get_sampler(self, clownseed, noise_sampler_type, noise_mode, noise_scale, ancestral_noise, denoise_to_zero, simple_phi_calc, cfgpp, eulers_mom, momentum, c2, eta1, eta2, s_noise1, s_noise2, branch_mode, branch_depth, branch_width,
                     alpha, k, noisy_cfg, 
                     alphas=None, latent_noise=None,
-                    eulers_moms=None, momentums=None, etas1=None, etas2=None, s_noises1=None, s_noises2=None, c2s=None, cfgpps=None, offsets=None, guides=None, alpha_ratios=None, t_fn_formula=None, sigma_fn_formula=None,skip_corrector=False,):
+                    eulers_moms=None, momentums=None, etas1=None, etas2=None, s_noises1=None, s_noises2=None, c2s=None, cfgpps=None, offsets=None, guides=None, alpha_ratios=None, t_fn_formula=None, sigma_fn_formula=None,skip_corrector=False,
+                    corrector_is_predictor=False,
+                    ):
         
         if guides is not None:
             (offset, guide_1, guide_2, guide_mode_1, guide_mode_2, 
@@ -241,6 +244,7 @@ class ClownSampler:
                 "t_fn_formula": t_fn_formula,
                 "sigma_fn_formula": sigma_fn_formula,
                 "skip_corrector": skip_corrector,
+                "corrector_is_predictor": corrector_is_predictor,
             }
         )
         return (sampler, )
