@@ -530,7 +530,7 @@ def _refined_exp_sosu_step(model, x, sigma, sigma_next, c2 = 0.5,
 
 
 
-def _refined_exp_sosu_step_RF(model, x, sigma, sigma_next, c2 = 0.5, eta1=0.25, eta2=0.5, eta_var1=0.0, eta_var2=0.0, noise_sampler=None, noise_mode="hard", order=2, 
+def _refined_exp_sosu_step_RF(model, x, sigma, sigma_next, c2 = 0.5, eta1=0.25, eta2=0.5, eta_var1=0.0, eta_var2=0.0, noise_sampler=None, noise_mode="hard", order="2b", 
                                    s_noise1=1.0, s_noise2=1.0, denoised1_2=None, h_last=None, auto_c2=False,
   extra_args: Dict[str, Any] = {},
   pbar: Optional[tqdm] = None,
@@ -555,7 +555,7 @@ def _refined_exp_sosu_step_RF(model, x, sigma, sigma_next, c2 = 0.5, eta1=0.25, 
   
   s_in = x.new_ones([x.shape[0]])
   
-  if order == 1 or h_last is None:
+  if order == "1" or h_last is None:
     denoised = model(x, sigma * s_in, **extra_args)
   else:
     denoised = denoised1_2
