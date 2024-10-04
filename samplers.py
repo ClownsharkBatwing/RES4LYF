@@ -142,9 +142,11 @@ class ClownSampler:
                 "denoise_to_zero": ("BOOLEAN", {"default": False}),
                 "simple_phi_calc": ("BOOLEAN", {"default": False}),    
                 #"skip_corrector": ("BOOLEAN", {"default": False}), 
-                "order": ("INT", {"default": 2, "min": 1, "max": 2}),
-                "t_fn_formula": ("STRING", {"default": "sigma.log().neg()", "multiline": True}),
-                "sigma_fn_formula": ("STRING", {"default": "t.neg().exp()", "multiline": True}),   
+                "step_type": (["res_a", "dpmpp_sde_alt"], {"default": "res_a"}),
+                #"order": ("INT", {"default": 2, "min": 1, "max": 2}),
+                "order": (["1", "2a", "2b", "2c", "3"], {"default": "2b"}),
+                "t_fn_formula": ("STRING", {"default": "", "multiline": True}),
+                "sigma_fn_formula": ("STRING", {"default": "", "multiline": True}),   
             },
             "optional": {
                 "eulers_moms": ("SIGMAS", ),
@@ -173,7 +175,7 @@ class ClownSampler:
                     alpha, k, noisy_cfg=False, 
                     alphas=None, latent_noise=None,
                     eulers_moms=None, momentums=None, etas1=None, etas2=None, eta_vars1=None, eta_vars2=None, s_noises1=None, s_noises2=None, c2s=None, cfgpps=None, offsets=None, guides=None, alpha_ratios=None, t_fn_formula=None, sigma_fn_formula=None,skip_corrector=False,
-                    corrector_is_predictor=False, order=1, auto_c2=False,
+                    corrector_is_predictor=False, step_type="res_a", order="2b", auto_c2=False,
                     ):
         
         if guides is not None:
@@ -255,6 +257,7 @@ class ClownSampler:
                 "sigma_fn_formula": sigma_fn_formula,
                 "skip_corrector": skip_corrector,
                 "corrector_is_predictor": corrector_is_predictor,
+                "step_type": step_type, 
                 "order": order,
                 "auto_c2": auto_c2,
             }
@@ -527,6 +530,7 @@ class SamplerDPMPP_SDE_ADVANCED:
                      "s_noise2": ("FLOAT", {"default": 1.0, "min": -100.0, "max": 100.0, "step":0.01, "round": False}),
                      "denoise_boost": ("FLOAT", {"default": 0.0, "min": -100.0, "max": 100.0, "step":0.01, "round": False}),
                      "r": ("FLOAT", {"default": 0.5, "min": 0.0, "max": 100.0, "step":0.01, "round": False}),
+                     "auto_r": ("BOOLEAN", {"default": False}), 
                      "alpha": ("FLOAT", {"default": 0.0, "min": -10000.0, "max": 10000.0, "step":0.1, "round": False}),
                      "k": ("FLOAT", {"default": 1.0, "min": -10000.0, "max": 10000.0, "step":2.0, "round": False}),
                      "noise_sampler_type": (NOISE_GENERATOR_NAMES, {"default": "brownian"}),
@@ -554,7 +558,7 @@ class SamplerDPMPP_SDE_ADVANCED:
 
     FUNCTION = "get_sampler"
 
-    def get_sampler(self, momentum=0.0, eta1=1.0, eta2=1.0, s_noise1=1.0, s_noise2=1.0, denoise_boost=0.0, r=0.5, alpha=-1.0, k=1.0, noise_sampler_type="brownian", noise_mode="soft", noise_scale=1.0, noisy_cfg=False,
+    def get_sampler(self, momentum=0.0, eta1=1.0, eta2=1.0, s_noise1=1.0, s_noise2=1.0, denoise_boost=0.0, r=0.5, auto_r=False, alpha=-1.0, k=1.0, noise_sampler_type="brownian", noise_mode="soft", noise_scale=1.0, noisy_cfg=False,
                     momentums=None, etas1=None, etas2=None, s_noises1=None, s_noises2=None, denoise_boosts=None, rs=None, alphas=None, order=2, t_fn_formula=None, sigma_fn_formula=None,
                     ):
         sampler_name = "dpmpp_sde_advanced"
@@ -570,7 +574,7 @@ class SamplerDPMPP_SDE_ADVANCED:
         alphas = initialize_or_scale(alphas, alpha, steps)
 
         sampler = comfy.samplers.ksampler(sampler_name, {"momentums": momentums, "etas1": etas1, "etas2": etas2, "s_noises1": s_noises1, "s_noises2": s_noises2, "noisy_cfg": noisy_cfg,
-                                                         "denoise_boosts": denoise_boosts, "alphas": alphas, "rs": rs, "k": k, "noise_sampler_type": noise_sampler_type, "noise_mode": noise_mode, "noise_scale": noise_scale, "order": order,
+                                                         "denoise_boosts": denoise_boosts, "alphas": alphas, "rs": rs, "auto_r": auto_r, "k": k, "noise_sampler_type": noise_sampler_type, "noise_mode": noise_mode, "noise_scale": noise_scale, "order": order,
                                                          "t_fn_formula": t_fn_formula, "sigma_fn_formula": sigma_fn_formula,})
         return (sampler, )
     
