@@ -125,6 +125,7 @@ class ClownSampler:
                 "s_noise1": ("FLOAT", {"default": 1.0, "min": -100.0, "max": 100.0, "step":0.01, "round": False}),
                 "s_noise2": ("FLOAT", {"default": 1.0, "min": -100.0, "max": 100.0, "step":0.01, "round": False}),
                 "c2": ("FLOAT", {"default": 0.5, "min": 0.0, "max": 10000.0, "step": 0.01}),
+                "c3": ("FLOAT", {"default": 0.5, "min": 0.0, "max": 10000.0, "step": 0.01}),
                 "auto_c2": ("BOOLEAN", {"default": True}),
                 "cfgpp": ("FLOAT", {"default": 0.0, "min": -10000.0, "max": 10000.0, "step": 0.01}),
                 "branch_mode": (['latent_match', 'latent_match_d', 'latent_match_sdxl_color_d', 'latent_match_sdxl_luminosity_d','latent_match_sdxl_pattern_d','cos_reversal', 'mean', 'mean_d', 'median', 'median_d', 'zmean_d','zmedian_d','gradient_max_full', 'gradient_max_full_d', 'gradient_min_full', 'gradient_min_full_d', 'gradient_max', 'gradient_max_d', 'gradient_min', 'gradient_min_d', 'cos_similarity', 'cos_similarity_d','cos_linearity', 'cos_linearity_d', 'cos_perpendicular', 'cos_perpendicular_d'], {"default": 'mean'}),
@@ -158,6 +159,7 @@ class ClownSampler:
                 "s_noises1": ("SIGMAS", ),
                 "s_noises2": ("SIGMAS", ),
                 "c2s": ("SIGMAS", ),
+                "c3s": ("SIGMAS", ),
                 "cfgpps": ("SIGMAS", ),
                 "alphas": ("SIGMAS", ),
                 "latent_noise": ("LATENT", ),  
@@ -171,10 +173,10 @@ class ClownSampler:
 
     FUNCTION = "get_sampler"
 
-    def get_sampler(self, clownseed, noise_sampler_type, noise_mode, noise_scale, ancestral_noise, denoise_to_zero, simple_phi_calc, cfgpp, eulers_mom, momentum, c2, eta1, eta2, eta_var1, eta_var2, s_noise1, s_noise2, branch_mode, branch_depth, branch_width,
+    def get_sampler(self, clownseed, noise_sampler_type, noise_mode, noise_scale, ancestral_noise, denoise_to_zero, simple_phi_calc, cfgpp, eulers_mom, momentum, c2, c3, eta1, eta2, eta_var1, eta_var2, s_noise1, s_noise2, branch_mode, branch_depth, branch_width,
                     alpha, k, noisy_cfg=False, 
                     alphas=None, latent_noise=None,
-                    eulers_moms=None, momentums=None, etas1=None, etas2=None, eta_vars1=None, eta_vars2=None, s_noises1=None, s_noises2=None, c2s=None, cfgpps=None, offsets=None, guides=None, alpha_ratios=None, t_fn_formula=None, sigma_fn_formula=None,skip_corrector=False,
+                    eulers_moms=None, momentums=None, etas1=None, etas2=None, eta_vars1=None, eta_vars2=None, s_noises1=None, s_noises2=None, c2s=None, c3s=None, cfgpps=None, offsets=None, guides=None, alpha_ratios=None, t_fn_formula=None, sigma_fn_formula=None,skip_corrector=False,
                     corrector_is_predictor=False, step_type="res_a", order="2b", auto_c2=False,
                     ):
         
@@ -197,6 +199,7 @@ class ClownSampler:
         s_noises1 = initialize_or_scale(s_noises1, s_noise1, steps)
         s_noises2 = initialize_or_scale(s_noises2, s_noise2, steps)
         c2s = initialize_or_scale(c2s, c2, steps)
+        c3s = initialize_or_scale(c3s, c3, steps)
         cfgpps = initialize_or_scale(cfgpps, cfgpp, steps)
         offsets = initialize_or_scale(offsets, offset, steps)
         guides_1 = initialize_or_scale(guides_1, guide_1, steps)
@@ -237,6 +240,7 @@ class ClownSampler:
                 "s_noises1": s_noises1,
                 "s_noises2": s_noises2,
                 "c2s": c2s,
+                "c3s": c3s,
                 "cfgpps": cfgpps,
                 "offsets": offsets,
                 "guides_1": guides_1,

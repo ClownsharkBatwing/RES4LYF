@@ -1029,6 +1029,7 @@ def sample_refined_exp_s_advanced_RF(
   momentum=None,
   eulers_mom=None,
   c2=None,
+  c3=None,
   cfgpp=None,
   offset=None,
   alpha=None,
@@ -1154,10 +1155,10 @@ def sample_refined_exp_s_advanced_RF(
         sigma_next = sigmas[i+1]
         time = sigmas[i] / sigma_max
         
-        sigma_next = torch.tensor(0.00001) if sigma_next == 0.0 else sigma_next
+        sigma_next = torch.tensor(0.001) if sigma_next == 0.0 else sigma_next
         
         if step_type == "res_a":
-          x, denoised, denoised2, denoised3, denoised1_2, vel, vel_2, vel_3, h_last = _refined_exp_sosu_step_RF_third_order(model, x, sigma, sigma_next, c2=c2[i],eta1=etas1[i], eta2=etas2[i], eta_var1=eta_vars1[i], eta_var2=eta_vars2[i], 
+          x, denoised, denoised2, denoised3, denoised1_2, vel, vel_2, vel_3, h_last = _refined_exp_sosu_step_RF_third_order(model, x, sigma, sigma_next, c2=c2[i], c3=c3[i], eta1=etas1[i], eta2=etas2[i], eta_var1=eta_vars1[i], eta_var2=eta_vars2[i], 
                                                           noise_sampler=noise_sampler, s_noise1=s_noises1[i], s_noise2=s_noises2[i], noise_mode=noise_mode,
                                                           extra_args=extra_args, simple_phi_calc=simple_phi_calc,
                                                           momentum = momentum[i], vel = vel, vel_2 = vel_2, vel_3 = vel_3, time = time,
