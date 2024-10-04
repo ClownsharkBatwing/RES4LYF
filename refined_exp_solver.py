@@ -408,7 +408,7 @@ def _refined_exp_sosu_step_RF_third_order(
     #sigma_2, h, c2 = get_res4lyf_half_step(sigma, sd, c2, auto_c2, h_last, t_fn_formula, sigma_fn_formula, remap_t_to_exp_space=True)
     #sigma_3, h, c3 = get_res4lyf_half_step(sigma, sd, c3, auto_c2, h_last, t_fn_formula, sigma_fn_formula, remap_t_to_exp_space=True)
     
-    sd = sigma_next
+    #sd = sigma_next
     t, t_next = sigma.log().neg(), sigma_next.log().neg()
     h = t_next - t
 
@@ -428,7 +428,9 @@ def _refined_exp_sosu_step_RF_third_order(
     k1 = denoised1
 
     # Step 2: Compute k2
-    x_2 = torch.exp(-c2*h) *x + h * (a21 * k1)
+    #x_2 = torch.exp(-c2*h) *x + h * (a21 * k1)
+    x_2 = ((sd/sigma)**c2) *x + h * (a21 * k1)
+
     #sigma_2 = sigma * torch.exp(-c2 * h)
     denoised2 = model(x_2, sigma_2 * s_in, **extra_args)
     k2 = denoised2
@@ -436,18 +438,24 @@ def _refined_exp_sosu_step_RF_third_order(
     # Step 3: Compute k3
     # x_3 = math.exp(-c3 * h) * x_2 + a31 * h * k1 + a32 * h * k2
 
-    x_3 = torch.exp(-c3*h)*x + h * (a31 * k1 + a32 * k2)
+    #x_3 = torch.exp(-c3*h)*x + h * (a31 * k1 + a32 * k2)
+    x_3 = ((sd/sigma)**c3) + h * (a31 * k1 + a32 * k2)
+
     #x_3 = math.exp(-c3*h) * x + a31 * h * k1 + a32 * h * k2
     #sigma_3 = sigma * torch.exp(-c3 * h)
     denoised3 = model(x_3, sigma_3 * s_in, **extra_args)
     k3 = denoised3
 
     # Step 4: Final state update using the computed coefficients
-    x_next = torch.exp(-h)*x + h * (b1 * k1 + b2 * k2 + b3 * k3)
+    #x_next = torch.exp(-h)*x + h * (b1 * k1 + b2 * k2 + b3 * k3)
 
-    x_next = torch.exp(-h)*x + h * (b1 * k1 + b2 * k2 + b3 * k3)
+    #x_next = torch.exp(-h)*x + h * (b1 * k1 + b2 * k2 + b3 * k3)
+    x_next = ((sd/sigma))*x + h * (b1 * k1 + b2 * k2 + b3 * k3)
+
     if pbar is not None:
         pbar.update(1.0)
+
+    x_next = alpha_ratio * x_next + noise_sampler(sigma=sigma, sigma_next=sigma_next) * s_noise2 * su
 
     gc.collect()
     torch.cuda.empty_cache()
@@ -841,6 +849,8 @@ def _refined_exp_sosu_step_RF_midpoint2(model, x_prev, sigma_prev, sigma, sigma_
   t_fn_formula = "sigma.log().neg()" if not t_fn_formula else t_fn_formula
   sigma_fn_formula = "t.neg().exp()" if not sigma_fn_formula else sigma_fn_formula
   
+  su, sd, alpha_ratio = get_res4lyf_step(sigma, sigma_next, eta2, eta_var2, noise_mode)
+
   def momentum_func(diff, velocity, timescale=1.0, offset=-momentum / 2.0): # Diff is current diff, vel is previous diff
     if velocity is None:
         momentum_vel = diff
@@ -854,9 +864,9 @@ def _refined_exp_sosu_step_RF_midpoint2(model, x_prev, sigma_prev, sigma, sigma_
   
   denoised = model(x_prev, sigma * s_in, **extra_args) 
   
-  x_next = math.exp(-h) * x_prev + h * (b1 * denoised + b2 * denoised1_2)
+  #x_next = math.exp(-h) * x_prev + h * (b1 * denoised + b2 * denoised1_2)
+  x_next = (sd/sigma) * x_prev + h * (b1 * denoised + b2 * denoised1_2)
   
-  su, sd, alpha_ratio = get_res4lyf_step(sigma, sigma_next, eta2, eta_var2, noise_mode)
   x_next = alpha_ratio * x_next + noise_sampler(sigma=sigma, sigma_next=sigma_next) * s_noise2 * su
   
   return x_next, denoised, vel, vel_2
@@ -1146,8 +1156,8 @@ def sample_refined_exp_s_advanced_RF(
 
         gc.collect()
         torch.cuda.empty_cache()
-
     return x
+  
   elif order == "3":
     for i in trange(len(sigmas) - 1, disable=disable):
 
@@ -1177,6 +1187,7 @@ def sample_refined_exp_s_advanced_RF(
 
         gc.collect()
         torch.cuda.empty_cache()
+    return x
         
   elif order == "2c":
     sigma_prev = None
@@ -1217,7 +1228,6 @@ def sample_refined_exp_s_advanced_RF(
 
         gc.collect()
         torch.cuda.empty_cache()
-
     return x
 
   elif order == "2b":
@@ -1260,7 +1270,6 @@ def sample_refined_exp_s_advanced_RF(
 
         gc.collect()
         torch.cuda.empty_cache()
-
     return x_next
 
 
