@@ -108,22 +108,17 @@ def calculate_second_order_multistep_coeffs(sigma, sigma_next, sigma_prev):
     Returns:
         A dictionary of coefficients: h, b1, b2
     """
-    # Convert sigmas to lambda values (lambda = -log(sigma))
     lam_n_plus_1 = -torch.log(sigma_next)
     lam_n = -torch.log(sigma)
     lam_n_minus_1 = -torch.log(sigma_prev)
     
-    # Step length (h) calculation
     h = lam_n_plus_1 - lam_n
     
-    # Calculate coefficients for the multistep update
     c2 = h / (lam_n - lam_n_minus_1)
     
-    # Calculate phi values for b1 and b2
     phi1 = _phi_1(-h)
     phi2 = _phi_2(-h) / c2
     
-    # Calculate b1 and b2
     b1 = phi1 - phi2
     b2 = phi2
 
@@ -269,19 +264,16 @@ def _de_third_order(h: float, c2: float, c3: float, simple_phi_calc=False) -> RE
     gamma = calculate_gamma(c2, c3)
     
     if simple_phi_calc:
-        # Simplified phi values for j={1,2,3}
         a3_1 = c3 * _phi_1(-c3 * h)
         phi1 = _phi_1(-h)
         phi2 = _phi_2(-h)
         phi3 = _phi_3(-h)
     else:
-        # General solution using _phi function for j={1, 2, 3}
         a3_1 = c3 * _phi(j=1, neg_h=-c3 * h)
         phi1 = _phi(j=1, neg_h=-h)
         phi2 = _phi(j=2, neg_h=-h)
         phi3 = _phi(j=3, neg_h=-h)
 
-    # Compute b1, b2, b3 using the derived relations
     b1 = phi1 - (phi2 / c2) - (phi3 / c3)
     b2 = (phi2 / c2) - (phi3 / (c2 * c3))
     b3 = phi3 / (c2 * c3)
@@ -346,33 +338,27 @@ def calculate_third_order_coeffs(h, c2, c3):
     """
     gamma = calculate_gamma(c2, c3)
     
-    # Calculate the step sizes
     neg_h = -h
     neg_h_c2 = -c2 * h
     neg_h_c3 = -c3 * h
     
-    # Calculate the phi values using the general function
     phi_1_h = _phi(neg_h, j=1)
     phi_2_h = _phi(neg_h, j=2)
     
-    # Phi for scaled step sizes
     phi_1_c2_h = _phi(neg_h_c2, j=1)
     phi_1_c3_h = _phi(neg_h_c3, j=1)
     
     phi_2_c2_h = _phi(neg_h_c2, j=2)
     phi_2_c3_h = _phi(neg_h_c3, j=2)
     
-    # Step 1: Compute a21 for second stage
     a21 = c2 * phi_1_c2_h
     
-    # Step 2: Compute a31 and a32 for third stage
     a31 = c3 * phi_1_c3_h  # a31 from k1 to k3
     a32 = gamma * c2 * phi_2_c2_h + (c3 ** 2 / c2) * phi_2_c3_h  # a32 from k2 to k3
     
-    # Step 3: Compute b1, b2, b3 (final combination coefficients)
-    b2 = (gamma / (gamma * c2 + c3)) * phi_2_h  # Middle term for bottom row
-    b3 = (1 / (gamma * c2 + c3)) * phi_2_h      # Right term for bottom row
-    b1 = phi_1_h - b2 - b3                      # First term from balancing the bottom row
+    b2 = (gamma / (gamma * c2 + c3)) * phi_2_h  # 
+    b3 = (1 / (gamma * c2 + c3)) * phi_2_h      
+    b1 = phi_1_h - b2 - b3                      
     
     print("a21 31 32: ", a21, a31, a32, "b: ", b1, b2, b3, "h: ", h, c2, c3)
     return a21, a31, a32, b1, b2, b3
@@ -388,7 +374,6 @@ def _refined_exp_sosu_step_RF_third_order(
     t_fn_formula="", sigma_fn_formula="",
     simple_phi_calc=False,
 ):
-    # Set up functions for sigma and time transformations
     t_fn = lambda sigma: sigma.log().neg() if not t_fn_formula else eval(f"lambda sigma: {t_fn_formula}", {"torch": torch})
     sigma_fn = lambda t: t.neg().exp() if not sigma_fn_formula else eval(f"lambda t: {sigma_fn_formula}", {"torch": torch})
 
@@ -399,11 +384,8 @@ def _refined_exp_sosu_step_RF_third_order(
             momentum_vel = momentum * (timescale + offset) * velocity + (1 - momentum * (timescale + offset)) * diff
         return momentum_vel
 
-    # Calculate gamma based on c2 and c3 from the Butcher tableau conditions
     gamma = calculate_gamma(c2, c3)
     
-
-    # Get necessary sigma steps and the time step size `h`
     su, sd, alpha_ratio = get_res4lyf_step(sigma, sigma_next, eta2, eta_var2, noise_mode)
     #sigma_2, h, c2 = get_res4lyf_half_step(sigma, sd, c2, auto_c2, h_last, t_fn_formula, sigma_fn_formula, remap_t_to_exp_space=True)
     #sigma_3, h, c3 = get_res4lyf_half_step(sigma, sd, c3, auto_c2, h_last, t_fn_formula, sigma_fn_formula, remap_t_to_exp_space=True)
@@ -418,39 +400,33 @@ def _refined_exp_sosu_step_RF_third_order(
     sigma_3 = s3.neg().exp()
     a21, a31, a32, b1, b2, b3 = calculate_third_order_coeffs(h, c2, c3)
     
-    # Initial setup for intermediate stages
     s_in = x.new_ones([x.shape[0]])
     
     
-
-    # Step 1: Compute k1
     denoised1 = model(x, sigma * s_in, **extra_args)
     k1 = denoised1
 
-    # Step 2: Compute k2
-    #x_2 = torch.exp(-c2*h) *x + h * (a21 * k1)
-    x_2 = ((sd/sigma)**c2) *x + h * (a21 * k1)
+    x_2 = torch.exp(-c2*h) *x + h * (a21 * k1)
+    #x_2 = ((sd/sigma)**c2) *x + h * (a21 * k1)
 
     #sigma_2 = sigma * torch.exp(-c2 * h)
     denoised2 = model(x_2, sigma_2 * s_in, **extra_args)
     k2 = denoised2
 
-    # Step 3: Compute k3
     # x_3 = math.exp(-c3 * h) * x_2 + a31 * h * k1 + a32 * h * k2
 
-    #x_3 = torch.exp(-c3*h)*x + h * (a31 * k1 + a32 * k2)
-    x_3 = ((sd/sigma)**c3) + h * (a31 * k1 + a32 * k2)
+    x_3 = torch.exp(-c3*h)*x + h * (a31 * k1 + a32 * k2)
+    #x_3 = ((sd/sigma)**c3) + h * (a31 * k1 + a32 * k2)
 
     #x_3 = math.exp(-c3*h) * x + a31 * h * k1 + a32 * h * k2
     #sigma_3 = sigma * torch.exp(-c3 * h)
     denoised3 = model(x_3, sigma_3 * s_in, **extra_args)
     k3 = denoised3
 
-    # Step 4: Final state update using the computed coefficients
     #x_next = torch.exp(-h)*x + h * (b1 * k1 + b2 * k2 + b3 * k3)
 
-    #x_next = torch.exp(-h)*x + h * (b1 * k1 + b2 * k2 + b3 * k3)
-    x_next = ((sd/sigma))*x + h * (b1 * k1 + b2 * k2 + b3 * k3)
+    x_next = torch.exp(-h)*x + h * (b1 * k1 + b2 * k2 + b3 * k3)
+    #x_next = ((sd/sigma))*x + h * (b1 * k1 + b2 * k2 + b3 * k3)
 
     if pbar is not None:
         pbar.update(1.0)
@@ -864,8 +840,8 @@ def _refined_exp_sosu_step_RF_midpoint2(model, x_prev, sigma_prev, sigma, sigma_
   
   denoised = model(x_prev, sigma * s_in, **extra_args) 
   
-  #x_next = math.exp(-h) * x_prev + h * (b1 * denoised + b2 * denoised1_2)
-  x_next = (sd/sigma) * x_prev + h * (b1 * denoised + b2 * denoised1_2)
+  x_next = math.exp(-h) * x_prev + h * (b1 * denoised + b2 * denoised1_2)
+  #x_next = (sd/sigma) * x_prev + h * (b1 * denoised + b2 * denoised1_2)
   
   x_next = alpha_ratio * x_next + noise_sampler(sigma=sigma, sigma_next=sigma_next) * s_noise2 * su
   
