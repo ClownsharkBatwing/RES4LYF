@@ -856,6 +856,9 @@ def _refined_exp_sosu_step_RF_midpoint2(model, x_prev, sigma_prev, sigma, sigma_
   
   x_next = math.exp(-h) * x_prev + h * (b1 * denoised + b2 * denoised1_2)
   
+  su, sd, alpha_ratio = get_res4lyf_step(sigma, sigma_next, eta2, eta_var2, noise_mode)
+  x_next = alpha_ratio * x_next + noise_sampler(sigma=sigma, sigma_next=sigma_next) * s_noise2 * su
+  
   return x_next, denoised, vel, vel_2
   """if order == 1 or h_last is None:
   
