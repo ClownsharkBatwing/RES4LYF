@@ -157,6 +157,15 @@ def _incomplete_gamma(s: int, x: float, gamma_s: Optional[int] = None) -> float:
 def _phi_1(neg_h: FloatTensor):
   return torch.nan_to_num(torch.expm1(neg_h) / neg_h, nan=1.0)
 
+# by CSBW
+def _phi_1(neg_h: FloatTensor):
+  phi_1_csbw = torch.nan_to_num(torch.exp(neg_h)*torch.expm1(-neg_h) / -neg_h, nan=1.0)
+  phi_1_kc = torch.nan_to_num(torch.expm1(neg_h) / neg_h, nan=1.0)
+  print("phi1 csbw, kc: ", phi_1_csbw, phi_1_kc)
+  return phi_1_csbw
+  return torch.nan_to_num(torch.exp(neg_h)*torch.expm1(-neg_h) / -neg_h, nan=1.0)
+
+
 # by Katherine Crowson
 def _phi_2(neg_h: FloatTensor):
   return torch.nan_to_num((torch.expm1(neg_h) - neg_h) / neg_h**2, nan=0.5)
@@ -190,6 +199,16 @@ def _phi(neg_h: float, j: int,):
   phi_: float = math.exp(neg_h) * neg_h**-j * (1-incomp_gamma_/gamma_)
   return phi_
 
+def _phi_csbw(j, h):
+  remainder = torch.zeros_like(h)
+  
+  for k in range(j): 
+    remainder += (-h)**k / math.factorial(k)
+  phi_j_h = ((-h).exp() - remainder) / (-h)**j
+  
+  return phi_j_h
+  
+
 class RESDECoeffsSecondOrder(NamedTuple):
   a2_1: float
   b1: float
@@ -206,9 +225,15 @@ def _de_second_order(h: float, c2: float, simple_phi_calc = False,) -> RESDECoef
   """
   if simple_phi_calc:
     # Kat computed simpler expressions for phi for cases j={1,2,3}
-    a2_1: float = c2 * _phi_1(-c2*h)
-    phi1: float = _phi_1(-h)
-    phi2: float = _phi_2(-h)
+    #a2_1: float = c2 * _phi_1(-c2*h)
+    #phi1: float = _phi_1(-h)
+    #phi2: float = _phi_2(-h)
+    
+    a2_1: float = c2 * _phi_csbw(1, c2*h)
+    phi1: float = _phi_csbw(1, h)
+    phi2: float = _phi_csbw(2, h)
+    
+    
   else:
     # I computed general solution instead.
     # they're close, but there are slight differences. not sure which would be more prone to numerical error.
@@ -221,15 +246,6 @@ def _de_second_order(h: float, c2: float, simple_phi_calc = False,) -> RESDECoef
   
   return RESDECoeffsSecondOrder(a2_1=a2_1, b1=b1, b2=b2,)  
   
-  
-# by Katherine Crowson
-def _phi_1(neg_h: FloatTensor):
-  return torch.nan_to_num(torch.expm1(neg_h) / neg_h, nan=1.0)
-
-# by Katherine Crowson
-def _phi_2(neg_h: FloatTensor):
-  return torch.nan_to_num((torch.expm1(neg_h) - neg_h) / neg_h**2, nan=0.5)
-
 
 """def calculate_gamma(c2: float, c3: float) -> float:
     numerator = 3 * (c2 ** 2) + 3 * (c3 ** 3)
@@ -353,20 +369,22 @@ def calculate_third_order_coeffs(h, c2, c3):
     
     a21 = c2 * phi_1_c2_h
     
-    a31 = c3 * phi_1_c3_h  # a31 from k1 to k3
     a32 = gamma * c2 * phi_2_c2_h + (c3 ** 2 / c2) * phi_2_c3_h  # a32 from k2 to k3
+    #a31 = c3 * phi_1_c3_h  # a31 from k1 to k3
+    a31 = c3 * phi_1_c3_h - a32 # a31 from k1 to k3
     
-    b2 = (gamma / (gamma * c2 + c3)) * phi_2_h  # 
     b3 = (1 / (gamma * c2 + c3)) * phi_2_h      
+    b2 = gamma * b3
+    #b2 = (gamma / (gamma * c2 + c3)) * phi_2_h  # 
     b1 = phi_1_h - b2 - b3                      
     
-    print("a21 31 32: ", a21, a31, a32, "b: ", b1, b2, b3, "h: ", h, c2, c3)
+    print("a21 31 32: ", a21.item(), a31.item(), a32.item(), "b: ", b1.item(), b2.item(), b3.item(), "h: ", h.item(), c2.item(), c3.item())
     return a21, a31, a32, b1, b2, b3
 
 
 def _refined_exp_sosu_step_RF_third_order(
     model, x, sigma, sigma_next, c2=0.5, c3=2./3., eta1=0.0, eta2=0.0, eta_var1=0.0, eta_var2=0.0, noise_sampler=None, noise_mode="hard", order=3,
-    s_noise1=1.0, s_noise2=1.0, s_noise3=1.0, denoised1_2=None, h_last=None, auto_c2=False,
+    s_noise1=1.0, s_noise2=1.0, s_noise3=1.0, denoised1_2_3=None, h_last=None, auto_c2=False,
     extra_args: Dict[str, Any] = {},
     pbar: Optional[tqdm] = None,
     momentum=0.0, vel=None, vel_2=None, vel_3=None,
@@ -377,6 +395,8 @@ def _refined_exp_sosu_step_RF_third_order(
     t_fn = lambda sigma: sigma.log().neg() if not t_fn_formula else eval(f"lambda sigma: {t_fn_formula}", {"torch": torch})
     sigma_fn = lambda t: t.neg().exp() if not sigma_fn_formula else eval(f"lambda t: {sigma_fn_formula}", {"torch": torch})
 
+    t_fn = eval(f"lambda sigma: {t_fn_formula}", {"torch": torch}) if t_fn_formula else (lambda sigma: sigma.log().neg())
+    sigma_fn = eval(f"lambda t: {sigma_fn_formula}", {"torch": torch}) if sigma_fn_formula else (lambda t: t.neg().exp())
     def momentum_func(diff, velocity, timescale=1.0, offset=-momentum / 2.0):
         if velocity is None:
             momentum_vel = diff
@@ -386,59 +406,68 @@ def _refined_exp_sosu_step_RF_third_order(
 
     gamma = calculate_gamma(c2, c3)
     
-    su, sd, alpha_ratio = get_res4lyf_step(sigma, sigma_next, eta2, eta_var2, noise_mode)
-    #sigma_2, h, c2 = get_res4lyf_half_step(sigma, sd, c2, auto_c2, h_last, t_fn_formula, sigma_fn_formula, remap_t_to_exp_space=True)
-    #sigma_3, h, c3 = get_res4lyf_half_step(sigma, sd, c3, auto_c2, h_last, t_fn_formula, sigma_fn_formula, remap_t_to_exp_space=True)
-    
     #sd = sigma_next
-    t, t_next = sigma.log().neg(), sigma_next.log().neg()
+    
+    #t, t_next = sigma.log().neg(), sigma_next.log().neg()
+    t = t_fn(sigma)
+    t_next = t_fn(sigma_next)
+    
     h = t_next - t
+    
+    print("sigma_next: ", sigma_next)
+    if h >= 0.9999:
+      h = torch.tensor(0.9999).to(h.dtype).to(h.device) # dtype=h.dtype, device=h.device)
+      t_next = h + t
+      sigma_next = sigma_fn(t_next)
+      
+      
 
     s2 = t + h * c2
     s3 = t + h * c3
-    sigma_2 = s2.neg().exp()
-    sigma_3 = s3.neg().exp()
+    #sigma_2 = s2.neg().exp()
+    #sigma_3 = s3.neg().exp()
+    sigma_2 = sigma_fn(s2)
+    sigma_3 = sigma_fn(s3)
+    
+    #su, sd, alpha_ratio = get_res4lyf_step(sigma, sigma_next, eta2, eta_var2, noise_mode)
+    #sigma_2, h, c2 = get_res4lyf_half_step(sigma, sd, c2, False, None, t_fn_formula, sigma_fn_formula, remap_t_to_exp_space=True)
+    #sigma_3, h, c3 = get_res4lyf_half_step(sigma, sd, c3, False, None, t_fn_formula, sigma_fn_formula, remap_t_to_exp_space=True)
+    #sigma_next = sd
+    
     a21, a31, a32, b1, b2, b3 = calculate_third_order_coeffs(h, c2, c3)
+    print("sigmas: ", sigma.item(), sigma_next.item(), sigma_2.item(), sigma_3.item())
     
+    #sigma_2 = sigma * torch.exp(-c2 * h)
+    #sigma_3 = sigma * torch.exp(-c3 * h)
     s_in = x.new_ones([x.shape[0]])
-    
     
     denoised1 = model(x, sigma * s_in, **extra_args)
     k1 = denoised1
 
-    x_2 = torch.exp(-c2*h) *x + h * (a21 * k1)
-    #x_2 = ((sd/sigma)**c2) *x + h * (a21 * k1)
-
-    #sigma_2 = sigma * torch.exp(-c2 * h)
+    x_2 = torch.exp(-c2*h)*x + h * (a21 * k1)
+    #x_2 = ((sd/sigma)**c2)*x + h * (a21 * k1)
+    
     denoised2 = model(x_2, sigma_2 * s_in, **extra_args)
     k2 = denoised2
 
-    # x_3 = math.exp(-c3 * h) * x_2 + a31 * h * k1 + a32 * h * k2
-
     x_3 = torch.exp(-c3*h)*x + h * (a31 * k1 + a32 * k2)
-    #x_3 = ((sd/sigma)**c3) + h * (a31 * k1 + a32 * k2)
+    #x_3 = ((sd/sigma)**c3)*x + h * (a31 * k1 + a32 * k2)
 
-    #x_3 = math.exp(-c3*h) * x + a31 * h * k1 + a32 * h * k2
-    #sigma_3 = sigma * torch.exp(-c3 * h)
     denoised3 = model(x_3, sigma_3 * s_in, **extra_args)
     k3 = denoised3
-
-    #x_next = torch.exp(-h)*x + h * (b1 * k1 + b2 * k2 + b3 * k3)
 
     x_next = torch.exp(-h)*x + h * (b1 * k1 + b2 * k2 + b3 * k3)
     #x_next = ((sd/sigma))*x + h * (b1 * k1 + b2 * k2 + b3 * k3)
 
-    if pbar is not None:
-        pbar.update(1.0)
-
-    x_next = alpha_ratio * x_next + noise_sampler(sigma=sigma, sigma_next=sigma_next) * s_noise2 * su
+    #x_next = alpha_ratio * x_next + noise_sampler(sigma=sigma, sigma_next=sigma_next) * s_noise2 * su
 
     gc.collect()
     torch.cuda.empty_cache()
+    if pbar is not None:
+        pbar.update(1.0)
 
-
-    denoised1_2 = (b1 * k1 + b2 * k2 + b3 * k3)
-    return x_next, denoised1, denoised2, denoised3, denoised1_2, vel, vel_2, vel_3, h
+    denoised1_2_3 = (b1 * k1 + b2 * k2 + b3 * k3)
+    return x_next, denoised1, denoised2, denoised3, denoised1_2_3, vel, vel_2, vel_3, h, sigma_next
 
 
 
@@ -1101,6 +1130,7 @@ def sample_refined_exp_s_advanced_RF(
 
   vel, vel_2, vel_3 = None, None, None
   denoised1_2=None
+  denoised1_2_3 = None
   h_last = None
 
   if order == "1" or order == "2a":
@@ -1135,20 +1165,25 @@ def sample_refined_exp_s_advanced_RF(
     return x
   
   elif order == "3":
+    new_sigma_next = torch.tensor(0.0).to(sigmas.dtype).to(sigmas.device)
     for i in trange(len(sigmas) - 1, disable=disable):
 
         sigma = sigmas[i]
         sigma_next = sigmas[i+1]
-        time = sigmas[i] / sigma_max
+        
+        if new_sigma_next > sigma:
+          sigma = new_sigma_next
+        
+        time = sigma / sigma_max
         
         sigma_next = torch.tensor(0.001) if sigma_next == 0.0 else sigma_next
         
         if step_type == "res_a":
-          x, denoised, denoised2, denoised3, denoised1_2, vel, vel_2, vel_3, h_last = _refined_exp_sosu_step_RF_third_order(model, x, sigma, sigma_next, c2=c2[i], c3=c3[i], eta1=etas1[i], eta2=etas2[i], eta_var1=eta_vars1[i], eta_var2=eta_vars2[i], 
+          x, denoised, denoised2, denoised3, denoised1_2_3, vel, vel_2, vel_3, h_last, new_sigma_next = _refined_exp_sosu_step_RF_third_order(model, x, sigma, sigma_next, c2=c2[i], c3=c3[i], eta1=etas1[i], eta2=etas2[i], eta_var1=eta_vars1[i], eta_var2=eta_vars2[i], 
                                                           noise_sampler=noise_sampler, s_noise1=s_noises1[i], s_noise2=s_noises2[i], noise_mode=noise_mode,
                                                           extra_args=extra_args, simple_phi_calc=simple_phi_calc,
                                                           momentum = momentum[i], vel = vel, vel_2 = vel_2, vel_3 = vel_3, time = time,
-                                                          t_fn_formula=t_fn_formula, sigma_fn_formula=sigma_fn_formula, denoised1_2=denoised1_2, h_last=h_last, order=order, auto_c2=auto_c2,
+                                                          t_fn_formula=t_fn_formula, sigma_fn_formula=sigma_fn_formula, denoised1_2_3=denoised1_2_3, h_last=h_last, order=order, auto_c2=auto_c2,
                                                           )
         """if step_type == "dpmpp_sde_alt":
           x, denoised, denoised2, denoised1_2, vel, vel_2, h_last  = _dpmpp_sde_step_RF(model, x, sigma, sigma_next, c2=c2[i],eta1=etas1[i], eta2=etas2[i], eta_var1=eta_vars1[i], eta_var2=eta_vars2[i], 
@@ -1159,7 +1194,7 @@ def sample_refined_exp_s_advanced_RF(
                                                           )"""
 
         if callback is not None:
-            callback({'x': x, 'i': i, 'sigma': sigmas[i], 'sigma_hat': sigmas[i], 'denoised': denoised1_2})
+            callback({'x': x, 'i': i, 'sigma': sigmas[i], 'sigma_hat': sigmas[i], 'denoised': denoised1_2_3})
 
         gc.collect()
         torch.cuda.empty_cache()
