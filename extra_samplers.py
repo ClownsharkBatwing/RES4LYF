@@ -1511,7 +1511,7 @@ def sample_backward_SDE_euler_advanced_RF_hard(
             noise_sampler.k = k
             noise_sampler.scale = scale
         
-        sigma, sigma_next, sigma_next2 = sigmas[i], sigmas[i+1], sigmas[i+2]
+        sigma, sigma_next = sigmas[i], sigmas[i+1]
         # Initial guess for backward iteration (use current value)
         #x_next = x.clone()
         
