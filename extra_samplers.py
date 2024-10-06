@@ -1488,7 +1488,7 @@ def sample_backward_euler_advanced_RF_hard(
 @torch.no_grad()
 def sample_backward_SDE_euler_advanced_RF_hard(
     model, x, sigmas, extra_args=None, callback=None, disable=None, eta=1., eta_var=1., s_noise=1., 
-    noise_sampler=None, noise_sampler_type="gaussian", noise_mode="hard", k=1.0, scale=0.1, 
+    noise_sampler=None, noise_sampler_type="gaussian", noise_mode="hard", reversible="post", k=1.0, scale=0.1, 
     alpha=None, iter=3, tol=1e-5):
     
     extra_args = {} if extra_args is None else extra_args
@@ -1501,6 +1501,7 @@ def sample_backward_SDE_euler_advanced_RF_hard(
     
     sigma_fn = lambda t: t.neg().exp()
     t_fn = lambda sigma: sigma.log().neg()
+    x_reverse_new = None
     
     #t_fn = lambda sigma: 1/((sigma).exp()+1)
     #sigma_fn = lambda t: ((1-t)/t).log()
@@ -1526,10 +1527,13 @@ def sample_backward_SDE_euler_advanced_RF_hard(
         denoised_next = denoised
 
         for iteration in range(iter):  
+            #x = x_reverse_new if x_reverse_new is not None else x
             denoised_next = model(x_next, sigma_next * s_in, **extra_args)
-            #x_reverse_new = (x_next - (1 - sigma_next/sigma) * denoised_next) / (sigma_next/sigma)
+            if reversible == "pre":
+                x_reverse_new = (x_next - (1 - sigma_next/sigma) * denoised_next) / (sigma_next/sigma)
             x_new = (sigma_next/sigma) * x + (1 - sigma_next/sigma) * denoised_next
-            x_reverse_new = (x_new - (1 - sigma_next/sigma) * denoised_next) / (sigma_next/sigma)
+            if reversible == "post":
+                x_reverse_new = (x_new - (1 - sigma_next/sigma) * denoised_next) / (sigma_next/sigma)
             
             error = torch.norm(x_new - x_next)
             print(f"Iteration {iteration + 1}, Error: {error.item()}")
