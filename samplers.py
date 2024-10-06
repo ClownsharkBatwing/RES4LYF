@@ -859,14 +859,17 @@ class SamplerRES_Implicit:
     @classmethod
     def INPUT_TYPES(s):
         return {"required":
-                    {"eta": ("FLOAT", {"default": 0.0, "min": 0.0, "max": 100.0, "step":0.01, "round": False}),
-                     "s_noise": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 100.0, "step":0.01, "round": False}),
+                    {"eta": ("FLOAT", {"default": 0.0, "min": -100.0, "max": 100.0, "step":0.01, "round": False}),
+                     "eta_var": ("FLOAT", {"default": 0.0, "min": -100.0, "max": 100.0, "step":0.01, "round": False}),
+                     "s_noise": ("FLOAT", {"default": 1.0, "min": -100.0, "max": 100.0, "step":0.01, "round": False}),
+                     "c2": ("FLOAT", {"default": 1.0, "min": -100.0, "max": 100.0, "step":0.01, "round": False}),
                      "alpha": ("FLOAT", {"default": 0.0, "min": -10000.0, "max": 10000.0, "step":0.1, "round": False}),
                      "k": ("FLOAT", {"default": 1.0, "min": -10000.0, "max": 10000.0, "step":2.0, "round": False}),
-                     "noise_sampler_type": (NOISE_GENERATOR_NAMES, {"default": "gaussian"}),
-                     "noise_mode": (["hard", "soft"], {"default": 'soft'}), 
+                     "noise_sampler_type": (NOISE_GENERATOR_NAMES, {"default": "brownian"}),
+                     "noise_mode": (["hard", "soft", "softer"], {"default": 'hard'}), 
+                     "iter_c2": ("INT", {"default": 0, "min": 0, "max": 100, "step": 1}), 
                      "iter": ("INT", {"default": 3, "min": 0, "max": 100, "step": 1}), 
-                     "tol": ("FLOAT", {"default": 0.00001, "min": 0, "max": 1, "step": 0.000001}), 
+                     "tol": ("FLOAT", {"default": 0.1, "min": 0, "max": 100, "step": 0.01}), 
                       },
                     "optional": 
                     {
@@ -878,12 +881,13 @@ class SamplerRES_Implicit:
 
     FUNCTION = "get_sampler"
 
-    def get_sampler(self, eta, s_noise, alpha, k, noise_sampler_type, noise_mode, alphas=None, iter=3, tol=0.00001):
+    def get_sampler(self, eta, eta_var, s_noise, c2, alpha, k, noise_sampler_type, noise_mode, alphas=None, iter_c2=0, iter=3, tol=0.1):
         
         steps = 10000
         alphas = initialize_or_scale(alphas, alpha, steps)
 
-        sampler = comfy.samplers.ksampler("backward_euler_advanced_RF_hard", {"eta": eta, "s_noise": s_noise, "alpha": alphas, "k": k, "noise_sampler_type": noise_sampler_type, "noise_mode": noise_mode, "iter": iter,"tol":tol,})
+        sampler = comfy.samplers.ksampler("RES_implicit_advanced_RF_PC", {"eta": eta, "eta_var": eta_var, "s_noise": s_noise, "c2": c2, "alpha": alphas, "k": k, "noise_sampler_type": noise_sampler_type, "noise_mode": noise_mode,
+                                                                          "iter_c2": iter_c2, "iter": iter,"tol":tol,})
         return (sampler, )
     
     
@@ -899,6 +903,7 @@ class SamplerSDE_Implicit:
                      "noise_sampler_type": (NOISE_GENERATOR_NAMES, {"default": "brownian"}),
                      "noise_mode": (["hard", "soft", "softer"], {"default": 'hard'}), 
                      "reversible": (["off", "pre", "post"], {"default": "post"}), 
+                     "reverse_weight": ("FLOAT", {"default": 0.0, "min": 0.0, "max": 100.0, "step":0.01, "round": False}),
                      "iter": ("INT", {"default": 2, "min": 0, "max": 100, "step": 1}), 
                      "tol": ("FLOAT", {"default": 0.1, "min": 0, "max": 1, "step": 0.01}), 
                       },
@@ -912,13 +917,13 @@ class SamplerSDE_Implicit:
 
     FUNCTION = "get_sampler"
 
-    def get_sampler(self, eta, eta_var, s_noise, alpha, k, noise_sampler_type, noise_mode, reversible, alphas=None, iter=3, tol=0.00001):
+    def get_sampler(self, eta, eta_var, s_noise, alpha, k, noise_sampler_type, noise_mode, reversible, reverse_weight, alphas=None, iter=3, tol=0.00001):
         
         steps = 10000
         alphas = initialize_or_scale(alphas, alpha, steps)
 
-        sampler = comfy.samplers.ksampler("backward_SDE_euler_advanced_RF_hard", {"eta": eta, "eta_var": eta_var, "s_noise": s_noise, "alpha": alphas, "k": k, "noise_sampler_type": noise_sampler_type, "noise_mode": noise_mode, 
-            "reversible": reversible, "iter": iter,"tol":tol,})
+        sampler = comfy.samplers.ksampler("SDE_implicit_advanced_RF_hard", {"eta": eta, "eta_var": eta_var, "s_noise": s_noise, "alpha": alphas, "k": k, "noise_sampler_type": noise_sampler_type, "noise_mode": noise_mode, 
+            "reversible": reversible, "reverse_weight": reverse_weight, "iter": iter,"tol":tol,})
         return (sampler, )
     
 class SamplerDPMPP_2S_Ancestral_Advanced:

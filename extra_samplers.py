@@ -217,176 +217,6 @@ def sample_dpmpp_sde_advanced(
             x = x + noise_sampler(sigma=sigma_fn(t), sigma_next=sigma_fn(t_next)) * s_noises2[i] * su
 
 
-@torch.no_grad()
-def sample_dpmpp_sde_advanced_RF_originalithink(
-    model, x, sigmas, extra_args=None, callback=None, disable=None,
-    momentum=0.0, noise_sampler=None, r=1/2, noise_sampler_type="brownian", noise_mode="hard", noise_scale=1.0, k=1.0, scale=0.1, 
-    momentums=None, etas1=None, etas2=None, s_noises1=None, s_noises2=None, rs=None, alphas=None,denoise_boosts=None, noisy_cfg=False, order=2, t_fn_formula=None, sigma_fn_formula=None, 
-):
-    """DPM-Solver++ (stochastic with eta parameter) adapted for Rectified Flow."""   ###^^^swapped sigma_fn and t_fn by accident!
-    def momentum_func(diff, velocity, timescale=1.0, offset=-momentum / 2.0): # Diff is current diff, vel is previous diff
-        if velocity is None:
-            momentum_vel = diff
-        else:
-            momentum_vel = momentum * (timescale + offset) * velocity + (1 - momentum * (timescale + offset)) * diff
-        return momentum_vel
-    
-    if len(sigmas) <= 1:
-        return x
-
-    sigma_min, sigma_max = sigmas[sigmas > 0].min(), sigmas.max()
-    seed = extra_args.get("seed", None)
-
-    noise_sampler = NOISE_GENERATOR_CLASSES.get(noise_sampler_type)(x=x, seed=seed, sigma_min=sigma_min, sigma_max=sigma_max)
-
-    extra_args = {} if extra_args is None else extra_args
-    s_in = x.new_ones([x.shape[0]])
-
-    if isinstance(model.inner_model.inner_model.model_sampling, comfy.model_sampling.CONST):
-        get_down_step = get_RF_step
-        sigma_fn = lambda t: 1/ (t.exp() + 1)
-        t_fn = lambda sigma: ((1-sigma)/sigma).log()
-        #sigma_fn = lambda t: t
-        #t_fn = lambda sigma: sigma
-    else:
-        get_down_step = lambda sigma, sigma_next, eta: (*get_ancestral_step(sigma, sigma_next, eta), 1.0) # wrap function so it returns a third fixed value: alpha_ratio = 1.0 
-        sigma_fn = lambda t: t.neg().exp()
-        #sigma_fn = lambda t: t.neg().exp()
-        t_fn = lambda sigma: sigma.log().neg()
-        
-    if sigma_fn_formula:
-        print(sigma_fn_formula)
-        sigma_fn = eval(f"lambda t: {sigma_fn_formula}", {"t": None})
-    if t_fn_formula:
-        print(t_fn_formula)
-        t_fn = eval(f"lambda sigma: {t_fn_formula}", {"sigma": None})
-
-    vel = None
-    h = None
-    alpha_ratio = 1.0
-    su = 0.0
-    noise1 = torch.zeros_like(x)
-    for i in trange(len(sigmas) - 1, disable=disable):
-        noise1 = noise_sampler(sigma=sigmas[i], sigma_next=sigmas[i+1])
-        if noisy_cfg == True:
-            with torch.no_grad():
-                x.grad = noise1
-                x.grad[0][0][0][0] = etas1[i] if sigmas[i] < 1.0 else 0.0
-                x.grad[0][0][0][1] = sigmas[i]
-                x.grad[0][0][0][2] = sigmas[i+1]
-                #x.grad[0][0][0][3] = float(seed + i*2)
-                denoised = model(x, sigmas[i] * s_in, **extra_args)
-                x = alpha_ratio * x + noise1 * s_noises2[i] * su
-        else:
-            denoised = model(x, sigmas[i] * s_in, **extra_args)
-        
-        vel = denoised = momentum_func(denoised, vel, sigmas[i], -momentums[i]/2.0)
-        
-        if noise_sampler_type == "fractal":
-            noise_sampler.alpha = alphas[i]
-            noise_sampler.k = k
-            noise_sampler.scale = scale
-            
-        if callback is not None:
-            callback({'x': x, 'i': i, 'sigma': sigmas[i], 'sigma_hat': sigmas[i], 'denoised': denoised})
-        if sigmas[i + 1] == 0:
-            # Euler method
-            d = to_d(x, sigmas[i], denoised)
-            dt = sigmas[i + 1] - sigmas[i]
-            x = x + d * dt
-        else:
-            # DPM-Solver++
-            t, t_next = t_fn(sigmas[i]), t_fn(sigmas[i + 1])
-            h = t_next - t
-            s = t + h * rs[i]
-            fac = 1 / (2 * rs[i])
-            
-            sigma_s = sigma_fn(s)
-
-            
-            if t_fn_formula or sigma_fn_formula:
-                print("sigma_s, s, t, t_next, h, fac: ", sigma_s.item(), s.item(), t.item(), t_next.item(), h.item(), fac.item())
-                print("sigma, sigma_next: ", sigmas[i].item(), sigmas[i+1].item())
-
-            if sigma_s.isnan():
-                sigma_s = 0.9999
-
-            # Step 1
-            #sd, su, alpha_ratio = get_down_step(sigmas[i], sigma_s, etas1[i])
-            sd, su, alpha_ratio = None, None, None
-            if noise_mode == "soft": 
-                sd, su, alpha_ratio = get_down_step(sigmas[i], sigma_s, etas1[i], noise_scale)
-            elif noise_mode == "softer":
-                sd, su, alpha_ratio = get_RF_step_traditional(sigmas[i], sigma_s, etas1[i], noise_scale)
-            elif noise_mode == "hard":
-                su = sigmas[i] * etas1[i]
-                if isinstance(model.inner_model.inner_model.model_sampling, comfy.model_sampling.CONST):
-                    su, sd, alpha_ratio = get_ancestral_step_RF(sigmas[i+1], etas1[i])
-                    #sd, alpha_ratio = get_RF_step2(su, sigmas[i+1])
-                else: 
-                    sd = sigmas[i+1] #this may not work well...
-            elif noise_mode == "hard_var":
-                su, sd, alpha_ratio = get_ancestral_step_RF(sigmas[i+1], etas1[i])
-                sigma_var = (-1 + torch.sqrt(1 + 4 * sigmas[i])) / 2
-                if sigmas[i+1] > sigma_var:
-                    su, sd, alpha_ratio = get_ancestral_step_RF_var(sigmas[i], sigmas[i+1], etas1[i])
-                
-                
-            sigma_sd_s = denoise_boosts[i] * sd + (1 - denoise_boosts[i]) * sigma_s #interpolate between sd and sigma_s; default is to step down to sigma_s, sd is farther down
-            
-            x_2 = (sigma_sd_s / sigmas[i]) * x + (1 - (sigma_sd_s / sigmas[i])) * denoised
-            
-            
-            #x_2 = alpha_ratio * x_2 + noise_sampler(sigma=sigmas[i], sigma_next=sigma_s) * s_noises1[i] * su
-            
-            noise2 = noise_sampler(sigma=sigmas[i], sigma_next=sigma_s)
-            if noisy_cfg == True:
-                with torch.no_grad():
-                    x_2.grad = noise2
-                    x_2.grad[0][0][0][0] = etas2[i]
-                    x_2.grad[0][0][0][1] = sigmas[i]
-                    x_2.grad[0][0][0][2] = sigma_s
-                    denoised_2 = model(x_2, sigma_s * s_in, **extra_args)
-                    x_2 = alpha_ratio * x_2 + noise2 * s_noises1[i] * su
-            else:
-                x_2 = alpha_ratio * x_2 + noise2 * s_noises1[i] * su
-                denoised_2 = model(x_2, sigma_s * s_in, **extra_args)
-                
-            # Step 2
-            #sd, su, alpha_ratio = get_down_step(sigmas[i], sigmas[i+1], etas2[i])
-            if noise_mode == "soft": 
-                sd, su, alpha_ratio = get_down_step(sigmas[i], sigmas[i+1], etas2[i], noise_scale)
-            elif noise_mode == "softer":
-                sd, su, alpha_ratio = get_RF_step_traditional(sigmas[i], sigmas[i+1], etas2[i], noise_scale)
-            elif noise_mode == "hard":
-                su = sigmas[i] * etas2[i]
-                if isinstance(model.inner_model.inner_model.model_sampling, comfy.model_sampling.CONST):
-                    su, sd, alpha_ratio = get_ancestral_step_RF(sigmas[i+1], etas2[i])
-                    #sd, alpha_ratio = get_RF_step2(su, sigmas[i+1])
-                else: 
-                    sd = sigmas[i+1] #this may not work well...
-            elif noise_mode == "hard_var":
-                su, sd, alpha_ratio = get_ancestral_step_RF(sigmas[i+1], etas2[i])
-                sigma_var = (-1 + torch.sqrt(1 + 4 * sigmas[i])) / 2
-                if sigmas[i+1] > sigma_var:
-                    su, sd, alpha_ratio = get_ancestral_step_RF_var(sigmas[i], sigmas[i+1], etas2[i])
-                
-            denoised_d = (1 - fac) * denoised + fac * denoised_2
-            x = (sd / sigmas[i]) * x + (1 - (sd / sigmas[i]))  * denoised_d
-            
-            if noisy_cfg == True:
-                noise1 = noise_sampler(sigma=sigmas[i], sigma_next=sigmas[i+1])
-            else:
-                x = alpha_ratio * x + noise_sampler(sigma=sigmas[i], sigma_next=sigmas[i+1]) * s_noises2[i] * su
-            
-            
-            
-            del denoised, denoised_d, denoised_2, x_2
-            gc.collect()
-            torch.cuda.empty_cache()
-    return x
-
-
 
 
 
@@ -1212,7 +1042,7 @@ def sample_euler_ancestral_advanced_RF_hard(model, x, sigmas, extra_args=None, c
 
 
 @torch.no_grad()
-def sample_backward_euler_advanced_RF_hard_works_at_higher_steps(
+def sample_euler_implicit_advanced_RF(
     model, x, sigmas, extra_args=None, callback=None, disable=None, eta=1., s_noise=1., 
     noise_sampler=None, noise_sampler_type="gaussian", noise_mode="hard", k=1.0, scale=0.1, 
     alpha=None, iter=3, tol=1e-5):
@@ -1230,107 +1060,27 @@ def sample_backward_euler_advanced_RF_hard_works_at_higher_steps(
             noise_sampler.k = k
             noise_sampler.scale = scale
         
-        # Initial guess for backward iteration (use current value)
         x_next = x.clone()
 
-        # Iteratively solve for x_next using the backward Euler approach
-        for _ in range(iter):  # Use a fixed number of iterations (e.g., 10) for implicit solving
-            # Get the next sigma value
+        for _ in range(iter): 
             sigma_up, sigma_down, alpha_ratio = (0.0, sigmas[i + 1], 1.0) if sigmas[i + 1] <= 0 else get_ancestral_step_RF(sigmas[i + 1], eta)
             
-            # Calculate the denoised output using the model at the next guess
             denoised_next = model(x_next, sigmas[i] * s_in, **extra_args)
             #denoised_next = model(x_next, sigma_down * s_in, **extra_args)
 
-            # Calculate the directional term
             d_next = to_d(x_next, sigmas[i], denoised_next)
 
-            # Update x_next using backward Euler approach
             dt = sigma_down - sigmas[i]
             x_next = x + d_next * dt
 
-        # Set the current value to the converged next value
         x = x_next
         
-        # Optional noise addition step (same as original)
         if sigmas[i + 1] > 0 and eta > 0:
             x = alpha_ratio * x + noise_sampler(sigma=sigmas[i], sigma_next=sigmas[i + 1]) * s_noise * sigma_up
 
-        # Callback if needed
         if callback is not None:
             callback({'x': x, 'i': i, 'sigma': sigmas[i], 'sigma_hat': sigmas[i], 'denoised': denoised_next})
 
-        # Clean up memory
-        gc.collect()
-        torch.cuda.empty_cache()
-
-    return x
-
-@torch.no_grad()
-def sample_backward_euler_advanced_RF_hard_IMEX_FRIED(
-    model, x, sigmas, extra_args=None, callback=None, disable=None, eta=1., s_noise=1., 
-    noise_sampler=None, noise_sampler_type="gaussian", noise_mode="hard", k=1.0, scale=0.1, 
-    alpha=None, iter=3, tol=1e-5):
-    """
-    Implements an IMEX-based sampler for diffusion/rectified flow models.
-
-    - model: The denoising model.
-    - x: Initial noisy state.
-    - sigmas: Sequence of sigma noise levels.
-    - extra_args: Any extra arguments required by the model.
-    - eta, s_noise: Parameters for controlling noise addition.
-    - iter: Number of iterations for implicit solving.
-    - tol: Tolerance for convergence.
-    """
-    extra_args = {} if extra_args is None else extra_args
-    s_in = x.new_ones([x.shape[0]])
-
-    for i in trange(len(sigmas) - 1, disable=disable):
-        sigma, sigma_next = sigmas[i], sigmas[i + 1]
-
-        # Explicit step: Compute the denoised prediction
-        denoised = model(x, sigma * s_in, **extra_args)
-        d = to_d(x, sigma, denoised)
-
-        # Explicit Euler update
-        dt = sigma_next - sigma
-        x_exp = x + d * dt
-
-        # Implicit step: Solve for `x_next` using implicit backward Euler
-        x_next = x_exp.clone()  # Initial guess for the implicit solve
-
-        for iteration in range(iter):
-            # Calculate denoised output at the next noise level
-            denoised_next = model(x_next, sigma_next * s_in, **extra_args)
-            d_next = to_d(x_next, sigma_next, denoised_next)
-
-            # Backward Euler update (implicit)
-            x_new = x_exp + d_next * dt
-
-            # Calculate error and check for convergence
-            error = torch.norm(x_new - x_next)
-            print(f"Iteration {iteration + 1}, Error: {error.item()}")
-
-            if error < tol:
-                print(f"Converged after {iteration + 1} iterations with error {error.item()}")
-                x_next = x_new
-                break
-
-            x_next = x_new
-
-        # Update x to the next value
-        x = x_next
-
-        # Optional noise addition to preserve variance
-        if sigma_next > 0 and eta > 0:
-            noise = torch.randn_like(x) * s_noise * sigma_next
-            x = x + noise
-
-        # Callback for debugging or logging
-        if callback is not None:
-            callback({'x': x, 'i': i, 'sigma': sigma, 'sigma_next': sigma_next, 'denoised': denoised_next})
-
-        # Clean up memory
         gc.collect()
         torch.cuda.empty_cache()
 
@@ -1339,7 +1089,7 @@ def sample_backward_euler_advanced_RF_hard_IMEX_FRIED(
 from .refined_exp_solver import _de_second_order, get_res4lyf_half_step, get_res4lyf_step, _refined_exp_sosu_step_RF2
 
 @torch.no_grad()
-def sample_backward_euler_advanced_RF_hard(
+def sample_RES_implicit_advanced_RF(
     model, x, sigmas, extra_args=None, callback=None, disable=None, c2=0.5, eta=1., s_noise=1., 
     noise_sampler=None, noise_sampler_type="gaussian", noise_mode="hard", k=1.0, scale=0.1, 
     alpha=None, iter=3, tol=1e-5):
@@ -1374,69 +1124,15 @@ def sample_backward_euler_advanced_RF_hard(
         su, sd, alpha_ratio = get_res4lyf_step(sigma, sigma_next, torch.tensor(0.0).to(x.dtype).to(x.device), torch.tensor(0.0).to(x.dtype).to(x.device), noise_mode)
         sigma_s, h, c2 = get_res4lyf_half_step(sigma, sd, c2, False, None, "", "", remap_t_to_exp_space=True)
         a2_1, b1, b2 = _de_second_order(h=h, c2=c2, simple_phi_calc=False)
-        # Initial guess for backward iteration (use current value)
-        #x_next = x.clone()
-        
-        #sigma_up, sigma_down, alpha_ratio = (0.0, sigmas[i + 1], 1.0) if sigmas[i + 1] <= 0 else get_ancestral_step_RF(sigmas[i + 1], eta)
 
-        #d = to_d(x, sigma, denoised)
-        """d = (x - denoised) / sigma
-        dt = sigma_next - sigma
-        x_next_orig = x + d * dt"""
-
-        
-        #x_next = x_next_orig.clone()
-        #x_next = x.clone()
-        #denoised_prev = denoised
-
-        # Iteratively solve for x_next using the backward Euler approach
-        
-        #if iter == 0:
         denoised = model(x, sigma * s_in, **extra_args)
         x_2 = ((sd/sigma)**c2)*x + h*a2_1*denoised
         denoised2 = model(x_2, sigma_s * s_in, **extra_args)
         x_next = (sd/sigma)*x + h*(b1*denoised + b2*denoised2)
         denoised_next = (b1*denoised + b2*denoised2) / (b1 + b2)
-        
-        
-        #x_next = (sigma_fn(t_next) / sigma_fn(t)) * x - (t - t_next).expm1() * denoised
-        
-        #denoised = model(x, sigma * s_in, **extra_args)
-        #x_next = (sigma_next/sigma) * x + (1 - sigma_next/sigma) * denoised
-        #x_next = x.clone()
-        #else:
-        for iteration in range(iter):  
-            #epsilon_next = x - x_next
-            #sigma_up, sigma_down, alpha_ratio = (0.0, sigmas[i + 1], 1.0) if sigmas[i + 1] <= 0 else get_ancestral_step_RF(sigmas[i + 1], eta) 
-            #denoised = model(x, sigma * s_in, **extra_args)
-            #x_next = (sigma_fn(t_next) / sigma_fn(t)) * x - (t - t_next).expm1() * denoised
-            
-            #denoised = model(x, sigma * s_in, **extra_args)
-            #x_next = (sigma_fn(t_next) / sigma_fn(t)) * x - (t - t_next).expm1() * denoised
-            """su, sd_next, alpha_ratio = get_res4lyf_step(sigma_next, sigmas[i+2], torch.tensor(0.0).to(x.dtype).to(x.device), torch.tensor(0.0).to(x.dtype).to(x.device), noise_mode)
-            sigma_s_next, h_next, c2 = get_res4lyf_half_step(sigma_next, sd, c2, False, None, "", "", remap_t_to_exp_space=True)
-            a2_1_next, b1_next, b2_next = _de_second_order(h=h, c2=c2, simple_phi_calc=False)
-            
-            
-            denoised = model(x_next, sigma_next * s_in, **extra_args)
-            x_2_next = ((sd_next/sigma_next)**c2)*x_next + h_next*a2_1_next*denoised
-            
-            #x_2_next = ((sd_next/sigmas[i])**c2)*x_next + h*a2_1*denoised
-            sigma_ratio = (sd - sigma_next) / (sigma_next - sigma)
-            sigma_ratio2 = (sigma_next - sigma) / (sd - sigma_next)
-            
-            denoised2 = model(x_2_next, sigma_s_next * s_in, **extra_args)
-            x_new = (sd/sigma)*x + h*(b1_next*denoised + b2_next*denoised2)*sigma_ratio2"""
-            
-            
-            
-            #denoised_next = model(x_next, sigma_next * s_in, **extra_args)
 
-            #x_new = (sigma_fn(t_next) / sigma_fn(t)) * (x_next + epsilon_next) - (t - t_next).expm1() * denoised_next
-            #x_reverse_new = (x_next - (1 - sigma_next/sigma) * denoised_next) / (sigma_next/sigma)
-            
-            #x_new = (sigma_next/sigma) * x + (1 - sigma_next/sigma) * (x_next - denoised_next)
-            #x_new = x + (sigma_next - sigma) * (x_next - denoised_next) / sigma_next
+        for iteration in range(iter):  
+
             time = sigmas[i] / sigma_max
             
             
@@ -1444,12 +1140,10 @@ def sample_backward_euler_advanced_RF_hard(
                                                                                                      vel = vel, vel_2 = vel_2, time = time,)
             
             denoised_next = denoised1_2
-            #x_new = (sigma_next/sigma) * x + (1 - sigma_next/sigma) * (x_next - denoised_next)
-            #x_reverse_new = (x_new - (1 - sigma_next/sigma) * denoised_next) / (sigma_next/sigma)
-            
+
             x_new = (sd/sigma)*x + h*denoised1_2*(b1 + b2)
             
-            x = (x_new - h*denoised1_2*(b1 + b2)) / (sd/sigma)
+            # x = (x_new - h*denoised1_2*(b1 + b2)) / (sd/sigma)   # projection back to x
             
             #x_new = (sigma_next/sigma) * x + (1 - sigma_next/sigma) * denoised_next
             error = torch.norm(x_new - x_next)
@@ -1461,16 +1155,13 @@ def sample_backward_euler_advanced_RF_hard(
                 x_next = x_new
                 break
 
-            #denoised_prev = denoised_next
             x_next = x_new
             denoised_next = (b1*denoised + b2*denoised2) / (b1 + b2)
             
-            #x = x_reverse_new
-            #x  = (x_new - (1 - sigma_next/sigma) * denoised_next) / (sigma_next/sigma)
+            #x  = (x_new - (1 - sigma_next/sigma) * denoised_next) / (sigma_next/sigma) # projection back to x with alternative math
 
         x = x_next
         
-        # Optional noise addition step (same as original)
         #if sigmas[i + 1] > 0 and eta > 0:
         #    x = alpha_ratio * x + noise_sampler(sigma=sigmas[i], sigma_next=sigmas[i + 1]) * s_noise * sigma_up
 
@@ -1485,10 +1176,122 @@ def sample_backward_euler_advanced_RF_hard(
 
 
 
+
+
+
 @torch.no_grad()
-def sample_backward_SDE_euler_advanced_RF_hard(
+def sample_RES_implicit_advanced_RF_PC(
+    model, x, sigmas, extra_args=None, callback=None, disable=None, c2=1.0, auto_c2=False, eta=0.0, eta_var=0.0, s_noise=1.0, 
+    noise_sampler=None, noise_sampler_type="gaussian", noise_mode="hard", k=1.0, scale=0.1, 
+    alpha=None, iter_c2=0, iter=3, tol=1e-5):
+    
+    extra_args = {} if extra_args is None else extra_args
+    seed = extra_args.get("seed", None) + 1
+    
+    s_in = x.new_ones([x.shape[0]])
+    alpha = torch.zeros_like(sigmas) if alpha is None else alpha
+    sigma_min, sigma_max = sigmas[sigmas > 0].min(), sigmas.max()
+    noise_sampler = NOISE_GENERATOR_CLASSES.get(noise_sampler_type)(x=x, seed=seed, sigma_min=sigma_min, sigma_max=sigma_max)
+    
+    sigma_fn = lambda t: t.neg().exp()
+    t_fn = lambda sigma: sigma.log().neg()
+    denoised_next = None
+    vel, vel_2, denoised, denoised2, denoised1_2, h_last = None, None, None, None, None, None
+    
+    if sigmas[-1] == 0.0:
+        sigmas[-1] = min(sigmas[-2]**2, 0.00001)
+    
+    #t_fn = lambda sigma: 1/((sigma).exp()+1)
+    #sigma_fn = lambda t: ((1-t)/t).log()
+    
+    for i in trange(len(sigmas) - 1, disable=disable):
+        if noise_sampler_type == "fractal":
+            noise_sampler.alpha = alpha[i]
+            noise_sampler.k = k
+            noise_sampler.scale = scale
+        
+        sigma, sigma_next = sigmas[i], sigmas[i+1]
+        
+        t, t_next = t_fn(sigma), t_fn(sigma_next)
+        h = t_next - t    
+    
+        sigma_up, sigma_down, alpha_ratio = get_res4lyf_step(sigma, sigma_next, eta, eta_var, noise_mode)
+        sigma_s, h, c2 = get_res4lyf_half_step(sigma, sigma_down, c2, auto_c2, h_last, "", "", remap_t_to_exp_space=True)
+        a2_1, b1, b2 = _de_second_order(h=h, c2=c2, simple_phi_calc=False)
+
+        denoised = model(x, sigma * s_in, **extra_args)
+        x_2 = ((sigma_down/sigma)**c2)*x + h*a2_1*denoised
+        
+        for iteration in range(iter_c2):  
+            time = sigmas[i] / sigma_max
+            
+            denoised_next = model(x_2, sigma_s * s_in, **extra_args)
+            x_2_new = ((sigma_down/sigma)**c2)*x + h*a2_1*denoised_next
+            
+            # x = (x_new - h*denoised1_2*(b1 + b2)) / (sd/sigma)   # projection back to x
+
+            error = torch.norm(x_2_new - x_2)
+            print(f"Iteration {iteration + 1}, Error: {error.item()}")
+
+            if error < tol:
+                print(f"Converged after {iteration + 1} iterations with error {error.item()}")
+                x_2 = x_2_new
+                break
+
+            x_2 = x_2_new
+            #denoised_next = (b1*denoised + b2*denoised2_next) / (b1 + b2)
+
+            #x  = (x_new - (1 - sigma_next/sigma) * denoised_next) / (sigma_next/sigma) # projection back to x with alternative math
+        
+        denoised2 = model(x_2, sigma_s * s_in, **extra_args)
+        x_next = (sigma_down/sigma)*x + h*(b1*denoised + b2*denoised2)
+        denoised_next = (b1*denoised + b2*denoised2) / (b1 + b2)
+
+        for iteration in range(iter):  
+            time = sigmas[i] / sigma_max
+            
+            denoised2_next = model(x_next, sigma_down * s_in, **extra_args)
+            x_new = (sigma_down/sigma)*x + h*(b1*denoised + b2*denoised2_next)
+            
+            # x = (x_new - h*denoised1_2*(b1 + b2)) / (sd/sigma)   # projection back to x
+
+            error = torch.norm(x_new - x_next)
+            print(f"Iteration {iteration + 1}, Error: {error.item()}")
+
+            if error < tol:
+                print(f"Converged after {iteration + 1} iterations with error {error.item()}")
+                x_next = x_new
+                break
+
+            x_next = x_new
+            denoised_next = (b1*denoised + b2*denoised2_next) / (b1 + b2)
+
+            #x  = (x_new - (1 - sigma_next/sigma) * denoised_next) / (sigma_next/sigma) # projection back to x with alternative math
+
+        x = x_next
+        h_last = h
+        
+        if sigmas[i + 1] > 0 and eta > 0:
+            x = alpha_ratio * x + noise_sampler(sigma=sigmas[i], sigma_next=sigmas[i + 1]) * s_noise * sigma_up
+
+        denoised_next = denoised if denoised_next is None else denoised_next
+        if callback is not None:
+            callback({'x': x, 'i': i, 'sigma': sigmas[i], 'sigma_hat': sigmas[i], 'denoised': denoised_next})
+
+        gc.collect()
+        torch.cuda.empty_cache()
+
+    return x
+
+
+
+
+
+
+@torch.no_grad()
+def sample_SDE_implicit_advanced_RF(
     model, x, sigmas, extra_args=None, callback=None, disable=None, eta=1., eta_var=1., s_noise=1., 
-    noise_sampler=None, noise_sampler_type="gaussian", noise_mode="hard", reversible="post", k=1.0, scale=0.1, 
+    noise_sampler=None, noise_sampler_type="gaussian", noise_mode="hard", reversible="post", reverse_weight=0.0, k=1.0, scale=0.1, 
     alpha=None, iter=3, tol=1e-5):
     
     extra_args = {} if extra_args is None else extra_args
@@ -1515,14 +1318,12 @@ def sample_backward_SDE_euler_advanced_RF_hard(
         sigma, sigma_next = sigmas[i], sigmas[i+1]
         sigma_up, sigma_down, alpha_ratio = get_res4lyf_step(sigma, sigma_next, eta, eta_var, noise_mode)
         #sigma_s, h, c2 = get_res4lyf_half_step(sigma, sd, c2, auto_c2, h_last, t_fn_formula, sigma_fn_formula, )
-        
-        #sigma_up, sigma_down, alpha_ratio = (0.0, sigmas[i + 1], 1.0) if sigmas[i + 1] <= 0 else get_ancestral_step_RF(sigmas[i + 1], eta)
-        sigma_next = sigma_down
-        denoised = model(x, sigma * s_in, **extra_args)
         #t, t_next = t_fn(sigma), t_fn(sigma_next)
         #h = t_next - t
-        
-        #x_next = (sigma_fn(t_next) / sigma_fn(t)) * x - (t - t_next).expm1() * denoised
+           
+        sigma_next = sigma_down
+        denoised = model(x, sigma * s_in, **extra_args)
+
         x_next = (sigma_next/sigma) * x + (1 - sigma_next/sigma) * denoised 
         denoised_next = denoised
 
@@ -1534,7 +1335,9 @@ def sample_backward_SDE_euler_advanced_RF_hard(
             x_new = (sigma_next/sigma) * x + (1 - sigma_next/sigma) * denoised_next
             if reversible == "post":
                 x_reverse_new = (x_new - (1 - sigma_next/sigma) * denoised_next) / (sigma_next/sigma)
-            
+            if reversible == "off":
+                x_reverse_new = x
+
             error = torch.norm(x_new - x_next)
             print(f"Iteration {iteration + 1}, Error: {error.item()}")
 
@@ -1543,10 +1346,8 @@ def sample_backward_SDE_euler_advanced_RF_hard(
                 x_next = x_new
                 break
 
-            denoised_prev = denoised_next
             x_next = x_new
-            
-            x = x_reverse_new
+            x = reverse_weight * x_reverse_new + (1-reverse_weight) * x
 
         x = x_next
         
@@ -1561,182 +1362,6 @@ def sample_backward_SDE_euler_advanced_RF_hard(
 
     return x
 
-
-"""@torch.no_grad()
-def sample_backward_euler_advanced_RF_hard(
-    model, x, sigmas, extra_args=None, callback=None, disable=None, eta=1., s_noise=1., 
-    noise_sampler=None, noise_sampler_type="gaussian", noise_mode="hard", k=1.0, scale=0.1, 
-    alpha=None, iter=3, tol=1e-5):
-    
-    extra_args = {} if extra_args is None else extra_args
-    seed = extra_args.get("seed", None) + 1
-    
-    s_in = x.new_ones([x.shape[0]])
-    alpha = torch.zeros_like(sigmas) if alpha is None else alpha
-    sigma_min, sigma_max = sigmas[sigmas > 0].min(), sigmas.max()
-    noise_sampler = NOISE_GENERATOR_CLASSES.get(noise_sampler_type)(x=x, seed=seed, sigma_min=sigma_min, sigma_max=sigma_max)
-    
-    for i in trange(len(sigmas) - 1, disable=disable):
-        if noise_sampler_type == "fractal":
-            noise_sampler.alpha = alpha[i]
-            noise_sampler.k = k
-            noise_sampler.scale = scale
-        
-        # Initial guess for backward iteration (use current value)
-        x_next = x.clone()
-        
-        #denoised = model(x, sigmas[i] * s_in, **extra_args)
-        
-
-        # Iteratively solve for x_next using the backward Euler approach
-        for iteration in range(iter):  
-            # Get the next sigma value
-            sigma_up, sigma_down, alpha_ratio = (0.0, sigmas[i + 1], 1.0) if sigmas[i + 1] <= 0 else get_ancestral_step_RF(sigmas[i + 1], eta)
-            
-            # Calculate the denoised output using the model at the next guess
-            # For the first iteration, use the current sigma level
-            if iteration == 0:
-                denoised_next = model(x_next, sigmas[i] * s_in, **extra_args)
-                d_next = to_d(x_next, sigmas[i], denoised_next)
-            else:
-                denoised_next = model(x_next, sigma_down * s_in, **extra_args)
-                d_next = to_d(x_next, sigma_down, denoised_next)
-
-            # Calculate the directional term
-            
-
-            # Update x_next using backward Euler approach
-            dt = sigma_down - sigmas[i]
-            x_new = x + d_next * dt
-            
-            # Calculate the error as the difference between consecutive updates
-            error = torch.norm(x_new - x_next)
-            print(f"Iteration {iteration + 1}, Error: {error.item()}")
-
-            # Check if the error is within the given tolerance
-            if error < tol:
-                print(f"Converged after {iteration + 1} iterations with error {error.item()}")
-                x_next = x_new
-                break
-
-            # Update x_next for the next iteration
-            x_next = x_new
-
-        # Set the current value to the converged next value
-        x = x_next
-        
-        # Optional noise addition step (same as original)
-        if sigmas[i + 1] > 0 and eta > 0:
-            x = alpha_ratio * x + noise_sampler(sigma=sigmas[i], sigma_next=sigmas[i + 1]) * s_noise * sigma_up
-
-        # Callback if needed
-        if callback is not None:
-            callback({'x': x, 'i': i, 'sigma': sigmas[i], 'sigma_hat': sigmas[i], 'denoised': denoised_next})
-
-        # Clean up memory
-        gc.collect()
-        torch.cuda.empty_cache()
-
-    return x"""
-
-
-"""
-@torch.no_grad()
-def sample_backward_euler_advanced_RF_hard(model, x, sigmas, extra_args=None, callback=None, disable=None, eta=1., s_noise=1., noise_sampler=None, noise_sampler_type="gaussian", noise_mode="hard", k=1.0, scale=0.1, alpha=None, iter=3):
-    extra_args = {} if extra_args is None else extra_args
-    seed = extra_args.get("seed", None) + 1
-    
-    s_in = x.new_ones([x.shape[0]])
-    alpha = torch.zeros_like(sigmas) if alpha is None else alpha
-    sigma_min, sigma_max = sigmas[sigmas > 0].min(), sigmas.max()
-    noise_sampler = NOISE_GENERATOR_CLASSES.get(noise_sampler_type)(x=x, seed=seed, sigma_min=sigma_min, sigma_max=sigma_max)
-    
-    for i in trange(len(sigmas) - 1, disable=disable):
-        if noise_sampler_type == "fractal":
-            noise_sampler.alpha = alpha[i]
-            noise_sampler.k = k
-            noise_sampler.scale = scale
-        
-        # Initial guess for backward iteration (use current value)
-        x_next = x.clone()
-
-        # Iteratively solve for x_next using the backward Euler approach
-        for _ in range(iter):  # Use a fixed number of iterations (e.g., 10) for implicit solving
-            # Get the next sigma value
-            sigma_up, sigma_down, alpha_ratio = (0.0, sigmas[i + 1], 1.0) if sigmas[i + 1] <= 0 else get_ancestral_step_RF(sigmas[i + 1], eta)
-            
-            # Calculate the denoised output using the model at the next guess
-            #denoised_next = model(x_next, sigmas[i] * s_in, **extra_args)
-            denoised_next = model(x_next, sigma_down * s_in, **extra_args)
-
-            # Calculate the directional term
-            d_next = to_d(x_next, sigmas[i], denoised_next)
-
-            # Update x_next using backward Euler approach
-            dt = sigma_down - sigmas[i]
-            x_next = x + d_next * dt
-
-        # Set the current value to the converged next value
-        x = x_next
-        
-        # Optional noise addition step (same as original)
-        if sigmas[i + 1] > 0 and eta > 0:
-            x = alpha_ratio * x + noise_sampler(sigma=sigmas[i], sigma_next=sigmas[i + 1]) * s_noise * sigma_up
-
-        # Callback if needed
-        if callback is not None:
-            callback({'x': x, 'i': i, 'sigma': sigmas[i], 'sigma_hat': sigmas[i], 'denoised': denoised_next})
-
-        # Clean up memory
-        gc.collect()
-        torch.cuda.empty_cache()
-
-    return x"""
-
-
-@torch.no_grad()
-def sample_euler_ancestral_advanced_RF_hard_old(model, x, sigmas, extra_args=None, callback=None, disable=None, eta=1., s_noise=1., noise_sampler=None, noise_sampler_type="gaussian", k=1.0, scale=0.1, alpha=None):
-    extra_args = {} if extra_args is None else extra_args
-    seed = extra_args.get("seed", None) + 1
-    
-    s_in = x.new_ones([x.shape[0]])
-    alpha = torch.zeros_like(sigmas) if alpha is None else alpha
-    sigma_min, sigma_max = sigmas[sigmas > 0].min(), sigmas.max()
-    noise_sampler = NOISE_GENERATOR_CLASSES.get(noise_sampler_type)(x=x, seed=seed, sigma_min=sigma_min, sigma_max=sigma_max)
-    
-    for i in trange(len(sigmas) - 1, disable=disable):
-        if noise_sampler_type == "fractal":
-            noise_sampler.alpha = alpha[i]
-            noise_sampler.k = k
-            noise_sampler.scale = scale
-        
-        denoised = model(x, sigmas[i] * s_in, **extra_args)
-        
-        #sigma_up = sigmas[i] * eta
-        #sigma_down, alpha_ratio = get_RF_step2(sigma_up, sigmas[i+1])
-        #sigma_up, sigma_down, alpha_ratio = get_ancestral_step_RF(sigmas[i+1], eta)
-        if sigmas[i+1] > 0:
-            sigma_up, sigma_down, alpha_ratio = get_ancestral_step_RF(sigmas[i+1], eta)
-        else:
-            sigma_up = 0.0
-            sigma_down = sigmas[i+1]
-            alpha_ratio = 1.0
-            
-        print(i, sigma_up, sigma_down, alpha_ratio, sigmas[i], sigmas[i+1])
-
-        if callback is not None:
-            callback({'x': x, 'i': i, 'sigma': sigmas[i], 'sigma_hat': sigmas[i], 'denoised': denoised})
-        
-        d = to_d(x, sigmas[i], denoised)
-        dt = sigma_down - sigmas[i]
-        x = x + d * dt
-        
-        if sigmas[i + 1] > 0 and eta > 0:
-            x = alpha_ratio * x   +   noise_sampler(sigma=sigmas[i], sigma_next=sigmas[i + 1]) * s_noise * sigma_up
-            
-        gc.collect()
-        torch.cuda.empty_cache()
-    return x
 
 
 @torch.no_grad()
@@ -2130,8 +1755,8 @@ def sample_rk4(model, x, sigmas, extra_args=None, callback=None, disable=None, s
         
         x = x + dx * dt
         
-        #if callback is not None:
-        #    callback({'x': x, 'i': i, 'sigma': sigma, 'sigma_next': sigma_next, 'dx': dx})
+        if callback is not None:
+            callback({'x': x, 'i': i, 'sigma': sigma, 'sigma_next': sigma_next, 'dx': dx})
     return x
 
 def sample_rk4_RF(model, x, sigmas, extra_args=None, callback=None, disable=None, s_churn=0., s_tmin=0., s_tmax=float('inf'), s_noise=1.):
@@ -2164,8 +1789,8 @@ def sample_rk4_RF(model, x, sigmas, extra_args=None, callback=None, disable=None
         
         x = x + dx * dt * sigma_ratio
         
-        #if callback is not None:
-        #    callback({'x': x, 'i': i, 'sigma': sigma, 'sigma_next': sigma_next, 'dx': dx})
+        if callback is not None:
+            callback({'x': x, 'i': i, 'sigma': sigma, 'sigma_next': sigma_next, 'dx': dx})
         gc.collect()
         torch.cuda.empty_cache()
     return x
@@ -2465,12 +2090,13 @@ def add_schedulers():
         import importlib
         importlib.reload(k_diffusion_sampling)
 
-# Add any extra samplers to the following dictionary
 #from .refined_exp_solver import sample_refined_exp_s, sample_refined_exp_s_advanced
 extra_samplers = {
     "euler_ancestral_advanced": sample_euler_ancestral_advanced,
-    "backward_euler_advanced_RF_hard": sample_backward_euler_advanced_RF_hard, 
-    "backward_SDE_euler_advanced_RF_hard": sample_backward_SDE_euler_advanced_RF_hard,
+    "RES_implicit_advanced_RF": sample_RES_implicit_advanced_RF, 
+    "RES_implicit_advanced_RF_PC": sample_RES_implicit_advanced_RF_PC, 
+    "SDE_implicit_advanced_RF": sample_SDE_implicit_advanced_RF,
+    "euler_implicit_advanced_RF": sample_euler_implicit_advanced_RF,
     #"euler_ancestral_advanced2": sample_euler_ancestral_advanced_RF2,
 
     "dpmpp_2s_ancestral_advanced": sample_dpmpp_2s_ancestral_advanced,
