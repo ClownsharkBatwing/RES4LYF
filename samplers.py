@@ -891,15 +891,15 @@ class SamplerSDE_Implicit:
     @classmethod
     def INPUT_TYPES(s):
         return {"required":
-                    {"eta": ("FLOAT", {"default": 0.0, "min": 0.0, "max": 100.0, "step":0.01, "round": False}),
+                    {"eta": ("FLOAT", {"default": 0.5, "min": 0.0, "max": 100.0, "step":0.01, "round": False}),
                      "eta_var": ("FLOAT", {"default": 0.0, "min": 0.0, "max": 100.0, "step":0.01, "round": False}),
                      "s_noise": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 100.0, "step":0.01, "round": False}),
                      "alpha": ("FLOAT", {"default": 0.0, "min": -10000.0, "max": 10000.0, "step":0.1, "round": False}),
                      "k": ("FLOAT", {"default": 1.0, "min": -10000.0, "max": 10000.0, "step":2.0, "round": False}),
-                     "noise_sampler_type": (NOISE_GENERATOR_NAMES, {"default": "gaussian"}),
-                     "noise_mode": (["hard", "soft"], {"default": 'soft'}), 
-                     "iter": ("INT", {"default": 3, "min": 0, "max": 100, "step": 1}), 
-                     "tol": ("FLOAT", {"default": 0.00001, "min": 0, "max": 1, "step": 0.000001}), 
+                     "noise_sampler_type": (NOISE_GENERATOR_NAMES, {"default": "brownian"}),
+                     "noise_mode": (["hard", "soft", "softer"], {"default": 'hard'}), 
+                     "iter": ("INT", {"default": 2, "min": 0, "max": 100, "step": 1}), 
+                     "tol": ("FLOAT", {"default": 0.1, "min": 0, "max": 1, "step": 0.01}), 
                       },
                     "optional": 
                     {
