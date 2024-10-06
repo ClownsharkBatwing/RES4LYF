@@ -615,6 +615,62 @@ def _refined_exp_sosu_step_RF(model, x, sigma, sigma_next, c2 = 0.5, eta1=0.25, 
 
 
 
+def _refined_exp_sosu_step_RF2(model, x, sigma, sigma_next, c2 = 0.5, eta1=0.25, eta2=0.5, eta_var1=0.0, eta_var2=0.0, noise_sampler=None, noise_mode="hard", order="2b", 
+                                   s_noise1=1.0, s_noise2=1.0, denoised1_2=None, h_last=None, auto_c2=False,
+  extra_args: Dict[str, Any] = {},
+  pbar: Optional[tqdm] = None,
+  momentum = 0.0, vel = None, vel_2 = None,
+  time = None,
+  t_fn_formula="", sigma_fn_formula="", 
+  simple_phi_calc = False,
+):
+  t_fn_formula = "sigma.log().neg()" if not t_fn_formula else t_fn_formula
+  sigma_fn_formula = "t.neg().exp()" if not sigma_fn_formula else sigma_fn_formula
+  
+  def momentum_func(diff, velocity, timescale=1.0, offset=-momentum / 2.0): # Diff is current diff, vel is previous diff
+    if velocity is None:
+        momentum_vel = diff
+    else:
+        momentum_vel = momentum * (timescale + offset) * velocity + (1 - momentum * (timescale + offset)) * diff
+    return momentum_vel
+
+  su, sd, alpha_ratio = get_res4lyf_step(sigma, sigma_next, eta2, eta_var2, noise_mode)
+  sigma_s, h, c2 = get_res4lyf_half_step(sigma, sd, c2, auto_c2, h_last, t_fn_formula, sigma_fn_formula, remap_t_to_exp_space=True)
+  a2_1, b1, b2 = _de_second_order(h=h, c2=c2, simple_phi_calc=simple_phi_calc)
+  
+  s_in = x.new_ones([x.shape[0]])
+  
+  if order == "1" or h_last is None:
+    denoised = model(x, sigma * s_in, **extra_args)
+  else:
+    denoised = denoised1_2
+  
+  diff_2 = vel_2 = momentum_func(h*a2_1*denoised, vel_2, time)
+  x_2 = ((sd/sigma)**c2)*x + diff_2 
+    
+  if sigma_next > 0.00001:
+    su_2, sd_2, alpha_ratio_2 = get_res4lyf_step(sigma, sigma_next, eta1, eta_var1, noise_mode)
+    x_2 = alpha_ratio_2 * x_2 + noise_sampler(sigma=sigma, sigma_next=sigma_s) * s_noise2 * su_2
+    denoised2 = model(x_2, sigma_s * s_in, **extra_args)
+  else: 
+    denoised2 = model(x_2, sigma_s * s_in, **extra_args)   #last step!
+
+  diff = vel = momentum_func(h*(b1*denoised + b2*denoised2), vel, time)
+  x_next =  (sd/sigma) * x + diff
+  x_next = alpha_ratio * x_next + noise_sampler(sigma=sigma, sigma_next=sigma_next) * s_noise1 * su
+  
+  denoised1_2 = momentum_func((b1*denoised + b2*denoised2), vel, time) / (b1 + b2)
+
+  if pbar is not None:
+    pbar.update(1.0)
+
+  gc.collect()
+  torch.cuda.empty_cache()
+  
+  return x_next, denoised, denoised2, denoised1_2, vel, vel_2, h
+
+
+
 @no_grad()
 def sample_refined_exp_s_advanced_RF_rolling(
   model,
@@ -903,7 +959,7 @@ def _refined_exp_sosu_step_RF_midpoint2(model, x_prev, sigma_prev, sigma, sigma_
   diff = vel = momentum_func(h*(b1*denoised + b2*denoised2), vel, time)
   x_next =  (sd/sigma) * x_prev + diff
   x_next = alpha_ratio * x_next + noise_sampler(sigma=sigma, sigma_next=sigma_next) * s_noise1 * su
-  
+  x_2 = alpha_ratio * x_2 + noise_sampler(sigma=sigma, sigma_next=sigma_next) * s_noise1 * su  
   denoised1_2 = momentum_func((b1*denoised + b2*denoised2), vel, time) / (b1 + b2)
 
   if pbar is not None:

@@ -12,6 +12,9 @@ import torch
 
 import os
 import shutil
+import sys
+
+sys.setrecursionlimit(10**6)
 
 """def get_ext_dir(subpath=None, mkdir=False):
     dir = os.path.dirname(__file__)
@@ -84,6 +87,8 @@ NODE_CLASS_MAPPINGS = {
     "SamplerDPMPP_SDE_Advanced": samplers.SamplerDPMPP_SDE_ADVANCED,
     "SamplerDPMPP_SDE_CFG++_Advanced": samplers.SamplerDPMPP_SDE_CFGPP_ADVANCED,
     "SamplerEulerAncestral_Advanced": samplers.SamplerEulerAncestral_Advanced,
+    "SamplerRES_Implicit": samplers.SamplerRES_Implicit,
+    "SamplerSDE_Implicit": samplers.SamplerSDE_Implicit,
     "SamplerDPMPP_2S_Ancestral_Advanced": samplers.SamplerDPMPP_2S_Ancestral_Advanced,
     "SamplerDPMPP_2M_SDE_Advanced": samplers.SamplerDPMPP_2M_SDE_Advanced,
     "SamplerDPMPP_3M_SDE_Advanced": samplers.SamplerDPMPP_3M_SDE_Advanced,
