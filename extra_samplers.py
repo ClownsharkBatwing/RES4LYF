@@ -1177,7 +1177,7 @@ def sample_RES_implicit_advanced_RF(
 
 
 
-
+from .refined_exp_solver import get_res4lyf_step_with_model
 
 @torch.no_grad()
 def sample_RES_implicit_advanced_RF_PC(
@@ -1215,10 +1215,17 @@ def sample_RES_implicit_advanced_RF_PC(
         t, t_next = t_fn(sigma), t_fn(sigma_next)
         h = t_next - t    
     
-        sigma_up, sigma_down, alpha_ratio = get_res4lyf_step(sigma, sigma_next, eta, eta_var, noise_mode)
+        #sigma_up, sigma_down, alpha_ratio = get_res4lyf_step(sigma, sigma_next, eta, eta_var, noise_mode)
+        sigma_up, sigma_down, alpha_ratio = get_res4lyf_step_with_model(model, sigma, sigma_next, eta, eta_var, noise_mode)
+        if isinstance(model.inner_model.inner_model.model_sampling, comfy.model_sampling.CONST) == False and noise_mode == "hard":
+            sigma = sigma * (1 + eta)
+        
         sigma_s, h, c2 = get_res4lyf_half_step(sigma, sigma_down, c2, auto_c2, h_last, "", "", remap_t_to_exp_space=True)
         a2_1, b1, b2 = _de_second_order(h=h, c2=c2, simple_phi_calc=False)
 
+        #if isinstance(model.inner_model.inner_model.model_sampling, comfy.model_sampling.CONST) == False:
+        #    x = alpha_ratio * x + noise_sampler(sigma=sigmas[i], sigma_next=sigmas[i + 1]) * s_noise * sigma_up
+            
         denoised = model(x, sigma * s_in, **extra_args)
         x_2 = ((sigma_down/sigma)**c2)*x + h*a2_1*denoised
         
@@ -1313,8 +1320,8 @@ def sample_RES_implicit_advanced_RF_PC(
         x = x_next
         h_last = h
         
-        if sigmas[i + 1] > 0 and eta > 0:
-            x = alpha_ratio * x + noise_sampler(sigma=sigmas[i], sigma_next=sigmas[i + 1]) * s_noise * sigma_up
+        #if sigmas[i + 1] > 0 and eta > 0 and isinstance(model.inner_model.inner_model.model_sampling, comfy.model_sampling.CONST) == True:
+        x = alpha_ratio * x + noise_sampler(sigma=sigma, sigma_next=sigma_next) * s_noise * sigma_up
 
         denoised_next = denoised if denoised_next is None else denoised_next
         if callback is not None:

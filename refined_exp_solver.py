@@ -94,6 +94,13 @@ def get_ancestral_step_RF(sigma_next, eta):
     alpha_ratio = (1 - sigma_next) / (1 - sigma_down)
     return sigma_up, sigma_down, alpha_ratio
 
+def get_ancestral_step(sigma, sigma_next, eta=1.):
+    """Calculates the noise level (sigma_down) to step down to and the amount of noise to add (sigma_up) when doing an ancestral sampling step."""
+    if not eta:
+        return sigma_next, 0.
+    sigma_up = min(sigma_next, eta * (sigma_next ** 2 * (sigma ** 2 - sigma_next ** 2) / sigma ** 2) ** 0.5)
+    sigma_down = (sigma_next ** 2 - sigma_up ** 2) ** 0.5
+    return sigma_down, sigma_up
 
 
 def _gamma(n: int,) -> int:
@@ -840,6 +847,28 @@ def get_res4lyf_step(sigma, sigma_next, eta=0.0, eta_var=1.0, noise_mode="hard")
     elif noise_mode == "hard":
       su, sd, alpha_ratio = get_ancestral_step_RF(sigma_next, eta)
     
+  return su, sd, alpha_ratio
+
+def get_res4lyf_step_with_model(model, sigma, sigma_next, eta=0.0, eta_var=1.0, noise_mode="hard"):
+  if isinstance(model.inner_model.inner_model.model_sampling, comfy.model_sampling.CONST):
+    sigma_var = (-1 + torch.sqrt(1 + 4 * sigma)) / 2
+    if eta_var > 0.0 and sigma_next > sigma_var:
+      su, sd, alpha_ratio = get_ancestral_step_RF_var(sigma, sigma_next, eta_var)
+    else:
+      if   noise_mode == "soft":
+        su, sd, alpha_ratio = get_RF_step(sigma, sigma_next, eta)
+      elif noise_mode == "softer":
+        su, sd, alpha_ratio = get_RF_step_traditional(sigma, sigma_next, eta)
+      elif noise_mode == "hard":
+        su, sd, alpha_ratio = get_ancestral_step_RF(sigma_next, eta)
+  else:
+    alpha_ratio = 1.0
+    if noise_mode == "hard":
+      sd = sigma_next
+      sigma_hat = sigma * (1 + eta)
+      su = (sigma_hat ** 2 - sigma ** 2) ** .5
+    if noise_mode == "soft" or noise_mode == "softer": 
+      sd, su = get_ancestral_step(sigma, sigma_next, eta)
   return su, sd, alpha_ratio
 
 
