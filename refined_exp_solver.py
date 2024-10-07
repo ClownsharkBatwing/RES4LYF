@@ -96,36 +96,6 @@ def get_ancestral_step_RF(sigma_next, eta):
 
 
 
-def calculate_second_order_multistep_coeffs(sigma, sigma_next, sigma_prev):
-    """
-    Calculate coefficients for the second-order multistep solver using Algorithm 4 from the paper.
-
-    Args:
-        sigma: Current noise level (float or tensor)
-        sigma_next: Next noise level (float or tensor)
-        sigma_prev: Previous noise level (float or tensor)
-
-    Returns:
-        A dictionary of coefficients: h, b1, b2
-    """
-    lam_n_plus_1 = -torch.log(sigma_next)
-    lam_n = -torch.log(sigma)
-    lam_n_minus_1 = -torch.log(sigma_prev)
-    
-    h = lam_n_plus_1 - lam_n
-    
-    c2 = h / (lam_n - lam_n_minus_1)
-    
-    phi1 = _phi_1(-h)
-    phi2 = _phi_2(-h) / c2
-    
-    b1 = phi1 - phi2
-    b2 = phi2
-
-    return h, c2, b1, b2
-  
-  
-
 def _gamma(n: int,) -> int:
   """
   https://en.wikipedia.org/wiki/Gamma_function
@@ -161,8 +131,8 @@ def _phi_1(neg_h: FloatTensor):
 def _phi_1(neg_h: FloatTensor):
   phi_1_csbw = torch.nan_to_num(torch.exp(neg_h)*torch.expm1(-neg_h) / -neg_h, nan=1.0)
   phi_1_kc = torch.nan_to_num(torch.expm1(neg_h) / neg_h, nan=1.0)
-  print("phi1 csbw, kc: ", phi_1_csbw, phi_1_kc)
-  return phi_1_csbw
+  #print("phi1 csbw, kc: ", phi_1_csbw, phi_1_kc)
+  #return phi_1_csbw
   return torch.nan_to_num(torch.exp(neg_h)*torch.expm1(-neg_h) / -neg_h, nan=1.0)
 
 
@@ -230,8 +200,8 @@ def _de_second_order(h: float, c2: float, simple_phi_calc = False,) -> RESDECoef
     #phi2: float = _phi_2(-h)
     
     a2_1: float = c2 * _phi_csbw(1, c2*h)
-    phi1: float = _phi_csbw(1, h)
-    phi2: float = _phi_csbw(2, h)
+    phi1: float =      _phi_csbw(1, h)
+    phi2: float =      _phi_csbw(2, h)
     
     
   else:
@@ -247,13 +217,6 @@ def _de_second_order(h: float, c2: float, simple_phi_calc = False,) -> RESDECoef
   return RESDECoeffsSecondOrder(a2_1=a2_1, b1=b1, b2=b2,)  
   
 
-"""def calculate_gamma(c2: float, c3: float) -> float:
-    numerator = 3 * (c2 ** 2) + 3 * (c3 ** 3)
-    denominator = 2 * (c2 + c3)
-    gamma = numerator / denominator
-    return gamma"""
-
-
 def calculate_gamma(c2: float, c3: float) -> float:
     """Calculate gamma based on c2 and c3 to satisfy the third-order condition."""
     numerator = 3 * (c3 ** 3) - 2 * c3
@@ -261,84 +224,37 @@ def calculate_gamma(c2: float, c3: float) -> float:
     if denominator == 0:
         raise ValueError("Invalid values for c2 leading to division by zero.")
     gamma = numerator / denominator
-    print("gamma half1: ", 2*(gamma*c2+c3))
-    print("gamma half2: ", 3*(gamma*c2**2 + c3**3))
     return gamma
   
 
-class RESDECoeffsThirdOrder(NamedTuple):
-    a3_1: float
-    b1: float
-    b2: float
-    b3: float
-    gamma: float
-
-def _de_third_order(h: float, c2: float, c3: float, simple_phi_calc=False) -> RESDECoeffsThirdOrder:
+def calculate_second_order_multistep_coeffs(sigma, sigma_next, sigma_prev):
     """
-    Calculate third-order coefficients.
+    Calculate coefficients for the second-order multistep solver using Algorithm 4 from the paper.
+
+    Args:
+        sigma: Current noise level (float or tensor)
+        sigma_next: Next noise level (float or tensor)
+        sigma_prev: Previous noise level (float or tensor)
+
+    Returns:
+        A dictionary of coefficients: h, b1, b2
     """
-    gamma = calculate_gamma(c2, c3)
+    lam_n_plus_1 = -torch.log(sigma_next)
+    lam_n = -torch.log(sigma)
+    lam_n_minus_1 = -torch.log(sigma_prev)
     
-    if simple_phi_calc:
-        a3_1 = c3 * _phi_1(-c3 * h)
-        phi1 = _phi_1(-h)
-        phi2 = _phi_2(-h)
-        phi3 = _phi_3(-h)
-    else:
-        a3_1 = c3 * _phi(j=1, neg_h=-c3 * h)
-        phi1 = _phi(j=1, neg_h=-h)
-        phi2 = _phi(j=2, neg_h=-h)
-        phi3 = _phi(j=3, neg_h=-h)
+    h = lam_n_plus_1 - lam_n
+    
+    c2 = h / (lam_n - lam_n_minus_1)
+    
+    phi1 = _phi_1(-h)
+    phi2 = _phi_2(-h) / c2
+    
+    b1 = phi1 - phi2
+    b2 = phi2
 
-    b1 = phi1 - (phi2 / c2) - (phi3 / c3)
-    b2 = (phi2 / c2) - (phi3 / (c2 * c3))
-    b3 = phi3 / (c2 * c3)
-
-    return RESDECoeffsThirdOrder(a3_1=a3_1, b1=b1, b2=b2, b3=b3, gamma=gamma)
-
-"""def calculate_third_order_coeffs(h, c2, c3): #, gamma):
-    gamma = calculate_gamma(c2, c3)
-    
-    # Calculate the step sizes
-    neg_h = -h
-    neg_h_c2 = -c2 * h
-    neg_h_c3 = -c3 * h
-    
-    # Calculate the phi values
-    phi_1_h = _phi_1(neg_h)
-    phi_2_h = _phi_2(neg_h)
-    
-    # Phi for scaled step sizes
-    phi_1_c2_h = _phi_1(neg_h_c2)
-    phi_1_c3_h = _phi_1(neg_h_c3)
-    
-    phi_2_c2_h = _phi_2(neg_h_c2)
-    phi_2_c3_h = _phi_2(neg_h_c3)
-    
-    # Step 1: Compute a21 for second stage
-    a21 = c2 * phi_1_c2_h
-    
-    # Step 2: Compute a31 and a32 for third stage
-    a31 = c3 * phi_1_c3_h  # a31 from k1 to k3
-    a32 = gamma * c2 * phi_2_c2_h + (c3 ** 2 / c2) * phi_2_c3_h  # a32 from k2 to k3
-    
-    # Step 3: Compute b1, b2, b3 (final combination coefficients)
-    b2 = (gamma / (gamma * c2 + c3)) * phi_2_h  # Middle term for bottom row
-    b3 = (1 / (gamma * c2 + c3)) * phi_2_h      # Right term for bottom row
-    b1 = phi_1_h - b2 - b3                      # First term from balancing the bottom row
-    
-    print("gamma half1: ", 2*(gamma*c2+c3))
-    print("gamma half2: ", 3*(gamma*c2**2 + c3**2))
-    return a21, a31, a32, b1, b2, b3
-    
-    return {
-        "a21": a21,
-        "a31": a31,
-        "a32": a32,
-        "b1": b1,
-        "b2": b2,
-        "b3": b3
-    }"""
+    return h, c2, b1, b2
+  
 
 def calculate_third_order_coeffs(h, c2, c3):
     """
@@ -370,12 +286,10 @@ def calculate_third_order_coeffs(h, c2, c3):
     a21 = c2 * phi_1_c2_h
     
     a32 = gamma * c2 * phi_2_c2_h + (c3 ** 2 / c2) * phi_2_c3_h  # a32 from k2 to k3
-    #a31 = c3 * phi_1_c3_h  # a31 from k1 to k3
     a31 = c3 * phi_1_c3_h - a32 # a31 from k1 to k3
     
     b3 = (1 / (gamma * c2 + c3)) * phi_2_h      
-    b2 = gamma * b3
-    #b2 = (gamma / (gamma * c2 + c3)) * phi_2_h  # 
+    b2 = gamma * b3  #simplified version of: b2 = (gamma / (gamma * c2 + c3)) * phi_2_h  
     b1 = phi_1_h - b2 - b3                      
     
     print("a21 31 32: ", a21.item(), a31.item(), a32.item(), "b: ", b1.item(), b2.item(), b3.item(), "h: ", h.item(), c2.item(), c3.item())
@@ -403,12 +317,7 @@ def _refined_exp_sosu_step_RF_third_order(
         else:
             momentum_vel = momentum * (timescale + offset) * velocity + (1 - momentum * (timescale + offset)) * diff
         return momentum_vel
-
-    gamma = calculate_gamma(c2, c3)
-    
-    #sd = sigma_next
-    
-    #t, t_next = sigma.log().neg(), sigma_next.log().neg()
+        
     t = t_fn(sigma)
     t_next = t_fn(sigma_next)
     
@@ -416,7 +325,7 @@ def _refined_exp_sosu_step_RF_third_order(
     
     print("sigma_next: ", sigma_next)
     if h >= 0.9999:
-      h = torch.tensor(0.9999).to(h.dtype).to(h.device) # dtype=h.dtype, device=h.device)
+      h = torch.tensor(0.9999).to(h.dtype).to(h.device) 
       t_next = h + t
       sigma_next = sigma_fn(t_next)
       
@@ -424,21 +333,12 @@ def _refined_exp_sosu_step_RF_third_order(
 
     s2 = t + h * c2
     s3 = t + h * c3
-    #sigma_2 = s2.neg().exp()
-    #sigma_3 = s3.neg().exp()
     sigma_2 = sigma_fn(s2)
     sigma_3 = sigma_fn(s3)
-    
-    #su, sd, alpha_ratio = get_res4lyf_step(sigma, sigma_next, eta2, eta_var2, noise_mode)
-    #sigma_2, h, c2 = get_res4lyf_half_step(sigma, sd, c2, False, None, t_fn_formula, sigma_fn_formula, remap_t_to_exp_space=True)
-    #sigma_3, h, c3 = get_res4lyf_half_step(sigma, sd, c3, False, None, t_fn_formula, sigma_fn_formula, remap_t_to_exp_space=True)
-    #sigma_next = sd
     
     a21, a31, a32, b1, b2, b3 = calculate_third_order_coeffs(h, c2, c3)
     print("sigmas: ", sigma.item(), sigma_next.item(), sigma_2.item(), sigma_3.item())
     
-    #sigma_2 = sigma * torch.exp(-c2 * h)
-    #sigma_3 = sigma * torch.exp(-c3 * h)
     s_in = x.new_ones([x.shape[0]])
     
     denoised1 = model(x, sigma * s_in, **extra_args)
@@ -468,10 +368,6 @@ def _refined_exp_sosu_step_RF_third_order(
 
     denoised1_2_3 = (b1 * k1 + b2 * k2 + b3 * k3)
     return x_next, denoised1, denoised2, denoised3, denoised1_2_3, vel, vel_2, vel_3, h, sigma_next
-
-
-
-
 
 
 
@@ -554,8 +450,6 @@ def _refined_exp_sosu_step(model, x, sigma, sigma_next, c2 = 0.5,
   torch.cuda.empty_cache()
 
   return StepOutput(x_next=x_next, denoised=denoised, denoised2=denoised2, vel=vel, vel_2=vel_2,)
-
-
 
 
 
@@ -931,46 +825,6 @@ def _refined_exp_sosu_step_RF_midpoint2(model, x_prev, sigma_prev, sigma, sigma_
   x_next = alpha_ratio * x_next + noise_sampler(sigma=sigma, sigma_next=sigma_next) * s_noise2 * su
   
   return x_next, denoised, vel, vel_2
-  """if order == 1 or h_last is None:
-  
-    denoised = model(x, sigma * s_in, **extra_args)
-    su, sd, alpha_ratio = get_res4lyf_step(sigma, sigma_next, eta2, eta_var2, noise_mode)
-    sigma_s, h, c2 = get_res4lyf_half_step(sigma, sd, c2, auto_c2, h_last, t_fn_formula, sigma_fn_formula, remap_t_to_exp_space=True)
-  else:"""
-  denoised = denoised1_2
-  sigma_s = sigma
-  sigma = sigma_prev
-  su, sd, alpha_ratio = get_res4lyf_step(sigma, sigma_next, eta2, eta_var2, noise_mode)
-
-  #su, sd, alpha_ratio = get_res4lyf_step(sigma, sigma_next, eta2, eta_var2, noise_mode)
-  #sigma_s, h, c2 = get_res4lyf_half_step(sigma, sd, c2, auto_c2, h_last, t_fn_formula, sigma_fn_formula, remap_t_to_exp_space=True)
-  a2_1, b1, b2 = _de_second_order(h=h, c2=c2, simple_phi_calc=simple_phi_calc)
-  
-  diff_2 = vel_2 = momentum_func(h*a2_1*denoised, vel_2, time)
-  x_2 = ((sd/sigma)**c2)*x_prev + diff_2 
-    
-  if sigma_next > 0.00001:
-    su_2, sd_2, alpha_ratio_2 = get_res4lyf_step(sigma, sigma_next, eta1, eta_var1, noise_mode)
-    x_2 = alpha_ratio_2 * x_2 + noise_sampler(sigma=sigma, sigma_next=sigma_s) * s_noise2 * su_2
-    denoised2 = model(x_2, sigma_s * s_in, **extra_args)
-  else: 
-    denoised2 = model(x_2, sigma_s * s_in, **extra_args)   #last step!
-
-  diff = vel = momentum_func(h*(b1*denoised + b2*denoised2), vel, time)
-  x_next =  (sd/sigma) * x_prev + diff
-  x_next = alpha_ratio * x_next + noise_sampler(sigma=sigma, sigma_next=sigma_next) * s_noise1 * su
-  x_2 = alpha_ratio * x_2 + noise_sampler(sigma=sigma, sigma_next=sigma_next) * s_noise1 * su  
-  denoised1_2 = momentum_func((b1*denoised + b2*denoised2), vel, time) / (b1 + b2)
-
-  if pbar is not None:
-    pbar.update(1.0)
-
-  gc.collect()
-  torch.cuda.empty_cache()
-
-  return x_next, denoised, denoised2, denoised1_2, vel, vel_2, h, x_2  #x_2 is the next x_prev... it is the "midpoint" x, which we will set to the "start" x for the next cycle
-
-
 
 
 
@@ -985,6 +839,7 @@ def get_res4lyf_step(sigma, sigma_next, eta=0.0, eta_var=1.0, noise_mode="hard")
       su, sd, alpha_ratio = get_RF_step_traditional(sigma, sigma_next, eta)
     elif noise_mode == "hard":
       su, sd, alpha_ratio = get_ancestral_step_RF(sigma_next, eta)
+    
   return su, sd, alpha_ratio
 
 

@@ -1183,7 +1183,7 @@ def sample_RES_implicit_advanced_RF(
 def sample_RES_implicit_advanced_RF_PC(
     model, x, sigmas, extra_args=None, callback=None, disable=None, c2=1.0, auto_c2=False, eta=0.0, eta_var=0.0, s_noise=1.0, 
     noise_sampler=None, noise_sampler_type="gaussian", noise_mode="hard", k=1.0, scale=0.1, 
-    alpha=None, iter_c2=0, iter=3, tol=1e-5):
+    alpha=None, iter_c2=0, iter=3, tol=1e-5, reverse_weight_c2=0.0, reverse_weight=0.0,):
     
     extra_args = {} if extra_args is None else extra_args
     seed = extra_args.get("seed", None) + 1
@@ -1237,8 +1237,29 @@ def sample_RES_implicit_advanced_RF_PC(
                 print(f"Converged after {iteration + 1} iterations with error {error.item()}")
                 x_2 = x_2_new
                 break
+            
+            if reverse_weight_c2 > 0.0:
+                #x_2_new = ((sigma_down/sigma)**c2)*x + h*a2_1*denoised_next
+                #(x_2_new - h*a2_1*denoised_next) / ((sigma_down/sigma)**c2) = x 
+                x_reverse_new = (x_2 - h*a2_1*denoised_next) / ((sigma_down/sigma)**c2)
+                x = reverse_weight_c2 * x_reverse_new + (1-reverse_weight_c2) * x
+                
+            """if reverse_weight_c2 > 0.0:
+                #x_2_new = ((sigma_down/sigma)**c2)*x + h*a2_1*denoised_next
+                #(x_2_new - h*a2_1*denoised_next) / ((sigma_down/sigma)**c2) = x 
+                x_reverse_new = (x_2_new - h*a2_1*denoised) / ((sigma_down/sigma)**c2)
+                x = reverse_weight_c2 * x_reverse_new + (1-reverse_weight_c2) * x
+                denoised = denoised_next
+                
+            if reverse_weight_c2 > 0.0:
+                #x_2_new = ((sigma_down/sigma)**c2)*x + h*a2_1*denoised_next
+                #(x_2_new - h*a2_1*denoised_next) / ((sigma_down/sigma)**c2) = x 
+                x_reverse_new = x + (denoised_next - denoised) * sigma
+                x = reverse_weight_c2 * x_reverse_new + (1-reverse_weight_c2) * x
+                denoised = denoised_next"""
 
             x_2 = x_2_new
+            denoised = denoised_next
             #denoised_next = (b1*denoised + b2*denoised2_next) / (b1 + b2)
 
             #x  = (x_new - (1 - sigma_next/sigma) * denoised_next) / (sigma_next/sigma) # projection back to x with alternative math
@@ -1262,8 +1283,29 @@ def sample_RES_implicit_advanced_RF_PC(
                 print(f"Converged after {iteration + 1} iterations with error {error.item()}")
                 x_next = x_new
                 break
+            
+            if reverse_weight > 0.0:
+                #x_new = (sigma_down/sigma)*x + h*(b1*denoised + b2*denoised2_next)
+                #(x_new - h*(b1*denoised + b2*denoised2_next)) / (sigma_down/sigma) = x 
+                x_reverse_new = (x_next - h*(b1*denoised + b2*denoised2_next)) / (sigma_down/sigma)
+                x = reverse_weight * x_reverse_new + (1-reverse_weight) * x
+
+            """if reverse_weight > 0.0:
+                #x_new = (sigma_down/sigma)*x + h*(b1*denoised + b2*denoised2_next)
+                #(x_new - h*(b1*denoised + b2*denoised2_next)) / (sigma_down/sigma) = x 
+                x_reverse_new = (x_new - h*(b1*denoised + b2*denoised2)) / (sigma_down/sigma)
+                x = reverse_weight * x_reverse_new + (1-reverse_weight) * x
+                denoised2 = denoised2_next
+
+            if reverse_weight > 0.0:
+                #x_new = (sigma_down/sigma)*x + h*(b1*denoised + b2*denoised2_next)
+                #(x_new - h*(b1*denoised + b2*denoised2_next)) / (sigma_down/sigma) = x 
+                x_reverse_new = x + (denoised2_next - denoised2) * sigma
+                x = reverse_weight * x_reverse_new + (1-reverse_weight) * x
+                denoised2 = denoised2_next"""
 
             x_next = x_new
+            denoised2 = denoised2_next
             denoised_next = (b1*denoised + b2*denoised2_next) / (b1 + b2)
 
             #x  = (x_new - (1 - sigma_next/sigma) * denoised_next) / (sigma_next/sigma) # projection back to x with alternative math
