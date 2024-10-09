@@ -788,6 +788,54 @@ class SamplerDEIS_SDE:
                                                          "denoised_type": denoised_type, "max_order": max_order,})
         return (sampler, )
 
+
+class SamplerDEIS_SDE_Implicit:
+    @classmethod
+    def INPUT_TYPES(s):
+        return {"required":
+                    {"momentum": ("FLOAT", {"default": 0.0, "min": -100.0, "max": 100.0, "step":0.01, "round": False}),
+                     "eta": ("FLOAT", {"default": 0.5, "min": -100.0, "max": 100.0, "step":0.01, "round": False}),
+                     "s_noise": ("FLOAT", {"default": 1.0, "min": -100.0, "max": 100.0, "step":0.01, "round": False}),
+                     "alpha": ("FLOAT", {"default": 0.0, "min": -10000.0, "max": 10000.0, "step":0.1, "round": False}),
+                     "k": ("FLOAT", {"default": 1.0, "min": -10000.0, "max": 10000.0, "step":2.0, "round": False}),
+                     "noise_sampler_type": (NOISE_GENERATOR_NAMES, {"default": "brownian"}),
+                     "noise_mode": (["hard", "hard_var", "soft", "softer"], {"default": "hard"}), 
+                     "noise_scale": ("FLOAT", {"default": 1.0, "min": -10000.0, "max": 10000.0, "step":0.1, "round": False}),
+                     "deis_mode": (["rhoab", "tab"], {"default": "rhoab"}), 
+                     "step_type": (["simple", "res_a", "dpmpp_sde"], {"default": "simple"}), 
+                     "denoised_type": (["1_2", "2"], {"default": "1_2"}), 
+                     "max_order": ("INT", {"default": 3, "min": 1, "max": 4, "step":1}),
+                     "iter": ("INT", {"default": 3, "min": 0, "max": 100, "step": 1}), 
+                     "reverse_weight": ("FLOAT", {"default": 0.0, "min": -100.0, "max": 100.0, "step":0.01, "round": False}),
+                     "tol": ("FLOAT", {"default": 0.1, "min": 0, "max": 100, "step": 0.01}), 
+                      },
+                    "optional": 
+                    {
+                        "momentums": ("SIGMAS", ),
+                        "etas": ("SIGMAS", ),
+                        "s_noises": ("SIGMAS", ),
+                        "alphas": ("SIGMAS", ),
+                    }  
+               }
+    RETURN_TYPES = ("SAMPLER",)
+    CATEGORY = "sampling/custom_sampling/samplers"
+
+    FUNCTION = "get_sampler"
+
+    def get_sampler(self, momentum, eta, s_noise, alpha, k, noise_sampler_type, noise_mode, noise_scale, deis_mode, step_type, denoised_type, max_order, momentums=None, etas=None, s_noises=None, alphas=None, iter=3, reverse_weight=1.0, tol=0.1):
+        sampler_name = "deis_sde_implicit"
+
+        steps = 10000
+        momentums = initialize_or_scale(momentums, momentum, steps)
+        etas = initialize_or_scale(etas, eta, steps)
+        s_noises = initialize_or_scale(s_noises, s_noise, steps)
+        alphas = initialize_or_scale(alphas, alpha, steps)
+
+        sampler = comfy.samplers.ksampler(sampler_name, {"momentums": momentums, "etas": etas, "s_noises": s_noises, "alpha": alphas, "k": k, 
+                                                         "noise_sampler_type": noise_sampler_type, "noise_mode": noise_mode, "noise_scale": noise_scale, "deis_mode": deis_mode, "step_type": step_type, 
+                                                         "denoised_type": denoised_type, "max_order": max_order, "iter": iter, "reverse_weight": reverse_weight, "tol": tol,})
+        return (sampler, )
+
  
 class SamplerDPMPP_SDE_CFGPP_ADVANCED:
     @classmethod
@@ -925,7 +973,7 @@ class SamplerSDE_Implicit:
         steps = 10000
         alphas = initialize_or_scale(alphas, alpha, steps)
 
-        sampler = comfy.samplers.ksampler("SDE_implicit_advanced_RF_hard", {"eta": eta, "eta_var": eta_var, "s_noise": s_noise, "alpha": alphas, "k": k, "noise_sampler_type": noise_sampler_type, "noise_mode": noise_mode, 
+        sampler = comfy.samplers.ksampler("SDE_implicit_advanced_RF", {"eta": eta, "eta_var": eta_var, "s_noise": s_noise, "alpha": alphas, "k": k, "noise_sampler_type": noise_sampler_type, "noise_mode": noise_mode, 
             "reversible": reversible, "reverse_weight": reverse_weight, "iter": iter,"tol":tol,})
         return (sampler, )
     
