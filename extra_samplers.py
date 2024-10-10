@@ -1457,7 +1457,7 @@ def sharpen(input_image):
     sharpen_kernel = sharpen_kernel.view(1, 1, 3, 3).to(input_image.device)
     return F.conv2d(input_image, sharpen_kernel.repeat(input_image.shape[1], 1, 1, 1), padding=1, groups=input_image.shape[1])
 
-
+from .refined_exp_solver import hard_light_blend
 
 @torch.no_grad()
 def sample_RES_implicit_advanced_RF_PC_3rd_order(
@@ -1559,7 +1559,9 @@ def sample_RES_implicit_advanced_RF_PC_3rd_order(
         
         if latent_guide is not None:
             lg_weight = latent_guide_weight * sigma
-            k1 = lg_weight*latent_guide + (1-lg_weight)*k1
+            #k1 = lg_weight*latent_guide + (1-lg_weight)*k1            
+            hard_light_blend_1 = hard_light_blend(latent_guide, k1)
+            k1 = k1 - lg_weight * sigma_next * k1  + (lg_weight * sigma_next * hard_light_blend_1)
         
         x_2 = ((sigma_down/sigma)**c2)*x + h*(a21*k1)
         
@@ -1598,7 +1600,9 @@ def sample_RES_implicit_advanced_RF_PC_3rd_order(
         
         if latent_guide is not None:
             lg_weight = latent_guide_weight * sigma
-            k2 = lg_weight*latent_guide + (1-lg_weight)*k2
+            #k2 = lg_weight*latent_guide + (1-lg_weight)*k2
+            hard_light_blend_1 = hard_light_blend(latent_guide, k2)
+            k2 = k2 - lg_weight * sigma_next * k2  + (lg_weight * sigma_next * hard_light_blend_1)
         x_3 = ((sigma_down/sigma)**c3)*x + h*(a31*k1 + a32*k2)
         
         gc.collect()
@@ -1635,7 +1639,13 @@ def sample_RES_implicit_advanced_RF_PC_3rd_order(
         k3 = model(x_3, sigma_3 * s_in, **extra_args)
         if latent_guide is not None:
             lg_weight = latent_guide_weight * sigma
-            k3 = lg_weight*latent_guide + (1-lg_weight)*k3
+            #k3 = lg_weight*latent_guide + (1-lg_weight)*k3
+            hard_light_blend_1 = hard_light_blend(latent_guide, k3)
+            k3 = k3 - lg_weight * sigma_next * k3  + (lg_weight * sigma_next * hard_light_blend_1)
+            
+
+      
+      
         x_next =  ((sigma_down/sigma))*x + h*(b1*k1 + b2*k2 + b3*k3)
         
         gc.collect()
