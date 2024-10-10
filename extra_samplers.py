@@ -1256,7 +1256,7 @@ from .refined_exp_solver import get_res4lyf_step_with_model
 
 @torch.no_grad()
 def sample_RES_implicit_advanced_RF_PC(
-    model, x, sigmas, extra_args=None, callback=None, disable=None, c2=1.0, auto_c2=False, eta=0.0, eta_var=0.0, s_noise=1.0, 
+    model, x, sigmas, extra_args=None, callback=None, disable=None, c2=1.0, auto_c2=False, eta1=0.0, eta2=0.0, eta_var1=0.0, eta_var2=0.0, s_noise1=1.0, s_noise2=1.0,
     noise_sampler=None, noise_sampler_type="gaussian", noise_mode="hard", k=1.0, scale=0.1, 
     alpha=None, iter_c2=0, iter=3, tol=1e-5, reverse_weight_c2=0.0, reverse_weight=0.0,):
     
@@ -1291,7 +1291,7 @@ def sample_RES_implicit_advanced_RF_PC(
         h = t_next - t    
     
         #sigma_up, sigma_down, alpha_ratio = get_res4lyf_step(sigma, sigma_next, eta, eta_var, noise_mode)
-        sigma_up, sigma_down, alpha_ratio = get_res4lyf_step_with_model(model, sigma, sigma_next, eta, eta_var, noise_mode)
+        sigma_up, sigma_down, alpha_ratio = get_res4lyf_step_with_model(model, sigma, sigma_next, eta2, eta_var2, noise_mode)
         if isinstance(model.inner_model.inner_model.model_sampling, comfy.model_sampling.CONST) == False and noise_mode == "hard":
             sigma = sigma * (1 + eta)
         
@@ -1347,6 +1347,8 @@ def sample_RES_implicit_advanced_RF_PC(
             #denoised_next = (b1*denoised + b2*denoised2_next) / (b1 + b2)
 
             #x  = (x_new - (1 - sigma_next/sigma) * denoised_next) / (sigma_next/sigma) # projection back to x with alternative math
+        su_2, sd_2, alpha_ratio_2 = get_res4lyf_step(sigma, sigma_next, eta1, eta_var1, noise_mode)
+        x_2 = alpha_ratio_2 * x_2 + noise_sampler(sigma=sigma, sigma_next=sigma_s) * s_noise1 * su_2
         
         denoised2 = model(x_2, sigma_s * s_in, **extra_args)
         x_next = (sigma_down/sigma)*x + h*(b1*denoised + b2*denoised2)
@@ -1404,7 +1406,7 @@ def sample_RES_implicit_advanced_RF_PC(
         h_last = h
         
         #if sigmas[i + 1] > 0 and eta > 0 and isinstance(model.inner_model.inner_model.model_sampling, comfy.model_sampling.CONST) == True:
-        x = alpha_ratio * x + noise_sampler(sigma=sigma, sigma_next=sigma_next) * s_noise * sigma_up
+        x = alpha_ratio * x + noise_sampler(sigma=sigma, sigma_next=sigma_next) * s_noise2 * sigma_up
 
         denoised_next = denoised if denoised_next is None else denoised_next
         if callback is not None:
@@ -1423,7 +1425,7 @@ def sample_RES_implicit_advanced_RF_PC(
 @torch.no_grad()
 def sample_SDE_implicit_advanced_RF(
     model, x, sigmas, extra_args=None, callback=None, disable=None, eta=1., eta_var=1., s_noise=1., 
-    noise_sampler=None, noise_sampler_type="gaussian", noise_mode="hard", reversible="post", reverse_weight=0.0, k=1.0, scale=0.1, 
+    noise_sampler=None, noise_sampler_type="gaussian", noise_mode="hard",reverse_weight=0.0, k=1.0, scale=0.1, 
     alpha=None, iter=3, tol=1e-5):
     
     extra_args = {} if extra_args is None else extra_args
@@ -1462,13 +1464,9 @@ def sample_SDE_implicit_advanced_RF(
         for iteration in range(iter):  
             #x = x_reverse_new if x_reverse_new is not None else x
             denoised_next = model(x_next, sigma_next * s_in, **extra_args)
-            if reversible == "pre":
+            if reverse_weight > 0.0:
                 x_reverse_new = (x_next - (1 - sigma_next/sigma) * denoised_next) / (sigma_next/sigma)
             x_new = (sigma_next/sigma) * x + (1 - sigma_next/sigma) * denoised_next
-            if reversible == "post":
-                x_reverse_new = (x_new - (1 - sigma_next/sigma) * denoised_next) / (sigma_next/sigma)
-            if reversible == "off":
-                x_reverse_new = x
 
             error = torch.norm(x_new - x_next)
             print(f"Iteration {iteration + 1}, Error: {error.item()}")

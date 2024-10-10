@@ -495,14 +495,14 @@ def _refined_exp_sosu_step_RF(model, x, sigma, sigma_next, c2 = 0.5, eta1=0.25, 
     
   if sigma_next > 0.00001:
     su_2, sd_2, alpha_ratio_2 = get_res4lyf_step(sigma, sigma_next, eta1, eta_var1, noise_mode)
-    x_2 = alpha_ratio_2 * x_2 + noise_sampler(sigma=sigma, sigma_next=sigma_s) * s_noise2 * su_2
+    x_2 = alpha_ratio_2 * x_2 + noise_sampler(sigma=sigma, sigma_next=sigma_s) * s_noise1 * su_2
     denoised2 = model(x_2, sigma_s * s_in, **extra_args)
   else: 
     denoised2 = model(x_2, sigma_s * s_in, **extra_args)   #last step!
 
   diff = vel = momentum_func(h*(b1*denoised + b2*denoised2), vel, time)
   x_next =  (sd/sigma) * x + diff
-  x_next = alpha_ratio * x_next + noise_sampler(sigma=sigma, sigma_next=sigma_next) * s_noise1 * su
+  x_next = alpha_ratio * x_next + noise_sampler(sigma=sigma, sigma_next=sigma_next) * s_noise2 * su
   
   denoised1_2 = momentum_func((b1*denoised + b2*denoised2), vel, time) / (b1 + b2)
 
