@@ -1252,7 +1252,7 @@ def sample_RES_implicit_advanced_RF(
 
 
 
-from .refined_exp_solver import get_res4lyf_step_with_model
+from .refined_exp_solver import get_res4lyf_step_with_model, calculate_third_order_coeffs
 
 @torch.no_grad()
 def sample_RES_implicit_advanced_RF_PC(
@@ -1293,7 +1293,7 @@ def sample_RES_implicit_advanced_RF_PC(
         #sigma_up, sigma_down, alpha_ratio = get_res4lyf_step(sigma, sigma_next, eta, eta_var, noise_mode)
         sigma_up, sigma_down, alpha_ratio = get_res4lyf_step_with_model(model, sigma, sigma_next, eta2, eta_var2, noise_mode)
         if isinstance(model.inner_model.inner_model.model_sampling, comfy.model_sampling.CONST) == False and noise_mode == "hard":
-            sigma = sigma * (1 + eta)
+            sigma = sigma * (1 + eta2)
         
         sigma_s, h, c2 = get_res4lyf_half_step(sigma, sigma_down, c2, auto_c2, h_last, "", "", remap_t_to_exp_space=True)
         a2_1, b1, b2 = _de_second_order(h=h, c2=c2, simple_phi_calc=False)
@@ -1317,6 +1317,7 @@ def sample_RES_implicit_advanced_RF_PC(
             if error < tol:
                 print(f"Converged after {iteration + 1} iterations with error {error.item()}")
                 x_2 = x_2_new
+                denoised = denoised_next
                 break
             
             if reverse_weight_c2 > 0.0:
@@ -1371,6 +1372,8 @@ def sample_RES_implicit_advanced_RF_PC(
             if error < tol:
                 print(f"Converged after {iteration + 1} iterations with error {error.item()}")
                 x_next = x_new
+                denoised2 = denoised2_next
+                denoised_next = (b1*denoised + b2*denoised2_next) / (b1 + b2)
                 break
             
             if reverse_weight > 0.0:
@@ -1417,6 +1420,267 @@ def sample_RES_implicit_advanced_RF_PC(
 
     return x
 
+
+
+
+
+
+@torch.no_grad()
+def sample_RES_implicit_advanced_RF_PC_3rd_order(
+    model, x, sigmas, extra_args=None, callback=None, disable=None, c2=0.5, c3=1.5, auto_c2=False, eta1=0.0, eta2=0.0, eta3=0.0, eta_var1=0.0, eta_var2=0.0, eta_var3=0.0, s_noise1=1.0, s_noise2=1.0, s_noise3=0.0,
+    noise_sampler=None, noise_sampler_type="gaussian", noise_mode="hard", k=1.0, scale=0.1, 
+    alpha=None, iter_c2=0, iter_c3=0, iter=3, tol=1e-5, reverse_weight_c2=0.0, reverse_weight_c3=0.0, reverse_weight=0.0,):
+    
+    extra_args = {} if extra_args is None else extra_args
+    seed = extra_args.get("seed", None) + 1
+    
+    s_in = x.new_ones([x.shape[0]])
+    alpha = torch.zeros_like(sigmas) if alpha is None else alpha
+    sigma_min, sigma_max = sigmas[sigmas > 0].min(), sigmas.max()
+    noise_sampler = NOISE_GENERATOR_CLASSES.get(noise_sampler_type)(x=x, seed=seed, sigma_min=sigma_min, sigma_max=sigma_max)
+    
+    sigma_fn = lambda t: t.neg().exp()
+    t_fn = lambda sigma: sigma.log().neg()
+    vel, vel_2, denoised, denoised2, denoised1_2, h_last = None, None, None, None, None, None
+    
+    if sigmas[-1] == 0.0:
+        sigmas[-1] = min(sigmas[-2]**2, 0.00001)
+    
+    #t_fn = lambda sigma: 1/((sigma).exp()+1)
+    #sigma_fn = lambda t: ((1-t)/t).log()
+    
+    for i in trange(len(sigmas) - 1, disable=disable):
+        if noise_sampler_type == "fractal":
+            noise_sampler.alpha = alpha[i]
+            noise_sampler.k = k
+            noise_sampler.scale = scale
+        
+        sigma, sigma_next = sigmas[i], sigmas[i+1]
+        
+        t = t_fn(sigma)
+        t_next = t_fn(sigma_next)
+        
+        h = t_next - t
+        
+        print("sigma_next: ", sigma_next)
+        if h >= 0.9999:
+            h = torch.tensor(0.9999).to(h.dtype).to(h.device) 
+            t_next = h + t
+            sigma_next = sigma_fn(t_next)
+        
+        s2 = t + h * c2
+        s3 = t + h * c3
+        sigma_2 = sigma_fn(s2)
+        sigma_3 = sigma_fn(s3)
+        
+        a21, a31, a32, b1, b2, b3 = calculate_third_order_coeffs(h, c2, c3)
+        print("sigmas: ", sigma.item(), sigma_next.item(), sigma_2.item(), sigma_3.item())
+    
+        #sigma_up, sigma_down, alpha_ratio = get_res4lyf_step(sigma, sigma_next, eta, eta_var, noise_mode)
+        sigma_up, sigma_down, alpha_ratio = get_res4lyf_step_with_model(model, sigma, sigma_next, eta3, eta_var3, noise_mode)
+        if isinstance(model.inner_model.inner_model.model_sampling, comfy.model_sampling.CONST) == False and noise_mode == "hard":
+            sigma = sigma * (1 + eta3)
+        
+        
+        t = t_fn(sigma)
+        t_next = t_fn(sigma_down)
+        
+        h = t_next - t
+        
+        print("sigma_next: ", sigma_next)
+        if h >= 0.9999:
+            h = torch.tensor(0.9999).to(h.dtype).to(h.device) 
+            t_next = h + t
+            sigma_next = sigma_fn(t_next)
+        
+        s2 = t + h * c2
+        s3 = t + h * c3
+        sigma_2 = sigma_fn(s2)
+        sigma_3 = sigma_fn(s3)
+        
+        
+        
+        
+        k1 = model(x, sigma * s_in, **extra_args)
+        x_2 = ((sigma_down/sigma)**c2)*x + h * (a21 * k1)
+        
+        gc.collect()
+        torch.cuda.empty_cache()
+        
+        for iteration in range(iter_c2):  
+            time = sigmas[i] / sigma_max
+            
+            k1_new = model(x_2, sigma_2 * s_in, **extra_args)
+            x_2_new = ((sigma_down/sigma)**c2)*x + h * (a21 * k1_new)
+            
+            error = torch.norm(x_2_new - x_2)
+            print(f"Iteration {iteration + 1}, Error: {error.item()}")
+
+            if error < tol:
+                print(f"Converged after {iteration + 1} iterations with error {error.item()}")
+                x_2 = x_2_new
+                k1 = k1_new   #check second order method for this, may have forgotten
+                break
+            
+            if reverse_weight_c2 > 0.0:
+                x_reverse_new = (x_2 - h * (a21 * k1_new)) / ((sigma_down/sigma)**c2)
+                x = reverse_weight_c2 * x_reverse_new + (1-reverse_weight_c2) * x
+
+            x_2 = x_2_new
+            k1 = k1_new
+            
+            gc.collect()
+            torch.cuda.empty_cache()
+
+        su_2, sd_2, alpha_ratio_2 = get_res4lyf_step(sigma, sigma_next, eta1, eta_var1, noise_mode)
+        x_2 = alpha_ratio_2 * x_2 + noise_sampler(sigma=sigma, sigma_next=sigma_2) * s_noise1 * su_2
+        
+        k2 = model(x_2, sigma_2 * s_in, **extra_args)
+        x_3 = ((sigma_down/sigma)**c3)*x + h * (a31 * k1 + a32 * k2)
+        
+        
+        gc.collect()
+        torch.cuda.empty_cache()
+
+        for iteration in range(iter_c3):  
+            time = sigmas[i] / sigma_max
+            
+            k2_new = model(x_3, sigma_3 * s_in, **extra_args)
+            x_3_new = ((sigma_down/sigma)**c3)*x + h * (a31 * k1 + a32 * k2_new)
+            
+            error = torch.norm(x_3_new - x_3)
+            print(f"Iteration {iteration + 1}, Error: {error.item()}")
+
+            if error < tol:
+                print(f"Converged after {iteration + 1} iterations with error {error.item()}")
+                x_3 = x_3_new 
+                k2 = k2_new
+                break
+            
+            if reverse_weight_c3 > 0.0:
+                x_reverse_new = (x_3 - h * (a31 * k1 + a32 * k2_new)) / ((sigma_down/sigma)**c3)
+                x = reverse_weight_c3 * x_reverse_new + (1-reverse_weight_c3) * x
+
+            x_3 = x_3_new 
+            k2 = k2_new
+            
+            gc.collect()
+            torch.cuda.empty_cache()
+            
+        su_3, sd_3, alpha_ratio_3 = get_res4lyf_step(sigma, sigma_next, eta2, eta_var2, noise_mode)
+        x_3 = alpha_ratio_3 * x_3 + noise_sampler(sigma=sigma, sigma_next=sigma_3) * s_noise2 * su_3
+
+        k3 = model(x_3, sigma_3 * s_in, **extra_args)
+        x_next =  ((sigma_down/sigma))*x + h * (b1 * k1 + b2 * k2 + b3 * k3)
+            
+        gc.collect()
+        torch.cuda.empty_cache()
+
+        for iteration in range(iter):  
+            time = sigmas[i] / sigma_max
+
+            k3_new = model(x_next, sigma_down * s_in, **extra_args)
+            x_next_new = ((sigma_down/sigma))*x + h * (b1 * k1 + b2 * k2 + b3 * k3_new)
+            
+            error = torch.norm(x_next_new - x_next)
+            print(f"Iteration {iteration + 1}, Error: {error.item()}")
+
+            if error < tol:
+                print(f"Converged after {iteration + 1} iterations with error {error.item()}")
+                x_next = x_next_new 
+                k3 = k3_new
+                break
+            
+            if reverse_weight > 0.0:
+                x_reverse_new = (x_next - h * (b1 * k1 + b2 * k2 + b3 * k3_new)) / ((sigma_down/sigma))
+                x = reverse_weight * x_reverse_new + (1-reverse_weight) * x
+
+            x_next = x_next_new 
+            k3 = k3_new
+            
+            gc.collect()
+            torch.cuda.empty_cache()
+
+        x = x_next
+        h_last = h
+        
+        #if sigmas[i + 1] > 0 and eta > 0 and isinstance(model.inner_model.inner_model.model_sampling, comfy.model_sampling.CONST) == True:
+        x = alpha_ratio * x + noise_sampler(sigma=sigma, sigma_next=sigma_next) * s_noise3 * sigma_up
+
+        #denoised_next = denoised if denoised_next is None else denoised_next
+        if callback is not None:
+            callback({'x': x, 'i': i, 'sigma': sigmas[i], 'sigma_hat': sigma, 'denoised': k3})
+
+        gc.collect()
+        torch.cuda.empty_cache()
+
+    return x
+
+
+
+
+
+"""
+def _refined_exp_sosu_step_RF_third_order(
+    model, x, sigma, sigma_next, c2=0.5, c3=2./3., eta1=0.0, eta2=0.0, eta_var1=0.0, eta_var2=0.0, noise_sampler=None, noise_mode="hard", order=3,
+    s_noise1=1.0, s_noise2=1.0, s_noise3=1.0, denoised1_2_3=None, h_last=None, auto_c2=False,
+    extra_args: Dict[str, Any] = {},
+    pbar: Optional[tqdm] = None,
+    momentum=0.0, vel=None, vel_2=None, vel_3=None,
+    time=None,
+    t_fn_formula="", sigma_fn_formula="",
+    simple_phi_calc=False,
+):
+    t_fn = lambda sigma: sigma.log().neg() if not t_fn_formula else eval(f"lambda sigma: {t_fn_formula}", {"torch": torch})
+    sigma_fn = lambda t: t.neg().exp() if not sigma_fn_formula else eval(f"lambda t: {sigma_fn_formula}", {"torch": torch})
+
+    t_fn = eval(f"lambda sigma: {t_fn_formula}", {"torch": torch}) if t_fn_formula else (lambda sigma: sigma.log().neg())
+    sigma_fn = eval(f"lambda t: {sigma_fn_formula}", {"torch": torch}) if sigma_fn_formula else (lambda t: t.neg().exp())
+
+    t = t_fn(sigma)
+    t_next = t_fn(sigma_next)
+    
+    h = t_next - t
+    
+    print("sigma_next: ", sigma_next)
+    if h >= 0.9999:
+      h = torch.tensor(0.9999).to(h.dtype).to(h.device) 
+      t_next = h + t
+      sigma_next = sigma_fn(t_next)
+      
+      
+
+    s2 = t + h * c2
+    s3 = t + h * c3
+    sigma_2 = sigma_fn(s2)
+    sigma_3 = sigma_fn(s3)
+    
+    a21, a31, a32, b1, b2, b3 = calculate_third_order_coeffs(h, c2, c3)
+    print("sigmas: ", sigma.item(), sigma_next.item(), sigma_2.item(), sigma_3.item())
+    
+    s_in = x.new_ones([x.shape[0]])
+    
+    k1 = denoised1 = model(x, sigma * s_in, **extra_args)
+    x_2 = torch.exp(-c2*h)*x + h * (a21 * k1)
+    #x_2 = ((sd/sigma)**c2)*x + h * (a21 * k1)
+    
+    k2 = denoised2 = model(x_2, sigma_2 * s_in, **extra_args)
+    x_3 = torch.exp(-c3*h)*x + h * (a31 * k1 + a32 * k2)
+    #x_3 = ((sd/sigma)**c3)*x + h * (a31 * k1 + a32 * k2)
+
+    k3 = denoised3 = model(x_3, sigma_3 * s_in, **extra_args)
+    x_next = torch.exp(-h)*x + h * (b1 * k1 + b2 * k2 + b3 * k3)
+    #x_next = ((sd/sigma))*x + h * (b1 * k1 + b2 * k2 + b3 * k3)
+
+    #x_next = alpha_ratio * x_next + noise_sampler(sigma=sigma, sigma_next=sigma_next) * s_noise2 * su
+
+    gc.collect()
+    torch.cuda.empty_cache()
+    if pbar is not None:
+        pbar.update(1.0)
+
+    denoised1_2_3 = (b1 * k1 + b2 * k2 + b3 * k3)
+    return x_next, denoised1, denoised2, denoised3, denoised1_2_3, vel, vel_2, vel_3, h, sigma_next"""
 
 
 
@@ -2329,6 +2593,7 @@ extra_samplers = {
     "euler_ancestral_advanced": sample_euler_ancestral_advanced,
     "RES_implicit_advanced_RF": sample_RES_implicit_advanced_RF, 
     "RES_implicit_advanced_RF_PC": sample_RES_implicit_advanced_RF_PC, 
+    "RES_implicit_advanced_RF_PC_3rd_order": sample_RES_implicit_advanced_RF_PC_3rd_order,
     "SDE_implicit_advanced_RF": sample_SDE_implicit_advanced_RF,
     "euler_implicit_advanced_RF": sample_euler_implicit_advanced_RF,
     #"euler_ancestral_advanced2": sample_euler_ancestral_advanced_RF2,

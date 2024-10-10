@@ -299,7 +299,7 @@ def calculate_third_order_coeffs(h, c2, c3):
     b2 = gamma * b3  #simplified version of: b2 = (gamma / (gamma * c2 + c3)) * phi_2_h  
     b1 = phi_1_h - b2 - b3                      
     
-    print("a21 31 32: ", a21.item(), a31.item(), a32.item(), "b: ", b1.item(), b2.item(), b3.item(), "h: ", h.item(), c2.item(), c3.item())
+    #print("a21 31 32: ", a21.item(), a31.item(), a32.item(), "b: ", b1.item(), b2.item(), b3.item(), "h: ", h.item(), c2.item(), c3.item())
     return a21, a31, a32, b1, b2, b3
 
 
