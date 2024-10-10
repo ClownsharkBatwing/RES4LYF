@@ -3,8 +3,12 @@ from torch import FloatTensor
 from tqdm.auto import trange
 from math import pi
 import gc
+import kornia
 
 from comfy.k_diffusion.sampling import get_ancestral_step, to_d
+
+import torch.nn.functional as F
+import torchvision.transforms as T
 
 
 import functools
@@ -1423,13 +1427,45 @@ def sample_RES_implicit_advanced_RF_PC(
 
 
 
+def compute_laplacian(image):
+    # Laplacian filter (simple edge detection)
+    laplacian_filter = torch.tensor([[0, 1, 0], [1, -4, 1], [0, 1, 0]], dtype=image.dtype, device=image.device).unsqueeze(0).unsqueeze(0)
+    
+    # Apply Laplacian filter separately for each channel
+    laplacian_per_channel = []
+    for channel in range(image.shape[1]):
+        laplacian = F.conv2d(image[:, channel:channel+1, :, :], laplacian_filter, padding=1)
+        laplacian_per_channel.append(laplacian)
+    
+    # Stack the results back together across channels
+    laplacian = torch.cat(laplacian_per_channel, dim=1)
+    return laplacian
+
+
+
+# Function to apply the sharpening kernel using conv2d
+def sharpen(input_image):
+    # Apply the sharpening kernel using conv2d
+    # 'groups' is set to the number of channels to apply the filter across all channels
+        
+        # Define the sharpening kernel
+    sharpen_kernel = torch.tensor([[0, -1, 0],
+                                [-1, 5, -1],
+                                [0, -1, 0]], dtype=input_image.dtype)
+
+    # Reshape the kernel to match the input dimensions (for conv2d)
+    sharpen_kernel = sharpen_kernel.view(1, 1, 3, 3).to(input_image.device)
+    return F.conv2d(input_image, sharpen_kernel.repeat(input_image.shape[1], 1, 1, 1), padding=1, groups=input_image.shape[1])
+
 
 
 @torch.no_grad()
 def sample_RES_implicit_advanced_RF_PC_3rd_order(
     model, x, sigmas, extra_args=None, callback=None, disable=None, c2=0.5, c3=1.5, auto_c2=False, eta1=0.0, eta2=0.0, eta3=0.0, eta_var1=0.0, eta_var2=0.0, eta_var3=0.0, s_noise1=1.0, s_noise2=1.0, s_noise3=0.0,
     noise_sampler=None, noise_sampler_type="gaussian", noise_mode="hard", k=1.0, scale=0.1, 
-    alpha=None, iter_c2=0, iter_c3=0, iter=3, tol=1e-5, reverse_weight_c2=0.0, reverse_weight_c3=0.0, reverse_weight=0.0,):
+    alpha=None, iter_c2=0, iter_c3=0, iter=3, tol=1e-5, reverse_weight_c2=0.0, reverse_weight_c3=0.0, reverse_weight=0.0,
+    latent_guide=None, latent_guide_weight=0.0):
+
     
     extra_args = {} if extra_args is None else extra_args
     seed = extra_args.get("seed", None) + 1
@@ -1443,9 +1479,31 @@ def sample_RES_implicit_advanced_RF_PC_3rd_order(
     t_fn = lambda sigma: sigma.log().neg()
     vel, vel_2, denoised, denoised2, denoised1_2, h_last = None, None, None, None, None, None
     
+        
+
     if sigmas[-1] == 0.0:
         sigmas[-1] = min(sigmas[-2]**2, 0.00001)
     
+
+    """sigmas_reversed = torch.flip(sigmas, dims=[0])
+    
+    epsilons = []
+
+    for i in trange(len(sigmas_reversed) - 1, disable=disable):
+
+        denoised = model(latent_guide, sigmas_reversed[i] * s_in, **extra_args)
+        
+        epsilon = latent_guide - denoised
+        epsilons.append(epsilon)
+        d = to_d(latent_guide, sigmas_reversed[i], denoised)
+
+        if callback is not None:
+            callback({'x': latent_guide, 'i': i, 'sigma': sigmas_reversed[i], 'sigma_hat': sigmas_reversed[i], 'denoised': denoised, 'epsilon': epsilon})
+
+        dt = sigmas_reversed[i + 1] - sigmas_reversed[i]
+        latent_guide = latent_guide + d * dt"""
+        
+
     #t_fn = lambda sigma: 1/((sigma).exp()+1)
     #sigma_fn = lambda t: ((1-t)/t).log()
     
@@ -1457,11 +1515,11 @@ def sample_RES_implicit_advanced_RF_PC_3rd_order(
         
         sigma, sigma_next = sigmas[i], sigmas[i+1]
         
+        
         t = t_fn(sigma)
         t_next = t_fn(sigma_next)
         
         h = t_next - t
-        
         print("sigma_next: ", sigma_next)
         if h >= 0.9999:
             h = torch.tensor(0.9999).to(h.dtype).to(h.device) 
@@ -1481,7 +1539,6 @@ def sample_RES_implicit_advanced_RF_PC_3rd_order(
         if isinstance(model.inner_model.inner_model.model_sampling, comfy.model_sampling.CONST) == False and noise_mode == "hard":
             sigma = sigma * (1 + eta3)
         
-        
         t = t_fn(sigma)
         t_next = t_fn(sigma_down)
         
@@ -1498,11 +1555,13 @@ def sample_RES_implicit_advanced_RF_PC_3rd_order(
         sigma_2 = sigma_fn(s2)
         sigma_3 = sigma_fn(s3)
         
-        
-        
-        
         k1 = model(x, sigma * s_in, **extra_args)
-        x_2 = ((sigma_down/sigma)**c2)*x + h * (a21 * k1)
+        
+        if latent_guide is not None:
+            lg_weight = latent_guide_weight * sigma
+            k1 = lg_weight*latent_guide + (1-lg_weight)*k1
+        
+        x_2 = ((sigma_down/sigma)**c2)*x + h*(a21*k1)
         
         gc.collect()
         torch.cuda.empty_cache()
@@ -1511,7 +1570,7 @@ def sample_RES_implicit_advanced_RF_PC_3rd_order(
             time = sigmas[i] / sigma_max
             
             k1_new = model(x_2, sigma_2 * s_in, **extra_args)
-            x_2_new = ((sigma_down/sigma)**c2)*x + h * (a21 * k1_new)
+            x_2_new = ((sigma_down/sigma)**c2)*x + h*(a21*k1_new)
             
             error = torch.norm(x_2_new - x_2)
             print(f"Iteration {iteration + 1}, Error: {error.item()}")
@@ -1523,7 +1582,7 @@ def sample_RES_implicit_advanced_RF_PC_3rd_order(
                 break
             
             if reverse_weight_c2 > 0.0:
-                x_reverse_new = (x_2 - h * (a21 * k1_new)) / ((sigma_down/sigma)**c2)
+                x_reverse_new = (x_2 - h*(a21*k1_new)) / ((sigma_down/sigma)**c2)
                 x = reverse_weight_c2 * x_reverse_new + (1-reverse_weight_c2) * x
 
             x_2 = x_2_new
@@ -1536,8 +1595,11 @@ def sample_RES_implicit_advanced_RF_PC_3rd_order(
         x_2 = alpha_ratio_2 * x_2 + noise_sampler(sigma=sigma, sigma_next=sigma_2) * s_noise1 * su_2
         
         k2 = model(x_2, sigma_2 * s_in, **extra_args)
-        x_3 = ((sigma_down/sigma)**c3)*x + h * (a31 * k1 + a32 * k2)
         
+        if latent_guide is not None:
+            lg_weight = latent_guide_weight * sigma
+            k2 = lg_weight*latent_guide + (1-lg_weight)*k2
+        x_3 = ((sigma_down/sigma)**c3)*x + h*(a31*k1 + a32*k2)
         
         gc.collect()
         torch.cuda.empty_cache()
@@ -1546,7 +1608,7 @@ def sample_RES_implicit_advanced_RF_PC_3rd_order(
             time = sigmas[i] / sigma_max
             
             k2_new = model(x_3, sigma_3 * s_in, **extra_args)
-            x_3_new = ((sigma_down/sigma)**c3)*x + h * (a31 * k1 + a32 * k2_new)
+            x_3_new = ((sigma_down/sigma)**c3)*x + h*(a31*k1 + a32*k2_new)
             
             error = torch.norm(x_3_new - x_3)
             print(f"Iteration {iteration + 1}, Error: {error.item()}")
@@ -1558,8 +1620,8 @@ def sample_RES_implicit_advanced_RF_PC_3rd_order(
                 break
             
             if reverse_weight_c3 > 0.0:
-                x_reverse_new = (x_3 - h * (a31 * k1 + a32 * k2_new)) / ((sigma_down/sigma)**c3)
-                x = reverse_weight_c3 * x_reverse_new + (1-reverse_weight_c3) * x
+                x_reverse_new = (x_3 - h*(a31*k1 + a32*k2_new)) / ((sigma_down/sigma)**c3)
+                x = reverse_weight_c3*x_reverse_new + (1-reverse_weight_c3)*x
 
             x_3 = x_3_new 
             k2 = k2_new
@@ -1571,8 +1633,11 @@ def sample_RES_implicit_advanced_RF_PC_3rd_order(
         x_3 = alpha_ratio_3 * x_3 + noise_sampler(sigma=sigma, sigma_next=sigma_3) * s_noise2 * su_3
 
         k3 = model(x_3, sigma_3 * s_in, **extra_args)
-        x_next =  ((sigma_down/sigma))*x + h * (b1 * k1 + b2 * k2 + b3 * k3)
-            
+        if latent_guide is not None:
+            lg_weight = latent_guide_weight * sigma
+            k3 = lg_weight*latent_guide + (1-lg_weight)*k3
+        x_next =  ((sigma_down/sigma))*x + h*(b1*k1 + b2*k2 + b3*k3)
+        
         gc.collect()
         torch.cuda.empty_cache()
 
@@ -1580,7 +1645,7 @@ def sample_RES_implicit_advanced_RF_PC_3rd_order(
             time = sigmas[i] / sigma_max
 
             k3_new = model(x_next, sigma_down * s_in, **extra_args)
-            x_next_new = ((sigma_down/sigma))*x + h * (b1 * k1 + b2 * k2 + b3 * k3_new)
+            x_next_new = ((sigma_down/sigma))*x + h*(b1*k1 + b2*k2 + b3*k3_new)
             
             error = torch.norm(x_next_new - x_next)
             print(f"Iteration {iteration + 1}, Error: {error.item()}")
@@ -1592,8 +1657,8 @@ def sample_RES_implicit_advanced_RF_PC_3rd_order(
                 break
             
             if reverse_weight > 0.0:
-                x_reverse_new = (x_next - h * (b1 * k1 + b2 * k2 + b3 * k3_new)) / ((sigma_down/sigma))
-                x = reverse_weight * x_reverse_new + (1-reverse_weight) * x
+                x_reverse_new = (x_next - h*(b1*k1 + b2*k2 + b3*k3_new)) / ((sigma_down/sigma))
+                x = reverse_weight*x_reverse_new + (1-reverse_weight)*x
 
             x_next = x_next_new 
             k3 = k3_new
@@ -1604,8 +1669,39 @@ def sample_RES_implicit_advanced_RF_PC_3rd_order(
         x = x_next
         h_last = h
         
+        
+        
+        # Step 2: Compute the Laplacian of the denoised latent to detect sharp/blurred regions
+        """laplacian = compute_laplacian(k3_new)
+        
+        # Step 3: Normalize Laplacian to create a mask (higher values in blurry regions)
+        blur_mask = 1 - torch.clamp(laplacian / laplacian.max(), 0, 1)  # Inverted Laplacian for mask (blurry regions get higher values)
+
+
+        noise = noise_sampler(sigma=sigma, sigma_next=sigma_next) * s_noise3 * sigma_up
+
+        # Step 4: Adjust denoising using the mask
+        # You can now apply the mask to adjust how much noise to remove in each region
+        epsilon = x_next - k3_new
+        adjusted_epsilon = epsilon * blur_mask  # Apply the mask
+
+        # Step 5: Normalize noise removal to ensure total noise removed remains the same
+        # Calculate the total adjustment factor based on the average mask value
+        mask_avg = blur_mask.mean()
+        noise *= (1.0 / mask_avg)  # Compensate for the masking
+
+        # Step 6: Compute the new latent by removing noise according to the adjusted epsilon
+        #k3_new = x - (adjusted_epsilon*0.1 + 0.9*epsilon)
+        #k3_new = x - adjusted_epsilon
+        
+        x = alpha_ratio * x + noise"""
+                
         #if sigmas[i + 1] > 0 and eta > 0 and isinstance(model.inner_model.inner_model.model_sampling, comfy.model_sampling.CONST) == True:
         x = alpha_ratio * x + noise_sampler(sigma=sigma, sigma_next=sigma_next) * s_noise3 * sigma_up
+        
+        #epsilon = epsilons.pop()
+        #epsilon = (epsilon - epsilon.mean()) / epsilon.std()
+        #x = alpha_ratio * x + epsilon * s_noise3 * sigma_up
 
         #denoised_next = denoised if denoised_next is None else denoised_next
         if callback is not None:
@@ -1615,74 +1711,6 @@ def sample_RES_implicit_advanced_RF_PC_3rd_order(
         torch.cuda.empty_cache()
 
     return x
-
-
-
-
-
-"""
-def _refined_exp_sosu_step_RF_third_order(
-    model, x, sigma, sigma_next, c2=0.5, c3=2./3., eta1=0.0, eta2=0.0, eta_var1=0.0, eta_var2=0.0, noise_sampler=None, noise_mode="hard", order=3,
-    s_noise1=1.0, s_noise2=1.0, s_noise3=1.0, denoised1_2_3=None, h_last=None, auto_c2=False,
-    extra_args: Dict[str, Any] = {},
-    pbar: Optional[tqdm] = None,
-    momentum=0.0, vel=None, vel_2=None, vel_3=None,
-    time=None,
-    t_fn_formula="", sigma_fn_formula="",
-    simple_phi_calc=False,
-):
-    t_fn = lambda sigma: sigma.log().neg() if not t_fn_formula else eval(f"lambda sigma: {t_fn_formula}", {"torch": torch})
-    sigma_fn = lambda t: t.neg().exp() if not sigma_fn_formula else eval(f"lambda t: {sigma_fn_formula}", {"torch": torch})
-
-    t_fn = eval(f"lambda sigma: {t_fn_formula}", {"torch": torch}) if t_fn_formula else (lambda sigma: sigma.log().neg())
-    sigma_fn = eval(f"lambda t: {sigma_fn_formula}", {"torch": torch}) if sigma_fn_formula else (lambda t: t.neg().exp())
-
-    t = t_fn(sigma)
-    t_next = t_fn(sigma_next)
-    
-    h = t_next - t
-    
-    print("sigma_next: ", sigma_next)
-    if h >= 0.9999:
-      h = torch.tensor(0.9999).to(h.dtype).to(h.device) 
-      t_next = h + t
-      sigma_next = sigma_fn(t_next)
-      
-      
-
-    s2 = t + h * c2
-    s3 = t + h * c3
-    sigma_2 = sigma_fn(s2)
-    sigma_3 = sigma_fn(s3)
-    
-    a21, a31, a32, b1, b2, b3 = calculate_third_order_coeffs(h, c2, c3)
-    print("sigmas: ", sigma.item(), sigma_next.item(), sigma_2.item(), sigma_3.item())
-    
-    s_in = x.new_ones([x.shape[0]])
-    
-    k1 = denoised1 = model(x, sigma * s_in, **extra_args)
-    x_2 = torch.exp(-c2*h)*x + h * (a21 * k1)
-    #x_2 = ((sd/sigma)**c2)*x + h * (a21 * k1)
-    
-    k2 = denoised2 = model(x_2, sigma_2 * s_in, **extra_args)
-    x_3 = torch.exp(-c3*h)*x + h * (a31 * k1 + a32 * k2)
-    #x_3 = ((sd/sigma)**c3)*x + h * (a31 * k1 + a32 * k2)
-
-    k3 = denoised3 = model(x_3, sigma_3 * s_in, **extra_args)
-    x_next = torch.exp(-h)*x + h * (b1 * k1 + b2 * k2 + b3 * k3)
-    #x_next = ((sd/sigma))*x + h * (b1 * k1 + b2 * k2 + b3 * k3)
-
-    #x_next = alpha_ratio * x_next + noise_sampler(sigma=sigma, sigma_next=sigma_next) * s_noise2 * su
-
-    gc.collect()
-    torch.cuda.empty_cache()
-    if pbar is not None:
-        pbar.update(1.0)
-
-    denoised1_2_3 = (b1 * k1 + b2 * k2 + b3 * k3)
-    return x_next, denoised1, denoised2, denoised3, denoised1_2_3, vel, vel_2, vel_3, h, sigma_next"""
-
-
 
 
 
