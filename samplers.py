@@ -961,7 +961,9 @@ class SamplerRES3_Implicit:
                      "s_noise3": ("FLOAT", {"default": 1.0, "min": -100.0, "max": 100.0, "step":0.01, "round": False}),
                      "alpha": ("FLOAT", {"default": 0.0, "min": -10000.0, "max": 10000.0, "step":0.1, "round": False}),
                      "k": ("FLOAT", {"default": 1.0, "min": -10000.0, "max": 10000.0, "step":2.0, "round": False}),
-                     "noise_sampler_type": (NOISE_GENERATOR_NAMES, {"default": "brownian"}),
+                    "noise_sampler_type1": (NOISE_GENERATOR_NAMES, {"default": "brownian"}),
+                    "noise_sampler_type2": (NOISE_GENERATOR_NAMES, {"default": "brownian"}),
+                    "noise_sampler_type3": (NOISE_GENERATOR_NAMES, {"default": "brownian"}),
                      "noise_mode": (["hard", "soft", "softer"], {"default": 'hard'}), 
                      "c2": ("FLOAT", {"default": 0.5, "min": -100.0, "max": 100.0, "step":0.01, "round": False}),
                      "c3": ("FLOAT", {"default": 1.0, "min": -100.0, "max": 100.0, "step":0.01, "round": False}),
@@ -990,7 +992,7 @@ class SamplerRES3_Implicit:
 
     FUNCTION = "get_sampler"
 
-    def get_sampler(self, eta1, eta2, eta3, eta_var1, eta_var2, eta_var3, s_noise1, s_noise2, s_noise3, c2, c3, auto_c2, alpha, k, noise_sampler_type, noise_mode, alphas=None, iter_c2=0, iter_c3=0, iter=3, reverse_weight_c2=0.0, reverse_weight_c3=0.0, reverse_weight=0.0, tol=0.1, latent_guide=None, latent_guide_weight=0.0, 
+    def get_sampler(self, eta1, eta2, eta3, eta_var1, eta_var2, eta_var3, s_noise1, s_noise2, s_noise3, c2, c3, auto_c2, alpha, k, noise_sampler_type1, noise_sampler_type2, noise_sampler_type3,  noise_mode, alphas=None, iter_c2=0, iter_c3=0, iter=3, reverse_weight_c2=0.0, reverse_weight_c3=0.0, reverse_weight=0.0, tol=0.1, latent_guide=None, latent_guide_weight=0.0, 
                     latent_guide_weights=None,):            
                     #guides=None,):
         
@@ -1027,7 +1029,7 @@ class SamplerRES3_Implicit:
         alphas = initialize_or_scale(alphas, alpha, steps)"""
 
 
-        sampler = comfy.samplers.ksampler("RES_implicit_advanced_RF_PC_3rd_order", {"eta1": eta1, "eta2": eta2, "eta3": eta3, "eta_var1": eta_var1, "eta_var2": eta_var2, "eta_var3": eta_var3, "s_noise1": s_noise1, "s_noise2": s_noise2, "s_noise3": s_noise3, "c2": c2, "c3": c3, "auto_c2": auto_c2, "alpha": alphas, "k": k, "noise_sampler_type": noise_sampler_type, "noise_mode": noise_mode,
+        sampler = comfy.samplers.ksampler("RES_implicit_advanced_RF_PC_3rd_order", {"eta1": eta1, "eta2": eta2, "eta3": eta3, "eta_var1": eta_var1, "eta_var2": eta_var2, "eta_var3": eta_var3, "s_noise1": s_noise1, "s_noise2": s_noise2, "s_noise3": s_noise3, "c2": c2, "c3": c3, "auto_c2": auto_c2, "alpha": alphas, "k": k, "noise_sampler_type1": noise_sampler_type1, "noise_sampler_type2": noise_sampler_type2,"noise_sampler_type3": noise_sampler_type3, "noise_mode": noise_mode,
                                                                           "iter_c2": iter_c2, "iter_c3": iter_c3, "iter": iter, "reverse_weight_c2": reverse_weight_c2, "reverse_weight_c3": reverse_weight_c3, "reverse_weight": reverse_weight, "tol":tol, "latent_guide": latent_guide, "latent_guide_weight": latent_guide_weight, "latent_guide_weights": latent_guide_weights,
                                                                           
                                                                           })

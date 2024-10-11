@@ -1462,7 +1462,7 @@ from .refined_exp_solver import hard_light_blend
 @torch.no_grad()
 def sample_RES_implicit_advanced_RF_PC_3rd_order(
     model, x, sigmas, extra_args=None, callback=None, disable=None, c2=0.5, c3=1.5, auto_c2=False, eta1=0.0, eta2=0.0, eta3=0.0, eta_var1=0.0, eta_var2=0.0, eta_var3=0.0, s_noise1=1.0, s_noise2=1.0, s_noise3=0.0,
-    noise_sampler=None, noise_sampler_type="gaussian", noise_mode="hard", k=1.0, scale=0.1, 
+    noise_sampler=None, noise_sampler_type1="gaussian", noise_sampler_type2="gaussian", noise_sampler_type3="gaussian",noise_mode="hard", k=1.0, scale=0.1, 
     alpha=None, iter_c2=0, iter_c3=0, iter=3, tol=1e-5, reverse_weight_c2=0.0, reverse_weight_c3=0.0, reverse_weight=0.0,
     latent_guide=None, latent_guide_weight=0.0, latent_guide_weights=None):
 
@@ -1473,7 +1473,9 @@ def sample_RES_implicit_advanced_RF_PC_3rd_order(
     s_in = x.new_ones([x.shape[0]])
     alpha = torch.zeros_like(sigmas) if alpha is None else alpha
     sigma_min, sigma_max = sigmas[sigmas > 0].min(), sigmas.max()
-    noise_sampler = NOISE_GENERATOR_CLASSES.get(noise_sampler_type)(x=x, seed=seed, sigma_min=sigma_min, sigma_max=sigma_max)
+    noise_sampler1 = NOISE_GENERATOR_CLASSES.get(noise_sampler_type1)(x=x, seed=seed, sigma_min=sigma_min, sigma_max=sigma_max)
+    noise_sampler2 = NOISE_GENERATOR_CLASSES.get(noise_sampler_type2)(x=x, seed=seed, sigma_min=sigma_min, sigma_max=sigma_max)
+    noise_sampler3 = NOISE_GENERATOR_CLASSES.get(noise_sampler_type3)(x=x, seed=seed, sigma_min=sigma_min, sigma_max=sigma_max)
     
     sigma_fn = lambda t: t.neg().exp()
     t_fn = lambda sigma: sigma.log().neg()
@@ -1508,10 +1510,18 @@ def sample_RES_implicit_advanced_RF_PC_3rd_order(
     #sigma_fn = lambda t: ((1-t)/t).log()
     
     for i in trange(len(sigmas) - 1, disable=disable):
-        if noise_sampler_type == "fractal":
-            noise_sampler.alpha = alpha[i]
-            noise_sampler.k = k
-            noise_sampler.scale = scale
+        if noise_sampler_type1 == "fractal":
+            noise_sampler1.alpha = alpha[i]
+            noise_sampler1.k = k
+            noise_sampler1.scale = scale
+        if noise_sampler_type2 == "fractal":
+            noise_sampler2.alpha = alpha[i]
+            noise_sampler2.k = k
+            noise_sampler2.scale = scale
+        if noise_sampler_type3 == "fractal":
+            noise_sampler3.alpha = alpha[i]
+            noise_sampler3.k = k
+            noise_sampler3.scale = scale
         
         sigma, sigma_next = sigmas[i], sigmas[i+1]
         
@@ -1594,7 +1604,7 @@ def sample_RES_implicit_advanced_RF_PC_3rd_order(
             torch.cuda.empty_cache()
 
         su_2, sd_2, alpha_ratio_2 = get_res4lyf_step(sigma, sigma_next, eta1, eta_var1, noise_mode)
-        x_2 = alpha_ratio_2 * x_2 + noise_sampler(sigma=sigma, sigma_next=sigma_2) * s_noise1 * su_2
+        x_2 = alpha_ratio_2 * x_2 + noise_sampler1(sigma=sigma, sigma_next=sigma_2) * s_noise1 * su_2
         
         k2 = model(x_2, sigma_2 * s_in, **extra_args)
         
@@ -1634,7 +1644,7 @@ def sample_RES_implicit_advanced_RF_PC_3rd_order(
             torch.cuda.empty_cache()
             
         su_3, sd_3, alpha_ratio_3 = get_res4lyf_step(sigma, sigma_next, eta2, eta_var2, noise_mode)
-        x_3 = alpha_ratio_3 * x_3 + noise_sampler(sigma=sigma, sigma_next=sigma_3) * s_noise2 * su_3
+        x_3 = alpha_ratio_3 * x_3 + noise_sampler2(sigma=sigma, sigma_next=sigma_3) * s_noise2 * su_3
 
         k3 = model(x_3, sigma_3 * s_in, **extra_args)
         if latent_guide is not None:
@@ -1707,7 +1717,7 @@ def sample_RES_implicit_advanced_RF_PC_3rd_order(
         x = alpha_ratio * x + noise"""
                 
         #if sigmas[i + 1] > 0 and eta > 0 and isinstance(model.inner_model.inner_model.model_sampling, comfy.model_sampling.CONST) == True:
-        x = alpha_ratio * x + noise_sampler(sigma=sigma, sigma_next=sigma_next) * s_noise3 * sigma_up
+        x = alpha_ratio * x + noise_sampler3(sigma=sigma, sigma_next=sigma_next) * s_noise3 * sigma_up
         
         #epsilon = epsilons.pop()
         #epsilon = (epsilon - epsilon.mean()) / epsilon.std()
