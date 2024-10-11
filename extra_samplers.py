@@ -1464,7 +1464,7 @@ def sample_RES_implicit_advanced_RF_PC_3rd_order(
     model, x, sigmas, extra_args=None, callback=None, disable=None, c2=0.5, c3=1.5, auto_c2=False, eta1=0.0, eta2=0.0, eta3=0.0, eta_var1=0.0, eta_var2=0.0, eta_var3=0.0, s_noise1=1.0, s_noise2=1.0, s_noise3=0.0,
     noise_sampler=None, noise_sampler_type="gaussian", noise_mode="hard", k=1.0, scale=0.1, 
     alpha=None, iter_c2=0, iter_c3=0, iter=3, tol=1e-5, reverse_weight_c2=0.0, reverse_weight_c3=0.0, reverse_weight=0.0,
-    latent_guide=None, latent_guide_weight=0.0):
+    latent_guide=None, latent_guide_weight=0.0, latent_guide_weights=None):
 
     
     extra_args = {} if extra_args is None else extra_args
@@ -1558,7 +1558,7 @@ def sample_RES_implicit_advanced_RF_PC_3rd_order(
         k1 = model(x, sigma * s_in, **extra_args)
         
         if latent_guide is not None:
-            lg_weight = latent_guide_weight * sigma
+            lg_weight = latent_guide_weights[i] * sigma
             #k1 = lg_weight*latent_guide + (1-lg_weight)*k1            
             hard_light_blend_1 = hard_light_blend(latent_guide, k1)
             k1 = k1 - lg_weight * sigma_next * k1  + (lg_weight * sigma_next * hard_light_blend_1)
@@ -1599,7 +1599,7 @@ def sample_RES_implicit_advanced_RF_PC_3rd_order(
         k2 = model(x_2, sigma_2 * s_in, **extra_args)
         
         if latent_guide is not None:
-            lg_weight = latent_guide_weight * sigma
+            lg_weight = latent_guide_weights[i] * sigma
             #k2 = lg_weight*latent_guide + (1-lg_weight)*k2
             hard_light_blend_1 = hard_light_blend(latent_guide, k2)
             k2 = k2 - lg_weight * sigma_next * k2  + (lg_weight * sigma_next * hard_light_blend_1)
@@ -1638,7 +1638,7 @@ def sample_RES_implicit_advanced_RF_PC_3rd_order(
 
         k3 = model(x_3, sigma_3 * s_in, **extra_args)
         if latent_guide is not None:
-            lg_weight = latent_guide_weight * sigma
+            lg_weight = latent_guide_weights[i] * sigma
             #k3 = lg_weight*latent_guide + (1-lg_weight)*k3
             hard_light_blend_1 = hard_light_blend(latent_guide, k3)
             k3 = k3 - lg_weight * sigma_next * k3  + (lg_weight * sigma_next * hard_light_blend_1)
