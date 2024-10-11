@@ -511,6 +511,7 @@ class SharkSampler:
         return {"required":
                     {"model": ("MODEL",),
                     "add_noise": ("BOOLEAN", {"default": True}),
+                    "noise_level": ("FLOAT", {"default": 1.0, "min": -10000.0, "max": 10000.0, "step":0.1, "round": 0.01}),
                     "noise_is_latent": ("BOOLEAN", {"default": False}),
                     "noise_type": (NOISE_GENERATOR_NAMES, ),
                     "alpha": ("FLOAT", {"default": 1.0, "min": -10000.0, "max": 10000.0, "step":0.1, "round": 0.01}),
@@ -535,7 +536,7 @@ class SharkSampler:
 
     CATEGORY = "sampling/custom_sampling"
     
-    def main(self, model, add_noise, noise_is_latent, noise_type, noise_seed, cfg, alpha, k, positive, negative, sampler, sigmas, latent_image, latent_noise=None): 
+    def main(self, model, add_noise, noise_level, noise_is_latent, noise_type, noise_seed, cfg, alpha, k, positive, negative, sampler, sigmas, latent_image, latent_noise=None): 
             latent = latent_image
             latent_image = latent["samples"]
 
@@ -546,6 +547,7 @@ class SharkSampler:
             elif latent_noise is None:
                 batch_inds = latent["batch_index"] if "batch_index" in latent else None
                 noise = prepare_noise(latent_image, noise_seed, noise_type, batch_inds, alpha, k)
+                
             else:
                 noise = latent_noise["samples"]
 
@@ -553,6 +555,7 @@ class SharkSampler:
                 noise += latent_image.cpu()
                 noise.sub_(noise.mean()).div_(noise.std())
 
+            noise *= noise_level
             noise_mask = latent["noise_mask"] if "noise_mask" in latent else None
 
             x0_output = {}

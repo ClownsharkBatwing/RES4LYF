@@ -1532,7 +1532,7 @@ def sample_RES_implicit_advanced_RF_PC_3rd_order(
         sigma, sigma_next = sigmas[i], sigmas[i+1]
         
         
-        t = t_fn(sigma)
+        t      = t_fn(sigma)
         t_next = t_fn(sigma_next)
         
         h = t_next - t
@@ -1544,18 +1544,16 @@ def sample_RES_implicit_advanced_RF_PC_3rd_order(
         
         s2 = t + h * c2
         s3 = t + h * c3
-        sigma_2 = sigma_fn(s2)
-        sigma_3 = sigma_fn(s3)
         
         a21, a31, a32, b1, b2, b3 = calculate_third_order_coeffs(h, c2, c3)
-        print("sigmas: ", sigma.item(), sigma_next.item(), sigma_2.item(), sigma_3.item())
-    
-        #sigma_up, sigma_down, alpha_ratio = get_res4lyf_step(sigma, sigma_next, eta, eta_var, noise_mode)
+
         sigma_up, sigma_down, alpha_ratio = get_res4lyf_step_with_model(model, sigma, sigma_next, eta3, eta_var3, noise_mode)
+            
+        
         if isinstance(model.inner_model.inner_model.model_sampling, comfy.model_sampling.CONST) == False and noise_mode == "hard":
             sigma = sigma * (1 + eta3)
         
-        t = t_fn(sigma)
+        t      = t_fn(sigma)
         t_next = t_fn(sigma_down)
         
         h = t_next - t
@@ -1570,7 +1568,22 @@ def sample_RES_implicit_advanced_RF_PC_3rd_order(
         s3 = t + h * c3
         sigma_2 = sigma_fn(s2)
         sigma_3 = sigma_fn(s3)
+
+
+        su_2, sd_2, alpha_ratio_2 = get_res4lyf_step(sigma, sigma_next, eta1, eta_var1, noise_mode)
+        su_3, sd_3, alpha_ratio_3 = get_res4lyf_step(sigma, sigma_next, eta2, eta_var2, noise_mode)
         
+        print("sigma_down orig: ", sigma_down.item())
+        su_total = sigma_up #+ su_2 + su_3
+        
+        #s_d = (-sigma_next**2 + su_total**2 + sigma_next * torch.sqrt((su_total+sigma_next)*(sigma_next - su_total)) - torch.sqrt((su_total+sigma_next)*(sigma_next-su_total)) )   /   (-2*sigma_next + 1 + su_total**2) #values end up being > 1.0
+        s_d = (-sigma_next**2 + su_total**2 - sigma_next * torch.sqrt((su_total+sigma_next)*(sigma_next - su_total)) + torch.sqrt((su_total+sigma_next)*(sigma_next-su_total)) )   /   (-2*sigma_next + 1 + su_total**2) #this one works and should be very general. this assumes alpha_ratio = (1 - sigma_down)/(1 - sigma_next)
+        s_u = torch.sqrt(sigma_next**2 - 2*sigma_down*sigma_next**2 + sigma_next**2 * sigma_down**2 - sigma_down**2 + 2*sigma_down**2 * sigma_next - sigma_down**2 * sigma_next**2 ) / (1 - sigma_down)
+        
+        print(su_total.item(), sigma_next.item(), sigma_down.item(), s_d.item(), s_u.item())
+        sigma_down = s_d
+        
+
         k1 = model(x, sigma * s_in, **extra_args)
         
         if latent_guide is not None:
@@ -1579,6 +1592,7 @@ def sample_RES_implicit_advanced_RF_PC_3rd_order(
             hard_light_blend_1 = hard_light_blend(latent_guide, k1)
             k1 = k1 - lg_weight * sigma_next * k1  + (lg_weight * sigma_next * hard_light_blend_1 * mask)
         
+        #su_2, sd_2, alpha_ratio_2 = get_res4lyf_step(sigma, sigma_next, eta1, eta_var1, noise_mode)
         x_2 = ((sigma_down/sigma)**c2)*x + h*(a21*k1)
         
         gc.collect()
@@ -1612,6 +1626,8 @@ def sample_RES_implicit_advanced_RF_PC_3rd_order(
         su_2, sd_2, alpha_ratio_2 = get_res4lyf_step(sigma, sigma_next, eta1, eta_var1, noise_mode)
         x_2 = alpha_ratio_2 * x_2 + noise_sampler1(sigma=sigma, sigma_next=sigma_2) * s_noise1 * su_2
         
+        
+        
         k2 = model(x_2, sigma_2 * s_in, **extra_args)
         
         if latent_guide is not None:
@@ -1619,6 +1635,8 @@ def sample_RES_implicit_advanced_RF_PC_3rd_order(
             #k2 = lg_weight*latent_guide + (1-lg_weight)*k2
             hard_light_blend_1 = hard_light_blend(latent_guide, k2)
             k2 = k2 - lg_weight * sigma_next * k2  + (lg_weight * sigma_next * hard_light_blend_1 * mask)
+            
+        #su_3, sd_3, alpha_ratio_3 = get_res4lyf_step(sigma, sigma_next, eta2, eta_var2, noise_mode)
         x_3 = ((sigma_down/sigma)**c3)*x + h*(a31*k1 + a32*k2)
         
         gc.collect()
@@ -1652,16 +1670,15 @@ def sample_RES_implicit_advanced_RF_PC_3rd_order(
         su_3, sd_3, alpha_ratio_3 = get_res4lyf_step(sigma, sigma_next, eta2, eta_var2, noise_mode)
         x_3 = alpha_ratio_3 * x_3 + noise_sampler2(sigma=sigma, sigma_next=sigma_3) * s_noise2 * su_3
 
+
+
         k3 = model(x_3, sigma_3 * s_in, **extra_args)
         if latent_guide is not None:
             lg_weight = latent_guide_weights[i] * sigma
             #k3 = lg_weight*latent_guide + (1-lg_weight)*k3
             hard_light_blend_1 = hard_light_blend(latent_guide, k3)
             k3 = k3 - lg_weight * sigma_next * k3  + (lg_weight * sigma_next * hard_light_blend_1 * mask)
-            
 
-      
-      
         x_next =  ((sigma_down/sigma))*x + h*(b1*k1 + b2*k2 + b3*k3)
         
         gc.collect()
