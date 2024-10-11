@@ -1464,7 +1464,7 @@ def sample_RES_implicit_advanced_RF_PC_3rd_order(
     model, x, sigmas, extra_args=None, callback=None, disable=None, c2=0.5, c3=1.5, auto_c2=False, eta1=0.0, eta2=0.0, eta3=0.0, eta_var1=0.0, eta_var2=0.0, eta_var3=0.0, s_noise1=1.0, s_noise2=1.0, s_noise3=0.0,
     noise_sampler=None, noise_sampler_type1="gaussian", noise_sampler_type2="gaussian", noise_sampler_type3="gaussian",noise_mode="hard", k=1.0, scale=0.1, 
     alpha=None, iter_c2=0, iter_c3=0, iter=3, tol=1e-5, reverse_weight_c2=0.0, reverse_weight_c3=0.0, reverse_weight=0.0,
-    latent_guide=None, latent_guide_weight=0.0, latent_guide_weights=None):
+    latent_guide=None, latent_guide_weight=0.0, latent_guide_weights=None, mask=None):
 
     
     extra_args = {} if extra_args is None else extra_args
@@ -1481,7 +1481,13 @@ def sample_RES_implicit_advanced_RF_PC_3rd_order(
     t_fn = lambda sigma: sigma.log().neg()
     vel, vel_2, denoised, denoised2, denoised1_2, h_last = None, None, None, None, None, None
     
-        
+    if mask is None:
+        mask = torch.ones_like(x)
+    else:
+        mask = mask.unsqueeze(1)
+        mask = mask.repeat(1, 16, 1, 1) 
+        mask = F.interpolate(mask, size=(x.shape[2], x.shape[3]), mode='bilinear', align_corners=False)
+        mask = mask.to(x.dtype).to(x.device)
 
     if sigmas[-1] == 0.0:
         sigmas[-1] = min(sigmas[-2]**2, 0.00001)
@@ -1571,7 +1577,7 @@ def sample_RES_implicit_advanced_RF_PC_3rd_order(
             lg_weight = latent_guide_weights[i] * sigma
             #k1 = lg_weight*latent_guide + (1-lg_weight)*k1            
             hard_light_blend_1 = hard_light_blend(latent_guide, k1)
-            k1 = k1 - lg_weight * sigma_next * k1  + (lg_weight * sigma_next * hard_light_blend_1)
+            k1 = k1 - lg_weight * sigma_next * k1  + (lg_weight * sigma_next * hard_light_blend_1 * mask)
         
         x_2 = ((sigma_down/sigma)**c2)*x + h*(a21*k1)
         
@@ -1612,7 +1618,7 @@ def sample_RES_implicit_advanced_RF_PC_3rd_order(
             lg_weight = latent_guide_weights[i] * sigma
             #k2 = lg_weight*latent_guide + (1-lg_weight)*k2
             hard_light_blend_1 = hard_light_blend(latent_guide, k2)
-            k2 = k2 - lg_weight * sigma_next * k2  + (lg_weight * sigma_next * hard_light_blend_1)
+            k2 = k2 - lg_weight * sigma_next * k2  + (lg_weight * sigma_next * hard_light_blend_1 * mask)
         x_3 = ((sigma_down/sigma)**c3)*x + h*(a31*k1 + a32*k2)
         
         gc.collect()
@@ -1651,7 +1657,7 @@ def sample_RES_implicit_advanced_RF_PC_3rd_order(
             lg_weight = latent_guide_weights[i] * sigma
             #k3 = lg_weight*latent_guide + (1-lg_weight)*k3
             hard_light_blend_1 = hard_light_blend(latent_guide, k3)
-            k3 = k3 - lg_weight * sigma_next * k3  + (lg_weight * sigma_next * hard_light_blend_1)
+            k3 = k3 - lg_weight * sigma_next * k3  + (lg_weight * sigma_next * hard_light_blend_1 * mask)
             
 
       
