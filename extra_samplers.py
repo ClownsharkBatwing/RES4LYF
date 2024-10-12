@@ -1428,32 +1428,24 @@ def sample_RES_implicit_advanced_RF_PC(
 
 
 def compute_laplacian(image):
-    # Laplacian filter (simple edge detection)
     laplacian_filter = torch.tensor([[0, 1, 0], [1, -4, 1], [0, 1, 0]], dtype=image.dtype, device=image.device).unsqueeze(0).unsqueeze(0)
     
-    # Apply Laplacian filter separately for each channel
     laplacian_per_channel = []
     for channel in range(image.shape[1]):
         laplacian = F.conv2d(image[:, channel:channel+1, :, :], laplacian_filter, padding=1)
         laplacian_per_channel.append(laplacian)
     
-    # Stack the results back together across channels
     laplacian = torch.cat(laplacian_per_channel, dim=1)
     return laplacian
 
 
 
-# Function to apply the sharpening kernel using conv2d
 def sharpen(input_image):
-    # Apply the sharpening kernel using conv2d
-    # 'groups' is set to the number of channels to apply the filter across all channels
-        
-        # Define the sharpening kernel
+
     sharpen_kernel = torch.tensor([[0, -1, 0],
                                 [-1, 5, -1],
                                 [0, -1, 0]], dtype=input_image.dtype)
 
-    # Reshape the kernel to match the input dimensions (for conv2d)
     sharpen_kernel = sharpen_kernel.view(1, 1, 3, 3).to(input_image.device)
     return F.conv2d(input_image, sharpen_kernel.repeat(input_image.shape[1], 1, 1, 1), padding=1, groups=input_image.shape[1])
 
