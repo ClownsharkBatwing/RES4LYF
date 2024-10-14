@@ -352,7 +352,8 @@ class GaussianNoiseGenerator(NoiseGenerator):
 
         noise = torch.randn(self.size, dtype=self.dtype, layout=self.layout, device=self.device, generator=self.generator)
 
-        return noise * self.std + self.mean
+        return (noise - noise.mean()) / noise.std()
+        #return noise * self.std + self.mean
 
 class LaplacianNoiseGenerator(NoiseGenerator):
     def __init__(self, x=None, size=None, dtype=None, layout=None, device=None, seed=42, generator=None, sigma_min=None, sigma_max=None, 

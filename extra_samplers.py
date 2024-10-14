@@ -1543,6 +1543,11 @@ def sample_RES_implicit_advanced_RF_PC(
     s_in = x.new_ones([x.shape[0]])
     alpha = torch.zeros_like(sigmas) if alpha is None else alpha
     sigma_min, sigma_max = sigmas[sigmas > 0].min(), sigmas.max()
+    
+    if isinstance(model.inner_model.inner_model.model_sampling, comfy.model_sampling.CONST):
+        sigma_max = torch.full_like(sigma_max, 1.0)
+        sigma_min = torch.full_like(sigma_min, min(sigma_min.item(), 0.00001))
+    
     noise_sampler = NOISE_GENERATOR_CLASSES.get(noise_sampler_type)(x=x, seed=seed, sigma_min=sigma_min, sigma_max=sigma_max)
     
     sigma_fn = lambda t: t.neg().exp()
@@ -1626,7 +1631,10 @@ def sample_RES_implicit_advanced_RF_PC(
 
             #x  = (x_new - (1 - sigma_next/sigma) * denoised_next) / (sigma_next/sigma) # projection back to x with alternative math
         su_2, sd_2, alpha_ratio_2 = get_res4lyf_step(sigma, sigma_next, eta1, eta_var1, noise_mode)
-        x_2 = alpha_ratio_2 * x_2 + noise_sampler(sigma=sigma, sigma_next=sigma_s) * s_noise1 * su_2
+        noise1 = noise_sampler(sigma=sigma, sigma_next=sigma_s)
+        noise1 = (noise1 - noise1.mean()) / noise1.std()
+        x_2 = alpha_ratio_2 * x_2 + noise1 * s_noise1 * su_2
+        #x_2 = alpha_ratio_2 * x_2 + noise_sampler(sigma=sigma, sigma_next=sigma_s) * s_noise1 * su_2
         
         denoised2 = model(x_2, sigma_s * s_in, **extra_args)
         x_next = (sigma_down/sigma)*x + h*(b1*denoised + b2*denoised2)
@@ -1686,7 +1694,10 @@ def sample_RES_implicit_advanced_RF_PC(
         h_last = h
         
         #if sigmas[i + 1] > 0 and eta > 0 and isinstance(model.inner_model.inner_model.model_sampling, comfy.model_sampling.CONST) == True:
-        x = alpha_ratio * x + noise_sampler(sigma=sigma, sigma_next=sigma_next) * s_noise2 * sigma_up
+        noise2 = noise_sampler(sigma=sigma, sigma_next=sigma_next)
+        noise2 = (noise2 - noise2.mean()) / noise2.std()
+        x = alpha_ratio * x + noise2 * s_noise2 * sigma_up
+        #x = alpha_ratio * x + noise_sampler(sigma=sigma, sigma_next=sigma_next) * s_noise2 * sigma_up
 
         denoised_next = denoised if denoised_next is None else denoised_next
         if callback is not None:
@@ -1746,7 +1757,6 @@ def sample_RES_implicit_advanced_RF_PC_3rd_order(
     noise_sampler1 = NOISE_GENERATOR_CLASSES.get(noise_sampler_type1)(x=x, seed=seed, sigma_min=sigma_min, sigma_max=sigma_max)
     noise_sampler2 = NOISE_GENERATOR_CLASSES.get(noise_sampler_type2)(x=x, seed=seed, sigma_min=sigma_min, sigma_max=sigma_max)
     noise_sampler3 = NOISE_GENERATOR_CLASSES.get(noise_sampler_type3)(x=x, seed=seed, sigma_min=sigma_min, sigma_max=sigma_max)
-    
     
     sigma_fn = lambda t: t.neg().exp()
     t_fn = lambda sigma: sigma.log().neg()
