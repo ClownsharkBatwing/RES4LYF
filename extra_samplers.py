@@ -126,13 +126,38 @@ def get_sigma_down_RF(sigma_next, eta):
 def get_sigma_up_RF(sigma_next, eta):
     return sigma_next * eta
 
-def get_ancestral_step_RF(sigma_next, eta):
+"""def get_ancestral_step_RF_maybe_works_with_variance_exploding(sigma_next, eta):
+    sigma_up = sigma_next * eta
+    eta_scaled = (1 - eta**2)**0.5
+    #sigma_down = (sigma_next * eta_scaled) / (1 - sigma_next + sigma_next * eta_scaled)
+    #alpha_ratio = (1 - sigma_next) + sigma_next * eta_scaled
+    #alpha_ratio = (1 - sigma_next) / (1 - sigma_down)
+    sigma_down = (sigma_next * eta_scaled)
+    alpha_ratio = 1.0
+    return sigma_up, sigma_down, alpha_ratio"""
+
+
+def get_ancestral_step_RF_correct_working(sigma_next, eta):
     sigma_up = sigma_next * eta
     eta_scaled = (1 - eta**2)**0.5
     sigma_down = (sigma_next * eta_scaled) / (1 - sigma_next + sigma_next * eta_scaled)
-    #alpha_ratio = (1 - sigma_next) + sigma_next * eta_scaled
-    alpha_ratio = (1 - sigma_next) / (1 - sigma_down)
+    alpha_ratio =                             1 - sigma_next + sigma_next * eta_scaled
+    #alpha_ratio = (1 - sigma_next) / (1 - sigma_down)
     return sigma_up, sigma_down, alpha_ratio
+
+
+
+def get_ancestral_step_RF(sigma_next, eta, sigma_max=1.0):
+    sigma_up = sigma_next * eta #or whatever the f
+    
+    sigma_signal = sigma_max - sigma_next
+    sigma_residual = torch.sqrt(sigma_next**2 - sigma_up**2)
+
+    alpha_ratio = sigma_signal + sigma_residual
+    sigma_down = sigma_residual / alpha_ratio
+    
+    return sigma_up, sigma_down, alpha_ratio
+
 
 
 
@@ -1254,7 +1279,255 @@ def sample_RES_implicit_advanced_RF(
     return x
 
 
+import torch.fft
 
+def frequency_separation_noise_fft(noise, alpha=0.5, cutoff_radius=30):
+    """
+    Separates the noise into low and high-frequency components using a Fourier transform on PyTorch tensors,
+    applies a single weighting factor between the low and high frequencies, and returns the adjusted noise.
+
+    Parameters:
+    - noise: The input noise tensor to be separated (shape [batch, channels, height, width] or [height, width]).
+    - alpha: A scalar weight to apply to the low-frequency components. (default 0.5).
+             High-frequency components will be weighted by (1 - alpha).
+    - cutoff_radius: The radius of the low-pass filter in the frequency domain (default 30).
+
+    Returns:
+    - adjusted_noise: The noise after applying frequency separation and weighting.
+    """
+    
+    device = noise.device  # Ensure everything is on the same device as 'noise'
+
+    # Step 1: Apply Fourier transform to convert noise to the frequency domain
+    noise_fft = torch.fft.fft2(noise)
+    noise_fft_shifted = torch.fft.fftshift(noise_fft)  # Shift the zero frequency component to the center
+
+    # Step 2: Create a low-pass filter (circular mask)
+    # Get dimensions
+    if len(noise.shape) == 2:  # If it's a 2D tensor (no batch or channels)
+        rows, cols = noise.shape
+    else:  # If it's a 4D tensor with [batch, channels, height, width]
+        _, _, rows, cols = noise.shape
+    
+    crow, ccol = rows // 2, cols // 2  # Center of the frequency image
+
+    # Generate the low-frequency mask
+    y, x = torch.meshgrid(torch.arange(0, rows, device=device), torch.arange(0, cols, device=device), indexing='ij')
+    mask = ((x - ccol)**2 + (y - crow)**2 <= cutoff_radius**2).float().to(device)
+
+    if len(noise.shape) == 4:
+        mask = mask.unsqueeze(0).unsqueeze(0)  # Add batch and channel dimensions
+
+    # Step 3: Separate low and high-frequency components
+    low_freq_fft = noise_fft_shifted * mask
+    high_freq_fft = noise_fft_shifted * (1 - mask)
+
+    # Step 4: Inverse Fourier transform to convert back to the spatial domain
+    low_freq_noise = torch.real(torch.fft.ifft2(torch.fft.ifftshift(low_freq_fft)))
+    high_freq_noise = torch.real(torch.fft.ifft2(torch.fft.ifftshift(high_freq_fft)))
+
+    # Step 5: Apply single weighting factor, then multiply by 2 to maintain the original amplitude
+    adjusted_noise = 2 * (alpha * low_freq_noise + (1 - alpha) * high_freq_noise)
+
+    # Step 6: Optionally normalize the adjusted noise to a specific range (e.g., -1 to 1)
+    #adjusted_noise = torch.clamp(adjusted_noise, -1, 1)
+
+    return adjusted_noise
+
+
+def frequency_equalization(image):
+    device = image.device  # Ensure everything is on the same device
+    dtype = image.dtype  # Ensure the same dtype
+
+    # Apply Fourier transform
+    image_fft = torch.fft.fft2(image.to(device=device, dtype=dtype))
+    image_fft_shifted = torch.fft.fftshift(image_fft)
+
+    # Calculate magnitude
+    magnitude = torch.abs(image_fft_shifted)
+
+    # Define a target distribution (average magnitude)
+    target_distribution = torch.ones_like(magnitude, device=device, dtype=dtype) * magnitude.mean()
+
+    # Equalize the frequency content
+    equalized_fft = image_fft_shifted * (target_distribution / (magnitude + 1e-8))
+
+    # Inverse Fourier transform to get the equalized image
+    equalized_image = torch.real(torch.fft.ifft2(torch.fft.ifftshift(equalized_fft)))
+
+    return equalized_image
+
+def local_frequency_equalization(image, patch_size=64, stride=32):
+    """
+    Performs local frequency equalization by dividing the image into patches, equalizing
+    the frequency content of each patch, and recombining them.
+
+    Parameters:
+    - image: The input image tensor (shape [batch, channels, height, width] or [height, width]).
+    - patch_size: The size of each patch for local frequency equalization.
+    - stride: The step size for the sliding window. A lower stride introduces overlap between patches.
+
+    Returns:
+    - equalized_image: The image after local frequency equalization.
+    """
+
+    # Ensure the image is 4D (batch, channels, height, width)
+    if len(image.shape) == 2:
+        image = image.unsqueeze(0).unsqueeze(0)  # Convert to [1, 1, height, width]
+    elif len(image.shape) == 3:
+        image = image.unsqueeze(0)  # Convert to [1, channels, height, width]
+
+    # Ensure we are working with the same device and dtype
+    device = image.device
+    dtype = image.dtype
+
+    # Get the image dimensions
+    batch_size, channels, height, width = image.shape
+
+    # Extract patches using unfold
+    patches = F.unfold(image, kernel_size=patch_size, stride=stride)
+    patches = patches.permute(0, 2, 1)  # Rearrange to [batch, num_patches, patch_size*patch_size]
+
+    # Reshape to have individual patches of size [batch, num_patches, channels, patch_height, patch_width]
+    patches = patches.view(batch_size, patches.shape[1], channels, patch_size, patch_size)
+
+    # Initialize a tensor to hold the equalized patches, on the same device and dtype as the input
+    equalized_patches = torch.zeros_like(patches, device=device, dtype=dtype)
+
+    # Perform frequency equalization on each patch
+    for i in range(patches.shape[1]):
+        equalized_patches[:, i] = frequency_equalization(patches[:, i])
+
+    # Recombine the patches back into the full image using fold
+    equalized_patches = equalized_patches.view(batch_size, -1, patch_size * patch_size)
+    equalized_patches = equalized_patches.permute(0, 2, 1)
+    equalized_image = F.fold(equalized_patches, output_size=(height, width), kernel_size=patch_size, stride=stride)
+
+    return equalized_image
+
+def frequency_weighted_sum(image, cutoff_radius=30):
+    """
+    Splits the image into low and high-frequency components, creates a density map representing
+    the relative contribution of low vs high-frequency content, and combines them using
+    weighted contributions that sum to 1.
+
+    Parameters:
+    - image: The input image tensor (shape [batch, channels, height, width] or [height, width]).
+    - cutoff_radius: The radius of the low-pass filter in the frequency domain (default 30).
+
+    Returns:
+    - weighted_image: The image after weighting low and high-frequency contributions.
+    """
+
+    device = image.device  # Ensure everything is on the same device
+    dtype = image.dtype  # Ensure the same dtype
+
+    # Step 1: Apply Fourier transform to convert image to the frequency domain
+    image_fft = torch.fft.fft2(image)
+    image_fft_shifted = torch.fft.fftshift(image_fft)  # Shift the zero frequency component to the center
+
+    # Get dimensions
+    if len(image.shape) == 2:  # If it's a 2D tensor (no batch or channels)
+        rows, cols = image.shape
+    else:  # If it's a 4D tensor with [batch, channels, height, width]
+        _, _, rows, cols = image.shape
+
+    crow, ccol = rows // 2, cols // 2  # Center of the frequency image
+
+    # Generate meshgrid on the same device as the image tensor
+    y, x = torch.meshgrid(torch.arange(0, rows, device=device), torch.arange(0, cols, device=device), indexing='ij')
+    distance_map = ((x - ccol)**2 + (y - crow)**2).float().sqrt()  # Distance from the center (frequency magnitude)
+
+    # Step 2: Create low-pass and high-pass masks based on cutoff radius
+    low_freq_mask = (distance_map <= cutoff_radius).float()
+    high_freq_mask = 1.0 - low_freq_mask  # Complement of the low-pass mask
+
+    # Step 3: Apply the masks to the frequency content
+    low_freq_fft = image_fft_shifted * low_freq_mask
+    high_freq_fft = image_fft_shifted * high_freq_mask
+
+    # Step 4: Inverse Fourier transform to get low and high frequency components
+    low_freq_image = torch.real(torch.fft.ifft2(torch.fft.ifftshift(low_freq_fft)))
+    high_freq_image = torch.real(torch.fft.ifft2(torch.fft.ifftshift(high_freq_fft)))
+
+    # Step 5: Compute the magnitude of the low and high-frequency components
+    low_freq_magnitude = torch.abs(low_freq_image)
+    high_freq_magnitude = torch.abs(high_freq_image)
+
+    # Step 6: Create a density map that shows the relative contribution of low vs high-frequency content
+    # Normalize the magnitudes to avoid division by zero
+    total_magnitude = low_freq_magnitude + high_freq_magnitude + 1e-8  # Add a small value to prevent division by zero
+    low_freq_weight = low_freq_magnitude / total_magnitude
+    high_freq_weight = high_freq_magnitude / total_magnitude
+
+    # Step 7: Combine low and high frequency components using weights
+    weighted_image = low_freq_weight * low_freq_image + high_freq_weight * high_freq_image
+
+    # Optionally normalize the result
+    #weighted_image = torch.clamp(weighted_image, 0, 1)  # Normalize between 0 and 1 if necessary
+
+    return weighted_image
+
+def full_frequency_rebalance(image):
+    """
+    Iterates through all frequencies in the image, isolates each frequency band, calculates its magnitude,
+    and applies a weighted contribution to each, summing the contributions so they effectively sum to 1.
+
+    Parameters:
+    - image: The input image tensor (shape [batch, channels, height, width] or [height, width]).
+
+    Returns:
+    - rebalanced_image: The image after rebalancing the contributions of all frequencies.
+    """
+
+    device = image.device  # Ensure everything is on the same device
+    dtype = image.dtype  # Ensure the same dtype
+
+    # Step 1: Apply Fourier transform to convert image to the frequency domain
+    image_fft = torch.fft.fft2(image)
+    image_fft_shifted = torch.fft.fftshift(image_fft)  # Shift the zero frequency component to the center
+
+    # Get dimensions
+    if len(image.shape) == 2:  # If it's a 2D tensor (no batch or channels)
+        rows, cols = image.shape
+    else:  # If it's a 4D tensor with [batch, channels, height, width]
+        _, _, rows, cols = image.shape
+
+    crow, ccol = rows // 2, cols // 2  # Center of the frequency image
+
+    # Generate meshgrid on the same device as the image tensor
+    y, x = torch.meshgrid(torch.arange(0, rows, device=device), torch.arange(0, cols, device=device), indexing='ij')
+    distance_map = ((x - ccol)**2 + (y - crow)**2).float().sqrt()  # Distance from the center (frequency magnitude)
+
+    # Initialize rebalanced frequency components
+    rebalanced_fft = torch.zeros_like(image_fft_shifted, device=device, dtype=torch.complex128)
+
+    # Maximum frequency is the diagonal frequency from the center (theoretical max frequency)
+    max_distance = distance_map.max().item()
+
+    # Step 2: Iterate through every possible frequency band
+    for i in range(int(max_distance) + 1):
+        # Create a band mask for the current frequency band (a single frequency at distance 'i')
+        band_mask = (distance_map >= i) & (distance_map < i + 1)
+        band_mask = band_mask.float()
+
+        # Isolate the current frequency band
+        current_band_fft = image_fft_shifted * band_mask
+
+        # Compute the magnitude of the current frequency band
+        current_band_magnitude = torch.abs(current_band_fft)
+
+        # Normalize the magnitude of the current frequency band to create a weight
+        total_magnitude = current_band_magnitude.sum() + 1e-8  # Sum all magnitudes (add small value to avoid zero division)
+        current_band_weight = current_band_magnitude / total_magnitude
+
+        # Apply the weight to the current frequency band (keep as complex)
+        rebalanced_fft += current_band_weight * current_band_fft
+
+    # Step 3: Inverse Fourier transform to convert back to the spatial domain
+    rebalanced_image = torch.real(torch.fft.ifft2(torch.fft.ifftshift(rebalanced_fft)))
+
+    return rebalanced_image
 
 from .refined_exp_solver import get_res4lyf_step_with_model, calculate_third_order_coeffs
 
@@ -1463,11 +1736,17 @@ def sample_RES_implicit_advanced_RF_PC_3rd_order(
     seed = extra_args.get("seed", None) + 1
     
     s_in = x.new_ones([x.shape[0]])
-    alpha = torch.zeros_like(sigmas) if alpha is None else alpha
-    sigma_min, sigma_max = sigmas[sigmas > 0].min(), sigmas.max()
+    alpha = torch.zeros_like(sigmas) if alpha is None else alpha 
+    sigma_min, sigma_max = sigmas[sigmas > 0].min()**2, sigmas.max() #squaring sigma_min to avoid sigma_next == sigma_min issue with brownian...
+    
+    if isinstance(model.inner_model.inner_model.model_sampling, comfy.model_sampling.CONST):
+        sigma_max = torch.full_like(sigma_max, 1.0)
+        sigma_min = torch.full_like(sigma_min, min(sigma_min.item(), 0.00001))
+    
     noise_sampler1 = NOISE_GENERATOR_CLASSES.get(noise_sampler_type1)(x=x, seed=seed, sigma_min=sigma_min, sigma_max=sigma_max)
     noise_sampler2 = NOISE_GENERATOR_CLASSES.get(noise_sampler_type2)(x=x, seed=seed, sigma_min=sigma_min, sigma_max=sigma_max)
     noise_sampler3 = NOISE_GENERATOR_CLASSES.get(noise_sampler_type3)(x=x, seed=seed, sigma_min=sigma_min, sigma_max=sigma_max)
+    
     
     sigma_fn = lambda t: t.neg().exp()
     t_fn = lambda sigma: sigma.log().neg()
@@ -1539,11 +1818,11 @@ def sample_RES_implicit_advanced_RF_PC_3rd_order(
         
         a21, a31, a32, b1, b2, b3 = calculate_third_order_coeffs(h, c2, c3)
 
-        sigma_up, sigma_down, alpha_ratio = get_res4lyf_step_with_model(model, sigma, sigma_next, eta3, eta_var3, noise_mode)
+        sigma_up, sigma_down, alpha_ratio = get_res4lyf_step_with_model(model, sigma, sigma_next, eta3[i], eta_var3[i], noise_mode)
             
         
         if isinstance(model.inner_model.inner_model.model_sampling, comfy.model_sampling.CONST) == False and noise_mode == "hard":
-            sigma = sigma * (1 + eta3)
+            sigma = sigma * (1 + eta3[i])
         
         t      = t_fn(sigma)
         t_next = t_fn(sigma_down)
@@ -1562,8 +1841,8 @@ def sample_RES_implicit_advanced_RF_PC_3rd_order(
         sigma_3 = sigma_fn(s3)
 
 
-        su_2, sd_2, alpha_ratio_2 = get_res4lyf_step(sigma, sigma_next, eta1, eta_var1, noise_mode)
-        su_3, sd_3, alpha_ratio_3 = get_res4lyf_step(sigma, sigma_next, eta2, eta_var2, noise_mode)
+        su_2, sd_2, alpha_ratio_2 = get_res4lyf_step(sigma, sigma_next, eta1[i], eta_var1[i], noise_mode)
+        su_3, sd_3, alpha_ratio_3 = get_res4lyf_step(sigma, sigma_next, eta2[i], eta_var2[i], noise_mode)
         
         print("sigma_down orig: ", sigma_down.item())
         su_total = sigma_up #+ su_2 + su_3
@@ -1575,6 +1854,13 @@ def sample_RES_implicit_advanced_RF_PC_3rd_order(
         print(su_total.item(), sigma_next.item(), sigma_down.item(), s_d.item(), s_u.item())
         sigma_down = s_d
         
+        """noise1 = noise_sampler1(sigma=sigma, sigma_next=sigma_2)
+        noise2 = noise_sampler2(sigma=sigma, sigma_next=sigma_3)
+        noise3 = noise_sampler3(sigma=sigma, sigma_next=sigma_next)
+        
+        noise1 = (noise1 - noise1.mean()) / noise1.std()
+        noise2 = (noise2 - noise2.mean()) / noise2.std()
+        noise3 = (noise3 - noise3.mean()) / noise3.std()"""
 
         k1 = model(x, sigma * s_in, **extra_args)
         
@@ -1584,7 +1870,7 @@ def sample_RES_implicit_advanced_RF_PC_3rd_order(
             hard_light_blend_1 = hard_light_blend(latent_guide, k1)
             k1 = k1 - lg_weight * sigma_next * k1  + (lg_weight * sigma_next * hard_light_blend_1 * mask)
         
-        #su_2, sd_2, alpha_ratio_2 = get_res4lyf_step(sigma, sigma_next, eta1, eta_var1, noise_mode)
+        #su_2, sd_2, alpha_ratio_2 = get_res4lyf_step(sigma, sigma_next, eta1[i], eta_var1[i], noise_mode)
         x_2 = ((sigma_down/sigma)**c2)*x + h*(a21*k1)
         
         gc.collect()
@@ -1615,8 +1901,11 @@ def sample_RES_implicit_advanced_RF_PC_3rd_order(
             gc.collect()
             torch.cuda.empty_cache()
 
-        su_2, sd_2, alpha_ratio_2 = get_res4lyf_step(sigma, sigma_next, eta1, eta_var1, noise_mode)
-        x_2 = alpha_ratio_2 * x_2 + noise_sampler1(sigma=sigma, sigma_next=sigma_2) * s_noise1 * su_2
+        su_2, sd_2, alpha_ratio_2 = get_res4lyf_step(sigma, sigma_next, eta1[i], eta_var1[i], noise_mode)
+        #x_2 = alpha_ratio_2 * x_2 + noise_sampler1(sigma=sigma, sigma_next=sigma_2) * s_noise1[i] * su_2
+        noise1 = noise_sampler1(sigma=sigma, sigma_next=sigma_2)
+        noise1 = (noise1 - noise1.mean()) / noise1.std()
+        x_2 = alpha_ratio_2 * x_2 + noise1 * s_noise1[i] * su_2
         
         
         
@@ -1628,7 +1917,7 @@ def sample_RES_implicit_advanced_RF_PC_3rd_order(
             hard_light_blend_1 = hard_light_blend(latent_guide, k2)
             k2 = k2 - lg_weight * sigma_next * k2  + (lg_weight * sigma_next * hard_light_blend_1 * mask)
             
-        #su_3, sd_3, alpha_ratio_3 = get_res4lyf_step(sigma, sigma_next, eta2, eta_var2, noise_mode)
+        #su_3, sd_3, alpha_ratio_3 = get_res4lyf_step(sigma, sigma_next, eta2[i], eta_var2[i], noise_mode)
         x_3 = ((sigma_down/sigma)**c3)*x + h*(a31*k1 + a32*k2)
         
         gc.collect()
@@ -1659,12 +1948,16 @@ def sample_RES_implicit_advanced_RF_PC_3rd_order(
             gc.collect()
             torch.cuda.empty_cache()
             
-        su_3, sd_3, alpha_ratio_3 = get_res4lyf_step(sigma, sigma_next, eta2, eta_var2, noise_mode)
-        x_3 = alpha_ratio_3 * x_3 + noise_sampler2(sigma=sigma, sigma_next=sigma_3) * s_noise2 * su_3
+        su_3, sd_3, alpha_ratio_3 = get_res4lyf_step(sigma, sigma_next, eta2[i], eta_var2[i], noise_mode)
+        #x_3 = alpha_ratio_3 * x_3 + noise_sampler2(sigma=sigma, sigma_next=sigma_3) * s_noise2[i] * su_3
+        noise2 = noise_sampler2(sigma=sigma, sigma_next=sigma_3)
+        noise2 = (noise2 - noise2.mean()) / noise2.std()
+        x_3 = alpha_ratio_3 * x_3 + noise2 * s_noise2[i] * su_3
 
 
 
         k3 = model(x_3, sigma_3 * s_in, **extra_args)
+
         if latent_guide is not None:
             lg_weight = latent_guide_weights[i] * sigma
             #k3 = lg_weight*latent_guide + (1-lg_weight)*k3
@@ -1702,43 +1995,14 @@ def sample_RES_implicit_advanced_RF_PC_3rd_order(
             torch.cuda.empty_cache()
 
         x = x_next
-        h_last = h
         
         
-        
-        # Step 2: Compute the Laplacian of the denoised latent to detect sharp/blurred regions
-        """laplacian = compute_laplacian(k3_new)
-        
-        # Step 3: Normalize Laplacian to create a mask (higher values in blurry regions)
-        blur_mask = 1 - torch.clamp(laplacian / laplacian.max(), 0, 1)  # Inverted Laplacian for mask (blurry regions get higher values)
-
-
-        noise = noise_sampler(sigma=sigma, sigma_next=sigma_next) * s_noise3 * sigma_up
-
-        # Step 4: Adjust denoising using the mask
-        # You can now apply the mask to adjust how much noise to remove in each region
-        epsilon = x_next - k3_new
-        adjusted_epsilon = epsilon * blur_mask  # Apply the mask
-
-        # Step 5: Normalize noise removal to ensure total noise removed remains the same
-        # Calculate the total adjustment factor based on the average mask value
-        mask_avg = blur_mask.mean()
-        noise *= (1.0 / mask_avg)  # Compensate for the masking
-
-        # Step 6: Compute the new latent by removing noise according to the adjusted epsilon
-        #k3_new = x - (adjusted_epsilon*0.1 + 0.9*epsilon)
-        #k3_new = x - adjusted_epsilon
-        
-        x = alpha_ratio * x + noise"""
-                
         #if sigmas[i + 1] > 0 and eta > 0 and isinstance(model.inner_model.inner_model.model_sampling, comfy.model_sampling.CONST) == True:
-        x = alpha_ratio * x + noise_sampler3(sigma=sigma, sigma_next=sigma_next) * s_noise3 * sigma_up
-        
-        #epsilon = epsilons.pop()
-        #epsilon = (epsilon - epsilon.mean()) / epsilon.std()
-        #x = alpha_ratio * x + epsilon * s_noise3 * sigma_up
+        #x = alpha_ratio * x + noise_sampler3(sigma=sigma, sigma_next=sigma_next) * s_noise3[i] * sigma_up
+        noise3 = noise_sampler3(sigma=sigma, sigma_next=sigma_next)
+        noise3 = (noise3 - noise3.mean()) / noise3.std()
+        x = alpha_ratio * x + noise3 * s_noise3[i] * sigma_up
 
-        #denoised_next = denoised if denoised_next is None else denoised_next
         if callback is not None:
             callback({'x': x, 'i': i, 'sigma': sigmas[i], 'sigma_hat': sigma, 'denoised': k3})
 
@@ -2226,6 +2490,11 @@ def sample_deis_sde(model, x, sigmas, extra_args=None, callback=None, disable=No
     
     alpha = torch.zeros_like(sigmas) if alpha is None else alpha
     sigma_min, sigma_max = sigmas[sigmas > 0].min(), sigmas.max()
+    
+    if isinstance(model.inner_model.inner_model.model_sampling, comfy.model_sampling.CONST):
+        sigma_max = torch.full_like(sigma_max, 1.0)
+        sigma_min = torch.full_like(sigma_min, min(sigma_min.item(), 0.00001))
+        
     seed = extra_args.get("seed", None) + 1
     noise_sampler = NOISE_GENERATOR_CLASSES.get(noise_sampler_type)(x=x, seed=seed, sigma_min=sigma_min, sigma_max=sigma_max)
     print("DEIS_SDE seed set to: ", seed)
@@ -2601,7 +2870,9 @@ def sample_deis_sde_implicit(model, x, sigmas, extra_args=None, callback=None, d
                 buffer_model.append(d_cur.detach())
             
         if sigma_next > 0 and etas[i] > 0:
-            noise = noise_sampler(sigma=sigma, sigma_next=sigma_next) * s_noises[i] * sigma_up   
+            noise = noise_sampler(sigma=sigma, sigma_next=sigma_next)
+            noise = (noise - noise.mean()) / noise.std()
+            noise = noise * s_noises[i] * sigma_up   
             x_next = x_next * alpha_ratio   +   noise                                            
             
         gc.collect() #necessary after every step to minimize OOM errors with flux dev

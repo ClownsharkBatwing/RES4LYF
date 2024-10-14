@@ -117,11 +117,13 @@ class set_precision_universal:
         
         if latent_image is not None:
             x = latent_image["samples"].clone().to(dtype)    
+            latent_image = {"samples": x}
 
         if set_default is True:
             torch.set_default_dtype(dtype)
         
-        return (cond_pos, cond_neg, sigmas, {"samples": x}, )
+        return (cond_pos, cond_neg, sigmas, latent_image, )
+        #return (cond_pos, cond_neg, sigmas, {"samples": x}, )
     
     
 class set_precision_advanced:

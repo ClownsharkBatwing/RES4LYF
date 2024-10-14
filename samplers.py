@@ -270,166 +270,6 @@ class ClownSampler:
 
 
 
-
-"""class ClownODE:
-    @classmethod
-    def INPUT_TYPES(s):
-        return {
-            "required": {
-                "eulers_mom": ("FLOAT", {"default": 0.0, "min": -10000.0, "max": 10000.0, "step": 0.01}),
-                "momentum": ("FLOAT", {"default": 0.0, "min": -10000.0, "max": 10000.0, "step": 0.01}),
-                "eta1": ("FLOAT", {"default": 0.25, "min": -100.0, "max": 100.0, "step":0.01, "round": False}),
-                "eta2": ("FLOAT", {"default": 0.5, "min": -100.0, "max": 100.0, "step":0.01, "round": False}),
-                "eta_var1": ("FLOAT", {"default": 0.0, "min": -100.0, "max": 100.0, "step":0.01, "round": False}),
-                "eta_var2": ("FLOAT", {"default": 0.0, "min": -100.0, "max": 100.0, "step":0.01, "round": False}),
-                "s_noise1": ("FLOAT", {"default": 1.0, "min": -100.0, "max": 100.0, "step":0.01, "round": False}),
-                "s_noise2": ("FLOAT", {"default": 1.0, "min": -100.0, "max": 100.0, "step":0.01, "round": False}),
-                "c2": ("FLOAT", {"default": 0.5, "min": 0.0, "max": 10000.0, "step": 0.01}),
-                "c3": ("FLOAT", {"default": 0.666, "min": 0.0, "max": 10000.0, "step": 0.01}),
-                "auto_c2": ("BOOLEAN", {"default": True}),
-                "cfgpp": ("FLOAT", {"default": 0.0, "min": -10000.0, "max": 10000.0, "step": 0.01}),
-                "branch_mode": (['latent_match', 'latent_match_d', 'latent_match_sdxl_color_d', 'latent_match_sdxl_luminosity_d','latent_match_sdxl_pattern_d','cos_reversal', 'mean', 'mean_d', 'median', 'median_d', 'zmean_d','zmedian_d','gradient_max_full', 'gradient_max_full_d', 'gradient_min_full', 'gradient_min_full_d', 'gradient_max', 'gradient_max_d', 'gradient_min', 'gradient_min_d', 'cos_similarity', 'cos_similarity_d','cos_linearity', 'cos_linearity_d', 'cos_perpendicular', 'cos_perpendicular_d'], {"default": 'mean'}),
-                "branch_depth": ("INT", {"default": 1, "min": 1, "max": 0xffffffffffffffff}),
-                "branch_width": ("INT", {"default": 1, "min": 1, "max": 0xffffffffffffffff}),
-
-                "noise_sampler_type": (NOISE_GENERATOR_NAMES, {"default": "brownian"}),
-                "noise_mode": (["hard", "soft", "softer"], {"default": 'hard'}), 
-                "noise_scale": ("FLOAT", {"default": 1.0, "min": -10000.0, "max": 10000.0, "step":0.1, "round": False}),
-                "ancestral_noise": ("BOOLEAN", {"default": True}),   
-                #"noisy_cfg": ("BOOLEAN", {"default": False}),
-                "clownseed": ("INT", {"default": -1.0, "min": -10000.0, "max": 0xffffffffffffffff}),
-                "alpha": ("FLOAT", {"default": 0.0, "min": -10000.0, "max": 10000.0, "step": 0.1}),
-                "k": ("FLOAT", {"default": 1.0, "min": -10000.0, "max": 10000.0, "step": 2}),      
-                "denoise_to_zero": ("BOOLEAN", {"default": False}),
-                "simple_phi_calc": ("BOOLEAN", {"default": False}),    
-                #"skip_corrector": ("BOOLEAN", {"default": False}), 
-                "step_type": (["res_a", "dpmpp_sde_alt"], {"default": "res_a"}),
-                #"order": ("INT", {"default": 2, "min": 1, "max": 2}),
-                "order": (["1", "2a", "2b", "2c", "3"], {"default": "2b"}),
-                "t_fn_formula": ("STRING", {"default": "", "multiline": True}),
-                "sigma_fn_formula": ("STRING", {"default": "", "multiline": True}),   
-            },
-            "optional": {
-                "eulers_moms": ("SIGMAS", ),
-                "momentums": ("SIGMAS", ),
-                "etas1": ("SIGMAS", ),
-                "etas2": ("SIGMAS", ),
-                "eta_vars1": ("SIGMAS", ),
-                "eta_vars2": ("SIGMAS", ),
-                "s_noises1": ("SIGMAS", ),
-                "s_noises2": ("SIGMAS", ),
-                "c2s": ("SIGMAS", ),
-                "c3s": ("SIGMAS", ),
-                "cfgpps": ("SIGMAS", ),
-                "alphas": ("SIGMAS", ),
-                "latent_noise": ("LATENT", ),  
-                "guides": ("GUIDES", ),
-                "alpha_ratios": ("SIGMAS", ),
-            }
-        }
-    
-    RETURN_TYPES = ("SAMPLER",)
-    CATEGORY = "sampling/custom_sampling/samplers"
-
-    FUNCTION = "get_sampler"
-
-    def get_sampler(self, clownseed, noise_sampler_type, noise_mode, noise_scale, ancestral_noise, denoise_to_zero, simple_phi_calc, cfgpp, eulers_mom, momentum, c2, c3, eta1=None, eta2=None, eta_var1=None, eta_var2=None, s_noise1=None, s_noise2=None, branch_mode=None, branch_depth=None, branch_width=None,
-                    alpha, k, noisy_cfg=False, 
-                    alphas=None, latent_noise=None,
-                    eulers_moms=None, momentums=None, etas1=None, etas2=None, eta_vars1=None, eta_vars2=None, s_noises1=None, s_noises2=None, c2s=None, c3s=None, cfgpps=None, offsets=None, guides=None, alpha_ratios=None, t_fn_formula=None, sigma_fn_formula=None,skip_corrector=False,
-                    corrector_is_predictor=False, step_type="res_a", order="2b", auto_c2=False,
-                    ):
-        
-        if guides is not None:
-            (offset, guide_1, guide_2, guide_mode_1, guide_mode_2, 
-            guide_1_Luminosity, guide_1_CyanRed, guide_1_LimePurple, guide_1_PatternStruct, 
-            offsets, guides_1, guides_2, latent_guide_1, latent_guide_2, latent_self_guide_1, latent_shift_guide_1) = guides
-        else:
-            offset, guide_1, guide_2, guide_mode_1, guide_mode_2, guide_1_Luminosity, guide_1_CyanRed, guide_1_LimePurple, guide_1_PatternStruct = 0.0, 0.0, 0.0, 0, 0, 0.0, 0.0, 0.0, 0.0
-            offsets, guides_1, guides_2, latent_guide_1, latent_guide_2, latent_self_guide_1, latent_shift_guide_1 = None, None, None, None, None, None, None
-
-        steps = 10000
-        eulers_moms = initialize_or_scale(eulers_moms, eulers_mom, steps)
-        momentums = initialize_or_scale(momentums, momentum, steps)
-        etas1 = initialize_or_scale(etas1, eta1, steps)
-        etas2 = initialize_or_scale(etas2, eta2, steps)
-        eta_vars1 = initialize_or_scale(eta_vars1, eta_var1, steps)
-        eta_vars2 = initialize_or_scale(eta_vars2, eta_var2, steps)
-
-        s_noises1 = initialize_or_scale(s_noises1, s_noise1, steps)
-        s_noises2 = initialize_or_scale(s_noises2, s_noise2, steps)
-        c2s = initialize_or_scale(c2s, c2, steps)
-        c3s = initialize_or_scale(c3s, c3, steps)
-        cfgpps = initialize_or_scale(cfgpps, cfgpp, steps)
-        offsets = initialize_or_scale(offsets, offset, steps)
-        guides_1 = initialize_or_scale(guides_1, guide_1, steps)
-        guides_2 = initialize_or_scale(guides_2, guide_2, steps)
-        alphas = initialize_or_scale(alphas, alpha, steps)
-
-        #import pdb; pdb.set_trace()
-
-        if latent_guide_1 is not None:
-            latent_guide_1 = latent_guide_1["samples"]
-
-        if latent_guide_2 is not None:
-            latent_guide_2 = latent_guide_2["samples"]
-
-        guide_1_channels = torch.tensor([guide_1_Luminosity, guide_1_CyanRed, guide_1_LimePurple, guide_1_PatternStruct])
-
-        latent_noise_samples = latent_noise["samples"] if latent_noise and "samples" in latent_noise else None
-        
-        sampler = comfy.samplers.ksampler(
-            "res_momentumized_advanced",
-            {
-                "noise_sampler_type": noise_sampler_type,
-                "noise_mode": noise_mode,
-                "noise_scale": noise_scale, 
-                "ancestral_noise": ancestral_noise,
-                "noisy_cfg": noisy_cfg,
-                "denoise_to_zero": denoise_to_zero,
-                "simple_phi_calc": simple_phi_calc,
-                "branch_mode": branch_mode,
-                "branch_depth": branch_depth,
-                "branch_width": branch_width,
-                "eulers_moms": eulers_moms,
-                "momentums": momentums,
-                "etas1": etas1,
-                "etas2": etas2,
-                "eta_vars1": eta_vars1,
-                "eta_vars2": eta_vars2,
-                "s_noises1": s_noises1,
-                "s_noises2": s_noises2,
-                "c2s": c2s,
-                "c3s": c3s,
-                "cfgpps": cfgpps,
-                "offsets": offsets,
-                "guides_1": guides_1,
-                "guides_2": guides_2,
-                "latent_guide_1": latent_guide_1,
-                "latent_guide_2": latent_guide_2,
-                "guide_mode_1": guide_mode_1,
-                "guide_mode_2": guide_mode_2,
-                "guide_1_channels": guide_1_channels,
-                "alphas": alphas,
-                "k": k,
-                "clownseed": clownseed+1,
-                "latent_noise": latent_noise_samples,
-                "latent_self_guide_1": latent_self_guide_1,
-                "latent_shift_guide_1": latent_shift_guide_1,
-                "alpha_ratios": alpha_ratios,
-                "t_fn_formula": t_fn_formula,
-                "sigma_fn_formula": sigma_fn_formula,
-                "skip_corrector": skip_corrector,
-                "corrector_is_predictor": corrector_is_predictor,
-                "step_type": step_type, 
-                "order": order,
-                "auto_c2": auto_c2,
-            }
-        )
-        return (sampler, )
-"""
-
-
 class LatentNoised:
     @classmethod
     def INPUT_TYPES(s):
@@ -948,6 +788,36 @@ class SamplerRES_Implicit:
         return (sampler, )
     
     
+
+class SamplerRES3_Implicit_Automation:
+    @classmethod
+    def INPUT_TYPES(s):
+        return {
+            "required": {        
+            },
+            "optional": {
+                "eta1": ("SIGMAS", ),
+                "eta2": ("SIGMAS", ),
+                "eta3": ("SIGMAS", ),
+                "eta_var1": ("SIGMAS", ),
+                "eta_var2": ("SIGMAS", ), 
+                "eta_var3": ("SIGMAS", ), 
+                "s_noise1": ("SIGMAS", ),
+                "s_noise2": ("SIGMAS", ), 
+                "s_noise3": ("SIGMAS", ), 
+            }
+        }
+    
+    RETURN_TYPES = ("AUTOMATION",)
+    CATEGORY = "sampling/custom_sampling/samplers"
+
+    FUNCTION = "main"
+
+    def main(self, eta1=None, eta2=None, eta3=None, eta_var1=None, eta_var2=None, eta_var3=None, s_noise1=None, s_noise2=None, s_noise3=None):
+        
+        return ( (eta1, eta2, eta3, eta_var1, eta_var2, eta_var3, s_noise1, s_noise2, s_noise3,) , )
+
+    
     
 class SamplerRES3_Implicit:
     @classmethod
@@ -967,6 +837,107 @@ class SamplerRES3_Implicit:
                     "noise_sampler_type1": (NOISE_GENERATOR_NAMES, {"default": "brownian"}),
                     "noise_sampler_type2": (NOISE_GENERATOR_NAMES, {"default": "brownian"}),
                     "noise_sampler_type3": (NOISE_GENERATOR_NAMES, {"default": "brownian"}),
+                     "noise_mode": (["hard", "soft", "softer"], {"default": 'hard'}), 
+                     "c2": ("FLOAT", {"default": 0.5, "min": -100.0, "max": 100.0, "step":0.01, "round": False}),
+                     "c3": ("FLOAT", {"default": 1.0, "min": -100.0, "max": 100.0, "step":0.01, "round": False}),
+                     "auto_c2": ("BOOLEAN", {"default": False}),
+                     "iter_c2": ("INT", {"default": 0, "min": 0, "max": 100, "step": 1}), 
+                     "iter_c3": ("INT", {"default": 0, "min": 0, "max": 100, "step": 1}), 
+                     "iter": ("INT", {"default": 3, "min": 0, "max": 100, "step": 1}), 
+                     "reverse_weight_c2": ("FLOAT", {"default": 1.0, "min": -100.0, "max": 100.0, "step":0.01, "round": False}),
+                     "reverse_weight_c3": ("FLOAT", {"default": 1.0, "min": -100.0, "max": 100.0, "step":0.01, "round": False}),
+                     "reverse_weight": ("FLOAT", {"default": 1.0, "min": -100.0, "max": 100.0, "step":0.01, "round": False}),
+                     "tol": ("FLOAT", {"default": 0.1, "min": 0, "max": 100, "step": 0.01}), 
+                     "latent_guide_weight": ("FLOAT", {"default": 1.0, "min": -100.0, "max": 100.0, "step":0.01, "round": False}),
+                     
+                      },
+                    "optional": 
+                    {
+                
+                        "alphas": ("SIGMAS", ),
+                        "latent_guide": ("LATENT", ),
+                        "latent_guide_weights": ("SIGMAS", ),
+                        "latent_guide_mask": ("MASK", ),
+                        "automation": ("AUTOMATION",),
+                        #"guides": ("GUIDES",),
+                    }  
+               }
+    RETURN_TYPES = ("SAMPLER",)
+    CATEGORY = "sampling/custom_sampling/samplers"
+
+    FUNCTION = "get_sampler"
+
+    def get_sampler(self, eta1, eta2, eta3, eta_var1, eta_var2, eta_var3, s_noise1, s_noise2, s_noise3, c2, c3, auto_c2, alpha, k, noise_sampler_type1, noise_sampler_type2, noise_sampler_type3,  noise_mode, alphas=None, iter_c2=0, iter_c3=0, iter=3, reverse_weight_c2=0.0, reverse_weight_c3=0.0, reverse_weight=0.0, tol=0.1, latent_guide=None, latent_guide_weight=0.0, 
+                    latent_guide_weights=None, latent_guide_mask=None, automation=None):            
+                    #guides=None,):
+        
+        steps = 10000
+        alphas = initialize_or_scale(alphas, alpha, steps)
+        
+        if latent_guide is not None:
+            latent_guide = latent_guide["samples"].to('cuda')
+            
+        if automation is not None:
+            (eta1s, eta2s, eta3s, eta_var1s, eta_var2s, eta_var3s, s_noise1s, s_noise2s, s_noise3s) = automation
+            
+            
+        steps = 10000
+        latent_guide_weights = initialize_or_scale(latent_guide_weights, latent_guide_weight, steps)
+        
+        eta1 = initialize_or_scale(eta1s, eta1, steps)
+        eta2 = initialize_or_scale(eta2s, eta2, steps)
+        eta3 = initialize_or_scale(eta3s, eta3, steps)
+        
+        eta_var1 = initialize_or_scale(eta_var1s, eta_var1, steps)
+        eta_var2 = initialize_or_scale(eta_var2s, eta_var2, steps)
+        eta_var3 = initialize_or_scale(eta_var3s, eta_var3, steps)
+        
+        s_noise1 = initialize_or_scale(s_noise1s, s_noise1, steps)
+        s_noise2 = initialize_or_scale(s_noise2s, s_noise2, steps)
+        s_noise3 = initialize_or_scale(s_noise3s, s_noise3, steps)
+
+        """if guides is not None:
+            (offset, guide_1, guide_2, guide_mode_1, guide_mode_2, 
+            guide_1_Luminosity, guide_1_CyanRed, guide_1_LimePurple, guide_1_PatternStruct, 
+            offsets, guides_1, guides_2, latent_guide_1, latent_guide_2, latent_self_guide_1, latent_shift_guide_1) = guides
+        else:
+            offset, guide_1, guide_2, guide_mode_1, guide_mode_2, guide_1_Luminosity, guide_1_CyanRed, guide_1_LimePurple, guide_1_PatternStruct = 0.0, 0.0, 0.0, 0, 0, 0.0, 0.0, 0.0, 0.0
+            offsets, guides_1, guides_2, latent_guide_1, latent_guide_2, latent_self_guide_1, latent_shift_guide_1 = None, None, None, None, None, None, None
+
+        etas1 = initialize_or_scale(etas1, eta1, steps)
+        etas2 = initialize_or_scale(etas2, eta2, steps)
+        eta_vars1 = initialize_or_scale(eta_vars1, eta_var1, steps)
+        eta_vars2 = initialize_or_scale(eta_vars2, eta_var2, steps)
+
+        s_noises1 = initialize_or_scale(s_noises1, s_noise1, steps)
+        s_noises2 = initialize_or_scale(s_noises2, s_noise2, steps)
+        c2s = initialize_or_scale(c2s, c2, steps)
+        c3s = initialize_or_scale(c3s, c3, steps)
+        cfgpps = initialize_or_scale(cfgpps, cfgpp, steps)
+        offsets = initialize_or_scale(offsets, offset, steps)
+        guides_1 = initialize_or_scale(guides_1, guide_1, steps)
+        guides_2 = initialize_or_scale(guides_2, guide_2, steps)
+        alphas = initialize_or_scale(alphas, alpha, steps)"""
+
+
+        sampler = comfy.samplers.ksampler("RES_implicit_advanced_RF_PC_3rd_order", {"eta1": eta1, "eta2": eta2, "eta3": eta3, "eta_var1": eta_var1, "eta_var2": eta_var2, "eta_var3": eta_var3, "s_noise1": s_noise1, "s_noise2": s_noise2, "s_noise3": s_noise3, "c2": c2, "c3": c3, "auto_c2": auto_c2, "alpha": alphas, "k": k, "noise_sampler_type1": noise_sampler_type1, "noise_sampler_type2": noise_sampler_type2,"noise_sampler_type3": noise_sampler_type3, "noise_mode": noise_mode,
+                                                                          "iter_c2": iter_c2, "iter_c3": iter_c3, "iter": iter, "reverse_weight_c2": reverse_weight_c2, "reverse_weight_c3": reverse_weight_c3, "reverse_weight": reverse_weight, "tol":tol, "latent_guide": latent_guide, "latent_guide_weight": latent_guide_weight, "latent_guide_weights": latent_guide_weights, "mask": latent_guide_mask,
+                                                                          
+                                                                          })
+        return (sampler, )
+    
+    
+    
+class SamplerRES_Advanced:
+    @classmethod
+    def INPUT_TYPES(s):
+        return {"required":
+                    {"eta": ("FLOAT", {"default": 0.0, "min": -100.0, "max": 100.0, "step":0.01, "round": False}),
+                     "eta_var": ("FLOAT", {"default": 0.0, "min": -100.0, "max": 100.0, "step":0.01, "round": False}),
+                     "s_noise": ("FLOAT", {"default": 1.0, "min": -100.0, "max": 100.0, "step":0.01, "round": False}),
+                     "alpha": ("FLOAT", {"default": 0.0, "min": -10000.0, "max": 10000.0, "step":0.1, "round": False}),
+                     "k": ("FLOAT", {"default": 1.0, "min": -10000.0, "max": 10000.0, "step":2.0, "round": False}),
+                    "noise_sampler_type": (NOISE_GENERATOR_NAMES, {"default": "brownian"}),
                      "noise_mode": (["hard", "soft", "softer"], {"default": 'hard'}), 
                      "c2": ("FLOAT", {"default": 0.5, "min": -100.0, "max": 100.0, "step":0.01, "round": False}),
                      "c3": ("FLOAT", {"default": 1.0, "min": -100.0, "max": 100.0, "step":0.01, "round": False}),
@@ -1009,35 +980,12 @@ class SamplerRES3_Implicit:
         steps = 10000
         latent_guide_weights = initialize_or_scale(latent_guide_weights, latent_guide_weight, steps)
 
-        """if guides is not None:
-            (offset, guide_1, guide_2, guide_mode_1, guide_mode_2, 
-            guide_1_Luminosity, guide_1_CyanRed, guide_1_LimePurple, guide_1_PatternStruct, 
-            offsets, guides_1, guides_2, latent_guide_1, latent_guide_2, latent_self_guide_1, latent_shift_guide_1) = guides
-        else:
-            offset, guide_1, guide_2, guide_mode_1, guide_mode_2, guide_1_Luminosity, guide_1_CyanRed, guide_1_LimePurple, guide_1_PatternStruct = 0.0, 0.0, 0.0, 0, 0, 0.0, 0.0, 0.0, 0.0
-            offsets, guides_1, guides_2, latent_guide_1, latent_guide_2, latent_self_guide_1, latent_shift_guide_1 = None, None, None, None, None, None, None
-
-        etas1 = initialize_or_scale(etas1, eta1, steps)
-        etas2 = initialize_or_scale(etas2, eta2, steps)
-        eta_vars1 = initialize_or_scale(eta_vars1, eta_var1, steps)
-        eta_vars2 = initialize_or_scale(eta_vars2, eta_var2, steps)
-
-        s_noises1 = initialize_or_scale(s_noises1, s_noise1, steps)
-        s_noises2 = initialize_or_scale(s_noises2, s_noise2, steps)
-        c2s = initialize_or_scale(c2s, c2, steps)
-        c3s = initialize_or_scale(c3s, c3, steps)
-        cfgpps = initialize_or_scale(cfgpps, cfgpp, steps)
-        offsets = initialize_or_scale(offsets, offset, steps)
-        guides_1 = initialize_or_scale(guides_1, guide_1, steps)
-        guides_2 = initialize_or_scale(guides_2, guide_2, steps)
-        alphas = initialize_or_scale(alphas, alpha, steps)"""
-
-
         sampler = comfy.samplers.ksampler("RES_implicit_advanced_RF_PC_3rd_order", {"eta1": eta1, "eta2": eta2, "eta3": eta3, "eta_var1": eta_var1, "eta_var2": eta_var2, "eta_var3": eta_var3, "s_noise1": s_noise1, "s_noise2": s_noise2, "s_noise3": s_noise3, "c2": c2, "c3": c3, "auto_c2": auto_c2, "alpha": alphas, "k": k, "noise_sampler_type1": noise_sampler_type1, "noise_sampler_type2": noise_sampler_type2,"noise_sampler_type3": noise_sampler_type3, "noise_mode": noise_mode,
                                                                           "iter_c2": iter_c2, "iter_c3": iter_c3, "iter": iter, "reverse_weight_c2": reverse_weight_c2, "reverse_weight_c3": reverse_weight_c3, "reverse_weight": reverse_weight, "tol":tol, "latent_guide": latent_guide, "latent_guide_weight": latent_guide_weight, "latent_guide_weights": latent_guide_weights, "mask": latent_guide_mask,
                                                                           
                                                                           })
         return (sampler, )
+    
     
     
 class SamplerSDE_Implicit:

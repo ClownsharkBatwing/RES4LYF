@@ -89,6 +89,7 @@ NODE_CLASS_MAPPINGS = {
     "SamplerDPMPP_SDE_CFG++_Advanced": samplers.SamplerDPMPP_SDE_CFGPP_ADVANCED,
     "SamplerEulerAncestral_Advanced": samplers.SamplerEulerAncestral_Advanced,
     "SamplerRES_Implicit": samplers.SamplerRES_Implicit,
+    "SamplerRES3_Implicit_Automation": samplers.SamplerRES3_Implicit_Automation,
     "SamplerRES3_Implicit": samplers.SamplerRES3_Implicit,
     "SamplerSDE_Implicit": samplers.SamplerSDE_Implicit,
     "SamplerDPMPP_2S_Ancestral_Advanced": samplers.SamplerDPMPP_2S_Ancestral_Advanced,

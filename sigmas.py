@@ -383,6 +383,8 @@ class sigmas_split:
     CATEGORY = "sampling/custom_sampling/sigmas"
     
     def main(self, sigmas, sigmas_start, sigmas_end):
+        return (sigmas[sigmas_start:sigmas_end],)
+
         sigmas_stop_step = sigmas_end - sigmas_start
         return (sigmas[sigmas_start:][:sigmas_stop_step],)
     

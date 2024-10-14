@@ -93,6 +93,10 @@ def get_ancestral_step_RF(sigma_next, eta):
     sigma_down = (sigma_next * eta_scaled) / (1 - sigma_next + sigma_next * eta_scaled)
     alpha_ratio = (1 - sigma_next) / (1 - sigma_down)
     return sigma_up, sigma_down, alpha_ratio
+  
+  
+  
+  
 
 def get_ancestral_step(sigma, sigma_next, eta=1.):
     """Calculates the noise level (sigma_down) to step down to and the amount of noise to add (sigma_up) when doing an ancestral sampling step."""
