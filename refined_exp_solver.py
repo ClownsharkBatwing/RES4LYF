@@ -95,7 +95,20 @@ def get_ancestral_step_RF(sigma_next, eta):
     return sigma_up, sigma_down, alpha_ratio
   
   
-  
+def get_ancestral_step_RF_exp(sigma_next, eta, sigma_max=1.0, h=None):
+    #if sigma_next == 0.0:
+    #  return torch.zeros_like(sigma), sigma_next, torch.ones_like(sigma)
+    
+    sigma_up = sigma_next * torch.sqrt(1 - (-2*eta*h).exp()) #or whatever the f
+    
+    sigma_signal = sigma_max - sigma_next
+    sigma_residual = torch.sqrt(sigma_next**2 - sigma_up**2)
+
+    alpha_ratio = sigma_signal + sigma_residual
+    sigma_down = sigma_residual / alpha_ratio
+    
+    return sigma_up, sigma_down, alpha_ratio
+
   
 
 def get_ancestral_step(sigma, sigma_next, eta=1.):
@@ -853,7 +866,7 @@ def get_res4lyf_step(sigma, sigma_next, eta=0.0, eta_var=1.0, noise_mode="hard")
     
   return su, sd, alpha_ratio
 
-def get_res4lyf_step_with_model(model, sigma, sigma_next, eta=0.0, eta_var=1.0, noise_mode="hard"):
+def get_res4lyf_step_with_model(model, sigma, sigma_next, eta=0.0, eta_var=1.0, noise_mode="hard", h=None):
   if isinstance(model.inner_model.inner_model.model_sampling, comfy.model_sampling.CONST):
     sigma_var = (-1 + torch.sqrt(1 + 4 * sigma)) / 2
     if eta_var > 0.0 and sigma_next > sigma_var:
@@ -865,6 +878,8 @@ def get_res4lyf_step_with_model(model, sigma, sigma_next, eta=0.0, eta_var=1.0, 
         su, sd, alpha_ratio = get_RF_step_traditional(sigma, sigma_next, eta)
       elif noise_mode == "hard":
         su, sd, alpha_ratio = get_ancestral_step_RF(sigma_next, eta)
+      elif noise_mode == "exp": 
+        su, sd, alpha_ratio = get_ancestral_step_RF_exp(sigma_next, eta, h)
   else:
     alpha_ratio = 1.0
     if noise_mode == "hard":
@@ -1975,11 +1990,11 @@ def select_perpendicular_cosine_trajectory(x_n, x_h, denoised2, branch_depth, br
     min_cosine_deviation_from_zero = float('inf')
     best_idx = -1
 
-    # Calculate cosine similarities aiming for orthogonality at each step
+    # calc cosine similarities: select for orthogonality at each step
     for n in range(len(x_n_depth)):
         total_cosine_deviation = 0.0
 
-        # Iterate through the trajectory path
+        # iterate throughout the diffusion trajectory
         for depth in range(1, branch_depth):
             for j in range(len(x_n[depth])):
                 if depth == 1:
@@ -1993,10 +2008,10 @@ def select_perpendicular_cosine_trajectory(x_n, x_h, denoised2, branch_depth, br
                 cosine_similarity = torch.dot(current_vector.flatten(), target_vector.flatten()) / (
                     torch.norm(current_vector) * torch.norm(target_vector))
 
-                # Accumulate deviation from zero (ideal for perpendicular direction)
-                total_cosine_deviation += (cosine_similarity ** 2)  # Squaring to emphasize smaller values
+                # accumulate deviation from zero: ideal for perpendicular direction
+                total_cosine_deviation += (cosine_similarity ** 2)  # square to emphasize smaller values
 
-        # Update to select the trajectory with the minimum deviation from zero cosine similarity (most perpendicular)
+        # select the trajectory with the minimum deviation from zero cosine similarity (most perpendicular)
         if total_cosine_deviation < min_cosine_deviation_from_zero:
             min_cosine_deviation_from_zero = total_cosine_deviation
             best_idx = n
@@ -2017,11 +2032,11 @@ def select_perpendicular_cosine_trajectory_d(x_n, x_h, denoised2, branch_depth, 
   min_cosine_deviation_from_zero = float('inf')
   best_idx = -1
 
-  # Calculate cosine similarities aiming for orthogonality at each step
+  # calc cosine similarities: select for orthogonality at each step
   for n in range(len(d_n_depth)):
       total_cosine_deviation = 0.0
 
-      # Iterate through the trajectory path
+      # iterate throughout the diffusion trajectory
       for depth in range(1, branch_depth):
           for j in range(len(denoised2[depth])):
               if depth == 1:
@@ -2035,10 +2050,10 @@ def select_perpendicular_cosine_trajectory_d(x_n, x_h, denoised2, branch_depth, 
               cosine_similarity = torch.dot(current_vector.flatten(), target_vector.flatten()) / (
                   torch.norm(current_vector) * torch.norm(target_vector))
 
-              # Accumulate deviation from zero (ideal for perpendicular direction)
-              total_cosine_deviation += (cosine_similarity ** 2)  # Squaring to emphasize smaller values
+              # accumulate deviation from zero: ideal for perpendicular direction
+              total_cosine_deviation += (cosine_similarity ** 2)  # square to emphasize smaller values
 
-      # Update to select the trajectory with the minimum deviation from zero cosine similarity (most perpendicular)
+      # select the trajectory with the minimum deviation from zero cosine similarity (most perpendicular)
       if total_cosine_deviation < min_cosine_deviation_from_zero:
           min_cosine_deviation_from_zero = total_cosine_deviation
           best_idx = n
