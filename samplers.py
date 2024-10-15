@@ -841,16 +841,16 @@ class SamplerRES3_Implicit:
     @classmethod
     def INPUT_TYPES(s):
         return {"required":
-                    {"eta1": ("FLOAT", {"default": 0.0, "min": -100.0, "max": 100.0, "step":0.01, "round": False}),
-                     "eta2": ("FLOAT", {"default": 0.0, "min": -100.0, "max": 100.0, "step":0.01, "round": False}),
-                     "eta3": ("FLOAT", {"default": 0.0, "min": -100.0, "max": 100.0, "step":0.01, "round": False}),
+                    {"eta1":     ("FLOAT", {"default": 0.0, "min": -100.0, "max": 100.0, "step":0.01, "round": False}),
+                     "eta2":     ("FLOAT", {"default": 0.0, "min": -100.0, "max": 100.0, "step":0.01, "round": False}),
+                     "eta3":     ("FLOAT", {"default": 0.0, "min": -100.0, "max": 100.0, "step":0.01, "round": False}),
                      "eta_var1": ("FLOAT", {"default": 0.0, "min": -100.0, "max": 100.0, "step":0.01, "round": False}),
                      "eta_var2": ("FLOAT", {"default": 0.0, "min": -100.0, "max": 100.0, "step":0.01, "round": False}),
                      "eta_var3": ("FLOAT", {"default": 0.0, "min": -100.0, "max": 100.0, "step":0.01, "round": False}),
                      "s_noise1": ("FLOAT", {"default": 1.0, "min": -100.0, "max": 100.0, "step":0.01, "round": False}),
                      "s_noise2": ("FLOAT", {"default": 1.0, "min": -100.0, "max": 100.0, "step":0.01, "round": False}),
                      "s_noise3": ("FLOAT", {"default": 1.0, "min": -100.0, "max": 100.0, "step":0.01, "round": False}),
-                     "alpha": ("FLOAT", {"default": 0.0, "min": -10000.0, "max": 10000.0, "step":0.1, "round": False}),
+                     "alpha":    ("FLOAT", {"default": 0.0, "min": -10000.0, "max": 10000.0, "step":0.1, "round": False}),
                      "k": ("FLOAT", {"default": 1.0, "min": -10000.0, "max": 10000.0, "step":2.0, "round": False}),
                     "noise_sampler_type1": (NOISE_GENERATOR_NAMES, {"default": "brownian"}),
                     "noise_sampler_type2": (NOISE_GENERATOR_NAMES, {"default": "brownian"}),
@@ -861,11 +861,11 @@ class SamplerRES3_Implicit:
                      "auto_c2": ("BOOLEAN", {"default": False}),
                      "iter_c2": ("INT", {"default": 0, "min": 0, "max": 100, "step": 1}), 
                      "iter_c3": ("INT", {"default": 0, "min": 0, "max": 100, "step": 1}), 
-                     "iter": ("INT", {"default": 3, "min": 0, "max": 100, "step": 1}), 
-                     "reverse_weight_c2": ("FLOAT", {"default": 1.0, "min": -100.0, "max": 100.0, "step":0.01, "round": False}),
-                     "reverse_weight_c3": ("FLOAT", {"default": 1.0, "min": -100.0, "max": 100.0, "step":0.01, "round": False}),
-                     "reverse_weight": ("FLOAT", {"default": 1.0, "min": -100.0, "max": 100.0, "step":0.01, "round": False}),
-                     "tol": ("FLOAT", {"default": 0.1, "min": 0, "max": 100, "step": 0.01}), 
+                     "iter":    ("INT", {"default": 3, "min": 0, "max": 100, "step": 1}), 
+                     "reverse_weight_c2":   ("FLOAT", {"default": 1.0, "min": -100.0, "max": 100.0, "step":0.01, "round": False}),
+                     "reverse_weight_c3":   ("FLOAT", {"default": 1.0, "min": -100.0, "max": 100.0, "step":0.01, "round": False}),
+                     "reverse_weight":      ("FLOAT", {"default": 1.0, "min": -100.0, "max": 100.0, "step":0.01, "round": False}),
+                     "tol":                 ("FLOAT", {"default": 0.1, "min":    0.0, "max": 100.1, "step":0.01}), 
                      "latent_guide_weight": ("FLOAT", {"default": 1.0, "min": -100.0, "max": 100.0, "step":0.01, "round": False}),
                      
                       },
@@ -895,6 +895,7 @@ class SamplerRES3_Implicit:
         if latent_guide is not None:
             latent_guide = latent_guide["samples"].to('cuda')
             
+        eta1s, eta2s, eta3s, eta_var1s, eta_var2s, eta_var3s, s_noise1s, s_noise2s, s_noise3s = None, None, None, None, None, None, None, None, None
         if automation is not None:
             (eta1s, eta2s, eta3s, eta_var1s, eta_var2s, eta_var3s, s_noise1s, s_noise2s, s_noise3s) = automation
             

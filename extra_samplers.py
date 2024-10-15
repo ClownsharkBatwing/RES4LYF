@@ -2703,6 +2703,7 @@ def sample_deis_sde_implicit(model, x, sigmas, extra_args=None, callback=None, d
             
         
         for iteration in range(iter):  
+            #denoised_new = model(x_next, sigma_next * s_in, **extra_args)
             denoised_new = model(x_next, sigma_down * s_in, **extra_args)
             denoised_new = momentum_func(denoised_new, vel, sigmas[i], -momentums[i] / 2.0)
             if callback is not None:
@@ -2730,6 +2731,7 @@ def sample_deis_sde_implicit(model, x, sigmas, extra_args=None, callback=None, d
             if error < tol:
                 print(f"Converged after {iteration + 1} iterations with error {error.item()}")
                 x_next = x_new
+                denoised = denoised_new
                 break
             
             if reverse_weight > 0.0:
