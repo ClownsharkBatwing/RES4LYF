@@ -788,6 +788,9 @@ class SamplerRES_Implicit:
         steps = 10000
         alphas = initialize_or_scale(alphas, alpha, steps)
         latent_guide_weights = initialize_or_scale(latent_guide_weights, latent_guide_weight, steps)
+        
+        if latent_guide is not None:
+            latent_guide = latent_guide["samples"].to('cuda')
 
         sampler = comfy.samplers.ksampler("RES_implicit_advanced_RF_PC", {"eta1": eta1, "eta2": eta2, "eta_var1": eta_var1, "eta_var2": eta_var2, "s_noise1": s_noise1, "s_noise2": s_noise2, "c2": c2, "auto_c2": auto_c2, "alpha": alphas, "k": k, "noise_sampler_type": noise_sampler_type, "noise_mode": noise_mode,
                                                                           "iter_c2": iter_c2, "iter": iter, "reverse_weight_c2": reverse_weight_c2, "reverse_weight": reverse_weight, "tol":tol,  "latent_guide": latent_guide, "latent_guide_weight": latent_guide_weight, "latent_guide_weights": latent_guide_weights, "mask": latent_guide_mask,})

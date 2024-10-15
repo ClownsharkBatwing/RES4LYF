@@ -1580,6 +1580,14 @@ def sample_RES_implicit_advanced_RF_PC(
     if sigmas[-1] == 0.0:
         sigmas[-1] = min(sigmas[-2]**2, 0.00001)
     
+    if mask is None:
+        mask = torch.ones_like(x)
+    else:
+        mask = mask.unsqueeze(1)
+        mask = mask.repeat(1, 16, 1, 1) 
+        mask = F.interpolate(mask, size=(x.shape[2], x.shape[3]), mode='bilinear', align_corners=False)
+        mask = mask.to(x.dtype).to(x.device)
+        
     #t_fn = lambda sigma: 1/((sigma).exp()+1)
     #sigma_fn = lambda t: ((1-t)/t).log()
     
