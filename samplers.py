@@ -898,7 +898,6 @@ class SamplerRES3_Implicit:
         if automation is not None:
             (eta1s, eta2s, eta3s, eta_var1s, eta_var2s, eta_var3s, s_noise1s, s_noise2s, s_noise3s) = automation
             
-            
         steps = 10000
         latent_guide_weights = initialize_or_scale(latent_guide_weights, latent_guide_weight, steps)
         
@@ -1020,10 +1019,14 @@ class SamplerSDE_Implicit:
                      "reverse_weight": ("FLOAT", {"default": 1.0, "min": -100.0, "max": 100.0, "step":0.01, "round": False}),
                      "iter": ("INT", {"default": 2, "min": 0, "max": 100, "step": 1}), 
                      "tol": ("FLOAT", {"default": 0.1, "min": 0, "max": 1, "step": 0.01}), 
+                     "latent_guide_weight": ("FLOAT", {"default": 1.0, "min": -100.0, "max": 100.0, "step":0.01, "round": False}),
                       },
                     "optional": 
                     {
                         "alphas": ("SIGMAS", ),
+                        "latent_guide": ("LATENT", ),
+                        "latent_guide_weights": ("SIGMAS", ),
+                        "latent_guide_mask": ("MASK", ),
                     }  
                }
     RETURN_TYPES = ("SAMPLER",)
@@ -1031,13 +1034,17 @@ class SamplerSDE_Implicit:
 
     FUNCTION = "get_sampler"
 
-    def get_sampler(self, eta, eta_var, s_noise, alpha, k, noise_sampler_type, noise_mode, reverse_weight, alphas=None, iter=3, tol=0.00001):
+    def get_sampler(self, eta, eta_var, s_noise, alpha, k, noise_sampler_type, noise_mode, reverse_weight, alphas=None, iter=3, tol=0.00001, latent_guide=None, latent_guide_weight=0.0, latent_guide_weights=None, latent_guide_mask=None, automation=None):   
         
         steps = 10000
         alphas = initialize_or_scale(alphas, alpha, steps)
+        latent_guide_weights = initialize_or_scale(latent_guide_weights, latent_guide_weight, steps)
+        
+        if latent_guide is not None:
+            latent_guide = latent_guide["samples"].to('cuda')
 
         sampler = comfy.samplers.ksampler("SDE_implicit_advanced_RF", {"eta": eta, "eta_var": eta_var, "s_noise": s_noise, "alpha": alphas, "k": k, "noise_sampler_type": noise_sampler_type, "noise_mode": noise_mode, 
-            "reverse_weight": reverse_weight, "iter": iter,"tol":tol,})
+            "reverse_weight": reverse_weight, "iter": iter,"tol":tol,"latent_guide": latent_guide, "latent_guide_weight": latent_guide_weight, "latent_guide_weights": latent_guide_weights, "mask": latent_guide_mask,})
         return (sampler, )
     
 class SamplerDPMPP_2S_Ancestral_Advanced:
