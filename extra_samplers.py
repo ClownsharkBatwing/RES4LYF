@@ -2539,7 +2539,8 @@ from .refined_exp_solver import _refined_exp_sosu_step_RF
 #under Apache 2 license
 @torch.no_grad()
 def sample_deis_sde(model, x, sigmas, extra_args=None, callback=None, disable=None, max_order=3, deis_mode='rhoab', step_type='res_a', denoised_type="1_2",
-                    momentums=None, etas=None, s_noises=None, noise_sampler_type="gaussian", noise_mode="hard", noise_scale=0.0, k=1.0, scale=0.1, alpha=None,):
+                    momentums=None, etas=None, s_noises=None, noise_sampler_type="gaussian", noise_mode="hard", noise_scale=0.0, k=1.0, scale=0.1, alpha=None,   
+                    latent_guide=None, latent_guide_weight=0.0, latent_guide_weights=None, mask=None):
 
     extra_args = {} if extra_args is None else extra_args
     s_in = x.new_ones([x.shape[0]])
@@ -2553,6 +2554,14 @@ def sample_deis_sde(model, x, sigmas, extra_args=None, callback=None, disable=No
         
     if sigmas[-1] == 0.0:
         sigmas[-1] = min(sigmas[-2]**2, 0.00001)
+
+    if mask is None:
+        mask = torch.ones_like(x)
+    else:
+        mask = mask.unsqueeze(1)
+        mask = mask.repeat(1, 16, 1, 1) 
+        mask = F.interpolate(mask, size=(x.shape[2], x.shape[3]), mode='bilinear', align_corners=False)
+        mask = mask.to(x.dtype).to(x.device)
         
     seed = extra_args.get("seed", None) + 1
     noise_sampler = NOISE_GENERATOR_CLASSES.get(noise_sampler_type)(x=x, seed=seed, sigma_min=sigma_min, sigma_max=sigma_max)
@@ -2612,6 +2621,13 @@ def sample_deis_sde(model, x, sigmas, extra_args=None, callback=None, disable=No
 
         if step_type == "simple": 
             denoised = model(x_cur, sigma * s_in, **extra_args)
+            
+            if latent_guide is not None:
+                lg_weight = latent_guide_weights[i] * sigma
+                #k2 = lg_weight*latent_guide + (1-lg_weight)*k2
+                hard_light_blend_1 = hard_light_blend(latent_guide, denoised)
+                denoised = denoised - lg_weight * sigma_next * denoised  + (lg_weight * sigma_next * hard_light_blend_1 * mask)
+            
             denoised = momentum_func(denoised, vel, sigmas[i], -momentums[i] / 2.0)
         elif step_type == "res_a":
             """x, denoised, denoised2, denoised1_2, vel, vel_2 = _refined_exp_sosu_step_RF_hard_deis(model, x_cur, sigma, sigma_next, sigmas[i+2], c2=0.5,eta=etas[i], noise_sampler=noise_sampler, s_noise=s_noises[i], noise_mode=noise_mode, ancestral_noise=True,

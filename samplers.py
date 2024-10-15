@@ -603,6 +603,7 @@ class SamplerDEIS_SDE:
                      "step_type": (["simple", "res_a", "dpmpp_sde"], {"default": "simple"}), 
                      "denoised_type": (["1_2", "2"], {"default": "1_2"}), 
                      "max_order": ("INT", {"default": 3, "min": 1, "max": 4, "step":1}),
+                     "latent_guide_weight": ("FLOAT", {"default": 1.0, "min": -100.0, "max": 100.0, "step":0.01, "round": False}),
                       },
                     "optional": 
                     {
@@ -610,6 +611,9 @@ class SamplerDEIS_SDE:
                         "etas": ("SIGMAS", ),
                         "s_noises": ("SIGMAS", ),
                         "alphas": ("SIGMAS", ),
+                        "latent_guide": ("LATENT", ),
+                        "latent_guide_weights": ("SIGMAS", ),
+                        "latent_guide_mask": ("MASK", ),
                     }  
                }
     RETURN_TYPES = ("SAMPLER",)
@@ -617,7 +621,8 @@ class SamplerDEIS_SDE:
 
     FUNCTION = "get_sampler"
 
-    def get_sampler(self, momentum, eta, s_noise, alpha, k, noise_sampler_type, noise_mode, noise_scale, deis_mode, step_type, denoised_type, max_order, momentums=None, etas=None, s_noises=None, alphas=None, ):
+    def get_sampler(self, momentum, eta, s_noise, alpha, k, noise_sampler_type, noise_mode, noise_scale, deis_mode, step_type, denoised_type, max_order, momentums=None, etas=None, s_noises=None, alphas=None,                     
+                    latent_guide=None, latent_guide_weight=0.0, latent_guide_weights=None, latent_guide_mask=None, automation=None):      
         sampler_name = "deis_sde"
 
         steps = 10000
@@ -625,10 +630,14 @@ class SamplerDEIS_SDE:
         etas = initialize_or_scale(etas, eta, steps)
         s_noises = initialize_or_scale(s_noises, s_noise, steps)
         alphas = initialize_or_scale(alphas, alpha, steps)
-
+        latent_guide_weights = initialize_or_scale(latent_guide_weights, latent_guide_weight, steps)
+        
+        if latent_guide is not None:
+            latent_guide = latent_guide["samples"].to('cuda')
+            
         sampler = comfy.samplers.ksampler(sampler_name, {"momentums": momentums, "etas": etas, "s_noises": s_noises, "alpha": alphas, "k": k, 
                                                          "noise_sampler_type": noise_sampler_type, "noise_mode": noise_mode, "noise_scale": noise_scale, "deis_mode": deis_mode, "step_type": step_type, 
-                                                         "denoised_type": denoised_type, "max_order": max_order,})
+                                                         "denoised_type": denoised_type, "max_order": max_order,"latent_guide": latent_guide, "latent_guide_weight": latent_guide_weight, "latent_guide_weights": latent_guide_weights, "mask": latent_guide_mask,})
         return (sampler, )
 
 
