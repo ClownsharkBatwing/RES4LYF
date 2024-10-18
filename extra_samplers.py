@@ -159,6 +159,19 @@ def get_ancestral_step_RF(sigma_next, eta, sigma_max=1.0):
     return sigma_up, sigma_down, alpha_ratio
 
 
+def get_ancestral_step_RF_down(sigma_next, sigma_up, sigma_max=1.0, h=None):
+    #if sigma_next == 0.0:
+    #  return torch.zeros_like(sigma), sigma_next, torch.ones_like(sigma)
+    
+    #sigma_up = sigma_next * torch.sqrt(1 - (-2*eta*h).exp()) #or whatever the f
+    
+    sigma_signal = sigma_max - sigma_next
+    sigma_residual = torch.sqrt(sigma_next**2 - sigma_up**2)
+
+    alpha_ratio = sigma_signal + sigma_residual
+    sigma_down = sigma_residual / alpha_ratio
+    
+    return sigma_up, sigma_down, alpha_ratio
 
 
 
@@ -215,6 +228,7 @@ def sample_dpmpp_sde_advanced(
             noise_sampler.alpha = alphas[i]
             noise_sampler.k = k
             noise_sampler.scale = scale
+
 
         if sigmas[i + 1] == 0:
             # Euler method
@@ -397,7 +411,138 @@ def sample_dpmpp_sde_advanced_RF(
         torch.cuda.empty_cache()
     return x
 
+from numpy.polynomial.chebyshev import chebfit, chebval
 
+def chebyshev_fit(x, nodes, N):
+    """
+    Fit a Chebyshev polynomial to the function values using PyTorch.
+    x: Function values at the Chebyshev nodes (PyTorch tensor).
+    nodes: The Chebyshev nodes (PyTorch tensor).
+    N: Degree of the Chebyshev polynomial.
+    
+    Returns: Chebyshev coefficients (PyTorch tensor).
+    """
+    # gen chebyshev polynomials T_k at nodes
+    T = [torch.ones_like(nodes), nodes]  # T_0 = 1, T_1 = x
+    for k in range(2, N + 1):
+        T_k = 2 * nodes * T[k - 1] - T[k - 2]
+        T.append(T_k)
+    
+    # stack polynomials T_0, T_1, ..., T_N
+    T = torch.stack(T, dim=1)
+    
+    # calc chebyshev coefficients... least-squares fit
+    coeffs = torch.linalg.lstsq(T, x).solution
+    
+    return coeffs
+
+def chebyshev_eval(coeffs, x, N):
+    """
+    Evaluate a Chebyshev polynomial at point x using the Chebyshev coefficients.
+    coeffs: Chebyshev coefficients (PyTorch tensor).
+    x: The point at which to evaluate the polynomial (PyTorch tensor).
+    N: Degree of the Chebyshev polynomial.
+    
+    Returns: Evaluated polynomial at x (PyTorch tensor).
+    """
+    T_0 = torch.ones_like(x)
+    T_1 = x
+    
+    # Evaluate using the recurrence relation
+    result = coeffs[0] * T_0 + coeffs[1] * T_1
+    for k in range(2, N + 1):
+        T_k = 2 * x * T_1 - T_0
+        result = result + coeffs[k] * T_k
+        T_0, T_1 = T_1, T_k
+    
+    return result
+
+@torch.no_grad()
+def _step_chebyshev(model, x, sigma, sigma_next, c2 = 0.5, eta1=0.25, eta2=0.5, eta_var1=0.0, eta_var2=0.0, noise_sampler=None, noise_mode="hard", order=2, 
+                                   s_noise1=1.0, s_noise2=1.0, denoised1_2=None, h_last=None, auto_c2=False, denoise_boost=0.0, extra_args=None,
+  momentum = 0.0, vel = None, vel_2 = None,
+  time = None,
+  t_fn_formula="", sigma_fn_formula="", N=3,
+):
+                                   
+                                   #(model, x, sigma, sigma_next, N=3, c2=0.5, eta1=0.25, eta2=0.5, noise_sampler=None, extra_args=None, denoise_boost=0.0):
+    """
+    PyTorch-based Chebyshev single-step method for diffusion models, avoiding NumPy.
+    """
+    
+    device = x.device
+    dtype = x.dtype
+    
+    # calc chebyshev nodes (cosine-spaced) over the interval [sigma_next, sigma]
+    nodes = torch.cos(torch.linspace(0, torch.pi, N + 1, device=device, dtype=dtype))
+    time_points = 0.5 * (sigma_next + sigma) * (1 - nodes)  # Scale nodes to [sigma_next, sigma]
+    
+    function_values = []
+    for t in time_points:
+        denoised = model(x, t * torch.ones_like(x, device=device, dtype=dtype), **extra_args)
+        function_values.append(denoised)
+    
+    function_values = torch.stack(function_values, dim=0)
+    
+    coeffs = chebyshev_fit(function_values, nodes, N)
+    
+    P_N_at_sigma_next = chebyshev_eval(coeffs, torch.tensor(1.0, device=device, dtype=dtype), N)
+    
+    x_next = x + P_N_at_sigma_next
+    
+    #noise = noise_sampler(sigma=sigma, sigma_next=sigma_next)
+    #noise = (noise - noise.mean()) / noise.std()  # Normalize the noise
+    #x_next = x_next + noise * (sigma_next - sigma)
+    
+    return x_next
+
+
+@torch.no_grad()
+def sample_chebyshev(
+    model, x, sigmas, extra_args=None, callback=None, disable=None,
+    momentum=0.0, noise_sampler=None, r=1/2, noise_sampler_type="brownian", noise_mode="hard", noise_scale=1.0, k=1.0, scale=0.1, 
+    momentums=None, etas1=None, etas2=None, s_noises1=None, s_noises2=None, rs=None, auto_r=False, alphas=None,denoise_boosts=None, noisy_cfg=False, order=2, t_fn_formula=None, sigma_fn_formula=None, 
+):
+    """DPM-Solver++ (stochastic with eta parameter) adapted for Rectified Flow."""   ###^^^swapped sigma_fn and t_fn by accident!
+    
+    if len(sigmas) <= 1:
+        return x
+
+    sigma_min, sigma_max = sigmas[sigmas > 0].min(), sigmas.max()
+    if isinstance(model.inner_model.inner_model.model_sampling, comfy.model_sampling.CONST):
+        sigma_max = torch.full_like(sigma_max, 1.0)
+        sigma_min = torch.full_like(sigma_min, min(sigma_min.item(), 0.00001))
+    if sigmas[-1] == 0.0:
+        sigmas[-1] = min(sigmas[-2]**2, 0.00001)
+        
+    seed = extra_args.get("seed", None) + 1
+
+    noise_sampler = NOISE_GENERATOR_CLASSES.get(noise_sampler_type)(x=x, seed=seed, sigma_min=sigma_min, sigma_max=sigma_max)
+
+    extra_args = {} if extra_args is None else extra_args
+
+    vel, vel_2 = None, None
+    denoised1_2=None
+    h_last = None
+
+    for i in trange(len(sigmas) - 1, disable=disable):
+
+        sigma = sigmas[i]
+        sigma_next = sigmas[i+1]
+        time = sigmas[i] / sigma_max
+        
+        sigma_next = torch.tensor(0.00001) if sigma_next == 0.0 else sigma_next
+        
+        x = _step_chebyshev(model, x, sigma=sigma, sigma_next= sigma_next, c2=rs[i], eta1=etas1[i], eta2=etas2[i], eta_var1= torch.tensor(0.0), eta_var2=torch.tensor(0.0), noise_sampler=noise_sampler, noise_mode=noise_mode, order=order, 
+                                                                          s_noise1=s_noises1[i], s_noise2=s_noises2[i], denoised1_2=denoised1_2, h_last=h_last, auto_c2=auto_r, denoise_boost=denoise_boosts[i],  extra_args=extra_args, time=time,
+                                                                          vel = vel, vel_2=vel_2,
+                                                                          )
+        if callback is not None:
+            callback({'x': x, 'i': i, 'sigma': sigmas[i], 'sigma_hat': sigmas[i], 'denoised': denoised1_2})
+
+        gc.collect()
+        torch.cuda.empty_cache()
+    return x
 
 
 @precision_tool.cast_tensor
@@ -1357,7 +1502,8 @@ def sample_RES_implicit_advanced_RF_PC(
         if isinstance(model.inner_model.inner_model.model_sampling, comfy.model_sampling.CONST) == False and noise_mode == "hard":
             sigma = sigma * (1 + eta2)
         
-        sigma_s, h, c2 = get_res4lyf_half_step(sigma, sigma_down, c2, auto_c2, h_last, "", "", remap_t_to_exp_space=True)
+        h = t_fn(sigma_down) - t_fn(sigma)
+        sigma_s, h_half, c2 = get_res4lyf_half_step(sigma, sigma_down, c2, auto_c2, h_last, "", "", remap_t_to_exp_space=True)
         a2_1, b1, b2 = _de_second_order(h=h, c2=c2, simple_phi_calc=False)
 
         denoised = model(x, sigma * s_in, **extra_args)
@@ -1515,6 +1661,213 @@ def sample_RES_implicit_advanced_RF_PC(
         torch.cuda.empty_cache()
 
     return x
+
+
+
+
+
+import scipy.integrate as integrate
+
+
+
+@torch.no_grad()
+def sample_logistic_implicit(
+    model, x, sigmas, extra_args=None, callback=None, disable=None, c2=1.0, auto_c2=False, eta1=0.0, eta2=0.0, eta_var1=0.0, eta_var2=0.0, s_noise1=1.0, s_noise2=1.0,
+    noise_sampler=None, noise_sampler_type="gaussian", noise_mode="hard", k=1.0, scale=0.1, 
+    alpha=None, iter_c2=0, iter=3, tol=1e-5, reverse_weight_c2=0.0, reverse_weight=0.0,
+    latent_guide=None, latent_guide_weight=0.0, latent_guide_weights=None, mask=None):
+    
+    extra_args = {} if extra_args is None else extra_args
+    seed = extra_args.get("seed", None) + 1
+    
+    s_in = x.new_ones([x.shape[0]])
+    alpha = torch.zeros_like(sigmas) if alpha is None else alpha
+    sigma_min, sigma_max = sigmas[sigmas > 0].min(), sigmas.max()
+    
+    if isinstance(model.inner_model.inner_model.model_sampling, comfy.model_sampling.CONST):
+        sigma_max = torch.full_like(sigma_max, 1.0)
+        sigma_min = torch.full_like(sigma_min, min(sigma_min.item(), 0.00001))
+    
+    noise_sampler = NOISE_GENERATOR_CLASSES.get(noise_sampler_type)(x=x, seed=seed, sigma_min=sigma_min, sigma_max=sigma_max)
+    
+    #sigma_fn = lambda t: t.neg().exp()
+    #t_fn = lambda sigma: sigma.log().neg()
+    sigma_fn = lambda t: ((1-t)/t).log()
+    t_fn = lambda sigma: 1/(sigma.exp()+1)
+    
+    h_fn = lambda sigma_next, sigma, ci: t_fn((sigma_next/sigma)**ci)
+    
+    #phi1_logistic = lambda h: (1-sigma_fn(h))/h
+    #phi2_logistic = lambda h: (sigma_fn(h) - 1 + h)/h**2
+    
+    two = torch.full_like(sigmas[0], 2.0)
+    #phi1_logistic = lambda h: (2/(torch.exp(h)+1))
+    phi1_logistic = lambda h: (1/h) * (two.log() - (torch.exp(h) + 1).log() + h)
+    
+    def integrand(tau, t): 
+        
+        return (t - tau) / (np.exp(t - tau) + 1)
+    def phi2_logistic(t): 
+        t_np = t.item()
+        result, error = integrate.quad(integrand, 0, t_np, args=(t_np,))
+        return torch.full_like(t, result / t**2)
+    
+    denoised_next = None
+    vel, vel_2, denoised, denoised2, denoised1_2, h_last = None, None, None, None, None, None
+    
+    if sigmas[-1] == 0.0:
+        sigmas[-1] = min(sigmas[-2]**2, 0.00001)
+    
+    if mask is None:
+        mask = torch.ones_like(x)
+    else:
+        mask = mask.unsqueeze(1)
+        mask = mask.repeat(1, 16, 1, 1) 
+        mask = F.interpolate(mask, size=(x.shape[2], x.shape[3]), mode='bilinear', align_corners=False)
+        mask = mask.to(x.dtype).to(x.device)
+    
+    for i in trange(len(sigmas) - 1, disable=disable):
+        if noise_sampler_type == "fractal":
+            noise_sampler.alpha = alpha[i]
+            noise_sampler.k = k
+            noise_sampler.scale = scale
+        
+        sigma, sigma_next = sigmas[i], sigmas[i+1]
+        
+        #t, t_next = t_fn(sigma), t_fn(sigma_next)
+        #h = t_next - t    
+        
+        h = h_fn(sigma_next, sigma, c2)
+        sigma_s = (sigma_next/sigma)**c2
+    
+        sigma_up, sigma_down, alpha_ratio = get_res4lyf_step_with_model(model, sigma, sigma_next, eta2, eta_var2, noise_mode)
+        if isinstance(model.inner_model.inner_model.model_sampling, comfy.model_sampling.CONST) == False and noise_mode == "hard":
+            sigma = sigma * (1 + eta2)
+        
+        #sigma_s, h, c2 = get_res4lyf_half_step(sigma, sigma_down, c2, auto_c2, h_last, "", "", remap_t_to_exp_space=True)
+        #a2_1, b1, b2 = _de_second_order(h=h, c2=c2, simple_phi_calc=False)
+
+        phi1 = phi1_logistic(h)
+        phi2 = phi2_logistic(h)
+        
+        a2_1 = c2 * phi1_logistic(c2*h)
+        b1 = phi1 - phi2/c2
+        b2 = phi2/c2
+
+        denoised = model(x, sigma * s_in, **extra_args)
+        
+        if latent_guide is not None:
+            lg_weight = latent_guide_weights[i] * sigma
+            hard_light_blend_1 = hard_light_blend(latent_guide, denoised)
+            denoised = denoised - lg_weight * sigma_next * denoised  + (lg_weight * sigma_next * hard_light_blend_1 * mask)
+            
+            
+        alpha_coeff = 1 - h*a2_1
+        x_2 = (1 - h*a2_1)*x + h*a2_1*denoised
+        #x_2 = ((sigma_down/sigma)**c2)*x + h*a2_1*denoised
+        gc.collect()
+        torch.cuda.empty_cache()
+        
+        for iteration in range(iter_c2):  
+            time = sigmas[i] / sigma_max
+            
+            denoised_next = model(x_2, sigma_s * s_in, **extra_args)
+            
+            if latent_guide is not None:
+                lg_weight = latent_guide_weights[i] * sigma
+                hard_light_blend_1 = hard_light_blend(latent_guide, denoised_next)
+                denoised_next = denoised_next - lg_weight * sigma_next * denoised_next  + (lg_weight * sigma_next * hard_light_blend_1 * mask)
+                
+            x_2_new = ((sigma_down/sigma)**c2)*x + h*a2_1*denoised_next
+            
+            error = torch.norm(x_2_new - x_2)
+            print(f"Iteration {iteration + 1}, Error: {error.item()}")
+
+            if error < tol:
+                print(f"Converged after {iteration + 1} iterations with error {error.item()}")
+                x_2 = x_2_new
+                denoised = denoised_next
+                break
+            
+            if reverse_weight_c2 > 0.0:
+                x_reverse_new = (x_2 - h*a2_1*denoised_next) / ((sigma_down/sigma)**c2)
+                x = reverse_weight_c2 * x_reverse_new + (1-reverse_weight_c2) * x
+
+            x_2 = x_2_new
+            denoised = denoised_next
+            
+            gc.collect()
+            torch.cuda.empty_cache()
+
+        su_2, sd_2, alpha_ratio_2 = get_res4lyf_step(sigma, sigma_next, eta1, eta_var1, noise_mode)
+        noise1 = noise_sampler(sigma=sigma, sigma_next=sigma_s)
+        noise1 = (noise1 - noise1.mean()) / noise1.std()
+        x_2 = alpha_ratio_2 * x_2 + noise1 * s_noise1 * su_2
+        
+        denoised2 = model(x_2, sigma_s * s_in, **extra_args)
+        
+        if latent_guide is not None:
+            lg_weight = latent_guide_weights[i] * sigma
+            hard_light_blend_1 = hard_light_blend(latent_guide, denoised2)
+            denoised2 = denoised2 - lg_weight * sigma_next * denoised2  + (lg_weight * sigma_next * hard_light_blend_1 * mask)
+            
+        alpha_coeff_next = (1 - h*(b1+b2))
+        x_next = (1 - h*(b1+b2))*x + h*(b1*denoised + b2*denoised2)
+        #x_next = (sigma_down/sigma)*x + h*(b1*denoised + b2*denoised2)
+        denoised_next = (b1*denoised + b2*denoised2) / (b1 + b2)
+        
+        gc.collect()
+        torch.cuda.empty_cache()
+
+        for iteration in range(iter):  
+            time = sigmas[i] / sigma_max
+            
+            denoised2_next = model(x_next, sigma_down * s_in, **extra_args)
+            
+            if latent_guide is not None:
+                lg_weight = latent_guide_weights[i] * sigma
+                hard_light_blend_1 = hard_light_blend(latent_guide, denoised2_next)
+                denoised2_next = denoised2_next - lg_weight * sigma_next * denoised2_next  + (lg_weight * sigma_next * hard_light_blend_1 * mask)
+                
+            x_new = (sigma_down/sigma)*x + h*(b1*denoised + b2*denoised2_next)
+            
+            error = torch.norm(x_new - x_next)
+            print(f"Iteration {iteration + 1}, Error: {error.item()}")
+
+            if error < tol:
+                print(f"Converged after {iteration + 1} iterations with error {error.item()}")
+                x_next = x_new
+                denoised2 = denoised2_next
+                denoised_next = (b1*denoised + b2*denoised2_next) / (b1 + b2)
+                break
+            
+            if reverse_weight > 0.0:
+                x_reverse_new = (x_next - h*(b1*denoised + b2*denoised2_next)) / (sigma_down/sigma)
+                x = reverse_weight * x_reverse_new + (1-reverse_weight) * x
+
+            x_next = x_new
+            denoised2 = denoised2_next
+            denoised_next = (b1*denoised + b2*denoised2_next) / (b1 + b2)
+            
+            gc.collect()
+            torch.cuda.empty_cache()
+
+        x = x_next
+        h_last = h
+        
+        noise2 = noise_sampler(sigma=sigma, sigma_next=sigma_next)
+        noise2 = (noise2 - noise2.mean()) / noise2.std()
+        x = alpha_ratio * x + noise2 * s_noise2 * sigma_up
+
+        denoised_next = denoised if denoised_next is None else denoised_next
+        if callback is not None:
+            callback({'x': x, 'i': i, 'sigma': sigmas[i], 'sigma_hat': sigma, 'denoised': denoised_next})
+
+        gc.collect()
+        torch.cuda.empty_cache()
+
+    return x
+
 
 
 
@@ -1855,7 +2208,7 @@ def sample_RES_implicit_advanced_RF_PC_3rd_order(
 def sample_SDE_implicit_advanced_RF(
     model, x, sigmas, extra_args=None, callback=None, disable=None, eta=1., eta_var=1., s_noise=1., 
     noise_sampler=None, noise_sampler_type="gaussian", noise_mode="hard",reverse_weight=0.0, k=1.0, scale=0.1, 
-    alpha=None, iter=3, tol=1e-5, latent_guide=None, latent_guide_weight=0.0, latent_guide_weights=None, mask=None):
+    alpha=None, iter=3, tol=1e-5, latent_guide=None, latent_guide_weight=0.0, latent_guide_weights=None, mask=None, loop_weight=0.0):
     
     extra_args = {} if extra_args is None else extra_args
     seed = extra_args.get("seed", None) + 1
@@ -1936,8 +2289,19 @@ def sample_SDE_implicit_advanced_RF(
                 x_reverse_new = (x_next - (1 - sigma_next/sigma) * denoised_next) / (sigma_next/sigma)
                 x = reverse_weight * x_reverse_new + (1-reverse_weight) * x
                 
+                if loop_weight > 0.0:
+                    denoised = model(x, sigma * s_in, **extra_args)
+                    if latent_guide is not None:
+                        lg_weight = latent_guide_weights[i] * sigma
+                        #k2 = lg_weight*latent_guide + (1-lg_weight)*k2
+                        hard_light_blend_1 = hard_light_blend(latent_guide, denoised)
+                        denoised = denoised - lg_weight * sigma_next * denoised  + (lg_weight * sigma_next * hard_light_blend_1 * mask)
+                    x_new2 = (sigma_next/sigma) * x + (1 - sigma_next/sigma) * denoised 
+                    x_new = loop_weight * x_new2 + (1-loop_weight) * x_new
+                
             x_next = x_new
-            denoised = denoised_next
+            if loop_weight == 0.0:
+                denoised = denoised_next
             #x = reverse_weight * x_reverse_new + (1-reverse_weight) * x
             
 
@@ -1953,6 +2317,161 @@ def sample_SDE_implicit_advanced_RF(
         torch.cuda.empty_cache()
 
     return x
+
+
+
+
+
+
+
+@torch.no_grad()
+def get_sigma_up_SA_solver_old(sigma, sigma_next, eta, h): 
+    sigma_up = sigma_next * torch.sqrt(1 - torch.exp(-2*eta**2*h))
+    return sigma_up
+
+@torch.no_grad()
+def get_sigma_up_SA_solver2_old(sigma, sigma_next): 
+    #sigma_up = sigma_next * torch.sqrt(1 - torch.exp(sigma_next**2 - sigma**2))
+    integral = torch.exp( (sigma_next**2 - sigma**2) )
+    sigma_up = sigma_next**2 * (1 - integral)
+    return sigma_up
+
+@torch.no_grad()
+def get_common_integral_SA_solver_old(sigma, sigma_next):
+    common_integral = torch.exp( (1/2) * (sigma_next**2 - sigma**2) )
+    return common_integral
+
+@torch.no_grad()
+def get_special_integral_SA_solver_old(sigma, sigma_next):
+    special_integral = ((1-sigma_next)/sigma_next - (1-sigma)/sigma)
+    return special_integral
+
+
+
+@torch.no_grad()
+def get_sigma_up_SA_solver(sigma, sigma_next): 
+    sigma_up = sigma_next * torch.sqrt(1 - torch.exp(sigma_next**2 - sigma**2))
+    return sigma_up
+
+@torch.no_grad()
+def get_sigma_up_SA_solver2(sigma, sigma_next): 
+    #sigma_up = sigma_next * torch.sqrt(1 - torch.exp(sigma_next**2 - sigma**2))
+    integral = torch.exp( (sigma_next**2 - sigma**2) )
+    sigma_up = sigma_next**2 * (1 - integral)
+    return sigma_up
+
+@torch.no_grad()
+def get_common_integral_SA_solver(sigma, sigma_next):
+    common_integral = torch.exp( (1/2) * (sigma_next**2 - sigma**2) )
+    return common_integral
+
+@torch.no_grad()
+def get_special_integral_SA_solver(sigma, sigma_next):
+    special_integral = ((1-sigma_next)/sigma_next - (1-sigma)/sigma)
+    return special_integral
+
+
+@torch.no_grad()
+def sample_corona(
+    model, x, sigmas, extra_args=None, callback=None, disable=None, eta=1., eta_var=1., s_noise=1., 
+    noise_sampler=None, noise_sampler_type="gaussian", noise_mode="hard",reverse_weight=0.0, k=1.0, scale=0.1, 
+    alpha=None, iter=3, tol=1e-5, latent_guide=None, latent_guide_weight=0.0, latent_guide_weights=None, mask=None):
+    
+    extra_args = {} if extra_args is None else extra_args
+    seed = extra_args.get("seed", None) + 1
+    
+    s_in = x.new_ones([x.shape[0]])
+    alpha = torch.zeros_like(sigmas) if alpha is None else alpha
+    sigma_min, sigma_max = sigmas[sigmas > 0].min(), sigmas.max()
+
+    if isinstance(model.inner_model.inner_model.model_sampling, comfy.model_sampling.CONST):
+        sigma_max = torch.full_like(sigma_max, 1.0)
+        sigma_min = torch.full_like(sigma_min, min(sigma_min.item(), 0.00001))
+        
+    if sigmas[-1] == 0.0:
+        sigmas[-1] = min(sigmas[-2]**2, 0.00001)
+    
+    if mask is None:
+        mask = torch.ones_like(x)
+    else:
+        mask = mask.unsqueeze(1)
+        mask = mask.repeat(1, 16, 1, 1) 
+        mask = F.interpolate(mask, size=(x.shape[2], x.shape[3]), mode='bilinear', align_corners=False)
+        mask = mask.to(x.dtype).to(x.device)
+        
+    noise_sampler = NOISE_GENERATOR_CLASSES.get(noise_sampler_type)(x=x, seed=seed, sigma_min=sigma_min, sigma_max=sigma_max)
+    
+    sigma_fn = lambda t: t.neg().exp()
+    t_fn = lambda sigma: sigma.log().neg()
+    x_reverse_new = None
+    
+    #t_fn = lambda sigma: 1/((sigma).exp()+1)
+    #sigma_fn = lambda t: ((1-t)/t).log()
+    
+    
+    
+    for i in trange(len(sigmas) - 1, disable=disable):
+        if noise_sampler_type == "fractal":
+            noise_sampler.alpha = alpha[i]
+            noise_sampler.k = k
+            noise_sampler.scale = scale
+        
+        
+        
+        sigma, sigma_next = sigmas[i], sigmas[i+1]
+        #sigma_up, sigma_down, alpha_ratio = get_res4lyf_step(sigma, sigma_next, eta, eta_var, noise_mode)
+        #sigma_s, h, c2 = get_res4lyf_half_step(sigma, sd, c2, auto_c2, h_last, t_fn_formula, sigma_fn_formula, )
+        t, t_next = t_fn(sigma), t_fn(sigma_next)
+        h = t_next - t
+        
+        noise = noise_sampler(sigma=sigma, sigma_next=sigma_next)
+        noise = (noise - noise.mean()) / noise.std()
+        
+        denoised = model(x, sigma * s_in, **extra_args)
+        
+        """alpha_coeff = (sigma_next/sigma) * torch.exp(-h*eta**2)
+        beta_coeff = sigma_next * (1 + eta**2) * torch.exp(-h * eta**2) * (torch.exp(t_next) - torch.exp(t))
+        sigma_up = sigma_next * torch.sqrt(1 - torch.exp(-2*h * eta**2))
+
+        x_next = alpha_coeff * x + beta_coeff * denoised + sigma_up * noise"""
+        
+        sigma_up = get_sigma_up_SA_solver(sigma, sigma_next)
+        common_integral = get_common_integral_SA_solver(sigma, sigma_next)
+        special_integral = get_special_integral_SA_solver(sigma, sigma_next)
+        x_next = (sigma_next / sigma) * common_integral * x   +  s_noise * sigma_next * common_integral * special_integral * denoised   +   sigma_up * noise * eta
+        
+        print(sigma_up.item(), ((sigma_next / sigma) * common_integral).item(), (sigma_next * common_integral * special_integral).item())
+        #x_next = (sigma_next / sigma) * common_integral * x   +  s_noise * sigma_next * torch.exp((1/2)*(sigma_next**2-sigma**2)) * ((1-sigma_next)/sigma_next-(1-sigma)/sigma) * denoised   +   sigma_up * noise * eta
+        
+
+        #x_next = (sigma_next/sigma) * x + (1 - sigma_next/sigma) * denoised 
+        denoised_next = denoised
+
+
+
+        x = x_next
+        
+        """if sigmas[i + 1] > 0 and eta > 0:
+            x = alpha_ratio * x + noise_sampler(sigma=sigmas[i], sigma_next=sigmas[i + 1]) * s_noise * sigma_up"""
+
+        if callback is not None:
+            callback({'x': x, 'i': i, 'sigma': sigmas[i], 'sigma_hat': sigmas[i], 'denoised': denoised_next})
+
+        gc.collect()
+        torch.cuda.empty_cache()
+
+    return x
+
+
+
+
+
+
+
+
+
+
+
 
 
 @torch.no_grad()
@@ -2279,41 +2798,136 @@ def sample_rk4(model, x, sigmas, extra_args=None, callback=None, disable=None, s
             callback({'x': x, 'i': i, 'sigma': sigma, 'sigma_next': sigma_next, 'dx': dx})
     return x
 
-def sample_rk4_RF(model, x, sigmas, extra_args=None, callback=None, disable=None, s_churn=0., s_tmin=0., s_tmax=float('inf'), s_noise=1.):
+
+def derivative(model, x, sigma, h, **extra_args):
+    s_in = x.new_ones([x.shape[0]])
+    x0 = model(x, sigma * s_in, **extra_args)
+    eps = (x - x0) / (sigma * s_in) 
+    eps_h = eps * h
+    return eps_h
+ 
+rk_ab_coeff = {
+    "dormand-prince": [
+        [1/5, 0, 0, 0, 0, 0, 0],
+        [3/40, 9/40, 0, 0, 0, 0, 0],
+        [44/45, -56/15, 32/9, 0, 0, 0, 0],
+        [19372/6561, -25360/2187, 64448/6561, -212/729, 0, 0, 0],
+        [9017/3168, -355/33, 46732/5247, 49/176, -5103/18656, 0],
+        [35/384, 0, 500/1113, 125/192, -2187/6784, 11/84, 0],
+        [35/384, 0, 500/1113, 125/192, -2187/6784, 11/84, 0],
+    ],
+    "rk4": [
+        [1/2, 0, 0, 0],
+        [0, 1/2, 0, 0],
+        [0, 0, 1, 0],
+        [1/6, 1/3, 1/3, 1/6]
+    ],
+}
+
+rk_ci_coeff = {
+    "dormand-prince": [0, 1/5, 3/10, 4/5, 89, 1, 1],
+    "rk4": [0, 1/2, 1/2, 1],
+}
+
+
+ 
+def epsilon(model, x, sigma, **extra_args):
+    s_in = x.new_ones([x.shape[0]])
+    x0 = model(x, sigma * s_in, **extra_args)
+    eps = (x - x0) / (sigma * s_in) 
+    return eps
+ 
+def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, noise_sampler=None, noise_sampler_type="brownian", noise_mode="hard", rk_type="dormand-prince", 
+              sigma_fn_formula="", t_fn_formula="",
+                  eta=0.5, eta_var=0.0, s_noise=1., alpha=-1.0, k=1.0, scale=0.1):
     """Implements the fourth-order Runge-Kutta method."""
     extra_args = {} if extra_args is None else extra_args
     s_in = x.new_ones([x.shape[0]])
     
     seed = torch.initial_seed()
-    print("seed: ", seed)
-    noise_sampler = NOISE_GENERATOR_CLASSES.get("brownian")(x=x, seed=seed, sigma_min=0.0, sigma_max=1.0)
     
-    for i in trange(len(sigmas) - 1, disable=disable):
-        sigma = sigmas[i]
-        sigma_next = sigmas[i + 1]
+    sigma_min, sigma_max = sigmas[sigmas > 0].min(), sigmas.max()
+    if isinstance(model.inner_model.inner_model.model_sampling, comfy.model_sampling.CONST):
+        sigma_max = torch.full_like(sigma_max, 1.0)
+        sigma_min = torch.full_like(sigma_min, min(sigma_min.item(), 0.00001))
+    if sigmas[-1] == 0.0:
+        sigmas[-1] = min(sigmas[-2]**2, 0.00001)
+    noise_sampler = NOISE_GENERATOR_CLASSES.get(noise_sampler_type)(x=x, seed=seed, sigma_min=0.0, sigma_max=1.0)
+    
+    if noise_sampler_type == "fractal":
+        noise_sampler.alpha = alpha
+        noise_sampler.k = k
+        noise_sampler.scale = scale
         
-        dt = sigma_next - sigma
+    sigma_fn = lambda t: t.neg().exp()
+    t_fn = lambda sigma: sigma.log().neg()
+    
+    ab = [
+        [1/3, 0, 0, 0],
+        [-1/3, 1, 0, 0],
+        [1, -1, 1, 0],
+        [1/8, 3/8, 3/8, 1/8]
+    ]
+    ci = [0, 1/3, 2/3, 1]
+    
+    ab = [
+        [1/5, 0, 0, 0, 0, 0, 0],
+        [3/40, 9/40, 0, 0, 0, 0, 0],
+        [44/45, -56/15, 32/9, 0, 0, 0, 0],
+        [19372/6561, -25360/2187, 64448/6561, -212/729, 0, 0, 0],
+        [9017/3168, -355/33, 46732/5247, 49/176, -5103/18656, 0, 0],
+        [35/384, 0, 500/1113, 125/192, -2187/6784, 11/84, 0],
+        #[35/384, 0, 500/1113, 125/192, -2187/6784, 11/84, 0],
+    ]
+    ci = [0, 1/5, 3/10, 4/5, 8/9, 1]
+    FSAL = True
+    
+    """ab = [
+        [1/2, 0, 0, 0],
+        [0, 1/2, 0, 0],
+        [0, 0, 1, 0],
+        [1/6, 1/3, 1/3, 1/6]
+    ]
+    ci = [0, 1/2, 1/2, 1]"""
+    
+    order = len(ci)
+    
+    xi = [torch.zeros_like(x)] * (order+1)
+    ki = [torch.zeros_like(x)] * order
+    ks = None
+    
+    xi[0] = x
+    
+    for _ in trange(len(sigmas)-1, disable=disable):
+        sigma, sigma_next = sigmas[_], sigmas[_+1]
         
-        # Runge-Kutta 4th order calculations
-        sd, su, alpha_ratio = get_RF_step(sigma, sigma_next, 1.0)
-        sigma_ratio = (sd - sigma) / (sigma_next - sigma)
-        
-        x = alpha_ratio * x + noise_sampler(sigma=sigma, sigma_next=sigma_next) * su
-        
-        k1 = to_d(x, sigma, model(x, sigma * s_in, **extra_args))
-        k2 = to_d(x + 0.5 * dt * k1, sigma + 0.5 * dt, model(x + 0.5 * dt * k1, (sigma + 0.5 * dt) * s_in, **extra_args))
-        k3 = to_d(x + 0.5 * dt * k2, sigma + 0.5 * dt, model(x + 0.5 * dt * k2, (sigma + 0.5 * dt) * s_in, **extra_args))
-        k4 = to_d(x + dt * k3, sigma_next, model(x + dt * k3, sigma_next * s_in, **extra_args))
-        
-        dx = (1.0 / 6.0) * (k1 + 2 * k2 + 2 * k3 + k4)
-        
-        x = x + dx * dt * sigma_ratio
-        
+        sigma_up, sigma_down, alpha_ratio = get_res4lyf_step(sigma, sigma_next, eta, eta_var, noise_mode)
+        h = sigma_down - sigma
+
+        for i in range(order):
+            if FSAL == True and _ > 0 and i == 0:
+                ki[0] = ki[order-1]
+            else:
+                ki[i] = epsilon(model, xi[i], sigma + h*ci[i], **extra_args)
+            ks = torch.zeros_like(x)
+            for j in range(order):
+                ks += ab[i][j]*ki[j]
+            denoised = xi[0] - sigma * ks
+            xi[(i+1)%order] = xi[0] + h*ks
+            
         if callback is not None:
-            callback({'x': x, 'i': i, 'sigma': sigma, 'sigma_next': sigma_next, 'dx': dx})
+            callback({'x': xi[0], 'i': _, 'sigma': sigma, 'sigma_next': sigma_next, 'denoised': denoised})
+            
+        noise = noise_sampler(sigma=sigma, sigma_next=sigma_next)
+        noise = (noise - noise.mean()) / noise.std()
+        xi[0] = alpha_ratio * xi[0] + noise * s_noise * sigma_up
+            
         gc.collect()
         torch.cuda.empty_cache()
-    return x
+        
+    return xi[0]
+
+
 
 @torch.no_grad()
 def sample_euler_ancestral_recursive(model, x, sigmas, i=0, extra_args=None, callback=None, disable=None, eta=1., s_noise=1., noise_sampler=None, noise_sampler_type="gaussian", ):
@@ -2828,6 +3442,9 @@ extra_samplers = {
     "SDE_implicit_advanced_RF": sample_SDE_implicit_advanced_RF,
     "euler_implicit_advanced_RF": sample_euler_implicit_advanced_RF,
     #"euler_ancestral_advanced2": sample_euler_ancestral_advanced_RF2,
+    "corona": sample_corona,
+    "logistic_implicit": sample_logistic_implicit,
+    "chebyshev": sample_chebyshev,
 
     "dpmpp_2s_ancestral_advanced": sample_dpmpp_2s_ancestral_advanced,
     "res_momentumized_advanced": sample_res_solver_advanced,
@@ -2845,9 +3462,8 @@ extra_samplers = {
     "deis_sde": sample_deis_sde,
     "deis_sde_implicit": sample_deis_sde_implicit,
 
-
     "rk4":  sample_rk4,
-    "rk4_RF":  sample_rk4_RF,
+    "rk":  sample_rk,
 }
 
 discard_penultimate_sigma_samplers = set((

@@ -95,6 +95,10 @@ NODE_CLASS_MAPPINGS = {
     "SamplerDPMPP_2S_Ancestral_Advanced": samplers.SamplerDPMPP_2S_Ancestral_Advanced,
     "SamplerDPMPP_2M_SDE_Advanced": samplers.SamplerDPMPP_2M_SDE_Advanced,
     "SamplerDPMPP_3M_SDE_Advanced": samplers.SamplerDPMPP_3M_SDE_Advanced,
+    "SamplerCorona": samplers.SamplerCorona,
+    "SamplerLogistic_Implicit": samplers.SamplerLogistic_Implicit,
+    "SamplerChebyshev": samplers.SamplerChebyshev,
+    "SamplerRK": samplers.SamplerRK,
 
     "Sigmas Recast": sigmas.set_precision_sigmas,
 
