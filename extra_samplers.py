@@ -2829,8 +2829,47 @@ rk_ci_coeff = {
     "rk4": [0, 1/2, 1/2, 1],
 }
 
+rk_methods = {
+    "dormand-prince": (
+        [
+            [1/5, 0, 0, 0, 0, 0, 0],
+            [3/40, 9/40, 0, 0, 0, 0, 0],
+            [44/45, -56/15, 32/9, 0, 0, 0, 0],
+            [19372/6561, -25360/2187, 64448/6561, -212/729, 0, 0, 0],
+            [9017/3168, -355/33, 46732/5247, 49/176, -5103/18656, 0],
+            [35/384, 0, 500/1113, 125/192, -2187/6784, 11/84, 0],
+        ],
+        [0, 1/5, 3/10, 4/5, 89, 1],
+        True, # epsilon model
+        True, # FSAL
+    ),
+    "rk4": (
+        [
+            [1/2, 0, 0, 0],
+            [0, 1/2, 0, 0],
+            [0, 0, 1, 0],
+            [1/6, 1/3, 1/3, 1/6]
+        ],
+        [0, 1/2, 1/2, 1],
+        True,
+        False,
+    ),
+    "rk38": (
+        [
+            [1/3, 0, 0, 0],
+            [-1/3, 1, 0, 0],
+            [1, -1, 1, 0],
+            [1/8, 3/8, 3/8, 1/8]
+        ],
+        [0, 1/3, 2/3, 1],
+        True,
+        False,
+    ),
+}
 
- 
+"""def get_rk_coeff(rk_type):
+    if rk"""
+
 def epsilon(model, x, sigma, **extra_args):
     s_in = x.new_ones([x.shape[0]])
     x0 = model(x, sigma * s_in, **extra_args)
@@ -2862,7 +2901,7 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
     sigma_fn = lambda t: t.neg().exp()
     t_fn = lambda sigma: sigma.log().neg()
     
-    ab = [
+    """ab = [
         [1/3, 0, 0, 0],
         [-1/3, 1, 0, 0],
         [1, -1, 1, 0],
@@ -2880,7 +2919,9 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
         #[35/384, 0, 500/1113, 125/192, -2187/6784, 11/84, 0],
     ]
     ci = [0, 1/5, 3/10, 4/5, 8/9, 1]
-    FSAL = True
+    FSAL = True"""
+    
+    ab, ci, eps_model, FSAL = rk_methods[rk_type]
     
     """ab = [
         [1/2, 0, 0, 0],
