@@ -3045,6 +3045,7 @@ def get_rk_methods(rk_type, h, c2=0.5, c3=0.75):
     FSAL = False
     if rk_type in rk_methods:
         ab, ci = rk_methods[rk_type]
+        ci = ci[:]
         ci.append(0)
         model_call = get_epsilon
         alpha_fn = lambda h: 1
@@ -3083,6 +3084,9 @@ def get_rk_methods(rk_type, h, c2=0.5, c3=0.75):
             alpha_fn = lambda h: torch.exp(h)
             t_fn = lambda sigma: sigma.log().neg()
             sigma_fn = lambda t: t.neg().exp()
+        case "dpmpp_3s":
+            phi_2 = h_eta.neg().expm1() / h_eta + 1
+            phi_3 = phi_2 / h_eta - 0.5
             
             
     return ab, ci, model_call, alpha_fn, t_fn, sigma_fn, FSAL
