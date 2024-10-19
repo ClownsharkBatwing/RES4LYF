@@ -586,8 +586,8 @@ class SamplerDPMPP_SDE_ADVANCED:
                                                          "denoise_boosts": denoise_boosts, "alphas": alphas, "rs": rs, "auto_r": auto_r, "k": k, "noise_sampler_type": noise_sampler_type, "noise_mode": noise_mode, "noise_scale": noise_scale, "order": order,
                                                          "t_fn_formula": t_fn_formula, "sigma_fn_formula": sigma_fn_formula,})
         return (sampler, )
-    
-    
+
+
 class SamplerRK:
     @classmethod
     def INPUT_TYPES(s):
@@ -599,7 +599,22 @@ class SamplerRK:
                      "k": ("FLOAT", {"default": 1.0, "min": -10000.0, "max": 10000.0, "step":2.0, "round": False}),
                      "noise_sampler_type": (NOISE_GENERATOR_NAMES, {"default": "brownian"}),
                      "noise_mode": (["hard", "hard_var", "soft", "softer"], {"default": 'hard'}),
-                     "rk_type": (["dormand-prince_6s", "dormand-prince_7s", "dormand-prince_13s", "rk4", "rk38"], {"default": "dormand-prince_7s"}), 
+                     "rk_type": (["dormand-prince_6s", 
+                                  "dormand-prince_7s", 
+                                  "dormand-prince_13s", 
+                                  "rk4_4s", 
+                                  "rk38_4s",
+                                  "ralston_4s",
+                                  "heun_3s", 
+                                  "houwen-wray_3s",
+                                  "kutta_3s", 
+                                  "ralston_3s",
+                                  "res_3s",
+                                  "ssprk3_3s",
+                                  "heun_2s", 
+                                  "ralston_2s",
+                                  "res_2s", 
+                                  "euler"], {"default": "dormand-prince_7s"}), 
                      "t_fn_formula": ("STRING", {"default": "1/((sigma).exp()+1)", "multiline": True}),
                      "sigma_fn_formula": ("STRING", {"default": "((1-t)/t).log()", "multiline": True}),
                       },
@@ -621,9 +636,8 @@ class SamplerRK:
         sampler = comfy.samplers.ksampler(sampler_name, {"eta": eta, "s_noise": s_noise, "alpha": alpha, "k": k, "noise_sampler_type": noise_sampler_type, "noise_mode": noise_mode, "rk_type": rk_type, 
                                                          "t_fn_formula": t_fn_formula, "sigma_fn_formula": sigma_fn_formula,})
         return (sampler, )
-    
-    
-    
+
+
 class SamplerChebyshev:
     @classmethod
     def INPUT_TYPES(s):
@@ -1204,6 +1218,49 @@ class SamplerSDE_Implicit:
         return (sampler, )
     
     
+    
+    
+class SamplerSDE_Implicit_Broyden:
+    @classmethod
+    def INPUT_TYPES(s):
+        return {"required":
+                    {"eta": ("FLOAT", {"default": 0.5, "min": 0.0, "max": 100.0, "step":0.01, "round": False}),
+                     "eta_var": ("FLOAT", {"default": 0.0, "min": 0.0, "max": 100.0, "step":0.01, "round": False}),
+                     "s_noise": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 100.0, "step":0.01, "round": False}),
+                     "alpha": ("FLOAT", {"default": 0.0, "min": -10000.0, "max": 10000.0, "step":0.1, "round": False}),
+                     "k": ("FLOAT", {"default": 1.0, "min": -10000.0, "max": 10000.0, "step":2.0, "round": False}),
+                     "noise_sampler_type": (NOISE_GENERATOR_NAMES, {"default": "brownian"}),
+                     "noise_mode": (["hard", "exp", "soft", "softer"], {"default": 'hard'}), 
+                     "reverse_weight": ("FLOAT", {"default": 1.0, "min": -100.0, "max": 100.0, "step":0.01, "round": False}),
+                     "iter": ("INT", {"default": 2, "min": 0, "max": 100, "step": 1}), 
+                     "tol": ("FLOAT", {"default": 0.1, "min": 0, "max": 1, "step": 0.01}), 
+                     "latent_guide_weight": ("FLOAT", {"default": 1.0, "min": -100.0, "max": 100.0, "step":0.01, "round": False}),
+                      },
+                    "optional": 
+                    {
+                        "alphas": ("SIGMAS", ),
+                        "latent_guide": ("LATENT", ),
+                        "latent_guide_weights": ("SIGMAS", ),
+                        "latent_guide_mask": ("MASK", ),
+                    }  
+               }
+    RETURN_TYPES = ("SAMPLER",)
+    CATEGORY = "sampling/custom_sampling/samplers"
+
+    FUNCTION = "get_sampler"
+
+    def get_sampler(self, eta, eta_var, s_noise, alpha, k, noise_sampler_type, noise_mode, reverse_weight, alphas=None, iter=3, tol=0.00001, latent_guide=None, latent_guide_weight=0.0, latent_guide_weights=None, latent_guide_mask=None, automation=None):   
+        
+        steps = 10000
+        alphas = initialize_or_scale(alphas, alpha, steps)
+        latent_guide_weights = initialize_or_scale(latent_guide_weights, latent_guide_weight, steps)
+        
+        if latent_guide is not None:
+            latent_guide = latent_guide["samples"].to('cuda')
+
+        sampler = comfy.samplers.ksampler("SDE_implicit_advanced_RF_broyden", {"eta": eta, "eta_var": eta_var, "s_noise": s_noise, "alpha": alphas, "k": k, "noise_sampler_type": noise_sampler_type, "noise_mode": noise_mode, 
+            "reverse_weight": reverse_weight, "iter": iter,"tol":tol,"latent_guide": latent_guide, "latent_guide_weight": latent_guide_weight, "latent_guide_weights": latent_guide_weights, "mask": latent_guide_mask,})
+        return (sampler, )
     
 
 class SamplerCorona:

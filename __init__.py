@@ -92,6 +92,9 @@ NODE_CLASS_MAPPINGS = {
     "SamplerRES3_Implicit_Automation": samplers.SamplerRES3_Implicit_Automation,
     "SamplerRES3_Implicit": samplers.SamplerRES3_Implicit,
     "SamplerSDE_Implicit": samplers.SamplerSDE_Implicit,
+    "SamplerSDE_Implicit_Broyden": samplers.SamplerSDE_Implicit_Broyden,
+    
+    
     "SamplerDPMPP_2S_Ancestral_Advanced": samplers.SamplerDPMPP_2S_Ancestral_Advanced,
     "SamplerDPMPP_2M_SDE_Advanced": samplers.SamplerDPMPP_2M_SDE_Advanced,
     "SamplerDPMPP_3M_SDE_Advanced": samplers.SamplerDPMPP_3M_SDE_Advanced,

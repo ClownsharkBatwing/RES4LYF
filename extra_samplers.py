@@ -2202,6 +2202,79 @@ def sample_RES_implicit_advanced_RF_PC_3rd_order(
 
     return x
 
+@torch.no_grad()
+def sample_SDE_implicit_advanced_RF_broyden(
+    model, x, sigmas, extra_args=None, callback=None, disable=None, eta=1., eta_var=1., s_noise=1., 
+    noise_sampler=None, noise_sampler_type="gaussian", noise_mode="hard", reverse_weight=0.0, k=1.0, scale=0.1, 
+    alpha=None, iter=3, tol=1e-5, latent_guide=None, latent_guide_weight=0.0, latent_guide_weights=None, mask=None, loop_weight=0.0, rank=128, m=5):
+    
+    extra_args = {} if extra_args is None else extra_args
+    s_in = x.new_ones([x.shape[0]])
+    alpha = torch.zeros_like(sigmas) if alpha is None else alpha
+    sigma_min, sigma_max = sigmas[sigmas > 0].min(), sigmas.max()
+
+    if sigmas[-1] == 0.0:
+        sigmas[-1] = min(sigmas[-2]**2, 0.00001)
+    
+    sigma_fn = lambda t: t.neg().exp()
+    t_fn = lambda sigma: sigma.log().neg()
+
+    f_hist = []
+    x_hist = []
+
+    for i in trange(len(sigmas) - 1, disable=disable):
+        
+        sigma, sigma_next = sigmas[i], sigmas[i+1]
+        denoised = model(x, sigma * s_in, **extra_args)
+
+        # Initialize x_next
+        x_next = (sigma_next / sigma) * x + (1 - sigma_next / sigma) * denoised
+
+        for iteration in range(iter):
+            denoised_next = model(x_next, sigma_next * s_in, **extra_args)
+
+            # Compute the new estimate
+            x_new = (sigma_next / sigma) * x + (1 - sigma_next / sigma) * denoised_next
+
+            # Compute residual
+            f = x_new - x_next
+
+            # Save the last m updates (f_hist and x_hist)
+            f_hist.append(f.view(-1))  # Flatten the tensors to 1D
+            x_hist.append(x_new.view(-1))  # Flatten the tensors to 1D
+
+            if len(f_hist) > m:
+                f_hist.pop(0)
+                x_hist.pop(0)
+
+            # Use the recent history to compute a better update
+            if len(f_hist) > 1:
+                F = torch.stack(f_hist, dim=1)  # Collect previous residuals
+                G = torch.stack([x_h.view(-1) - x_next.view(-1) for x_h in x_hist], dim=1)  # Collect updates
+
+                # Solve a least squares problem to find an improved update
+                alpha = torch.linalg.lstsq(F, f.view(-1))[0]  # Solving for the coefficients
+                x_new = sum([alpha[j] * x_hist[j].view_as(x) for j in range(len(x_hist))])
+
+            # Convergence check
+            error = torch.norm(x_new - x_next)
+            if error < tol:
+                x_next = x_new
+                break
+
+            x_next = x_new
+
+        x = x_next
+
+        if callback is not None:
+            callback({'x': x, 'i': i, 'sigma': sigma, 'sigma_hat': sigma_next, 'denoised': denoised_next})
+
+        gc.collect()
+        torch.cuda.empty_cache()
+
+    return x
+
+
 
 
 @torch.no_grad()
@@ -2846,23 +2919,7 @@ rk_methods = {
             [403863854/491063109, 0, 0, -5068492393/434740067, -411421997/543043805, 652783627/914296604, 11173962825/925320556, -13158990841/6184727034, 3936647629/1978049680, -160528059/685178525, 248638103/1413531060, 0, 0],
             [14005451/335480064, 0, 0, 0, 0, -59238493/1068277825, 181606767/758867731, 561292985/797845732, -1041891430/1371343529, 760417239/1151165299, 118820643/751138087, -528747749/2220607170, 1/4]
         ],
-        [
-            0,
-            1/18,
-            1/12,
-            1/8,
-            5/16,
-            3/8,
-            59/400,
-            93/200,
-            5490023248 / 9719169821,
-            13/20,
-            1201146811 / 1299019798,
-            1,
-            1,
-        ],
-        True,
-        True,
+        [0, 1/18, 1/12, 1/8, 5/16, 3/8, 59/400, 93/200, 5490023248 / 9719169821, 13/20, 1201146811 / 1299019798, 1, 1],
     ),
     "dormand-prince_6s": (
         [
@@ -2874,8 +2931,6 @@ rk_methods = {
             [35/384, 0, 500/1113, 125/192, -2187/6784, 11/84, 0],
         ],
         [0, 1/5, 3/10, 4/5, 8/9, 1],
-        True, # epsilon model
-        True, # FSAL
     ),
     "dormand-prince_7s": (
         [
@@ -2887,10 +2942,8 @@ rk_methods = {
             [35/384, 0, 500/1113, 125/192, -2187/6784, 11/84, 0],
         ],
         [0, 1/5, 3/10, 4/5, 8/9, 1],
-        True, # epsilon model
-        False, # FSAL
     ),
-    "rk4": (
+    "rk4_4s": (
         [
             [1/2, 0, 0, 0],
             [0, 1/2, 0, 0],
@@ -2898,10 +2951,8 @@ rk_methods = {
             [1/6, 1/3, 1/3, 1/6]
         ],
         [0, 1/2, 1/2, 1],
-        True,
-        False,
     ),
-    "rk38": (
+    "rk38_4s": (
         [
             [1/3, 0, 0, 0],
             [-1/3, 1, 0, 0],
@@ -2909,13 +2960,138 @@ rk_methods = {
             [1/8, 3/8, 3/8, 1/8]
         ],
         [0, 1/3, 2/3, 1],
-        True,
-        False,
+    ),
+    "ralston_4s": (
+        [
+            [2/5, 0, 0, 0],
+            [(-2889+1428 * 5**0.5)/1024,   (3785-1620 * 5**0.5)/1024,  0, 0],
+            [(-3365+2094 * 5**0.5)/6040,   (-975-3046 * 5**0.5)/2552,  (467040+203968*5**0.5)/240845, 0],
+            [(263+24*5**0.5)/1812, (125-1000*5**0.5)/3828, (3426304+1661952*5**0.5)/5924787, (30-4*5**0.5)/123]
+        ],
+        [0, 2/5, (14-3 * 5**0.5)/16, 1],
+    ),
+    "heun_3s": (
+        [
+            [1/3, 0, 0],
+            [0, 2/3, 0],
+            [1/4, 0, 3/4]
+        ],
+        [0, 1/3, 2/3],
+    ),
+    "kutta_3s": (
+        [
+            [1/2, 0, 0],
+            [-1, 2, 0],
+            [1/6, 2/3, 1/6]
+        ],
+        [0, 1/2, 1],
+    ),
+    "ralston_3s": (
+        [
+            [1/2, 0, 0],
+            [0, 3/4, 0],
+            [2/9, 1/3, 4/9]
+        ],
+        [0, 1/2, 3/4],
+    ),
+    "houwen-wray_3s": (
+        [
+            [8/15, 0, 0],
+            [1/4, 5/12, 0],
+            [1/4, 0, 3/4]
+        ],
+        [0, 8/15, 2/3],
+    ),
+    "ssprk3_3s": (
+        [
+            [1, 0, 0],
+            [1/4, 1/4, 0],
+            [1/6, 1/6, 2/3]
+        ],
+        [0, 1, 1/2],
+    ),
+    "midpoint_2s": (
+        [
+            [1/2, 0],
+            [0, 1]
+        ],
+        [0, 1/2],
+    ),
+    "heun_2s": (
+        [
+            [1, 0],
+            [1/2, 1/2]
+        ],
+        [0, 1],
+    ),
+    "ralston_2s": (
+        [
+            [2/3, 0],
+            [1/4, 3/4]
+        ],
+        [0, 2/3],
+    ),
+    "euler": (
+        [
+            [1],
+        ],
+        [0],
     ),
 }
 
 
-def get_rk_methods(rk_type, c2=0.5, c3=0.75):
+
+def get_rk_methods(rk_type, h, c2=0.5, c3=0.75):
+    FSAL = False
+    if rk_type in rk_methods:
+        ab, ci = rk_methods[rk_type]
+        ci.append(0)
+        model_call = get_epsilon
+        alpha_fn = lambda h: 1
+        t_fn = lambda sigma: sigma
+        sigma_fn = lambda t: t
+    
+    match rk_type:
+        case "dormand-prince_6s":
+            FSAL = True
+        case "dormand-prince_7s":
+            pass
+        case "rk4":
+            pass
+        case "rk38":
+            pass
+        case "res_2s":
+            a2_1, b1, b2 = _de_second_order(h=h, c2=c2, simple_phi_calc=False)
+            ab = [
+                    [a2_1, 0],
+                    [b1, b2],
+            ]
+            ci = [0, c2, 1]
+            model_call = get_denoised
+            alpha_fn = lambda h: torch.exp(h)
+            t_fn = lambda sigma: sigma.log().neg()
+            sigma_fn = lambda t: t.neg().exp()
+        case "res_3s":
+            a21, a31, a32, b1, b2, b3 = calculate_third_order_coeffs(h, c2, c3)
+            ab = [
+                    [a21, 0, 0],
+                    [a31, a32, 0],
+                    [b1, b2, b3],
+            ]
+            ci = [0, c2, c3, 1]
+            model_call = get_denoised
+            alpha_fn = lambda h: torch.exp(h)
+            t_fn = lambda sigma: sigma.log().neg()
+            sigma_fn = lambda t: t.neg().exp()
+            
+            
+    return ab, ci, model_call, alpha_fn, t_fn, sigma_fn, FSAL
+
+
+"""def get_rk_methods(rk_type, c2=0.5, c3=0.75):
+    if rk_type in rk_methods:
+        return rk_methods[rk_type]
+    
     match rk_type:
         case "dormand-prince_6s":
             return (
@@ -2974,7 +3150,7 @@ def get_rk_methods(rk_type, c2=0.5, c3=0.75):
                 lambda h: 1,
                 )
             
-    return 0
+    return 0"""
 
 """def get_rk_coeff(rk_type):
     if rk"""
@@ -2984,11 +3160,99 @@ def epsilon(model, x, sigma, **extra_args):
     x0 = model(x, sigma * s_in, **extra_args)
     eps = (x - x0) / (sigma * s_in) 
     return eps
+
+def get_epsilon(model, x, sigma, **extra_args):
+    s_in = x.new_ones([x.shape[0]])
+    x0 = model(x, sigma * s_in, **extra_args)
+    eps = (x - x0) / (sigma * s_in) 
+    return eps
+
+def get_denoised(model, x, sigma, **extra_args):
+    s_in = x.new_ones([x.shape[0]])
+    x0 = model(x, sigma * s_in, **extra_args)
+    return x0
+
+def model_call(model, x, sigma, epsilon_prediction=False, **extra_args):
+    s_in = x.new_ones([x.shape[0]])
+    x0 = model(x, sigma * s_in, **extra_args)
+    if epsilon_prediction == False:
+        return x0
+    else:
+        eps = (x - x0) / (sigma * s_in) 
+        return eps
  
 def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, noise_sampler=None, noise_sampler_type="brownian", noise_mode="hard", rk_type="dormand-prince", 
               sigma_fn_formula="", t_fn_formula="",
+                  eta=0.5, eta_var=0.0, s_noise=1., alpha=-1.0, k=1.0, scale=0.1, c2=0.5, c3=0.75):
+    extra_args = {} if extra_args is None else extra_args
+    s_in = x.new_ones([x.shape[0]])
+    
+    seed = torch.initial_seed() + 1
+    
+    sigma_min, sigma_max = sigmas[sigmas > 0].min(), sigmas.max()
+    if isinstance(model.inner_model.inner_model.model_sampling, comfy.model_sampling.CONST):
+        sigma_max = torch.full_like(sigma_max, 1.0)
+        sigma_min = torch.full_like(sigma_min, min(sigma_min.item(), 0.00001))
+    if sigmas[-1] == 0.0:
+        sigmas[-1] = min(sigmas[-2]**2, 0.00001)
+    noise_sampler = NOISE_GENERATOR_CLASSES.get(noise_sampler_type)(x=x, seed=seed, sigma_min=0.0, sigma_max=1.0)
+    
+    if noise_sampler_type == "fractal":
+        noise_sampler.alpha = alpha
+        noise_sampler.k = k
+        noise_sampler.scale = scale
+        
+    sigma_fn = lambda t: t.neg().exp()
+    t_fn = lambda sigma: sigma.log().neg()
+    
+
+    ab, ci, model_call, alpha_fn, t_fn, sigma_fn, FSAL = get_rk_methods(rk_type, 1.0, c2, c3) #dummy value for h=1.0, just need to get the order
+    order = len(ci)-1
+    
+    xi = [torch.zeros_like(x)] * (order+1)
+    ki = [torch.zeros_like(x)] * order
+    ks = None
+    
+    xi[0] = x
+    
+    for _ in trange(len(sigmas)-1, disable=disable):
+        sigma, sigma_next = sigmas[_], sigmas[_+1]
+        
+        sigma_up, sigma_down, alpha_ratio = get_res4lyf_step(sigma, sigma_next, eta, eta_var, noise_mode)
+        t_down, t = t_fn(sigma_down), t_fn(sigma)
+        h = t_down - t
+        
+        ab, ci, model_call, alpha_fn, t_fn, sigma_fn, FSAL = get_rk_methods(rk_type, h, c2, c3)
+        
+        for i in range(order):
+            if FSAL == True and _ > 0 and i == 0:
+                ki[0] = ki[order-1]
+            else:
+                ki[i] = model_call(model, xi[i], sigma_fn(t + h*ci[i]), **extra_args)
+            ks = torch.zeros_like(x)
+            for j in range(order):
+                ks += ab[i][j]*ki[j]
+            denoised = alpha_fn(-h*ci[i+1]) * xi[0] - sigma * ks
+            xi[(i+1)%order] = alpha_fn(-h*ci[i+1]) * xi[0] + h*ks
+            
+        if callback is not None:
+            callback({'x': xi[0], 'i': _, 'sigma': sigma, 'sigma_next': sigma_next, 'denoised': denoised})
+            
+        noise = noise_sampler(sigma=sigma, sigma_next=sigma_next)
+        noise = (noise - noise.mean()) / noise.std()
+        xi[0] = alpha_ratio * xi[0] + noise * s_noise * sigma_up
+            
+        gc.collect()
+        torch.cuda.empty_cache()
+        
+    return xi[0]
+
+
+
+
+"""def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, noise_sampler=None, noise_sampler_type="brownian", noise_mode="hard", rk_type="dormand-prince", 
+              sigma_fn_formula="", t_fn_formula="",
                   eta=0.5, eta_var=0.0, s_noise=1., alpha=-1.0, k=1.0, scale=0.1):
-    """Implements the fourth-order Runge-Kutta method."""
     extra_args = {} if extra_args is None else extra_args
     s_in = x.new_ones([x.shape[0]])
     
@@ -3049,7 +3313,7 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
         gc.collect()
         torch.cuda.empty_cache()
         
-    return xi[0]
+    return xi[0]"""
 
 
 
@@ -3569,6 +3833,7 @@ extra_samplers = {
     "corona": sample_corona,
     "logistic_implicit": sample_logistic_implicit,
     "chebyshev": sample_chebyshev,
+    "SDE_implicit_advanced_RF_broyden": sample_SDE_implicit_advanced_RF_broyden,
 
     "dpmpp_2s_ancestral_advanced": sample_dpmpp_2s_ancestral_advanced,
     "res_momentumized_advanced": sample_res_solver_advanced,
