@@ -599,7 +599,7 @@ class SamplerRK:
                      "k": ("FLOAT", {"default": 1.0, "min": -10000.0, "max": 10000.0, "step":2.0, "round": False}),
                      "noise_sampler_type": (NOISE_GENERATOR_NAMES, {"default": "brownian"}),
                      "noise_mode": (["hard", "hard_var", "soft", "softer"], {"default": 'hard'}),
-                     "rk_type": (["dormand-prince"], {"default": "dormand-prince"}), 
+                     "rk_type": (["dormand-prince_6s", "dormand-prince_7s", "rk4", "rk38"], {"default": "dormand-prince"}), 
                      "t_fn_formula": ("STRING", {"default": "1/((sigma).exp()+1)", "multiline": True}),
                      "sigma_fn_formula": ("STRING", {"default": "((1-t)/t).log()", "multiline": True}),
                       },
