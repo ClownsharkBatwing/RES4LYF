@@ -618,8 +618,10 @@ class SamplerRK:
                                   "heun_2s", 
                                   "ralston_2s",
                                   "res_2s", 
+                                  "res_2m",
                                   "ddim",
                                   "euler"], {"default": "dormand-prince_7s"}), 
+                     "buffer": ("INT", {"default": 0, "min": 0, "max": 100, "step":1}),
                      "t_fn_formula": ("STRING", {"default": "1/((sigma).exp()+1)", "multiline": True}),
                      "sigma_fn_formula": ("STRING", {"default": "((1-t)/t).log()", "multiline": True}),
                       },
@@ -632,13 +634,13 @@ class SamplerRK:
 
     FUNCTION = "get_sampler"
 
-    def get_sampler(self, eta=0.25, eta_var=0.0, s_noise=1.0, alpha=-1.0, k=1.0, noise_sampler_type="brownian", noise_mode="hard", rk_type="dormand-prince", t_fn_formula=None, sigma_fn_formula=None,
+    def get_sampler(self, eta=0.25, eta_var=0.0, s_noise=1.0, alpha=-1.0, k=1.0, buffer=0, noise_sampler_type="brownian", noise_mode="hard", rk_type="dormand-prince", t_fn_formula=None, sigma_fn_formula=None,
                     ):
         sampler_name = "rk"
 
         steps = 10000
 
-        sampler = comfy.samplers.ksampler(sampler_name, {"eta": eta, "eta_var": eta_var, "s_noise": s_noise, "alpha": alpha, "k": k, "noise_sampler_type": noise_sampler_type, "noise_mode": noise_mode, "rk_type": rk_type, 
+        sampler = comfy.samplers.ksampler(sampler_name, {"eta": eta, "eta_var": eta_var, "s_noise": s_noise, "alpha": alpha, "k": k, "buffer": buffer, "noise_sampler_type": noise_sampler_type, "noise_mode": noise_mode, "rk_type": rk_type, 
                                                          "t_fn_formula": t_fn_formula, "sigma_fn_formula": sigma_fn_formula,})
         return (sampler, )
 
