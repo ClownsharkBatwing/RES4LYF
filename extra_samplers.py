@@ -1356,7 +1356,7 @@ def sample_euler_implicit_advanced_RF(
 
 
 
-from .refined_exp_solver import _de_second_order, get_res4lyf_half_step, get_res4lyf_step, _refined_exp_sosu_step_RF2, \
+from .refined_exp_solver import _de_second_order, get_res4lyf_half_step, get_res4lyf_step, \
     get_res4lyf_step_with_model, calculate_third_order_coeffs
 
 @torch.no_grad()
