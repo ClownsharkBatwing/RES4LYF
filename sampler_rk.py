@@ -17,7 +17,7 @@ from .noise_classes import *
 from .extra_samplers_helpers import get_deis_coeff_list
 
 import comfy.model_patcher
-from .refined_exp_solver import _de_second_order, get_res4lyf_half_step, get_res4lyf_step, get_res4lyf_step_with_model, calculate_third_order_coeffs
+from .refined_exp_solver import get_res4lyf_step, get_res4lyf_step_with_model
 
 
 def get_ancestral_step_RF_var(sigma, sigma_next, eta):
@@ -62,14 +62,6 @@ def get_ancestral_step_backwards(sigma, sigma_next, eta=1.):
     sigma_up = torch.sqrt(sigma_next**2 - sigma_down**2)
     return sigma_up, sigma_down
 
-"""def get_RF_step(sigma, sigma_next, eta, alpha_ratio=None):
-    #down_ratio = (1 - eta) + eta * (sigma_next / sigma)   #maybe this is the most appropriate target for scaling?
-    #sigma_down = sigma_next * down_ratio
-    sigma_up = eta
-    alpha_ratio = 1 - sigma_up ** 2 / sigma_next ** 2 
-    sigma_down = sigma_next
-
-    return sigma_down, sigma_up, alpha_ratio"""
 
 def get_RF_step_traditional(sigma, sigma_next, eta, scale=0.0, alpha_ratio=None):
     # uses math similar to what is used for the get ancestral step code in comfyui. WORKS!
@@ -82,36 +74,17 @@ def get_RF_step_traditional(sigma, sigma_next, eta, scale=0.0, alpha_ratio=None)
 
     return sigma_up, sigma_down, alpha_ratio
 
-def get_RF_step_orig(sigma, sigma_next, eta, alpha_ratio=None):
-    """Calculates the noise level (sigma_down) to step down to and the amount of noise to add (sigma_up) when doing a rectified flow sampling step, 
-    and a mixing ratio (alpha_ratio) for scaling the latent during noise addition."""
-    down_ratio = (1 - eta) + eta * (sigma_next / sigma)   #maybe this is the most appropriate target for scaling?
-    sigma_down = sigma_next * down_ratio
-
-    if alpha_ratio is None:
-        alpha_ratio = (1 - sigma_next) / (1 - sigma_down)
-        
-    sigma_up = (sigma_next ** 2 - sigma_down ** 2 * alpha_ratio ** 2) ** 0.5 
-
-    return sigma_down, sigma_up, alpha_ratio
-
-
-def get_RF_step(sigma, sigma_next, eta, noise_scale=1.0, alpha_ratio=None):
+def get_RF_step(sigma, sigma_next, eta, alpha_ratio=None):
     """Calculates the noise level (sigma_down) to step down to and the amount of noise to add (sigma_up) when doing a rectified flow sampling step, 
     and a mixing ratio (alpha_ratio) for scaling the latent during noise addition. Scale is to shape the sigma_down curve."""
-    sigma_minus = sigma - sigma_next
-    #down_ratio = (1 - eta) + eta * ((sigma - sigma_minus * noise_scale) / sigma)
-    down_ratio = (1 - eta) + eta * ((sigma - sigma_minus) / sigma)
-    #sigma_down = sigma_next * down_ratio ** noise_scale
-    sigma_down = sigma_next ** noise_scale * down_ratio
+    down_ratio = (1 - eta) + eta * ((sigma_next) / sigma)
+    sigma_down = down_ratio * sigma_next
 
     if alpha_ratio is None:
         alpha_ratio = (1 - sigma_next) / (1 - sigma_down)
         
-    sigma_up = (sigma_next ** 2 - sigma_down ** 2 * alpha_ratio ** 2) ** 0.5 
-
-    return sigma_down, sigma_up, alpha_ratio
-
+    sigma_up = (sigma_next ** 2 - sigma_down ** 2 * alpha_ratio ** 2) ** 0.5 # variance preservation is required with RF
+    return sigma_up, sigma_down, alpha_ratio
 
 
 def get_sigma_down_RF(sigma_next, eta):
@@ -122,12 +95,23 @@ def get_sigma_down_RF(sigma_next, eta):
 def get_sigma_up_RF(sigma_next, eta):
     return sigma_next * eta
 
+def get_ancestral_step_RF_exp(sigma_next, eta, sigma_max=1.0, h=None):
+    sigma_up = sigma_next * (1 - (-2*eta*h).exp())**0.5 #or whatever the f
+    
+    sigma_signal = sigma_max - sigma_next
+    sigma_residual = (sigma_next**2 - sigma_up**2)**0.5
+
+    alpha_ratio = sigma_signal + sigma_residual
+    sigma_down = sigma_residual / alpha_ratio
+    
+    return sigma_up, sigma_down, alpha_ratio
+
+
 def get_ancestral_step_RF_correct_working(sigma_next, eta):
     sigma_up = sigma_next * eta
     eta_scaled = (1 - eta**2)**0.5
     sigma_down = (sigma_next * eta_scaled) / (1 - sigma_next + sigma_next * eta_scaled)
     alpha_ratio =                             1 - sigma_next + sigma_next * eta_scaled
-    #alpha_ratio = (1 - sigma_next) / (1 - sigma_down)
     return sigma_up, sigma_down, alpha_ratio
 
 def get_ancestral_step_RF(sigma_next, eta, sigma_max=1.0):
@@ -143,11 +127,7 @@ def get_ancestral_step_RF(sigma_next, eta, sigma_max=1.0):
 
 
 def get_ancestral_step_RF_down(sigma_next, sigma_up, sigma_max=1.0, h=None):
-    #if sigma_next == 0.0:
-    #  return torch.zeros_like(sigma), sigma_next, torch.ones_like(sigma)
-    
-    #sigma_up = sigma_next * torch.sqrt(1 - (-2*eta*h).exp()) #or whatever the f
-    
+
     sigma_signal = sigma_max - sigma_next
     sigma_residual = torch.sqrt(sigma_next**2 - sigma_up**2)
 
@@ -155,6 +135,30 @@ def get_ancestral_step_RF_down(sigma_next, sigma_up, sigma_max=1.0, h=None):
     sigma_down = sigma_residual / alpha_ratio
     
     return sigma_up, sigma_down, alpha_ratio
+
+def get_res4lyf_step_with_model(model, sigma, sigma_next, eta=0.0, eta_var=1.0, noise_mode="hard", h=None):
+  if isinstance(model.inner_model.inner_model.model_sampling, comfy.model_sampling.CONST):
+    sigma_var = (-1 + torch.sqrt(1 + 4 * sigma)) / 2
+    if eta_var > 0.0 and sigma_next > sigma_var:
+      su, sd, alpha_ratio = get_ancestral_step_RF_var(sigma, sigma_next, eta_var)
+    else:
+      if   noise_mode == "soft":
+        su, sd, alpha_ratio = get_RF_step(sigma, sigma_next, eta)
+      elif noise_mode == "softer":
+        su, sd, alpha_ratio = get_RF_step_traditional(sigma, sigma_next, eta)
+      elif noise_mode == "hard":
+        su, sd, alpha_ratio = get_ancestral_step_RF(sigma_next, eta)
+      elif noise_mode == "exp": 
+        su, sd, alpha_ratio = get_ancestral_step_RF_exp(sigma_next, eta, h)
+  else:
+    alpha_ratio = 1.0
+    if noise_mode == "hard":
+      sd = sigma_next
+      sigma_hat = sigma * (1 + eta)
+      su = (sigma_hat ** 2 - sigma ** 2) ** .5
+    if noise_mode == "soft" or noise_mode == "softer": 
+      sd, su = get_ancestral_step(sigma, sigma_next, eta)
+  return su, sd, alpha_ratio
 
 
 def get_res4lyf_step(sigma, sigma_next, eta=0.0, eta_var=1.0, noise_mode="hard"):
@@ -430,6 +434,21 @@ def get_rk_methods(rk_type, h, c2=0.5, c3=0.75):
             t_fn = lambda sigma: sigma.log().neg()
             sigma_fn = lambda t: t.neg().exp()
         case "dpmpp_2s":
+            c2 = 0.5
+            a2_1 =         c2   * phi(1, -h*c2)
+            b1 = (1 - 1/(2*c2)) * phi(1, -h)
+            b2 =     (1/(2*c2)) * phi(1, -h)
+            ab = [
+                    [a2_1, 0],
+                    [b1, b2],
+            ]
+            ci = [0, c2, 1]
+            model_call = get_denoised
+            alpha_fn = lambda neg_h: torch.exp(neg_h)
+            t_fn = lambda sigma: sigma.log().neg()
+            sigma_fn = lambda t: t.neg().exp()
+        case "dpmpp_sde_2s":
+            c2 = 1.0
             a2_1 =         c2   * phi(1, -h*c2)
             b1 = (1 - 1/(2*c2)) * phi(1, -h)
             b2 =     (1/(2*c2)) * phi(1, -h)
@@ -455,10 +474,6 @@ def get_rk_methods(rk_type, h, c2=0.5, c3=0.75):
             alpha_fn = lambda neg_h: torch.exp(neg_h)
             t_fn = lambda sigma: sigma.log().neg()
             sigma_fn = lambda t: t.neg().exp()
-        #case "dpmpp_3s":
-        #    phi_2 = h_eta.neg().expm1() / h_eta + 1
-        #    phi_3 = phi_2 / h_eta - 0.5
-            
             
     return ab, ci, model_call, alpha_fn, t_fn, sigma_fn, FSAL
 
@@ -506,8 +521,6 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
         noise_sampler.k = k
         noise_sampler.scale = scale
         
-    #order = get_rk_methods_order(rk_type)
-    #ab, ci, model_call, alpha_fn, t_fn, sigma_fn, FSAL = get_rk_methods(rk_type, h, c2, c3)
     order, model_call, alpha_fn, t_fn, sigma_fn, FSAL = get_rk_methods_order_and_fn(rk_type)
     
     xi = [torch.zeros_like(x)] * (order+1)
@@ -519,11 +532,10 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
     for _ in trange(len(sigmas)-1, disable=disable):
         sigma, sigma_next = sigmas[_], sigmas[_+1]
         
-        sigma_up, sigma_down, alpha_ratio = get_res4lyf_step(sigma, sigma_next, eta, eta_var, noise_mode)
+        sigma_up, sigma_down, alpha_ratio = get_res4lyf_step_with_model(model, sigma, sigma_next, eta, eta_var, noise_mode, h = t_fn(sigma_next)-t_fn(sigma))
         t_down, t = t_fn(sigma_down), t_fn(sigma)
         h = t_down - t
         
-        #ab, ci, model_call, alpha_fn, t_fn, sigma_fn, FSAL = get_rk_methods(rk_type, h, c2, c3)
         ab, ci = get_rk_methods_coeff(rk_type, h, c2, c3)
         
         for i in range(order):
