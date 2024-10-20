@@ -462,14 +462,18 @@ def get_rk_methods(rk_type, h, c2=0.5, c3=0.75):
             t_fn = lambda sigma: sigma.log().neg()
             sigma_fn = lambda t: t.neg().exp()
         case "dpmpp_3s":
-            a2_1 =         c2   * phi(1, -h*c2)
-            b1 = (1 - 1/(2*c2)) * phi(1, -h)
-            b2 =     (1/(2*c2)) * phi(1, -h)
+            a2_1 = c2 * phi(1, -h*c2)
+            a3_2 = (c3**2 / c2) * phi(2, -h*c3)
+            a3_1 = c3 * phi(1, -h*c3) - a3_2
+            b2 = 0
+            b3 = (1/c3) * phi(2, -h)
+            b1 = phi(1, -h) - b2 - b3
             ab = [
-                    [a2_1, 0],
-                    [b1, b2],
+                    [a2_1, 0, 0],
+                    [a3_1, a3_2, 0],
+                    [b1, b2, b3],
             ]
-            ci = [0, c2, 1]
+            ci = [0, c2, c3, 1]
             model_call = get_denoised
             alpha_fn = lambda neg_h: torch.exp(neg_h)
             t_fn = lambda sigma: sigma.log().neg()
