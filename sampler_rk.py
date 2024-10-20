@@ -466,6 +466,14 @@ def get_rk_methods_order(rk_type):
     ab, ci, model_call, alpha_fn, t_fn, sigma_fn, FSAL = get_rk_methods(rk_type, torch.tensor(1.0).to('cuda').to(torch.float64), c2=0.5, c3=0.75)
     return len(ci)-1
 
+def get_rk_methods_order_and_fn(rk_type):
+    ab, ci, model_call, alpha_fn, t_fn, sigma_fn, FSAL = get_rk_methods(rk_type, torch.tensor(1.0).to('cuda').to(torch.float64), c2=0.5, c3=0.75)
+    return len(ci)-1, model_call, alpha_fn, t_fn, sigma_fn, FSAL
+
+def get_rk_methods_coeff(rk_type, h, c2, c3):
+    ab, ci, model_call, alpha_fn, t_fn, sigma_fn, FSAL = get_rk_methods(rk_type, h, c2, c3)
+    return ab, ci
+
 def get_epsilon(model, x, sigma, **extra_args):
     s_in = x.new_ones([x.shape[0]])
     x0 = model(x, sigma * s_in, **extra_args)
@@ -498,10 +506,9 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
         noise_sampler.k = k
         noise_sampler.scale = scale
         
-    sigma_fn = lambda t: t.neg().exp()
-    t_fn = lambda sigma: sigma.log().neg()
-    
-    order = get_rk_methods_order(rk_type)
+    #order = get_rk_methods_order(rk_type)
+    #ab, ci, model_call, alpha_fn, t_fn, sigma_fn, FSAL = get_rk_methods(rk_type, h, c2, c3)
+    order, model_call, alpha_fn, t_fn, sigma_fn, FSAL = get_rk_methods_order_and_fn(rk_type)
     
     xi = [torch.zeros_like(x)] * (order+1)
     ki = [torch.zeros_like(x)] * order
@@ -516,7 +523,8 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
         t_down, t = t_fn(sigma_down), t_fn(sigma)
         h = t_down - t
         
-        ab, ci, model_call, alpha_fn, t_fn, sigma_fn, FSAL = get_rk_methods(rk_type, h, c2, c3)
+        #ab, ci, model_call, alpha_fn, t_fn, sigma_fn, FSAL = get_rk_methods(rk_type, h, c2, c3)
+        ab, ci = get_rk_methods_coeff(rk_type, h, c2, c3)
         
         for i in range(order):
             if FSAL == True and _ > 0 and i == 0:
