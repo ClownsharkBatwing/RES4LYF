@@ -1356,96 +1356,8 @@ def sample_euler_implicit_advanced_RF(
 
 
 
-from .refined_exp_solver import _de_second_order, get_res4lyf_half_step, get_res4lyf_step, _refined_exp_sosu_step_RF2
-
-@torch.no_grad()
-def sample_RES_implicit_advanced_RF(
-    model, x, sigmas, extra_args=None, callback=None, disable=None, c2=0.5, eta=1., s_noise=1., 
-    noise_sampler=None, noise_sampler_type="gaussian", noise_mode="hard", k=1.0, scale=0.1, 
-    alpha=None, iter=3, tol=1e-5):
-    
-    extra_args = {} if extra_args is None else extra_args
-    seed = extra_args.get("seed", None) + 1
-    
-    s_in = x.new_ones([x.shape[0]])
-    alpha = torch.zeros_like(sigmas) if alpha is None else alpha
-    sigma_min, sigma_max = sigmas[sigmas > 0].min(), sigmas.max()
-    noise_sampler = NOISE_GENERATOR_CLASSES.get(noise_sampler_type)(x=x, seed=seed, sigma_min=sigma_min, sigma_max=sigma_max)
-    
-    sigma_fn = lambda t: t.neg().exp()
-    t_fn = lambda sigma: sigma.log().neg()
-    denoised_next = None
-    vel, vel_2, denoised, denoised2, denoised1_2 = None, None, None, None, None
-    
-    #t_fn = lambda sigma: 1/((sigma).exp()+1)
-    #sigma_fn = lambda t: ((1-t)/t).log()
-    
-    for i in trange(len(sigmas) - 2, disable=disable):
-        if noise_sampler_type == "fractal":
-            noise_sampler.alpha = alpha[i]
-            noise_sampler.k = k
-            noise_sampler.scale = scale
-        
-        sigma, sigma_next = sigmas[i], sigmas[i+1]
-        
-        t, t_next = t_fn(sigma), t_fn(sigma_next)
-        h = t_next - t    
-    
-        su, sd, alpha_ratio = get_res4lyf_step(sigma, sigma_next, torch.tensor(0.0).to(x.dtype).to(x.device), torch.tensor(0.0).to(x.dtype).to(x.device), noise_mode)
-        sigma_s, h, c2 = get_res4lyf_half_step(sigma, sd, c2, False, None, "", "", remap_t_to_exp_space=True)
-        a2_1, b1, b2 = _de_second_order(h=h, c2=c2, simple_phi_calc=False)
-
-        denoised = model(x, sigma * s_in, **extra_args)
-        x_2 = ((sd/sigma)**c2)*x + h*a2_1*denoised
-        denoised2 = model(x_2, sigma_s * s_in, **extra_args)
-        x_next = (sd/sigma)*x + h*(b1*denoised + b2*denoised2)
-        denoised_next = (b1*denoised + b2*denoised2) / (b1 + b2)
-
-        for iteration in range(iter):  
-
-            time = sigmas[i] / sigma_max
-            
-            
-            x_next_next, denoised, denoised2, denoised1_2, vel, vel_2, h_step = _refined_exp_sosu_step_RF2(model, x_next, sigma_next, sigmas[i+2], eta1=0.0, eta2=0.0, eta_var1=0.0, eta_var2=0.0, noise_sampler=noise_sampler, noise_mode="hard", order="1", extra_args=extra_args, 
-                                                                                                     vel = vel, vel_2 = vel_2, time = time,)
-            
-            denoised_next = denoised1_2
-
-            x_new = (sd/sigma)*x + h*denoised1_2*(b1 + b2)
-            
-            # x = (x_new - h*denoised1_2*(b1 + b2)) / (sd/sigma)   # projection back to x
-            
-            #x_new = (sigma_next/sigma) * x + (1 - sigma_next/sigma) * denoised_next
-            error = torch.norm(x_new - x_next)
-            #error = torch.norm(denoised_next - denoised_prev)
-            print(f"Iteration {iteration + 1}, Error: {error.item()}")
-
-            if error < tol:
-                print(f"Converged after {iteration + 1} iterations with error {error.item()}")
-                x_next = x_new
-                break
-
-            x_next = x_new
-            denoised_next = (b1*denoised + b2*denoised2) / (b1 + b2)
-            
-            #x  = (x_new - (1 - sigma_next/sigma) * denoised_next) / (sigma_next/sigma) # projection back to x with alternative math
-
-        x = x_next
-        
-        #if sigmas[i + 1] > 0 and eta > 0:
-        #    x = alpha_ratio * x + noise_sampler(sigma=sigmas[i], sigma_next=sigmas[i + 1]) * s_noise * sigma_up
-
-        denoised_next = denoised if denoised_next is None else denoised_next
-        if callback is not None:
-            callback({'x': x, 'i': i, 'sigma': sigmas[i], 'sigma_hat': sigmas[i], 'denoised': denoised_next})
-
-        gc.collect()
-        torch.cuda.empty_cache()
-
-    return x
-
-
-from .refined_exp_solver import get_res4lyf_step_with_model, calculate_third_order_coeffs
+from .refined_exp_solver import _de_second_order, get_res4lyf_half_step, get_res4lyf_step, _refined_exp_sosu_step_RF2, \
+    get_res4lyf_step_with_model, calculate_third_order_coeffs
 
 @torch.no_grad()
 def sample_RES_implicit_advanced_RF_PC(
@@ -2846,31 +2758,6 @@ def sample_dpmpp_3m_sde_advanced(model, x, sigmas, extra_args=None, callback=Non
         h_1, h_2 = h, h_1
     return x
 
-def sample_rk4(model, x, sigmas, extra_args=None, callback=None, disable=None, s_churn=0., s_tmin=0., s_tmax=float('inf'), s_noise=1.):
-    """Implements the fourth-order Runge-Kutta method."""
-    extra_args = {} if extra_args is None else extra_args
-    s_in = x.new_ones([x.shape[0]])
-    
-    for i in trange(len(sigmas) - 1, disable=disable):
-        sigma      = sigmas[i]
-        sigma_next = sigmas[i + 1]
-        
-        dt = sigma_next - sigma
-        
-        # Runge-Kutta 4th order calculations
-        k1 = to_d(x, sigma, model(x, sigma * s_in, **extra_args))
-        k2 = to_d(x + 0.5 * dt * k1, sigma + 0.5 * dt, model(x + 0.5 * dt * k1, (sigma + 0.5 * dt) * s_in, **extra_args))
-        k3 = to_d(x + 0.5 * dt * k2, sigma + 0.5 * dt, model(x + 0.5 * dt * k2, (sigma + 0.5 * dt) * s_in, **extra_args))
-        k4 = to_d(x + dt * k3, sigma_next, model(x + dt * k3, sigma_next * s_in, **extra_args))
-        
-        dx = (1.0 / 6.0) * (k1 + 2 * k2 + 2 * k3 + k4)
-        
-        x = x + dx * dt
-        
-        if callback is not None:
-            callback({'x': x, 'i': i, 'sigma': sigma, 'sigma_next': sigma_next, 'dx': dx})
-    return x
-
 
 def derivative(model, x, sigma, h, **extra_args):
     s_in = x.new_ones([x.shape[0]])
@@ -2878,7 +2765,7 @@ def derivative(model, x, sigma, h, **extra_args):
     eps = (x - x0) / (sigma * s_in) 
     eps_h = eps * h
     return eps_h
- 
+"""
 rk_ab_coeff = {
     "dormand-prince": [
         [1/5, 0, 0, 0, 0, 0, 0],
@@ -3091,79 +2978,9 @@ def get_rk_methods(rk_type, h, c2=0.5, c3=0.75):
             
     return ab, ci, model_call, alpha_fn, t_fn, sigma_fn, FSAL
 
-
-"""def get_rk_methods(rk_type, c2=0.5, c3=0.75):
-    if rk_type in rk_methods:
-        return rk_methods[rk_type]
-    
-    match rk_type:
-        case "dormand-prince_6s":
-            return (
-                [
-                    [1/5, 0, 0, 0, 0, 0, 0],
-                    [3/40, 9/40, 0, 0, 0, 0, 0],
-                    [44/45, -56/15, 32/9, 0, 0, 0, 0],
-                    [19372/6561, -25360/2187, 64448/6561, -212/729, 0, 0, 0],
-                    [9017/3168, -355/33, 46732/5247, 49/176, -5103/18656, 0],
-                    [35/384, 0, 500/1113, 125/192, -2187/6784, 11/84, 0],
-                ],
-                [0, 1/5, 3/10, 4/5, 8/9, 1],
-                True, 
-                True,
-                lambda h: 1,
-                )
-        case "dormand-prince_7s":
-            return (
-                [
-                    [1/5, 0, 0, 0, 0, 0, 0],
-                    [3/40, 9/40, 0, 0, 0, 0, 0],
-                    [44/45, -56/15, 32/9, 0, 0, 0, 0],
-                    [19372/6561, -25360/2187, 64448/6561, -212/729, 0, 0, 0],
-                    [9017/3168, -355/33, 46732/5247, 49/176, -5103/18656, 0],
-                    [35/384, 0, 500/1113, 125/192, -2187/6784, 11/84, 0],
-                ],
-                [0, 1/5, 3/10, 4/5, 8/9, 1],
-                True, 
-                False,
-                lambda h: 1,
-                )
-        case "rk4":
-            return (
-                [
-                    [1/2, 0, 0, 0],
-                    [0, 1/2, 0, 0],
-                    [0, 0, 1, 0],
-                    [1/6, 1/3, 1/3, 1/6]
-                ],
-                [0, 1/2, 1/2, 1],
-                True,
-                False,
-                lambda h: 1,
-                )
-        case "rk38":
-            return (
-                [
-                    [1/3, 0, 0, 0],
-                    [-1/3, 1, 0, 0],
-                    [1, -1, 1, 0],
-                    [1/8, 3/8, 3/8, 1/8]
-                ],
-                [0, 1/3, 2/3, 1],
-                True,
-                False,
-                lambda h: 1,
-                )
-            
-    return 0"""
-
-"""def get_rk_coeff(rk_type):
-    if rk"""
-
-def epsilon(model, x, sigma, **extra_args):
-    s_in = x.new_ones([x.shape[0]])
-    x0 = model(x, sigma * s_in, **extra_args)
-    eps = (x - x0) / (sigma * s_in) 
-    return eps
+def get_rk_methods_order(rk_type):
+    ab, ci, model_call, alpha_fn, t_fn, sigma_fn, FSAL = get_rk_methods(rk_type, 1.0, c2=0.5, c3=0.75)
+    return len(ci)-1
 
 def get_epsilon(model, x, sigma, **extra_args):
     s_in = x.new_ones([x.shape[0]])
@@ -3210,8 +3027,10 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
     t_fn = lambda sigma: sigma.log().neg()
     
 
-    ab, ci, model_call, alpha_fn, t_fn, sigma_fn, FSAL = get_rk_methods(rk_type, 1.0, c2, c3) #dummy value for h=1.0, just need to get the order
-    order = len(ci)-1
+    #ab, ci, model_call, alpha_fn, t_fn, sigma_fn, FSAL = get_rk_methods(rk_type, 1.0, c2, c3) #dummy value for h=1.0, just need to get the order
+    #order = len(ci)-1
+    
+    order = get_rk_methods_order(rk_type)
     
     xi = [torch.zeros_like(x)] * (order+1)
     ki = [torch.zeros_like(x)] * order
@@ -3250,75 +3069,7 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
         torch.cuda.empty_cache()
         
     return xi[0]
-
-
-
-
-"""def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, noise_sampler=None, noise_sampler_type="brownian", noise_mode="hard", rk_type="dormand-prince", 
-              sigma_fn_formula="", t_fn_formula="",
-                  eta=0.5, eta_var=0.0, s_noise=1., alpha=-1.0, k=1.0, scale=0.1):
-    extra_args = {} if extra_args is None else extra_args
-    s_in = x.new_ones([x.shape[0]])
-    
-    seed = torch.initial_seed()
-    
-    sigma_min, sigma_max = sigmas[sigmas > 0].min(), sigmas.max()
-    if isinstance(model.inner_model.inner_model.model_sampling, comfy.model_sampling.CONST):
-        sigma_max = torch.full_like(sigma_max, 1.0)
-        sigma_min = torch.full_like(sigma_min, min(sigma_min.item(), 0.00001))
-    if sigmas[-1] == 0.0:
-        sigmas[-1] = min(sigmas[-2]**2, 0.00001)
-    noise_sampler = NOISE_GENERATOR_CLASSES.get(noise_sampler_type)(x=x, seed=seed, sigma_min=0.0, sigma_max=1.0)
-    
-    if noise_sampler_type == "fractal":
-        noise_sampler.alpha = alpha
-        noise_sampler.k = k
-        noise_sampler.scale = scale
-        
-    sigma_fn = lambda t: t.neg().exp()
-    t_fn = lambda sigma: sigma.log().neg()
-    
-
-    
-    ab, ci, eps_model, FSAL = rk_methods[rk_type]
-
-    order = len(ci)
-    
-    xi = [torch.zeros_like(x)] * (order+1)
-    ki = [torch.zeros_like(x)] * order
-    ks = None
-    
-    xi[0] = x
-    
-    for _ in trange(len(sigmas)-1, disable=disable):
-        sigma, sigma_next = sigmas[_], sigmas[_+1]
-        
-        sigma_up, sigma_down, alpha_ratio = get_res4lyf_step(sigma, sigma_next, eta, eta_var, noise_mode)
-        h = sigma_down - sigma
-
-        for i in range(order):
-            if FSAL == True and _ > 0 and i == 0:
-                ki[0] = ki[order-1]
-            else:
-                ki[i] = epsilon(model, xi[i], sigma + h*ci[i], **extra_args)
-            ks = torch.zeros_like(x)
-            for j in range(order):
-                ks += ab[i][j]*ki[j]
-            denoised = xi[0] - sigma * ks
-            xi[(i+1)%order] = xi[0] + h*ks
-            
-        if callback is not None:
-            callback({'x': xi[0], 'i': _, 'sigma': sigma, 'sigma_next': sigma_next, 'denoised': denoised})
-            
-        noise = noise_sampler(sigma=sigma, sigma_next=sigma_next)
-        noise = (noise - noise.mean()) / noise.std()
-        xi[0] = alpha_ratio * xi[0] + noise * s_noise * sigma_up
-            
-        gc.collect()
-        torch.cuda.empty_cache()
-        
-    return xi[0]"""
-
+"""
 
 
 @torch.no_grad()
@@ -3826,9 +3577,10 @@ def add_schedulers():
         importlib.reload(k_diffusion_sampling)
 
 #from .refined_exp_solver import sample_refined_exp_s, sample_refined_exp_s_advanced
+from .sampler_rk import sample_rk
+
 extra_samplers = {
     "euler_ancestral_advanced": sample_euler_ancestral_advanced,
-    "RES_implicit_advanced_RF": sample_RES_implicit_advanced_RF, 
     "RES_implicit_advanced_RF_PC": sample_RES_implicit_advanced_RF_PC, 
     "RES_implicit_advanced_RF_PC_3rd_order": sample_RES_implicit_advanced_RF_PC_3rd_order,
     "SDE_implicit_advanced_RF": sample_SDE_implicit_advanced_RF,
@@ -3855,7 +3607,6 @@ extra_samplers = {
     "deis_sde": sample_deis_sde,
     "deis_sde_implicit": sample_deis_sde_implicit,
 
-    "rk4":  sample_rk4,
     "rk":  sample_rk,
 }
 

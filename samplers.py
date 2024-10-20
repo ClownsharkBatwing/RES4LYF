@@ -593,24 +593,27 @@ class SamplerRK:
     def INPUT_TYPES(s):
         return {"required":
                     {#"momentum": ("FLOAT", {"default": 0.0, "min": -100.0, "max": 100.0, "step":0.01, "round": False}),
-                     "eta": ("FLOAT", {"default": 0.25, "min": -100.0, "max": 100.0, "step":0.01, "round": False}),
-                     "s_noise": ("FLOAT", {"default": 1.0, "min": -100.0, "max": 100.0, "step":0.01, "round": False}),
-                     "alpha": ("FLOAT", {"default": 0.0, "min": -10000.0, "max": 10000.0, "step":0.1, "round": False}),
-                     "k": ("FLOAT", {"default": 1.0, "min": -10000.0, "max": 10000.0, "step":2.0, "round": False}),
+                     "eta": ("FLOAT", {"default": 0.25, "min": -100.0, "max": 100.0, "step":0.01, "round": False, "tooltip": "Calculated noise amount to be added, then removed, after each step."}),
+                     "eta_var": ("FLOAT", {"default": 0.0, "min": -100.0, "max": 100.0, "step":0.01, "round": False, "tooltip": "Calculate variance-corrected noise amount (overrides eta/noise_mode settings). Cannot be used at very low sigma values; reverts to eta/noise_mode for final steps."}),
+                     "s_noise": ("FLOAT", {"default": 1.0, "min": -100.0, "max": 100.0, "step":0.01, "round": False, "tooltip": "Ratio of calculated noise amount actually added after each step. >1.0 will leave extra noise behind, <1.0 will remove more noise than it adds."}),
+                     "alpha": ("FLOAT", {"default": 0.0, "min": -10000.0, "max": 10000.0, "step":0.1, "round": False, "tooltip": "Fractal noise mode: <0 = extra high frequency noise, >0 = extra low frequency noise, 0 = white noise."}),
+                     "k": ("FLOAT", {"default": 1.0, "min": -10000.0, "max": 10000.0, "step":2.0, "round": False, "tooltip": "Fractal noise mode: all that matters is positive vs. negative. Effect unclear."}),
                      "noise_sampler_type": (NOISE_GENERATOR_NAMES, {"default": "brownian"}),
-                     "noise_mode": (["hard", "hard_var", "soft", "softer"], {"default": 'hard'}),
+                     "noise_mode": (["hard", "soft", "softer"], {"default": 'hard'}),
                      "rk_type": (["dormand-prince_6s", 
                                   "dormand-prince_7s", 
                                   "dormand-prince_13s", 
                                   "rk4_4s", 
                                   "rk38_4s",
                                   "ralston_4s",
+                                  "dpmpp_3s",
                                   "heun_3s", 
                                   "houwen-wray_3s",
                                   "kutta_3s", 
                                   "ralston_3s",
                                   "res_3s",
                                   "ssprk3_3s",
+                                  "dpmpp_2s",
                                   "heun_2s", 
                                   "ralston_2s",
                                   "res_2s", 
@@ -627,13 +630,13 @@ class SamplerRK:
 
     FUNCTION = "get_sampler"
 
-    def get_sampler(self, eta=1.0, s_noise=1.0, alpha=-1.0, k=1.0, noise_sampler_type="brownian", noise_mode="hard", rk_type="dormand-prince", t_fn_formula=None, sigma_fn_formula=None,
+    def get_sampler(self, eta=0.25, eta_var=0.0, s_noise=1.0, alpha=-1.0, k=1.0, noise_sampler_type="brownian", noise_mode="hard", rk_type="dormand-prince", t_fn_formula=None, sigma_fn_formula=None,
                     ):
         sampler_name = "rk"
 
         steps = 10000
 
-        sampler = comfy.samplers.ksampler(sampler_name, {"eta": eta, "s_noise": s_noise, "alpha": alpha, "k": k, "noise_sampler_type": noise_sampler_type, "noise_mode": noise_mode, "rk_type": rk_type, 
+        sampler = comfy.samplers.ksampler(sampler_name, {"eta": eta, "eta_var": eta_var, "s_noise": s_noise, "alpha": alpha, "k": k, "noise_sampler_type": noise_sampler_type, "noise_mode": noise_mode, "rk_type": rk_type, 
                                                          "t_fn_formula": t_fn_formula, "sigma_fn_formula": sigma_fn_formula,})
         return (sampler, )
 
