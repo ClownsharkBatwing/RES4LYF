@@ -618,6 +618,7 @@ class SamplerRK:
                                   "heun_2s", 
                                   "ralston_2s",
                                   "res_2s", 
+                                  "ddim",
                                   "euler"], {"default": "dormand-prince_7s"}), 
                      "t_fn_formula": ("STRING", {"default": "1/((sigma).exp()+1)", "multiline": True}),
                      "sigma_fn_formula": ("STRING", {"default": "((1-t)/t).log()", "multiline": True}),

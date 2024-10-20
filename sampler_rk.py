@@ -213,13 +213,6 @@ def calculate_gamma(c2, c3):
     return (3*(c3**3) - 2*c3) / (c2*(2 - 3*c2))
 
 
-def derivative(model, x, sigma, h, **extra_args):
-    s_in = x.new_ones([x.shape[0]])
-    x0 = model(x, sigma * s_in, **extra_args)
-    eps = (x - x0) / (sigma * s_in) 
-    eps_h = eps * h
-    return eps_h
- 
 rk_ab_coeff = {
     "dormand-prince": [
         [1/5, 0, 0, 0, 0, 0, 0],
@@ -402,6 +395,17 @@ def get_rk_methods(rk_type, h, c2=0.5, c3=0.75):
             pass
         case "rk38":
             pass
+        case "ddim":
+            b1 = phi(1, -h)
+            ab = [
+                    [b1],
+            ]
+            ci = [0, 1]
+            model_call = get_denoised
+            alpha_fn = lambda h: torch.exp(h)
+            t_fn = lambda sigma: sigma.log().neg()
+            sigma_fn = lambda t: t.neg().exp()
+            
         case "res_2s":
             a2_1 = c2 * phi(1, -h*c2)
             b1 =        phi(1, -h) - phi(2, -h)/c2
@@ -415,6 +419,7 @@ def get_rk_methods(rk_type, h, c2=0.5, c3=0.75):
             alpha_fn = lambda h: torch.exp(h)
             t_fn = lambda sigma: sigma.log().neg()
             sigma_fn = lambda t: t.neg().exp()
+            
         case "res_3s":
             gamma = calculate_gamma(c2, c3)
             a2_1 = c2 * phi(1, -h*c2)
@@ -433,6 +438,7 @@ def get_rk_methods(rk_type, h, c2=0.5, c3=0.75):
             alpha_fn = lambda neg_h: torch.exp(neg_h)
             t_fn = lambda sigma: sigma.log().neg()
             sigma_fn = lambda t: t.neg().exp()
+            
         case "dpmpp_2s":
             c2 = 0.5
             a2_1 =         c2   * phi(1, -h*c2)
@@ -447,6 +453,7 @@ def get_rk_methods(rk_type, h, c2=0.5, c3=0.75):
             alpha_fn = lambda neg_h: torch.exp(neg_h)
             t_fn = lambda sigma: sigma.log().neg()
             sigma_fn = lambda t: t.neg().exp()
+            
         case "dpmpp_sde_2s":
             c2 = 1.0
             a2_1 =         c2   * phi(1, -h*c2)
@@ -461,6 +468,7 @@ def get_rk_methods(rk_type, h, c2=0.5, c3=0.75):
             alpha_fn = lambda neg_h: torch.exp(neg_h)
             t_fn = lambda sigma: sigma.log().neg()
             sigma_fn = lambda t: t.neg().exp()
+            
         case "dpmpp_3s":
             a2_1 = c2 * phi(1, -h*c2)
             a3_2 = (c3**2 / c2) * phi(2, -h*c3)
@@ -507,7 +515,7 @@ def get_denoised(model, x, sigma, **extra_args):
  
 def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, noise_sampler=None, noise_sampler_type="brownian", noise_mode="hard", rk_type="dormand-prince", 
               sigma_fn_formula="", t_fn_formula="",
-                  eta=0.5, eta_var=0.0, s_noise=1., alpha=-1.0, k=1.0, scale=0.1, c2=0.5, c3=0.75):
+                  eta=0.5, eta_var=0.0, s_noise=1., alpha=-1.0, k=1.0, scale=0.1, c2=0.5, c3=1.0):
     extra_args = {} if extra_args is None else extra_args
     
     seed = torch.initial_seed() + 1
