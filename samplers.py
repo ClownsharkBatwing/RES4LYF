@@ -618,7 +618,7 @@ class SamplerRK:
                                   "heun_2s", 
                                   "ralston_2s",
                                   "res_2s", 
-                                  "res_2m",
+                                  #"res_2m",
                                   "ddim",
                                   "euler"], {"default": "dormand-prince_7s"}), 
                      "buffer": ("INT", {"default": 0, "min": 0, "max": 100, "step":1}),

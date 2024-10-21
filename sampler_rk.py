@@ -543,6 +543,7 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
                 ki[0] = denoised_last
             elif MULTISTEP == True and i < len(denoised_buffer):
                 ki[i] = denoised_buffer[i]
+                ki[i] = denoised_buffer.pop()
                 #buf_len = len(denoised_buffer)
                 #if i < buf_len:
                 #    ki[i] = denoised_buffer[i]
@@ -557,14 +558,17 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
                 ab_sum += ab[i][j]
             if EPS_PRED == True:
                 denoised = alpha_fn(-h*ci[i+1]) * xi[0] - sigma * ks
+                dnl = ks / ab_sum
             else:
                 denoised = ks / ab_sum
-            """denoised_last = denoised
-            denoised_buffer.append(denoised)
+                dnl = denoised
+            denoised_last = denoised
+            denoised_buffer.append(dnl)
             if len(denoised_buffer) > BUF_ELEM:
-                denoised_buffer = denoised_buffer[1:]"""
-            
+                denoised_buffer = denoised_buffer[1:]
+            #denoised_last = dnl
             xi[(i+1)%order] = alpha_fn(-h*ci[i+1]) * xi[0] + h*ks
+
 
         denoised_last = denoised
         denoised_buffer.append(denoised)
