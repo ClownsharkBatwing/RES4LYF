@@ -9,8 +9,7 @@ from torch.distributions import StudentT, Laplace
 import numpy as np
 import pywt
 import functools
-
-
+from opensimplex import OpenSimplex
 
 class PrecisionTool:
     def __init__(self, cast_type='fp64'):
@@ -46,7 +45,6 @@ class PrecisionTool:
                     return {k: cast_and_move_to_device(v) for k, v in data.items()}
                 return data
 
-            # Cast all tensor arguments and move them to the target device
             new_args = [cast_and_move_to_device(arg) for arg in args]
             new_kwargs = {k: cast_and_move_to_device(v) for k, v in kwargs.items()}
             
@@ -64,7 +62,6 @@ precision_tool = PrecisionTool(cast_type='fp64')
 
 def noise_generator_factory(cls, **fixed_params):
     def create_instance(**kwargs):
-        # Combine fixed_params with kwargs, giving priority to kwargs
         params = {**fixed_params, **kwargs}
         return cls(**params)
     return create_instance
@@ -120,14 +117,13 @@ class NoiseGenerator:
             updated_values.append(getattr(self, attribute_name))
         return tuple(updated_values)
 
-class BrownianNoiseGenerator(NoiseGenerator):
-    #def __init__(self, x=None, size=None, dtype=None, layout=None, device=None, seed=42, generator=None, sigma_min=None, sigma_max=None, 
-    #             sigma=14.614642, sigma_next=0.0291675): 
-    #    self.update(sigma=sigma, sigma_next=sigma_next)
-    #    super().__init__(x, size, dtype, layout, device, seed, generator, sigma_min, sigma_max)
 
+
+class BrownianNoiseGenerator(NoiseGenerator):
     def __call__(self, *, sigma=None, sigma_next=None, **kwargs):
         return BrownianTreeNoiseSampler(self.x, self.sigma_min, self.sigma_max, seed=self.seed, cpu = self.device.type=='cpu')(sigma, sigma_next)
+
+
 
 class FractalNoiseGenerator(NoiseGenerator):
     def __init__(self, x=None, size=None, dtype=None, layout=None, device=None, seed=42, generator=None, sigma_min=None, sigma_max=None, 
@@ -138,7 +134,6 @@ class FractalNoiseGenerator(NoiseGenerator):
 
     def __call__(self, *, alpha=None, k=None, scale=None, **kwargs):
         self.update(alpha=alpha, k=k, scale=scale)
-        #pdb.set_trace()
 
         b, c, h, w = self.size
         
@@ -157,7 +152,7 @@ class FractalNoiseGenerator(NoiseGenerator):
 
         return noise / torch.std(noise)
     
-from opensimplex import OpenSimplex
+    
 
 class SimplexNoiseGenerator(NoiseGenerator):
     def __init__(self, x=None, size=None, dtype=None, layout=None, device=None, seed=42, generator=None, sigma_min=None, sigma_max=None, 
@@ -214,7 +209,6 @@ class HiresPyramidNoiseGenerator(NoiseGenerator):
 
 
 
-
 class PyramidNoiseGenerator(NoiseGenerator):
     def __init__(self, x=None, size=None, dtype=None, layout=None, device=None, seed=42, generator=None, sigma_min=None, sigma_max=None, 
                  discount=0.8, mode='nearest-exact'):
@@ -239,6 +233,7 @@ class PyramidNoiseGenerator(NoiseGenerator):
         return x / x.std()
 
 
+
 class InterpolatedPyramidNoiseGenerator(NoiseGenerator):
     def __init__(self, x=None, size=None, dtype=None, layout=None, device=None, seed=42, generator=None, sigma_min=None, sigma_max=None, 
                  discount=0.7, mode='nearest-exact'):
@@ -252,9 +247,6 @@ class InterpolatedPyramidNoiseGenerator(NoiseGenerator):
         b, c, h, w = self.size
         orig_h, orig_w = h, w
 
-        #u = nn.Upsample(size=(orig_h, orig_w), mode=self.mode).to(self.device)
-        #u = nn.functional.interpolate(size=(orig_h, orig_w), mode=self.mode)
-
         noise = ((torch.rand(size=self.size, dtype=self.dtype, layout=self.layout, device=self.device, generator=self.generator) - 0.5) * 2 * 1.73)
         multipliers = [1]
 
@@ -263,18 +255,18 @@ class InterpolatedPyramidNoiseGenerator(NoiseGenerator):
             h, w = min(orig_h * 15, int(h * (r ** i))), min(orig_w * 15, int(w * (r ** i)))
 
             new_noise = torch.randn((b, c, h, w), dtype=self.dtype, layout=self.layout, device=self.device, generator=self.generator)
-            #upsampled_noise = u(new_noise)
             upsampled_noise = nn.functional.interpolate(new_noise, size=(orig_h, orig_w), mode=self.mode)
 
             noise += upsampled_noise * self.discount ** i
             multipliers.append(        self.discount ** i)
             
-            #if h <= 1 or w <= 1:
             if h >= orig_h * 15 or w >= orig_w * 15:
                 break  # if resolution is too high
         
         noise = noise / sum([m ** 2 for m in multipliers]) ** 0.5 
-        return noise #/ noise.std()
+        return noise / noise.std()
+
+
 
 class CascadeBPyramidNoiseGenerator(NoiseGenerator):
     def __init__(self, x=None, size=None, dtype=None, layout=None, device=None, seed=42, generator=None, sigma_min=None, sigma_max=None, 
@@ -306,9 +298,7 @@ class CascadeBPyramidNoiseGenerator(NoiseGenerator):
 
         return epsilon
     
-
-
-    def _pyramid_noise(self, epsilon, size_range=None, levels=10, scale_mode='nearest'):
+    """def _pyramid_noise(self, epsilon, size_range=None, levels=10, scale_mode='nearest'):
         epsilon = epsilon.clone()
         multipliers = [1]
         for i in range(1, levels):
@@ -322,8 +312,7 @@ class CascadeBPyramidNoiseGenerator(NoiseGenerator):
             if h <= 1 or w <= 1:
                 break
         epsilon = epsilon / sum([m ** 2 for m in multipliers]) ** 0.5
-        # epsilon = epsilon / epsilon.std()
-        return epsilon
+        return epsilon"""
 
 
 class UniformNoiseGenerator(NoiseGenerator):
@@ -524,12 +513,9 @@ class PerlinNoiseGenerator(NoiseGenerator):
         *args,
         **kwargs,
     ) -> Tensor:
-        # grid height and width
-        gh, gw = grid_shape
-        # output height and width
-        oh, ow = out_shape
-        # block height and width
-        bh, bw = oh // gh, ow // gw
+        gh, gw = grid_shape         # grid height and width
+        oh, ow = out_shape        # output height and width
+        bh, bw = oh // gh, ow // gw        # block height and width
 
         if oh != bh * gh:
             raise Exception(f"Output height {oh} must be divisible by grid height {gh}")
@@ -559,111 +545,9 @@ class PerlinNoiseGenerator(NoiseGenerator):
             noise += self.perlin_noise((noise_size_H, noise_size_W), (noise_size_H, noise_size_W), batch_size=self.x.shape[1], generator=self.generator).to(self.device)
         return noise / noise.std()
     
-class GreenNoiseGenerator(NoiseGenerator):
-    def __init__(self, x=None, size=None, dtype=None, layout=None, device=None, seed=42, generator=None, sigma_min=None, sigma_max=None):
-        super().__init__(x, size, dtype, layout, device, seed, generator, sigma_min, sigma_max)
-
-    def __call__(self, **kwargs):
-        b, c, h, w = self.size
-
-        # Generate random noise
-        noise = torch.randn(size=self.size, dtype=self.dtype, layout=self.layout, device=self.device, generator=self.generator)
-        
-        # Generate frequency grid
-        y_freq = torch.fft.fftfreq(h, 1/h, device=self.device)
-        x_freq = torch.fft.fftfreq(w, 1/w, device=self.device)
-        freq = torch.sqrt(y_freq[:, None]**2 + x_freq[None, :]**2).clamp(min=1e-10)
-
-        # Create a mid-frequency emphasis for green noise (centered on mid frequencies)
-        power = torch.sqrt(freq)
-        power[0, 0] = 1  # Avoid division by zero
-
-        # Apply the frequency emphasis
-        noise_fft = torch.fft.fft2(noise)
-        modified_fft = noise_fft / torch.sqrt(power)
-        noise = torch.fft.ifft2(modified_fft).real
-
-        # Normalize and return the latent noise
-        #return noise / noise.std()
-        return normalize(noise)
-
-
-class VelvetNoiseGenerator(NoiseGenerator):
-    def __init__(self, x=None, size=None, dtype=None, layout=None, device=None, seed=42, generator=None, sigma_min=None, sigma_max=None, num_impulses=100):
-        self.update(num_impulses=num_impulses)
-        super().__init__(x, size, dtype, layout, device, seed, generator, sigma_min, sigma_max)
-
-    def __call__(self, *, num_impulses=None, **kwargs):
-        self.update(num_impulses=num_impulses)
-        
-        b, c, h, w = self.size
-        noise = torch.zeros(size=self.size, dtype=self.dtype, layout=self.layout, device=self.device)
-        
-        # Randomly place impulses across the image
-        for _ in range(self.num_impulses):
-            # Generate random positions for the impulses
-            i = torch.randint(0, h, (1,), generator=self.generator, device=self.device).item()
-            j = torch.randint(0, w, (1,), generator=self.generator, device=self.device).item()
-            # Generate random values for the impulses
-            noise[..., i, j] = torch.randn((1,), generator=self.generator, device=self.device)
-
-        #return noise / noise.std()
-        return normalize(noise)
-
-class LatentFilmGrainGenerator(NoiseGenerator):
-    def __init__(self, x=None, size=None, dtype=None, layout=None, device=None, seed=42, generator=None, sigma_min=None, sigma_max=None, 
-                 density=1.0, intensity=1.0, highlights=1.0, supersample_factor=4):
-        # Initialize the generator with noise parameters
-        self.update(density=density, intensity=intensity, highlights=highlights, supersample_factor=supersample_factor)
-        super().__init__(x, size, dtype, layout, device, seed, generator, sigma_min, sigma_max)
-
-    def __call__(self, *, density=None, intensity=None, highlights=None, supersample_factor=None, **kwargs):
-        # Update parameters
-        self.update(density=density, intensity=intensity, highlights=highlights, supersample_factor=supersample_factor)
-
-        # Generate film grain in latent space
-        latent_noise = self.apply_film_grain_to_latent()
-        return latent_noise
-
-    def apply_film_grain_to_latent(self):
-        # Get latent space size
-        b, c, h, w = self.size
-        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-
-        # Generate initial latent tensor
-        latent_tensor = torch.randn(self.size, dtype=self.dtype, layout=self.layout, device=self.device, generator=self.generator)
-
-        # Supersample latent space for higher resolution film grain
-        supersampled_size = (h * self.supersample_factor, w * self.supersample_factor)
-        latent_tensor = F.interpolate(latent_tensor, size=supersampled_size, mode="bilinear", align_corners=False)
-
-        # Flatten the latent tensor to add noise to a subset of pixels
-        latent_tensor_flat = latent_tensor.view(-1)  # Flatten into a 1D tensor
-        num_pixels = int(self.density * latent_tensor_flat.size(0))
-
-        # Select random indices for applying noise
-        indices = torch.randint(0, latent_tensor_flat.size(0), (num_pixels,), dtype=torch.int64, device=device)
-        noise_values = torch.randn(num_pixels, dtype=self.dtype, device=self.device, generator=self.generator) * self.intensity
-
-        # Add noise to latent space
-        latent_tensor_flat.index_add_(0, indices, noise_values)  # Index into the 1D tensor
-        latent_tensor = latent_tensor_flat.view(b, c, *supersampled_size)  # Reshape back to original size
-
-        # Downsample back to original latent space resolution
-        latent_tensor = F.interpolate(latent_tensor, size=(h, w), mode="bilinear", align_corners=False)
-
-        # Apply highlights (contrast adjustment in latent space)
-        latent_tensor = latent_tensor * self.highlights
-
-        return latent_tensor / latent_tensor.std()
-
-
-
-
 
 NOISE_GENERATOR_CLASSES = {
     "fractal": FractalNoiseGenerator,
-    #"pyramid": PyramidNoiseGenerator,
     "gaussian": GaussianNoiseGenerator,
     "uniform": UniformNoiseGenerator,
     "pyramid-cascade_B": CascadeBPyramidNoiseGenerator,
@@ -680,10 +564,8 @@ NOISE_GENERATOR_CLASSES = {
     "wavelet": WaveletNoiseGenerator,
     "simplex": SimplexNoiseGenerator,
     "perlin": PerlinNoiseGenerator,
-    #"green": GreenNoiseGenerator,
-    #"velvet": VelvetNoiseGenerator,
-    #"film_grain": LatentFilmGrainGenerator,
 }
+
 
 NOISE_GENERATOR_NAMES = tuple(NOISE_GENERATOR_CLASSES.keys())
 

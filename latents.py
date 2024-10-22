@@ -123,7 +123,6 @@ class set_precision_universal:
             torch.set_default_dtype(dtype)
         
         return (cond_pos, cond_neg, sigmas, latent_image, )
-        #return (cond_pos, cond_neg, sigmas, {"samples": x}, )
     
     
 class set_precision_advanced:
@@ -513,9 +512,6 @@ class LatentPhaseMagnitudeMultiply:
 
 
 
-
-
-
 class LatentPhaseMagnitudeOffset:
     @classmethod
     def INPUT_TYPES(s):
@@ -629,8 +625,6 @@ class LatentPhaseMagnitudeOffset:
             mixed_phase_magnitude_batch[i, :, :, :] = mixed_phase_magnitude
 
         return ({"samples": mixed_phase_magnitude_batch}, )
-
-
 
 
 
@@ -748,6 +742,8 @@ class LatentPhaseMagnitudePower:
 
         return ({"samples": mixed_phase_magnitude_batch}, )
 
+
+
 class StableCascade_StageC_VAEEncode_Exact:
     def __init__(self, device="cpu"):
         self.device = device
@@ -767,8 +763,6 @@ class StableCascade_StageC_VAEEncode_Exact:
     CATEGORY = "latent/stable_cascade"
 
     def generate(self, image, vae, width, height):
-        img_width = image.shape[-2]
-        img_height = image.shape[-3]
         out_width = (width) * vae.downscale_ratio #downscale_ratio = 32
         out_height = (height) * vae.downscale_ratio
         #movedim(-1,1) goes from 1,1024,1024,3 to 1,3,1024,1024
@@ -804,19 +798,16 @@ class StableCascade_StageC_VAEEncode_Exact_Tiled:
         img_height = image.shape[-3]
         upscale_amount = vae.downscale_ratio  # downscale_ratio = 32
 
-        # Prepare the image for tiling (move channels to the correct position).
-        image = image.movedim(-1, 1)  # Change shape from (B, H, W, C) to (B, C, H, W)
+        image = image.movedim(-1, 1)  # bhwc -> bchw 
 
-        # Define the encoding function for tiled processing
         encode_fn = lambda img: vae.encode(img.to(vae.device)).to("cpu")
 
-        # Use the tiled_scale_multidim function for encoding.
         c_latent = tiled_scale_multidim(
             image, encode_fn,
             tile=(tile_size // 8, tile_size // 8),
             overlap=overlap,
             upscale_amount=upscale_amount,
-            out_channels=16,  # Assume VAE outputs num_latent_channels
+            out_channels=16, 
             output_device=self.device
         )
 

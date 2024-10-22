@@ -855,10 +855,7 @@ def get_res4lyf_half_step(sigma, sigma_next, c2=0.5, auto_c2=False, h_last=None,
   sigma_s = sigma_fn_x(s)
 
   h = (t_fn(sigma_s) - t_fn(sigma)) / c2 # h = (s - t) / c2    #remapped timestep-space
-    
-  #print("sigma:", sigma.item(), "sigma_s:", sigma_s.item(), "sigma_next:", sigma_next.item(),)
-  #print("t:", t.item(), "s:", s.item(), "t_next:", t_next.item(), "h:", h.item(), "c2:", c2.item())
-  
+
   return sigma_s, h, c2
 
 

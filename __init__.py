@@ -14,8 +14,6 @@ import os
 import shutil
 import sys
 
-sys.setrecursionlimit(10**6)
-
 """def get_ext_dir(subpath=None, mkdir=False):
     dir = os.path.dirname(__file__)
     if subpath is not None:
@@ -42,18 +40,16 @@ install_js()"""
 
 extra_samplers.add_samplers()
 
-#torch.set_default_dtype(torch.float64)
-
 NODE_CLASS_MAPPINGS = {
     "ConditioningAverageScheduler": conditioning.ConditioningAverageScheduler,
     "ConditioningMultiply": conditioning.ConditioningMultiply,
     "ConditioningToBase64": conditioning.ConditioningToBase64,
     "Conditioning Recast FP64": conditioning.Conditioning_Recast64,
     "Base64ToConditioning": conditioning.Base64ToConditioning,
+    "StableCascade_StageB_Conditioning64": conditioning.StableCascade_StageB_Conditioning64,
 
     "LatentNoised": samplers.LatentNoised,
     "LatentNoiseList": latents.LatentNoiseList,
-    #"LatentBatch_channels_offset": latents.LatentBatch_channels_offset,
     "LatentBatch_channels": latents.LatentBatch_channels,
     "LatentBatch_channels_16": latents.LatentBatch_channels_16,
     "LatentNoiseBatch_fractal": latents.LatentNoiseBatch_fractal,
@@ -87,25 +83,20 @@ NODE_CLASS_MAPPINGS = {
     "SamplerDPMPP_DualSDE_Advanced": samplers.SamplerDPMPP_DUALSDE_MOMENTUMIZED_ADVANCED,
     "SamplerDPMPP_SDE_Advanced": samplers.SamplerDPMPP_SDE_ADVANCED,
     "SamplerDPMPP_SDE_CFG++_Advanced": samplers.SamplerDPMPP_SDE_CFGPP_ADVANCED,
-    "SamplerEulerAncestral_Advanced": samplers.SamplerEulerAncestral_Advanced,
     "SamplerRES_Implicit": samplers.SamplerRES_Implicit,
     "SamplerRES3_Implicit_Automation": samplers.SamplerRES3_Implicit_Automation,
     "SamplerRES3_Implicit": samplers.SamplerRES3_Implicit,
     "SamplerSDE_Implicit": samplers.SamplerSDE_Implicit,
-    "SamplerSDE_Implicit_Broyden": samplers.SamplerSDE_Implicit_Broyden,
     
     
     "SamplerDPMPP_2S_Ancestral_Advanced": samplers.SamplerDPMPP_2S_Ancestral_Advanced,
     "SamplerDPMPP_2M_SDE_Advanced": samplers.SamplerDPMPP_2M_SDE_Advanced,
     "SamplerDPMPP_3M_SDE_Advanced": samplers.SamplerDPMPP_3M_SDE_Advanced,
     "SamplerCorona": samplers.SamplerCorona,
-    "SamplerLogistic_Implicit": samplers.SamplerLogistic_Implicit,
-    "SamplerChebyshev": samplers.SamplerChebyshev,
     "SamplerRK": samplers.SamplerRK,
 
     "Sigmas Recast": sigmas.set_precision_sigmas,
 
-    #Sigmas Interpolate": sigmas.sigmas_interpolate,
     "Sigmas Variance Floor": sigmas.sigmas_variance_floor,
     "Sigmas Truncate": sigmas.sigmas_truncate,
     "Sigmas Start": sigmas.sigmas_start,
@@ -139,21 +130,15 @@ NODE_CLASS_MAPPINGS = {
     "Tan Scheduler 2": sigmas.tan_scheduler_2stage,
     "Tan Scheduler 2 Simple": sigmas.tan_scheduler_2stage_simple,
     
-    "StableCascade_StageB_Conditioning64": conditioning.StableCascade_StageB_Conditioning64,
-    
-    "Film Grain": images.Film_Grain,
-    #"Frequency Separation Vivid Light": images.Frequency_Separation_Vivid_Light,
-    "Frequency Separation Hard Light": images.Frequency_Separation_Hard_Light,
-    #"Frequency Separation FFT": images.Frequency_Separation_FFT,
-    #"Frequency Separation Wavelet": images.Frequency_Separation_Wavelet,
-    #"Frequency Separation TV": images.Frequency_Separation_TV,
-    "Frequency Separation Hard Light LAB": images.Frequency_Separation_Hard_Light_LAB,
     
     "Image Channels LAB": images.Image_Channels_LAB,
     "Image Median Blur": images.ImageMedianBlur,
     "Image Pair Split": images.Image_Pair_Split,
-    #"Image Smudge Blur": images.FastSmudgeBlur,
     "Image Crop Location Exact": images.Image_Crop_Location_Exact,
+    "Film Grain": images.Film_Grain,
+    "Frequency Separation Hard Light": images.Frequency_Separation_Hard_Light,
+    "Frequency Separation Hard Light LAB": images.Frequency_Separation_Hard_Light_LAB,
+    
 
     "UNetSave": models.UNetSave,
 }

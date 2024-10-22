@@ -481,22 +481,14 @@ def sample_common(model, x, noise, noise_mask, noise_seed, tile_width, tile_heig
                         tiling.set_slice(x, single_tile, tile_h_list[idx], tile_h_len_list[idx], tile_w_list[idx], tile_w_len_list[idx], single_mask.cpu())
 
                 x = x.to('cpu') 
-                
-                   
-            #img_pass tiles level        
-        #end img_pass tiles            
-                    
+
     comfy.sampler_helpers.cleanup_additional_models(modelPatches)
 
-    #out = x.copy()
-    #out["samples"] = x.cpu()
-    #return (out, )
-    
     return x.cpu()
 
 
 
-class UltraSharkSampler_Tiled:
+class UltraSharkSampler_Tiled: #this is for use with https://github.com/ClownsharkBatwing/UltraCascade
     @classmethod
     def INPUT_TYPES(s):
         return {"required":
