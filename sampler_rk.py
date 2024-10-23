@@ -384,7 +384,7 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
                 if cfgpp != 0.0:
                     ki[i] = temp[0] + cfgpp * (ki[i] - temp[0])
                 ki_tmp[i] = temp[0]
-            print(i, len(denoised_buffer))
+            #print(i, len(denoised_buffer))
                 
             ks = torch.zeros_like(x)
             ks_tmp = torch.zeros_like(x)
