@@ -4,10 +4,15 @@ from .noise_classes import *
 import comfy.samplers
 import comfy.sample
 import comfy.sampler_helpers
+import comfy.model_sampling
+import comfy.latent_formats
+import comfy.sd
 
 import latent_preview
 import torch
 import torch.nn.functional as F
+
+import math
 
 def initialize_or_scale(tensor, value, steps):
     if tensor is None:
@@ -340,6 +345,7 @@ class SharkSampler:
                     {"model": ("MODEL",),
                     "add_noise": ("BOOLEAN", {"default": True}),
                     "noise_level": ("FLOAT", {"default": 1.0, "min": -10000.0, "max": 10000.0, "step":0.1, "round": 0.01}),
+                    "noise_normalize": ("BOOLEAN", {"default": False}),
                     "noise_is_latent": ("BOOLEAN", {"default": False}),
                     "noise_type": (NOISE_GENERATOR_NAMES, ),
                     "alpha": ("FLOAT", {"default": 1.0, "min": -10000.0, "max": 10000.0, "step":0.1, "round": 0.01}),
@@ -364,7 +370,7 @@ class SharkSampler:
 
     CATEGORY = "sampling/custom_sampling"
     
-    def main(self, model, add_noise, noise_level, noise_is_latent, noise_type, noise_seed, cfg, alpha, k, positive, negative, sampler, sigmas, latent_image, latent_noise=None): 
+    def main(self, model, add_noise, noise_level, noise_normalize, noise_is_latent, noise_type, noise_seed, cfg, alpha, k, positive, negative, sampler, sigmas, latent_image, latent_noise=None): 
             latent = latent_image
             latent_image = latent["samples"]
 
@@ -384,6 +390,9 @@ class SharkSampler:
                 noise.sub_(noise.mean()).div_(noise.std())
 
             noise *= noise_level
+            if noise_normalize:
+                noise.sub_(noise.mean()).div_(noise.std())
+                
             noise_mask = latent["noise_mask"] if "noise_mask" in latent else None
 
             x0_output = {}
@@ -528,7 +537,7 @@ class SamplerRK:
                      "k": ("FLOAT", {"default": 1.0, "min": -10000.0, "max": 10000.0, "step":2.0, "round": False, "tooltip": "Fractal noise mode: all that matters is positive vs. negative. Effect unclear."}),
                      "cfgpp": ("FLOAT", {"default": 0.0, "min": -10000.0, "max": 10000.0, "step":0.01, "round": False, "tooltip": "CFG++ scale. Replaces CFG."}),
                      "noise_sampler_type": (NOISE_GENERATOR_NAMES, {"default": "brownian"}),
-                     "noise_mode": (["hard", "soft", "softer", "exp"], {"default": 'hard', "tooltip": "How noise scales with the sigma schedule. Hard is the most aggressive, the others start strong and drop rapidly."}),
+                     "noise_mode": (["hard", "hard_sq", "soft", "softer", "exp"], {"default": 'hard', "tooltip": "How noise scales with the sigma schedule. Hard is the most aggressive, the others start strong and drop rapidly."}),
                      "rk_type": (["dormand-prince_6s", 
                                   "dormand-prince_7s", 
                                   "dormand-prince_13s", 
@@ -553,7 +562,7 @@ class SamplerRK:
                      "buffer": ("INT", {"default": 0, "min": 0, "max": 100, "step":1, "tooltip": "Set to 1 to reuse the result from the last step for the predictor step. Use only on samplers ending with 2s or higher. Currently only working with res, dpmpp, etc."}),
                      #"t_fn_formula": ("STRING", {"default": "1/((sigma).exp()+1)", "multiline": True}),
                      #"sigma_fn_formula": ("STRING", {"default": "((1-t)/t).log()", "multiline": True}),
-                      },
+                    },
                     "optional": 
                     {
                     }  
@@ -627,6 +636,265 @@ class SamplerDEIS_SDE:
                                                          "noise_sampler_type": noise_sampler_type, "noise_mode": noise_mode, "noise_scale": noise_scale, "deis_mode": deis_mode, "step_type": step_type, 
                                                          "denoised_type": denoised_type, "max_order": max_order,"latent_guide": latent_guide, "latent_guide_weight": latent_guide_weight, "latent_guide_weights": latent_guide_weights, "mask": latent_guide_mask,})
         return (sampler, )
+
+
+class OutCONST: ##### REVERSE #####
+    def calculate_input(self, sigma, noise):
+        return noise
+
+    def calculate_denoised(self, sigma, model_output, model_input):
+        sigma = sigma.view(sigma.shape[:1] + (1,) * (model_output.ndim - 1))
+        return model_input - model_output * sigma
+
+    def noise_scaling(self, sigma, noise, latent_image, max_denoise=False):
+        #return sigma * noise + (1.0 - sigma) * latent_image
+        return latent_image
+
+    def inverse_noise_scaling(self, sigma, latent):
+        return latent / (1.0 - sigma)
+
+"""def time_snr_shift_exponential(alpha, t):
+    return math.exp(alpha) / (math.exp(alpha) + (1 / t - 1) ** 1.0)
+
+def time_snr_shift_linear(alpha, t):
+    if alpha == 1.0:
+        return t
+    return alpha * t / (1 + (alpha - 1) * t)"""
+
+class ModelSamplingDiscreteFlowExponential(torch.nn.Module):
+    def __init__(self, model_config=None):
+        super().__init__()
+        if model_config is not None:
+            sampling_settings = model_config.sampling_settings
+        else:
+            sampling_settings = {}
+
+        self.set_parameters(shift=sampling_settings.get("shift", 1.0), multiplier=sampling_settings.get("multiplier", 1000))
+
+    def set_parameters(self, shift=1.0, timesteps=1000, multiplier=1000): #timesteps=10000, multiplier=1): # 
+        self.shift = shift
+        self.multiplier = multiplier
+        ts = self.sigma((torch.arange(1, timesteps + 1, 1) / timesteps) * multiplier)
+        self.register_buffer('sigmas', ts)
+
+    @property
+    def sigma_min(self):
+        return self.sigmas[0]
+
+    @property
+    def sigma_max(self):
+        return self.sigmas[-1]
+
+    @staticmethod
+    def time_snr_shift(alpha, t):
+        return math.exp(alpha) / (math.exp(alpha) + (1 / t - 1) ** 1.0)
+
+    def timestep(self, sigma):
+        return sigma * self.multiplier
+
+    def sigma(self, timestep):
+        return self.time_snr_shift(self.shift, timestep / self.multiplier)
+
+    def percent_to_sigma(self, percent):
+        if percent <= 0.0:
+            return 1.0
+        if percent >= 1.0:
+            return 0.0
+        return 1.0 - percent
+
+
+class ModelSamplingDiscreteFlowLinear(torch.nn.Module):
+    def __init__(self, model_config=None):
+        super().__init__()
+        if model_config is not None:
+            sampling_settings = model_config.sampling_settings
+        else:
+            sampling_settings = {}
+
+        self.set_parameters(shift=sampling_settings.get("shift", 1.0), multiplier=sampling_settings.get("multiplier", 1000))
+
+    def set_parameters(self, shift=1.0, timesteps=1000, multiplier=1000): #timesteps=10000, multiplier=1): # 
+        self.shift = shift
+        self.multiplier = multiplier
+        ts = self.sigma((torch.arange(1, timesteps + 1, 1) / timesteps) * multiplier)
+        self.register_buffer('sigmas', ts)
+
+    @property
+    def sigma_min(self):
+        return self.sigmas[0]
+
+    @property
+    def sigma_max(self):
+        return self.sigmas[-1]
+
+    @staticmethod
+    def time_snr_shift(alpha, t):
+        if alpha == 1.0:
+            return t
+        return alpha * t / (1 + (alpha - 1) * t)
+
+    def timestep(self, sigma):
+        return sigma * self.multiplier
+
+    def sigma(self, timestep):
+        return self.time_snr_shift(self.shift, timestep / self.multiplier)
+
+    def percent_to_sigma(self, percent):
+        if percent <= 0.0:
+            return 1.0
+        if percent >= 1.0:
+            return 0.0
+        return 1.0 - percent
+
+
+def time_snr_shift_exponential(alpha, t):
+    return math.exp(alpha) / (math.exp(alpha) + (1 / t - 1) ** 1.0)
+
+def time_snr_shift_linear(alpha, t):
+    if alpha == 1.0:
+        return t
+    return alpha * t / (1 + (alpha - 1) * t)
+
+class SD35L_TimestepPatcher:
+    @classmethod
+    def INPUT_TYPES(s):
+        return {"required": { 
+                    "model": ("MODEL",),
+                    "scaling": (["exponential", "linear"], {"default": 'exponential'}), 
+                }
+               }
+    
+    RETURN_TYPES = ("MODEL",)
+    FUNCTION = "main"
+    CATEGORY = "SD35L"
+
+    def sigma_exponential(self, timestep):
+        return time_snr_shift_exponential(self.shift, timestep / self.multiplier)
+
+    def sigma_linear(self, timestep):
+        return time_snr_shift_linear(self.shift, timestep / self.multiplier)
+
+    def main(self, model, scaling):
+        self.shift = 3.0
+        self.multiplier = 1000
+        timesteps = 1000
+
+        if scaling == "exponential": 
+            ts = self.sigma_exponential((torch.arange(1, timesteps + 1, 1) / timesteps) * self.multiplier)
+        elif scaling == "linear": 
+            ts = self.sigma_linear((torch.arange(1, timesteps + 1, 1) / timesteps) * self.multiplier)
+
+        work_model = model.clone()
+        work_model.model.model_sampling.register_buffer('sigmas', ts)
+        
+        return (work_model,)
+
+        if scaling == "exponential": 
+            sampling_base = ModelSamplingDiscreteFlowExponential #ModelSamplingFlux
+        elif scaling == "linear": 
+            sampling_base = ModelSamplingDiscreteFlowLinear #ModelSamplingFlux
+        #sampling_base.timestep_type = scaling
+        #sampling_base = comfy.model_sampling.ModelSamplingFlux
+
+        class ModelSamplingAdvanced(sampling_base, type(model.model.model_sampling).__bases__[1]):
+            pass
+        
+        #work_model = model.clone()
+        work_model = model
+
+        model_sampling = ModelSamplingAdvanced(work_model.model.model_config)
+        #model_sampling.set_parameters(shift=shift)
+        work_model.add_object_patch("model_sampling", model_sampling)
+        
+        return (work_model,)
+    
+    
+    
+class SamplerTEST:
+    @classmethod
+    def INPUT_TYPES(s):
+        return {"required":
+                    {"model": ("MODEL",),
+                     "momentum": ("FLOAT", {"default": 0.0, "min": -100.0, "max": 100.0, "step":0.01, "round": False}),
+                     "eta_value": ("FLOAT", {"default": 0.5, "min": -100.0, "max": 100.0, "step":0.01, "round": False}),
+
+                     "eta": ("FLOAT", {"default": 0.25, "min": -100.0, "max": 100.0, "step":0.01, "round": False}),
+                     "eta_var": ("FLOAT", {"default": 0.0, "min": -100.0, "max": 100.0, "step":0.01, "round": False}),
+
+                     "s_noise": ("FLOAT", {"default": 1.0, "min": -100.0, "max": 100.0, "step":0.01, "round": False}),
+                     "alpha": ("FLOAT", {"default": 0.0, "min": -10000.0, "max": 10000.0, "step":0.1, "round": False}),
+                     "k": ("FLOAT", {"default": 1.0, "min": -10000.0, "max": 10000.0, "step":2.0, "round": False}),
+                     "noise_sampler_type": (NOISE_GENERATOR_NAMES, {"default": "brownian"}),
+                     "noise_mode": (["hard", "exp", "hard_var", "soft", "softer"], {"default": "hard"}), 
+                     "noise_scale": ("FLOAT", {"default": 1.0, "min": -10000.0, "max": 10000.0, "step":0.1, "round": False}),
+                     "deis_mode": (["rhoab", "tab"], {"default": "rhoab"}), 
+                     "step_type": (["simple", "res_a", "dpmpp_sde"], {"default": "simple"}), 
+                     "denoised_type": (["1_2", "2"], {"default": "1_2"}), 
+                     "max_order": ("INT", {"default": 3, "min": 1, "max": 4, "step":1}),
+                     "latent_guide_weight": ("FLOAT", {"default": 1.0, "min": -100.0, "max": 100.0, "step":0.01, "round": False}),
+                     "start": ("INT", {"default": 0, "min": 0, "max": 10000, "step":1}),
+                     "stop": ("INT", {"default": 30, "min": 0, "max": 10000, "step":1}),
+                      },
+                    "optional": 
+                    {
+                        "momentums": ("SIGMAS", ),
+                        "etas": ("SIGMAS", ),
+                        "s_noises": ("SIGMAS", ),
+                        "alphas": ("SIGMAS", ),
+                        "latent_guide": ("LATENT", ),
+                        "latent_guide_weights": ("SIGMAS", ),
+                        "latent_guide_mask": ("MASK", ),
+                    }  
+               }
+    RETURN_TYPES = ("MODEL", "SAMPLER",)
+    RETURN_NAMES = ("model", "sampler",)
+
+    CATEGORY = "sampling/custom_sampling/samplers"
+
+    FUNCTION = "get_sampler"
+
+    def get_sampler(self, model, momentum, eta_value, eta, eta_var, s_noise, alpha, k, noise_sampler_type, noise_mode, noise_scale, deis_mode, step_type, denoised_type, max_order, momentums=None, etas=None, s_noises=None, alphas=None,                     
+                    latent_guide=None, latent_guide_weight=0.0, latent_guide_weights=None, latent_guide_mask=None, automation=None, start=0, stop=5):      
+        sampler_name = "negative_logsnr_euler"
+
+        steps = 10000
+        momentums = initialize_or_scale(momentums, momentum, steps)
+        etas = initialize_or_scale(etas, eta, steps)
+        s_noises = initialize_or_scale(s_noises, s_noise, steps)
+        alphas = initialize_or_scale(alphas, alpha, steps)
+        latent_guide_weights = initialize_or_scale(latent_guide_weights, latent_guide_weight, steps)
+        
+        
+        #if latent_guide is not None:
+        #    latent_guide = latent_guide["samples"].to('cuda')
+            
+        process_latent_in = model.get_model_object("process_latent_in")
+        latent_guide = process_latent_in(latent_guide['samples'])
+            
+        
+        sampling_base = comfy.model_sampling.ModelSamplingDiscreteFlow #ModelSamplingFlux
+        #sampling_base = comfy.model_sampling.ModelSamplingFlux
+
+        sampling_type = OutCONST
+
+        class ModelSamplingAdvanced(sampling_base, sampling_type):
+            pass
+
+        work_model = model.clone()
+        model_sampling = ModelSamplingAdvanced(work_model.model.model_config)
+        #model_sampling.set_parameters(shift=shift)
+        work_model.add_object_patch("model_sampling", model_sampling)
+        
+        sampler = comfy.samplers.ksampler(sampler_name, {"eta": eta, "eta_var": eta_var, "eta_value": eta_value, "alpha": alphas, "k": k, 
+                                                         "latent_guide": latent_guide, "latent_guide_weight": latent_guide_weight, "start_time": start, "end_time": stop,})
+        
+        """sampler = comfy.samplers.ksampler(sampler_name, {"momentums": momentums, "etas": etas, "s_noises": s_noises, "alpha": alphas, "k": k, 
+                                                         "noise_sampler_type": noise_sampler_type, "noise_mode": noise_mode, "noise_scale": noise_scale, "deis_mode": deis_mode, "step_type": step_type, 
+                                                         "denoised_type": denoised_type, "max_order": max_order,"latent_guide": latent_guide, "latent_guide_weight": latent_guide_weight, "latent_guide_weights": latent_guide_weights, "mask": latent_guide_mask,})"""
+        return (work_model, sampler, )
+
+
+
 
 
 class SamplerDEIS_SDE_Implicit:
@@ -1041,8 +1309,7 @@ class SamplerDPMPP_SDE_ADVANCED:
                                                          "t_fn_formula": t_fn_formula, "sigma_fn_formula": sigma_fn_formula,})
         return (sampler, )
 
-    
-    
+
     
 class SamplerDPMPP_2S_Ancestral_Advanced:
     @classmethod

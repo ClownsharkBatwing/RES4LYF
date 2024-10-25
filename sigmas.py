@@ -705,6 +705,31 @@ class sigmas2_add:
     def main(self, sigmas_1, sigmas_2):
         return (sigmas_1 + sigmas_2,)
 
+class sigmas_rescale:
+    def __init__(self):
+        pass
+    @classmethod
+    def INPUT_TYPES(s):
+        return {
+            "required": {
+                "start": ("FLOAT", {"default": 1.0, "min": -10000,"max": 10000,"step": 0.01}),
+                "end": ("FLOAT", {"default": 0.0, "min": -10000,"max": 10000,"step": 0.01}),
+                "sigmas": ("SIGMAS", ),
+            },
+            "optional": {
+            }
+        }
+    FUNCTION = "main"
+    RETURN_TYPES = ("SIGMAS",)
+    RETURN_NAMES = ("sigmas_rescaled",)
+    CATEGORY = "sampling/custom_sampling/sigmas"
+    def main(self, start=0, end=-1, sigmas=None):
+
+        s_out_1 = ((sigmas - sigmas.min()) * (start - end)) / (sigmas.max() - sigmas.min()) + end     
+        
+        return (s_out_1,)
+
+
 class sigmas_math1:
     def __init__(self):
         pass

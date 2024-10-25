@@ -88,6 +88,9 @@ NODE_CLASS_MAPPINGS = {
     "SamplerRES3_Implicit": samplers.SamplerRES3_Implicit,
     "SamplerSDE_Implicit": samplers.SamplerSDE_Implicit,
     
+    "SamplerTEST": samplers.SamplerTEST,
+
+    "SD35L_TimestepPatcher": samplers.SD35L_TimestepPatcher,
     
     "SamplerDPMPP_2S_Ancestral_Advanced": samplers.SamplerDPMPP_2S_Ancestral_Advanced,
     "SamplerDPMPP_2M_SDE_Advanced": samplers.SamplerDPMPP_2M_SDE_Advanced,
@@ -119,6 +122,8 @@ NODE_CLASS_MAPPINGS = {
     
     "Sigmas2 Mult": sigmas.sigmas2_mult,
     "Sigmas2 Add": sigmas.sigmas2_add,
+    
+    "Sigmas Rescale": sigmas.sigmas_rescale,
 
     "Sigmas Math1": sigmas.sigmas_math1,
     "Sigmas Math3": sigmas.sigmas_math3,

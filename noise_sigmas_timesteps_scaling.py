@@ -67,7 +67,7 @@ def get_sigma_down_RF(sigma_next, eta):
 def get_sigma_up_RF(sigma_next, eta):
     return sigma_next * eta
 
-def get_ancestral_step_RF_exp(sigma_next, eta, sigma_max=1.0, h=None):
+def get_ancestral_step_RF_exp(sigma_next, eta, h=None, sigma_max=1.0):
     sigma_up = sigma_next * (1 - (-2*eta*h).exp())**0.5 #or whatever the f
     
     sigma_signal = sigma_max - sigma_next
@@ -86,6 +86,44 @@ def get_ancestral_step_RF_correct_working(sigma_next, eta):
     alpha_ratio =                             1 - sigma_next + sigma_next * eta_scaled
     return sigma_up, sigma_down, alpha_ratio
 
+def get_ancestral_step_RF_sqrd(sigma, sigma_next, eta, sigma_max=1.0):
+    sigma_hat = sigma * (1 + eta)
+    sigma_up = (sigma_hat ** 2 - sigma ** 2) ** .5
+
+    #sigma_up = sigma_next * eta #or whatever the f  
+    #sigma_down = ( (sigma_next**2 - sigma_up**2) / (1 - sigma_up**2) ) **0.5
+    #alpha_ratio = (1-sigma_next**2) / (1-sigma_down**2) 
+    #alpha_ratio = (1-sigma_next) / (1-sigma_down) 
+    """if sigma_next**2 > sigma_up**2:
+        sigma_signal = sigma_max - sigma_next
+        sigma_residual = torch.sqrt(sigma_next**2 - sigma_up**2)
+
+        alpha_ratio = sigma_signal + sigma_residual
+        sigma_down = sigma_residual / alpha_ratio
+    else:
+        sigma_up = 0
+        sigma_down = sigma_next
+        alpha_ratio = 1.0"""
+        
+    if sigma_next**2 <= sigma_up**2: #fallback to hard noise to avoid sqrt(neg)
+        sigma_up = sigma_next * eta 
+        
+    sigma_signal = sigma_max - sigma_next
+    sigma_residual = torch.sqrt(sigma_next**2 - sigma_up**2)
+
+    alpha_ratio = sigma_signal + sigma_residual
+    sigma_down = sigma_residual / alpha_ratio
+    return sigma_up, sigma_down, alpha_ratio
+
+
+def get_ancestral_step_RF_test(sigma_next, eta, sigma_max=1.0):
+    sigma_up = ( (2*sigma_next) / (1-sigma_next) ) ** 0.5
+
+    alpha_ratio = 1 / (1 - sigma_next)
+    sigma_down = (  (sigma_next**2 - sigma_up**2) / alpha_ratio**2 ) ** 0.5
+    
+    return sigma_up, sigma_down, alpha_ratio
+
 def get_ancestral_step_RF(sigma_next, eta, sigma_max=1.0):
     sigma_up = sigma_next * eta #or whatever the f
     
@@ -96,6 +134,8 @@ def get_ancestral_step_RF(sigma_next, eta, sigma_max=1.0):
     sigma_down = sigma_residual / alpha_ratio
     
     return sigma_up, sigma_down, alpha_ratio
+
+
 
 
 def get_ancestral_step_RF_down(sigma_next, sigma_up, sigma_max=1.0, h=None):
@@ -120,6 +160,8 @@ def get_res4lyf_step_with_model(model, sigma, sigma_next, eta=0.0, eta_var=1.0, 
         su, sd, alpha_ratio = get_RF_step_traditional(sigma, sigma_next, eta)
       elif noise_mode == "hard":
         su, sd, alpha_ratio = get_ancestral_step_RF(sigma_next, eta)
+      elif noise_mode == "hard_sq": 
+        su, sd, alpha_ratio = get_ancestral_step_RF_sqrd(sigma, sigma_next, eta)
       elif noise_mode == "exp": 
         su, sd, alpha_ratio = get_ancestral_step_RF_exp(sigma_next, eta, h)
   else:
@@ -144,6 +186,7 @@ def get_res4lyf_step(sigma, sigma_next, eta=0.0, eta_var=1.0, noise_mode="hard")
       su, sd, alpha_ratio = get_RF_step_traditional(sigma, sigma_next, eta)
     elif noise_mode == "hard":
       su, sd, alpha_ratio = get_ancestral_step_RF(sigma_next, eta)
+      su, sd, alpha_ratio = get_ancestral_step_RF_sqrd(sigma, sigma_next, eta)
     elif noise_mode == "e**(-2*eta*h)":
       su, sd, alpha_ratio = get_ancestral_step_RF(sigma_next, eta)
   return su, sd, alpha_ratio
