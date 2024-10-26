@@ -2383,25 +2383,8 @@ def add_schedulers():
 from .sampler_rk import phi
 
 
-def generate_eta_values(steps, start_time, end_time, eta, eta_trend):
-    eta_values = [0] * steps
-    
-    if eta_trend == 'constant':
-        for i in range(start_time, end_time):
-            eta_values[i] = eta
-    elif eta_trend == 'linear_increase':
-        for i in range(start_time, end_time):
-            progress = (i - start_time) / (end_time - start_time - 1)
-            eta_values[i] = eta * progress
-    elif eta_trend == 'linear_decrease':
-        for i in range(start_time, end_time):
-            progress = 1 - (i - start_time) / (end_time - start_time - 1)
-            eta_values[i] = eta * progress
-    
-    return eta_values
-
 @torch.no_grad()
-def sample_negative_logsnr_euler(model, x, sigmas, extra_args=None, callback=None, disable=None, s_noise=1.0, c2=0.5, gamma=0.25, eta_value=0.5, eta=0.0, eta_var=0.0, noise_mode="hard", start_time=0, end_time=5, eta_trend="constant",
+def sample_negative_logsnr_euler(model, x, sigmas, extra_args=None, callback=None, disable=None, s_noise=1.0, c2=0.5, gamma=0.25, eta_value=0.5, eta=0.0, eta_var=0.0, noise_mode="hard", eta_values=None, t_is=None,
                                  etas=None, s_noises=None, alpha=-1.0, k=1.0, scale=0.1, cfgpp=1.5, latent_guide=None, latent_guide_weight=1.0, noise_sampler_type="brownian", ):
     
     temp = [0]
@@ -2419,6 +2402,8 @@ def sample_negative_logsnr_euler(model, x, sigmas, extra_args=None, callback=Non
     seed = torch.initial_seed() + 1
     #noise_sampler = torch.randn_like  # Gaussian noise for the diffusion term
 
+    if sigmas[0] == 0.0:
+        sigmas = sigmas[1:]
     sigma_min, sigma_max = sigmas[sigmas > 0].min(), sigmas.max()
     if isinstance(model.inner_model.inner_model.model_sampling, comfy.model_sampling.CONST):
         sigma_max = torch.full_like(sigma_max, 1.0)
@@ -2442,14 +2427,15 @@ def sample_negative_logsnr_euler(model, x, sigmas, extra_args=None, callback=Non
     N = len(sigmas)-1
     y0 = latent_image.clone().to(y1.device)
     s_in = y0.new_ones([y0.shape[0]])
-    eta_values = generate_eta_values(N, start_time, end_time, eta_value, eta_trend)
     for i in trange(N, disable=disable):
-        # t_i = 1-model.inner_model.inner_model.model_sampling.timestep(sigmas[i]) # TODO: figure out which one to use
-        t_i = 1 - sigmas[i]
-        t_tmp = model.inner_model.inner_model.model_sampling.timestep(sigmas[i])
-        if t_tmp > 1.0:
-            t_tmp /= 1000
-        t_i = 1 - t_tmp
+        if t_is is not None:
+            t_i = t_is[i]
+        else:
+            t_tmp = model.inner_model.inner_model.model_sampling.timestep(sigmas[i])
+            if t_tmp > 1.0:
+                t_tmp /= 1000
+            t_i = 1 - t_tmp
+            
         #t_i = i/N # Empiracally better results
         sigma, sigma_next = sigmas[i], sigmas[i+1]
         

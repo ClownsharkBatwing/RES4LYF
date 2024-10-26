@@ -761,6 +761,8 @@ class SD35L_TimestepPatcher:
         return {"required": { 
                     "model": ("MODEL",),
                     "scaling": (["exponential", "linear"], {"default": 'exponential'}), 
+                    "shift": ("FLOAT", {"default": 3.0, "min": -100.0, "max": 100.0, "step":0.01, "round": False}),
+                    
                 }
                }
     
@@ -774,20 +776,23 @@ class SD35L_TimestepPatcher:
     def sigma_linear(self, timestep):
         return time_snr_shift_linear(self.shift, timestep / self.multiplier)
 
-    def main(self, model, scaling):
-        self.shift = 3.0
+    def main(self, model, scaling, shift):
+        self.shift = shift
         self.multiplier = 1000
-        timesteps = 1000
+        timesteps = 10000
 
+        s_range = torch.arange(1, timesteps + 1, 1).to(torch.float64)
         if scaling == "exponential": 
-            ts = self.sigma_exponential((torch.arange(1, timesteps + 1, 1) / timesteps) * self.multiplier)
+            ts = self.sigma_exponential((s_range / timesteps) * self.multiplier)
         elif scaling == "linear": 
-            ts = self.sigma_linear((torch.arange(1, timesteps + 1, 1) / timesteps) * self.multiplier)
+            ts = self.sigma_linear((s_range / timesteps) * self.multiplier)
 
-        work_model = model.clone()
-        work_model.model.model_sampling.register_buffer('sigmas', ts)
+        #work_model = model.clone()
+        model.model.model_sampling.shift = self.shift
+        model.model.model_sampling.multiplier = self.multiplier
+        model.model.model_sampling.register_buffer('sigmas', ts)
         
-        return (work_model,)
+        return (model,)
 
         if scaling == "exponential": 
             sampling_base = ModelSamplingDiscreteFlowExponential #ModelSamplingFlux
@@ -826,18 +831,15 @@ class SamplerTEST:
                      "k": ("FLOAT", {"default": 1.0, "min": -10000.0, "max": 10000.0, "step":2.0, "round": False}),
                      "noise_sampler_type": (NOISE_GENERATOR_NAMES, {"default": "brownian"}),
                      "noise_mode": (["hard", "exp", "hard_var", "soft", "softer"], {"default": "hard"}), 
-                     "noise_scale": ("FLOAT", {"default": 1.0, "min": -10000.0, "max": 10000.0, "step":0.1, "round": False}),
-                     "deis_mode": (["rhoab", "tab"], {"default": "rhoab"}), 
-                     "step_type": (["simple", "res_a", "dpmpp_sde"], {"default": "simple"}), 
-                     "denoised_type": (["1_2", "2"], {"default": "1_2"}), 
-                     "max_order": ("INT", {"default": 3, "min": 1, "max": 4, "step":1}),
+                     "order": ("INT", {"default": 3, "min": 1, "max": 4, "step":1}),
                      "latent_guide_weight": ("FLOAT", {"default": 1.0, "min": -100.0, "max": 100.0, "step":0.01, "round": False}),
-                     "start": ("INT", {"default": 0, "min": 0, "max": 10000, "step":1}),
-                     "stop": ("INT", {"default": 30, "min": 0, "max": 10000, "step":1}),
+
                       },
                     "optional": 
                     {
                         "momentums": ("SIGMAS", ),
+                        "eta_values": ("SIGMAS", ),
+                        "t_is": ("SIGMAS", ),
                         "etas": ("SIGMAS", ),
                         "s_noises": ("SIGMAS", ),
                         "alphas": ("SIGMAS", ),
@@ -846,52 +848,36 @@ class SamplerTEST:
                         "latent_guide_mask": ("MASK", ),
                     }  
                }
-    RETURN_TYPES = ("MODEL", "SAMPLER",)
-    RETURN_NAMES = ("model", "sampler",)
+    RETURN_TYPES = ("SAMPLER",)
+    RETURN_NAMES = ("sampler",)
 
     CATEGORY = "sampling/custom_sampling/samplers"
 
     FUNCTION = "get_sampler"
 
-    def get_sampler(self, model, momentum, eta_value, eta, eta_var, s_noise, alpha, k, noise_sampler_type, noise_mode, noise_scale, deis_mode, step_type, denoised_type, max_order, momentums=None, etas=None, s_noises=None, alphas=None,                     
-                    latent_guide=None, latent_guide_weight=0.0, latent_guide_weights=None, latent_guide_mask=None, automation=None, start=0, stop=5):      
+    def get_sampler(self, model, momentum, eta_value, eta, eta_var, s_noise, alpha, k, noise_sampler_type, noise_mode, order, momentums=None, eta_values=None, t_is=None, etas=None, s_noises=None, alphas=None,                     
+                    latent_guide=None, latent_guide_weight=0.0, latent_guide_weights=None, latent_guide_mask=None, automation=None,):      
         sampler_name = "negative_logsnr_euler"
 
         steps = 10000
         momentums = initialize_or_scale(momentums, momentum, steps)
+        eta_values = initialize_or_scale(eta_values, eta_value, steps)
         etas = initialize_or_scale(etas, eta, steps)
         s_noises = initialize_or_scale(s_noises, s_noise, steps)
         alphas = initialize_or_scale(alphas, alpha, steps)
         latent_guide_weights = initialize_or_scale(latent_guide_weights, latent_guide_weight, steps)
         
         
-        #if latent_guide is not None:
-        #    latent_guide = latent_guide["samples"].to('cuda')
+        eta_values = F.pad(eta_values, (0, 10000), value=0.0)
             
         process_latent_in = model.get_model_object("process_latent_in")
         latent_guide = process_latent_in(latent_guide['samples'])
             
-        
-        sampling_base = comfy.model_sampling.ModelSamplingDiscreteFlow #ModelSamplingFlux
-        #sampling_base = comfy.model_sampling.ModelSamplingFlux
 
-        sampling_type = OutCONST
+        sampler = comfy.samplers.ksampler(sampler_name, {"eta_values": eta_values, "t_is": t_is, "eta": eta, "eta_var": eta_var, "eta_value": eta_value, "alpha": alphas, "k": k, 
+                                                         "latent_guide": latent_guide, "latent_guide_weight": latent_guide_weight,})
 
-        class ModelSamplingAdvanced(sampling_base, sampling_type):
-            pass
-
-        work_model = model.clone()
-        model_sampling = ModelSamplingAdvanced(work_model.model.model_config)
-        #model_sampling.set_parameters(shift=shift)
-        work_model.add_object_patch("model_sampling", model_sampling)
-        
-        sampler = comfy.samplers.ksampler(sampler_name, {"eta": eta, "eta_var": eta_var, "eta_value": eta_value, "alpha": alphas, "k": k, 
-                                                         "latent_guide": latent_guide, "latent_guide_weight": latent_guide_weight, "start_time": start, "end_time": stop,})
-        
-        """sampler = comfy.samplers.ksampler(sampler_name, {"momentums": momentums, "etas": etas, "s_noises": s_noises, "alpha": alphas, "k": k, 
-                                                         "noise_sampler_type": noise_sampler_type, "noise_mode": noise_mode, "noise_scale": noise_scale, "deis_mode": deis_mode, "step_type": step_type, 
-                                                         "denoised_type": denoised_type, "max_order": max_order,"latent_guide": latent_guide, "latent_guide_weight": latent_guide_weight, "latent_guide_weights": latent_guide_weights, "mask": latent_guide_mask,})"""
-        return (work_model, sampler, )
+        return (sampler, )
 
 
 
