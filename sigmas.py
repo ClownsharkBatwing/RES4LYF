@@ -273,6 +273,37 @@ class sigmas_interpolate:
         sigmas_0 = interpolate(sigmas_0, len(sigmas_1))
         return (sigmas_0, sigmas_1,)
     
+class sigmas_noise_inversion:
+    def __init__(self):
+        pass
+
+    @classmethod
+    def INPUT_TYPES(s):
+        return {
+            "required": {
+                "sigmas": ("SIGMAS", {"forceInput": True}),
+            }
+        }
+
+    FUNCTION = "main"
+    RETURN_TYPES = ("SIGMAS","SIGMAS",)
+    RETURN_NAMES = ("sigmas_fwd","sigmas_rev",)
+    CATEGORY = "sampling/custom_sampling/sigmas"
+    
+    def main(self, sigmas):
+        dtype = sigmas.dtype
+        sigmas = sigmas.clone().to(torch.float64)
+        
+        null = torch.tensor([0.0], device=sigmas.device, dtype=sigmas.dtype)
+        sigmas_fwd = torch.flip(sigmas, dims=[0])
+        sigmas_fwd = torch.cat([sigmas_fwd, null])
+        if sigmas_fwd[0] == 0.0:
+            sigmas_fwd[0] = 0.0001
+        
+        sigmas_rev = torch.cat([null, sigmas])
+        
+        return (sigmas_fwd, sigmas_rev,)
+    
 def compute_sigma_next_variance_floor(sigma):
     return (-1 + torch.sqrt(1 + 4 * sigma)) / 2
 

@@ -89,6 +89,8 @@ NODE_CLASS_MAPPINGS = {
     "SamplerSDE_Implicit": samplers.SamplerSDE_Implicit,
     
     "SamplerTEST": samplers.SamplerTEST,
+    "SamplerNoiseInversion": samplers.SamplerNoiseInversion,
+
 
     "SD35L_TimestepPatcher": samplers.SD35L_TimestepPatcher,
     
@@ -99,6 +101,7 @@ NODE_CLASS_MAPPINGS = {
     "SamplerRK": samplers.SamplerRK,
 
     "Sigmas Recast": sigmas.set_precision_sigmas,
+    "Sigmas Noise Inversion": sigmas.sigmas_noise_inversion,
 
     "Sigmas Variance Floor": sigmas.sigmas_variance_floor,
     "Sigmas Truncate": sigmas.sigmas_truncate,

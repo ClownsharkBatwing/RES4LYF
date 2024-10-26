@@ -2383,6 +2383,213 @@ def add_schedulers():
 from .sampler_rk import phi
 
 
+
+
+@torch.no_grad()
+def sample_noise_inversion_rev(model, x, sigmas, extra_args=None, callback=None, disable=None, s_noise=1.0, c2=0.5, gamma=0.25, eta_value=0.5, eta=0.0, eta_var=0.0, 
+                               noise_mode="hard", eta_values=None, t_is=None, etas=None, s_noises=None, alpha=-1.0, k=1.0, scale=0.1, 
+                               cfgpp=0.0, latent_guide=None, latent_guide_weight=1.0, noise_sampler_type="brownian", ):
+    
+    """temp = [0]
+    temp[0] = torch.full_like(x, 0.0)
+    if cfgpp != 0.0:
+        def post_cfg_function(args):
+            temp[0] = args["uncond_denoised"]
+            return args["denoised"]
+        model_options = extra_args.get("model_options", {}).copy()
+        extra_args["model_options"] = comfy.model_patcher.set_model_options_post_cfg_function(model_options, post_cfg_function, disable_cfg1_optimization=True)"""
+
+    extra_args = {} if extra_args is None else extra_args
+    s_in = x.new_ones([x.shape[0]])
+    seed = torch.initial_seed() + 1
+    sigmas = sigmas.clone()
+    
+    if sigmas[0] == 0.0:      #remove padding used to avoid need for model patch with noise inversion
+        sigmas = sigmas[1:]
+    if sigmas[-1] == 0.0:
+        sigmas = sigmas[:-1]
+        
+    sigma_min, sigma_max = sigmas[sigmas > 0].min(), sigmas.max()
+    if isinstance(model.inner_model.inner_model.model_sampling, comfy.model_sampling.CONST):
+        sigma_max = torch.full_like(sigma_max, 1.0)
+        sigma_min = torch.full_like(sigma_min, min(sigma_min.item(), 0.00001))
+
+    noise_sampler = NOISE_GENERATOR_CLASSES.get(noise_sampler_type)(x=x, seed=seed, sigma_min=sigma_min, sigma_max=sigma_max)
+    if noise_sampler_type == "fractal":
+        noise_sampler.alpha = alpha
+        noise_sampler.k = k
+        noise_sampler.scale = scale
+
+    t_fn = lambda sigma: sigma.log().neg()
+    sigma_fn = lambda t: t.neg().exp() 
+
+    if t_is is None:
+        if sigmas[1] > sigmas[0]:
+            t_is = 1 - sigmas
+        else:
+            t_is = sigmas
+    t_is = torch.clamp(t_is, min=0.00001, max=1.0)
+
+    if latent_guide is None:
+        noise = noise_sampler(sigma=sigma_max, sigma_next=sigma_min)
+        y0 = (noise - noise.mean()) / noise.std()
+    else: #REV MODE, initialize image guide
+        y0 = latent_guide.clone().to(x.device)
+    
+        
+    for i in trange(len(sigmas)-1, disable=disable):            
+        sigma, sigma_next = sigmas[i], sigmas[i+1]
+        if eta > 0.0 or eta_var > 0.0:
+            sigma_up, sigma_down, alpha_ratio = get_res4lyf_step_with_model(model, sigma, sigma_next, eta * eta_values[i], eta_var * eta_values[i], noise_mode)
+            sigma_next = sigma_down
+        else:
+            alpha_ratio = 1.0
+            sigma_up = 0.0
+
+        #denoised = model(x, sigma * s_in, **extra_args)
+        
+        t_next, t = t_fn(sigma_next), t_fn(sigma)
+        h = t_next - t
+        
+        a2_1 = c2 * phi(1, -h*c2)
+        b1 =        phi(1, -h) - phi(2, -h)/c2
+        b2 =        phi(2, -h)/c2
+
+        k1 = model(x, sigma * s_in, **extra_args)
+        x_2 = ((sigma_next/sigma)**c2)*x + h*(a2_1*k1)
+        
+        #dt2 = ((sigma_next/sigma)**c2) - sigma
+        #x_2 = x + dt2 * (a2_1*k1)
+        k2 = model(x_2, sigma_fn(t + h*c2) * s_in, **extra_args)
+        x_next = (sigma_next/sigma) * x + h*(b1*k1 + b2*k2)
+        denoised1_2 = (b1*k1 + b2*k2) / (b1 + b2)
+        denoised = denoised1_2
+        
+        
+        eps = (x - denoised) / sigma
+
+        dt = sigma_next - sigma
+        x = x   +   (1 - eta_values[i]) * eps * dt   +   eta_values[i] * ((y0 - x) / t_is[i]) * (dt**2)**(1/2)  
+        
+        noise = noise_sampler(sigma=sigma, sigma_next=sigma_next)
+        noise = (noise - noise.mean()) / noise.std()
+        x = alpha_ratio * x + noise * s_noise * sigma_up
+        #x = x - (1-eta_values[i]) * (1 - sigma_next/sigma) * x    +   (1-eta_values[i])*(1-sigma_next/sigma)*denoised    -   eta_values[i] * sigma_next * (y0 - x) ** 2
+
+        if callback is not None:
+            callback({'x': x, 'denoised': x, 'i': i, 'sigma': sigmas[i], 'sigma_hat': sigmas[i]})
+
+    return x
+
+
+
+
+@torch.no_grad()
+def sample_noise_inversion_rev2(model, x, sigmas, extra_args=None, callback=None, disable=None, s_noise=1.0, c2=0.5, gamma=0.25, eta_value=0.5, eta=0.0, eta_var=0.0, noise_mode="hard", eta_values=None, t_is=None,
+                                 etas=None, s_noises=None, alpha=-1.0, k=1.0, scale=0.1, cfgpp=1.5, latent_guide=None, latent_guide_weight=1.0, noise_sampler_type="brownian", ):
+    
+    temp = [0]
+    temp[0] = torch.full_like(x, 0.0)
+    if cfgpp != 0.0:
+        def post_cfg_function(args):
+            temp[0] = args["uncond_denoised"]
+            return args["denoised"]
+        model_options = extra_args.get("model_options", {}).copy()
+        extra_args["model_options"] = comfy.model_patcher.set_model_options_post_cfg_function(model_options, post_cfg_function, disable_cfg1_optimization=True)
+
+    extra_args = {} if extra_args is None else extra_args
+    s_in = x.new_ones([x.shape[0]])
+    seed = torch.initial_seed() + 1
+
+    if sigmas[0] == 0.0:
+        sigmas = sigmas[1:]
+    sigma_min, sigma_max = sigmas[sigmas > 0].min(), sigmas.max()
+    if isinstance(model.inner_model.inner_model.model_sampling, comfy.model_sampling.CONST):
+        sigma_max = torch.full_like(sigma_max, 1.0)
+        sigma_min = torch.full_like(sigma_min, min(sigma_min.item(), 0.00001))
+    if sigmas[-1] == 0.0:
+        sigmas[-1] = min(sigmas[-2]**2, 0.00001)
+    noise_sampler = NOISE_GENERATOR_CLASSES.get(noise_sampler_type)(x=x, seed=seed, sigma_min=0.0, sigma_max=1.0)
+    if noise_sampler_type == "fractal":
+        noise_sampler.alpha = alpha
+        noise_sampler.k = k
+        noise_sampler.scale = scale
+        
+    t_fn = lambda sigma: sigma.log().neg()
+    sigma_fn = lambda t: t.neg().exp() 
+        
+        
+        
+    #sigma_diff = sigmas[1] - sigmas[0]
+    #eps_sign = sigma_diff / (sigma_diff**2)**0.5
+    
+    
+    sigmas = sigmas.clone()
+        
+    if sigmas[1] > sigmas[0]: #FWD MODE, initialize noise
+        noise = noise_sampler(sigma=sigmas[1], sigma_next=sigmas[0])
+        noise = (noise - noise.mean()) / noise.std()
+        y0 = noise
+        if sigmas[-1] == 0.0:
+            sigmas = sigmas[:-1]
+    else: #REV MODE, initialize image guide
+        y0 = latent_guide.clone().to(x.device)
+    
+        
+    for i in trange(len(sigmas)-1, disable=disable):            
+        sigma, sigma_next = sigmas[i], sigmas[i+1]
+    
+        sigma_up, sigma_down, alpha_ratio = get_res4lyf_step_with_model(model, sigma, sigma_next, eta, eta_var, noise_mode)
+        
+
+        t_next, t = t_fn(sigma_next), t_fn(sigma)
+        h = t_next - t
+        
+        a2_1 = c2 * phi(1, -h*c2)
+        b1 =        phi(1, -h) - phi(2, -h)/c2
+        b2 =        phi(2, -h)/c2
+
+        """k1 = model(x, sigma * s_in, **extra_args)
+        x_2 = ((sigma_next/sigma)**c2)*x + h*(a2_1*k1)
+        k2 = model(x_2, sigma_fn(t + h*c2) * s_in, **extra_args)
+        x_next = (sigma_next/sigma) * x + h*(b1*k1 + b2*k2)
+        denoised1_2 = (b1*k1 + b2*k2) / (b1 + b2)
+        denoised = denoised1_2"""
+
+
+        denoised = model(x, sigma * s_in, **extra_args)
+        eps = (x - denoised) / sigma
+        """vf_u = eps_sign * eps
+                
+        vf_c = (y0-x) / (t_is[i] + 1e-5) #avoid div by 0
+        vf_ctrl = vf_u + eta_values[i] * (vf_c - vf_u)
+        
+        epsilon_full = eps_sign * vf_ctrl
+        denoised_full = x -epsilon_full * sigma
+        
+        #x = (sigma_next/sigma) * x    +   h * denoised_full * (b1 + b2)
+        
+        
+        
+        dt = sigma_next - sigma
+        #vf_ctrl = eta_values[i] * ((y0-x)/(t_is[i] + 1e-5))    +    (1-eta_values[i]) * (-epsilon)
+        
+        vf_ctrl = eta_values[i] * ( (x-y0) / (eps_sign * (t_is[i] + 1e-5)) )   +    (1-eta_values[i]) * (eps)"""
+        
+        dt = sigma_next - sigma
+        x = x + eta_values[i] * ((y0 - x) / (t_is[i])) * (dt**2)**(1/2)    +   (1 - eta_values[i]) * eps * dt
+        
+        
+        #x = x + vf_ctrl * (dt)
+        
+        #x = x + vf_ctrl * (sigmas[i] - sigmas[i+1]) #- sigma_ratio * epsilon   #original math, same results
+        
+        if callback is not None:
+            callback({'x': x, 'denoised': x, 'i': i, 'sigma': sigmas[i], 'sigma_hat': sigmas[i]})
+
+    return x
+
+
 @torch.no_grad()
 def sample_negative_logsnr_euler(model, x, sigmas, extra_args=None, callback=None, disable=None, s_noise=1.0, c2=0.5, gamma=0.25, eta_value=0.5, eta=0.0, eta_var=0.0, noise_mode="hard", eta_values=None, t_is=None,
                                  etas=None, s_noises=None, alpha=-1.0, k=1.0, scale=0.1, cfgpp=1.5, latent_guide=None, latent_guide_weight=1.0, noise_sampler_type="brownian", ):
@@ -2396,11 +2603,9 @@ def sample_negative_logsnr_euler(model, x, sigmas, extra_args=None, callback=Non
         model_options = extra_args.get("model_options", {}).copy()
         extra_args["model_options"] = comfy.model_patcher.set_model_options_post_cfg_function(model_options, post_cfg_function, disable_cfg1_optimization=True)
 
-
     extra_args = {} if extra_args is None else extra_args
     s_in = x.new_ones([x.shape[0]])
     seed = torch.initial_seed() + 1
-    #noise_sampler = torch.randn_like  # Gaussian noise for the diffusion term
 
     if sigmas[0] == 0.0:
         sigmas = sigmas[1:]
@@ -2418,14 +2623,24 @@ def sample_negative_logsnr_euler(model, x, sigmas, extra_args=None, callback=Non
         
     y1 = x
     latent_image = latent_guide
-    #process_latent_in = model.get_model_object("process_latent_in")
-    #latent_image = process_latent_in(latent_image)
+
     t_fn = lambda sigma: sigma.log().neg()
     sigma_fn = lambda t: t.neg().exp()
     
+    epsilon_sign = -1
+    
     X = y1.clone()
     N = len(sigmas)-1
-    y0 = latent_image.clone().to(y1.device)
+    
+    if sigmas[1] > sigmas[0]:
+        noise = noise_sampler(sigma=sigmas[1], sigma_next=sigmas[0])
+        noise = (noise - noise.mean()) / noise.std()
+        y0 = noise
+        if sigmas[-1] == 0.0:
+            sigmas = sigmas[:-1]
+    else:
+        y0 = latent_image.clone().to(y1.device)
+        
     s_in = y0.new_ones([y0.shape[0]])
     for i in trange(N, disable=disable):
         if t_is is not None:
@@ -2436,16 +2651,17 @@ def sample_negative_logsnr_euler(model, x, sigmas, extra_args=None, callback=Non
                 t_tmp /= 1000
             t_i = 1 - t_tmp
             
-        #t_i = i/N # Empiracally better results
         sigma, sigma_next = sigmas[i], sigmas[i+1]
         
-        #t_i = 1 - sigma
-        
+        if sigma_next > sigma:
+            epsilon_sign = -1   #flipped sign negative for experiment
+            t_i = sigmas[i]
+            #sigma_next = sigmas[i]
+            #sigma = sigmas[i+1]
+                
         sigma_up, sigma_down, alpha_ratio = get_res4lyf_step_with_model(model, sigma, sigma_next, eta, eta_var, noise_mode)
         sigma_ratio = (sigma_down - sigma) / (sigma_next - sigma)
-        
-        #sigma_next = sigma_down
-        
+                
         t_next, t = t_fn(sigma_down), t_fn(sigma)
         h = t_next - t
         
@@ -2458,9 +2674,7 @@ def sample_negative_logsnr_euler(model, x, sigmas, extra_args=None, callback=Non
         X = alpha_ratio * X + noise * s_noise * sigma_up
         
         k1 = model(X, sigma * s_in, **extra_args)
-        #k1_tmp = temp[0]
         x_2 = ((sigma_down/sigma)**c2)*X + h*(a2_1*k1)
-        #x_2 = ((sigma_down/sigma)**c2)*X + h*(a2_1*k1)
         
         k2 = model(x_2, sigma_fn(t + h*c2) * s_in, **extra_args)
         x_next = (sigma_down/sigma) * X + h*(b1*k1 + b2*k2)
@@ -2471,7 +2685,7 @@ def sample_negative_logsnr_euler(model, x, sigmas, extra_args=None, callback=Non
         # 5. Unconditional Vector field uti(Xti) = -u(Xti, 1-ti, Φ(“prompt”); φ)
         #denoised = model(X, sigma*s_in, **extra_args)
         epsilon = (X - denoised) / sigma
-        unconditional_vector_field = -epsilon
+        unconditional_vector_field = epsilon_sign * epsilon
         
         
         #unconditional_vector_field = -model(X, sigma*s_in, **extra_args) # this implementation takes sigma instead of timestep
@@ -2482,8 +2696,7 @@ def sample_negative_logsnr_euler(model, x, sigmas, extra_args=None, callback=Non
         # 7. Controlled Vector field ti(Yti) = uti(Yti) + γ (uti(Yti|y1) − uti(Yti))
         controlled_vector_field = unconditional_vector_field + eta_values[i] * (conditional_vector_field - unconditional_vector_field)
         
-        
-        epsilon_full = -controlled_vector_field
+        epsilon_full = epsilon_sign * controlled_vector_field
         denoised_full = X -epsilon_full * sigma
         
         X_ORIG = X
@@ -2507,95 +2720,6 @@ def sample_negative_logsnr_euler(model, x, sigmas, extra_args=None, callback=Non
 
     return X
 
-    """for i in range(len(sigmas) - 1):
-        sigma = sigmas[i]
-        sigma_next = sigmas[i + 1]
-        
-        # Define t based on linear interpolation between 1 (max noise) and 0 (clean)
-        t = 1 - sigma / sigmas.max()
-        t_next = 1 - sigma_next / sigmas.max()
-        
-        # Time step is now the difference in time (t)
-        h = t_next - t  # Linear time difference
-        
-        # Call the model to get the denoised image (drift term, like u_t)
-        u_t = model(x, sigma * s_in, **extra_args)  # Drift term from the model
-        
-        # Compute the diffusion term (Wiener process with noise scaling)
-        noise = noise_sampler(x)  # Random noise (Wiener process)
-        diffusion = torch.sqrt(s_noise * (2 * t / (1 - t))) * noise
-        
-        # Update using the SDE (Euler-Maruyama update)
-        #x = x + u_t * h + diffusion * torch.sqrt(h)
-        
-        x = x + u
-        
-        # Optional callback for intermediate visualization
-        if callback is not None:
-            callback({'x': x, 'i': i, 'sigma': sigma, 'denoised': u_t})
-
-    return x"""
-
-
-
-    y0 = x
-    Y = y0.clone()
-    generator = torch.Generator()
-    seed = torch.initial_seed() + 1
-    generator.manual_seed(seed) 
-    y1 = torch.randn(Y.shape, generator=generator).to(y0.device)
-    N = len(sigmas)-1
-    s_in = y0.new_ones([y0.shape[0]])
-    for i in trange(N, disable=disable):
-        t_i = model.inner_model.inner_model.model_sampling.timestep(sigmas[i])
-
-        # 6. Unconditional Vector field uti(Yti) = u(Yti, ti, Φ(“”); φ)
-        unconditional_vector_field = model(Y, s_in * sigmas[i], **extra_args) # this implementation takes sigma instead of timestep
-        
-        # 7.Conditional Vector field  uti(Yti|y1) = (y1−Yti)/1−ti
-        conditional_vector_field = (y1-Y)/(1-t_i)
-        
-        # 8. Controlled Vector field ti(Yti) = uti(Yti) + γ (uti(Yti|y1) − uti(Yti))
-        controlled_vector_field = unconditional_vector_field + gamma * (conditional_vector_field - unconditional_vector_field)
-        
-        # 9. Next state Yti+1 = Yti + ˆuti(Yti) (σ(ti+1) − σ(ti))
-        Y = Y + controlled_vector_field * (sigmas[i+1] - sigmas[i])
-        
-        if callback is not None:
-            callback({'x': Y, 'denoised': Y, 'i': i, 'sigma': sigmas[i], 'sigma_hat': sigmas[i]})
-            
-    return Y
-            
-    # Time t goes from 1 (noisy image) to 0 (clean image)
-    for i in range(len(sigmas) - 1):
-        sigma = sigmas[i]
-        sigma_next = sigmas[i + 1]
-        
-        # Time (t) interpolation between 0 and 1: reverse process
-        t = 1 - sigma / sigmas.max()  # t = 1 means fully noisy, t = 0 means clean
-        t_next = 1 - sigma_next / sigmas.max()
-        
-        h = t_next - t  # Time step in the continuous space, NOT log-space
-        
-        # Call the model to get the denoised image (drift term, like u_t)
-        u_t = model(x, sigma * s_in, **extra_args)  # Drift term from the model
-        
-        d = to_d(x, sigma, u_t)
-        
-        # Compute the diffusion term (Wiener process with noise scaling)
-        noise = noise_sampler(x)  # Random noise (Wiener process)
-        diffusion = torch.sqrt(s_noise * (2 * t / (1 - t))) * noise
-        
-        # Update using the SDE (Euler-Maruyama update)
-        #x = x + u_t * h + diffusion * torch.sqrt(h) * 0 
-        dt = sigma_next - sigma
-        x = x + d * dt
-        #x = x + d * h #+ diffusion * torch.sqrt(h) 
-        
-        if callback is not None:
-            callback({'x': x, 'i': i, 'sigma': sigma, 'denoised': u_t})
-
-    return x
 
 #from .refined_exp_solver import sample_refined_exp_s, sample_refined_exp_s_advanced
 from .sampler_rk import sample_rk, sample_rk_3m
@@ -2606,6 +2730,7 @@ extra_samplers = {
     "RES_implicit_advanced_RF_PC_3rd_order": sample_RES_implicit_advanced_RF_PC_3rd_order,
     "SDE_implicit_advanced_RF": sample_SDE_implicit_advanced_RF,
     "corona": sample_corona,
+    "noise_inversion_rev": sample_noise_inversion_rev,
 
     "dpmpp_2s_ancestral_advanced": sample_dpmpp_2s_ancestral_advanced,
     "res_momentumized_advanced": sample_res_solver_advanced,

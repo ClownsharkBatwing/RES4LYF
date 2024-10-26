@@ -869,9 +869,13 @@ class SamplerTEST:
         
         
         eta_values = F.pad(eta_values, (0, 10000), value=0.0)
+        if t_is is not None:
+            t_is = torch.clamp(t_is, min=0.0, max=0.9999)
+
             
-        process_latent_in = model.get_model_object("process_latent_in")
-        latent_guide = process_latent_in(latent_guide['samples'])
+        if latent_guide is not None:
+            process_latent_in = model.get_model_object("process_latent_in")
+            latent_guide = process_latent_in(latent_guide['samples'])
             
 
         sampler = comfy.samplers.ksampler(sampler_name, {"eta_values": eta_values, "t_is": t_is, "eta": eta, "eta_var": eta_var, "eta_value": eta_value, "alpha": alphas, "k": k, 
@@ -879,6 +883,78 @@ class SamplerTEST:
 
         return (sampler, )
 
+
+
+
+    
+class SamplerNoiseInversion:
+    @classmethod
+    def INPUT_TYPES(s):
+        return {"required":
+                    {"model": ("MODEL",),
+                     "momentum": ("FLOAT", {"default": 0.0, "min": -100.0, "max": 100.0, "step":0.01, "round": False}),
+                     "eta_value": ("FLOAT", {"default": 0.5, "min": -100.0, "max": 100.0, "step":0.01, "round": False}),
+
+                     "eta": ("FLOAT", {"default": 0.25, "min": -100.0, "max": 100.0, "step":0.01, "round": False}),
+                     "eta_var": ("FLOAT", {"default": 0.0, "min": -100.0, "max": 100.0, "step":0.01, "round": False}),
+
+                     "s_noise": ("FLOAT", {"default": 1.0, "min": -100.0, "max": 100.0, "step":0.01, "round": False}),
+                     "alpha": ("FLOAT", {"default": 0.0, "min": -10000.0, "max": 10000.0, "step":0.1, "round": False}),
+                     "k": ("FLOAT", {"default": 1.0, "min": -10000.0, "max": 10000.0, "step":2.0, "round": False}),
+                     "noise_sampler_type": (NOISE_GENERATOR_NAMES, {"default": "brownian"}),
+                     "noise_mode": (["hard", "exp", "hard_var", "soft", "softer"], {"default": "hard"}), 
+                     "order": ("INT", {"default": 3, "min": 1, "max": 4, "step":1}),
+                     "latent_guide_weight": ("FLOAT", {"default": 1.0, "min": -100.0, "max": 100.0, "step":0.01, "round": False}),
+
+                      },
+                    "optional": 
+                    {
+                        "momentums": ("SIGMAS", ),
+                        "eta_values": ("SIGMAS", ),
+                        "t_is": ("SIGMAS", ),
+                        "etas": ("SIGMAS", ),
+                        "s_noises": ("SIGMAS", ),
+                        "alphas": ("SIGMAS", ),
+                        "latent_guide": ("LATENT", ),
+                        "latent_guide_weights": ("SIGMAS", ),
+                        "latent_guide_mask": ("MASK", ),
+                    }  
+               }
+    RETURN_TYPES = ("SAMPLER",)
+    RETURN_NAMES = ("sampler",)
+
+    CATEGORY = "sampling/custom_sampling/samplers"
+
+    FUNCTION = "get_sampler"
+
+    def get_sampler(self, model, momentum, eta_value, eta, eta_var, s_noise, alpha, k, noise_sampler_type, noise_mode, order, momentums=None, eta_values=None, t_is=None, etas=None, s_noises=None, alphas=None,                     
+                    latent_guide=None, latent_guide_weight=0.0, latent_guide_weights=None, latent_guide_mask=None, automation=None,):      
+        sampler_name = "noise_inversion_rev"
+
+        steps = 10000
+        momentums = initialize_or_scale(momentums, momentum, steps)
+        eta_values = initialize_or_scale(eta_values, eta_value, steps)
+        etas = initialize_or_scale(etas, eta, steps)
+        s_noises = initialize_or_scale(s_noises, s_noise, steps)
+        alphas = initialize_or_scale(alphas, alpha, steps)
+        latent_guide_weights = initialize_or_scale(latent_guide_weights, latent_guide_weight, steps)
+        
+        
+        eta_values = F.pad(eta_values, (0, 10000), value=0.0)
+        #if t_is is not None:
+        #    t_is = torch.clamp(t_is, min=0.00001, max=1.0)
+
+            
+        if latent_guide is not None:
+            process_latent_in = model.get_model_object("process_latent_in")
+            latent_guide = process_latent_in(latent_guide['samples'])
+            
+
+        sampler = comfy.samplers.ksampler(sampler_name, {"eta_values": eta_values, "t_is": t_is, "eta": eta, "eta_var": eta_var, "eta_value": eta_value, "alpha": alphas, "k": k, 
+                                                         "noise_sampler_type": noise_sampler_type, "noise_mode": noise_mode,
+                                                         "latent_guide": latent_guide, "latent_guide_weight": latent_guide_weight,})
+
+        return (sampler, )
 
 
 
