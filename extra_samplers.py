@@ -2386,9 +2386,9 @@ from .sampler_rk import phi
 
 
 @torch.no_grad()
-def sample_noise_inversion_rev(model, x, sigmas, extra_args=None, callback=None, disable=None, s_noise=1.0, c2=0.5, gamma=0.25, eta_value=0.5, eta=0.0, eta_var=0.0, 
-                               noise_mode="hard", eta_values=None, t_is=None, etas=None, s_noises=None, alpha=-1.0, k=1.0, scale=0.1, 
-                               cfgpp=0.0, latent_guide=None, latent_guide_weight=1.0, noise_sampler_type="brownian", ):
+def sample_noise_inversion_rev(model, x, sigmas, extra_args=None, callback=None, disable=None, s_noise=1.0, c2=0.5, c3=1.0, gamma=0.25, eta_value=0.5, eta=0.0, eta_var=0.0, 
+                               noise_mode="hard", eta_values=None, t_is=None, etas=None, s_noises=None, alpha=-1.0, k=1.0, scale=0.1, order=2, 
+                               cfgpp=0.0, latent_guide=None, latent_guide_weight=1.0, noise_sampler_type="brownian", sde_seed=-1.0):
     
     """temp = [0]
     temp[0] = torch.full_like(x, 0.0)
@@ -2401,7 +2401,10 @@ def sample_noise_inversion_rev(model, x, sigmas, extra_args=None, callback=None,
 
     extra_args = {} if extra_args is None else extra_args
     s_in = x.new_ones([x.shape[0]])
-    seed = torch.initial_seed() + 1
+    if sde_seed < 0:
+        seed = torch.initial_seed() + 1
+    else:
+        seed = sde_seed
     sigmas = sigmas.clone()
     
     if sigmas[0] == 0.0:      #remove padding used to avoid need for model patch with noise inversion
@@ -2440,35 +2443,59 @@ def sample_noise_inversion_rev(model, x, sigmas, extra_args=None, callback=None,
     for i in trange(len(sigmas)-1, disable=disable):            
         sigma, sigma_next = sigmas[i], sigmas[i+1]
         if eta > 0.0 or eta_var > 0.0:
-            sigma_up, sigma_down, alpha_ratio = get_res4lyf_step_with_model(model, sigma, sigma_next, eta * eta_values[i], eta_var * eta_values[i], noise_mode)
-            sigma_next = sigma_down
+            #sigma_up, sigma_down, alpha_ratio = get_res4lyf_step_with_model(model, sigma, sigma_next, eta * eta_values[i], eta_var * eta_values[i], noise_mode)
+            sigma_up, sigma_down, alpha_ratio = get_res4lyf_step_with_model(model, sigma, sigma_next, eta, eta_var, noise_mode)
         else:
             alpha_ratio = 1.0
             sigma_up = 0.0
+            sigma_down = sigma_next
 
+        t_down, t = t_fn(sigma_down), t_fn(sigma)
+        h = t_down - t
+            
         #denoised = model(x, sigma * s_in, **extra_args)
+        if order == 1:
+            denoised = model(x, sigma * s_in, **extra_args)
         
-        t_next, t = t_fn(sigma_next), t_fn(sigma)
-        h = t_next - t
-        
-        a2_1 = c2 * phi(1, -h*c2)
-        b1 =        phi(1, -h) - phi(2, -h)/c2
-        b2 =        phi(2, -h)/c2
+        if order == 2:
+            
+            a2_1 = c2 * phi(1, -h*c2)
+            b1 =        phi(1, -h) - phi(2, -h)/c2
+            b2 =        phi(2, -h)/c2
 
-        k1 = model(x, sigma * s_in, **extra_args)
-        x_2 = ((sigma_next/sigma)**c2)*x + h*(a2_1*k1)
+            k1 = model(x, sigma * s_in, **extra_args)
+            x_2 = ((sigma_down/sigma)**c2)*x + h*(a2_1*k1)
+            
+            #dt2 = ((sigma_next/sigma)**c2) - sigma
+            #x_2 = x + dt2 * (a2_1*k1)
+            k2 = model(x_2, sigma_fn(t + h*c2) * s_in, **extra_args)
+            x_next = (sigma_down/sigma) * x + h*(b1*k1 + b2*k2)
+            denoised1_2 = (b1*k1 + b2*k2) / (b1 + b2)
+            denoised = denoised1_2
         
-        #dt2 = ((sigma_next/sigma)**c2) - sigma
-        #x_2 = x + dt2 * (a2_1*k1)
-        k2 = model(x_2, sigma_fn(t + h*c2) * s_in, **extra_args)
-        x_next = (sigma_next/sigma) * x + h*(b1*k1 + b2*k2)
-        denoised1_2 = (b1*k1 + b2*k2) / (b1 + b2)
-        denoised = denoised1_2
+        if order == 3:
+            gamma = (3*(c3**3) - 2*c3) / (c2*(2 - 3*c2))
+            a2_1 = c2 * phi(1, -h*c2)
+            a3_2 = gamma * c2 * phi(2, -h*c2) + (c3 ** 2 / c2) * phi(2, -h*c3) #phi_2_c3_h  # a32 from k2 to k3
+            a3_1 = c3 * phi(1, -h*c3) - a3_2 # a31 from k1 to k3
+            b3 = (1 / (gamma * c2 + c3)) * phi(2, -h)      
+            b2 = gamma * b3  #simplified version of: b2 = (gamma / (gamma * c2 + c3)) * phi_2_h  
+            b1 = phi(1, -h) - b2 - b3     
+            
+            k1 = model(x, sigma * s_in, **extra_args)
+            x_2 = ((sigma_down/sigma)**c2)*x + h*(a2_1*k1)
+            
+            k2 = model(x_2, sigma_fn(t + h*c2) * s_in, **extra_args)
+            x_3 = ((sigma_down/sigma)**c3)*x_2 + h*(a3_1*k1 + a3_2*k2)        
         
-        
+            k3 = model(x_3, sigma_fn(t + h*c3) * s_in, **extra_args)
+            x_next = ((sigma_down/sigma))*x_3 + h*(b1*k1 + b2*k2 + b3*k3)      
+            
+            denoised = (b1*k1 + b2*k2 + b3*k3) / (b1 + b2 + b3)
+            
         eps = (x - denoised) / sigma
 
-        dt = sigma_next - sigma
+        dt = sigma_down - sigma
         x = x   +   (1 - eta_values[i]) * eps * dt   +   eta_values[i] * ((y0 - x) / t_is[i]) * (dt**2)**(1/2)  
         
         noise = noise_sampler(sigma=sigma, sigma_next=sigma_next)
@@ -2479,6 +2506,9 @@ def sample_noise_inversion_rev(model, x, sigmas, extra_args=None, callback=None,
         if callback is not None:
             callback({'x': x, 'denoised': x, 'i': i, 'sigma': sigmas[i], 'sigma_hat': sigmas[i]})
 
+        gc.collect()
+        torch.cuda.empty_cache()
+        
     return x
 
 
