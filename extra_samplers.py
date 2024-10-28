@@ -2383,10 +2383,8 @@ def add_schedulers():
 from .sampler_rk import phi
 
 
-
-
 @torch.no_grad()
-def sample_noise_inversion_rev(model, x, sigmas, extra_args=None, callback=None, disable=None, s_noise=1.0, c2=0.5, c3=1.0, gamma=0.25, eta_value=0.5, eta=0.0, eta_var=0.0, 
+def sample_noise_inversion_rev3(model, x, sigmas, extra_args=None, callback=None, disable=None, s_noise=1.0, c2=0.5, c3=1.0, gamma=0.25, eta_value=0.5, eta=0.0, eta_var=0.0, 
                                noise_mode="hard", eta_values=None, t_is=None, etas=None, s_noises=None, alpha=-1.0, k=1.0, scale=0.1, order=2, 
                                cfgpp=0.0, latent_guide=None, latent_guide_weight=1.0, noise_sampler_type="brownian", sde_seed=-1.0):
     
@@ -2504,7 +2502,303 @@ def sample_noise_inversion_rev(model, x, sigmas, extra_args=None, callback=None,
         #x = x - (1-eta_values[i]) * (1 - sigma_next/sigma) * x    +   (1-eta_values[i])*(1-sigma_next/sigma)*denoised    -   eta_values[i] * sigma_next * (y0 - x) ** 2
 
         if callback is not None:
-            callback({'x': x, 'denoised': x, 'i': i, 'sigma': sigmas[i], 'sigma_hat': sigmas[i]})
+            callback({'x': x, 'denoised': denoised, 'i': i, 'sigma': sigmas[i], 'sigma_hat': sigmas[i]})
+
+        gc.collect()
+        torch.cuda.empty_cache()
+        
+    return x
+
+
+
+
+@torch.no_grad()
+def sample_noise_inversion_rev(model, x, sigmas, extra_args=None, callback=None, disable=None, s_noise=1.0, c2=0.5, c3=1.0, gamma=0.25, eta_value=0.5, eta=0.0, eta_var=0.0, 
+                               noise_mode="hard", eta_values=None, t_is=None, etas=None, s_noises=None, alpha=-1.0, k=1.0, scale=0.1, order=2, 
+                               cfgpp=0.0, latent_guide=None, latent_guide_weight=1.0, noise_sampler_type="brownian", sde_seed=-1.0):
+    
+    temp = [0]
+    temp[0] = torch.full_like(x, 0.0)
+    if cfgpp != 0.0:
+        def post_cfg_function(args):
+            temp[0] = args["uncond_denoised"]
+            return args["denoised"]
+        model_options = extra_args.get("model_options", {}).copy()
+        extra_args["model_options"] = comfy.model_patcher.set_model_options_post_cfg_function(model_options, post_cfg_function, disable_cfg1_optimization=True)
+
+    extra_args = {} if extra_args is None else extra_args
+    s_in = x.new_ones([x.shape[0]])
+    if sde_seed < 0:
+        seed = torch.initial_seed() + 1
+    else:
+        seed = sde_seed
+    sigmas = sigmas.clone()
+    
+    if sigmas[0] == 0.0:      #remove padding used to avoid need for model patch with noise inversion
+        sigmas = sigmas[1:]
+    if sigmas[-1] == 0.0:
+        sigmas = sigmas[:-1]
+        
+    sigma_min, sigma_max = sigmas[sigmas > 0].min(), sigmas.max()
+    if isinstance(model.inner_model.inner_model.model_sampling, comfy.model_sampling.CONST):
+        sigma_max = torch.full_like(sigma_max, 1.0)
+        sigma_min = torch.full_like(sigma_min, min(sigma_min.item(), 0.00001))
+
+    noise_sampler = NOISE_GENERATOR_CLASSES.get(noise_sampler_type)(x=x, seed=seed, sigma_min=sigma_min, sigma_max=sigma_max)
+    if noise_sampler_type == "fractal":
+        noise_sampler.alpha = alpha
+        noise_sampler.k = k
+        noise_sampler.scale = scale
+
+    t_fn = lambda sigma: sigma.log().neg()
+    sigma_fn = lambda t: t.neg().exp() 
+
+    if t_is is None:
+        if sigmas[1] > sigmas[0]:
+            #t_is = 1 - sigmas
+            t_is = sigmas - 1       ########### I CHANGED THIS!!!!!!!! WATCH OUT
+            t_is = torch.clamp(t_is, min=-1.0, max=-0.00001)
+        else:
+            t_is = sigmas
+            t_is = torch.clamp(t_is, min=0.00001, max=1.0)
+    
+    
+    if sigmas[1] > sigmas[2]:
+        sample_rev = True
+    else:
+        sample_rev = False
+
+    if latent_guide is None:
+        noise = noise_sampler(sigma=sigma_max, sigma_next=sigma_min)
+        y0 = (noise - noise.mean()) / noise.std()
+    else: #REV MODE, initialize image guide
+        y0 = latent_guide.clone().to(x.device)
+    
+        
+    for i in trange(len(sigmas)-1, disable=disable):            
+        sigma, sigma_next = sigmas[i], sigmas[i+1]
+        if eta > 0.0 or eta_var > 0.0:
+            #sigma_up, sigma_down, alpha_ratio = get_res4lyf_step_with_model(model, sigma, sigma_next, eta * eta_values[i], eta_var * eta_values[i], noise_mode)
+            sigma_up, sigma_down, alpha_ratio = get_res4lyf_step_with_model(model, sigma, sigma_next, eta, eta_var, noise_mode)
+        else:
+            alpha_ratio = 1.0
+            sigma_up = 0.0
+            sigma_down = sigma_next
+
+        t_down, t = t_fn(sigma_down), t_fn(sigma)
+        h = t_down - t
+        
+        h_inv = t_fn(sigma_down - 1) - t_fn(sigma - 1)
+        
+        #sigma_2 = (sigma_down/sigma)**c2
+        #sigma_3 = (sigma_down/sigma)**c3
+        s2 = t + h * c2
+        s3 = t + h * c3
+        sigma_2 = sigma_fn(s2)
+        sigma_3 = sigma_fn(s3)
+        dt_2 = sigma_2 - sigma
+        dt_3 = sigma_3 - sigma
+        dt = sigma_down - sigma
+            
+        etz = eta_values[i]
+        sds = sigma_down/sigma
+        sdsm1 = ((sigma_down-1) / (sigma-1))
+        
+        #denoised = model(x, sigma * s_in, **extra_args)
+        if order == 1:
+            denoised = model(x, sigma * s_in, **extra_args)
+            eps = (x - denoised) / sigma
+            #x_next = x   +   (1 - eta_values[i]) * eps * dt   +   eta_values[i] * ((y0 - x) / t_is[i]) * (dt**2)**(1/2) 
+            
+            #x_next = x   +   (1 - eta_values[i]) * eps * dt   +   eta_values[i] * ((x - y0) / t_is[i]) * dt    #WORKS INVERTIBLE ti = sigma - 1
+            
+            #_next = x   +     (1 - eta_values[i]) * (  (1 - sigma_down/sigma) * (denoised - x) )      +        eta_values[i] * ((x - y0) / t_is[i]) * dt 
+            
+            x_next = x   +     (1 - eta_values[i]) * (  (1 - sigma_down/sigma) * (denoised - x) )      +        eta_values[i] * ((x - y0) / t_is[i]) * (sigma_down - sigma)
+
+            x_next = (1-etz) * sds * x + etz * sdsm1 * x    +    (1-etz)*(1-sds)*denoised      +     etz * (1-sdsm1) * y0
+            
+            #x_next = x   +   (1 - eta_values[i]) * (  (1 - sigma_down/sigma) * (denoised - x) )   +   eta_values[i] * (  (1 - sigma_down/t_is[i]) * (x - y0) ) 
+            #x = x - (1-eta_values[i]) * (1 - sigma_next/sigma) * x    +   (1-eta_values[i])*(1-sigma_next/sigma)*denoised    -   eta_values[i] * sigma_next * (y0 - x) ** 2
+        
+        if order == 2:
+            a2_1 = c2 * phi(1, -h*c2)
+            b1 =        phi(1, -h) - phi(2, -h)/c2
+            b2 =        phi(2, -h)/c2
+            if sample_rev == True:
+
+                k1 = model(x, sigma * s_in, **extra_args)
+                
+                #x_2 = x   +   (1 - eta_values[i]) * eps_2 * dt_2   +   eta_values[i] * ((y0 - x) / (sigma_2)) * (dt_2**2)**(1/2)     #this def didn't work so hot with the forward direction
+                #x_2 = ((sigma_down/sigma)**c2)*x + h*(a2_1*k1)
+                x_2 = ((sigma_down/sigma)**c2)*x + (1-eta_values[i]) * h*(a2_1*k1)     +   eta_values[i] * h * (a2_1*y0) 
+                
+                #x_2 = ((sigma_down/sigma)**c2)*x + (1-eta_values[i]) * h*(a2_1*k1)     +    eta_values[i] * h * (y0 - x) / 2 #* (b1 + b2)# / 2
+                
+                #dt2 = ((sigma_next/sigma)**c2) - sigma
+                #x_2 = x + dt2 * (a2_1*k1)
+                k2 = model(x_2, sigma_fn(t + h*c2) * s_in, **extra_args)
+                #x_next = (sigma_down/sigma) * x + h*(b1*k1 + b2*k2)
+                x_next = (sigma_down/sigma) * x   +    (1-eta_values[i]) * h*(b1*k1 + b2*k2)    +   eta_values[i] * h * (b1*y0 + b2*y0) 
+                
+                #x_next = (sigma_down/sigma) * x +    (1-eta_values[i]) * h*(b1*k1 + b2*k2)     +    eta_values[i] * h * (y0 - x) / 2 #* (b1 + b2)# / 2
+                
+                
+                denoised1_2 = (b1*k1 + b2*k2) / (b1 + b2)
+                denoised = denoised1_2
+                
+                eps_next = (x - denoised) / sigma
+                #x_next = x   +   (1 - eta_values[i]) * eps_next * dt   +   eta_values[i] * ((y0 - x) / t_is[i]) * (dt**2)**(1/2)  
+                #x = x_next
+            elif sample_rev == False: #forward mode                
+                k1 = model(x, sigma * s_in, **extra_args)
+                #x_2 = ((sigma_down/sigma)**c2)*x + h*(a2_1*k1)
+                
+                x_2 = ((1-etz) * (sigma_2/sigma)  +  etz * ((sigma_2-1)/(sigma-1)) ) * x     +     (1-etz)* h*(a2_1*k1)      +     etz * (1-((sigma_2-1)/(sigma-1))) * y0
+                
+                #x_next = ((1-etz) * sds  +  etz * sdsm1) * x     +     (1-etz)*(1-sds) * denoised      +     etz * (1-sdsm1) * y0
+                
+                #x_2 = ((sigma_down/sigma)**c2)*x + (1-eta_values[i]) * h*(a2_1*k1)     +   eta_values[i] * h * (a2_1*y0) 
+                k2 = model(x_2, sigma_fn(t + h*c2) * s_in, **extra_args)
+                #x_next = (sigma_down/sigma) * x   +    (1-eta_values[i]) * h*(b1*k1 + b2*k2)    +   eta_values[i] * h * (b1*y0 + b2*y0) 
+                #x_next = ((1-etz) * sds  +  etz * sdsm1) * x     +     (1-etz)*  h*(b1*k1 + b2*k2)      +     etz * h_inv * (b1*y0 + b2*y0) 
+                
+                denoised1_2 = (b1*k1 + b2*k2) / (b1 + b2)
+                denoised = denoised1_2
+
+                #x_next = ((1-etz) * sds  +  etz * sdsm1) * x     +     (1-etz)*(1-sds) * denoised      +     etz * (1-sdsm1) * y0
+                x_next = ((1-etz) * sds  +  etz * sdsm1) * x     +     (1-etz)* h*(b1*k1 + b2*k2)      +     etz * (1-sdsm1) * y0
+
+                
+            
+        if order == 3:
+            gamma = (3*(c3**3) - 2*c3) / (c2*(2 - 3*c2))
+            a2_1 = c2 * phi(1, -h*c2)
+            a3_2 = gamma * c2 * phi(2, -h*c2) + (c3 ** 2 / c2) * phi(2, -h*c3) #phi_2_c3_h  # a32 from k2 to k3
+            a3_1 = c3 * phi(1, -h*c3) - a3_2 # a31 from k1 to k3
+            b3 = (1 / (gamma * c2 + c3)) * phi(2, -h)      
+            b2 = gamma * b3  #simplified version of: b2 = (gamma / (gamma * c2 + c3)) * phi_2_h  
+            b1 = phi(1, -h) - b2 - b3 
+            if sample_rev == True:
+
+                k1 = model(x, sigma * s_in, **extra_args)
+                #x_2 = ((sigma_down/sigma)**c2)*x + h*(a2_1*k1)      
+                x_2 = ((sigma_down/sigma)**c2)*x + (1-eta_values[i]) * h*(a2_1*k1)   +   eta_values[i] * h*(a2_1*y0)
+                
+                k2 = model(x_2, sigma_fn(t + h*c2) * s_in, **extra_args)
+                #x_3 = ((sigma_down/sigma)**c3)*x_2 + h*(a3_1*k1 + a3_2*k2)        
+                x_3 = ((sigma_down/sigma)**c3)*x_2 + (1-eta_values[i]) * h*(a3_1*k1 + a3_2*k2)   + eta_values[i] * h*(a3_1*y0 + a3_2*y0)
+            
+                k3 = model(x_3, sigma_fn(t + h*c3) * s_in, **extra_args)
+                #x_next = ((sigma_down/sigma))*x + h*(b1*k1 + b2*k2 + b3*k3)      
+                x_next = (sigma_down/sigma) * x   +   (1-eta_values[i]) * h*(b1*k1 + b2*k2 + b3*k3)   +   eta_values[i] * h * (b1*y0 + b2*y0 + b3*y0)   
+                
+                denoised = (b1*k1 + b2*k2 + b3*k3) / (b1 + b2 + b3)
+            elif sample_rev == False: #forward mode                
+    
+                k1 = model(x, sigma * s_in, **extra_args)
+                #x_2 = ((sigma_down/sigma)**c2)*x + h*(a2_1*k1)      
+                x_2 = ((1-etz) * (sigma_2/sigma)  +  etz * ((sigma_2-1)/(sigma-1)) ) * x     +     (1-etz)* h*(a2_1*k1)      +     etz * (1-((sigma_2-1)/(sigma-1))) * y0
+                #x_2 = ((1-etz) * (sigma_2/sigma)  +  etz * ((sigma_2-1)/(sigma-1)) ) * x     +     (1-etz)* (1-(sigma_2/sigma)) * k1      +     etz * (1-((sigma_2-1)/(sigma-1))) * y0
+                
+                k2 = model(x_2, sigma_fn(t + h*c2) * s_in, **extra_args)
+                #x_3 = ((sigma_down/sigma)**c3)*x_2 + h*(a3_1*k1 + a3_2*k2)        
+                #x_3 = ((sigma_down/sigma)**c3)*x_2 + (1-eta_values[i]) * h*(a3_1*k1 + a3_2*k2)   + eta_values[i] * h*(a3_1*y0 + a3_2*y0)
+                #denoised = (a3_1*k1 + a3_2*k2) / (a3_1 + a3_2)
+                
+                #x_3 = ((1-etz) * (sigma_3/sigma)  +  etz * ((sigma_3-1)/(sigma-1)) ) * x_2     +     (1-etz)* (1-(sigma_3/sigma)) * denoised      +     etz * (1-((sigma_3-1)/(sigma-1))) * y0
+                x_3 = ((1-etz) * (sigma_3/sigma)  +  etz * ((sigma_3-1)/(sigma-1)) ) * x_2     +     (1-etz)* h*(a3_1*k1 + a3_2*k2)      +     etz * (1-((sigma_3-1)/(sigma-1))) * y0
+            
+                k3 = model(x_3, sigma_fn(t + h*c3) * s_in, **extra_args)
+                #x_next = ((sigma_down/sigma))*x + h*(b1*k1 + b2*k2 + b3*k3)      
+                #x_next = (sigma_down/sigma) * x   +   (1-eta_values[i]) * h*(b1*k1 + b2*k2 + b3*k3)   +   eta_values[i] * h * (b1*y0 + b2*y0 + b3*y0)   
+                
+                x_next = ((1-etz) * (sigma_down/sigma)  +  etz * ((sigma_down-1)/(sigma-1)) ) * x     +     (1-etz)* h*(b1*k1 + b2*k2 + b3*k3)      +     etz * (1-((sigma_down-1)/(sigma-1))) * y0
+                #x_next = ((1-etz) * sds  +  etz * sdsm1) * x     +     (1-etz)* h*(b1*k1 + b2*k2 + b3*k3)      +     etz * (1-sdsm1) * y0
+                
+                denoised = (b1*k1 + b2*k2 + b3*k3) / (b1 + b2 + b3)
+                #denoised = k3
+                eps = (x - denoised) / sigma
+                #x_next = ((1-etz) * sds  +  etz * sdsm1) * x     +     (1-etz)* (1-(sigma_down/sigma)) * denoised      +     etz * (1-sdsm1) * y0
+                #x_next = x   +   (1 - eta_values[i]) * eps * dt   +   eta_values[i] * ((y0 - x) / (1-sigma)) * (dt**2)**(1/2)  
+
+                
+            
+            
+        eps = (x - denoised) / sigma
+
+        #dt = sigma_down - sigma
+        #x = x   +   (1 - eta_values[i]) * eps * dt   +   eta_values[i] * ((y0 - x) / t_is[i]) * (dt**2)**(1/2)     #originally derived equation for euler-style update form
+        
+        #x = x   +   (1 - eta_values[i]) * eps * dt   +   eta_values[i] * (  (1 - sigma_down/sigma) * (y0 - x) )     #this last term is CONFIRMED to be equivalent!
+        
+        #x = x   +   (1 - eta_values[i]) * (  (1 - sigma_down/sigma) * (denoised - x) )   +   eta_values[i] * (  (1 - sigma_down/sigma) * (y0 - x) )     #these last two terms are CONFIRMED to be equivalent!
+        
+        #x = x   +   (1-eta_values[i]) * (1-sigma_down/sigma) * denoised   -  (1-sigma_down/sigma) * x   +   eta_values[i] * (1-sigma_down/sigma) * y0   #CONFIRMED EQUIVALENT
+        
+        #x = (sigma_down/sigma) * x   +   (1-eta_values[i]) * (1-sigma_down/sigma) * denoised   +   eta_values[i] * (1-sigma_down/sigma) * y0  #CONFIRMED EQUIVALENT
+        
+        if sample_rev == False:
+            print("fwd")
+            #x_next = x   +   (1 - eta_values[i]) * eps * dt   +   eta_values[i] * ((y0 - x) / t_is[i]) * (dt**2)**(1/2) 
+            
+            #x_next = x   +   (1 - eta_values[i]) * eps * dt   +   eta_values[i] * ((y0 - x) / (1/sigma)) * (dt**2)**(1/2) 
+            #x_next = x   +   (1 - eta_values[i]) * (  (1 - sigma_down/sigma) * (denoised - x) )   +   eta_values[i] * (  (1 - sigma_down/sigma) * (x - y0) )      #DOESNT WORK FOR SOME REASON
+            #x_next = x   +   (1 - eta_values[i]) * (  (1 - sigma_down/sigma) * (denoised - x) )   +   eta_values[i] * ( (y0-x)/sigma ) * (sigma - sigma_down)
+            #x_next = x   +   (1 - eta_values[i]) * eps * dt   +   eta_values[i] * ((y0 - x) / sigma) * (sigma - sigma_down) 
+            
+        """if sample_rev:
+            if order == 2:
+                #x = (sigma_down/sigma) * x +  (1-eta_values[i]) * h*(b1*k1 + b2*k2)    +   eta_values[i] * (1-sigma_down/sigma) * y0 
+                x = (sigma_down/sigma) * x   +    (1-eta_values[i]) * h*(b1*k1 + b2*k2)    +   eta_values[i] * h * (b1*y0 + b2*y0) 
+            elif order == 3:
+                x = (sigma_down/sigma) * x   +   (1-eta_values[i]) * h*(b1*k1 + b2*k2 + b3*k3)   +   eta_values[i] * h * (b1*y0 + b2*y0 + b3*y0) 
+            else:
+                x = (sigma_down/sigma) * x   +   (1-eta_values[i]) * (1-sigma_down/sigma) * denoised   +   eta_values[i] * (1-sigma_down/sigma) * y0 
+            #x = (sigma_down/sigma) * x   +   (1-sigma_down/sigma) * ( (1-eta_values[i]) *  denoised   +   eta_values[i] * y0 )     #CONFIRMED EQUIVALENT
+        else:
+            #x = (sigma_down/sigma) * x   +   (1-sigma_down/sigma) * ( (1-eta_values[i]) *  denoised   -   eta_values[i] * y0  + 2 *eta_values[i] * x)
+            print("fwd")
+            x = x   +   (1 - eta_values[i]) * eps * dt   +   eta_values[i] * ((y0 - x) / t_is[i]) * (dt**2)**(1/2) 
+            #x = x   +   (1 - eta_values[i]) * (  (1 - sigma_down/sigma) * (denoised - x) )   +   eta_values[i] * (  (1 - sigma_down/sigma) * (x - y0) ) """
+        
+        #x = (sigma_down/sigma) * x   +   (1 - sigma_down/sigma) * ( (1 - eta_values[i]) * denoised   +   eta_values[i] * y0   -   2*eta_values[i] * x)
+        
+        
+        #x = x   +   (1 - eta_values[i]) * eps * dt   +     eta_values[i] * (1 - sigma_down/sigma) * (y0 - x)   # eta_values[i] * ((y0 - x) / t_is[i]) * (dt**2)**(1/2)  
+        
+        #x = x   +   (1 - eta_values[i]) * eps * dt   +    eta_values[i] * ((y0 - x) / sigma) * (sigma - sigma_down)                    #eta_values[i] * ((y0 - x) / t_is[i]) * (dt**2)**(1/2)  
+        
+        #x = x   +   (1 - eta_values[i]) * eps * dt   +   eta_values[i] * (1 - sigma_down) * (y0 - x)    #eta_values[i] * ((y0 - x) / t_is[i]) * (dt**2)**(1/2)  
+        
+        
+        
+        #dt = sigma_down - sigma
+        #x = x   +   (1 - eta_values[i]) * eps * dt   +   eta_values[i] * ((y0 - x) / t_is[i]) * (dt**2)**(1/2)  
+        
+        
+        #x = x   +   (1 - eta_values[i]) * eps * dt   +   eta_values[i] * ((y0 - x) / t_is[i]) * (sigma - sigma_down)
+        
+        #x = x   +   (1 - eta_values[i]) * eps * dt   +   eta_values[i] * (1 - sigma_down) * (y0 - x) # +   eta_values[i] * ((y0 - x) / t_is[i]) * (dt**2)**(1/2)  
+        
+        #x = x - (1-eta_values[i]) * (1 - sigma_down/sigma) * x    +   (1-eta_values[i])*(1-sigma_down/sigma)*denoised    +   eta_values[i] * (1 - sigma_down) * (y0 - x)
+        
+        #THIS ONE SEEMS TO WORK?
+        #x = x - (1-eta_values[i]) * (1 - sigma_down/sigma) * x    +   (1-eta_values[i])*(1-sigma_down/sigma)*denoised    +   eta_values[i] * (1 - sigma_down/sigma) * (y0 - x) 
+        
+        #x = x   +   (1 - sigma) * ((x - denoised) / sigma) * (sigma_down - sigma)   +   sigma * ((y0 - x) / sigma) * (sigma - sigma_down)  
+        
+        #x_eta = x + ((y0 - x) / t_is[i]) * (dt**2)**(1/2)
+        #x = (1 - eta_values[i]) * x_next + eta_values[i] * x_eta
+        
+        x = x_next
+        noise = noise_sampler(sigma=sigma, sigma_next=sigma_next)
+        noise = (noise - noise.mean()) / noise.std()
+        x = alpha_ratio * x + noise * s_noise * sigma_up
+        #x = x - (1-eta_values[i]) * (1 - sigma_next/sigma) * x    +   (1-eta_values[i])*(1-sigma_next/sigma)*denoised    -   eta_values[i] * sigma_next * (y0 - x) ** 2
+
+        if callback is not None:
+            callback({'x': x, 'denoised': denoised, 'i': i, 'sigma': sigmas[i], 'sigma_hat': sigmas[i]})
 
         gc.collect()
         torch.cuda.empty_cache()
