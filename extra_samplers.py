@@ -2585,6 +2585,10 @@ def sample_noise_inversion_rev(model, x, sigmas, extra_args=None, callback=None,
             #sigma_up, sigma_down, alpha_ratio = get_res4lyf_step_with_model(model, sigma, sigma_next, eta * eta_values[i], eta_var * eta_values[i], noise_mode)
             else:
                 sigma_up, sigma_down, alpha_ratio = get_res4lyf_step_with_model(model, sigma, sigma_next, eta, eta_var, noise_mode)
+                #if sample_rev == True:
+                #    sigma_up, sigma_down, alpha_ratio = get_res4lyf_step_with_model(model, sigma, sigma_next, eta, eta_var, noise_mode)
+                #else:
+                #    sigma_up, sigma_down, alpha_ratio = get_res4lyf_step_with_model(model, sigma_next, sigma, eta, eta_var, noise_mode)
         else:
             alpha_ratio = 1.0
             sigma_up = 0.0
@@ -2613,6 +2617,11 @@ def sample_noise_inversion_rev(model, x, sigmas, extra_args=None, callback=None,
             if sigma_down < 0.001 and order == 3:
                 order = 2
                 print("Dropping to 2nd order step to avoid numerical instability.")
+        
+        if sample_rev == False:
+            noise = noise_sampler(sigma=sigma, sigma_next=sigma_next)
+            noise = (noise - noise.mean()) / noise.std()
+            x = alpha_ratio * x + noise * s_noise * sigma_up
         
         #denoised = model(x, sigma * s_in, **extra_args)
         if order == 1:
@@ -2692,14 +2701,18 @@ def sample_noise_inversion_rev(model, x, sigmas, extra_args=None, callback=None,
             if sample_rev == True:
 
                 k1 = model(x, sigma * s_in, **extra_args)
+                k1_tmp = temp[0]
                 #x_2 = ((sigma_down/sigma)**c2)*x + h*(a2_1*k1)      
-                x_2 = ((sigma_down/sigma)**c2)*x + (1-eta_values[i]) * h*(a2_1*k1)   +   eta_values[i] * h*(a2_1*y0)
+                x_2 = ((sigma_down/sigma)**c2) * x + (1-eta_values[i]) * h*(a2_1*k1)   +   eta_values[i] * h*(a2_1*y0)
                 
                 k2 = model(x_2, sigma_fn(t + h*c2) * s_in, **extra_args)
+                k2_tmp = temp[0]
                 #x_3 = ((sigma_down/sigma)**c3)*x_2 + h*(a3_1*k1 + a3_2*k2)        
-                x_3 = ((sigma_down/sigma)**c3)*x_2 + (1-eta_values[i]) * h*(a3_1*k1 + a3_2*k2)   + eta_values[i] * h*(a3_1*y0 + a3_2*y0)
+                x_3 = ((sigma_down/sigma)**c3) * x + (1-eta_values[i]) * h*(a3_1*k1 + a3_2*k2)   + eta_values[i] * h*(a3_1*y0 + a3_2*y0)
             
                 k3 = model(x_3, sigma_fn(t + h*c3) * s_in, **extra_args)
+                k3_tmp = temp[0]
+                cfgpp_term = 
                 #x_next = ((sigma_down/sigma))*x + h*(b1*k1 + b2*k2 + b3*k3)      
                 x_next = (sigma_down/sigma) * x   +   (1-eta_values[i]) * h*(b1*k1 + b2*k2 + b3*k3)   +   eta_values[i] * h * (b1*y0 + b2*y0 + b3*y0)   
                 
@@ -2707,19 +2720,22 @@ def sample_noise_inversion_rev(model, x, sigmas, extra_args=None, callback=None,
             elif sample_rev == False: #forward mode                
     
                 k1 = model(x, sigma * s_in, **extra_args)
+                k1_tmp = temp[0]
                 #x_2 = ((sigma_down/sigma)**c2)*x + h*(a2_1*k1)      
                 x_2 = ((1-etz) * (sigma_2/sigma)  +  etz * ((sigma_2-1)/(sigma-1)) ) * x     +     (1-etz)* h*(a2_1*k1)      +     etz * (1-((sigma_2-1)/(sigma-1))) * y0
                 #x_2 = ((1-etz) * (sigma_2/sigma)  +  etz * ((sigma_2-1)/(sigma-1)) ) * x     +     (1-etz)* (1-(sigma_2/sigma)) * k1      +     etz * (1-((sigma_2-1)/(sigma-1))) * y0
                 
                 k2 = model(x_2, sigma_fn(t + h*c2) * s_in, **extra_args)
+                k2_tmp = temp[0]
                 #x_3 = ((sigma_down/sigma)**c3)*x_2 + h*(a3_1*k1 + a3_2*k2)        
                 #x_3 = ((sigma_down/sigma)**c3)*x_2 + (1-eta_values[i]) * h*(a3_1*k1 + a3_2*k2)   + eta_values[i] * h*(a3_1*y0 + a3_2*y0)
                 #denoised = (a3_1*k1 + a3_2*k2) / (a3_1 + a3_2)
                 
                 #x_3 = ((1-etz) * (sigma_3/sigma)  +  etz * ((sigma_3-1)/(sigma-1)) ) * x_2     +     (1-etz)* (1-(sigma_3/sigma)) * denoised      +     etz * (1-((sigma_3-1)/(sigma-1))) * y0
-                x_3 = ((1-etz) * (sigma_3/sigma)  +  etz * ((sigma_3-1)/(sigma-1)) ) * x_2     +     (1-etz)* h*(a3_1*k1 + a3_2*k2)      +     etz * (1-((sigma_3-1)/(sigma-1))) * y0
+                x_3 = ((1-etz) * (sigma_3/sigma)  +  etz * ((sigma_3-1)/(sigma-1)) ) * x     +     (1-etz)* h*(a3_1*k1 + a3_2*k2)      +     etz * (1-((sigma_3-1)/(sigma-1))) * y0
             
                 k3 = model(x_3, sigma_fn(t + h*c3) * s_in, **extra_args)
+                k3_tmp = temp[0]
                 #x_next = ((sigma_down/sigma))*x + h*(b1*k1 + b2*k2 + b3*k3)      
                 #x_next = (sigma_down/sigma) * x   +   (1-eta_values[i]) * h*(b1*k1 + b2*k2 + b3*k3)   +   eta_values[i] * h * (b1*y0 + b2*y0 + b3*y0)   
                 
@@ -2802,9 +2818,10 @@ def sample_noise_inversion_rev(model, x, sigmas, extra_args=None, callback=None,
         #x = (1 - eta_values[i]) * x_next + eta_values[i] * x_eta
         
         x = x_next
-        noise = noise_sampler(sigma=sigma, sigma_next=sigma_next)
-        noise = (noise - noise.mean()) / noise.std()
-        x = alpha_ratio * x + noise * s_noise * sigma_up
+        if sample_rev == True:
+            noise = noise_sampler(sigma=sigma, sigma_next=sigma_next)
+            noise = (noise - noise.mean()) / noise.std()
+            x = alpha_ratio * x + noise * s_noise * sigma_up
         #x = x - (1-eta_values[i]) * (1 - sigma_next/sigma) * x    +   (1-eta_values[i])*(1-sigma_next/sigma)*denoised    -   eta_values[i] * sigma_next * (y0 - x) ** 2
 
         if callback is not None:
