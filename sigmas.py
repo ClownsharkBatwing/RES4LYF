@@ -294,11 +294,13 @@ class sigmas_noise_inversion:
         dtype = sigmas.dtype
         sigmas = sigmas.clone().to(torch.float64)
         
+        if sigmas[-1] == 0.0:
+            sigmas[-1] = 0.0001
+        
         null = torch.tensor([0.0], device=sigmas.device, dtype=sigmas.dtype)
         sigmas_fwd = torch.flip(sigmas, dims=[0])
         sigmas_fwd = torch.cat([sigmas_fwd, null])
-        if sigmas_fwd[0] == 0.0:
-            sigmas_fwd[0] = 0.0001
+        sigmas_fwd[0] = 0.001
         
         sigmas_rev = torch.cat([null, sigmas])
         
