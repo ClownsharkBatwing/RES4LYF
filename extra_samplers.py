@@ -2578,8 +2578,13 @@ def sample_noise_inversion_rev(model, x, sigmas, extra_args=None, callback=None,
     for i in trange(len(sigmas)-1, disable=disable):            
         sigma, sigma_next = sigmas[i], sigmas[i+1]
         if eta > 0.0 or eta_var > 0.0:
+            if sigma_next == 1.0:
+                alpha_ratio = 1.0
+                sigma_up = 0.0
+                sigma_down = sigma_next   
             #sigma_up, sigma_down, alpha_ratio = get_res4lyf_step_with_model(model, sigma, sigma_next, eta * eta_values[i], eta_var * eta_values[i], noise_mode)
-            sigma_up, sigma_down, alpha_ratio = get_res4lyf_step_with_model(model, sigma, sigma_next, eta, eta_var, noise_mode)
+            else:
+                sigma_up, sigma_down, alpha_ratio = get_res4lyf_step_with_model(model, sigma, sigma_next, eta, eta_var, noise_mode)
         else:
             alpha_ratio = 1.0
             sigma_up = 0.0
@@ -2603,6 +2608,11 @@ def sample_noise_inversion_rev(model, x, sigmas, extra_args=None, callback=None,
         etz = eta_values[i]
         sds = sigma_down/sigma
         sdsm1 = ((sigma_down-1) / (sigma-1))
+        
+        if sample_rev == True:
+            if sigma_down < 0.001 and order == 3:
+                order = 2
+                print("Dropping to 2nd order step to avoid numerical instability.")
         
         #denoised = model(x, sigma * s_in, **extra_args)
         if order == 1:
@@ -2725,7 +2735,7 @@ def sample_noise_inversion_rev(model, x, sigmas, extra_args=None, callback=None,
                 
             
             
-        eps = (x - denoised) / sigma
+        #eps = (x - denoised) / sigma
 
         #dt = sigma_down - sigma
         #x = x   +   (1 - eta_values[i]) * eps * dt   +   eta_values[i] * ((y0 - x) / t_is[i]) * (dt**2)**(1/2)     #originally derived equation for euler-style update form
@@ -2738,8 +2748,8 @@ def sample_noise_inversion_rev(model, x, sigmas, extra_args=None, callback=None,
         
         #x = (sigma_down/sigma) * x   +   (1-eta_values[i]) * (1-sigma_down/sigma) * denoised   +   eta_values[i] * (1-sigma_down/sigma) * y0  #CONFIRMED EQUIVALENT
         
-        if sample_rev == False:
-            print("fwd")
+        #if sample_rev == False:
+            #print("fwd")
             #x_next = x   +   (1 - eta_values[i]) * eps * dt   +   eta_values[i] * ((y0 - x) / t_is[i]) * (dt**2)**(1/2) 
             
             #x_next = x   +   (1 - eta_values[i]) * eps * dt   +   eta_values[i] * ((y0 - x) / (1/sigma)) * (dt**2)**(1/2) 
