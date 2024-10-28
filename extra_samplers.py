@@ -2647,18 +2647,21 @@ def sample_noise_inversion_rev(model, x, sigmas, extra_args=None, callback=None,
             if sample_rev == True:
 
                 k1 = model(x, sigma * s_in, **extra_args)
-                
+                k1u = temp[0]
+                cfgpp_term = cfgpp * h * ( (a2_1*k1) - (a2_1*k1u))
                 #x_2 = x   +   (1 - eta_values[i]) * eps_2 * dt_2   +   eta_values[i] * ((y0 - x) / (sigma_2)) * (dt_2**2)**(1/2)     #this def didn't work so hot with the forward direction
                 #x_2 = ((sigma_down/sigma)**c2)*x + h*(a2_1*k1)
-                x_2 = ((sigma_down/sigma)**c2)*x + (1-eta_values[i]) * h*(a2_1*k1)     +   eta_values[i] * h * (a2_1*y0) 
+                x_2 = ((sigma_down/sigma)**c2)*(x + cfgpp_term) + (1-eta_values[i]) * h*(a2_1*k1)     +   eta_values[i] * h * (a2_1*y0) 
                 
                 #x_2 = ((sigma_down/sigma)**c2)*x + (1-eta_values[i]) * h*(a2_1*k1)     +    eta_values[i] * h * (y0 - x) / 2 #* (b1 + b2)# / 2
                 
                 #dt2 = ((sigma_next/sigma)**c2) - sigma
                 #x_2 = x + dt2 * (a2_1*k1)
                 k2 = model(x_2, sigma_fn(t + h*c2) * s_in, **extra_args)
+                k2u = temp[0]
+                cfgpp_term = cfgpp * h * ( (b1*k1 + b2*k2) - (b1*k1u + b2*k2u))
                 #x_next = (sigma_down/sigma) * x + h*(b1*k1 + b2*k2)
-                x_next = (sigma_down/sigma) * x   +    (1-eta_values[i]) * h*(b1*k1 + b2*k2)    +   eta_values[i] * h * (b1*y0 + b2*y0) 
+                x_next = (sigma_down/sigma) * (x + cfgpp_term)   +    (1-eta_values[i]) * h*(b1*k1 + b2*k2)    +   eta_values[i] * h * (b1*y0 + b2*y0) 
                 
                 #x_next = (sigma_down/sigma) * x +    (1-eta_values[i]) * h*(b1*k1 + b2*k2)     +    eta_values[i] * h * (y0 - x) / 2 #* (b1 + b2)# / 2
                 
@@ -2671,14 +2674,18 @@ def sample_noise_inversion_rev(model, x, sigmas, extra_args=None, callback=None,
                 #x = x_next
             elif sample_rev == False: #forward mode                
                 k1 = model(x, sigma * s_in, **extra_args)
+                k1u = temp[0]
+                cfgpp_term = cfgpp * h * ( (a2_1*k1) - (a2_1*k1u))
                 #x_2 = ((sigma_down/sigma)**c2)*x + h*(a2_1*k1)
                 
-                x_2 = ((1-etz) * (sigma_2/sigma)  +  etz * ((sigma_2-1)/(sigma-1)) ) * x     +     (1-etz)* h*(a2_1*k1)      +     etz * (1-((sigma_2-1)/(sigma-1))) * y0
+                x_2 = ((1-etz) * (sigma_2/sigma)  +  etz * ((sigma_2-1)/(sigma-1)) ) * (x + cfgpp_term)     +     (1-etz)* h*(a2_1*k1)      +     etz * (1-((sigma_2-1)/(sigma-1))) * y0
                 
                 #x_next = ((1-etz) * sds  +  etz * sdsm1) * x     +     (1-etz)*(1-sds) * denoised      +     etz * (1-sdsm1) * y0
                 
                 #x_2 = ((sigma_down/sigma)**c2)*x + (1-eta_values[i]) * h*(a2_1*k1)     +   eta_values[i] * h * (a2_1*y0) 
                 k2 = model(x_2, sigma_fn(t + h*c2) * s_in, **extra_args)
+                k2u = temp[0]
+                cfgpp_term = cfgpp * h * ( (b1*k1 + b2*k2) - (b1*k1u + b2*k2u))
                 #x_next = (sigma_down/sigma) * x   +    (1-eta_values[i]) * h*(b1*k1 + b2*k2)    +   eta_values[i] * h * (b1*y0 + b2*y0) 
                 #x_next = ((1-etz) * sds  +  etz * sdsm1) * x     +     (1-etz)*  h*(b1*k1 + b2*k2)      +     etz * h_inv * (b1*y0 + b2*y0) 
                 
@@ -2686,7 +2693,7 @@ def sample_noise_inversion_rev(model, x, sigmas, extra_args=None, callback=None,
                 denoised = denoised1_2
 
                 #x_next = ((1-etz) * sds  +  etz * sdsm1) * x     +     (1-etz)*(1-sds) * denoised      +     etz * (1-sdsm1) * y0
-                x_next = ((1-etz) * sds  +  etz * sdsm1) * x     +     (1-etz)* h*(b1*k1 + b2*k2)      +     etz * (1-sdsm1) * y0
+                x_next = ((1-etz) * sds  +  etz * sdsm1) * (x + cfgpp_term)     +     (1-etz)* h*(b1*k1 + b2*k2)      +     etz * (1-sdsm1) * y0
 
                 
             
@@ -2701,45 +2708,50 @@ def sample_noise_inversion_rev(model, x, sigmas, extra_args=None, callback=None,
             if sample_rev == True:
 
                 k1 = model(x, sigma * s_in, **extra_args)
-                k1_tmp = temp[0]
+                k1u = temp[0]
+                cfgpp_term = cfgpp * h * ( (a2_1*k1) - (a2_1*k1u))
                 #x_2 = ((sigma_down/sigma)**c2)*x + h*(a2_1*k1)      
-                x_2 = ((sigma_down/sigma)**c2) * x + (1-eta_values[i]) * h*(a2_1*k1)   +   eta_values[i] * h*(a2_1*y0)
+                x_2 = ((sigma_down/sigma)**c2) * (x + cfgpp_term) + (1-eta_values[i]) * h*(a2_1*k1)   +   eta_values[i] * h*(a2_1*y0)
                 
                 k2 = model(x_2, sigma_fn(t + h*c2) * s_in, **extra_args)
-                k2_tmp = temp[0]
+                k2u = temp[0]
+                cfgpp_term = cfgpp * h * ( (a3_1*k1 + a3_2*k2) - (a3_1*k1u + a3_2*k2u))
                 #x_3 = ((sigma_down/sigma)**c3)*x_2 + h*(a3_1*k1 + a3_2*k2)        
-                x_3 = ((sigma_down/sigma)**c3) * x + (1-eta_values[i]) * h*(a3_1*k1 + a3_2*k2)   + eta_values[i] * h*(a3_1*y0 + a3_2*y0)
+                x_3 = ((sigma_down/sigma)**c3) * (x + cfgpp_term) + (1-eta_values[i]) * h*(a3_1*k1 + a3_2*k2)   + eta_values[i] * h*(a3_1*y0 + a3_2*y0)
             
                 k3 = model(x_3, sigma_fn(t + h*c3) * s_in, **extra_args)
-                k3_tmp = temp[0]
-                #cfgpp_term = 
+                k3u = temp[0]
+                cfgpp_term = cfgpp * h * ( (b1*k1 + b2*k2 + b3*k3) - (b1*k1u + b2*k2u + b3*k3u))
                 #x_next = ((sigma_down/sigma))*x + h*(b1*k1 + b2*k2 + b3*k3)      
-                x_next = (sigma_down/sigma) * x   +   (1-eta_values[i]) * h*(b1*k1 + b2*k2 + b3*k3)   +   eta_values[i] * h * (b1*y0 + b2*y0 + b3*y0)   
+                x_next = (sigma_down/sigma) * (x + cfgpp_term)   +   (1-eta_values[i]) * h*(b1*k1 + b2*k2 + b3*k3)   +   eta_values[i] * h * (b1*y0 + b2*y0 + b3*y0)   
                 
                 denoised = (b1*k1 + b2*k2 + b3*k3) / (b1 + b2 + b3)
             elif sample_rev == False: #forward mode                
     
                 k1 = model(x, sigma * s_in, **extra_args)
-                k1_tmp = temp[0]
+                k1u = temp[0]
+                cfgpp_term = cfgpp * h * ( (a2_1*k1) - (a2_1*k1u))
                 #x_2 = ((sigma_down/sigma)**c2)*x + h*(a2_1*k1)      
-                x_2 = ((1-etz) * (sigma_2/sigma)  +  etz * ((sigma_2-1)/(sigma-1)) ) * x     +     (1-etz)* h*(a2_1*k1)      +     etz * (1-((sigma_2-1)/(sigma-1))) * y0
+                x_2 = ((1-etz) * (sigma_2/sigma)  +  etz * ((sigma_2-1)/(sigma-1)) ) * (x + cfgpp_term)     +     (1-etz)* h*(a2_1*k1)      +     etz * (1-((sigma_2-1)/(sigma-1))) * y0
                 #x_2 = ((1-etz) * (sigma_2/sigma)  +  etz * ((sigma_2-1)/(sigma-1)) ) * x     +     (1-etz)* (1-(sigma_2/sigma)) * k1      +     etz * (1-((sigma_2-1)/(sigma-1))) * y0
                 
                 k2 = model(x_2, sigma_fn(t + h*c2) * s_in, **extra_args)
-                k2_tmp = temp[0]
+                k2u = temp[0]
+                cfgpp_term = cfgpp * h * ( (a3_1*k1 + a3_2*k2) - (a3_1*k1u + a3_2*k2u))
                 #x_3 = ((sigma_down/sigma)**c3)*x_2 + h*(a3_1*k1 + a3_2*k2)        
                 #x_3 = ((sigma_down/sigma)**c3)*x_2 + (1-eta_values[i]) * h*(a3_1*k1 + a3_2*k2)   + eta_values[i] * h*(a3_1*y0 + a3_2*y0)
                 #denoised = (a3_1*k1 + a3_2*k2) / (a3_1 + a3_2)
                 
                 #x_3 = ((1-etz) * (sigma_3/sigma)  +  etz * ((sigma_3-1)/(sigma-1)) ) * x_2     +     (1-etz)* (1-(sigma_3/sigma)) * denoised      +     etz * (1-((sigma_3-1)/(sigma-1))) * y0
-                x_3 = ((1-etz) * (sigma_3/sigma)  +  etz * ((sigma_3-1)/(sigma-1)) ) * x     +     (1-etz)* h*(a3_1*k1 + a3_2*k2)      +     etz * (1-((sigma_3-1)/(sigma-1))) * y0
+                x_3 = ((1-etz) * (sigma_3/sigma)  +  etz * ((sigma_3-1)/(sigma-1)) ) * (x + cfgpp_term)     +     (1-etz)* h*(a3_1*k1 + a3_2*k2)      +     etz * (1-((sigma_3-1)/(sigma-1))) * y0
             
                 k3 = model(x_3, sigma_fn(t + h*c3) * s_in, **extra_args)
-                k3_tmp = temp[0]
+                k3u = temp[0]
+                cfgpp_term = cfgpp * h * ( (b1*k1 + b2*k2 + b3*k3) - (b1*k1u + b2*k2u + b3*k3u))
                 #x_next = ((sigma_down/sigma))*x + h*(b1*k1 + b2*k2 + b3*k3)      
                 #x_next = (sigma_down/sigma) * x   +   (1-eta_values[i]) * h*(b1*k1 + b2*k2 + b3*k3)   +   eta_values[i] * h * (b1*y0 + b2*y0 + b3*y0)   
                 
-                x_next = ((1-etz) * (sigma_down/sigma)  +  etz * ((sigma_down-1)/(sigma-1)) ) * x     +     (1-etz)* h*(b1*k1 + b2*k2 + b3*k3)      +     etz * (1-((sigma_down-1)/(sigma-1))) * y0
+                x_next = ((1-etz) * (sigma_down/sigma)  +  etz * ((sigma_down-1)/(sigma-1)) ) * (x + cfgpp_term)     +     (1-etz)* h*(b1*k1 + b2*k2 + b3*k3)      +     etz * (1-((sigma_down-1)/(sigma-1))) * y0
                 #x_next = ((1-etz) * sds  +  etz * sdsm1) * x     +     (1-etz)* h*(b1*k1 + b2*k2 + b3*k3)      +     etz * (1-sdsm1) * y0
                 
                 denoised = (b1*k1 + b2*k2 + b3*k3) / (b1 + b2 + b3)
