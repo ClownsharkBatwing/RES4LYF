@@ -2712,7 +2712,7 @@ def sample_noise_inversion_rev(model, x, sigmas, extra_args=None, callback=None,
             
                 k3 = model(x_3, sigma_fn(t + h*c3) * s_in, **extra_args)
                 k3_tmp = temp[0]
-                cfgpp_term = 
+                #cfgpp_term = 
                 #x_next = ((sigma_down/sigma))*x + h*(b1*k1 + b2*k2 + b3*k3)      
                 x_next = (sigma_down/sigma) * x   +   (1-eta_values[i]) * h*(b1*k1 + b2*k2 + b3*k3)   +   eta_values[i] * h * (b1*y0 + b2*y0 + b3*y0)   
                 
