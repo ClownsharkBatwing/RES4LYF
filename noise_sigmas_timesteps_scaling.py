@@ -174,6 +174,33 @@ def get_res4lyf_step_with_model(model, sigma, sigma_next, eta=0.0, eta_var=1.0, 
       sd, su = get_ancestral_step(sigma, sigma_next, eta)
   return su, sd, alpha_ratio
 
+def get_res4lyf_step_with_model2(model, sigma, sigma_next, eta=0.0, eta_var=1.0, noise_mode="hard", h=None):
+  if isinstance(model.inner_model.inner_model.model_sampling, comfy.model_sampling.CONST):
+    sigma_var = (-1 + torch.sqrt(1 + 4 * sigma)) / 2
+    if eta_var > 0.0 and sigma_next > sigma_var:
+      su, sd, alpha_ratio = get_ancestral_step_RF_var(sigma, sigma_next, eta_var)
+    else:
+      if   noise_mode == "soft":
+        su, sd, alpha_ratio = get_RF_step(sigma, sigma_next, eta)
+      elif noise_mode == "softer":
+        su, sd, alpha_ratio = get_RF_step_traditional(sigma, sigma_next, eta)
+      elif noise_mode == "hard":
+        su, sd, alpha_ratio = get_ancestral_step_RF(sigma_next, eta)
+      elif noise_mode == "hard_sq": 
+        su, sd, alpha_ratio = get_ancestral_step_RF_sqrd(sigma, sigma_next, eta)
+      elif noise_mode == "exp": 
+        su, sd, alpha_ratio = get_ancestral_step_RF_exp(sigma_next, eta, h)
+  else:
+    alpha_ratio = 1.0
+    if noise_mode == "hard":
+      sd = sigma_next
+      sigma_hat = sigma * (1 + eta)
+      su = (sigma_hat ** 2 - sigma ** 2) ** .5
+      sigma = sigma_hat
+    if noise_mode == "soft" or noise_mode == "softer": 
+      sd, su = get_ancestral_step(sigma, sigma_next, eta)
+  return su, sigma, sd, alpha_ratio
+
 
 def get_res4lyf_step(sigma, sigma_next, eta=0.0, eta_var=1.0, noise_mode="hard"):
   sigma_var = (-1 + torch.sqrt(1 + 4 * sigma)) / 2
