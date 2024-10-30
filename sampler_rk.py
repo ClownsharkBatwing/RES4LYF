@@ -341,12 +341,12 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
     
     uncond = [0]
     uncond[0] = torch.full_like(x, 0.0)
-    """if cfgpp != 0.0:
+    if cfgpp != 0.0:
         def post_cfg_function(args):
             uncond[0] = args["uncond_denoised"]
             return args["denoised"]
         model_options = extra_args.get("model_options", {}).copy()
-        extra_args["model_options"] = comfy.model_patcher.set_model_options_post_cfg_function(model_options, post_cfg_function, disable_cfg1_optimization=True)"""
+        extra_args["model_options"] = comfy.model_patcher.set_model_options_post_cfg_function(model_options, post_cfg_function, disable_cfg1_optimization=True)
 
     BUF_ELEM=buffer
     seed = torch.initial_seed() + 1
