@@ -2118,7 +2118,7 @@ from .sampler_rk import phi
 @torch.no_grad()
 def sample_noise_inversion_rev(model, x, sigmas, extra_args=None, callback=None, disable=None, s_noise=1.0, c2=0.5, c3=1.0, gamma=0.25, eta_value=0.5, eta=0.0, eta_var=0.0, 
                                noise_mode="hard", eta_values=None, t_is=None, etas=None, s_noises=None, alpha=-1.0, k=1.0, scale=0.1, order=2, 
-                               cfgpp=0.0, latent_guide=None, latent_guide_weight=1.0, noise_sampler_type="brownian", sde_seed=-1.0):
+                               cfgpp=0.0, latent_guide=None, latent_guide_weight=1.0, latent_guide_weights=None, latent_guide_mask=None, noise_sampler_type="brownian", sde_seed=-1.0):
     
     #model_sampling = model.get_model_object("model_sampling")
     sigma_min_model=model.inner_model.inner_model.model_sampling.sigma_min 
@@ -2184,7 +2184,19 @@ def sample_noise_inversion_rev(model, x, sigmas, extra_args=None, callback=None,
     else: #REV MODE, initialize image guide
         y0 = latent_guide.clone().to(x.device)
     
-        
+    # If latent_guide_weights not provided, create from single weight
+    if latent_guide_weights is None and latent_guide is not None:
+        latent_guide_weights = torch.full((len(sigmas),), latent_guide_weight, device=latent_guide_weights.device)
+    elif latent_guide_weights is not None and latent_guide is not None:
+        # Ensure that latent_guide_weights has enough length
+        latent_guide_weights = torch.cat([latent_guide_weights, torch.full((len(sigmas),), latent_guide_weights[-1], device=latent_guide_weights.device)])
+
+    # Apply mask if provided, otherwise use full mask
+    if latent_guide_mask is None and latent_guide is not None:
+        latent_guide_mask = torch.ones_like(x)
+    elif latent_guide_mask is not None:
+        latent_guide_mask = latent_guide_mask.to(x.device, x.dtype)
+
     for i in trange(len(sigmas)-1, disable=disable):            
         sigma, sigma_next = sigmas[i], sigmas[i+1]
         if eta > 0.0 or eta_var > 0.0:
@@ -2230,15 +2242,27 @@ def sample_noise_inversion_rev(model, x, sigmas, extra_args=None, callback=None,
             x = alpha_ratio * x + noise * s_noise * sigma_up
         
         #denoised = model(x, sigma * s_in, **extra_args)
+        if latent_guide is not None:
+            y0_w = latent_guide_weights[i] * y0 * latent_guide_mask
+        else:
+            y0_w = y0
+
         if order == 1:
             denoised = model(x, sigma * s_in, **extra_args)
             eps = (x - denoised) / sigma
             if sample_rev == True:
-                x_next = x   +   (1 - eta_values[i]) * eps * dt   +   eta_values[i] * ((y0 - x) / t_is[i]) * (dt**2)**(1/2) 
+                x_next = x + (1 - eta_values[i]) * eps * dt + eta_values[i] * ((y0_w - x) / t_is[i]) * (dt**2)**(1/2)
+
+                # if latent_guide is not None:
+                #     lg_weight = latent_guide_weights[i]
+                #     x_next = (1-etz) * sds * x + etz * sdsm1 * x + (1-etz)*(sigmax-sds)*denoised*denoised + etz * (sigmax-sds) * y0 * lg_weight * latent_guide_mask
+                # else:
+                #     x_next = (1-etz) * sds * x + etz * sdsm1 * x + (1-etz)*(sigmax-sds)*denoised*denoised + etz * (sigmax-sds) * y0            
+
             else:
                 noise = noise_sampler(sigma=sigmax, sigma_next=sigma_min) 
                 y0 = (noise - noise.mean()) / noise.std()
-            
+
                 #x_next = x   +   (1 - eta_values[i]) * eps * dt   +   eta_values[i] * ((x - y0) / t_is[i]) * dt    #WORKS INVERTIBLE ti = sigma - 1
                 
                 #_next = x   +     (1 - eta_values[i]) * (  (1 - sigma_down/sigma) * (denoised - x) )      +        eta_values[i] * ((x - y0) / t_is[i]) * dt 
@@ -2249,7 +2273,7 @@ def sample_noise_inversion_rev(model, x, sigmas, extra_args=None, callback=None,
                 
                 #x_next = x   +   (1 - eta_values[i]) * (  (1 - sigma_down/sigma) * (denoised - x) )   +   eta_values[i] * (  (1 - sigma_down/t_is[i]) * (x - y0) ) 
                 #x = x - (1-eta_values[i]) * (1 - sigma_next/sigma) * x    +   (1-eta_values[i])*(1-sigma_next/sigma)*denoised    -   eta_values[i] * sigma_next * (y0 - x) ** 2
-        
+
         if order == 2:
             a2_1 = c2 * phi(1, -h*c2)
             b1 =        phi(1, -h) - phi(2, -h)/c2
@@ -2261,7 +2285,8 @@ def sample_noise_inversion_rev(model, x, sigmas, extra_args=None, callback=None,
                 cfgpp_term = cfgpp * h * ( (a2_1*k1) - (a2_1*k1u))
                 #x_2 = x   +   (1 - eta_values[i]) * eps_2 * dt_2   +   eta_values[i] * ((y0 - x) / (sigma_2)) * (dt_2**2)**(1/2)     #this def didn't work so hot with the forward direction
                 #x_2 = ((sigma_down/sigma)**c2)*x + h*(a2_1*k1)
-                x_2 = ((sigma_down/sigma)**c2)*(x + cfgpp_term) + (1-eta_values[i]) * h*(a2_1*k1)     +   eta_values[i] * h * (a2_1*y0) 
+
+                x_2 = ((sigma_down/sigma)**c2)*(x + cfgpp_term) + (1-eta_values[i]) * h*(a2_1*k1) + eta_values[i] * h * (a2_1) * y0_w
                 
                 #x_2 = ((sigma_down/sigma)**c2)*x + (1-eta_values[i]) * h*(a2_1*k1)     +    eta_values[i] * h * (y0 - x) / 2 #* (b1 + b2)# / 2
                 
@@ -2271,7 +2296,8 @@ def sample_noise_inversion_rev(model, x, sigmas, extra_args=None, callback=None,
                 k2u = temp[0]
                 cfgpp_term = cfgpp * h * ( (b1*k1 + b2*k2) - (b1*k1u + b2*k2u))
                 #x_next = (sigma_down/sigma) * x + h*(b1*k1 + b2*k2)
-                x_next = (sigma_down/sigma) * (x + cfgpp_term)   +    (1-eta_values[i]) * h*(b1*k1 + b2*k2)    +   eta_values[i] * h * (b1*y0 + b2*y0) 
+                
+                x_next = (sigma_down/sigma) * (x + cfgpp_term) + (1-eta_values[i]) * h*(b1*k1 + b2*k2) + eta_values[i] * h * (b1 + b2) * y0_w
                 
                 #x_next = (sigma_down/sigma) * x +    (1-eta_values[i]) * h*(b1*k1 + b2*k2)     +    eta_values[i] * h * (y0 - x) / 2 #* (b1 + b2)# / 2
                 
@@ -2324,19 +2350,22 @@ def sample_noise_inversion_rev(model, x, sigmas, extra_args=None, callback=None,
                 k1u = temp[0]
                 cfgpp_term = cfgpp * h * ( (a2_1*k1) - (a2_1*k1u))
                 #x_2 = ((sigma_down/sigma)**c2)*x + h*(a2_1*k1)      
-                x_2 = ((sigma_down/sigma)**c2) * (x + cfgpp_term) + (1-eta_values[i]) * h*(a2_1*k1)   +   eta_values[i] * h*(a2_1*y0)
+                
+                x_2 = ((sigma_down/sigma)**c2) * (x + cfgpp_term) + (1-eta_values[i]) * h*(a2_1*k1) + eta_values[i] * h * (a2_1) * y0_w
                 
                 k2 = model(x_2, sigma_fn(t + h*c2) * s_in, **extra_args)
                 k2u = temp[0]
                 cfgpp_term = cfgpp * h * ( (a3_1*k1 + a3_2*k2) - (a3_1*k1u + a3_2*k2u))
                 #x_3 = ((sigma_down/sigma)**c3)*x_2 + h*(a3_1*k1 + a3_2*k2)        
-                x_3 = ((sigma_down/sigma)**c3) * (x + cfgpp_term) + (1-eta_values[i]) * h*(a3_1*k1 + a3_2*k2)   + eta_values[i] * h*(a3_1*y0 + a3_2*y0)
+
+                x_3 = ((sigma_down/sigma)**c3) * (x + cfgpp_term) + (1-eta_values[i]) * h*(a3_1*k1 + a3_2*k2) + eta_values[i] * h * (a3_1 + a3_2) * y0_w
             
                 k3 = model(x_3, sigma_fn(t + h*c3) * s_in, **extra_args)
                 k3u = temp[0]
                 cfgpp_term = cfgpp * h * ( (b1*k1 + b2*k2 + b3*k3) - (b1*k1u + b2*k2u + b3*k3u))
                 #x_next = ((sigma_down/sigma))*x + h*(b1*k1 + b2*k2 + b3*k3)      
-                x_next = (sigma_down/sigma) * (x + cfgpp_term)   +   (1-eta_values[i]) * h*(b1*k1 + b2*k2 + b3*k3)   +   eta_values[i] * h * (b1*y0 + b2*y0 + b3*y0)   
+                
+                x_next = (sigma_down/sigma) * (x + cfgpp_term) + (1-eta_values[i]) * h*(b1*k1 + b2*k2 + b3*k3) + eta_values[i] * h * (b1 + b2 + b3) * y0_w
                 
                 denoised = (b1*k1 + b2*k2 + b3*k3) / (b1 + b2 + b3)
             elif sample_rev == False: #forward mode                

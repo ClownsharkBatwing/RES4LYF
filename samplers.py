@@ -819,7 +819,7 @@ class SamplerNoiseInversion:
 
         sampler = comfy.samplers.ksampler(sampler_name, {"eta_values": eta_values, "t_is": t_is, "eta": eta, "eta_var": eta_var, "eta_value": eta_value, "alpha": alphas, "k": k, 
                                                          "noise_sampler_type": noise_sampler_type, "noise_mode": noise_mode, "sde_seed": sde_seed, "order": order, "cfgpp": cfgpp,
-                                                         "latent_guide": latent_guide, "latent_guide_weight": latent_guide_weight,})
+                                                         "latent_guide": latent_guide, "latent_guide_weight": latent_guide_weight, "latent_guide_weights": latent_guide_weights, "latent_guide_mask": latent_guide_mask})
 
         return (sampler, )
 
