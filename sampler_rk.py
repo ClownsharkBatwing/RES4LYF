@@ -15,7 +15,7 @@ from .noise_classes import *
 
 import comfy.model_patcher
 
-from .noise_sigmas_timesteps_scaling import get_res4lyf_step_with_model
+from .noise_sigmas_timesteps_scaling import get_res4lyf_step_with_model, get_res4lyf_step_with_model2
 
 
 def phi(j, neg_h):
@@ -338,7 +338,8 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
               sigma_fn_formula="", t_fn_formula="",
                   eta=0.5, eta_var=0.0, s_noise=1., alpha=-1.0, k=1.0, scale=0.1, c2=0.5, c3=1.0, buffer=0, cfgpp=0.5, iter=0, reverse_weight=0.0):
     extra_args = {} if extra_args is None else extra_args
-    
+    sigma_min = sigmin=model.inner_model.inner_model.model_sampling.sigma_min 
+    sigma_max = sigmax=model.inner_model.inner_model.model_sampling.sigma_max 
     uncond = [0]
     uncond[0] = torch.full_like(x, 0.0)
     if cfgpp != 0.0:
@@ -351,13 +352,13 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
     BUF_ELEM=buffer
     seed = torch.initial_seed() + 1
     
-    sigma_min, sigma_max = sigmas[sigmas > 0].min(), sigmas.max()
+    """sigma_min, sigma_max = sigmas[sigmas > 0].min(), sigmas.max()
     if isinstance(model.inner_model.inner_model.model_sampling, comfy.model_sampling.CONST):
         sigma_max = torch.full_like(sigma_max, 1.0)
-        sigma_min = torch.full_like(sigma_min, min(sigma_min.item(), 0.00001))
+        sigma_min = torch.full_like(sigma_min, min(sigma_min.item(), 0.00001))"""
     if sigmas[-1] == 0.0:
-        sigmas[-1] = min(sigmas[-2]**2, 0.00001)
-    noise_sampler = NOISE_GENERATOR_CLASSES.get(noise_sampler_type)(x=x, seed=seed, sigma_min=0.0, sigma_max=1.0)
+        sigmas[-1] = min(sigmas[-2]**2, 0.0001)
+    noise_sampler = NOISE_GENERATOR_CLASSES.get(noise_sampler_type)(x=x, seed=seed, sigma_min=sigmin, sigma_max=sigmax)
     
     if noise_sampler_type == "fractal":
         noise_sampler.alpha = alpha
@@ -384,11 +385,16 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
         sigma, sigma_next = sigmas[_], sigmas[_+1]
         
         h_orig = t_fn(sigma_next)-t_fn(sigma)
-        sigma_up, sigma_down, alpha_ratio = get_res4lyf_step_with_model(model, sigma, sigma_next, eta, eta_var, noise_mode, h_orig)
+        sigma_up, sigma, sigma_down, alpha_ratio = get_res4lyf_step_with_model2(model, sigma, sigma_next, eta, eta_var, noise_mode, h_orig)
         t_down, t = t_fn(sigma_down), t_fn(sigma)
         h = t_down - t
         
         ab, ci = get_rk_methods_coeff(rk_type, h, c2, c3, h_prev)
+        
+        if isinstance(model.inner_model.inner_model.model_sampling, comfy.model_sampling.CONST) == False:
+            noise = noise_sampler(sigma=sigma, sigma_next=sigma_next)
+            noise = (noise - noise.mean()) / noise.std()
+            xi[0] = alpha_ratio * xi[0] + noise * s_noise * sigma_up
 
         xi_0 = xi[0]
         
@@ -436,9 +442,10 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
         if callback is not None:
             callback({'x': xi[0], 'i': _, 'sigma': sigma, 'sigma_next': sigma_next, 'denoised': denoised})
             
-        noise = noise_sampler(sigma=sigma, sigma_next=sigma_next)
-        noise = (noise - noise.mean()) / noise.std()
-        xi[0] = alpha_ratio * xi[0] + noise * s_noise * sigma_up
+        if isinstance(model.inner_model.inner_model.model_sampling, comfy.model_sampling.CONST):
+            noise = noise_sampler(sigma=sigma, sigma_next=sigma_next)
+            noise = (noise - noise.mean()) / noise.std()
+            xi[0] = alpha_ratio * xi[0] + noise * s_noise * sigma_up
             
         h_prev = h_orig
         
