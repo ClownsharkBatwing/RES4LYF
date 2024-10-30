@@ -560,7 +560,7 @@ class SamplerRK:
                                   "ddim",
                                   "euler"], {"default": "dormand-prince_7s"}), 
                      "buffer": ("INT", {"default": 0, "min": 0, "max": 1, "step":1, "tooltip": "Set to 1 to reuse the result from the last step for the predictor step. Use only on samplers ending with 2s or higher. Currently only working with res, dpmpp, etc."}),
-                     "iter": ("INT", {"default": 0, "min": 0, "max": 100, "step":1, "tooltip": "Number of implicit refinement steps to run after each explicit step. Currently only working with CFG."}),
+                     "iter": ("INT", {"default": 0, "min": 0, "max": 100, "step":1, "tooltip": "Number of implicit refinement steps to run after each explicit step."}),
                      #"t_fn_formula": ("STRING", {"default": "1/((sigma).exp()+1)", "multiline": True}),
                      #"sigma_fn_formula": ("STRING", {"default": "((1-t)/t).log()", "multiline": True}),
                     },
