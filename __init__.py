@@ -79,7 +79,6 @@ NODE_CLASS_MAPPINGS = {
     "UltraSharkSampler": samplers.UltraSharkSampler,
     "UltraSharkSampler Tiled": samplers_tiled.UltraSharkSampler_Tiled,
     "SamplerDEIS_SDE": samplers.SamplerDEIS_SDE,
-    "SamplerDEIS_SDE_Implicit": samplers.SamplerDEIS_SDE_Implicit,
     "SamplerDPMPP_DualSDE_Advanced": samplers.SamplerDPMPP_DUALSDE_MOMENTUMIZED_ADVANCED,
     "SamplerDPMPP_SDE_Advanced": samplers.SamplerDPMPP_SDE_ADVANCED,
     "SamplerDPMPP_SDE_CFG++_Advanced": samplers.SamplerDPMPP_SDE_CFGPP_ADVANCED,
@@ -88,7 +87,6 @@ NODE_CLASS_MAPPINGS = {
     "SamplerRES3_Implicit": samplers.SamplerRES3_Implicit,
     "SamplerSDE_Implicit": samplers.SamplerSDE_Implicit,
     
-    "SamplerTEST": samplers.SamplerTEST,
     "SamplerNoiseInversion": samplers.SamplerNoiseInversion,
 
 
@@ -99,6 +97,7 @@ NODE_CLASS_MAPPINGS = {
     "SamplerDPMPP_3M_SDE_Advanced": samplers.SamplerDPMPP_3M_SDE_Advanced,
     "SamplerCorona": samplers.SamplerCorona,
     "SamplerRK": samplers.SamplerRK,
+    "SamplerRK_Test": samplers.SamplerRK_Test,
 
     "Sigmas Recast": sigmas.set_precision_sigmas,
     "Sigmas Noise Inversion": sigmas.sigmas_noise_inversion,

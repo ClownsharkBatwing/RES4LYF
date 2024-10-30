@@ -488,7 +488,7 @@ def sample_common(model, x, noise, noise_mask, noise_seed, tile_width, tile_heig
 
 
 
-class UltraSharkSampler_Tiled: #this is for use with https://github.com/ClownsharkBatwing/UltraCascade
+class UltraSharkSampler_Tiled: #this is for use with https://github.com/ClownsharkBatwing/UltraCascade, heavily modified tiled sampler code adapted from https://github.com/BlenderNeko/ComfyUI_TiledKSampler
     @classmethod
     def INPUT_TYPES(s):
         return {"required":

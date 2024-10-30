@@ -1524,5 +1524,4 @@ class latent_normalize_channels:
                     for j in range(c):
                         x[i, j] = x[i, j] / x[i, j].std()
 
-        #import pdb; pdb.set_trace()
         return ({"samples": x},)

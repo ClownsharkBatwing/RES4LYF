@@ -2,6 +2,8 @@ import torch
 import itertools
 import numpy as np
 
+# tiled sampler code adapted from https://github.com/BlenderNeko/ComfyUI_TiledKSampler
+
 def grouper(n, iterable):
     it = iter(iterable)
     while True:
