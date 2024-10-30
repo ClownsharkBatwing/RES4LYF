@@ -2389,8 +2389,8 @@ def sample_noise_inversion_rev(model, x, sigmas, extra_args=None, callback=None,
         if callback is not None:
             callback({'x': x, 'denoised': denoised, 'i': i, 'sigma': sigmas[i], 'sigma_hat': sigmas[i]})
 
-        gc.collect()
-        torch.cuda.empty_cache()
+        #gc.collect()
+        #torch.cuda.empty_cache()
         
     return x
 
