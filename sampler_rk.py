@@ -394,6 +394,7 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
         
         if (MULTISTEP == False and FSAL == False) or _ == 0:
             ki[0]   = model_call(model, xi_0, sigma_fn(t + h*ci[0]), **extra_args)
+            #print("model 1")
             ki_u[0] = uncond[0]
 
         if cfgpp != 0.0:
@@ -415,14 +416,16 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
                 
                 if (i+1)%order > 0:
                     ki[i+1]   = model_call(model, xi[i+1], sigma_fn(t + h*ci[i+1]), **extra_args)
+                    #print("model 2")
                     ki_u[i+1] = uncond[0]
 
             if FSAL and _ > 0:
                 ki[0] = ki[order-1]
             if MULTISTEP and _ > 0:
                 ki[0] = denoised
-            else:
+            elif iteration < iter:
                 ki[0] = model_call(model, xi[0], sigma_down, **extra_args)
+                #rint("model 3")
             ki_u[0] = uncond[0]
 
             if EPS_PRED == True:
