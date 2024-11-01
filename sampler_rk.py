@@ -416,6 +416,7 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
             h_prev = t_fn(sigmas[_ - 0]) - t_fn(sigmas[_ - 1])"""
         if sigma_next == 0.0:
             rk_type = "euler"
+            iter = 0
             order, model_call, alpha_fn, t_fn, sigma_fn, FSAL, EPS_PRED = get_rk_methods_order_and_fn(rk_type)
         
         h_orig = t_fn(sigma_next)-t_fn(sigma)
