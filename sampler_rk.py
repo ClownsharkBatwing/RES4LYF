@@ -270,7 +270,7 @@ def get_rk_methods(rk_type, h, c2=0.5, c3=0.75, h_prev=None, h_prev2=None):
             ci = [0, c2, c3, 1]
 
         case "dpmpp_2s":
-            c2 = 0.5
+            #c2 = 0.5
             a2_1 =         c2   * phi(1, -h*c2)
             b1 = (1 - 1/(2*c2)) * phi(1, -h)
             b2 =     (1/(2*c2)) * phi(1, -h)
