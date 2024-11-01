@@ -475,8 +475,8 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
             if multistep_order == 1:
                 ki[1] = ki[0]
             if multistep_order == 2:
-                ki[1] = ki[0]
                 ki[2] = ki[1]
+                ki[1] = ki[0]
             elif iteration < iter:
                 ki[0] = model_call(model, xi[0], sigma_down, **extra_args)
             ki_u[0] = uncond[0]
