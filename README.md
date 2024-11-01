@@ -6,6 +6,8 @@ A particular emphasis of this project has been to facilitate modulating paramete
 
 Much of this work remains experimental and is subject to further changes.
 
+![image](https://github.com/user-attachments/assets/d62fe232-1a79-458d-be97-edd5edc51405)
+
 **INSTALLATION:** 
 
 If you are using a venv, you will need to first run from within your ComfyUI folder (that contains your "venv" folder):
@@ -31,3 +33,4 @@ pip install -r requirements.txt
 _Alternatively, if you are using the portable version of ComfyUI you will need to replace "pip" with the path to your embedded pip executable. For example, on Windows:_
 
 X:\path\to\your\comfy_portable_folder\python_embedded\Scripts\pip.exe install -r requirements.txt
+
