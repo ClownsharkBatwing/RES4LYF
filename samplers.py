@@ -554,11 +554,16 @@ class SamplerRK:
                                   "dpmpp_2s",
                                   "dpmpp_sde_2s",
                                   "heun_2s", 
+                                  "midpoint_2s",
                                   "ralston_2s",
                                   "res_2s", 
-                                  #"res_2m",
+                                  "dpmpp_3m",
+                                  "res_3m",
+                                  "dpmpp_2m",
+                                  "res_2m",
                                   "ddim",
                                   "euler"], {"default": "dormand-prince_7s"}), 
+                     "exp_mode": ("BOOLEAN", {"default": False, "tooltip": "Convert linear RK methods to exponential form."}),
                      "buffer": ("INT", {"default": 0, "min": 0, "max": 1, "step":1, "tooltip": "Set to 1 to reuse the result from the last step for the predictor step. Use only on samplers ending with 2s or higher. Currently only working with res, dpmpp, etc."}),
                      "iter": ("INT", {"default": 0, "min": 0, "max": 100, "step":1, "tooltip": "Number of implicit refinement steps to run after each explicit step."}),
                      #"t_fn_formula": ("STRING", {"default": "1/((sigma).exp()+1)", "multiline": True}),
@@ -573,14 +578,15 @@ class SamplerRK:
 
     FUNCTION = "get_sampler"
 
-    def get_sampler(self, eta=0.25, eta_var=0.0, s_noise=1.0, alpha=-1.0, k=1.0, cfgpp=0.0, buffer=0, noise_sampler_type="brownian", noise_mode="hard", rk_type="dormand-prince", t_fn_formula=None, sigma_fn_formula=None, iter=0,
+    def get_sampler(self, eta=0.25, eta_var=0.0, s_noise=1.0, alpha=-1.0, k=1.0, cfgpp=0.0, buffer=0, noise_sampler_type="brownian", noise_mode="hard", rk_type="dormand-prince", 
+                    exp_mode=False, t_fn_formula=None, sigma_fn_formula=None, iter=0,
                     ):
         sampler_name = "rk"
 
         steps = 10000
 
         sampler = comfy.samplers.ksampler(sampler_name, {"eta": eta, "eta_var": eta_var, "s_noise": s_noise, "alpha": alpha, "k": k, "cfgpp": cfgpp, "buffer": buffer, "noise_sampler_type": noise_sampler_type, "noise_mode": noise_mode, "rk_type": rk_type, 
-                                                         "t_fn_formula": t_fn_formula, "sigma_fn_formula": sigma_fn_formula, "iter": iter,})
+                                                         "exp_mode": exp_mode, "t_fn_formula": t_fn_formula, "sigma_fn_formula": sigma_fn_formula, "iter": iter,})
         return (sampler, )
 
     
