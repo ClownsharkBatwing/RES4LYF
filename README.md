@@ -6,7 +6,7 @@ A particular emphasis of this project has been to facilitate modulating paramete
 
 Much of this work remains experimental and is subject to further changes.
 
-![image](https://github.com/user-attachments/assets/d62fe232-1a79-458d-be97-edd5edc51405)
+![image](https://github.com/user-attachments/assets/af8ef38e-4fe8-4cb8-ae34-7bfb2c59864f)
 
 **INSTALLATION:** 
 
