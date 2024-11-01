@@ -9,7 +9,7 @@ from torch.distributions import StudentT, Laplace
 import numpy as np
 import pywt
 import functools
-from opensimplex import OpenSimplex
+#from opensimplex import OpenSimplex
 
 class PrecisionTool:
     def __init__(self, cast_type='fp64'):
@@ -562,7 +562,7 @@ NOISE_GENERATOR_CLASSES = {
     "laplacian": LaplacianNoiseGenerator,
     "studentt": StudentTNoiseGenerator,
     "wavelet": WaveletNoiseGenerator,
-    "simplex": SimplexNoiseGenerator,
+    #"simplex": SimplexNoiseGenerator,
     "perlin": PerlinNoiseGenerator,
 }
 
