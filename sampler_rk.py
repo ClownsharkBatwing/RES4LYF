@@ -354,7 +354,10 @@ def calculate_second_order_multistep_coeffs(sigma, sigma_next, sigma_prev):
 
     return h, c2, b1, b2
 
-
+    
+    """if sigmas[-1] == 0.0:
+        sigmas[-1] = sigmin
+        sigmas = torch.cat((sigmas, torch.tensor([0.0], dtype=sigmas.dtype, device=sigmas.device)))"""
 
 def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, noise_sampler=None, noise_sampler_type="brownian", noise_mode="hard", rk_type="dormand-prince", 
               sigma_fn_formula="", t_fn_formula="",
@@ -373,6 +376,7 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
 
     BUF_ELEM=buffer
     seed = torch.initial_seed() + 1
+
     
     noise_sampler = NOISE_GENERATOR_CLASSES.get(noise_sampler_type)(x=x, seed=seed, sigma_min=sigmin, sigma_max=sigmax)
     
@@ -406,6 +410,14 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
     for _ in trange(len(sigmas)-1, disable=disable):
         sigma, sigma_next = sigmas[_], sigmas[_+1]
         
+        """if h_prev2 is not None:
+            h_prev2 = t_fn(sigmas[_ - 1]) - t_fn(sigmas[_ - 2])
+        if h_prev is not None:
+            h_prev = t_fn(sigmas[_ - 0]) - t_fn(sigmas[_ - 1])"""
+        if sigma_next == 0.0:
+            rk_type = "euler"
+            order, model_call, alpha_fn, t_fn, sigma_fn, FSAL, EPS_PRED = get_rk_methods_order_and_fn(rk_type)
+        
         h_orig = t_fn(sigma_next)-t_fn(sigma)
         sigma_up, sigma, sigma_down, alpha_ratio = get_res4lyf_step_with_model2(model, sigma, sigma_next, eta, eta_var, noise_mode, h_orig)
         t_down, t = t_fn(sigma_down), t_fn(sigma)
@@ -437,19 +449,19 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
         for iteration in range(iter+1):
             for i in range(multistep_order, order):
 
-                if sigma_next == 0.0:
+                """if sigma_next == 0.0:
                     xi[0] = (sigma_down/sigma) * xi_0 + (1 - sigma_down/sigma) * ki[0]
                     break
-                else:
-                    ks   = torch.zeros_like(x)
-                    ks_u = torch.zeros_like(x)
-                    ab_sum=0
-                    for j in range(order):
-                        ks     += ab[i][j] * ki[j]
-                        ks_u   += ab[i][j] * ki_u[j]
-                        ab_sum += ab[i][j]
+                else:"""
+                ks   = torch.zeros_like(x)
+                ks_u = torch.zeros_like(x)
+                ab_sum=0
+                for j in range(order):
+                    ks     += ab[i][j] * ki[j]
+                    ks_u   += ab[i][j] * ki_u[j]
+                    ab_sum += ab[i][j]
 
-                    xi[(i+1)%order] = alpha_fn(-h*ci[i+1]) * (xi_0 + cfgpp*h*(ks - ks_u)) + h*ks
+                xi[(i+1)%order] = alpha_fn(-h*ci[i+1]) * (xi_0 + cfgpp*h*(ks - ks_u)) + h*ks
                 
                 """sigma_from = sigma_fn(t + h*ci[i])
                 sigma_to   = sigma_fn(t + h*ci[i+1])
