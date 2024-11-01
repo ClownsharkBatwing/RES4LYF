@@ -538,6 +538,7 @@ class SamplerRK:
                      "cfgpp": ("FLOAT", {"default": 0.0, "min": -10000.0, "max": 10000.0, "step":0.01, "round": False, "tooltip": "CFG++ scale. Replaces CFG."}),
                      "noise_sampler_type": (NOISE_GENERATOR_NAMES, {"default": "brownian"}),
                      "noise_mode": (["hard", "hard_sq", "soft", "softer", "exp"], {"default": 'hard', "tooltip": "How noise scales with the sigma schedule. Hard is the most aggressive, the others start strong and drop rapidly."}),
+                     "noise_seed": ("INT", {"default": -1, "min": -1, "max": 0xffffffffffffffff}),
                      "rk_type": (["dormand-prince_6s", 
                                   "dormand-prince_7s", 
                                   "dormand-prince_13s", 
@@ -566,6 +567,8 @@ class SamplerRK:
                      "exp_mode": ("BOOLEAN", {"default": False, "tooltip": "Convert linear RK methods to exponential form."}),
                      "buffer": ("INT", {"default": 0, "min": 0, "max": 1, "step":1, "tooltip": "Set to 1 to reuse the result from the last step for the predictor step. Use only on samplers ending with 2s or higher. Currently only working with res, dpmpp, etc."}),
                      "iter": ("INT", {"default": 0, "min": 0, "max": 100, "step":1, "tooltip": "Number of implicit refinement steps to run after each explicit step."}),
+                     "latent_guide_weight": ("FLOAT", {"default": 0.0, "min": -100.0, "max": 100.0, "step":0.01, "round": False}),
+
                      #"t_fn_formula": ("STRING", {"default": "1/((sigma).exp()+1)", "multiline": True}),
                      #"sigma_fn_formula": ("STRING", {"default": "((1-t)/t).log()", "multiline": True}),
                     },
@@ -580,19 +583,20 @@ class SamplerRK:
 
     FUNCTION = "get_sampler"
 
-    def get_sampler(self, eta=0.25, eta_var=0.0, s_noise=1.0, alpha=-1.0, k=1.0, cfgpp=0.0, buffer=0, noise_sampler_type="brownian", noise_mode="hard", rk_type="dormand-prince", 
+    def get_sampler(self, eta=0.25, eta_var=0.0, s_noise=1.0, alpha=-1.0, k=1.0, cfgpp=0.0, buffer=0, noise_sampler_type="brownian", noise_mode="hard", noise_seed=-1, rk_type="dormand-prince", 
                     exp_mode=False, t_fn_formula=None, sigma_fn_formula=None, iter=0,
-                    latent_guide=None, latent_guide_weights=None,
+                    latent_guide=None, latent_guide_weight=0.0, latent_guide_weights=None,
                     ):
         sampler_name = "rk"
 
         steps = 10000
-        if latent_guide_weights == None:
-            latent_guide_weights = initialize_or_scale(latent_guide_weights, 0.0, steps)
+        latent_guide_weights = initialize_or_scale(latent_guide_weights, latent_guide_weight, steps)
+            
+        latent_guide_weights = F.pad(latent_guide_weights, (0, 10000), value=0.0)
 
-        sampler = comfy.samplers.ksampler(sampler_name, {"eta": eta, "eta_var": eta_var, "s_noise": s_noise, "alpha": alpha, "k": k, "cfgpp": cfgpp, "buffer": buffer, "noise_sampler_type": noise_sampler_type, "noise_mode": noise_mode, "rk_type": rk_type, 
+        sampler = comfy.samplers.ksampler(sampler_name, {"eta": eta, "eta_var": eta_var, "s_noise": s_noise, "alpha": alpha, "k": k, "cfgpp": cfgpp, "buffer": buffer, "noise_sampler_type": noise_sampler_type, "noise_mode": noise_mode, "noise_seed": noise_seed, "rk_type": rk_type, 
                                                          "exp_mode": exp_mode, "t_fn_formula": t_fn_formula, "sigma_fn_formula": sigma_fn_formula, "iter": iter,
-                                                         "latent_guide": latent_guide, "latent_guide_weights": latent_guide_weights,})
+                                                         "latent_guide": latent_guide, "latent_guide_weight": latent_guide_weight, "latent_guide_weights": latent_guide_weights,})
         return (sampler, )
 
     

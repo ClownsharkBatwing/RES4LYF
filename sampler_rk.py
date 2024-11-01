@@ -363,16 +363,39 @@ def calculate_second_order_multistep_coeffs(sigma, sigma_next, sigma_prev):
         h_prev2 = t_fn(sigmas[_ - 1]) - t_fn(sigmas[_ - 2])
     if h_prev is not None:
         h_prev = t_fn(sigmas[_ - 0]) - t_fn(sigmas[_ - 1])"""
+        
+def hard_light_blend(base_latent, blend_latent):
+    blend_latent = (blend_latent - blend_latent.min()) / (blend_latent.max() - blend_latent.min())
 
-def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, noise_sampler=None, noise_sampler_type="brownian", noise_mode="hard", rk_type="dormand-prince", 
+    positive_mask = base_latent >= 0
+    negative_mask = base_latent < 0
+    
+    positive_latent = base_latent * positive_mask.float()
+    negative_latent = base_latent * negative_mask.float()
+
+    positive_result = torch.where(blend_latent < 0.5,
+                                  2 * positive_latent * blend_latent,
+                                  1 - 2 * (1 - positive_latent) * (1 - blend_latent))
+
+    negative_result = torch.where(blend_latent < 0.5,
+                                  2 * negative_latent.abs() * blend_latent,
+                                  1 - 2 * (1 - negative_latent.abs()) * (1 - blend_latent))
+    negative_result = -negative_result
+
+    combined_result = positive_result * positive_mask.float() + negative_result * negative_mask.float()
+
+    return combined_result
+
+
+def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, noise_sampler=None, noise_sampler_type="brownian", noise_mode="hard", noise_seed=-1, rk_type="dormand-prince", 
               sigma_fn_formula="", t_fn_formula="",
                   eta=0.5, eta_var=0.0, s_noise=1., alpha=-1.0, k=1.0, scale=0.1, c2=0.5, c3=1.0, buffer=0, cfgpp=0.5, iter=0, reverse_weight=0.0, exp_mode=False,
-                  latent_guide=None, latent_guide_weights=None,):
+                  latent_guide=None, latent_guide_weight=0.0, latent_guide_weights=None,):
     extra_args = {} if extra_args is None else extra_args
     
     if latent_guide is not None:
         #process_latent_in = model.get_model_object("process_latent_in")
-        y0 = model.inner_model.inner_model.process_latent_in(latent_guide['samples']).clone().to(x.device)
+        y0 = latent_guide = model.inner_model.inner_model.process_latent_in(latent_guide['samples']).clone().to(x.device)
         #y0 = process_latent_in(latent_guide['samples']).clone().to(x.device)
     else:
         y0 = torch.zeros_like(x)
@@ -394,7 +417,10 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
         extra_args["model_options"] = comfy.model_patcher.set_model_options_post_cfg_function(model_options, post_cfg_function, disable_cfg1_optimization=True)
 
     BUF_ELEM=buffer
-    seed = torch.initial_seed() + 1
+    if noise_seed == -1:
+        seed = torch.initial_seed() + 1
+    else:
+        seed = noise_seed
 
     
     noise_sampler = NOISE_GENERATOR_CLASSES.get(noise_sampler_type)(x=x, seed=seed, sigma_min=sigmin, sigma_max=sigmax)
@@ -485,6 +511,20 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
                     ks_u   += ab[i][j] * ki_u[j]
                     ys     += ab[i][j] * y0
                     ab_sum += ab[i][j]
+                    
+                if UNSAMPLE == False and latent_guide is not None:
+                    if EPS_PRED:
+                        denoised = alpha_fn(-h*ci[i+1]) * xi[0] - sigma * ks
+                    else:
+                        denoised = ks / ab_sum
+                    lg_weight = latent_guide_weights[_] * sigma_fn(t + h*ci[i+1])
+                    hard_light_blend_1 = hard_light_blend(latent_guide, denoised)
+                    denoised = denoised - lg_weight * sigma_fn(t + h*ci[i+1]) * denoised  + (lg_weight * sigma_fn(t + h*ci[i+1]) * hard_light_blend_1) # * mask)
+                    if EPS_PRED:
+                        #denoised = alpha_fn(-h*ci[i+1]) * xi[0] - sigma * ks
+                        ks = (alpha_fn(-h*ci[i+1]) * xi[0] - denoised ) / sigma
+                    else:
+                        ks = denoised * ab_sum
 
                 cfgpp_term = cfgpp*h*(ks - ks_u)
                 if UNSAMPLE:
