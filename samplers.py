@@ -571,6 +571,8 @@ class SamplerRK:
                     },
                     "optional": 
                     {
+                        "latent_guide": ("LATENT", ),
+                        "latent_guide_weights": ("SIGMAS", ),
                     }  
                }
     RETURN_TYPES = ("SAMPLER",)
@@ -580,13 +582,17 @@ class SamplerRK:
 
     def get_sampler(self, eta=0.25, eta_var=0.0, s_noise=1.0, alpha=-1.0, k=1.0, cfgpp=0.0, buffer=0, noise_sampler_type="brownian", noise_mode="hard", rk_type="dormand-prince", 
                     exp_mode=False, t_fn_formula=None, sigma_fn_formula=None, iter=0,
+                    latent_guide=None, latent_guide_weights=None,
                     ):
         sampler_name = "rk"
 
         steps = 10000
+        if latent_guide_weights == None:
+            latent_guide_weights = initialize_or_scale(latent_guide_weights, 0.0, steps)
 
         sampler = comfy.samplers.ksampler(sampler_name, {"eta": eta, "eta_var": eta_var, "s_noise": s_noise, "alpha": alpha, "k": k, "cfgpp": cfgpp, "buffer": buffer, "noise_sampler_type": noise_sampler_type, "noise_mode": noise_mode, "rk_type": rk_type, 
-                                                         "exp_mode": exp_mode, "t_fn_formula": t_fn_formula, "sigma_fn_formula": sigma_fn_formula, "iter": iter,})
+                                                         "exp_mode": exp_mode, "t_fn_formula": t_fn_formula, "sigma_fn_formula": sigma_fn_formula, "iter": iter,
+                                                         "latent_guide": latent_guide, "latent_guide_weights": latent_guide_weights,})
         return (sampler, )
 
     
