@@ -4,6 +4,8 @@ from tqdm.auto import trange
 from math import pi
 import gc
 import math
+import copy
+
 
 import torch.nn.functional as F
 import torchvision.transforms as T
@@ -169,10 +171,33 @@ rk_coeff = {
     ),
 }
 
-def get_rk_methods(rk_type, h, c2=0.5, c3=0.75, h_prev=None):
+def get_rk_methods(rk_type, h, c2=0.5, c3=0.75, h_prev=None, h_prev2=None):
     FSAL = False
+    multistep_order = 0
+    
+    if rk_type[-2:] == "2m": #multistep method
+        if h_prev is not None: # and h_prev2 is None:
+            multistep_order = 1
+            c2 = -h_prev / h
+            rk_type = rk_type[:-2] + "2s"
+        else:
+            rk_type = rk_type[:-2] + "2s"
+            
+    if rk_type[-2:] == "3m": #multistep method
+        """if h_prev is not None and h_prev2 is None: # and h_prev2 is None:
+            multistep_order = 1
+            c2 = -h_prev / h
+            rk_type = rk_type[:-2] + "2s"""
+        if h_prev2 is not None: # and h_prev2 is None:
+            multistep_order = 2
+            c2 = -h_prev2 / h_prev
+            c3 = -h_prev / h
+            rk_type = rk_type[:-2] + "3s"
+        else:
+            rk_type = rk_type[:-2] + "3s"
+    
     if rk_type in rk_coeff:
-        ab, ci = rk_coeff[rk_type]
+        ab, ci = copy.deepcopy(rk_coeff[rk_type])
         ci = ci[:]
         ci.append(0)
         model_call = get_epsilon
@@ -207,7 +232,18 @@ def get_rk_methods(rk_type, h, c2=0.5, c3=0.75, h_prev=None):
                     [b1],
             ]
             ci = [0, 1]
-            
+         
+        case "heun_exp_2s":
+            #a2_1 = c2 * phi(1, -h*c2)
+            a2_1 =      phi(1, -h)
+            b1 =        phi(1, -h)/2
+            b2 =        phi(1, -h)/2
+            ab = [
+                    [a2_1, 0],
+                    [b1, b2],
+            ]
+            ci = [0, 1, 1]
+               
         case "res_2s":
             a2_1 = c2 * phi(1, -h*c2)
             b1 =        phi(1, -h) - phi(2, -h)/c2
@@ -218,20 +254,6 @@ def get_rk_methods(rk_type, h, c2=0.5, c3=0.75, h_prev=None):
             ]
             ci = [0, c2, 1]
 
-        case "res_2m":
-            FSAL = True
-            if h_prev == None:
-                return get_rk_methods("res_2s")
-            
-            c2 = -h_prev / h
-            #a2_1 = c2 * phi(1, -h*c2)
-            b1 =        phi(1, -h) - phi(2, -h)/c2
-            b2 =        phi(2, -h)/c2
-            ab = [
-                    [b1, b2],
-            ]
-            ci = [0]
-            
         case "res_3s":
             gamma = calculate_gamma(c2, c3)
             a2_1 = c2 * phi(1, -h*c2)
@@ -283,23 +305,23 @@ def get_rk_methods(rk_type, h, c2=0.5, c3=0.75, h_prev=None):
             ]
             ci = [0, c2, c3, 1]
 
-    return ab, ci, model_call, alpha_fn, t_fn, sigma_fn, FSAL, EPS_PRED
+    return ab, ci, multistep_order, model_call, alpha_fn, t_fn, sigma_fn, FSAL, EPS_PRED
 
 def get_rk_methods_order(rk_type):
-    ab, ci, model_call, alpha_fn, t_fn, sigma_fn, FSAL, EPS_PRED = get_rk_methods(rk_type, torch.tensor(1.0).to('cuda').to(torch.float64), c2=0.5, c3=0.75)
+    ab, ci, multistep_order, model_call, alpha_fn, t_fn, sigma_fn, FSAL, EPS_PRED = get_rk_methods(rk_type, torch.tensor(1.0).to('cuda').to(torch.float64), c2=0.5, c3=0.75)
     return len(ci)-1
 
 def get_rk_methods_order_and_fn(rk_type):
-    ab, ci, model_call, alpha_fn, t_fn, sigma_fn, FSAL, EPS_PRED = get_rk_methods(rk_type, torch.tensor(1.0).to('cuda').to(torch.float64), c2=0.5, c3=0.75)
+    ab, ci, multistep_order, model_call, alpha_fn, t_fn, sigma_fn, FSAL, EPS_PRED = get_rk_methods(rk_type, torch.tensor(1.0).to('cuda').to(torch.float64), c2=0.5, c3=0.75)
     MULTISTEP=False
     multistep_buffer_size = len(ab[0]) - len(ab) # x dim - y dim
     if len(ab) < len(ci):
         MULTISTEP=True
     return len(ci)-1, model_call, alpha_fn, t_fn, sigma_fn, FSAL, EPS_PRED #MULTISTEP
 
-def get_rk_methods_coeff(rk_type, h, c2, c3, h_prev=None):
-    ab, ci, model_call, alpha_fn, t_fn, sigma_fn, FSAL, EPS_PRED = get_rk_methods(rk_type, h, c2, c3, h_prev)
-    return ab, ci
+def get_rk_methods_coeff(rk_type, h, c2, c3, h_prev=None, h_prev2=None):
+    ab, ci, multistep_order, model_call, alpha_fn, t_fn, sigma_fn, FSAL, EPS_PRED = get_rk_methods(rk_type, h, c2, c3, h_prev, h_prev2)
+    return ab, ci, multistep_order
 
 def get_epsilon(model, x, sigma, **extra_args):
     s_in = x.new_ones([x.shape[0]])
@@ -336,10 +358,10 @@ def calculate_second_order_multistep_coeffs(sigma, sigma_next, sigma_prev):
 
 def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, noise_sampler=None, noise_sampler_type="brownian", noise_mode="hard", rk_type="dormand-prince", 
               sigma_fn_formula="", t_fn_formula="",
-                  eta=0.5, eta_var=0.0, s_noise=1., alpha=-1.0, k=1.0, scale=0.1, c2=0.5, c3=1.0, buffer=0, cfgpp=0.5, iter=0, reverse_weight=0.0):
+                  eta=0.5, eta_var=0.0, s_noise=1., alpha=-1.0, k=1.0, scale=0.1, c2=0.5, c3=1.0, buffer=0, cfgpp=0.5, iter=0, reverse_weight=0.0, exp_mode=False):
     extra_args = {} if extra_args is None else extra_args
-    sigma_min = sigmin=model.inner_model.inner_model.model_sampling.sigma_min 
-    sigma_max = sigmax=model.inner_model.inner_model.model_sampling.sigma_max 
+    sigma_min = sigmin = model.inner_model.inner_model.model_sampling.sigma_min 
+    sigma_max = sigmax = model.inner_model.inner_model.model_sampling.sigma_max 
     uncond = [0]
     uncond[0] = torch.full_like(x, 0.0)
     if cfgpp != 0.0:
@@ -352,12 +374,6 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
     BUF_ELEM=buffer
     seed = torch.initial_seed() + 1
     
-    """sigma_min, sigma_max = sigmas[sigmas > 0].min(), sigmas.max()
-    if isinstance(model.inner_model.inner_model.model_sampling, comfy.model_sampling.CONST):
-        sigma_max = torch.full_like(sigma_max, 1.0)
-        sigma_min = torch.full_like(sigma_min, min(sigma_min.item(), 0.00001))"""
-    if sigmas[-1] == 0.0:
-        sigmas[-1] = min(sigmas[-2]**2, 0.0001)
     noise_sampler = NOISE_GENERATOR_CLASSES.get(noise_sampler_type)(x=x, seed=seed, sigma_min=sigmin, sigma_max=sigmax)
     
     if noise_sampler_type == "fractal":
@@ -367,11 +383,17 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
         
     order, model_call, alpha_fn, t_fn, sigma_fn, FSAL, EPS_PRED = get_rk_methods_order_and_fn(rk_type)
     
+    if exp_mode:
+        model_call = get_denoised
+        alpha_fn = lambda neg_h: torch.exp(neg_h)
+        t_fn = lambda sigma: sigma.log().neg()
+        sigma_fn = lambda t: t.neg().exp() 
+    
     xi   = [torch.zeros_like(x)] * (order+1)
     ki   = [torch.zeros_like(x)] *  order
     ki_u = [torch.zeros_like(x)] *  order
     
-    h_prev = None
+    h_prev, h_prev2 = None, None
     
     if buffer > 0:
         MULTISTEP = True
@@ -389,7 +411,13 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
         t_down, t = t_fn(sigma_down), t_fn(sigma)
         h = t_down - t
         
-        ab, ci = get_rk_methods_coeff(rk_type, h, c2, c3, h_prev)
+        ab, ci, multistep_order = get_rk_methods_coeff(rk_type, h, c2, c3, h_prev, h_prev2)
+        
+        if exp_mode:
+            ci[-1] = 1.0
+            for i in range(order):
+                for j in range(order):
+                    ab[i][j] = ab[i][j] * phi(1, -h * ci[i+1])
         
         if isinstance(model.inner_model.inner_model.model_sampling, comfy.model_sampling.CONST) == False:
             noise = noise_sampler(sigma=sigma, sigma_next=sigma_next)
@@ -399,8 +427,7 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
         xi_0 = xi[0]
         
         if (MULTISTEP == False and FSAL == False) or _ == 0:
-            ki[0]   = model_call(model, xi_0, sigma_fn(t + h*ci[0]), **extra_args)
-            #print("model 1")
+            ki[0]   = model_call(model, xi_0, sigma, **extra_args)
             ki_u[0] = uncond[0]
 
         if cfgpp != 0.0:
@@ -408,33 +435,53 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
         ki_u[0] = uncond[0]
 
         for iteration in range(iter+1):
-            for i in range(order):
+            for i in range(multistep_order, order):
 
-                ks   = torch.zeros_like(x)
-                ks_u = torch.zeros_like(x)
-                ab_sum=0
-                for j in range(order):
-                    ks     += ab[i][j] * ki[j]
-                    ks_u   += ab[i][j] * ki_u[j]
-                    ab_sum += ab[i][j]
+                if sigma_next == 0.0:
+                    xi[0] = (sigma_down/sigma) * xi_0 + (1 - sigma_down/sigma) * ki[0]
+                    break
+                else:
+                    ks   = torch.zeros_like(x)
+                    ks_u = torch.zeros_like(x)
+                    ab_sum=0
+                    for j in range(order):
+                        ks     += ab[i][j] * ki[j]
+                        ks_u   += ab[i][j] * ki_u[j]
+                        ab_sum += ab[i][j]
 
-                xi[(i+1)%order] = alpha_fn(-h*ci[i+1]) * (xi_0 + cfgpp*h*(ks - ks_u)) + h*ks
+                    xi[(i+1)%order] = alpha_fn(-h*ci[i+1]) * (xi_0 + cfgpp*h*(ks - ks_u)) + h*ks
                 
-                if (i+1)%order > 0:
+                """sigma_from = sigma_fn(t + h*ci[i])
+                sigma_to   = sigma_fn(t + h*ci[i+1])
+
+                if EPS_PRED:
+                    h_coeff = (1 - sigma_to/sigma)
+                    xi[(i+1)%order] = alpha_fn(-h*ci[i+1]) * (xi_0 + cfgpp*h*(ks - ks_u)) + h*ks
+                    #xi[(i+1)%order] = xi_0 + h*ks
+                    #xi[(i+1)%order] = (sigma_down/sigma) * xi_0 + (1-sigma_down/sigma)*ks
+                else:
+                    h_coeff = h
+                
+                    xi[(i+1)%order] = (sigma_to/sigma) * (xi_0 + cfgpp*h_coeff*(ks - ks_u)) + h_coeff*ks"""
+                
+                if (i+1)%order > 0 and (i+1)%order > multistep_order-1:
                     ki[i+1]   = model_call(model, xi[i+1], sigma_fn(t + h*ci[i+1]), **extra_args)
-                    #print("model 2")
                     ki_u[i+1] = uncond[0]
 
             if FSAL and _ > 0:
                 ki[0] = ki[order-1]
             if MULTISTEP and _ > 0:
                 ki[0] = denoised
+            if multistep_order == 1:
+                ki[1] = ki[0]
+            if multistep_order == 2:
+                ki[1] = ki[0]
+                ki[2] = ki[1]
             elif iteration < iter:
                 ki[0] = model_call(model, xi[0], sigma_down, **extra_args)
-                #rint("model 3")
             ki_u[0] = uncond[0]
 
-            if EPS_PRED == True:
+            if EPS_PRED == True and exp_mode == False:
                 denoised = alpha_fn(-h*ci[i+1]) * xi[0] - sigma * ks
             else:
                 denoised = ks / ab_sum
@@ -447,10 +494,8 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
             noise = (noise - noise.mean()) / noise.std()
             xi[0] = alpha_ratio * xi[0] + noise * s_noise * sigma_up
             
-        h_prev = h_orig
-        
-        #gc.collect()
-        #torch.cuda.empty_cache()
+        h_prev2 = h_prev
+        h_prev = h
         
     return xi[0]
 
@@ -463,8 +508,207 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
 
 
 
-
 def sample_rk_test(model, x, sigmas, extra_args=None, callback=None, disable=None, noise_sampler=None, noise_sampler_type="brownian", noise_mode="hard", rk_type="dormand-prince", 
+              sigma_fn_formula="", t_fn_formula="",
+                  eta=0.5, eta_var=0.0, s_noise=1., alpha=-1.0, k=1.0, scale=0.1, c2=0.5, c3=1.0, buffer=0, cfgpp=0.5, iter=0, sub_iter=0, reverse_weight=0.0):
+    extra_args = {} if extra_args is None else extra_args
+    s_in = x.new_ones([x.shape[0]])
+    temp = [0]
+    temp[0] = torch.full_like(x, 0.0)
+    if cfgpp != 0.0:
+        def post_cfg_function(args):
+            temp[0] = args["uncond_denoised"]
+            return args["denoised"]
+        model_options = extra_args.get("model_options", {}).copy()
+        extra_args["model_options"] = comfy.model_patcher.set_model_options_post_cfg_function(model_options, post_cfg_function, disable_cfg1_optimization=True)
+
+    BUF_ELEM=buffer
+    seed = torch.initial_seed() + 1
+    
+    sigma_min, sigma_max = sigmas[sigmas > 0].min(), sigmas.max()
+
+    noise_sampler = NOISE_GENERATOR_CLASSES.get(noise_sampler_type)(x=x, seed=seed, sigma_min=0.0, sigma_max=1.0)
+    
+    if noise_sampler_type == "fractal":
+        noise_sampler.alpha = alpha
+        noise_sampler.k = k
+        noise_sampler.scale = scale
+        
+    order, model_call, alpha_fn, t_fn, sigma_fn, FSAL, EPS_PRED = get_rk_methods_order_and_fn(rk_type)
+
+    old_denoised = None
+
+    for _ in trange(len(sigmas)-1, disable=disable):
+        sigma, sigma_next = sigmas[_], sigmas[_+1]
+        
+        h_orig = t_fn(sigma_next)-t_fn(sigma)
+        sigma_up, sigma_down, alpha_ratio = get_res4lyf_step_with_model(model, sigma, sigma_next, eta, eta_var, noise_mode, h_orig)
+        t_down, t = t_fn(sigma_down), t_fn(sigma)
+        h = t_down - t
+                
+        #TRYING ANOTHER IMPLEMENTATION OF DPMPP_2M  FROM VERY USEFUL PAPER.PDF
+
+        if _ == 0 or sigmas[_ + 1] == 0 or buffer == 0:
+
+            k1 = model(x, sigma * s_in, **extra_args)
+            x_next = (sigma_down / sigma) * x + (1 - sigma_down/sigma) * k1
+            denoised = k1 
+            k_prev = k1
+            x_prev = x
+        elif _ == 1 or buffer == 1:
+            h_last = t - t_fn(sigmas[_ - 1])
+            r = h_last / h
+            c2 = h / h_prev
+            
+            c2 = -h_last / h
+            
+            a2_1 = c2 * phi(1, -h*c2)
+            b1 =        phi(1, -h) - phi(2, -h)/c2
+            b2 =        phi(2, -h)/c2
+
+            k1 = model(x, sigma * s_in, **extra_args)
+                        
+            x_next = (sigma_down / sigma) * x + h * (b1 * k1 + b2*k_prev) 
+            
+            k_prev2 = k_prev
+            k_prev = k1
+            
+        elif _ >= 2:
+            h_last = t - t_fn(sigmas[_ - 1])
+            h_last2 = t_fn(sigmas[_ - 1]) - t_fn(sigmas[_ - 2])
+            
+            c2 = -h_last2 / h_last
+            c3 = -h_last / h
+            
+            gamma = calculate_gamma(c2, c3)
+            a2_1 = c2 * phi(1, -h*c2)
+            a3_2 = gamma * c2 * phi(2, -h*c2) + (c3 ** 2 / c2) * phi(2, -h*c3) #phi_2_c3_h  # a32 from k2 to k3
+            a3_1 = c3 * phi(1, -h*c3) - a3_2 # a31 from k1 to k3
+            b3 = (1 / (gamma * c2 + c3)) * phi(2, -h)      
+            b2 = gamma * b3  #simplified version of: b2 = (gamma / (gamma * c2 + c3)) * phi_2_h  
+            b1 = phi(1, -h) - b2 - b3     
+            
+            #x_3 = torch.exp(-c3*h)*x + h * (a3_1 * k_prev + a3_2 * k_prev2)
+            
+            k1 = model(x, sigma * s_in, **extra_args)
+                        
+            x_next = (sigma_down / sigma) * x + h * (b1 * k1 + b2*k_prev + b3*k_prev2) 
+            
+            k_prev2 = k_prev
+            k_prev = k1
+
+        x = x_next
+        h_prev = h
+        #k_prev = k1
+        denoised = k1
+         
+        if callback is not None:
+            callback({'x': x, 'i': _, 'sigma': sigma, 'sigma_next': sigma_next, 'denoised': denoised})
+            
+        noise = noise_sampler(sigma=sigma, sigma_next=sigma_next)
+        noise = (noise - noise.mean()) / noise.std()
+        x = alpha_ratio * x + noise * s_noise * sigma_up
+
+    return x
+
+
+
+
+
+
+
+
+
+
+
+def sample_rk_test_working_2nd_order_dpmpp_2m_like(model, x, sigmas, extra_args=None, callback=None, disable=None, noise_sampler=None, noise_sampler_type="brownian", noise_mode="hard", rk_type="dormand-prince", 
+              sigma_fn_formula="", t_fn_formula="",
+                  eta=0.5, eta_var=0.0, s_noise=1., alpha=-1.0, k=1.0, scale=0.1, c2=0.5, c3=1.0, buffer=0, cfgpp=0.5, iter=0, sub_iter=0, reverse_weight=0.0):
+    extra_args = {} if extra_args is None else extra_args
+    s_in = x.new_ones([x.shape[0]])
+    temp = [0]
+    temp[0] = torch.full_like(x, 0.0)
+    if cfgpp != 0.0:
+        def post_cfg_function(args):
+            temp[0] = args["uncond_denoised"]
+            return args["denoised"]
+        model_options = extra_args.get("model_options", {}).copy()
+        extra_args["model_options"] = comfy.model_patcher.set_model_options_post_cfg_function(model_options, post_cfg_function, disable_cfg1_optimization=True)
+
+    BUF_ELEM=buffer
+    seed = torch.initial_seed() + 1
+    
+    sigma_min, sigma_max = sigmas[sigmas > 0].min(), sigmas.max()
+
+    noise_sampler = NOISE_GENERATOR_CLASSES.get(noise_sampler_type)(x=x, seed=seed, sigma_min=0.0, sigma_max=1.0)
+    
+    if noise_sampler_type == "fractal":
+        noise_sampler.alpha = alpha
+        noise_sampler.k = k
+        noise_sampler.scale = scale
+        
+    order, model_call, alpha_fn, t_fn, sigma_fn, FSAL, EPS_PRED = get_rk_methods_order_and_fn(rk_type)
+
+    old_denoised = None
+
+    for _ in trange(len(sigmas)-1, disable=disable):
+        sigma, sigma_next = sigmas[_], sigmas[_+1]
+        
+        h_orig = t_fn(sigma_next)-t_fn(sigma)
+        sigma_up, sigma_down, alpha_ratio = get_res4lyf_step_with_model(model, sigma, sigma_next, eta, eta_var, noise_mode, h_orig)
+        t_down, t = t_fn(sigma_down), t_fn(sigma)
+        h = t_down - t
+                
+        #TRYING ANOTHER IMPLEMENTATION OF DPMPP_2M  FROM VERY USEFUL PAPER.PDF
+        a2_1 = c2 * phi(1, -h*c2)
+        b1 =        phi(1, -h) - phi(2, -h)/c2
+        b2 =        phi(2, -h)/c2
+            
+        if _ == 0 or sigmas[_ + 1] == 0:
+
+            k1 = model(x, sigma * s_in, **extra_args)
+            x_next = (sigma_down / sigma) * x + (1 - sigma_down/sigma) * k1
+            denoised = k1 
+            k_prev = k1
+            x_prev = x
+        else:
+            h_last = t - t_fn(sigmas[_ - 1])
+            r = h_last / h
+            c2 = h / h_prev
+            
+            c2 = -h_last / h
+            
+            a2_1 = c2 * phi(1, -h*c2)
+            b1 =        phi(1, -h) + phi(2, -h)/c2
+            b2 =        -phi(2, -h)/c2
+            
+            a2_1 = c2 * phi(1, -h*c2)
+            b1 =        phi(1, -h) - phi(2, -h)/c2
+            b2 =        phi(2, -h)/c2
+
+            k1 = model(x, sigma * s_in, **extra_args)
+                        
+            x_next = (sigma_down / sigma) * x + h * (b1 * k1 + b2*k_prev) 
+
+        x = x_next
+        h_prev = h
+        k_prev = k1
+        denoised = k1
+         
+        if callback is not None:
+            callback({'x': x, 'i': _, 'sigma': sigma, 'sigma_next': sigma_next, 'denoised': denoised})
+            
+        noise = noise_sampler(sigma=sigma, sigma_next=sigma_next)
+        noise = (noise - noise.mean()) / noise.std()
+        x = alpha_ratio * x + noise * s_noise * sigma_up
+
+    return x
+
+
+
+
+
+def sample_rk_test_resmultistep(model, x, sigmas, extra_args=None, callback=None, disable=None, noise_sampler=None, noise_sampler_type="brownian", noise_mode="hard", rk_type="dormand-prince", 
               sigma_fn_formula="", t_fn_formula="",
                   eta=0.5, eta_var=0.0, s_noise=1., alpha=-1.0, k=1.0, scale=0.1, c2=0.5, c3=1.0, buffer=0, cfgpp=0.5, iter=0, sub_iter=0, reverse_weight=0.0):
     extra_args = {} if extra_args is None else extra_args
@@ -509,19 +753,44 @@ def sample_rk_test(model, x, sigmas, extra_args=None, callback=None, disable=Non
         b2 =        phi(2, -h)/c2
             
 
-        k1 = model(x, sigma * s_in, **extra_args)
+        if _ == 0:
+            k1 = model(x, sigma * s_in, **extra_args)
+            x_2 = ((sigma_down / sigma) ** c2) * x + h*(a2_1*k1)
 
-        for iteration in range(iter+1):
+            k2 = model(x_2, sigma_fn(t + h * c2) * s_in, **extra_args)
+            x_next = (sigma_down / sigma) * x + h*(b1*k1 + b2*k2)  
+            denoised = (b1*k1 + b2*k2) / (b1 + b2)      
+        else:
+            sigma_prev = sigmas[_-1]
+            
+            c2_m = ( t_fn(sigma_prev) - t_fn(sigma)) / h
+            b1 =        phi(1, -h) - phi(2, -h)/c2_m
+            b2 =        phi(2, -h)/c2_m
+            
+            k1 = model(x, sigma * s_in, **extra_args)
+            
+            #x_next = (sigma_down / sigma) * x + h*(b1*k1 + b2*k2)
+            #x_next = (sigma_down / sigma) * x + h*(b1*k1 + b2*k2)
+            k2 = k1
+            denoised = (b1*k1 + b2*k2) / (b1 + b2)  
+            
+            
+            #x_next = (sigma_down / sigma) * x + h*(b1*k1 + b2*denoised)
+            #denoised = (b1*k1 + b2*denoised) / (b1 + b2)  
+            
+
+        """k1 = model(x, sigma * s_in, **extra_args)
+        for iteration in range(iter+1): # implicit loop
             x_2 = ((sigma_down / sigma) ** c2) * x + h*(a2_1*k1)
             
             k2 = model(x_2, sigma_fn(t + h * c2) * s_in, **extra_args)
             x_next = (sigma_down / sigma) * x + h*(b1*k1 + b2*k2)  
             
             if iteration < iter:
-                k1 = model(x_next, sigma_down * s_in, **extra_args)
+                k1 = model(x_next, sigma_down * s_in, **extra_args)"""
             
         x = x_next
-        denoised = (b1*k1 + b2*k2) / (b1 + b2)       
+         
                 
         """k1 = model(x, sigma * s_in, **extra_args)
         x_2 = ((sigma_down/sigma)**c2)*x + h*(a2_1*k1)
@@ -544,8 +813,8 @@ def sample_rk_test(model, x, sigmas, extra_args=None, callback=None, disable=Non
         noise = (noise - noise.mean()) / noise.std()
         x = alpha_ratio * x + noise * s_noise * sigma_up
             
-        gc.collect()
-        torch.cuda.empty_cache()
+        #gc.collect()
+        #torch.cuda.empty_cache()
         
     return x
 
@@ -764,17 +1033,24 @@ def sample_dpmpp_3m_sde(model, x, sigmas, extra_args=None, callback=None, disabl
             if h_2 is not None:
                 r0 = h_1 / h
                 r1 = h_2 / h
+                
                 d1_0 = (denoised - denoised_1) / r0
                 d1_1 = (denoised_1 - denoised_2) / r1
                 d1 = d1_0 + (d1_0 - d1_1) * r0 / (r0 + r1)
                 d2 = (d1_0 - d1_1) / (r0 + r1)
+                
                 phi_2 = h_eta.neg().expm1() / h_eta + 1
                 phi_3 = phi_2 / h_eta - 0.5
+                
                 x = x + phi_2 * d1 - phi_3 * d2
+                
             elif h_1 is not None:
                 r = h_1 / h
+                
                 d = (denoised - denoised_1) / r
+                
                 phi_2 = h_eta.neg().expm1() / h_eta + 1
+                
                 x = x + phi_2 * d
 
             if eta:
@@ -783,3 +1059,5 @@ def sample_dpmpp_3m_sde(model, x, sigmas, extra_args=None, callback=None, disabl
         denoised_1, denoised_2 = denoised, denoised_1
         h_1, h_2 = h, h_1
     return x
+
+
