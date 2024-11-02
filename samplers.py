@@ -13,6 +13,7 @@ import torch
 import torch.nn.functional as F
 
 import math
+import copy
 
 def initialize_or_scale(tensor, value, steps):
     if tensor is None:
@@ -562,6 +563,9 @@ class SamplerRK:
                                   "res_3m",
                                   "dpmpp_2m",
                                   "res_2m",
+                                  #"deis_2m",
+                                  #"deis_3m",
+                                  #"deis_4m",
                                   "ddim",
                                   "euler"], {"default": "dormand-prince_7s"}), 
                      "exp_mode": ("BOOLEAN", {"default": False, "tooltip": "Convert linear RK methods to exponential form."}),
@@ -599,7 +603,38 @@ class SamplerRK:
                                                          "latent_guide": latent_guide, "latent_guide_weight": latent_guide_weight, "latent_guide_weights": latent_guide_weights,})
         return (sampler, )
 
+    sigma_fn = lambda t: (t.exp() + 1) ** -1 + 1e-5
+    t_fn = lambda sigma: ((1-sigma)/sigma + 1e-5).log()
     
+class SamplerOptions_TimestepScaling:
+    @classmethod
+    def INPUT_TYPES(s):
+        return {"required":
+                    {
+                     "sampler": ("SAMPLER", ),
+                     "t_fn_formula": ("STRING", {"default": "1/((sigma).exp()+1)", "multiline": True}),
+                     "sigma_fn_formula": ("STRING", {"default": "((1-t)/t).log()", "multiline": True}),
+                    },
+                     "optional": 
+                    {
+                    }  
+               }
+    RETURN_TYPES = ("SAMPLER",)
+    RETURN_NAMES = ("sampler",)
+
+    CATEGORY = "sampling/custom_sampling/samplers"
+
+    FUNCTION = "set_sampler_extra_options"
+
+    def set_sampler_extra_options(self, sampler, t_fn_formula=None, sigma_fn_formula=None, ):
+
+        sampler = copy.deepcopy(sampler)
+
+        sampler.extra_options['t_fn_formula']     = t_fn_formula
+        sampler.extra_options['sigma_fn_formula'] = sigma_fn_formula
+
+        return (sampler, )
+
     
 
 class SamplerRK_Test:

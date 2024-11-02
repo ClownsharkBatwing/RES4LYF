@@ -240,3 +240,22 @@ def get_res4lyf_half_step(sigma, sigma_next, c2=0.5, auto_c2=False, h_last=None,
   
   return sigma_s, h, c2
 
+def get_res4lyf_half_step2(sigma, sigma_next, c2=0.5, auto_c2=False, h_last=None, t_fn=None, sigma_fn=None, t_fn_formula="", sigma_fn_formula="", ):
+
+  sigma_fn_x = eval(f"lambda t: {sigma_fn_formula}", {"t": None}) if sigma_fn_formula else sigma_fn
+  t_fn_x = eval(f"lambda sigma: {t_fn_formula}", {"sigma": None}) if t_fn_formula else t_fn
+      
+  t, t_next = t_fn_x(sigma), t_fn_x(sigma_next)
+  h = t_next - t
+  if h_last is not None and auto_c2 == True:
+    c2 = h_last / h 
+  s = t + h * c2
+  sigma_s = sigma_fn_x(s)
+
+  h = (t_fn(sigma_s) - t_fn(sigma)) / c2 # h = (s - t) / c2    #remapped timestep-space
+    
+  #print("sigma:", sigma.item(), "sigma_s:", sigma_s.item(), "sigma_next:", sigma_next.item(),)
+  #print("t:", t.item(), "s:", s.item(), "t_next:", t_next.item(), "h:", h.item(), "c2:", c2.item())
+  
+  return sigma_s, h, c2
+

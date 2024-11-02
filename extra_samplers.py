@@ -2033,6 +2033,7 @@ def sample_deis_sde(model, x, sigmas, extra_args=None, callback=None, disable=No
         if callback is not None:
             callback({'x': x, 'i': i, 'sigma': sigmas[i], 'sigma_hat': sigmas[i], 'denoised': denoised})
             
+        #sigma_ratio = (sigma_down - sigma) / (sigma_next - sigma) #sigma_minus_full / sigma_minus_orig... alternative to using sigma_down in the equations directly
         d_cur = ((x_cur - denoised) / sigma) * sigma_ratio    ###### convert to alt sigma scaling "sigma space" so remaining code does not need modification
         #d_cur = (x / sigma) # * sigma_ratio
         #d_cur = (((sigma_down/sigma) * x - vel) / sigma) * sigma_ratio
@@ -2397,7 +2398,7 @@ def sample_noise_inversion_rev(model, x, sigmas, extra_args=None, callback=None,
 
 
 #from .refined_exp_solver import sample_refined_exp_s, sample_refined_exp_s_advanced
-from .sampler_rk import sample_rk, sample_rk_multistep, sample_rk_test
+from .sampler_rk import sample_rk, sample_rk_test
 
 extra_samplers = {
     "RES_implicit_advanced_RF_PC": sample_RES_implicit_advanced_RF_PC, 
@@ -2423,7 +2424,6 @@ extra_samplers = {
 
     "rk":  sample_rk,
     "rk_test": sample_rk_test,
-    "rk_multistep": sample_rk_multistep,
 }
 
 discard_penultimate_sigma_samplers = set((
