@@ -8,6 +8,8 @@ Much of this work remains experimental and is subject to further changes.
 
 ![image](https://github.com/user-attachments/assets/af8ef38e-4fe8-4cb8-ae34-7bfb2c59864f)
 
+![image](https://github.com/ClownsharkBatwing/RES4LYF/blob/main/workflows/txt2img%20(embedded).png?raw=true)
+
 **INSTALLATION:** 
 
 If you are using a venv, you will need to first run from within your ComfyUI folder (that contains your "venv" folder):
