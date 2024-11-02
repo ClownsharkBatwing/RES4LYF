@@ -23,8 +23,7 @@ Much of this work remains experimental and is subject to further changes.
 **IMG2IMG Workflow (Unsampling:**
 
 
-[!image](https://github.com/ClownsharkBatwing/RES4LYF/blob/main/workflows/img2img%20unsampling%20workflow%20(embedded).png?raw=true)
-
+[!image]([https://github.com/ClownsharkBatwing/RES4LYF/blob/main/workflows/img2img%20unsampling%20workflow%20(embedded).png?raw=true)
 
 [!image](https://github.com/ClownsharkBatwing/RES4LYF/blob/main/workflows/img2img%20unsampling%20workflow.png?raw=true)
 
