@@ -17,7 +17,7 @@ from .noise_classes import *
 
 import comfy.model_patcher
 
-from .noise_sigmas_timesteps_scaling import get_res4lyf_step_with_model, get_res4lyf_step_with_model2, get_res4lyf_half_step2
+from .noise_sigmas_timesteps_scaling import get_res4lyf_step_with_model, get_res4lyf_step_with_model2, get_res4lyf_half_step3
 
 
 def phi(j, neg_h):
@@ -477,7 +477,8 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
         t_down, t = t_fn(sigma_down), t_fn(sigma)
         h = t_down - t
         
-        sigma_s, h, c2 = get_res4lyf_half_step2(sigma, sigma_down, t_fn=t_fn, sigma_fn=sigma_fn, t_fn_formula=t_fn_formula, sigma_fn_formula=sigma_fn_formula)
+        #sigma_s, h_remap, c2 = get_res4lyf_half_step2(sigma, sigma_down, t_fn=t_fn, sigma_fn=sigma_fn, t_fn_formula=t_fn_formula, sigma_fn_formula=sigma_fn_formula)
+        c2, c3 = get_res4lyf_half_step3(sigma, sigma_down, t_fn=t_fn, sigma_fn=sigma_fn, t_fn_formula=t_fn_formula, sigma_fn_formula=sigma_fn_formula)
         ab, ci, multistep_order = get_rk_methods_coeff(rk_type, h, c2, c3, h_prev, h_prev2)
         
         if exp_mode:

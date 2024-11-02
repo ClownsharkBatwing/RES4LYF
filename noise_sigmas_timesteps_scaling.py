@@ -252,10 +252,34 @@ def get_res4lyf_half_step2(sigma, sigma_next, c2=0.5, auto_c2=False, h_last=None
   s = t + h * c2
   sigma_s = sigma_fn_x(s)
 
-  h = (t_fn(sigma_s) - t_fn(sigma)) / c2 # h = (s - t) / c2    #remapped timestep-space
+  #h = (t_fn(sigma_s) - t_fn(sigma)) / c2 # h = (s - t) / c2    #remapped timestep-space
+  
+  c2 = (t_fn(sigma_s) - t_fn(sigma)) / h
     
   #print("sigma:", sigma.item(), "sigma_s:", sigma_s.item(), "sigma_next:", sigma_next.item(),)
   #print("t:", t.item(), "s:", s.item(), "t_next:", t_next.item(), "h:", h.item(), "c2:", c2.item())
   
   return sigma_s, h, c2
+
+def get_res4lyf_half_step3(sigma, sigma_next, c2=0.5, c3=1.0, t_fn=None, sigma_fn=None, t_fn_formula="", sigma_fn_formula="", ):
+
+  sigma_fn_x = eval(f"lambda t: {sigma_fn_formula}", {"t": None}) if sigma_fn_formula else sigma_fn
+  t_fn_x = eval(f"lambda sigma: {t_fn_formula}", {"sigma": None}) if t_fn_formula else t_fn
+      
+  t_x, t_next_x = t_fn_x(sigma), t_fn_x(sigma_next)
+  h_x = t_next_x - t_x
+
+  s2 = t_x + h_x * c2
+  s3 = t_x + h_x * c3
+  sigma_2 = sigma_fn_x(s2)
+  sigma_3 = sigma_fn_x(s3)
+
+  h = t_fn(sigma_next) - t_fn(sigma)
+  c2 = (t_fn(sigma_2) - t_fn(sigma)) / h    
+  c3 = (t_fn(sigma_3) - t_fn(sigma)) / h    
+  
+  #print("sigma:", sigma.item(), "sigma_s:", sigma_s.item(), "sigma_next:", sigma_next.item(),)
+  #print("t:", t.item(), "s:", s.item(), "t_next:", t_next.item(), "h:", h.item(), "c2:", c2.item())
+  
+  return c2, c3
 
