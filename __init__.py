@@ -195,7 +195,7 @@ if flags["test_samplers"]:
         "rk_testnew":  test_samplers.sample_rk_testnew,
     })
 
-WEB_DIRECTORY = "./web"
+WEB_DIRECTORY = "./web/js"
 __all__ = ["NODE_CLASS_MAPPINGS",  "WEB_DIRECTORY"]
 
 
