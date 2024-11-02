@@ -74,7 +74,7 @@ NODE_CLASS_MAPPINGS = {
 
     "AdvancedNoise": samplers.AdvancedNoise,
     "ClownGuides": samplers.ClownGuides,
-    "ClownSampler": samplers.ClownSampler,
+    "ClownSamplerLegacy": samplers.ClownSampler,
     "SharkSampler": samplers.SharkSampler,
     "UltraSharkSampler": samplers.UltraSharkSampler,
     "UltraSharkSampler Tiled": samplers_tiled.UltraSharkSampler_Tiled,
@@ -89,13 +89,14 @@ NODE_CLASS_MAPPINGS = {
     
     "SamplerNoiseInversion": samplers.SamplerNoiseInversion,
 
-
+    "SamplerOptions_TimestepScaling": samplers.SamplerOptions_TimestepScaling,
     "SD35L_TimestepPatcher": samplers.SD35L_TimestepPatcher,
     
     "SamplerDPMPP_2S_Ancestral_Advanced": samplers.SamplerDPMPP_2S_Ancestral_Advanced,
     "SamplerDPMPP_2M_SDE_Advanced": samplers.SamplerDPMPP_2M_SDE_Advanced,
     "SamplerDPMPP_3M_SDE_Advanced": samplers.SamplerDPMPP_3M_SDE_Advanced,
     "SamplerCorona": samplers.SamplerCorona,
+    "ClownSampler": samplers.SamplerRK,
     "SamplerRK": samplers.SamplerRK,
     "SamplerRK_Test": samplers.SamplerRK_Test,
 
