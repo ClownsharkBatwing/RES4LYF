@@ -8,7 +8,23 @@ Much of this work remains experimental and is subject to further changes.
 
 ![image](https://github.com/user-attachments/assets/af8ef38e-4fe8-4cb8-ae34-7bfb2c59864f)
 
+**TXT2IMG Workflow:** 
+
 ![image](https://github.com/ClownsharkBatwing/RES4LYF/blob/main/workflows/txt2img%20(embedded).png?raw=true)
+
+![image](https://github.com/ClownsharkBatwing/RES4LYF/blob/main/workflows/txt2img.png)
+
+**IMG2IMG Workflow (Latent Image Guides):** 
+
+![image](https://github.com/ClownsharkBatwing/RES4LYF/blob/main/workflows/img2img%20latent%20image%20guide%20(embedded).png?raw=true)
+
+![image](https://github.com/ClownsharkBatwing/RES4LYF/blob/main/workflows/img2img%20latent%20image%20guide.png?raw=true)
+
+**IMG2IMG Workflow (Unsampling:**
+
+[!image](https://github.com/ClownsharkBatwing/RES4LYF/blob/main/workflows/img2img%20unsampling%20workflow%20(embedded).png?raw=true)
+
+[!image](https://github.com/ClownsharkBatwing/RES4LYF/blob/main/workflows/img2img%20unsampling%20workflow.png?raw=true)
 
 **INSTALLATION:** 
 
