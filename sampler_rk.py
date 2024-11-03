@@ -470,14 +470,6 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
         
         c2, c3 = get_res4lyf_half_step3(sigma, sigma_down, t_fn=t_fn, sigma_fn=sigma_fn, t_fn_formula=t_fn_formula, sigma_fn_formula=sigma_fn_formula)
         ab, ci, multistep_order = get_rk_methods_coeff(rk_type, h, c2, c3, h_prev, h_prev2)
-
-        if UNSAMPLE and sigma_next > sigma:
-            sigma_down_inv = sigmax - sigma_down 
-            sigma_inv      = sigmax - sigma
-            h_inv = t_fn(sigma_down_inv) - t_fn(sigma_inv)
-            ab_inv, ci_inv, multistep_order_inv = get_rk_methods_coeff(rk_type, h_inv, c2, c3, h_prev, h_prev2)
-        else:
-            sigma_down_inv, sigma_inv, ab_inv, h_inv = sigma_down, sigma, ab, h
         
         if exp_mode:
             ci[-1] = 1.0
@@ -507,7 +499,7 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
                 for j in range(order):
                     ks     += ab[i][j] * ki[j]
                     ks_u   += ab[i][j] * ki_u[j]
-                    ys     += ab_inv[i][j] * y0
+                    ys     += ab[i][j] * y0
 
                 if UNSAMPLE == False and latent_guide is not None:
                     lg = latent_guide * sum(ab[i])
@@ -515,7 +507,7 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
                         lg = (alpha_fn(-h*ci[i+1]) * xi[0] - latent_guide) / (sigma_fn(t + h*ci[i]) + 1e-8)
                         #lg = (alpha_fn(-h*ci[i+1]) * xi[(i+1)%order] - latent_guide) / (sigma_fn(t + h*ci[i]) + 1e-8)
                     hard_light_blend_1 = hard_light_blend(lg, ks)
-                    lg_weight = latent_guide_weights[_] * sigma_fn(t + h*ci[i+1])
+                    lg_weight = latent_guide_weights[_] * sigma #sigma_fn(t + h*ci[i+1])
                     ks = (1 - lg_weight) * ks   +   lg_weight * hard_light_blend_1
 
                 """ if UNSAMPLE == False and latent_guide is not None: ### OLD METHOD FOR HARD LIGHT BLENDING. MIGHT BE BETTER. NOT SURE. COMMENT OUT THE PREVIOUS ONE TO USE THIS ONE AGAIN.
@@ -530,9 +522,14 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
                         ks = (alpha_fn(-h*ci[i+1]) * xi[(i+1)%order] - denoised ) / (sigma_fn(t + h*ci[i]) + 1e-8)
                     else:
                         ks = denoised * sum(ab[i])"""
-
+                if sigma_next > sigma:
+                    sigma_down_inv = sigmax - sigma_down
+                    sigma_inv      = sigmax - sigma
+                else:
+                    sigma_down_inv, sigma_inv = sigma_down, sigma
+                    
                 cfgpp_term = cfgpp*h*(ks - ks_u)
-                xi[(i+1)%order]  = (1-UNSAMPLE * latent_guide_weights[_]) * ( alpha_fn(-h*ci[i+1]) * (xi_0 + cfgpp_term)    +    h*ks )    +    UNSAMPLE * latent_guide_weights[_] * ( (sigma_down_inv/sigma_inv) * (xi_0 + cfgpp_term)   +   (1 - sigma_down_inv/sigma_inv)*ys )
+                xi[(i+1)%order]  = (1-UNSAMPLE * latent_guide_weights[_]) * ( alpha_fn(-h*ci[i+1]) * (xi_0 + cfgpp_term)    +    h*ks )    +    UNSAMPLE * latent_guide_weights[_] * ( (sigma_down_inv/sigma_inv) * (xi_0 + cfgpp_term)   +   (sigmax - sigma_down_inv/sigma_inv)*ys )
                 #xi[(i+1)%order]  = xi_0   +   (1 - latent_guide_weights[_]) * eps * h   +   latent_guide_weights[_] * ((y0 - xi_0) / t_i) * (h**2)**(1/2) 
                 #xi[(i+1)%order]  = (1-lgw) * alpha_fn(-h*ci[i+1]) * (xi_0 + cfgpp_term)   +   lgw * alpha_fn(-h_inv*ci[i+1]) * (xi_0 + cfgpp_term)    +    (1-lgw) * h*ks    +   lgw * h_inv*ys 
                         
