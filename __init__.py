@@ -47,6 +47,7 @@ NODE_CLASS_MAPPINGS = {
     "Conditioning Recast FP64": conditioning.Conditioning_Recast64,
     "Base64ToConditioning": conditioning.Base64ToConditioning,
     "StableCascade_StageB_Conditioning64": conditioning.StableCascade_StageB_Conditioning64,
+    "ConditioningZeroAndTruncate": conditioning.ConditioningZeroAndTruncate,
 
     "LatentNoised": samplers.LatentNoised,
     "LatentNoiseList": latents.LatentNoiseList,
