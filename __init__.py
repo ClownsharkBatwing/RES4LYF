@@ -74,7 +74,7 @@ NODE_CLASS_MAPPINGS = {
 
     "AdvancedNoise": samplers.AdvancedNoise,
     "ClownGuides": samplers.ClownGuides,
-    "ClownSamplerLegacy": samplers.ClownSampler,
+    "ClownSamplerLegacy": samplers.ClownSamplerLegacy,
     "SharkSampler": samplers.SharkSampler,
     "UltraSharkSampler": samplers.UltraSharkSampler,
     "UltraSharkSampler Tiled": samplers_tiled.UltraSharkSampler_Tiled,
