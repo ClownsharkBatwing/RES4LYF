@@ -570,7 +570,7 @@ class SamplerRK:
                      "exp_mode": ("BOOLEAN", {"default": False, "tooltip": "Convert linear RK methods to exponential form."}), 
                      "multistep": ("BOOLEAN", {"default": False, "tooltip": "For samplers ending in S only. Reduces cost by one model call per step by reusing the previous step as the current predictor step."}),
                      "implicit_steps": ("INT", {"default": 0, "min": 0, "max": 100, "step":1, "tooltip": "Number of implicit Runge-Kutta refinement steps to run after each explicit step."}),
-                     "cfgpp": ("FLOAT", {"default": 0.0, "min": -10000.0, "max": 10000.0, "step":0.01, "round": False, "tooltip": "CFG++ scale. Replaces CFG."}),
+                     "cfgpp": ("FLOAT", {"default": 0.0, "min": -10000.0, "max": 10000.0, "step":0.01, "round": False, "tooltip": "CFG++ scale. Use in place of, or with, CFG. Currently only working with RES, DPMPP, and DDIM samplers."}),
                      "latent_guide_weight": ("FLOAT", {"default": 0.0, "min": -100.0, "max": 100.0, "step":0.01, "round": False}),
 
                      #"t_fn_formula": ("STRING", {"default": "1/((sigma).exp()+1)", "multiline": True}),

@@ -37,6 +37,26 @@ def multiply_nested_tensors(structure, scalar):
     else:
         return structure
 
+class ConditioningZeroAndTruncate:
+    @classmethod
+    def INPUT_TYPES(s):
+        return { "required": {"conditioning": ("CONDITIONING", )}}
+    RETURN_TYPES = ("CONDITIONING",)
+    FUNCTION = "zero_out"
+
+    CATEGORY = "advanced/conditioning"
+
+    def zero_out(self, conditioning):
+        c = []
+        for t in conditioning:
+            d = t[1].copy()
+            pooled_output = d.get("pooled_output", None)
+            if pooled_output is not None:
+                d["pooled_output"] = torch.zeros((1,2048), dtype=t[0].dtype, device=t[0].device)
+                n = [torch.zeros((1,154,4096), dtype=t[0].dtype, device=t[0].device), d]
+            c.append(n)
+        return (c, )
+
 
 class ConditioningToBase64:
     @classmethod
