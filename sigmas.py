@@ -75,12 +75,12 @@ def train_interpolator(model, sigma_schedule, steps, epochs=5000, lr=0.01):
         x_train = torch.linspace(0, 1, steps=steps).unsqueeze(1)
         y_train = sigma_schedule.unsqueeze(1)
 
-        # Disable inference mode explicitly for training
+        # disable inference mode for training
         model.train()
         for epoch in range(epochs):
             optimizer.zero_grad()
 
-            # Forward pass
+            # fwd pass
             outputs = model(x_train)
             loss = criterion(outputs, y_train)
             loss.backward()
@@ -92,13 +92,13 @@ def interpolate_sigma_schedule_model(sigma_schedule, target_steps):
     model = SimpleInterpolator()
     sigma_schedule = sigma_schedule.float().detach()
 
-    # Train the model on the original sigma schedule
+    # train on original sigma schedule
     trained_model = train_interpolator(model, sigma_schedule, len(sigma_schedule))
 
-    # Generate the target steps for interpolation
+    # generate target steps for interpolation
     x_interpolated = torch.linspace(0, 1, target_steps).unsqueeze(1)
 
-    # Perform inference with gradients disabled
+    # inference w/o gradients
     trained_model.eval()
     with torch.no_grad():
         interpolated_sigma = trained_model(x_interpolated).squeeze()
@@ -135,53 +135,49 @@ class sigmas_interpolate:
         order = self.order
         sigma_schedule_np = sigma_schedule.cpu().numpy()
 
-        # Original steps (assuming they are uniformly spaced)
+        # orig steps (assuming even spacing)
         original_steps = np.linspace(0, 1, len(sigma_schedule_np))
 
-        # Fit a polynomial of the given order to the data using numpy
+        # fit polynomial of the given order
         coefficients = np.polyfit(original_steps, sigma_schedule_np, deg=order)
 
-        # Generate the new steps where we want to interpolate the data
+        # generate new steps where we want to interpolate the data
         target_steps_np = np.linspace(0, 1, target_steps)
 
-        # Evaluate the polynomial at the new steps
+        # eval polynomial at new steps
         interpolated_sigma_np = np.polyval(coefficients, target_steps_np)
 
-        # Convert the result back to a PyTorch tensor
         interpolated_sigma = torch.tensor(interpolated_sigma_np, device=sigma_schedule.device, dtype=sigma_schedule.dtype)
-
         return interpolated_sigma
 
     def interpolate_sigma_schedule_constrained(self, sigma_schedule, target_steps):
-        # Convert to numpy for interpolation
         sigma_schedule_np = sigma_schedule.cpu().numpy()
 
-        # Original steps
+        # orig steps
         original_steps = np.linspace(0, 1, len(sigma_schedule_np))
 
-        # Target steps for interpolation
+        # target steps for interpolation
         target_steps_np = np.linspace(0, 1, target_steps)
 
-        # Fit cubic spline with fixed start and end values
+        # fit cubic spline with fixed start and end values
         cs = CubicSpline(original_steps, sigma_schedule_np, bc_type=((1, 0.0), (1, 0.0)))
 
-        # Evaluate the spline at the target steps
+        # eval spline at the target steps
         interpolated_sigma_np = cs(target_steps_np)
 
-        # Convert back to a PyTorch tensor
         interpolated_sigma = torch.tensor(interpolated_sigma_np, device=sigma_schedule.device, dtype=sigma_schedule.dtype)
 
         return interpolated_sigma
     
     def interpolate_sigma_schedule_exp(self, sigma_schedule, target_steps):
-        # Step 1: Transform to log space
+        # transform to log space
         log_sigma_schedule = torch.log(sigma_schedule)
 
-        # Step 2: Define the original and target step ranges
+        # define the original and target step ranges
         original_steps = torch.linspace(0, 1, steps=len(sigma_schedule))
         target_steps = torch.linspace(0, 1, steps=target_steps)
 
-        # Step 3: Interpolate in log space
+        # interpolate in log space
         interpolated_log_sigma = F.interpolate(
             log_sigma_schedule.unsqueeze(0).unsqueeze(0),  # Add fake batch and channel dimensions
             size=target_steps.shape[0],
@@ -189,34 +185,29 @@ class sigmas_interpolate:
             align_corners=True
         ).squeeze()
 
-        # Step 4: Transform back to exponential space
+        # transform back to exponential space
         interpolated_sigma_schedule = torch.exp(interpolated_log_sigma)
 
         return interpolated_sigma_schedule
     
     def interpolate_sigma_schedule_power(self, sigma_schedule, target_steps):
-        # Convert to numpy for easier manipulation
         sigma_schedule_np = sigma_schedule.cpu().numpy()
-
-        # Original steps (assuming uniformly spaced)
         original_steps = np.linspace(1, len(sigma_schedule_np), len(sigma_schedule_np))
 
-        # Perform power regression using a log-log transformation
+        # power regression using a log-log transformation
         log_x = np.log(original_steps)
         log_y = np.log(sigma_schedule_np)
 
-        # Perform linear regression on log-log data
+        # linear regression on log-log data
         coefficients = np.polyfit(log_x, log_y, deg=1)  # degree 1 for linear fit in log-log space
-        a = np.exp(coefficients[1])  # Intercept (exp because of the log transform)
-        b = coefficients[0]  # Slope
+        a = np.exp(coefficients[1])  # a = "b" = intercept (exp because of the log transform)
+        b = coefficients[0]  # b = "m" = slope
 
-        # Generate the target steps for interpolation
         target_steps_np = np.linspace(1, len(sigma_schedule_np), target_steps)
 
-        # Predict using the power law: y = a * x^b
+        # power law prediction: y = a * x^b
         interpolated_sigma_np = a * (target_steps_np ** b)
 
-        # Convert back to a PyTorch tensor
         interpolated_sigma = torch.tensor(interpolated_sigma_np, device=sigma_schedule.device, dtype=sigma_schedule.dtype)
 
         return interpolated_sigma
@@ -228,17 +219,14 @@ class sigmas_interpolate:
         return F.interpolate(sigma_schedule.unsqueeze(0).unsqueeze(0), target_steps, mode='nearest').squeeze(0).squeeze(0)    
     
     def interpolate_nearest_neighbor(self, sigma_schedule, target_steps):
-        # Original steps (e.g., 0 to 1 normalized)
         original_steps = torch.linspace(0, 1, steps=len(sigma_schedule))
-
-        # Target steps (e.g., reducing down to 10 steps)
         target_steps = torch.linspace(0, 1, steps=target_steps)
 
-        # Nearest neighbor interpolation
+        # interpolate original -> target steps using nearest neighbor
         indices = torch.searchsorted(original_steps, target_steps)
-        indices = torch.clamp(indices, 0, len(sigma_schedule) - 1)  # Ensure indices are within valid range
+        indices = torch.clamp(indices, 0, len(sigma_schedule) - 1)  # clamp indices to valid range
 
-        # Select the closest values based on the indices
+        # set nearest neighbor via indices
         interpolated_sigma = sigma_schedule[indices]
 
         return interpolated_sigma
@@ -247,10 +235,7 @@ class sigmas_interpolate:
     def main(self, sigmas_0, sigmas_1, mode, order):
 
         self.order = order
-        #with torch.set_grad_enabled(True):
-        #    original_sigma = torch.tensor([0.1, 0.2, 0.4, 0.8, 1.6, 3.2, 6.4, 12.8, 25.6, 51.2])
-        #    sigmas_0 = interpolate_sigma_schedule_model(original_sigma, 100)
-        
+
         if   mode == "linear": 
             interpolate = self.interpolate_sigma_schedule_linear
         if   mode == "nearest": 
@@ -265,15 +250,12 @@ class sigmas_interpolate:
             with torch.inference_mode(False):
                 interpolate = interpolate_sigma_schedule_model
         
-        #if  (len(sigmas_0) < len(sigmas_1)):
-        #    sigmas_0 = interpolate(sigmas_0, len(sigmas_1))
-        #elif(len(sigmas_0) > len(sigmas_1)):
-        #    sigmas_1 = interpolate(sigmas_1, len(sigmas_0))
-
         sigmas_0 = interpolate(sigmas_0, len(sigmas_1))
         return (sigmas_0, sigmas_1,)
     
 class sigmas_noise_inversion:
+    # flip sigmas for unsampling, and pad both fwd/rev directions with null bytes to disable noise scaling, etc from the model.
+    # will cause model to return epsilon prediction instead of calculated denoised latent image.
     def __init__(self):
         pass
 
@@ -289,9 +271,9 @@ class sigmas_noise_inversion:
     RETURN_TYPES = ("SIGMAS","SIGMAS",)
     RETURN_NAMES = ("sigmas_fwd","sigmas_rev",)
     CATEGORY = "sampling/custom_sampling/sigmas"
+    DESCRIPTION = "For use with unsampling. Connect sigmas_fwd to the unsampling (first) node, and sigmas_rev to the sampling (second) node."
     
     def main(self, sigmas):
-        dtype = sigmas.dtype
         sigmas = sigmas.clone().to(torch.float64)
         
         null = torch.tensor([0.0], device=sigmas.device, dtype=sigmas.dtype)
@@ -302,40 +284,8 @@ class sigmas_noise_inversion:
         sigmas_rev = torch.cat([sigmas_rev, null])
         
         return (sigmas_fwd, sigmas_rev,)
-    
-"""class sigmas_noise_inversion:
-    def __init__(self):
-        pass
 
-    @classmethod
-    def INPUT_TYPES(s):
-        return {
-            "required": {
-                "sigmas": ("SIGMAS", {"forceInput": True}),
-            }
-        }
 
-    FUNCTION = "main"
-    RETURN_TYPES = ("SIGMAS","SIGMAS",)
-    RETURN_NAMES = ("sigmas_fwd","sigmas_rev",)
-    CATEGORY = "sampling/custom_sampling/sigmas"
-    
-    def main(self, sigmas):
-        dtype = sigmas.dtype
-        sigmas = sigmas.clone().to(torch.float64)
-        
-        if sigmas[-1] == 0.0:
-            sigmas[-1] = 0.0001
-        
-        null = torch.tensor([0.0], device=sigmas.device, dtype=sigmas.dtype)
-        sigmas_fwd = torch.flip(sigmas, dims=[0])
-        sigmas_fwd = torch.cat([sigmas_fwd, null])
-        sigmas_fwd[0] = 0.001
-        
-        sigmas_rev = torch.cat([null, sigmas])
-        
-        return (sigmas_fwd, sigmas_rev,)"""
-    
 def compute_sigma_next_variance_floor(sigma):
     return (-1 + torch.sqrt(1 + 4 * sigma)) / 2
 
@@ -354,6 +304,9 @@ class sigmas_variance_floor:
     FUNCTION = "main"
     RETURN_TYPES = ("SIGMAS",)
     CATEGORY = "sampling/custom_sampling/sigmas"
+    
+    DESCRIPTION = ("Process a sigma schedule so that any steps that are too large for variance-locked SDE sampling are replaced with the maximum permissible value."
+        "Will be very difficult to approach sigma = 0 due to the nature of the math, as steps become very small much below approximately sigma = 0.15 to 0.2.")
     
     def main(self, sigmas):
         dtype = sigmas.dtype
@@ -786,6 +739,10 @@ class sigmas_rescale:
     RETURN_TYPES = ("SIGMAS",)
     RETURN_NAMES = ("sigmas_rescaled",)
     CATEGORY = "sampling/custom_sampling/sigmas"
+    DESCRIPTION = ("Can be used to set denoise. Results are generally better than with the approach used by KSampler and most nodes with denoise values "
+                   "(which slice the sigmas schedule according to step count, not the noise level). Will also flip the sigma schedule if the start and end values are reversed." 
+                   )
+      
     def main(self, start=0, end=-1, sigmas=None):
 
         s_out_1 = ((sigmas - sigmas.min()) * (start - end)) / (sigmas.max() - sigmas.min()) + end     

@@ -9,7 +9,12 @@ from torch.distributions import StudentT, Laplace
 import numpy as np
 import pywt
 import functools
-#from opensimplex import OpenSimplex
+
+# Set this to "True" if you have installed OpenSimplex. Recommended to install without dependencies due to conflicting packages: pip3 install opensimplex --no-deps 
+OPENSIMPLEX_ENABLE = False
+
+if OPENSIMPLEX_ENABLE:
+    from opensimplex import OpenSimplex
 
 class PrecisionTool:
     def __init__(self, cast_type='fp64'):
@@ -20,7 +25,7 @@ class PrecisionTool:
         def wrapper(*args, **kwargs):
             if self.cast_type not in ['fp64', 'fp32', 'fp16']:
                 return func(*args, **kwargs)
-            # Find the first tensor argument to determine the target device
+
             target_device = None
             for arg in args:
                 if torch.is_tensor(arg):
@@ -32,7 +37,7 @@ class PrecisionTool:
                         target_device = v.device
                         break
             
-        # Recursive function to cast tensors in nested dictionaries
+        # recursively zs_recast tensors in nested dictionaries
             def cast_and_move_to_device(data):
                 if torch.is_tensor(data):
                     if self.cast_type == 'fp64':
@@ -279,7 +284,6 @@ class CascadeBPyramidNoiseGenerator(NoiseGenerator):
         self.update(levels=levels, mode=mode)
 
         b, c, h, w = self.size
-        orig_h, orig_w = h, w
 
         epsilon = torch.randn(self.size, dtype=self.dtype, layout=self.layout, device=self.device, generator=self.generator)
         multipliers = [1]
@@ -297,22 +301,6 @@ class CascadeBPyramidNoiseGenerator(NoiseGenerator):
         epsilon = epsilon / sum([m ** 2 for m in multipliers]) ** 0.5 #divides the epsilon tensor by the square root of the sum of the squared multipliers.
 
         return epsilon
-    
-    """def _pyramid_noise(self, epsilon, size_range=None, levels=10, scale_mode='nearest'):
-        epsilon = epsilon.clone()
-        multipliers = [1]
-        for i in range(1, levels):
-            m = 0.75 ** i
-            h, w = epsilon.size(-2) // (2 ** i), epsilon.size(-2) // (2 ** i)
-            if size_range is None or (size_range[0] <= h <= size_range[1] or size_range[0] <= w <= size_range[1]):
-                offset = torch.randn(epsilon.size(0), epsilon.size(1), h, w, device=self.device)
-                epsilon = epsilon + torch.nn.functional.interpolate(offset, size=epsilon.shape[-2:],
-                                                                    mode=scale_mode) * m
-                multipliers.append(m)
-            if h <= 1 or w <= 1:
-                break
-        epsilon = epsilon / sum([m ** 2 for m in multipliers]) ** 0.5
-        return epsilon"""
 
 
 class UniformNoiseGenerator(NoiseGenerator):
@@ -562,15 +550,18 @@ NOISE_GENERATOR_CLASSES = {
     "laplacian": LaplacianNoiseGenerator,
     "studentt": StudentTNoiseGenerator,
     "wavelet": WaveletNoiseGenerator,
-    #"simplex": SimplexNoiseGenerator,
     "perlin": PerlinNoiseGenerator,
 }
 
+if OPENSIMPLEX_ENABLE:
+    NOISE_GENERATOR_CLASSES.update({
+        "simplex": SimplexNoiseGenerator,
+    })
 
 NOISE_GENERATOR_NAMES = tuple(NOISE_GENERATOR_CLASSES.keys())
 
 @precision_tool.cast_tensor
-def prepare_noise(latent_image, seed, noise_type, noise_inds=None, alpha=1.0, k=1.0): # From `sample.py`
+def prepare_noise(latent_image, seed, noise_type, noise_inds=None, alpha=1.0, k=1.0): # adapted from comfy/sample.py: https://github.com/comfyanonymous/ComfyUI
     #optional arg skip can be used to skip and discard x number of noise generations for a given seed
     noise_func = NOISE_GENERATOR_CLASSES.get(noise_type)(x=latent_image, seed=seed, sigma_min=0.0291675, sigma_max=14.614642)
 

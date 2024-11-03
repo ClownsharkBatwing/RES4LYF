@@ -1,7 +1,8 @@
+# tiled sampler code adapted from https://github.com/BlenderNeko/ComfyUI_TiledKSampler 
+# and heavily modified for use with https://github.com/ClownsharkBatwing/UltraCascade
+
 import sys
 import os
-import itertools
-import numpy as np
 import copy
 from functools import partial
 
@@ -21,10 +22,6 @@ import latent_preview
 import comfy.clip_vision
 import folder_paths
 
-#from PIL import Image
-import torch.profiler
-
-from .extra_samplers import prepare_noise
 from .noise_classes import *
 
 
@@ -488,7 +485,7 @@ def sample_common(model, x, noise, noise_mask, noise_seed, tile_width, tile_heig
 
 
 
-class UltraSharkSampler_Tiled: #this is for use with https://github.com/ClownsharkBatwing/UltraCascade, heavily modified tiled sampler code adapted from https://github.com/BlenderNeko/ComfyUI_TiledKSampler
+class UltraSharkSampler_Tiled: #this is for use with https://github.com/ClownsharkBatwing/UltraCascade
     @classmethod
     def INPUT_TYPES(s):
         return {"required":
@@ -534,6 +531,7 @@ class UltraSharkSampler_Tiled: #this is for use with https://github.com/Clownsha
     FUNCTION = "sample"
 
     CATEGORY = "sampling"
+    DESCRIPTION = "For use with UltraCascade."
 
     def sample(self, model, noise_seed, add_noise, noise_is_latent, noise_type, alpha, k, tile_width, tile_height, tiling_strategy, cfg, positive, negative, latent_image, latent_noise=None, sampler=None, sigmas=None, guide=None,
                clip_name=None, strength=1.0, noise_augment=1.0, image_cv=None, max_tile_batch_size=3,

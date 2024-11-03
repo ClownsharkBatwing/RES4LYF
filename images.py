@@ -2,15 +2,14 @@ import torch
 import numpy as np
 import kornia
 import cv2
-import pywt
 from PIL import Image, ImageFilter, ImageEnhance
 import torch.nn.functional as F
 
-# Tensor to PIL
+# tensor -> PIL
 def tensor2pil(image):
     return Image.fromarray(np.clip(255. * image.cpu().numpy().squeeze(), 0, 255).astype(np.uint8))
 
-# PIL to Tensor
+# PIL -> tensor
 def pil2tensor(image):
     return torch.from_numpy(np.array(image).astype(np.float32) / 255.0).unsqueeze(0)
 
@@ -133,7 +132,7 @@ def cv2_layer(tensor, function):
 
 
 
-class Film_Grain: #Rewrite of the WAS Film Grain node, much improved speed and efficiency
+class Film_Grain: # Rewrite of the WAS Film Grain node, much improved speed and efficiency (https://github.com/WASasquatch/was-node-suite-comfyui)
     def __init__(self):
         pass
 
@@ -160,7 +159,7 @@ class Film_Grain: #Rewrite of the WAS Film Grain node, much improved speed and e
 
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         
-        #Apply grayscale noise with specified density, intensity, and highlights to a PIL image.
+        # apply grayscale noise with specified density/intensity/highlights to PIL image
         img_gray = img.convert('L')
         original_size = img.size
         img_gray = img_gray.resize(
@@ -476,7 +475,7 @@ class FastSmudgeBlur:
     CATEGORY = "image/filter"
 
     def main(self, images, kernel_size):
-        img = images.clone().detach().to('cuda').float()  # Detach and move to CUDA
+        img = images.clone().detach().to('cuda').float()
         
         # (b, h, w, c) to (b, c, h, w)
         img = img.permute(0, 3, 1, 2)
