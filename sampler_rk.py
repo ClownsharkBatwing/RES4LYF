@@ -463,8 +463,7 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
             implicit_steps, eta, eta_var = 0, 0, 0
             order, model_call, alpha_fn, t_fn, sigma_fn, FSAL, EPS_PRED = get_rk_methods_order_and_fn(rk_type)
         
-        h_orig = t_fn(sigma_next)-t_fn(sigma)
-        sigma_up, sigma, sigma_down, alpha_ratio = get_res4lyf_step_with_model2(model, sigma, sigma_next, eta, eta_var, noise_mode, h_orig)
+        sigma_up, sigma, sigma_down, alpha_ratio = get_res4lyf_step_with_model2(model, sigma, sigma_next, eta, eta_var, noise_mode, h=t_fn(sigma_next)-t_fn(sigma))
         t_down, t = t_fn(sigma_down), t_fn(sigma)
         h = t_down - t
         
@@ -510,18 +509,6 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
                     lg_weight = latent_guide_weights[_] * sigma #sigma_fn(t + h*ci[i+1])
                     ks = (1 - lg_weight) * ks   +   lg_weight * hard_light_blend_1
 
-                """ if UNSAMPLE == False and latent_guide is not None: ### OLD METHOD FOR HARD LIGHT BLENDING. MIGHT BE BETTER. NOT SURE. COMMENT OUT THE PREVIOUS ONE TO USE THIS ONE AGAIN.
-                    if EPS_PRED:
-                        denoised = alpha_fn(-h*ci[i+1]) * xi[(i+1)%order] - (sigma_fn(t + h*ci[i]) + 1e-8) * ks
-                    else:
-                        denoised = ks / sum(ab[i])
-                    lg_weight = latent_guide_weights[_] * sigma_fn(t + h*ci[i+1])
-                    hard_light_blend_1 = hard_light_blend(latent_guide, denoised)
-                    denoised = denoised - lg_weight * sigma_fn(t + h*ci[i+1]) * denoised  + (lg_weight * sigma_fn(t + h*ci[i+1]) * hard_light_blend_1) # * mask)
-                    if EPS_PRED:
-                        ks = (alpha_fn(-h*ci[i+1]) * xi[(i+1)%order] - denoised ) / (sigma_fn(t + h*ci[i]) + 1e-8)
-                    else:
-                        ks = denoised * sum(ab[i])"""
                 if sigma_next > sigma:
                     sigma_down_inv = sigmax - sigma_down
                     sigma_inv      = sigmax - sigma
@@ -539,13 +526,16 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
 
             if FSAL and _ > 0:
                 ki[0] = ki[order-1]
+                ki_u[0] = ki_u[order-1]
             if MULTISTEP and _ > 0:
                 ki[0] = denoised
+                ki_u[0] = ki_u[order-1]
             for ms in range(multistep_order):
                 ki[multistep_order - ms] = ki[multistep_order - ms - 1]
+                ki_u[multistep_order - ms] = ki_u[multistep_order - ms - 1]
             if iteration < implicit_steps:
                 ki[0] = model_call(model, xi[0], sigma_down, **extra_args)
-            ki_u[0] = uncond[0]
+                ki_u[0] = uncond[0]
 
             if EPS_PRED == True and exp_mode == False:
                 denoised = alpha_fn(-h*ci[i+1]) * xi[0] - sigma * ks
