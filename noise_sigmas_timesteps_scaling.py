@@ -263,8 +263,10 @@ def get_res4lyf_half_step2(sigma, sigma_next, c2=0.5, auto_c2=False, h_last=None
 
 def get_res4lyf_half_step3(sigma, sigma_next, c2=0.5, c3=1.0, t_fn=None, sigma_fn=None, t_fn_formula="", sigma_fn_formula="", ):
 
-  sigma_fn_x = eval(f"lambda t: {sigma_fn_formula}", {"t": None}) if sigma_fn_formula else sigma_fn
-  t_fn_x = eval(f"lambda sigma: {t_fn_formula}", {"sigma": None}) if t_fn_formula else t_fn
+  #sigma_fn_x = eval(f"lambda t: {sigma_fn_formula}", {"t": None}) if sigma_fn_formula else sigma_fn
+  #t_fn_x = eval(f"lambda sigma: {t_fn_formula}", {"sigma": None}) if t_fn_formula else t_fn
+  t_fn_x     = eval(f"lambda sigma: {t_fn_formula}", {"torch": torch}) if t_fn_formula else t_fn
+  sigma_fn_x = eval(f"lambda t: {sigma_fn_formula}", {"torch": torch}) if sigma_fn_formula else sigma_fn
       
   t_x, t_next_x = t_fn_x(sigma), t_fn_x(sigma_next)
   h_x = t_next_x - t_x
@@ -283,3 +285,11 @@ def get_res4lyf_half_step3(sigma, sigma_next, c2=0.5, c3=1.0, t_fn=None, sigma_f
   
   return c2, c3
 
+
+
+"""if t_fn_formula:
+    t_fn_x = eval(f"lambda sigma: {t_fn_formula}", {"torch": torch})
+if sigma_fn_formula:
+    sigma_fn_x = eval(f"lambda t: {sigma_fn_formula}", {"torch": torch})"""
+        
+    
