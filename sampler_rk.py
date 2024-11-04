@@ -468,6 +468,7 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
             ki[0]   = model_call(model, xi_0, sigma, **extra_args)
             if EPS_PRED and rk_type.startswith("deis"):
                 ki[0] = (xi_0 - ki[0]) / sigma
+                ki[0] = ki[0] * (sigma_down-sigma)/(sigma_next-sigma)
             ki_u[0] = uncond[0]
 
         if cfgpp != 0.0:
@@ -482,7 +483,7 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
                     ks     += ab[i][j] * ki[j]
                     ks_u   += ab[i][j] * ki_u[j]
                     ys     += ab[i][j] * y0
-
+                    
                 if LGW_MASK_RESCALE_MIN: 
                     lgw_mask = mask * (1 - latent_guide_weights[_]) + latent_guide_weights[_]
                 else:
@@ -520,6 +521,7 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
                     ki[i+1]   = model_call(model, xi[i+1], sigma_fn(t + h*ci[i+1]), **extra_args)
                     if EPS_PRED and rk_type.startswith("deis"):
                         ki[i+1]  = (xi[i+1] - ki[i+1]) / sigma_fn(t + h*ci[i+1])
+                        ki[i+1] = ki[i+1] * (sigma_down-sigma)/(sigma_next-sigma)
                     ki_u[i+1] = uncond[0]
 
             if FSAL and _ > 0:
