@@ -156,19 +156,15 @@ class set_precision_advanced:
             "64": 'fp64'
         }
 
-        # Set default dtype based on global_precision
         torch.set_default_dtype(dtype_map[global_precision])
-        # Set precision_tool cast type based on shark_precision
         precision_tool.set_cast_type(precision_map[shark_precision])
 
         latent_passthrough = latent_image["samples"]
 
-        # Convert latent_image["samples"] dtypes for static latent outputs
         latent_out16 = latent_image["samples"].to(torch.float16)
         latent_out32 = latent_image["samples"].to(torch.float32)
         latent_out64 = latent_image["samples"].to(torch.float64)
 
-        # Convert latent for cast to global output according to global_precision
         target_dtype = dtype_map[global_precision]
         if latent_image["samples"].dtype != target_dtype:
             latent_image["samples"] = latent_image["samples"].to(target_dtype)
@@ -1081,7 +1077,6 @@ class LatentNoiseBatch_gaussian_channels:
 
         x = latent["samples"]
         b, c, h, w = x.shape  
-        # x_noised = torch.zeros([steps, 4, h, w], device=x.device)
 
         noise_latents = torch.zeros([steps, 4, h, w], dtype=x.dtype, layout=x.layout, device=x.device)
 
@@ -1134,11 +1129,6 @@ class LatentNoiseBatch_gaussian:
 
         latent_samples = latent["samples"]
         b, c, h, w = latent_samples.shape  
-        #noise_latents = torch.zeros([steps, 4, h, w], device=latent_samples.device)
-
-        #for i in range(steps):
-        #    noise = self.adjustable_gaussian_noise_like(latent_samples, means[i].item(), stds[i].item(), seed+i)
-        #    noise_latents[i] = latent_samples + noise
 
         noise_latents = torch.zeros([steps, c, h, w], dtype=latent_samples.dtype, layout=latent_samples.layout, device=latent_samples.device)
 
@@ -1146,9 +1136,6 @@ class LatentNoiseBatch_gaussian:
 
         for i in range(steps):
             noise_latents[i] = noise_sampler(mean=means[i].item(), std=stds[i].item())
-            #noise = noise_sampler(mean=means[i].item(), std=stds[i].item())
-            #noise_latents[i] = latent_samples + noise
-
         return ({"samples": noise_latents}, )
 
 class LatentNoiseBatch_fractal:
@@ -1190,8 +1177,6 @@ class LatentNoiseBatch_fractal:
 
         for i in range(steps):
             noise_latents[i] = noise_sampler(alpha=alphas[i].item(), k=ks[i].item(), scale=0.1)
-            #noise = noise_sampler(alpha=alphas[i].item(), k=ks[i].item(), scale=0.1)
-            #noise_latents[i] = latent_samples + noise
 
         return ({"samples": noise_latents}, )
 
@@ -1298,11 +1283,8 @@ class LatentBatch_channels:
               luminosity, cyan_red, lime_purple, pattern_structure, 
               luminositys=None, cyan_reds=None, lime_purples=None, pattern_structures=None):
         
-        #pdb.set_trace()
         x = latent["samples"]
         b, c, h, w = x.shape  
-
-        # x_noised = torch.zeros([steps, 4, h, w], device=x.device)
 
         noise_latents = torch.zeros([b, c, h, w], dtype=x.dtype, layout=x.layout, device=x.device)
 
@@ -1443,11 +1425,8 @@ class LatentBatch_channels_16:
               chan_1, chan_2, chan_3, chan_4, chan_5, chan_6, chan_7, chan_8, chan_9, chan_10, chan_11, chan_12, chan_13, chan_14, chan_15, chan_16,
               chan_1s=None, chan_2s=None, chan_3s=None, chan_4s=None, chan_5s=None, chan_6s=None, chan_7s=None, chan_8s=None, chan_9s=None, chan_10s=None, chan_11s=None, chan_12s=None, chan_13s=None, chan_14s=None, chan_15s=None, chan_16s=None):
         
-        #pdb.set_trace()
         x = latent["samples"]
         b, c, h, w = x.shape  
-
-        # x_noised = torch.zeros([steps, 4, h, w], device=x.device)
 
         noise_latents = torch.zeros([b, c, h, w], dtype=x.dtype, layout=x.layout, device=x.device)
         chan_1s = initialize_or_scale(chan_1s, chan_1, b)
@@ -1499,7 +1478,6 @@ class latent_normalize_channels:
 
     def main(self, latent, mode, operation):
         x = latent["samples"]
-        #lat = latent["samples"]
         b, c, h, w = x.shape
 
         if mode == "full":
@@ -1525,3 +1503,30 @@ class latent_normalize_channels:
                         x[i, j] = x[i, j] / x[i, j].std()
 
         return ({"samples": x},)
+
+
+
+def hard_light_blend(base_latent, blend_latent):
+    blend_latent = (blend_latent - blend_latent.min()) / (blend_latent.max() - blend_latent.min())
+
+    positive_mask = base_latent >= 0
+    negative_mask = base_latent < 0
+    
+    positive_latent = base_latent * positive_mask.float()
+    negative_latent = base_latent * negative_mask.float()
+
+    positive_result = torch.where(blend_latent < 0.5,
+                                  2 * positive_latent * blend_latent,
+                                  1 - 2 * (1 - positive_latent) * (1 - blend_latent))
+
+    negative_result = torch.where(blend_latent < 0.5,
+                                  2 * negative_latent.abs() * blend_latent,
+                                  1 - 2 * (1 - negative_latent.abs()) * (1 - blend_latent))
+    negative_result = -negative_result
+
+    combined_result = positive_result * positive_mask.float() + negative_result * negative_mask.float()
+
+    return combined_result
+
+
+

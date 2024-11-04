@@ -1,5 +1,5 @@
-#Adapted from: https://github.com/zju-pi/diff-sampler/blob/main/gits-main/solver_utils.py
-#fixed the calcs for "rhoab" which suffered from an off-by-one error
+# Adapted from: https://github.com/zju-pi/diff-sampler/blob/main/gits-main/solver_utils.py
+# fixed the calcs for "rhoab" which suffered from an off-by-one error and made some other minor corrections
 
 import torch
 import numpy as np
@@ -73,7 +73,7 @@ def get_deis_coeff_list(t_steps, max_order, N=10000, deis_mode='tab'):
             if order == 1:
                 C.append([])
             else:
-                taus = torch.linspace(t_cur, t_next, N)   # split the interval for integral appximation
+                taus = torch.linspace(t_cur, t_next, N)   # split the interval for integral approximation
                 dtau = (t_next - t_cur) / N
                 prev_t = t_steps[[i - k for k in range(order)]]
                 coeff_temp = []

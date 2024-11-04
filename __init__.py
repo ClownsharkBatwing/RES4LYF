@@ -1,4 +1,4 @@
-from . import extra_samplers
+from . import sampler_rk
 from . import samplers
 from . import samplers_tiled
 from . import sigmas
@@ -13,6 +13,16 @@ import torch
 import os
 import shutil
 import sys
+
+flags = {
+    "test_samplers": False,
+}
+try:
+    from . import test_samplers
+    flags["test_samplers"] = True
+    print("Importing test_samplers.py")
+except ImportError:
+    pass
 
 """def get_ext_dir(subpath=None, mkdir=False):
     dir = os.path.dirname(__file__)
@@ -38,21 +48,66 @@ def install_js():
 
 install_js()"""
 
-extra_samplers.add_samplers()
+discard_penultimate_sigma_samplers = set((
+))
+
+def add_samplers():
+    from comfy.samplers import KSampler, k_diffusion_sampling
+    if hasattr(KSampler, "DISCARD_PENULTIMATE_SIGMA_SAMPLERS"):
+        KSampler.DISCARD_PENULTIMATE_SIGMA_SAMPLERS |= discard_penultimate_sigma_samplers
+    added = 0
+    for sampler in extra_samplers: #getattr(self, "sample_{}".format(extra_samplers))
+        if sampler not in KSampler.SAMPLERS:
+            try:
+                idx = KSampler.SAMPLERS.index("uni_pc_bh2") # *should* be last item in samplers list
+                KSampler.SAMPLERS.insert(idx+1, sampler) # add custom samplers (presumably) to end of list
+                setattr(k_diffusion_sampling, "sample_{}".format(sampler), extra_samplers[sampler])
+                added += 1
+            except ValueError as _err:
+                pass
+    if added > 0:
+        import importlib
+        importlib.reload(k_diffusion_sampling)
+
+extra_samplers = {
+    "rk":  sampler_rk.sample_rk,
+}
+
+add_samplers()
+
 
 NODE_CLASS_MAPPINGS = {
+    "ClownSampler": samplers.SamplerRK,
+    "SamplerRK": samplers.SamplerRK,
+
+    "SharkSampler": samplers.SharkSampler,
+    "UltraSharkSampler": samplers.UltraSharkSampler,
+    "UltraSharkSampler Tiled": samplers_tiled.UltraSharkSampler_Tiled,
+
+    "SamplerOptions_TimestepScaling": samplers.SamplerOptions_TimestepScaling,
+    "SamplerOptions_GarbageCollection": samplers.SamplerOptions_GarbageCollection,
+    "SD35L_TimestepPatcher": samplers.SD35L_TimestepPatcher,
+    
+    "AdvancedNoise": samplers.AdvancedNoise,
+
     "ConditioningAverageScheduler": conditioning.ConditioningAverageScheduler,
     "ConditioningMultiply": conditioning.ConditioningMultiply,
-    "ConditioningToBase64": conditioning.ConditioningToBase64,
     "Conditioning Recast FP64": conditioning.Conditioning_Recast64,
-    "Base64ToConditioning": conditioning.Base64ToConditioning,
     "StableCascade_StageB_Conditioning64": conditioning.StableCascade_StageB_Conditioning64,
     "ConditioningZeroAndTruncate": conditioning.ConditioningZeroAndTruncate,
+    
+    "ConditioningToBase64": conditioning.ConditioningToBase64,
+    "Base64ToConditioning": conditioning.Base64ToConditioning,
+
+    "Set Precision": latents.set_precision,
+    "Set Precision Universal": latents.set_precision_universal,
+    "Set Precision Advanced": latents.set_precision_advanced,
 
     "LatentNoised": samplers.LatentNoised,
     "LatentNoiseList": latents.LatentNoiseList,
     "LatentBatch_channels": latents.LatentBatch_channels,
     "LatentBatch_channels_16": latents.LatentBatch_channels_16,
+    "LatentNoiseBatch_perlin": latents.LatentNoiseBatch_perlin,
     "LatentNoiseBatch_fractal": latents.LatentNoiseBatch_fractal,
     "LatentNoiseBatch_gaussian": latents.LatentNoiseBatch_gaussian,
     "LatentNoiseBatch_gaussian_channels": latents.LatentNoiseBatch_gaussian_channels,
@@ -60,10 +115,7 @@ NODE_CLASS_MAPPINGS = {
     "Latent to Cuda": latents.latent_to_cuda,
     "Latent Batcher": latents.latent_batch,
     "Latent Normalize Channels": latents.latent_normalize_channels,
-    "Set Precision": latents.set_precision,
-    "Set Precision Universal": latents.set_precision_universal,
-    "Set Precision Advanced": latents.set_precision_advanced,
-    "LatentNoiseBatch_perlin": latents.LatentNoiseBatch_perlin,
+
     "EmptyLatentImage64": latents.EmptyLatentImage64,
     "EmptyLatentImageCustom": latents.EmptyLatentImageCustom,
     "StableCascade_StageC_VAEEncode_Exact": latents.StableCascade_StageC_VAEEncode_Exact,
@@ -72,34 +124,6 @@ NODE_CLASS_MAPPINGS = {
     "LatentPhaseMagnitudeMultiply": latents.LatentPhaseMagnitudeMultiply,
     "LatentPhaseMagnitudeOffset": latents.LatentPhaseMagnitudeOffset,
     "LatentPhaseMagnitudePower": latents.LatentPhaseMagnitudePower,
-
-    "AdvancedNoise": samplers.AdvancedNoise,
-    "ClownGuides": samplers.ClownGuides,
-    "ClownSamplerLegacy": samplers.ClownSamplerLegacy,
-    "SharkSampler": samplers.SharkSampler,
-    "UltraSharkSampler": samplers.UltraSharkSampler,
-    "UltraSharkSampler Tiled": samplers_tiled.UltraSharkSampler_Tiled,
-    "SamplerDEIS_SDE": samplers.SamplerDEIS_SDE,
-    "SamplerDPMPP_DualSDE_Advanced": samplers.SamplerDPMPP_DUALSDE_MOMENTUMIZED_ADVANCED,
-    "SamplerDPMPP_SDE_Advanced": samplers.SamplerDPMPP_SDE_ADVANCED,
-    "SamplerDPMPP_SDE_CFG++_Advanced": samplers.SamplerDPMPP_SDE_CFGPP_ADVANCED,
-    "SamplerRES_Implicit": samplers.SamplerRES_Implicit,
-    "SamplerRES3_Implicit_Automation": samplers.SamplerRES3_Implicit_Automation,
-    "SamplerRES3_Implicit": samplers.SamplerRES3_Implicit,
-    "SamplerSDE_Implicit": samplers.SamplerSDE_Implicit,
-    
-    "SamplerNoiseInversion": samplers.SamplerNoiseInversion,
-
-    "SamplerOptions_TimestepScaling": samplers.SamplerOptions_TimestepScaling,
-    "SD35L_TimestepPatcher": samplers.SD35L_TimestepPatcher,
-    
-    "SamplerDPMPP_2S_Ancestral_Advanced": samplers.SamplerDPMPP_2S_Ancestral_Advanced,
-    "SamplerDPMPP_2M_SDE_Advanced": samplers.SamplerDPMPP_2M_SDE_Advanced,
-    "SamplerDPMPP_3M_SDE_Advanced": samplers.SamplerDPMPP_3M_SDE_Advanced,
-    "SamplerCorona": samplers.SamplerCorona,
-    "ClownSampler": samplers.SamplerRK,
-    "SamplerRK": samplers.SamplerRK,
-    "SamplerRK_Test": samplers.SamplerRK_Test,
 
     "Sigmas Recast": sigmas.set_precision_sigmas,
     "Sigmas Noise Inversion": sigmas.sigmas_noise_inversion,
@@ -139,7 +163,6 @@ NODE_CLASS_MAPPINGS = {
     "Tan Scheduler 2": sigmas.tan_scheduler_2stage,
     "Tan Scheduler 2 Simple": sigmas.tan_scheduler_2stage_simple,
     
-    
     "Image Channels LAB": images.Image_Channels_LAB,
     "Image Median Blur": images.ImageMedianBlur,
     "Image Pair Split": images.Image_Pair_Split,
@@ -148,10 +171,15 @@ NODE_CLASS_MAPPINGS = {
     "Frequency Separation Hard Light": images.Frequency_Separation_Hard_Light,
     "Frequency Separation Hard Light LAB": images.Frequency_Separation_Hard_Light_LAB,
     
-
     "UNetSave": models.UNetSave,
 }
 
+if flags["test_samplers"]:
+    NODE_CLASS_MAPPINGS.update({
+        "SamplerRK_Test": test_samplers.SamplerRK_Test,
+    })
+
 WEB_DIRECTORY = "./web/js"
 __all__ = ["NODE_CLASS_MAPPINGS",  "WEB_DIRECTORY"]
+
 

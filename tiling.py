@@ -2,7 +2,8 @@ import torch
 import itertools
 import numpy as np
 
-# tiled sampler code adapted from https://github.com/BlenderNeko/ComfyUI_TiledKSampler
+# tiled sampler code adapted from https://github.com/BlenderNeko/ComfyUI_TiledKSampler 
+# for use with https://github.com/ClownsharkBatwing/UltraCascade
 
 def grouper(n, iterable):
     it = iter(iterable)

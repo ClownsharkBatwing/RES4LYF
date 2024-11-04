@@ -28,6 +28,7 @@ class UNetSave:
     OUTPUT_NODE = True
 
     CATEGORY = "advanced/model_merging"
+    DESCRIPTION = "Save a .safetensors containing only the model data."
 
     def save(self, model, filename_prefix, prompt=None, extra_pnginfo=None):
         save_checkpoint(model, clip=None, vae=None, filename_prefix=filename_prefix, output_dir=self.output_dir, prompt=prompt, extra_pnginfo=extra_pnginfo)
