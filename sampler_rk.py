@@ -323,7 +323,7 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
               sigma_fn_formula="", t_fn_formula="",
                   eta=0.5, eta_var=0.0, s_noise=1., alpha=-1.0, k=1.0, scale=0.1, c2=0.5, c3=1.0, MULTISTEP=False, cfgpp=0.5, implicit_steps=0, reverse_weight=0.0, exp_mode=False,
                   latent_guide=None, latent_guide_weight=0.0, latent_guide_weights=None,
-                  GARBAGE_COLLECT=False, mask=None,
+                  GARBAGE_COLLECT=False, mask=None, LGW_MASK_RESCALE_MIN=True,
                   ):
     extra_args = {} if extra_args is None else extra_args
     
@@ -447,8 +447,19 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
                     sigma_down_inv, sigma_inv = sigma_down, sigma
                     
                 cfgpp_term = cfgpp*h*(ks - ks_u)
-                xi[(i+1)%order]  = (1-mask*UNSAMPLE * latent_guide_weights[_]) * ( alpha_fn(-h*ci[i+1])       * (xi_0 + cfgpp_term)   +    h*ks )     \
-                                    + mask*UNSAMPLE * latent_guide_weights[_]  * ( (sigma_down_inv/sigma_inv) * (xi_0 + cfgpp_term)   +   (sigmax - sigma_down_inv/sigma_inv)*ys )
+
+                #tensor = (mask - mask.min()) / (mask.max() - mask.min())
+
+                # Apply the new range transformation to [new_min, 1]
+                if LGW_MASK_RESCALE_MIN: 
+                    lgw_mask = mask * (1 - latent_guide_weights[_]) + latent_guide_weights[_]
+                else:
+                    lgw_mask = mask * latent_guide_weights[_]
+                xi[(i+1)%order]  = (1-UNSAMPLE * lgw_mask) * ( alpha_fn(-h*ci[i+1])       * (xi_0 + cfgpp_term)   +    h*ks )     \
+                                    + UNSAMPLE * lgw_mask  * ( (sigma_down_inv/sigma_inv) * (xi_0 + cfgpp_term)   +   (sigmax - sigma_down_inv/sigma_inv)*ys )
+                                                                
+                #xi[(i+1)%order]  = (1-mask*UNSAMPLE * latent_guide_weights[_]) * ( alpha_fn(-h*ci[i+1])       * (xi_0 + cfgpp_term)   +    h*ks )     \
+                #                    + mask*UNSAMPLE * latent_guide_weights[_]  * ( (sigma_down_inv/sigma_inv) * (xi_0 + cfgpp_term)   +   (sigmax - sigma_down_inv/sigma_inv)*ys )
                         
                 if (i+1)%order > 0 and (i+1)%order > multistep_order-1:
                     if GARBAGE_COLLECT: gc.collect(); torch.cuda.empty_cache()
