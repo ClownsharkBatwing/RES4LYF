@@ -176,10 +176,11 @@ def get_rk_methods(rk_type, h, c2=0.5, c3=1.0, h_prev=None, h_prev2=None, stepco
         if stepcount < order:
             if order == 4:
                 rk_type = "res_3s"
-            if order == 3:
+                order = 3
+            elif order == 3:
                 rk_type = "res_3s"
-            if order == 2:
-                rk_type = "res_3s"
+            elif order == 2:
+                rk_type = "res_2s"
         else:
             rk_type = "deis"
             multistep_order = order-1
@@ -350,8 +351,8 @@ def get_rk_methods_order_and_fn(rk_type):
         MULTISTEP=True
     return len(ci)-1, model_call, alpha_fn, t_fn, sigma_fn, FSAL, EPS_PRED #MULTISTEP
 
-def get_rk_methods_coeff(rk_type, h, c2, c3, h_cur=None, h_prev=None, h_prev2=None, stepcount=0, sigmas=None):
-    ab, ci, multistep_order, model_call, alpha_fn, t_fn, sigma_fn, FSAL, EPS_PRED = get_rk_methods(rk_type, h, c2, c3, h_prev, h_prev2, stepcount=0, sigmas=None)
+def get_rk_methods_coeff(rk_type, h, c2, c3, h_prev=None, h_prev2=None, stepcount=0, sigmas=None):
+    ab, ci, multistep_order, model_call, alpha_fn, t_fn, sigma_fn, FSAL, EPS_PRED = get_rk_methods(rk_type, h, c2, c3, h_prev, h_prev2, stepcount, sigmas)
     return ab, ci, multistep_order, EPS_PRED
 
 def get_epsilon(model, x, sigma, **extra_args):
@@ -429,7 +430,7 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
         t_fn = lambda sigma: sigma.log().neg()
         sigma_fn = lambda t: t.neg().exp() 
     
-    xi, ki, ki_u = [torch.zeros_like(x)]*(order+1), [torch.zeros_like(x)]*order, [torch.zeros_like(x)]*order
+    xi, ki, ki_u = [torch.zeros_like(x)]*(order+2), [torch.zeros_like(x)]*(order+1), [torch.zeros_like(x)]*(order+1)
     h_prev, h_prev2 = None, None
         
     xi[0] = x
