@@ -332,7 +332,7 @@ class SamplerRK:
                      "noise_sampler_type": (NOISE_GENERATOR_NAMES, {"default": "brownian"}),
                      "alpha": ("FLOAT", {"default": 0.0, "min": -10000.0, "max": 10000.0, "step":0.1, "round": False, "tooltip": "Fractal noise mode: <0 = extra high frequency noise, >0 = extra low frequency noise, 0 = white noise."}),
                      "k": ("FLOAT", {"default": 1.0, "min": -10000.0, "max": 10000.0, "step":2.0, "round": False, "tooltip": "Fractal noise mode: all that matters is positive vs. negative. Effect unclear."}),
-                     "noise_seed": ("INT", {"default": -1, "min": -1, "max": 0xffffffffffffffff}),
+                     "noise_seed": ("INT", {"default": -1, "min": -1, "max": 0xffffffffffffffff, "tooltip": "Seed for the SDE noise that is added after each step if eta or eta_var are non-zero. If set to -1, it will use the increment the seed most recently used by the workflow."}),
                      "rk_type": (["dormand-prince_6s", 
                                   "dormand-prince_7s", 
                                   "dormand-prince_13s", 
@@ -373,6 +373,7 @@ class SamplerRK:
                     "optional": 
                     {
                         "latent_guide": ("LATENT", ),
+                        "latent_guide_mask": ("MASK", ),
                         "latent_guide_weights": ("SIGMAS", ),
                     }  
                }
@@ -383,7 +384,7 @@ class SamplerRK:
 
     def get_sampler(self, eta=0.25, eta_var=0.0, s_noise=1.0, alpha=-1.0, k=1.0, cfgpp=0.0, multistep=False, noise_sampler_type="brownian", noise_mode="hard", noise_seed=-1, rk_type="dormand-prince", 
                     exp_mode=False, t_fn_formula=None, sigma_fn_formula=None, implicit_steps=0,
-                    latent_guide=None, latent_guide_weight=0.0, latent_guide_weights=None,
+                    latent_guide=None, latent_guide_weight=0.0, latent_guide_weights=None, latent_guide_mask=None,
                     ):
         sampler_name = "rk"
 
@@ -394,7 +395,7 @@ class SamplerRK:
 
         sampler = comfy.samplers.ksampler(sampler_name, {"eta": eta, "eta_var": eta_var, "s_noise": s_noise, "alpha": alpha, "k": k, "cfgpp": cfgpp, "MULTISTEP": multistep, "noise_sampler_type": noise_sampler_type, "noise_mode": noise_mode, "noise_seed": noise_seed, "rk_type": rk_type, 
                                                          "exp_mode": exp_mode, "t_fn_formula": t_fn_formula, "sigma_fn_formula": sigma_fn_formula, "implicit_steps": implicit_steps,
-                                                         "latent_guide": latent_guide, "latent_guide_weight": latent_guide_weight, "latent_guide_weights": latent_guide_weights,})
+                                                         "latent_guide": latent_guide, "mask": latent_guide_mask, "latent_guide_weight": latent_guide_weight, "latent_guide_weights": latent_guide_weights,})
         return (sampler, )
 
     sigma_fn = lambda t: (t.exp() + 1) ** -1 + 1e-5
@@ -429,6 +430,40 @@ class SamplerOptions_TimestepScaling:
         sampler.extra_options['t_fn_formula']     = t_fn_formula
         sampler.extra_options['sigma_fn_formula'] = sigma_fn_formula
 
+        return (sampler, )
+
+
+def time_snr_shift_exponential(alpha, t):
+    return math.exp(alpha) / (math.exp(alpha) + (1 / t - 1) ** 1.0)
+
+def time_snr_shift_linear(alpha, t):
+    if alpha == 1.0:
+        return t
+    return alpha * t / (1 + (alpha - 1) * t)
+
+    
+class SamplerOptions_GarbageCollection:
+    @classmethod
+    def INPUT_TYPES(s):
+        return {"required":
+                    {
+                     "sampler": ("SAMPLER", ),
+                     "garbage_collection": ("BOOLEAN", {"default": True}),
+                    },
+                     "optional": 
+                    {
+                    }  
+               }
+    RETURN_TYPES = ("SAMPLER",)
+    RETURN_NAMES = ("sampler",)
+    FUNCTION = "set_sampler_extra_options"
+    
+    CATEGORY = "sampling/custom_sampling/samplers"
+    DESCRIPTION = "Patches ClownSampler's to use garbage collection after every step. This can help with OOM issues during inference for large models like Flux. The tradeoff is slower sampling."
+
+    def set_sampler_extra_options(self, sampler, garbage_collection):
+        sampler = copy.deepcopy(sampler)
+        sampler.extra_options['GARBAGE_COLLECT'] = garbage_collection
         return (sampler, )
 
 
@@ -478,4 +513,3 @@ class SD35L_TimestepPatcher:
         model.model.model_sampling.register_buffer('sigmas', ts)
         
         return (model,)
-

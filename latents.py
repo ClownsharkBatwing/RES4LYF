@@ -1503,3 +1503,30 @@ class latent_normalize_channels:
                         x[i, j] = x[i, j] / x[i, j].std()
 
         return ({"samples": x},)
+
+
+
+def hard_light_blend(base_latent, blend_latent):
+    blend_latent = (blend_latent - blend_latent.min()) / (blend_latent.max() - blend_latent.min())
+
+    positive_mask = base_latent >= 0
+    negative_mask = base_latent < 0
+    
+    positive_latent = base_latent * positive_mask.float()
+    negative_latent = base_latent * negative_mask.float()
+
+    positive_result = torch.where(blend_latent < 0.5,
+                                  2 * positive_latent * blend_latent,
+                                  1 - 2 * (1 - positive_latent) * (1 - blend_latent))
+
+    negative_result = torch.where(blend_latent < 0.5,
+                                  2 * negative_latent.abs() * blend_latent,
+                                  1 - 2 * (1 - negative_latent.abs()) * (1 - blend_latent))
+    negative_result = -negative_result
+
+    combined_result = positive_result * positive_mask.float() + negative_result * negative_mask.float()
+
+    return combined_result
+
+
+

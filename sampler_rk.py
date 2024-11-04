@@ -1,23 +1,18 @@
 import torch
-from torch import FloatTensor
-from tqdm.auto import trange
-from math import pi
-import math
-import copy
-
-
 import torch.nn.functional as F
 import torchvision.transforms as T
 
-import functools
-
-from .noise_classes import *
+from tqdm.auto import trange
+import math
+import copy
+import gc
 
 import comfy.model_patcher
+
+from .noise_classes import *
 from .extra_samplers_helpers import get_deis_coeff_list
-
-
 from .noise_sigmas_timesteps_scaling import get_res4lyf_step_with_model, get_res4lyf_half_step3
+from .latents import hard_light_blend
 
 
 def phi(j, neg_h):
@@ -171,6 +166,7 @@ rk_coeff = {
     ),
 }
 
+
 def get_rk_methods(rk_type, h, c2=0.5, c3=1.0, h_prev=None, h_prev2=None):
     FSAL = False
     multistep_order = 0
@@ -322,41 +318,27 @@ def get_denoised(model, x, sigma, **extra_args):
     x0 = model(x, sigma * s_in, **extra_args)
     return x0
 
-        
-def hard_light_blend(base_latent, blend_latent):
-    blend_latent = (blend_latent - blend_latent.min()) / (blend_latent.max() - blend_latent.min())
-
-    positive_mask = base_latent >= 0
-    negative_mask = base_latent < 0
-    
-    positive_latent = base_latent * positive_mask.float()
-    negative_latent = base_latent * negative_mask.float()
-
-    positive_result = torch.where(blend_latent < 0.5,
-                                  2 * positive_latent * blend_latent,
-                                  1 - 2 * (1 - positive_latent) * (1 - blend_latent))
-
-    negative_result = torch.where(blend_latent < 0.5,
-                                  2 * negative_latent.abs() * blend_latent,
-                                  1 - 2 * (1 - negative_latent.abs()) * (1 - blend_latent))
-    negative_result = -negative_result
-
-    combined_result = positive_result * positive_mask.float() + negative_result * negative_mask.float()
-
-    return combined_result
-
-
 
 def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, noise_sampler=None, noise_sampler_type="brownian", noise_mode="hard", noise_seed=-1, rk_type="dormand-prince", 
               sigma_fn_formula="", t_fn_formula="",
                   eta=0.5, eta_var=0.0, s_noise=1., alpha=-1.0, k=1.0, scale=0.1, c2=0.5, c3=1.0, MULTISTEP=False, cfgpp=0.5, implicit_steps=0, reverse_weight=0.0, exp_mode=False,
-                  latent_guide=None, latent_guide_weight=0.0, latent_guide_weights=None,):
+                  latent_guide=None, latent_guide_weight=0.0, latent_guide_weights=None,
+                  GARBAGE_COLLECT=False, mask=None,
+                  ):
     extra_args = {} if extra_args is None else extra_args
     
     if latent_guide is not None:
         y0 = latent_guide = model.inner_model.inner_model.process_latent_in(latent_guide['samples']).clone().to(x.device)
     else:
         y0 = torch.zeros_like(x)
+        
+    if mask is None:
+        mask = torch.ones_like(x)
+    else:
+        mask = mask.unsqueeze(1)
+        mask = mask.repeat(1, x.shape[1], 1, 1) 
+        mask = F.interpolate(mask, size=(x.shape[2], x.shape[3]), mode='bilinear', align_corners=False)
+        mask = mask.to(x.dtype).to(x.device)
         
     UNSAMPLE = False
     if sigmas[0] == 0.0:      #remove padding used to avoid need for model patch with noise inversion
@@ -399,10 +381,7 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
         t_fn = lambda sigma: sigma.log().neg()
         sigma_fn = lambda t: t.neg().exp() 
     
-    xi   = [torch.zeros_like(x)] * (order+1)
-    ki   = [torch.zeros_like(x)] *  order
-    ki_u = [torch.zeros_like(x)] *  order
-    
+    xi, ki, ki_u = [torch.zeros_like(x)]*(order+1), [torch.zeros_like(x)]*order, [torch.zeros_like(x)]*order
     h_prev, h_prev2 = None, None
         
     xi[0] = x
@@ -458,19 +437,21 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
                         lg = (alpha_fn(-h*ci[i+1]) * xi[0] - latent_guide) / (sigma_fn(t + h*ci[i]) + 1e-8)
                     hard_light_blend_1 = hard_light_blend(lg, ks)
                     lg_weight = latent_guide_weights[_] * sigma #sigma_fn(t + h*ci[i+1])
-                    ks = (1 - lg_weight) * ks   +   lg_weight * hard_light_blend_1
+                    ks = (1 - mask * lg_weight) * ks   +   mask * lg_weight * hard_light_blend_1
+                    #denoised = denoised - lg_weight * sigma_next * denoised  + (lg_weight * sigma_next * hard_light_blend_1 * mask)
 
                 if sigma_next > sigma:
-                    sigma_down_inv = sigmax - sigma_down
+                    sigma_down_inv = sigmax - sigma_fn(t + h*ci[i+1]) #sigma_down
                     sigma_inv      = sigmax - sigma
                 else:
                     sigma_down_inv, sigma_inv = sigma_down, sigma
                     
                 cfgpp_term = cfgpp*h*(ks - ks_u)
-                xi[(i+1)%order]  = (1-UNSAMPLE * latent_guide_weights[_]) * ( alpha_fn(-h*ci[i+1])       * (xi_0 + cfgpp_term)   +    h*ks )     \
-                                    + UNSAMPLE * latent_guide_weights[_]  * ( (sigma_down_inv/sigma_inv) * (xi_0 + cfgpp_term)   +   (sigmax - sigma_down_inv/sigma_inv)*ys )
+                xi[(i+1)%order]  = (1-mask*UNSAMPLE * latent_guide_weights[_]) * ( alpha_fn(-h*ci[i+1])       * (xi_0 + cfgpp_term)   +    h*ks )     \
+                                    + mask*UNSAMPLE * latent_guide_weights[_]  * ( (sigma_down_inv/sigma_inv) * (xi_0 + cfgpp_term)   +   (sigmax - sigma_down_inv/sigma_inv)*ys )
                         
                 if (i+1)%order > 0 and (i+1)%order > multistep_order-1:
+                    if GARBAGE_COLLECT: gc.collect(); torch.cuda.empty_cache()
                     ki[i+1]   = model_call(model, xi[i+1], sigma_fn(t + h*ci[i+1]), **extra_args)
                     ki_u[i+1] = uncond[0]
 
@@ -502,6 +483,7 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
             
         h_prev2 = h_prev
         h_prev = h
+        
         
     return xi[0]
 

@@ -85,6 +85,7 @@ NODE_CLASS_MAPPINGS = {
     "UltraSharkSampler Tiled": samplers_tiled.UltraSharkSampler_Tiled,
 
     "SamplerOptions_TimestepScaling": samplers.SamplerOptions_TimestepScaling,
+    "SamplerOptions_GarbageCollection": samplers.SamplerOptions_GarbageCollection,
     "SD35L_TimestepPatcher": samplers.SD35L_TimestepPatcher,
     
     "AdvancedNoise": samplers.AdvancedNoise,
