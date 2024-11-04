@@ -538,7 +538,8 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
             if EPS_PRED == True and exp_mode == False and not rk_type.startswith("deis"):
                 denoised = alpha_fn(-h*ci[i+1]) * xi[0] - sigma * ks
             elif EPS_PRED == True and rk_type.startswith("deis"):
-                denoised = - (ki[-1] * sigma_fn(t + h*ci[-1]) - xi[0])
+                denoised = xi[0] - (ki[0] * sigma)
+                #denoised =  xi[0] - (ki[-1] * sigma_fn(t + h*ci[-1]))
             else:
                 denoised = ks / sum(ab[i])
             
