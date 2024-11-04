@@ -334,6 +334,7 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
         
     if mask is None:
         mask = torch.ones_like(x)
+        LGW_MASK_RESCALE_MIN = False
     else:
         mask = mask.unsqueeze(1)
         mask = mask.repeat(1, x.shape[1], 1, 1) 
@@ -431,13 +432,20 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
                     ks_u   += ab[i][j] * ki_u[j]
                     ys     += ab[i][j] * y0
 
+                if LGW_MASK_RESCALE_MIN: 
+                    lgw_mask = mask * (1 - latent_guide_weights[_]) + latent_guide_weights[_]
+                else:
+                    lgw_mask = mask * latent_guide_weights[_]
+                    
                 if UNSAMPLE == False and latent_guide is not None:
                     lg = latent_guide * sum(ab[i])
                     if EPS_PRED:
                         lg = (alpha_fn(-h*ci[i+1]) * xi[0] - latent_guide) / (sigma_fn(t + h*ci[i]) + 1e-8)
                     hard_light_blend_1 = hard_light_blend(lg, ks)
                     lg_weight = latent_guide_weights[_] * sigma #sigma_fn(t + h*ci[i+1])
-                    ks = (1 - mask * lg_weight) * ks   +   mask * lg_weight * hard_light_blend_1
+                    #ks = (1 - mask * lg_weight) * ks   +   mask * lg_weight * hard_light_blend_1
+                    
+                    ks = (1 - lgw_mask) * ks   +   lgw_mask * hard_light_blend_1
                     #denoised = denoised - lg_weight * sigma_next * denoised  + (lg_weight * sigma_next * hard_light_blend_1 * mask)
 
                 if sigma_next > sigma:
@@ -451,10 +459,7 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
                 #tensor = (mask - mask.min()) / (mask.max() - mask.min())
 
                 # Apply the new range transformation to [new_min, 1]
-                if LGW_MASK_RESCALE_MIN: 
-                    lgw_mask = mask * (1 - latent_guide_weights[_]) + latent_guide_weights[_]
-                else:
-                    lgw_mask = mask * latent_guide_weights[_]
+
                 xi[(i+1)%order]  = (1-UNSAMPLE * lgw_mask) * ( alpha_fn(-h*ci[i+1])       * (xi_0 + cfgpp_term)   +    h*ks )     \
                                     + UNSAMPLE * lgw_mask  * ( (sigma_down_inv/sigma_inv) * (xi_0 + cfgpp_term)   +   (sigmax - sigma_down_inv/sigma_inv)*ys )
                                                                 
