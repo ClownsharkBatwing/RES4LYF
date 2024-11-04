@@ -167,9 +167,23 @@ rk_coeff = {
 }
 
 
-def get_rk_methods(rk_type, h, c2=0.5, c3=1.0, h_prev=None, h_prev2=None):
+def get_rk_methods(rk_type, h, c2=0.5, c3=1.0, h_prev=None, h_prev2=None, stepcount=0, sigmas=None):
     FSAL = False
     multistep_order = 0
+    
+    if rk_type[:4] == "deis": 
+        order = int(rk_type[-2])
+        if stepcount < order:
+            if order == 4:
+                rk_type = "res_3s"
+            if order == 3:
+                rk_type = "res_3s"
+            if order == 2:
+                rk_type = "res_3s"
+        else:
+            rk_type = "deis"
+            multistep_order = order-1
+
     
     if rk_type[-2:] == "2m": #multistep method
         if h_prev is not None: 
@@ -206,6 +220,39 @@ def get_rk_methods(rk_type, h, c2=0.5, c3=1.0, h_prev=None, h_prev2=None):
         EPS_PRED = False
     
     match rk_type:
+        case "deis": 
+            model_call = get_epsilon
+            alpha_fn = lambda h: 1
+            t_fn = lambda sigma: sigma
+            sigma_fn = lambda t: t
+            EPS_PRED = True
+            
+            coeff_list = get_deis_coeff_list(sigmas, multistep_order+1, deis_mode="rhoab")
+            coeff_list = [[elem / h for elem in inner_list] for inner_list in coeff_list]
+            if multistep_order == 1:
+                b1, b2 = coeff_list[stepcount]
+                ab = [
+                        [0, 0],
+                        [b1, b2],
+                ]
+                ci = [0, 0, 0]
+            if multistep_order == 2:
+                b1, b2, b3 = coeff_list[stepcount]
+                ab = [
+                        [0, 0, 0],
+                        [0, 0, 0],
+                        [b1, b2, b3],
+                ]
+                ci = [0, 0, 0, 0]
+            if multistep_order == 3:
+                b1, b2, b3, b4 = coeff_list[stepcount]
+                ab = [
+                        [0, 0, 0, 0],
+                        [0, 0, 0, 0],
+                        [0, 0, 0, 0],
+                        [b1, b2, b3, b4],
+                ]
+                ci = [0, 0, 0, 0, 0]
 
         case "dormand-prince_6s":
             FSAL = True
@@ -303,9 +350,9 @@ def get_rk_methods_order_and_fn(rk_type):
         MULTISTEP=True
     return len(ci)-1, model_call, alpha_fn, t_fn, sigma_fn, FSAL, EPS_PRED #MULTISTEP
 
-def get_rk_methods_coeff(rk_type, h, c2, c3, h_prev=None, h_prev2=None):
-    ab, ci, multistep_order, model_call, alpha_fn, t_fn, sigma_fn, FSAL, EPS_PRED = get_rk_methods(rk_type, h, c2, c3, h_prev, h_prev2)
-    return ab, ci, multistep_order
+def get_rk_methods_coeff(rk_type, h, c2, c3, h_cur=None, h_prev=None, h_prev2=None, stepcount=0, sigmas=None):
+    ab, ci, multistep_order, model_call, alpha_fn, t_fn, sigma_fn, FSAL, EPS_PRED = get_rk_methods(rk_type, h, c2, c3, h_prev, h_prev2, stepcount=0, sigmas=None)
+    return ab, ci, multistep_order, EPS_PRED
 
 def get_epsilon(model, x, sigma, **extra_args):
     s_in = x.new_ones([x.shape[0]])
@@ -400,7 +447,8 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
         h = t_down - t
         
         c2, c3 = get_res4lyf_half_step3(sigma, sigma_down, t_fn=t_fn, sigma_fn=sigma_fn, t_fn_formula=t_fn_formula, sigma_fn_formula=sigma_fn_formula)
-        ab, ci, multistep_order = get_rk_methods_coeff(rk_type, h, c2, c3, h_prev, h_prev2)
+        ab, ci, multistep_order, EPS_PRED = get_rk_methods_coeff(rk_type, h, c2, c3, h_prev, h_prev2, _, sigmas)
+        order = len(ci)-1
         
         if exp_mode:
             ci[-1] = 1.0
@@ -417,6 +465,8 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
         
         if (MULTISTEP == False and FSAL == False) or _ == 0:
             ki[0]   = model_call(model, xi_0, sigma, **extra_args)
+            if EPS_PRED and rk_type.startswith("deis"):
+                ki[0] = (xi_0 - ki[0]) / sigma
             ki_u[0] = uncond[0]
 
         if cfgpp != 0.0:
@@ -458,8 +508,6 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
 
                 #tensor = (mask - mask.min()) / (mask.max() - mask.min())
 
-                # Apply the new range transformation to [new_min, 1]
-
                 xi[(i+1)%order]  = (1-UNSAMPLE * lgw_mask) * ( alpha_fn(-h*ci[i+1])       * (xi_0 + cfgpp_term)   +    h*ks )     \
                                     + UNSAMPLE * lgw_mask  * ( (sigma_down_inv/sigma_inv) * (xi_0 + cfgpp_term)   +   (sigmax - sigma_down_inv/sigma_inv)*ys )
                                                                 
@@ -469,6 +517,8 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
                 if (i+1)%order > 0 and (i+1)%order > multistep_order-1:
                     if GARBAGE_COLLECT: gc.collect(); torch.cuda.empty_cache()
                     ki[i+1]   = model_call(model, xi[i+1], sigma_fn(t + h*ci[i+1]), **extra_args)
+                    if EPS_PRED and rk_type.startswith("deis"):
+                        ki[i+1]  = (xi[i+1] - ki[i+1]) / sigma_fn(t + h*ci[i+1])
                     ki_u[i+1] = uncond[0]
 
             if FSAL and _ > 0:
