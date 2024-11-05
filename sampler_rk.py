@@ -517,7 +517,6 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
                             ks2[0][n] = (ks2[0][n] * latent_guide[0][n].std())
                         ks = (1 - lgw_mask) * ks   +   lgw_mask * ks2
 
-
                 if sigma_next > sigma:
                     sigma_down_inv = sigmax - sigma_fn(t + h*ci[i+1]) #sigma_down
                     sigma_inv      = sigmax - sigma
@@ -571,6 +570,4 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
         h_prev2 = h_prev
         h_prev = h
         
-        
     return xi[0]
-

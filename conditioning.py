@@ -61,6 +61,28 @@ class ConditioningZeroAndTruncate:
             c.append(n)
         return (c, )
 
+class ConditioningTruncate: 
+    # needs updating to ensure dims are correct for arbitrary models without hardcoding. 
+    @classmethod
+    def INPUT_TYPES(s):
+        return { "required": {"conditioning": ("CONDITIONING", )}}
+    RETURN_TYPES = ("CONDITIONING",)
+    FUNCTION = "zero_out"
+
+    CATEGORY = "advanced/conditioning"
+    DESCRIPTION = "Use for positive conditioning with SD3.5. Tokens beyond 77 result in degradation of image quality."
+
+    def zero_out(self, conditioning):
+        c = []
+        for t in conditioning:
+            d = t[1].copy()
+            pooled_output = d.get("pooled_output", None)
+            if pooled_output is not None:
+                d["pooled_output"] = d["pooled_output"][:, :2048]
+                n = [t[0][:, :154, :4096], d]
+            c.append(n)
+        return (c, )
+
 
 class ConditioningMultiply:
     @classmethod
