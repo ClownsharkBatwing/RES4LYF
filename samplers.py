@@ -137,14 +137,15 @@ class SharkSampler:
         return {"required":
                     {"model": ("MODEL",),
                     "add_noise": ("BOOLEAN", {"default": True}),
-                    "noise_level": ("FLOAT", {"default": 1.0, "min": -10000.0, "max": 10000.0, "step":0.1, "round": 0.01}),
-                    "noise_normalize": ("BOOLEAN", {"default": False}),
+                    "noise_normalize": ("BOOLEAN", {"default": True}),
+                    "noise_stdev": ("FLOAT", {"default": 1.0, "min": -10000.0, "max": 10000.0, "step":0.01, "round": False, }),
+                    "noise_mean": ("FLOAT", {"default": 0.0, "min": -10000.0, "max": 10000.0, "step":0.01, "round": False, }),
                     "noise_is_latent": ("BOOLEAN", {"default": False}),
-                    "noise_type": (NOISE_GENERATOR_NAMES, ),
-                    "alpha": ("FLOAT", {"default": 1.0, "min": -10000.0, "max": 10000.0, "step":0.1, "round": 0.01}),
-                    "k": ("FLOAT", {"default": 1.0, "min": -10000.0, "max": 10000.0, "step":2.0, "round": 0.01}),
+                    "noise_type": (NOISE_GENERATOR_NAMES, {"default": "gaussian"}),
+                    "alpha": ("FLOAT", {"default": 1.0, "min": -10000.0, "max": 10000.0, "step":0.1, "round": False, }),
+                    "k": ("FLOAT", {"default": 1.0, "min": -10000.0, "max": 10000.0, "step":2.0, "round": False, }),
                     "noise_seed": ("INT", {"default": 0, "min": 0, "max": 0xffffffffffffffff}),
-                    "cfg": ("FLOAT", {"default": 6.0, "min": 0.0, "max": 100.0, "step":0.5, "round": 0.01}),
+                    "cfg": ("FLOAT", {"default": 5.0, "min": 0.0, "max": 100.0, "step":0.5, "round": False, }),
                     "positive": ("CONDITIONING", ),
                     "negative": ("CONDITIONING", ),
                     "sampler": ("SAMPLER", ),
@@ -153,6 +154,7 @@ class SharkSampler:
                      },
                 "optional": 
                     {"latent_noise": ("LATENT", ),
+                     "latent_noise_match": ("LATENT",),
                     }
                 }
 
@@ -163,7 +165,7 @@ class SharkSampler:
 
     CATEGORY = "sampling/custom_sampling"
     
-    def main(self, model, add_noise, noise_level, noise_normalize, noise_is_latent, noise_type, noise_seed, cfg, alpha, k, positive, negative, sampler, sigmas, latent_image, latent_noise=None): 
+    def main(self, model, add_noise, noise_stdev, noise_mean, noise_normalize, noise_is_latent, noise_type, noise_seed, cfg, alpha, k, positive, negative, sampler, sigmas, latent_image, latent_noise=None, latent_noise_match=None,): 
             latent = latent_image
             latent_image = latent["samples"]
 
@@ -182,9 +184,18 @@ class SharkSampler:
                 noise += latent_image.cpu()
                 noise.sub_(noise.mean()).div_(noise.std())
 
-            noise *= noise_level
             if noise_normalize:
                 noise.sub_(noise.mean()).div_(noise.std())
+            noise *= noise_stdev
+            noise = (noise - noise.mean()) + noise_mean
+            
+            if latent_noise_match:
+                #noise.sub_(noise.mean()).div_(noise.std())
+                for i in range(latent_noise_match["samples"].shape[1]):
+                    noise[0][i] = (noise[0][i] - noise[0][i].mean())
+                    noise[0][i] = (noise[0][i]) + latent_noise_match["samples"][0][i].mean()
+                    #noise[0][i] = (noise[0][i] - noise[0][i].mean()) / noise[0][i].std()
+                    #noise[0][i] = (noise[0][i] * latent_noise_match["samples"][0][i].std()) + latent_noise_match["samples"][0][i].mean()
                 
             noise_mask = latent["noise_mask"] if "noise_mask" in latent else None
 
@@ -328,6 +339,8 @@ class SamplerRK:
                      "eta": ("FLOAT", {"default": 0.25, "min": -100.0, "max": 100.0, "step":0.01, "round": False, "tooltip": "Calculated noise amount to be added, then removed, after each step."}),
                      "eta_var": ("FLOAT", {"default": 0.0, "min": -100.0, "max": 100.0, "step":0.01, "round": False, "tooltip": "Calculate variance-corrected noise amount (overrides eta/noise_mode settings). Cannot be used at very low sigma values; reverts to eta/noise_mode for final steps."}),
                      "s_noise": ("FLOAT", {"default": 1.0, "min": -100.0, "max": 100.0, "step":0.01, "round": False, "tooltip": "Ratio of calculated noise amount actually added after each step. >1.0 will leave extra noise behind, <1.0 will remove more noise than it adds."}),
+                     "d_noise": ("FLOAT", {"default": 1.0, "min": -100.0, "max": 100.0, "step":0.01, "round": False, "tooltip": "Ratio of calculated noise amount actually added after each step. >1.0 will leave extra noise behind, <1.0 will remove more noise than it adds."}),
+
                      "noise_mode": (["hard", "hard_sq", "soft", "softer", "exp"], {"default": 'hard', "tooltip": "How noise scales with the sigma schedule. Hard is the most aggressive, the others start strong and drop rapidly."}),
                      "noise_sampler_type": (NOISE_GENERATOR_NAMES, {"default": "brownian"}),
                      "alpha": ("FLOAT", {"default": 0.0, "min": -10000.0, "max": 10000.0, "step":0.1, "round": False, "tooltip": "Fractal noise mode: <0 = extra high frequency noise, >0 = extra low frequency noise, 0 = white noise."}),
@@ -360,16 +373,14 @@ class SamplerRK:
                                   "deis_3m", 
                                   "deis_4m",
                                   "ddim",
-                                  "euler"], {"default": "dormand-prince_7s"}), 
+                                  "euler"], {"default": "res_2m"}), 
                      "exp_mode": ("BOOLEAN", {"default": False, "tooltip": "Convert linear RK methods to exponential form."}), 
                      "multistep": ("BOOLEAN", {"default": False, "tooltip": "For samplers ending in S only. Reduces cost by one model call per step by reusing the previous step as the current predictor step."}),
                      "implicit_steps": ("INT", {"default": 0, "min": 0, "max": 100, "step":1, "tooltip": "Number of implicit Runge-Kutta refinement steps to run after each explicit step."}),
                      "cfgpp": ("FLOAT", {"default": 0.0, "min": -10000.0, "max": 10000.0, "step":0.01, "round": False, "tooltip": "CFG++ scale. Use in place of, or with, CFG. Currently only working with RES, DPMPP, and DDIM samplers."}),
                      "latent_guide_weight": ("FLOAT", {"default": 0.0, "min": -100.0, "max": 100.0, "step":0.01, "round": False}),
+                     "guide_mode": (["hard_light", "mean_std", "mean", "std"], {"default": 'eight', "tooltip": "The mode used."}),
                      "rescale_floor": ("BOOLEAN", {"default": True, "tooltip": "Latent_guide_weight(s) control the minimum value for the latent_guide_mask. If false, they control the maximum value."}),
-
-                     #"t_fn_formula": ("STRING", {"default": "1/((sigma).exp()+1)", "multiline": True}),
-                     #"sigma_fn_formula": ("STRING", {"default": "((1-t)/t).log()", "multiline": True}),
                     },
                     "optional": 
                     {
@@ -383,9 +394,9 @@ class SamplerRK:
 
     FUNCTION = "get_sampler"
 
-    def get_sampler(self, eta=0.25, eta_var=0.0, s_noise=1.0, alpha=-1.0, k=1.0, cfgpp=0.0, multistep=False, noise_sampler_type="brownian", noise_mode="hard", noise_seed=-1, rk_type="dormand-prince", 
+    def get_sampler(self, eta=0.25, eta_var=0.0, d_noise=1.0, s_noise=1.0, alpha=-1.0, k=1.0, cfgpp=0.0, multistep=False, noise_sampler_type="brownian", noise_mode="hard", noise_seed=-1, rk_type="dormand-prince", 
                     exp_mode=False, t_fn_formula=None, sigma_fn_formula=None, implicit_steps=0,
-                    latent_guide=None, latent_guide_weight=0.0, latent_guide_weights=None, latent_guide_mask=None, rescale_floor=True,
+                    latent_guide=None, latent_guide_weight=0.0, guide_mode="hard_light", latent_guide_weights=None, latent_guide_mask=None, rescale_floor=True,
                     ):
         sampler_name = "rk"
 
@@ -394,9 +405,9 @@ class SamplerRK:
             
         latent_guide_weights = F.pad(latent_guide_weights, (0, 10000), value=0.0)
 
-        sampler = comfy.samplers.ksampler(sampler_name, {"eta": eta, "eta_var": eta_var, "s_noise": s_noise, "alpha": alpha, "k": k, "cfgpp": cfgpp, "MULTISTEP": multistep, "noise_sampler_type": noise_sampler_type, "noise_mode": noise_mode, "noise_seed": noise_seed, "rk_type": rk_type, 
+        sampler = comfy.samplers.ksampler(sampler_name, {"eta": eta, "eta_var": eta_var, "s_noise": s_noise, "d_noise": d_noise, "alpha": alpha, "k": k, "cfgpp": cfgpp, "MULTISTEP": multistep, "noise_sampler_type": noise_sampler_type, "noise_mode": noise_mode, "noise_seed": noise_seed, "rk_type": rk_type, 
                                                          "exp_mode": exp_mode, "t_fn_formula": t_fn_formula, "sigma_fn_formula": sigma_fn_formula, "implicit_steps": implicit_steps,
-                                                         "latent_guide": latent_guide, "mask": latent_guide_mask, "latent_guide_weight": latent_guide_weight, "latent_guide_weights": latent_guide_weights,
+                                                         "latent_guide": latent_guide, "mask": latent_guide_mask, "latent_guide_weight": latent_guide_weight, "latent_guide_weights": latent_guide_weights, "guide_mode": guide_mode,
                                                          "LGW_MASK_RESCALE_MIN": rescale_floor,})
         return (sampler, )
 

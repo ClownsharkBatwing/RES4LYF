@@ -369,11 +369,13 @@ def get_denoised(model, x, sigma, **extra_args):
 
 def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, noise_sampler=None, noise_sampler_type="brownian", noise_mode="hard", noise_seed=-1, rk_type="dormand-prince", 
               sigma_fn_formula="", t_fn_formula="",
-                  eta=0.5, eta_var=0.0, s_noise=1., alpha=-1.0, k=1.0, scale=0.1, c2=0.5, c3=1.0, MULTISTEP=False, cfgpp=0.5, implicit_steps=0, reverse_weight=0.0, exp_mode=False,
-                  latent_guide=None, latent_guide_weight=0.0, latent_guide_weights=None,
+                  eta=0.5, eta_var=0.0, s_noise=1., d_noise=1., alpha=-1.0, k=1.0, scale=0.1, c2=0.5, c3=1.0, MULTISTEP=False, cfgpp=0.5, implicit_steps=0, reverse_weight=0.0, exp_mode=False,
+                  latent_guide=None, latent_guide_weight=0.0, latent_guide_weights=None, guide_mode="hard_light",
                   GARBAGE_COLLECT=False, mask=None, LGW_MASK_RESCALE_MIN=True,
                   ):
     extra_args = {} if extra_args is None else extra_args
+    
+    sigmas = sigmas.clone() * d_noise
     
     if latent_guide is not None:
         y0 = latent_guide = model.inner_model.inner_model.process_latent_in(latent_guide['samples']).clone().to(x.device)
@@ -490,15 +492,31 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
                     lgw_mask = mask * latent_guide_weights[_]
                     
                 if UNSAMPLE == False and latent_guide is not None:
-                    lg = latent_guide * sum(ab[i])
-                    if EPS_PRED:
-                        lg = (alpha_fn(-h*ci[i+1]) * xi[0] - latent_guide) / (sigma_fn(t + h*ci[i]) + 1e-8)
-                    hard_light_blend_1 = hard_light_blend(lg, ks)
-                    lg_weight = latent_guide_weights[_] * sigma #sigma_fn(t + h*ci[i+1])
-                    #ks = (1 - mask * lg_weight) * ks   +   mask * lg_weight * hard_light_blend_1
-                    
-                    ks = (1 - lgw_mask) * ks   +   lgw_mask * hard_light_blend_1
-                    #denoised = denoised - lg_weight * sigma_next * denoised  + (lg_weight * sigma_next * hard_light_blend_1 * mask)
+                    if guide_mode == "hard_light":
+                        lg = latent_guide * sum(ab[i])
+                        if EPS_PRED:
+                            lg = (alpha_fn(-h*ci[i+1]) * xi[0] - latent_guide) / (sigma_fn(t + h*ci[i]) + 1e-8)
+                        hard_light_blend_1 = hard_light_blend(lg, ks)
+                        ks = (1 - lgw_mask) * ks   +   lgw_mask * hard_light_blend_1
+                    elif guide_mode == "mean_std":
+                        ks2 = torch.zeros_like(x)
+                        for n in range(latent_guide.shape[1]):
+                            ks2[0][n] = (ks[0][n] - ks[0][n].mean()) / ks[0][n].std()
+                            ks2[0][n] = (ks2[0][n] * latent_guide[0][n].std()) + latent_guide[0][n].mean()
+                        ks = (1 - lgw_mask) * ks   +   lgw_mask * ks2
+                    elif guide_mode == "mean":
+                        ks2 = torch.zeros_like(x)
+                        for n in range(latent_guide.shape[1]):
+                            ks2[0][n] = (ks[0][n] - ks[0][n].mean())
+                            ks2[0][n] = (ks2[0][n]) + latent_guide[0][n].mean()
+                        ks = (1 - lgw_mask) * ks   +   lgw_mask * ks2
+                    elif guide_mode == "std":
+                        ks2 = torch.zeros_like(x)
+                        for n in range(latent_guide.shape[1]):
+                            ks2[0][n] = (ks[0][n]) / ks[0][n].std()
+                            ks2[0][n] = (ks2[0][n] * latent_guide[0][n].std())
+                        ks = (1 - lgw_mask) * ks   +   lgw_mask * ks2
+
 
                 if sigma_next > sigma:
                     sigma_down_inv = sigmax - sigma_fn(t + h*ci[i+1]) #sigma_down
@@ -512,10 +530,7 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
 
                 xi[(i+1)%order]  = (1-UNSAMPLE * lgw_mask) * ( alpha_fn(-h*ci[i+1])       * (xi_0 + cfgpp_term)   +    h*ks )     \
                                     + UNSAMPLE * lgw_mask  * ( (sigma_down_inv/sigma_inv) * (xi_0 + cfgpp_term)   +   (sigmax - sigma_down_inv/sigma_inv)*ys )
-                                                                
-                #xi[(i+1)%order]  = (1-mask*UNSAMPLE * latent_guide_weights[_]) * ( alpha_fn(-h*ci[i+1])       * (xi_0 + cfgpp_term)   +    h*ks )     \
-                #                    + mask*UNSAMPLE * latent_guide_weights[_]  * ( (sigma_down_inv/sigma_inv) * (xi_0 + cfgpp_term)   +   (sigmax - sigma_down_inv/sigma_inv)*ys )
-                        
+  
                 if (i+1)%order > 0 and (i+1)%order > multistep_order-1:
                     if GARBAGE_COLLECT: gc.collect(); torch.cuda.empty_cache()
                     ki[i+1]   = model_call(model, xi[i+1], sigma_fn(t + h*ci[i+1]), **extra_args)
