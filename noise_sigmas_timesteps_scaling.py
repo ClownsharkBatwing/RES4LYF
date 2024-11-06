@@ -82,7 +82,6 @@ def get_ancestral_step_RF_hard(sigma_next, eta, sigma_max=1.0):
     return sigma_up, sigma_down, alpha_ratio
 
 
-
 def get_res4lyf_step_with_model(model, sigma, sigma_next, eta=0.0, eta_var=1.0, noise_mode="hard", h=None):
   if isinstance(model.inner_model.inner_model.model_sampling, comfy.model_sampling.CONST):
     sigma_var = (-1 + torch.sqrt(1 + 4 * sigma)) / 2
@@ -108,8 +107,12 @@ def get_res4lyf_step_with_model(model, sigma, sigma_next, eta=0.0, eta_var=1.0, 
       sigma = sigma_hat
     if noise_mode == "soft" or noise_mode == "softer": 
       su, sd, alpha_ratio = get_ancestral_step_EPS(sigma, sigma_next, eta)
+  
+  su = torch.nan_to_num(su, 0.0)
+  sd = torch.nan_to_num(sd, sigma_next)
+  alpha_ratio = torch.nan_to_num(alpha_ratio, 1.0)
+  
   return su, sigma, sd, alpha_ratio
-
 
 
 def get_res4lyf_half_step3(sigma, sigma_next, c2=0.5, c3=1.0, t_fn=None, sigma_fn=None, t_fn_formula="", sigma_fn_formula="", ):

@@ -395,6 +395,13 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
     extra_args = {} if extra_args is None else extra_args
     
     sigmas = sigmas.clone() * d_noise
+    sigmin = model.inner_model.inner_model.model_sampling.sigma_min 
+    sigmax = model.inner_model.inner_model.model_sampling.sigma_max 
+    
+    UNSAMPLE = False
+    if sigmas[0] == 0.0:      #remove padding used to avoid need for model patch with noise inversion
+        UNSAMPLE = True
+        sigmas = sigmas[1:-1]
     
     if latent_guide is not None:
         y0 = latent_guide = model.inner_model.inner_model.process_latent_in(latent_guide['samples']).clone().to(x.device)
@@ -410,14 +417,6 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
         mask = F.interpolate(mask, size=(x.shape[2], x.shape[3]), mode='bilinear', align_corners=False)
         mask = mask.to(x.dtype).to(x.device)
         
-    UNSAMPLE = False
-    if sigmas[0] == 0.0:      #remove padding used to avoid need for model patch with noise inversion
-        UNSAMPLE = True
-        sigmas = sigmas[1:-1]
-        
-    sigmin = model.inner_model.inner_model.model_sampling.sigma_min 
-    sigmax = model.inner_model.inner_model.model_sampling.sigma_max 
-    
     uncond = [0]
     uncond[0] = torch.full_like(x, 0.0)
     if cfgpp != 0.0:
@@ -461,8 +460,8 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
         
         if sigma == sigmin and sigma_next == 0.0:
             rk_type = "euler"
-            implicit_step, eta, eta_var = 0, 0, 0
-            
+            implicit_steps, eta, eta_var = 0, 0, 0
+        
         elif sigma_next == 0.0:
             sigma_next = sigmin
             null = torch.tensor([0.0], device=sigmas.device, dtype=sigmas.dtype) 
@@ -506,33 +505,32 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
 
         for iteration in range(implicit_steps+1):
             for i in range(multistep_order, order):
-
+                
+                sigma_mid = sigma_fn(t + h*ci[i+1])
+                if sigma_next > sigma:
+                    sigma_mid_inv = sigmax - sigma_mid #sigma_down
+                    sigma_inv     = sigmax - sigma
+                else:
+                    sigma_mid_inv, sigma_inv = sigma_down, sigma
+                
+                if LGW_MASK_RESCALE_MIN: 
+                    lgw_mask = mask * (1 - latent_guide_weights[_]) + latent_guide_weights[_]
+                else:
+                    lgw_mask = mask * latent_guide_weights[_]    
+                    
                 ks, ks_u, ys = torch.zeros_like(x), torch.zeros_like(x), torch.zeros_like(x)
                 for j in range(order):
                     ks     += ab[i][j] * ki[j]
                     ks_u   += ab[i][j] * ki_u[j]
                     ys     += ab[i][j] * y0
                     
-                if LGW_MASK_RESCALE_MIN: 
-                    lgw_mask = mask * (1 - latent_guide_weights[_]) + latent_guide_weights[_]
-                else:
-                    lgw_mask = mask * latent_guide_weights[_]
-                    
+
                 if EPS_PRED and rk_type.startswith("deis"):
                     epsilon = (h * ks) / (sigma_down - sigma)       #xi[(i+1)%order]  = xi_0 + h*ks
                     ks = xi_0 - epsilon * sigma        # denoised
                 else:
                     ks /= sum(ab[i])
                 
-                sigma_mid = sigma_fn(t + h*ci[i+1])
-
-                if sigma_next > sigma:
-                    sigma_mid_inv = sigmax - sigma_fn(t + h*ci[i+1]) #sigma_down
-                    sigma_inv     = sigmax - sigma
-                else:
-                    sigma_mid_inv, sigma_inv = sigma_down, sigma
-                
-                    
                 if UNSAMPLE == False and latent_guide is not None:
                     if guide_mode == "hard_light":
                         lg = latent_guide * sum(ab[i])
@@ -560,9 +558,9 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
                         ks = (1 - lgw_mask) * ks   +   lgw_mask * ks2
 
                 cfgpp_term = cfgpp*h*(ks - ks_u)
-                    
+
                 xi[(i+1)%order]  = (1-UNSAMPLE * lgw_mask) * (     (sigma_mid/sigma)      * (xi_0 + cfgpp_term)    +    ((1 - (sigma_mid/sigma))) * ks )     \
-                                + UNSAMPLE * lgw_mask  * ( (sigma_mid_inv/sigma_inv)  * (xi_0 )   +      (sigmax - sigma_mid_inv/sigma_inv) * ys )
+                                + UNSAMPLE * lgw_mask  * ( (sigma_mid_inv/sigma_inv)  * (xi_0 + cfgpp_term)   +      (sigmax - sigma_mid_inv/sigma_inv) * ys )
 
                 if (i+1)%order > 0 and (i+1)%order > multistep_order-1:
                     if GARBAGE_COLLECT: gc.collect(); torch.cuda.empty_cache()
