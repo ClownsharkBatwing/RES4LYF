@@ -206,12 +206,14 @@ def get_rk_methods(rk_type, h, c2=0.5, c3=1.0, h_prev=None, h_prev2=None, stepco
     if rk_type in rk_coeff:
         ab, ci = copy.deepcopy(rk_coeff[rk_type])
         ci = ci[:]
-        ci.append(0)
-        model_call = get_epsilon
+        ci.append(1)
         alpha_fn = lambda h: 1
         t_fn = lambda sigma: sigma
         sigma_fn = lambda t: t
-        EPS_PRED = True
+        
+        model_call = get_denoised
+        EPS_PRED = False
+
     else:
         model_call = get_denoised
         alpha_fn = lambda neg_h: torch.exp(neg_h)
@@ -226,7 +228,14 @@ def get_rk_methods(rk_type, h, c2=0.5, c3=1.0, h_prev=None, h_prev2=None, stepco
             alpha_fn = lambda h: 1
             t_fn = lambda sigma: sigma
             sigma_fn = lambda t: t
+            alpha_fn = lambda neg_h: torch.exp(neg_h)
+            t_fn = lambda sigma: sigma.log().neg()
+            sigma_fn = lambda t: t.neg().exp()
             EPS_PRED = True
+            
+            #model_call = get_denoised
+            
+            #EPS_PRED = False
             
             coeff_list = get_deis_coeff_list(sigmas, multistep_order+1, deis_mode="rhoab")
             coeff_list = [[elem / h for elem in inner_list] for inner_list in coeff_list]
@@ -280,6 +289,11 @@ def get_rk_methods(rk_type, h, c2=0.5, c3=1.0, h_prev=None, h_prev2=None, stepco
             a2_1 = c2 * phi(1, -h*c2)
             b1 =        phi(1, -h) - phi(2, -h)/c2
             b2 =        phi(2, -h)/c2
+            
+            a2_1 /= (c2 * phi(1, -h*c2))
+            b1 /= phi(1, -h)
+            b2 /= phi(1, -h)
+            
             ab = [
                     [a2_1, 0],
                     [b1, b2],
@@ -311,7 +325,7 @@ def get_rk_methods(rk_type, h, c2=0.5, c3=1.0, h_prev=None, h_prev2=None, stepco
                     [b1, b2],
             ]
             ci = [0, c2, 1]
-
+            
         case "dpmpp_sde_2s":
             c2 = 1.0
             a2_1 =         c2   * phi(1, -h*c2)
@@ -337,14 +351,19 @@ def get_rk_methods(rk_type, h, c2=0.5, c3=1.0, h_prev=None, h_prev2=None, stepco
             ]
             ci = [0, c2, c3, 1]
 
+
     return ab, ci, multistep_order, model_call, alpha_fn, t_fn, sigma_fn, FSAL, EPS_PRED
 
 def get_rk_methods_order(rk_type):
     ab, ci, multistep_order, model_call, alpha_fn, t_fn, sigma_fn, FSAL, EPS_PRED = get_rk_methods(rk_type, torch.tensor(1.0).to('cuda').to(torch.float64), c2=0.5, c3=0.75)
     return len(ci)-1
 
-def get_rk_methods_order_and_fn(rk_type):
-    ab, ci, multistep_order, model_call, alpha_fn, t_fn, sigma_fn, FSAL, EPS_PRED = get_rk_methods(rk_type, torch.tensor(1.0).to('cuda').to(torch.float64), c2=0.5, c3=0.75)
+def get_rk_methods_order_and_fn(rk_type, h=None, c2=None, c3=None, h_prev=None, h_prev2=None, stepcount=0, sigmas=None):
+    if h == None:
+        ab, ci, multistep_order, model_call, alpha_fn, t_fn, sigma_fn, FSAL, EPS_PRED = get_rk_methods(rk_type, torch.tensor(1.0).to('cuda').to(torch.float64), c2=0.5, c3=0.75)
+    else:
+        ab, ci, multistep_order, model_call, alpha_fn, t_fn, sigma_fn, FSAL, EPS_PRED = get_rk_methods(rk_type, h, c2, c3, h_prev, h_prev2, stepcount, sigmas)
+
     MULTISTEP=False
     multistep_buffer_size = len(ab[0]) - len(ab) # x dim - y dim
     if len(ab) < len(ci):
@@ -429,11 +448,11 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
     if exp_mode:
         model_call = get_denoised
         alpha_fn = lambda neg_h: torch.exp(neg_h)
-        t_fn = lambda sigma: sigma.log().neg()
+        t_fn     = lambda sigma: sigma.log().neg()
         sigma_fn = lambda t: t.neg().exp() 
     
     xi, ki, ki_u = [torch.zeros_like(x)]*(order+2), [torch.zeros_like(x)]*(order+1), [torch.zeros_like(x)]*(order+1)
-    h_prev, h_prev2 = None, None
+    h, h_prev, h_prev2 = None, None, None
         
     xi[0] = x
 
@@ -443,7 +462,9 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
         if sigma_next == 0.0:
             rk_type = "euler"
             implicit_steps, eta, eta_var = 0, 0, 0
-            order, model_call, alpha_fn, t_fn, sigma_fn, FSAL, EPS_PRED = get_rk_methods_order_and_fn(rk_type)
+            
+        #order, model_call, alpha_fn, t_fn, sigma_fn, FSAL, EPS_PRED = get_rk_methods_order_and_fn(rk_type, h, c2, c3, h_prev, h_prev2, _, sigmas)
+        order, model_call, alpha_fn, t_fn, sigma_fn, FSAL, EPS_PRED = get_rk_methods_order_and_fn(rk_type)
         
         sigma_up, sigma, sigma_down, alpha_ratio = get_res4lyf_step_with_model(model, sigma, sigma_next, eta, eta_var, noise_mode, h=t_fn(sigma_next)-t_fn(sigma))
         t_down, t = t_fn(sigma_down), t_fn(sigma)
@@ -464,8 +485,8 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
             noise = torch.nan_to_num((noise - noise.mean()) / noise.std(), 0.0)
             xi[0] = alpha_ratio * xi[0] + noise * s_noise * sigma_up
 
-        xi_0 = xi[0]
-        
+        xi_0 = xi[0] # needed for implicit sampling
+
         if (MULTISTEP == False and FSAL == False) or _ == 0:
             ki[0]   = model_call(model, xi_0, sigma, **extra_args)
             if EPS_PRED and rk_type.startswith("deis"):
@@ -490,6 +511,16 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
                     lgw_mask = mask * (1 - latent_guide_weights[_]) + latent_guide_weights[_]
                 else:
                     lgw_mask = mask * latent_guide_weights[_]
+                    
+                if EPS_PRED:
+                    #xi[(i+1)%order]  = xi_0 + h*ks
+                    sigma_mid = sigma_down
+                    epsilon = (h * ks) / (sigma_down - sigma)
+                    ks = xi_0 - epsilon * sigma        # denoised
+                    #ks = alpha_fn(-h) * xi_0 - sigma * ks
+                else:
+                    ks /= sum(ab[i])
+                    sigma_mid = sigma_fn(t + h*ci[i+1])
                     
                 if UNSAMPLE == False and latent_guide is not None:
                     if guide_mode == "hard_light":
@@ -518,43 +549,54 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
                         ks = (1 - lgw_mask) * ks   +   lgw_mask * ks2
 
                 if sigma_next > sigma:
-                    sigma_down_inv = sigmax - sigma_fn(t + h*ci[i+1]) #sigma_down
-                    sigma_inv      = sigmax - sigma
+                    sigma_mid_inv = sigmax - sigma_fn(t + h*ci[i+1]) #sigma_down
+                    sigma_inv     = sigmax - sigma
                 else:
-                    sigma_down_inv, sigma_inv = sigma_down, sigma
-                    
+                    sigma_mid_inv, sigma_inv = sigma_down, sigma
+                
+
                 cfgpp_term = cfgpp*h*(ks - ks_u)
-
-                #tensor = (mask - mask.min()) / (mask.max() - mask.min())
-
-                xi[(i+1)%order]  = (1-UNSAMPLE * lgw_mask) * ( alpha_fn(-h*ci[i+1])       * (xi_0 + cfgpp_term)   +    h*ks )     \
-                                    + UNSAMPLE * lgw_mask  * ( (sigma_down_inv/sigma_inv) * (xi_0 + cfgpp_term)   +   (sigmax - sigma_down_inv/sigma_inv)*ys )
-  
+                    
+                #else:
+                xi[(i+1)%order]  = (1-UNSAMPLE * lgw_mask) * (     (sigma_mid/sigma)      * (xi_0 + cfgpp_term)    +    ((1 - (sigma_mid/sigma))) * ks )     \
+                                + UNSAMPLE * lgw_mask  * ( (sigma_mid_inv/sigma_inv)  * (xi_0 )   +      (sigmax - sigma_mid_inv/sigma_inv) * ys )
+                """if EPS_PRED:
+                    #xi[(i+1)%order]  = xi_0 + h*ks
+                    #ks = xi_0 - sigma * (ks/sum(ab[i]))
+                    ks = xi_0 - sigma * ks
+                    #sum_ab = -sum_ab
+                    denoised = xi[0] - (ki[0] * sigma)
+                    sigma_mid = sigma_down
+                    xi[(i+1)%order]  = xi_0 + h*ks"""
+                    
                 if (i+1)%order > 0 and (i+1)%order > multistep_order-1:
                     if GARBAGE_COLLECT: gc.collect(); torch.cuda.empty_cache()
                     ki[i+1]   = model_call(model, xi[i+1], sigma_fn(t + h*ci[i+1]), **extra_args)
                     if EPS_PRED and rk_type.startswith("deis"):
-                        ki[i+1]  = (xi[i+1] - ki[i+1]) / sigma_fn(t + h*ci[i+1])
+                        ki[i+1] = (xi[i+1] - ki[i+1]) / sigma_fn(t + h*ci[i+1])
                         ki[i+1] = ki[i+1] * (sigma_down-sigma)/(sigma_next-sigma)
                     ki_u[i+1] = uncond[0]
 
             if FSAL and _ > 0:
-                ki[0] = ki[order-1]
+                ki  [0] = ki[order-1]
                 ki_u[0] = ki_u[order-1]
             if MULTISTEP and _ > 0:
-                ki[0] = denoised
+                ki  [0] = denoised
                 ki_u[0] = ki_u[order-1]
             for ms in range(multistep_order):
-                ki[multistep_order - ms] = ki[multistep_order - ms - 1]
+                ki  [multistep_order - ms] = ki  [multistep_order - ms - 1]
                 ki_u[multistep_order - ms] = ki_u[multistep_order - ms - 1]
             if iteration < implicit_steps:
-                ki[0] = model_call(model, xi[0], sigma_down, **extra_args)
+                ki  [0] = model_call(model, xi[0], sigma_down, **extra_args)
                 ki_u[0] = uncond[0]
 
             if EPS_PRED == True and exp_mode == False and not rk_type.startswith("deis"):
                 denoised = alpha_fn(-h*ci[i+1]) * xi[0] - sigma * ks
             elif EPS_PRED == True and rk_type.startswith("deis"):
-                denoised = xi[0] - (ki[0] * sigma)
+                #denoised = xi[0] - (ki[0] * sigma)
+                epsilon = (h * ks) / (sigma_down - sigma)
+                denoised = xi_0 - epsilon * sigma        # denoised
+                #denoised = ks
                 #denoised =  xi[0] - (ki[-1] * sigma_fn(t + h*ci[-1]))
             else:
                 denoised = ks / sum(ab[i])
@@ -571,3 +613,4 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
         h_prev = h
         
     return xi[0]
+
