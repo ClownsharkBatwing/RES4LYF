@@ -557,11 +557,11 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
                             ks2[0][n] = (ks2[0][n] * latent_guide[0][n].std())
                         ks = (1 - lgw_mask) * ks   +   lgw_mask * ks2
                     elif guide_mode == "blend": 
-                        UNSAMPLE = True
+                        ks = (1 - lgw_mask) * ks   +   lgw_mask * ys
                     elif guide_mode == "inversion": 
                         UNSAMPLE = True
-                        sigma_mid_inv = sigmax - sigma_mid #sigma_down
-                        sigma_inv     = sigmax - sigma
+                        sigma_mid_inv = sigmax - sigma_mid + 1e-7#sigma_down
+                        sigma_inv     = sigmax - sigma + 1e-7
 
                 cfgpp_term = cfgpp*h*(ks - ks_u)
             
