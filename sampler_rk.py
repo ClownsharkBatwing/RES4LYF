@@ -556,11 +556,18 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
                             ks2[0][n] = (ks[0][n]) / ks[0][n].std()
                             ks2[0][n] = (ks2[0][n] * latent_guide[0][n].std())
                         ks = (1 - lgw_mask) * ks   +   lgw_mask * ks2
+                    elif guide_mode == "blend": 
+                        UNSAMPLE = True
+                    elif guide_mode == "inversion": 
+                        UNSAMPLE = True
+                        sigma_mid_inv = sigmax - sigma_mid #sigma_down
+                        sigma_inv     = sigmax - sigma
 
                 cfgpp_term = cfgpp*h*(ks - ks_u)
+            
 
-                xi[(i+1)%order]  = (1-UNSAMPLE * lgw_mask) * (     (sigma_mid/sigma)      * (xi_0 + cfgpp_term)    +    ((1 - (sigma_mid/sigma))) * ks )     \
-                                + UNSAMPLE * lgw_mask  * ( (sigma_mid_inv/sigma_inv)  * (xi_0 + cfgpp_term)   +      (sigmax - sigma_mid_inv/sigma_inv) * ys )
+                xi[(i+1)%order]  = (1-UNSAMPLE * lgw_mask) * (     (sigma_mid/sigma)  * (xi_0 + cfgpp_term)    +     ((1 - (sigma_mid/sigma)))      * ks )     \
+                                + UNSAMPLE * lgw_mask  * ( (sigma_mid_inv/sigma_inv)  * (xi_0 + cfgpp_term)    +      (1 - sigma_mid_inv/sigma_inv) * ys )
 
                 if (i+1)%order > 0 and (i+1)%order > multistep_order-1:
                     if GARBAGE_COLLECT: gc.collect(); torch.cuda.empty_cache()
@@ -600,6 +607,14 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
         if isinstance(model.inner_model.inner_model.model_sampling, comfy.model_sampling.CONST) or noise_mode != "hard":
             noise = noise_sampler(sigma=sigma, sigma_next=sigma_next)
             noise = (noise - noise.mean()) / noise.std()
+            
+            if guide_mode == "noise_mean":
+                noise2 = torch.zeros_like(x)
+                for n in range(latent_guide.shape[1]):
+                    noise2[0][n] = (noise[0][n] - noise[0][n].mean())
+                    noise2[0][n] = (noise2[0][n]) + latent_guide[0][n].mean()
+                noise = (1 - lgw_mask) * noise   +   lgw_mask * noise2
+            
             xi[0] = alpha_ratio * xi[0] + noise * s_noise * sigma_up
             
         h_prev2 = h_prev

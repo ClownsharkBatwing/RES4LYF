@@ -379,7 +379,8 @@ class SamplerRK:
                      "implicit_steps": ("INT", {"default": 0, "min": 0, "max": 100, "step":1, "tooltip": "Number of implicit Runge-Kutta refinement steps to run after each explicit step."}),
                      "cfgpp": ("FLOAT", {"default": 0.0, "min": -10000.0, "max": 10000.0, "step":0.01, "round": False, "tooltip": "CFG++ scale. Use in place of, or with, CFG. Currently only working with RES, DPMPP, and DDIM samplers."}),
                      "latent_guide_weight": ("FLOAT", {"default": 0.0, "min": -100.0, "max": 100.0, "step":0.01, "round": False}),
-                     "guide_mode": (["hard_light", "mean_std", "mean", "std"], {"default": 'eight', "tooltip": "The mode used."}),
+                     #"guide_mode": (["hard_light", "mean_std", "mean", "std", "noise_mean", "blend", "inversion"], {"default": 'mean', "tooltip": "The mode used."}),
+                     "guide_mode": (["hard_light", "blend", "mean_std", "mean", "std"], {"default": 'mean', "tooltip": "The mode used."}),
                      "rescale_floor": ("BOOLEAN", {"default": True, "tooltip": "Latent_guide_weight(s) control the minimum value for the latent_guide_mask. If false, they control the maximum value."}),
                     },
                     "optional": 
