@@ -511,7 +511,7 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
                     sigma_mid_inv = sigmax - sigma_mid #sigma_down
                     sigma_inv     = sigmax - sigma
                 else:
-                    sigma_mid_inv, sigma_inv = sigma_down, sigma
+                    sigma_mid_inv, sigma_inv = sigma_mid, sigma
                 
                 if LGW_MASK_RESCALE_MIN: 
                     lgw_mask = mask * (1 - latent_guide_weights[_]) + latent_guide_weights[_]
