@@ -95,6 +95,7 @@ NODE_CLASS_MAPPINGS = {
     "Conditioning Recast FP64": conditioning.Conditioning_Recast64,
     "StableCascade_StageB_Conditioning64": conditioning.StableCascade_StageB_Conditioning64,
     "ConditioningZeroAndTruncate": conditioning.ConditioningZeroAndTruncate,
+    "ConditioningTruncate": conditioning.ConditioningTruncate,
     
     "ConditioningToBase64": conditioning.ConditioningToBase64,
     "Base64ToConditioning": conditioning.Base64ToConditioning,
