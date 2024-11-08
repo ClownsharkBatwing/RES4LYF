@@ -210,6 +210,7 @@ def get_rk_methods(rk_type, h, c2=0.5, c3=1.0, h_prev=None, h_prev2=None, stepco
         alpha_fn = lambda h: 1
         t_fn = lambda sigma: sigma
         sigma_fn = lambda t: t
+        h_fn = lambda sigma_down, sigma: sigma_down - sigma
         
         model_call = get_denoised
         EPS_PRED = False
@@ -219,18 +220,22 @@ def get_rk_methods(rk_type, h, c2=0.5, c3=1.0, h_prev=None, h_prev2=None, stepco
         alpha_fn = lambda neg_h: torch.exp(neg_h)
         t_fn = lambda sigma: sigma.log().neg()
         sigma_fn = lambda t: t.neg().exp()
+        h_fn = lambda sigma_down, sigma: -torch.log(sigma_down/sigma)
 
         EPS_PRED = False
     
     match rk_type:
         case "deis": 
             model_call = get_epsilon
-            alpha_fn = lambda h: 1
-            t_fn = lambda sigma: sigma
-            sigma_fn = lambda t: t
+            #alpha_fn = lambda h: 1
+            #t_fn = lambda sigma: sigma
+            #sigma_fn = lambda t: t
+            
             alpha_fn = lambda neg_h: torch.exp(neg_h)
             t_fn = lambda sigma: sigma.log().neg()
             sigma_fn = lambda t: t.neg().exp()
+            h_fn = lambda sigma_down, sigma: -torch.log(sigma_down/sigma)
+            
             EPS_PRED = True
             
             #model_call = get_denoised
@@ -290,9 +295,14 @@ def get_rk_methods(rk_type, h, c2=0.5, c3=1.0, h_prev=None, h_prev2=None, stepco
             b1 =        phi(1, -h) - phi(2, -h)/c2
             b2 =        phi(2, -h)/c2
             
-            a2_1 /= (c2 * phi(1, -h*c2))
+            #a2_1 /= (c2 * phi(1, -h*c2))
+            a2_1 /= (1 - torch.exp(-h*c2)) / h
             b1 /= phi(1, -h)
             b2 /= phi(1, -h)
+            
+            #b1b2 = b1 + b2
+            #b1 = b1 / b1b2
+            #b2 = b2 / b1b2
             
             ab = [
                     [a2_1, 0],
@@ -308,6 +318,14 @@ def get_rk_methods(rk_type, h, c2=0.5, c3=1.0, h_prev=None, h_prev2=None, stepco
             b3 = (1 / (gamma * c2 + c3)) * phi(2, -h)      
             b2 = gamma * b3  #simplified version of: b2 = (gamma / (gamma * c2 + c3)) * phi_2_h  
             b1 = phi(1, -h) - b2 - b3     
+            
+            a2_1 /= (1 - torch.exp(-h*c2)) / h
+            a3_2 /= (1 - torch.exp(-h*c3)) / h
+            a3_1 /= (1 - torch.exp(-h*c3)) / h
+            b1 /= phi(1, -h)
+            b2 /= phi(1, -h)
+            b3 /= phi(1, -h)
+            
             ab = [
                     [a2_1, 0, 0],
                     [a3_1, a3_2, 0],
@@ -320,6 +338,11 @@ def get_rk_methods(rk_type, h, c2=0.5, c3=1.0, h_prev=None, h_prev2=None, stepco
             a2_1 =         c2   * phi(1, -h*c2)
             b1 = (1 - 1/(2*c2)) * phi(1, -h)
             b2 =     (1/(2*c2)) * phi(1, -h)
+            
+            a2_1 /= (1 - torch.exp(-h*c2)) / h
+            b1 /= phi(1, -h)
+            b2 /= phi(1, -h)
+            
             ab = [
                     [a2_1, 0],
                     [b1, b2],
@@ -331,6 +354,11 @@ def get_rk_methods(rk_type, h, c2=0.5, c3=1.0, h_prev=None, h_prev2=None, stepco
             a2_1 =         c2   * phi(1, -h*c2)
             b1 = (1 - 1/(2*c2)) * phi(1, -h)
             b2 =     (1/(2*c2)) * phi(1, -h)
+            
+            a2_1 /= (1 - torch.exp(-h*c2)) / h
+            b1 /= phi(1, -h)
+            b2 /= phi(1, -h)
+            
             ab = [
                     [a2_1, 0],
                     [b1, b2],
@@ -344,6 +372,14 @@ def get_rk_methods(rk_type, h, c2=0.5, c3=1.0, h_prev=None, h_prev2=None, stepco
             b2 = 0
             b3 = (1/c3) * phi(2, -h)
             b1 = phi(1, -h) - b2 - b3
+            
+            a2_1 /= (1 - torch.exp(-h*c2)) / h
+            a3_2 /= (1 - torch.exp(-h*c3)) / h
+            a3_1 /= (1 - torch.exp(-h*c3)) / h
+            b1 /= phi(1, -h)
+            b2 /= phi(1, -h)
+            b3 /= phi(1, -h)
+            
             ab = [
                     [a2_1, 0, 0],
                     [a3_1, a3_2, 0],
@@ -352,26 +388,26 @@ def get_rk_methods(rk_type, h, c2=0.5, c3=1.0, h_prev=None, h_prev2=None, stepco
             ci = [0, c2, c3, 1]
 
 
-    return ab, ci, multistep_order, model_call, alpha_fn, t_fn, sigma_fn, FSAL, EPS_PRED
+    return ab, ci, multistep_order, model_call, alpha_fn, t_fn, sigma_fn, h_fn, FSAL, EPS_PRED
 
 def get_rk_methods_order(rk_type):
-    ab, ci, multistep_order, model_call, alpha_fn, t_fn, sigma_fn, FSAL, EPS_PRED = get_rk_methods(rk_type, torch.tensor(1.0).to('cuda').to(torch.float64), c2=0.5, c3=0.75)
+    ab, ci, multistep_order, model_call, alpha_fn, t_fn, sigma_fn, h_fn, FSAL, EPS_PRED = get_rk_methods(rk_type, torch.tensor(1.0).to('cuda').to(torch.float64), c2=0.5, c3=0.75)
     return len(ci)-1
 
 def get_rk_methods_order_and_fn(rk_type, h=None, c2=None, c3=None, h_prev=None, h_prev2=None, stepcount=0, sigmas=None):
     if h == None:
-        ab, ci, multistep_order, model_call, alpha_fn, t_fn, sigma_fn, FSAL, EPS_PRED = get_rk_methods(rk_type, torch.tensor(1.0).to('cuda').to(torch.float64), c2=0.5, c3=0.75)
+        ab, ci, multistep_order, model_call, alpha_fn, t_fn, sigma_fn, h_fn, FSAL, EPS_PRED = get_rk_methods(rk_type, torch.tensor(1.0).to('cuda').to(torch.float64), c2=0.5, c3=0.75)
     else:
-        ab, ci, multistep_order, model_call, alpha_fn, t_fn, sigma_fn, FSAL, EPS_PRED = get_rk_methods(rk_type, h, c2, c3, h_prev, h_prev2, stepcount, sigmas)
+        ab, ci, multistep_order, model_call, alpha_fn, t_fn, sigma_fn, h_fn, FSAL, EPS_PRED = get_rk_methods(rk_type, h, c2, c3, h_prev, h_prev2, stepcount, sigmas)
 
     MULTISTEP=False
     multistep_buffer_size = len(ab[0]) - len(ab) # x dim - y dim
     if len(ab) < len(ci):
         MULTISTEP=True
-    return len(ci)-1, model_call, alpha_fn, t_fn, sigma_fn, FSAL, EPS_PRED #MULTISTEP
+    return len(ci)-1, model_call, alpha_fn, t_fn, sigma_fn, h_fn, FSAL, EPS_PRED #MULTISTEP
 
 def get_rk_methods_coeff(rk_type, h, c2, c3, h_prev=None, h_prev2=None, stepcount=0, sigmas=None):
-    ab, ci, multistep_order, model_call, alpha_fn, t_fn, sigma_fn, FSAL, EPS_PRED = get_rk_methods(rk_type, h, c2, c3, h_prev, h_prev2, stepcount, sigmas)
+    ab, ci, multistep_order, model_call, alpha_fn, t_fn, sigma_fn, h_fn, FSAL, EPS_PRED = get_rk_methods(rk_type, h, c2, c3, h_prev, h_prev2, stepcount, sigmas)
     return ab, ci, multistep_order, EPS_PRED
 
 def get_epsilon(model, x, sigma, **extra_args):
@@ -389,7 +425,7 @@ def get_denoised(model, x, sigma, **extra_args):
 def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, noise_sampler=None, noise_sampler_type="brownian", noise_mode="hard", noise_seed=-1, rk_type="dormand-prince", 
               sigma_fn_formula="", t_fn_formula="",
                   eta=0.5, eta_var=0.0, s_noise=1., d_noise=1., alpha=-1.0, k=1.0, scale=0.1, c2=0.5, c3=1.0, MULTISTEP=False, cfgpp=0.5, implicit_steps=0, reverse_weight=0.0, exp_mode=False,
-                  latent_guide=None, latent_guide_weight=0.0, latent_guide_weights=None, guide_mode="hard_light",
+                  latent_guide=None, latent_guide_inv=None, latent_guide_weight=0.0, latent_guide_weights=None, guide_mode="hard_light",
                   GARBAGE_COLLECT=False, mask=None, LGW_MASK_RESCALE_MIN=True,
                   ):
     extra_args = {} if extra_args is None else extra_args
@@ -406,7 +442,11 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
     if latent_guide is not None:
         y0 = latent_guide = model.inner_model.inner_model.process_latent_in(latent_guide['samples']).clone().to(x.device)
     else:
-        y0 = torch.zeros_like(x)
+        y0 = latent_guide = torch.zeros_like(x)
+    if latent_guide_inv is not None:
+        y0_inv = latent_guide_inv = model.inner_model.inner_model.process_latent_in(latent_guide_inv['samples']).clone().to(x.device)
+    else:
+        y0_inv = latent_guide_inv = torch.zeros_like(x)
         
     if mask is None:
         mask = torch.ones_like(x)
@@ -442,7 +482,7 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
         y0 = noise_sampler(sigma=sigmax, sigma_next=sigmin)
         y0 = (y0 - y0.mean()) / y0.std()
         
-    order, model_call, alpha_fn, t_fn, sigma_fn, FSAL, EPS_PRED = get_rk_methods_order_and_fn(rk_type)
+    order, model_call, alpha_fn, t_fn, sigma_fn, h_fn, FSAL, EPS_PRED = get_rk_methods_order_and_fn(rk_type)
 
     if exp_mode:
         model_call = get_denoised
@@ -458,7 +498,11 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
     for _ in trange(len(sigmas)-1, disable=disable):
         sigma, sigma_next = sigmas[_], sigmas[_+1]
         
-        if sigma == sigmin and sigma_next == 0.0:
+        if sigma_next == 0.0:
+            rk_type = "euler"
+            implicit_steps, eta, eta_var = 0, 0, 0
+            
+        """if sigma == sigmin and sigma_next == 0.0:
             rk_type = "euler"
             implicit_steps, eta, eta_var = 0, 0, 0
         
@@ -466,14 +510,17 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
             sigma_next = sigmin
             null = torch.tensor([0.0], device=sigmas.device, dtype=sigmas.dtype) 
             sigmas = torch.cat([sigmas, null])
-            eta, eta_var = 0, 0  #implicit_steps = 0
+            eta, eta_var = 0, 0  #implicit_steps = 0"""
             
         #order, model_call, alpha_fn, t_fn, sigma_fn, FSAL, EPS_PRED = get_rk_methods_order_and_fn(rk_type, h, c2, c3, h_prev, h_prev2, _, sigmas)
-        order, model_call, alpha_fn, t_fn, sigma_fn, FSAL, EPS_PRED = get_rk_methods_order_and_fn(rk_type)
+        order, model_call, alpha_fn, t_fn, sigma_fn, h_fn, FSAL, EPS_PRED = get_rk_methods_order_and_fn(rk_type)
         
-        sigma_up, sigma, sigma_down, alpha_ratio = get_res4lyf_step_with_model(model, sigma, sigma_next, eta, eta_var, noise_mode, h=t_fn(sigma_next)-t_fn(sigma))
+        #sigma_up, sigma, sigma_down, alpha_ratio = get_res4lyf_step_with_model(model, sigma, sigma_next, eta, eta_var, noise_mode, h=t_fn(sigma_next)-t_fn(sigma))
+        sigma_up, sigma, sigma_down, alpha_ratio = get_res4lyf_step_with_model(model, sigma, sigma_next, eta, eta_var, noise_mode, h_fn(sigma_next,sigma) )
         t_down, t = t_fn(sigma_down), t_fn(sigma)
-        h = t_down - t
+        #h = t_down - t
+        #h = t_fn(sigma_down/sigma)
+        h = h_fn(sigma_down, sigma)
         
         c2, c3 = get_res4lyf_half_step3(sigma, sigma_down, t_fn=t_fn, sigma_fn=sigma_fn, t_fn_formula=t_fn_formula, sigma_fn_formula=sigma_fn_formula)
         ab, ci, multistep_order, EPS_PRED = get_rk_methods_coeff(rk_type, h, c2, c3, h_prev, h_prev2, _, sigmas)
@@ -483,7 +530,9 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
             ci[-1] = 1.0
             for i in range(order):
                 for j in range(order):
-                    ab[i][j] = ab[i][j] * phi(1, -h * ci[i+1])
+                    #ab[i][j] = ab[i][j] * phi(1, -h * ci[i+1])
+                    ab[i][j] *= (-torch.log(sigma_down/sigma) / (sigma_down - sigma))
+                    ci[i] = torch.log(sigma - sigma * ci[i] + sigma_down * ci[i]) / ( sigma_down.log() - sigma.log())
         
         if isinstance(model.inner_model.inner_model.model_sampling, comfy.model_sampling.CONST) == False and noise_mode == "hard":
             noise = noise_sampler(sigma=sigmas[_], sigma_next=sigmas[_+1])
@@ -515,14 +564,17 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
                 
                 if LGW_MASK_RESCALE_MIN: 
                     lgw_mask = mask * (1 - latent_guide_weights[_]) + latent_guide_weights[_]
+                    lgw_mask_inv = (1-mask) * (1 - latent_guide_weights[_]) + latent_guide_weights[_]
                 else:
                     lgw_mask = mask * latent_guide_weights[_]    
+                    lgw_mask_inv = (1-mask) * latent_guide_weights[_]   
                     
-                ks, ks_u, ys = torch.zeros_like(x), torch.zeros_like(x), torch.zeros_like(x)
+                ks, ks_u, ys, ys_inv = torch.zeros_like(x), torch.zeros_like(x), torch.zeros_like(x), torch.zeros_like(x)
                 for j in range(order):
                     ks     += ab[i][j] * ki[j]
                     ks_u   += ab[i][j] * ki_u[j]
                     ys     += ab[i][j] * y0
+                    ys_inv += ab[i][j] * y0_inv
                     
 
                 if EPS_PRED and rk_type.startswith("deis"):
@@ -557,18 +609,28 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
                             ks2[0][n] = (ks2[0][n] * latent_guide[0][n].std())
                         ks = (1 - lgw_mask) * ks   +   lgw_mask * ks2
                     elif guide_mode == "blend": 
-                        ks = (1 - lgw_mask) * ks   +   lgw_mask * ys
+                        #ks1 = (1 - lgw_mask) * ks   +   lgw_mask * ys   #+   (1-lgw_mask) * latent_guide_inv
+                        #ks2 = (1 - lgw_mask_inv) * ks   +   lgw_mask_inv * ys_inv
+                        #ks = (ks1 + ks2)
+                        ks = (1 - lgw_mask)     * ks   +   lgw_mask     * ys   #+   (1-lgw_mask) * latent_guide_inv
+                        ks = (1 - lgw_mask_inv) * ks   +   lgw_mask_inv * ys_inv
+                        #ks = (ks1 + ks2)
                     elif guide_mode == "inversion": 
                         UNSAMPLE = True
                         sigma_mid_inv = sigmax - sigma_mid + 1e-7#sigma_down
-                        sigma_inv     = sigmax - sigma + 1e-7
+                        sigma_inv     = sigmax - sigma     + 1e-7
 
                 cfgpp_term = cfgpp*h*(ks - ks_u)
-            
 
-                xi[(i+1)%order]  = (1-UNSAMPLE * lgw_mask) * (     (sigma_mid/sigma)  * (xi_0 + cfgpp_term)    +     ((1 - (sigma_mid/sigma)))      * ks )     \
-                                + UNSAMPLE * lgw_mask  * ( (sigma_mid_inv/sigma_inv)  * (xi_0 + cfgpp_term)    +      (1 - sigma_mid_inv/sigma_inv) * ys )
-
+                alpha_t_1 = alpha_t_1_inv = torch.exp(torch.log(sigma_down/sigma) * ci[i+1])
+                if sigma_next > sigma:
+                    alpha_t_1_inv = torch.nan_to_num(torch.exp(torch.log((sigmax - sigma_down)/(sigmax - sigma)) * ci[i+1]), 1.)
+                xi[(i+1)%order]  = (1-UNSAMPLE * lgw_mask) * (alpha_t_1 * (xi_0 + cfgpp_term)    +    (1 - alpha_t_1)* ks )     \
+                                + UNSAMPLE * lgw_mask  * (alpha_t_1_inv * (xi_0 + cfgpp_term)    +      (1 - alpha_t_1_inv) * ys )
+                                
+                #xi[(i+1)%order]  = (1-UNSAMPLE * lgw_mask) * (     (sigma_down**ci[i+1]/sigma**ci[i+1])  * (xi_0 + cfgpp_term)    +     ((1 - (sigma_down**ci[i+1]/sigma**ci[i+1])))      * ks )     \
+                #                + UNSAMPLE * lgw_mask  * ( (sigma_mid_inv/sigma_inv)  * (xi_0 + cfgpp_term)    +      (1 - sigma_mid_inv/sigma_inv) * ys )
+                                
                 if (i+1)%order > 0 and (i+1)%order > multistep_order-1:
                     if GARBAGE_COLLECT: gc.collect(); torch.cuda.empty_cache()
                     ki[i+1]   = model_call(model, xi[i+1], sigma_fn(t + h*ci[i+1]), **extra_args)

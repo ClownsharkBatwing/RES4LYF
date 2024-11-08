@@ -71,7 +71,9 @@ def add_samplers():
 
 extra_samplers = {
     "rk":  sampler_rk.sample_rk,
+    "rk_testnew":  test_samplers.sample_rk_testnew,
 }
+
 
 add_samplers()
 
@@ -177,7 +179,7 @@ NODE_CLASS_MAPPINGS = {
 
 if flags["test_samplers"]:
     NODE_CLASS_MAPPINGS.update({
-        "SamplerRK_Test": test_samplers.SamplerRK_Test,
+        "SamplerRK_TestNew": test_samplers.SamplerRK_TestNew,
     })
 
 WEB_DIRECTORY = "./web"
