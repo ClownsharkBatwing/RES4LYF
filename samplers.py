@@ -157,7 +157,7 @@ class SharkSampler:
                     "sampler_mode": (['standard', 'unsample', 'resample'],),
                     "scheduler": (comfy.samplers.SCHEDULER_NAMES, ),
                     "steps": ("INT", {"default": 30, "min": 1, "max": 10000}),
-                    "denoise": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 10000}),
+                    "denoise": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 10000, "step":0.01}),
                     "cfg": ("FLOAT", {"default": 5.0, "min": 0.0, "max": 100.0, "step":0.5, "round": False, }),
                     "truncate_conditioning": (['false', 'true', 'true_and_zero_neg'], ),
                     
