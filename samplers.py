@@ -308,7 +308,7 @@ class SharkSampler:
             out_orig_dtype = out['samples'].clone().to(latent_image_dtype)
             out_denoised_orig_dtype = out_denoised['samples'].clone().to(latent_image_dtype)
                 
-            return ( {'samples', out_orig_dtype}, {'samples', out_denoised_orig_dtype}, out, out_denoised,)
+            return ( {'samples': out_orig_dtype}, {'samples': out_denoised_orig_dtype}, out, out_denoised,)
             #return (out.to(latent_image_dtype), out_denoised.to(latent_image_dtype))
 
 
