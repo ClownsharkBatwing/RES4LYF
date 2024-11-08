@@ -129,7 +129,16 @@ class LatentNoised:
 
             return ({'samples': noised_latent},)
 
+def get_sigmas(model, scheduler, steps, denoise): #adapted from comfyui
+    total_steps = steps
+    if denoise < 1.0:
+        if denoise <= 0.0:
+            return (torch.FloatTensor([]),)
+        total_steps = int(steps/denoise)
 
+    sigmas = comfy.samplers.calculate_sigmas(model.get_model_object("model_sampling"), scheduler, total_steps).cpu()
+    sigmas = sigmas[-(steps + 1):]
+    return sigmas
 
 class SharkSampler:
     @classmethod
@@ -145,16 +154,22 @@ class SharkSampler:
                     "alpha": ("FLOAT", {"default": 1.0, "min": -10000.0, "max": 10000.0, "step":0.1, "round": False, }),
                     "k": ("FLOAT", {"default": 1.0, "min": -10000.0, "max": 10000.0, "step":2.0, "round": False, }),
                     "noise_seed": ("INT", {"default": 0, "min": -1, "max": 0xffffffffffffffff}),
+                    "scheduler": (comfy.samplers.SCHEDULER_NAMES, ),
+                    "steps": ("INT", {"default": 30, "min": 1, "max": 10000}),
+                    "denoise": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 10000}),
                     "cfg": ("FLOAT", {"default": 5.0, "min": 0.0, "max": 100.0, "step":0.5, "round": False, }),
+                    "truncate_conditioning": (['false', 'true', 'true_and_zero_neg'], ),
+                    
                     "positive": ("CONDITIONING", ),
                     "negative": ("CONDITIONING", ),
                     "sampler": ("SAMPLER", ),
-                    "sigmas": ("SIGMAS", ),
                     "latent_image": ("LATENT", ),               
                      },
                 "optional": 
-                    {"latent_noise": ("LATENT", ),
-                     "latent_noise_match": ("LATENT",),
+                    {
+                    "sigmas": ("SIGMAS", ),
+                    "latent_noise": ("LATENT", ),
+                    "latent_noise_match": ("LATENT",),
                     }
                 }
 
@@ -165,7 +180,7 @@ class SharkSampler:
 
     CATEGORY = "sampling/custom_sampling"
     
-    def main(self, model, add_noise, noise_stdev, noise_mean, noise_normalize, noise_is_latent, noise_type, noise_seed, cfg, alpha, k, positive, negative, sampler, sigmas, latent_image, latent_noise=None, latent_noise_match=None,): 
+    def main(self, model, add_noise, noise_stdev, noise_mean, noise_normalize, noise_is_latent, noise_type, noise_seed, cfg, truncate_conditioning, alpha, k, positive, negative, sampler, latent_image, scheduler, steps, denoise, sigmas=None, latent_noise=None, latent_noise_match=None,): 
             latent = latent_image
             latent_image_dtype = latent_image['samples'].dtype
             
@@ -179,7 +194,9 @@ class SharkSampler:
                 
             if sigmas is not None:
                 sigmas = sigmas.clone().to(torch.float64)
-            
+            else: 
+                sigmas = get_sigmas(model, scheduler, steps, denoise).to(torch.float64)
+                
             if latent_image is not None:
                 x = latent_image["samples"].clone().to(torch.float64)    
                 #x = {"samples": x}
@@ -189,8 +206,36 @@ class SharkSampler:
             if latent_noise_match is not None:
                 latent_noise_match["samples"] = latent_noise_match["samples"].clone().to(torch.float64)    
 
-            sigmin = model.object_patches["model_sampling"].sigma_min
-            sigmax = model.object_patches["model_sampling"].sigma_max
+            if truncate_conditioning == "true" or truncate_conditioning == "true_and_zero_neg":
+                c = []
+                for t in positive:
+                    d = t[1].copy()
+                    pooled_output = d.get("pooled_output", None)
+                    if pooled_output is not None:
+                        d["pooled_output"] = d["pooled_output"][:, :2048]
+                        n = [t[0][:, :154, :4096], d]
+                    c.append(n)
+                positive = c
+                
+                c = []
+                for t in negative:
+                    d = t[1].copy()
+                    pooled_output = d.get("pooled_output", None)
+                    if pooled_output is not None:
+                        if truncate_conditioning == "true_and_zero_neg":
+                            d["pooled_output"] = torch.zeros((1,2048), dtype=t[0].dtype, device=t[0].device)
+                            n = [torch.zeros((1,154,4096), dtype=t[0].dtype, device=t[0].device), d]
+                        else:
+                            d["pooled_output"] = d["pooled_output"][:, :2048]
+                            n = [t[0][:, :154, :4096], d]
+                    c.append(n)
+                negative = c
+            
+            sigmin = model.model.model_sampling.sigma_min
+            sigmax = model.model.model_sampling.sigma_max
+
+            #sigmin = model.object_patches_backup['model_sampling'].sigma_min
+            #sigmax = model.object_patches_backup['model_sampling'].sigma_max
             
             if noise_seed == -1:
                 seed = torch.initial_seed() + 1
@@ -425,7 +470,9 @@ class SamplerRK:
 
                         "latent_guide_mask": ("MASK", ),
                         "latent_guide_weights": ("SIGMAS", ),
+                        "sigmas_override": ("SIGMAS", ),
                     }  
+                    
                }
     RETURN_TYPES = ("SAMPLER",)
     CATEGORY = "sampling/custom_sampling/samplers"
@@ -434,7 +481,7 @@ class SamplerRK:
 
     def get_sampler(self, eta=0.25, eta_var=0.0, d_noise=1.0, s_noise=1.0, alpha=-1.0, k=1.0, cfgpp=0.0, multistep=False, noise_sampler_type="brownian", noise_mode="hard", noise_seed=-1, rk_type="dormand-prince", 
                     exp_mode=False, t_fn_formula=None, sigma_fn_formula=None, implicit_steps=0,
-                    latent_guide=None, latent_guide_inv=None, latent_guide_weight=0.0, guide_mode="hard_light", latent_guide_weights=None, latent_guide_mask=None, rescale_floor=True,
+                    latent_guide=None, latent_guide_inv=None, latent_guide_weight=0.0, guide_mode="hard_light", latent_guide_weights=None, latent_guide_mask=None, rescale_floor=True, sigmas_override=None,
                     ):
         sampler_name = "rk"
 
@@ -446,7 +493,7 @@ class SamplerRK:
         sampler = comfy.samplers.ksampler(sampler_name, {"eta": eta, "eta_var": eta_var, "s_noise": s_noise, "d_noise": d_noise, "alpha": alpha, "k": k, "cfgpp": cfgpp, "MULTISTEP": multistep, "noise_sampler_type": noise_sampler_type, "noise_mode": noise_mode, "noise_seed": noise_seed, "rk_type": rk_type, 
                                                          "exp_mode": exp_mode, "t_fn_formula": t_fn_formula, "sigma_fn_formula": sigma_fn_formula, "implicit_steps": implicit_steps,
                                                          "latent_guide": latent_guide, "latent_guide_inv": latent_guide_inv, "mask": latent_guide_mask, "latent_guide_weight": latent_guide_weight, "latent_guide_weights": latent_guide_weights, "guide_mode": guide_mode,
-                                                         "LGW_MASK_RESCALE_MIN": rescale_floor,})
+                                                         "LGW_MASK_RESCALE_MIN": rescale_floor, "sigmas_override": sigmas_override})
         return (sampler, )
 
     sigma_fn = lambda t: (t.exp() + 1) ** -1 + 1e-5
