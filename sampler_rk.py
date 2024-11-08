@@ -601,7 +601,13 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
                         for n in range(latent_guide.shape[1]):
                             ks2[0][n] = (ks[0][n] - ks[0][n].mean())
                             ks2[0][n] = (ks2[0][n]) + latent_guide[0][n].mean()
+                        ks3 = torch.zeros_like(x)
+                        for n in range(latent_guide.shape[1]):
+                            ks3[0][n] = (ks[0][n] - ks[0][n].mean())
+                            ks3[0][n] = (ks3[0][n]) + latent_guide_inv[0][n].mean()
+                            
                         ks = (1 - lgw_mask) * ks   +   lgw_mask * ks2
+                        ks = (1 - lgw_mask_inv) * ks   +   lgw_mask_inv * ks3
                     elif guide_mode == "std":
                         ks2 = torch.zeros_like(x)
                         for n in range(latent_guide.shape[1]):
