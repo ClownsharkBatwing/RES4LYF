@@ -500,7 +500,8 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
         
         if sigma_next == 0.0:
             rk_type = "euler"
-            implicit_steps, eta, eta_var = 0, 0, 0
+            eta, eta_var = 0, 0
+            #implicit_steps, eta, eta_var = 0, 0, 0
             
         """if sigma == sigmin and sigma_next == 0.0:
             rk_type = "euler"

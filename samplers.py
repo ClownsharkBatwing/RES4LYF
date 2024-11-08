@@ -144,7 +144,7 @@ class SharkSampler:
                     "noise_type": (NOISE_GENERATOR_NAMES, {"default": "gaussian"}),
                     "alpha": ("FLOAT", {"default": 1.0, "min": -10000.0, "max": 10000.0, "step":0.1, "round": False, }),
                     "k": ("FLOAT", {"default": 1.0, "min": -10000.0, "max": 10000.0, "step":2.0, "round": False, }),
-                    "noise_seed": ("INT", {"default": 0, "min": 0, "max": 0xffffffffffffffff}),
+                    "noise_seed": ("INT", {"default": 0, "min": -1, "max": 0xffffffffffffffff}),
                     "cfg": ("FLOAT", {"default": 5.0, "min": 0.0, "max": 100.0, "step":0.5, "round": False, }),
                     "positive": ("CONDITIONING", ),
                     "negative": ("CONDITIONING", ),
@@ -158,8 +158,8 @@ class SharkSampler:
                     }
                 }
 
-    RETURN_TYPES = ("LATENT","LATENT","LATENT")
-    RETURN_NAMES = ("output", "denoised_output", "latent_batch")
+    RETURN_TYPES = ("LATENT","LATENT","LATENT","LATENT")
+    RETURN_NAMES = ("output", "denoised", "output_fp64", "denoised_fp64")
 
     FUNCTION = "main"
 
@@ -167,21 +167,53 @@ class SharkSampler:
     
     def main(self, model, add_noise, noise_stdev, noise_mean, noise_normalize, noise_is_latent, noise_type, noise_seed, cfg, alpha, k, positive, negative, sampler, sigmas, latent_image, latent_noise=None, latent_noise_match=None,): 
             latent = latent_image
-            latent_image = latent["samples"]
-
-            torch.manual_seed(noise_seed)
-
-            if not add_noise:
-                noise = torch.zeros(latent_image.size(), dtype=latent_image.dtype, layout=latent_image.layout, device="cpu")
-            elif latent_noise is None:
-                batch_inds = latent["batch_index"] if "batch_index" in latent else None
-                noise = prepare_noise(latent_image, noise_seed, noise_type, batch_inds, alpha, k)
+            latent_image_dtype = latent_image['samples'].dtype
+            
+            if positive is not None:
+                positive[0][0] = positive[0][0].clone().to(torch.float64)
+                positive[0][1]["pooled_output"] = positive[0][1]["pooled_output"].clone().to(torch.float64)
+            
+            if negative is not None:
+                negative[0][0] = negative[0][0].clone().to(torch.float64)
+                negative[0][1]["pooled_output"] = negative[0][1]["pooled_output"].clone().to(torch.float64)
                 
+            if sigmas is not None:
+                sigmas = sigmas.clone().to(torch.float64)
+            
+            if latent_image is not None:
+                x = latent_image["samples"].clone().to(torch.float64)    
+                #x = {"samples": x}
+                
+            if latent_noise is not None:
+                latent_noise["samples"] = latent_noise["samples"].clone().to(torch.float64)    
+            if latent_noise_match is not None:
+                latent_noise_match["samples"] = latent_noise_match["samples"].clone().to(torch.float64)    
+
+            sigmin = model.object_patches["model_sampling"].sigma_min
+            sigmax = model.object_patches["model_sampling"].sigma_max
+            
+            if noise_seed == -1:
+                seed = torch.initial_seed() + 1
+            else:
+                seed = noise_seed
+                torch.manual_seed(noise_seed)
+            
+            noise_sampler = NOISE_GENERATOR_CLASSES.get(noise_type)(x=x, seed=seed, sigma_min=sigmin, sigma_max=sigmax)
+            
+            if noise_type == "fractal":
+                noise_sampler.alpha = alpha
+                noise_sampler.k = k
+                noise_sampler.scale = 0.1
+        
+            if not add_noise:
+                noise = torch.zeros_like(x)
+            elif latent_noise is None:
+                noise = noise_sampler(sigma=sigmax, sigma_next=sigmin)
             else:
                 noise = latent_noise["samples"]
 
             if noise_is_latent: #add noise and latent together and normalize --> noise
-                noise += latent_image.cpu()
+                noise += x.cpu()
                 noise.sub_(noise.mean()).div_(noise.std())
 
             if noise_normalize:
@@ -190,12 +222,10 @@ class SharkSampler:
             noise = (noise - noise.mean()) + noise_mean
             
             if latent_noise_match:
-                #noise.sub_(noise.mean()).div_(noise.std())
                 for i in range(latent_noise_match["samples"].shape[1]):
                     noise[0][i] = (noise[0][i] - noise[0][i].mean())
                     noise[0][i] = (noise[0][i]) + latent_noise_match["samples"][0][i].mean()
-                    #noise[0][i] = (noise[0][i] - noise[0][i].mean()) / noise[0][i].std()
-                    #noise[0][i] = (noise[0][i] * latent_noise_match["samples"][0][i].std()) + latent_noise_match["samples"][0][i].mean()
+
                 
             noise_mask = latent["noise_mask"] if "noise_mask" in latent else None
 
@@ -205,7 +235,7 @@ class SharkSampler:
 
             disable_pbar = False
 
-            samples = comfy.sample.sample_custom(model, noise, cfg, sampler, sigmas, positive, negative, latent_image, 
+            samples = comfy.sample.sample_custom(model, noise, cfg, sampler, sigmas, positive, negative, x, 
                                                  noise_mask=noise_mask, callback=callback, disable_pbar=disable_pbar, seed=noise_seed)
 
             out = latent.copy()
@@ -215,7 +245,12 @@ class SharkSampler:
                 out_denoised["samples"] = model.model.process_latent_out(x0_output["x0"].cpu())
             else:
                 out_denoised = out
-            return (out, out_denoised)
+                
+            out_orig_dtype = out['samples'].clone().to(latent_image_dtype)
+            out_denoised_orig_dtype = out_denoised['samples'].clone().to(latent_image_dtype)
+                
+            return ( {'samples', out_orig_dtype}, {'samples', out_denoised_orig_dtype}, out, out_denoised,)
+            #return (out.to(latent_image_dtype), out_denoised.to(latent_image_dtype))
 
 
 class UltraSharkSampler:  
