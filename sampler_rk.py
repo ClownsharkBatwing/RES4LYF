@@ -441,15 +441,6 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
         UNSAMPLE = True
         sigmas = sigmas[1:-1]
     
-    if latent_guide is not None:
-        y0 = latent_guide = model.inner_model.inner_model.process_latent_in(latent_guide['samples']).clone().to(x.device)
-    else:
-        y0 = latent_guide = torch.zeros_like(x)
-    if latent_guide_inv is not None:
-        y0_inv = latent_guide_inv = model.inner_model.inner_model.process_latent_in(latent_guide_inv['samples']).clone().to(x.device)
-    else:
-        y0_inv = latent_guide_inv = torch.zeros_like(x)
-        
     if mask is None:
         mask = torch.ones_like(x)
         LGW_MASK_RESCALE_MIN = False
@@ -459,6 +450,29 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
         mask = F.interpolate(mask, size=(x.shape[2], x.shape[3]), mode='bilinear', align_corners=False)
         mask = mask.to(x.dtype).to(x.device)
         
+    if latent_guide is not None:
+        if sigmas[1] < sigmas[0]:
+            y0 = latent_guide = model.inner_model.inner_model.process_latent_in(latent_guide['samples']).clone().to(x.device)
+        else:
+            x = model.inner_model.inner_model.process_latent_in(latent_guide['samples']).clone().to(x.device)
+    else:
+        y0 = latent_guide = torch.zeros_like(x)
+    
+ 
+    if latent_guide_inv is not None:
+        if sigmas[1] < sigmas[0]:
+            y0_inv = latent_guide_inv = model.inner_model.inner_model.process_latent_in(latent_guide_inv['samples']).clone().to(x.device)
+        elif UNSAMPLE and mask is not None:
+            x = mask * x + (1-mask) * model.inner_model.inner_model.process_latent_in(latent_guide_inv['samples']).clone().to(x.device)
+        else:
+            y0_inv = latent_guide_inv = torch.zeros_like(x)
+    else:
+        y0_inv = latent_guide_inv = torch.zeros_like(x)
+            
+    #else:
+    #    y0_inv = latent_guide_inv = torch.zeros_like(x)
+        
+    
     uncond = [0]
     uncond[0] = torch.full_like(x, 0.0)
     if cfgpp != 0.0:
@@ -483,6 +497,8 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
     if UNSAMPLE and sigmas[1] > sigmas[0]: #sigma_next > sigma:
         y0 = noise_sampler(sigma=sigmax, sigma_next=sigmin)
         y0 = (y0 - y0.mean()) / y0.std()
+        y0_inv = noise_sampler(sigma=sigmax, sigma_next=sigmin)
+        y0_inv = (y0_inv - y0_inv.mean()) / y0_inv.std()
         
     order, model_call, alpha_fn, t_fn, sigma_fn, h_fn, FSAL, EPS_PRED = get_rk_methods_order_and_fn(rk_type)
 
@@ -636,6 +652,8 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
                     alpha_t_1_inv = torch.nan_to_num(torch.exp(torch.log((sigmax - sigma_down)/(sigmax - sigma)) * ci[i+1]), 1.)
                 xi[(i+1)%order]  = (1-UNSAMPLE * lgw_mask) * (alpha_t_1 * (xi_0 + cfgpp_term)    +    (1 - alpha_t_1)* ks )     \
                                 + UNSAMPLE * lgw_mask  * (alpha_t_1_inv * (xi_0 + cfgpp_term)    +      (1 - alpha_t_1_inv) * ys )
+                                
+                xi[(i+1)%order]  = (1-lgw_mask_inv) * xi[(i+1)%order]   + UNSAMPLE * lgw_mask_inv  * (alpha_t_1_inv * (xi_0 + cfgpp_term)    +      (1 - alpha_t_1_inv) * ys_inv )
                                 
                 #xi[(i+1)%order]  = (1-UNSAMPLE * lgw_mask) * (     (sigma_down**ci[i+1]/sigma**ci[i+1])  * (xi_0 + cfgpp_term)    +     ((1 - (sigma_down**ci[i+1]/sigma**ci[i+1])))      * ks )     \
                 #                + UNSAMPLE * lgw_mask  * ( (sigma_mid_inv/sigma_inv)  * (xi_0 + cfgpp_term)    +      (1 - sigma_mid_inv/sigma_inv) * ys )
