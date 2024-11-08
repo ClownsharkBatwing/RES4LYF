@@ -154,6 +154,7 @@ class SharkSampler:
                     "alpha": ("FLOAT", {"default": 1.0, "min": -10000.0, "max": 10000.0, "step":0.1, "round": False, }),
                     "k": ("FLOAT", {"default": 1.0, "min": -10000.0, "max": 10000.0, "step":2.0, "round": False, }),
                     "noise_seed": ("INT", {"default": 0, "min": -1, "max": 0xffffffffffffffff}),
+                    "sampler_mode": (['standard', 'unsample', 'resample'],),
                     "scheduler": (comfy.samplers.SCHEDULER_NAMES, ),
                     "steps": ("INT", {"default": 30, "min": 1, "max": 10000}),
                     "denoise": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 10000}),
@@ -180,31 +181,44 @@ class SharkSampler:
 
     CATEGORY = "sampling/custom_sampling"
     
-    def main(self, model, add_noise, noise_stdev, noise_mean, noise_normalize, noise_is_latent, noise_type, noise_seed, cfg, truncate_conditioning, alpha, k, positive, negative, sampler, latent_image, scheduler, steps, denoise, sigmas=None, latent_noise=None, latent_noise_match=None,): 
+    def main(self, model, add_noise, noise_stdev, noise_mean, noise_normalize, noise_is_latent, noise_type, noise_seed, cfg, truncate_conditioning, alpha, k, positive, negative, sampler, latent_image, sampler_mode, scheduler, steps, denoise, sigmas=None, latent_noise=None, latent_noise_match=None,): 
             latent = latent_image
             latent_image_dtype = latent_image['samples'].dtype
             
+            default_dtype = torch.float64
+            
             if positive is not None:
-                positive[0][0] = positive[0][0].clone().to(torch.float64)
-                positive[0][1]["pooled_output"] = positive[0][1]["pooled_output"].clone().to(torch.float64)
+                positive[0][0] = positive[0][0].clone().to(default_dtype)
+                positive[0][1]["pooled_output"] = positive[0][1]["pooled_output"].clone().to(default_dtype)
             
             if negative is not None:
-                negative[0][0] = negative[0][0].clone().to(torch.float64)
-                negative[0][1]["pooled_output"] = negative[0][1]["pooled_output"].clone().to(torch.float64)
+                negative[0][0] = negative[0][0].clone().to(default_dtype)
+                negative[0][1]["pooled_output"] = negative[0][1]["pooled_output"].clone().to(default_dtype)
                 
             if sigmas is not None:
-                sigmas = sigmas.clone().to(torch.float64)
+                sigmas = sigmas.clone().to(default_dtype)
             else: 
-                sigmas = get_sigmas(model, scheduler, steps, denoise).to(torch.float64)
+                sigmas = get_sigmas(model, scheduler, steps, denoise).to(default_dtype)
+                
+            #sigmas = sigmas.clone().to(torch.float64)
+        
+            if sampler_mode == "unsample": 
+                null = torch.tensor([0.0], device=sigmas.device, dtype=sigmas.dtype)
+                sigmas = torch.flip(sigmas, dims=[0])
+                sigmas = torch.cat([sigmas, null])
+            elif sampler_mode == "resample":
+                null = torch.tensor([0.0], device=sigmas.device, dtype=sigmas.dtype)
+                sigmas = torch.cat([null, sigmas])
+                sigmas = torch.cat([sigmas, null])
                 
             if latent_image is not None:
-                x = latent_image["samples"].clone().to(torch.float64)    
+                x = latent_image["samples"].clone().to(default_dtype) 
                 #x = {"samples": x}
                 
             if latent_noise is not None:
-                latent_noise["samples"] = latent_noise["samples"].clone().to(torch.float64)    
+                latent_noise["samples"] = latent_noise["samples"].clone().to(default_dtype)  
             if latent_noise_match is not None:
-                latent_noise_match["samples"] = latent_noise_match["samples"].clone().to(torch.float64)    
+                latent_noise_match["samples"] = latent_noise_match["samples"].clone().to(default_dtype)
 
             if truncate_conditioning == "true" or truncate_conditioning == "true_and_zero_neg":
                 c = []

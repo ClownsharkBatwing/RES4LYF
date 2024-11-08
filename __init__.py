@@ -71,7 +71,7 @@ def add_samplers():
 
 extra_samplers = {
     "rk":  sampler_rk.sample_rk,
-    "rk_testnew":  test_samplers.sample_rk_testnew,
+    #"rk_testnew":  test_samplers.sample_rk_testnew,
 }
 
 
