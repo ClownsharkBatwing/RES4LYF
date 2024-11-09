@@ -652,8 +652,8 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
                     alpha_t_1_inv = torch.nan_to_num(torch.exp(torch.log((sigmax - sigma_down)/(sigmax - sigma)) * ci[i+1]), 1.)
                 xi[(i+1)%order]  = (1-UNSAMPLE * lgw_mask) * (alpha_t_1 * (xi_0 + cfgpp_term)    +    (1 - alpha_t_1)* ks )     \
                                 + UNSAMPLE * lgw_mask  * (alpha_t_1_inv * (xi_0 + cfgpp_term)    +      (1 - alpha_t_1_inv) * ys )
-                                
-                xi[(i+1)%order]  = (1-lgw_mask_inv) * xi[(i+1)%order]   + UNSAMPLE * lgw_mask_inv  * (alpha_t_1_inv * (xi_0 + cfgpp_term)    +      (1 - alpha_t_1_inv) * ys_inv )
+                if UNSAMPLE:     
+                    xi[(i+1)%order]  = (1-lgw_mask_inv) * xi[(i+1)%order]   + UNSAMPLE * lgw_mask_inv  * (alpha_t_1_inv * (xi_0 + cfgpp_term)    +      (1 - alpha_t_1_inv) * ys_inv )
                                 
                 #xi[(i+1)%order]  = (1-UNSAMPLE * lgw_mask) * (     (sigma_down**ci[i+1]/sigma**ci[i+1])  * (xi_0 + cfgpp_term)    +     ((1 - (sigma_down**ci[i+1]/sigma**ci[i+1])))      * ks )     \
                 #                + UNSAMPLE * lgw_mask  * ( (sigma_mid_inv/sigma_inv)  * (xi_0 + cfgpp_term)    +      (1 - sigma_mid_inv/sigma_inv) * ys )
