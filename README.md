@@ -12,7 +12,7 @@ Much of this work remains experimental and is subject to further changes.
 
 ![image](https://github.com/ClownsharkBatwing/RES4LYF/blob/main/workflows/txt2img%20(embedded).png?raw=true)
 
-![image](https://github.com/ClownsharkBatwing/RES4LYF/blob/main/workflows/txt2img.png)
+![image](https://github.com/ClownsharkBatwing/RES4LYF/blob/main/workflows/txt2img%20SD35M.png)
 
 **IMG2IMG Workflow (Latent Image Guides):** 
 
