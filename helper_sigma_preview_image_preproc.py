@@ -1,17 +1,3 @@
-def safe_get_nested(d, keys, default=None):
-    for key in keys:
-        if isinstance(d, dict):
-            d = d.get(key, default)
-        else:
-            return default
-    return d
-
-
-
-
-
-
-
 import torch
 import torch.nn.functional as F
 import numpy as np
@@ -84,28 +70,8 @@ class SaveImage:
 
         return { "ui": { "images": results } }
 
-class PreviewImage(SaveImage):
-    def __init__(self):
-        self.output_dir = folder_paths.get_temp_directory()
-        self.type = "temp"
-        self.prefix_append = "_temp_" + ''.join(random.choice("abcdefghijklmnopqrstupvxyz") for x in range(5))
-        self.compress_level = 1
 
-    @classmethod
-    def INPUT_TYPES(s):
-        return {"required":
-                    {
-                        "images": ("IMAGE", ), 
-                        "sigmas": ("SIGMAS", {"forceInput": True}),
-                        "print_as_list" : ("BOOLEAN", {"default": False}),
-                    },
-                "hidden": {"prompt": "PROMPT", "extra_pnginfo": "EXTRA_PNGINFO"},
-                }
-        
-        
-        
-        
-        
+
 class SigmasPreview(SaveImage):
     def __init__(self):
         self.output_dir = folder_paths.get_temp_directory()
@@ -126,17 +92,28 @@ class SigmasPreview(SaveImage):
     CATEGORY = 'sampling/custom_sampling/sigmas'
     OUTPUT_NODE = True
 
+    @staticmethod
+    def tensor_to_graph_image(tensor):
+        plt.figure()
+        plt.plot(tensor.numpy(), marker='o', linestyle='-', color='blue')
+        plt.title("Graph from Tensor")
+        plt.xlabel("Index")
+        plt.ylabel("Value")
+        with BytesIO() as buf:
+            plt.savefig(buf, format='png')
+            buf.seek(0)
+            image = Image.open(buf).copy()
+        plt.close()
+        return image
+
     def sigmas_preview(self, sigmas, print_as_list):
-        """if mask.dim() == 2:
-            mask = torch.unsqueeze(mask, 0)
-        preview = mask.reshape((-1, 1, mask.shape[-2], mask.shape[-1])).movedim(1, -1).expand(-1, -1, -1, 3)"""
-        
+        # adapted from https://github.com/Extraltodeus/sigmas_tools_and_the_golden_scheduler
         if print_as_list:
             print(sigmas.tolist())
             sigmas_percentages = ((sigmas-sigmas.min())/(sigmas.max()-sigmas.min())).tolist()
             sigmas_percentages_w_steps = [(i,round(s,4)) for i,s in enumerate(sigmas_percentages)]
             print(sigmas_percentages_w_steps)
-        sigmas_graph = tensor_to_graph_image(sigmas.cpu())
+        sigmas_graph = self.tensor_to_graph_image(sigmas.cpu())
         numpy_image = np.array(sigmas_graph)
         numpy_image = numpy_image / 255.0
         tensor_image = torch.from_numpy(numpy_image)
@@ -147,53 +124,7 @@ class SigmasPreview(SaveImage):
 
 
 
-        
-def tensor_to_graph_image(tensor):
-    plt.figure()
-    plt.plot(tensor.numpy(), marker='o', linestyle='-', color='blue')
-    plt.title("Graph from Tensor")
-    plt.xlabel("Index")
-    plt.ylabel("Value")
-    with BytesIO() as buf:
-        plt.savefig(buf, format='png')
-        buf.seek(0)
-        image = Image.open(buf).copy()
-    plt.close()
-    return image
 
-
-# adapted from https://github.com/Extraltodeus/sigmas_tools_and_the_golden_scheduler
-class sigmas_to_graph:
-    def __init__(self):
-        pass
-    
-    @classmethod
-    def INPUT_TYPES(s):
-        return {
-            "required": {
-                "sigmas": ("SIGMAS", {"forceInput": True}),
-                "print_as_list" : ("BOOLEAN", {"default": False}),
-            }
-        }
-
-    FUNCTION = "simple_output"
-    RETURN_TYPES = ("IMAGE",)
-    CATEGORY = "sampling/custom_sampling/sigmas"
-    
-    def simple_output(self, sigmas,print_as_list):
-        if print_as_list:
-            print(sigmas.tolist())
-            sigmas_percentages = ((sigmas-sigmas.min())/(sigmas.max()-sigmas.min())).tolist()
-            sigmas_percentages_w_steps = [(i,round(s,4)) for i,s in enumerate(sigmas_percentages)]
-            print(sigmas_percentages_w_steps)
-        sigmas_graph = tensor_to_graph_image(sigmas.cpu())
-        numpy_image = np.array(sigmas_graph)
-        numpy_image = numpy_image / 255.0
-        tensor_image = torch.from_numpy(numpy_image)
-        tensor_image = tensor_image.unsqueeze(0)
-        images_tensor = torch.cat([tensor_image], 0)
-        return (images_tensor,)
-    
 
 
 # adapted from https://github.com/cubiq/ComfyUI_essentials
