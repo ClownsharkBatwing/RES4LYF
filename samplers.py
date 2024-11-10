@@ -137,7 +137,7 @@ def get_sigmas(model, scheduler, steps, denoise): #adapted from comfyui
         total_steps = int(steps/denoise)
 
     if scheduler == "beta57":
-        sigmas = comfy.samplers.beta_scheduler(model.get_model_object("model_sampling"), steps, alpha=0.5, beta=0.7)
+        sigmas = comfy.samplers.beta_scheduler(model.get_model_object("model_sampling"), total_steps, alpha=0.5, beta=0.7)
     else:
         sigmas = comfy.samplers.calculate_sigmas(model.get_model_object("model_sampling"), scheduler, total_steps).cpu()
     
@@ -462,7 +462,7 @@ class ClownsharKSampler:
             if isinstance(model.model.model_config, comfy.supported_models.SD3):
                 model = ModelSamplingSD3().patch(model, shift)[0] 
             elif isinstance(model.model.model_config, comfy.supported_models.Flux) or isinstance(model.model.model_config, comfy.supported_models.FluxSchnell):
-                model = ModelSamplingFlux().patch(model, shift, base_shift, x.shape[3], x.shape[2])[0] 
+                model = ModelSamplingFlux().patch(model, shift, base_shift, latent_image['samples'].shape[3], latent_image['samples'].shape[2])[0] 
             elif isinstance(model.model.model_config, comfy.supported_models.AuraFlow):
                 model = ModelSamplingAuraFlow().patch_aura(model, shift)[0] 
             elif isinstance(model.model.model_config, comfy.supported_models.Stable_Cascade_C):
@@ -808,7 +808,7 @@ class SamplerRK:
                      #"guide_mode": (["hard_light", "blend", "mean_std", "mean", "std"], {"default": 'mean', "tooltip": "The mode used."}),
                      "rescale_floor": ("BOOLEAN", {"default": True, "tooltip": "Latent_guide_weight(s) control the minimum value for the latent_guide_mask. If false, they control the maximum value."}),
                     },
-                    "optional": 
+                    "optional":
                     {
                         "latent_guide": ("LATENT", ),
                         "latent_guide_inv": ("LATENT", ),
@@ -958,6 +958,55 @@ class SD35L_TimestepPatcher:
 
 
 class ClownsharKSamplerGuides:
+    @classmethod
+    def INPUT_TYPES(s):
+        return {"required":
+                    {"guide_mode": (["hard_light", "mean_std", "mean", "std", "blend",], {"default": 'blend', "tooltip": "The mode used."}),
+                     "latent_guide_weight": ("FLOAT", {"default": 0.0, "min": -100.0, "max": 100.0, "step":0.01, "round": False}),
+                    "scheduler": (["constant"] + comfy.samplers.SCHEDULER_NAMES + ["beta57"], {"default": "beta57"},),
+                    "steps": ("INT", {"default": 30, "min": 1, "max": 10000}),
+                    "denoise": ("FLOAT", {"default": 1.0, "min": -100.0, "max": 100.0, "step":0.01, "round": False}),
+                     "rescale_floor": ("BOOLEAN", {"default": False, "tooltip": "If true, latent_guide_weight(s) primarily affect the masked areas. If false, they control the unmasked areas."}),
+                    },
+                    "optional": 
+                    {
+                        "latent_guide": ("LATENT", ),
+                        "latent_guide_inv": ("LATENT", ),
+                        "latent_guide_mask": ("MASK", ),
+                        "latent_guide_weights": ("SIGMAS", ),
+                    }  
+               }
+    RETURN_TYPES = ("GUIDES",)
+    CATEGORY = "sampling/custom_sampling/samplers"
+
+    FUNCTION = "get_sampler"
+
+    def get_sampler(self, model=None, scheduler="constant", steps=30, denoise=1.0, latent_guide=None, latent_guide_inv=None, latent_guide_weight=0.0, guide_mode="blend", latent_guide_weights=None, latent_guide_mask=None, rescale_floor=True,
+                    ):
+        default_dtype = torch.float64
+        
+        max_steps = 10000
+        
+        #if scheduler != "constant": 
+        #    latent_guide_weights = get_sigmas(model, scheduler, steps, latent_guide_weight).to(default_dtype)
+            
+        if scheduler == "constant": 
+            latent_guide_weights = initialize_or_scale(latent_guide_weights, latent_guide_weight, max_steps).to(default_dtype)
+            latent_guide_weights = F.pad(latent_guide_weights, (0, max_steps), value=0.0)
+        
+        if latent_guide is not None:
+            x = latent_guide["samples"].clone().to(default_dtype) 
+        if latent_guide_inv is not None:
+            x = latent_guide_inv["samples"].clone().to(default_dtype) 
+
+        guides = (guide_mode, rescale_floor, latent_guide_weight, latent_guide_weights, latent_guide, latent_guide_inv, latent_guide_mask, scheduler, steps, denoise)
+        return (guides, )
+
+
+
+
+
+class ClownsharKSamplerOptions:
     @classmethod
     def INPUT_TYPES(s):
         return {"required":
