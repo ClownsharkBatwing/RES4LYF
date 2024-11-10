@@ -1532,11 +1532,8 @@ def hard_light_blend(base_latent, blend_latent):
     ks = combined_result
     ks2 = torch.zeros_like(base_latent)
     for n in range(base_latent.shape[1]):
-        #ks2[0][n] = (ks[0][n] - ks[0][n].mean()) / ks[0][n].std()
-        #ks2[0][n] = (ks2[0][n] * base_latent[0][n].std()) + blend_latent[0][n].mean()
         ks2[0][n] = (ks[0][n]) / ks[0][n].std()
         ks2[0][n] = (ks2[0][n] * base_latent[0][n].std())
-    #ks = (1 - lgw_mask) * ks   +   lgw_mask * ks2
     combined_result = ks2
     
     return combined_result

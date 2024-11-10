@@ -71,7 +71,7 @@ def add_samplers():
 
 extra_samplers = {
     "rk":  sampler_rk.sample_rk,
-    #"rk_testnew":  test_samplers.sample_rk_testnew,
+    "rk_testnew":  test_samplers.sample_rk_testnew,
 }
 
 
@@ -80,7 +80,11 @@ add_samplers()
 
 NODE_CLASS_MAPPINGS = {
     "ClownSampler": samplers.SamplerRK,
+    "ClownsharKSampler": samplers.ClownsharKSampler,
     "SamplerRK": samplers.SamplerRK,
+    
+    "ClownsharKSamplerGuides": samplers.ClownsharKSamplerGuides,
+
 
     "SharkSampler": samplers.SharkSampler,
     "UltraSharkSampler": samplers.UltraSharkSampler,
@@ -180,6 +184,9 @@ NODE_CLASS_MAPPINGS = {
 if flags["test_samplers"]:
     NODE_CLASS_MAPPINGS.update({
         "SamplerRK_TestNew": test_samplers.SamplerRK_TestNew,
+    })
+    extra_samplers.update({
+        "rk_testnew":  test_samplers.sample_rk_testnew,
     })
 
 WEB_DIRECTORY = "./web"
