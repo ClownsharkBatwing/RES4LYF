@@ -1,6 +1,6 @@
 # RES4LYF
 
-At the heart of this repository is the "ClownSampler", which was specifically designed to support both rectified flow and probability flow models. It features 25 different selectible samplers all available in both ODE or SDE modes with 17 noise types, 6 noise scaling modes, and options for implicit Runge-Kutta sampling refinement steps. Several new samplers are implemented, including RES_3S, RES_3M, and RES_2M. Additionally, img2img capabilities include both latent image guidance or unsampling/resampling (via rectified noise inversion). 
+At the heart of this repository is the "ClownsharKSampler", which was specifically designed to support both rectified flow and probability flow models. It features 28 different selectible samplers all available in both ODE or SDE modes with 20 noise types, 6 noise scaling modes, and options for implicit Runge-Kutta sampling refinement steps. Several new samplers are implemented, including RES_3S, RES_3M, and RES_2M. Additionally, img2img capabilities include both latent image guidance or unsampling/resampling (via rectified noise inversion, a form of latent image guidance). 
 
 A particular emphasis of this project has been to facilitate modulating parameters vs. time, which can facilitate large gains in image quality from the sampling process. To this end, a wide variety of sigma, latent, and noise manipulation nodes are included. 
 
