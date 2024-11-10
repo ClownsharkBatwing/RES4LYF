@@ -533,9 +533,11 @@ class PerlinNoiseGenerator(NoiseGenerator):
             noise += self.perlin_noise((noise_size_H, noise_size_W), (noise_size_H, noise_size_W), batch_size=self.x.shape[1], generator=self.generator).to(self.device)
         return noise / noise.std()
     
+from functools import partial
 
 NOISE_GENERATOR_CLASSES = {
     "fractal": FractalNoiseGenerator,
+
     "gaussian": GaussianNoiseGenerator,
     "uniform": UniformNoiseGenerator,
     "pyramid-cascade_B": CascadeBPyramidNoiseGenerator,
@@ -553,12 +555,39 @@ NOISE_GENERATOR_CLASSES = {
     "perlin": PerlinNoiseGenerator,
 }
 
+
+NOISE_GENERATOR_CLASSES_SIMPLE = {
+    "none": GaussianNoiseGenerator,
+    "brownian": BrownianNoiseGenerator,
+    "gaussian": GaussianNoiseGenerator,
+    "laplacian": LaplacianNoiseGenerator,
+    "perlin": PerlinNoiseGenerator,
+    "studentt": StudentTNoiseGenerator,
+    "uniform": UniformNoiseGenerator,
+    "wavelet": WaveletNoiseGenerator,
+    "brown": noise_generator_factory(FractalNoiseGenerator, alpha=2.0),
+    "pink": noise_generator_factory(FractalNoiseGenerator, alpha=1.0),
+    "white": noise_generator_factory(FractalNoiseGenerator, alpha=0.0),
+    "blue": noise_generator_factory(FractalNoiseGenerator, alpha=-1.0),
+    "violet": noise_generator_factory(FractalNoiseGenerator, alpha=-2.0),
+    "hires-pyramid-bicubic": noise_generator_factory(HiresPyramidNoiseGenerator, mode='bicubic'),   
+    "hires-pyramid-bilinear": noise_generator_factory(HiresPyramidNoiseGenerator, mode='bilinear'),
+    "hires-pyramid-nearest": noise_generator_factory(HiresPyramidNoiseGenerator, mode='nearest'),  
+    "pyramid-bicubic": noise_generator_factory(PyramidNoiseGenerator, mode='bicubic'),   
+    "pyramid-bilinear": noise_generator_factory(PyramidNoiseGenerator, mode='bilinear'),
+    "pyramid-nearest": noise_generator_factory(PyramidNoiseGenerator, mode='nearest'),  
+    "pyramid-interpolated": InterpolatedPyramidNoiseGenerator,
+    "pyramid-cascade_B": CascadeBPyramidNoiseGenerator,
+}
+
 if OPENSIMPLEX_ENABLE:
     NOISE_GENERATOR_CLASSES.update({
         "simplex": SimplexNoiseGenerator,
     })
 
 NOISE_GENERATOR_NAMES = tuple(NOISE_GENERATOR_CLASSES.keys())
+NOISE_GENERATOR_NAMES_SIMPLE = tuple(NOISE_GENERATOR_CLASSES_SIMPLE.keys())
+
 
 @precision_tool.cast_tensor
 def prepare_noise(latent_image, seed, noise_type, noise_inds=None, alpha=1.0, k=1.0): # adapted from comfy/sample.py: https://github.com/comfyanonymous/ComfyUI
