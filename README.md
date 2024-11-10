@@ -10,9 +10,16 @@ Much of this work remains experimental and is subject to further changes.
 
 **TXT2IMG Workflow:** 
 
-![image](https://github.com/ClownsharkBatwing/RES4LYF/blob/main/workflows/txt2img%20(embedded).png?raw=true)
+![image](https://github.com/ClownsharkBatwing/RES4LYF/blob/main/workflows/txt2img%20SD35M%20output.png)
 
-![image](https://github.com/ClownsharkBatwing/RES4LYF/blob/main/workflows/txt2img%20SD35M.png)
+![image](https://github.com/ClownsharkBatwing/RES4LYF/blob/main/workflows/txt2img.png)
+
+**TXT2IMG Workflow (Latent Image Guides:**
+![image](https://github.com/ClownsharkBatwing/RES4LYF/blob/main/workflows/txt2img%20guided%20SD35M.png)
+
+![image](https://github.com/ClownsharkBatwing/RES4LYF/blob/main/workflows/txt2img%20guided%20SD35M%20input.png)
+
+![image](https://github.com/ClownsharkBatwing/RES4LYF/blob/main/workflows/txt2img%20guided%20SD35M%20output.png)
 
 **IMG2IMG Workflow (Latent Image Guides):** 
 
