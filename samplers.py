@@ -467,12 +467,10 @@ class ClownsharKSampler:
                 model = ModelSamplingAuraFlow().patch_aura(model, shift)[0] 
             elif isinstance(model.model.model_config, comfy.supported_models.Stable_Cascade_C):
                 model = ModelSamplingStableCascade().patch(model, shift)[0] 
-            
+
             latent = latent_image
             latent_image_dtype = latent_image['samples'].dtype
-            
-            
-            
+
             if positive is not None:
                 positive[0][0] = positive[0][0].clone().to(default_dtype)
                 positive[0][1]["pooled_output"] = positive[0][1]["pooled_output"].clone().to(default_dtype)
