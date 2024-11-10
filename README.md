@@ -6,7 +6,7 @@ A particular emphasis of this project has been to facilitate modulating paramete
 
 Much of this work remains experimental and is subject to further changes.
 
-![image](https://github.com/user-attachments/assets/af8ef38e-4fe8-4cb8-ae34-7bfb2c59864f)
+![image](https://github.com/user-attachments/assets/a55ec484-1339-45a2-bcc4-76934f4648d4)
 
 **TXT2IMG Workflow:** 
 
