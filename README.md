@@ -12,7 +12,7 @@ Much of this work remains experimental and is subject to further changes.
 
 ![image](https://github.com/ClownsharkBatwing/RES4LYF/blob/main/workflows/txt2img%20SD35M%20output.png)
 
-![image](https://github.com/ClownsharkBatwing/RES4LYF/blob/main/workflows/txt2img.png)
+![image](https://github.com/ClownsharkBatwing/RES4LYF/blob/main/workflows/txt2img%20SD35M.png)
 
 **TXT2IMG Workflow (Latent Image Guides:**
 ![image](https://github.com/ClownsharkBatwing/RES4LYF/blob/main/workflows/txt2img%20guided%20SD35M.png)
@@ -21,18 +21,28 @@ Much of this work remains experimental and is subject to further changes.
 
 ![image](https://github.com/ClownsharkBatwing/RES4LYF/blob/main/workflows/txt2img%20guided%20SD35M%20output.png)
 
+**TXT2IMG Workflow (Dual Guides with Masking):**
+![image](https://github.com/ClownsharkBatwing/RES4LYF/blob/main/workflows/txt2img%20dual%20guides%20with%20mask%20SD35M.png)
+
+![image](https://github.com/ClownsharkBatwing/RES4LYF/blob/main/workflows/txt2img%20dual%20guides%20with%20mask%20SD35M%20output.png)
+
+Input images and mask:
+https://github.com/ClownsharkBatwing/RES4LYF/blob/main/workflows/txt2img%20dual%20guides%20with%20mask%20SD35M%20input1.png
+https://github.com/ClownsharkBatwing/RES4LYF/blob/main/workflows/txt2img%20dual%20guides%20with%20mask%20SD35M%20input2.png
+https://github.com/ClownsharkBatwing/RES4LYF/blob/main/workflows/txt2img%20dual%20guides%20with%20mask%20SD35M%20mask.png
+
 **IMG2IMG Workflow (Latent Image Guides):** 
 
-![image](https://github.com/ClownsharkBatwing/RES4LYF/blob/main/workflows/img2img%20latent%20image%20guide%20(embedded).png?raw=true)
+![image](
 
-![image](https://github.com/ClownsharkBatwing/RES4LYF/blob/main/workflows/img2img%20latent%20image%20guide.png?raw=true)
+![image](
 
 **IMG2IMG Workflow (Unsampling):**
 
 
-![image](https://github.com/ClownsharkBatwing/RES4LYF/blob/main/workflows/img2img%20unsampling%20workflow%20(embedded).png?raw=true)
+![image](
 
-![image](https://github.com/ClownsharkBatwing/RES4LYF/blob/main/workflows/img2img%20unsampling%20workflow.png?raw=true)
+![image](
 
 
 **INSTALLATION:** 
