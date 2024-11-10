@@ -182,6 +182,8 @@ NODE_CLASS_MAPPINGS = {
     "UNetSave": models.UNetSave,
     
     "PrepForUnsampling": helper_sigma_preview_image_preproc.PrepForUnsampling,
+    
+    "SigmasPreview": helper_sigma_preview_image_preproc.SigmasPreview,
 }
 
 if flags["test_samplers"]:

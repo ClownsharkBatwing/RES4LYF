@@ -102,6 +102,52 @@ class PreviewImage(SaveImage):
                 "hidden": {"prompt": "PROMPT", "extra_pnginfo": "EXTRA_PNGINFO"},
                 }
         
+        
+        
+        
+        
+class SigmasPreview(SaveImage):
+    def __init__(self):
+        self.output_dir = folder_paths.get_temp_directory()
+        self.type = "temp"
+        self.prefix_append = "_temp_" + ''.join(random.choice("abcdefghijklmnopqrstupvxyz1234567890") for x in range(5))
+        self.compress_level = 4
+
+    @classmethod
+    def INPUT_TYPES(self):
+        return {
+            "required": {
+                "sigmas": ("SIGMAS",),
+                "print_as_list" : ("BOOLEAN", {"default": False}),
+            }
+        }
+
+    FUNCTION = "sigmas_preview"
+    CATEGORY = 'sampling/custom_sampling/sigmas'
+    OUTPUT_NODE = True
+
+    def sigmas_preview(self, sigmas, print_as_list):
+        """if mask.dim() == 2:
+            mask = torch.unsqueeze(mask, 0)
+        preview = mask.reshape((-1, 1, mask.shape[-2], mask.shape[-1])).movedim(1, -1).expand(-1, -1, -1, 3)"""
+        
+        if print_as_list:
+            print(sigmas.tolist())
+            sigmas_percentages = ((sigmas-sigmas.min())/(sigmas.max()-sigmas.min())).tolist()
+            sigmas_percentages_w_steps = [(i,round(s,4)) for i,s in enumerate(sigmas_percentages)]
+            print(sigmas_percentages_w_steps)
+        sigmas_graph = tensor_to_graph_image(sigmas.cpu())
+        numpy_image = np.array(sigmas_graph)
+        numpy_image = numpy_image / 255.0
+        tensor_image = torch.from_numpy(numpy_image)
+        tensor_image = tensor_image.unsqueeze(0)
+        images_tensor = torch.cat([tensor_image], 0)
+        
+        return self.save_images(images_tensor, "SigmasPreview")
+
+
+
+        
 def tensor_to_graph_image(tensor):
     plt.figure()
     plt.plot(tensor.numpy(), marker='o', linestyle='-', color='blue')
