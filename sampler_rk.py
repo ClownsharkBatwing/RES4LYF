@@ -56,6 +56,31 @@ rk_coeff = {
         ],
         [2/5 - 6**0.5 / 10, 2/5 + 6**0.5 / 10, 1.]
     ),
+    "radau_iia_2s": (
+        [    
+            [5/12, -1/12],
+            [3/4, 1/4],
+            [3/4, 1/4],
+        ],
+        [1/3, 1]
+    ),
+    "lobatto_iiic_3s": (
+        [    
+            [1/6, -1/3, 1/6],
+            [1/6, 5/12, -1/12],
+            [1/6, 2/3, 1/6],
+            [1/6, 2/3, 1/6],
+        ],
+        [0, 1/2, 1]
+    ),
+    "lobatto_iiic_2s": (
+        [    
+            [1/2, -1/2],
+            [1/2, 1/2],
+            [1/2, 1/2],
+        ],
+        [0, 1]
+    ),
     "dormand-prince_13s": (
         [
             [1/18, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
@@ -560,7 +585,7 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
                     ki_u[0] = uncond[0]
                 
                 sigma_mid = sigma_fn(t + h*ci[i+1])
-                alpha_t_1 = alpha_t_1_inv = torch.exp(torch.log(sigma_down/sigma) * ci[i+1])
+                alpha_t_1 = alpha_t_1_inv = torch.exp(torch.log(sigma_down/sigma) * ci[i+1] )
                 if sigma_next > sigma:
                     alpha_t_1_inv = torch.nan_to_num(   torch.exp(torch.log((sigmax - sigma_down)/(sigmax - sigma)) * ci[i+1]),    1.)
                 
@@ -582,7 +607,8 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
                     epsilon = (h * ks) / (sigma_down - sigma)       #xi[(i+1)%order]  = xi_0 + h*ks
                     ks = xi_0 - epsilon * sigma        # denoised
                 else:
-                    ks /= sum(ab[i])
+                    if iteration > 0 and implicit_sampler_name.startswith("lobatto") == False:
+                        ks /= sum(ab[i])
                 
                 if UNSAMPLE == False and latent_guide is not None and latent_guide_weights[_] > 0.0:
                     if guide_mode == "hard_light":
