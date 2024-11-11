@@ -441,7 +441,7 @@ class ClownsharKSampler:
             latent_guide_weights = initialize_or_scale(latent_guide_weights, latent_guide_weight, max_steps).to(default_dtype)
             latent_guide_weights = F.pad(latent_guide_weights, (0, max_steps), value=0.0)
             
-            if shift < 0 or base_shift < 0:
+            if shift >= 0 and base_shift >= 0:
                 if isinstance(model.model.model_config, comfy.supported_models.SD3):
                     model = ModelSamplingSD3().patch(model, shift)[0] 
                 elif isinstance(model.model.model_config, comfy.supported_models.Flux) or isinstance(model.model.model_config, comfy.supported_models.FluxSchnell):
