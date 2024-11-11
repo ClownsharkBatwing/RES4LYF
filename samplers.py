@@ -441,7 +441,7 @@ class ClownsharKSampler:
             latent_guide_weights = initialize_or_scale(latent_guide_weights, latent_guide_weight, max_steps).to(default_dtype)
             latent_guide_weights = F.pad(latent_guide_weights, (0, max_steps), value=0.0)
             
-            if shift > 0 and base_shift > 0:
+            if shift <= 0 or base_shift <= 0:
                 if isinstance(model.model.model_config, comfy.supported_models.SD3):
                     model = ModelSamplingSD3().patch(model, shift)[0] 
                 elif isinstance(model.model.model_config, comfy.supported_models.Flux) or isinstance(model.model.model_config, comfy.supported_models.FluxSchnell):
@@ -843,10 +843,6 @@ class SamplerOptions_GarbageCollection:
 
 def time_snr_shift_exponential(alpha, t):
     return math.exp(alpha) / (math.exp(alpha) + (1 / t - 1) ** 1.0)
-for sd3.5 i was using 3/exponential for the shift whats the equivalent? 3 for max and 0 for base? is 1.5 and 1.5 the equivalent to what the flux node was doing?
-￼
-@dasilva333
-@Clownshark Batwing  so you got rid of eta_var? what's the alternative now? whats beta57 compared to beta? is there any benefit? do you recommend it for somoeone that uses beta for everythinig? whats denoisie_alt and how is it used? is it safe to just act like it doesn't exisit and use only the denoise field? for sd3.5 i was using 3/exponential for the shift whats the equivalent? 3 for max and 0 for base? is 1.5 and 1.5 the equivalent to what the flux node was doing?
 
 def time_snr_shift_linear(alpha, t):
     if alpha == 1.0:
