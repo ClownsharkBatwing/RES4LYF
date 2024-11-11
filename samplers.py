@@ -1,4 +1,5 @@
 from .noise_classes import *
+from .sigmas import get_sigmas
 
 import comfy.samplers
 import comfy.sample
@@ -6,6 +7,8 @@ import comfy.sampler_helpers
 import comfy.model_sampling
 import comfy.latent_formats
 import comfy.sd
+from comfy_extras.nodes_model_advanced import ModelSamplingSD3, ModelSamplingFlux, ModelSamplingAuraFlow, ModelSamplingStableCascade
+import comfy.supported_models
 
 import latent_preview
 import torch
@@ -13,6 +16,7 @@ import torch.nn.functional as F
 
 import math
 import copy
+
 
 def initialize_or_scale(tensor, value, steps):
     if tensor is None:
@@ -129,21 +133,6 @@ class LatentNoised:
 
             return ({'samples': noised_latent},)
 
-def get_sigmas(model, scheduler, steps, denoise): #adapted from comfyui
-    total_steps = steps
-    if denoise < 1.0:
-        if denoise <= 0.0:
-            return (torch.FloatTensor([]),)
-        total_steps = int(steps/denoise)
-
-    if scheduler == "beta57":
-        sigmas = comfy.samplers.beta_scheduler(model.get_model_object("model_sampling"), total_steps, alpha=0.5, beta=0.7)
-    else:
-        sigmas = comfy.samplers.calculate_sigmas(model.get_model_object("model_sampling"), scheduler, total_steps).cpu()
-    
-    
-    sigmas = sigmas[-(steps + 1):]
-    return sigmas
 
 #SCHEDULER_NAMES = comfy.samplers.SCHEDULER_NAMES + ["beta57"]
 
@@ -330,41 +319,36 @@ class SharkSampler:
             out_denoised_orig_dtype = out_denoised['samples'].clone().to(latent_image_dtype)
                 
             return ( {'samples': out_orig_dtype}, {'samples': out_denoised_orig_dtype}, out, out_denoised,)
-            #return (out.to(latent_image_dtype), out_denoised.to(latent_image_dtype))
             
-            
-            
-"""RK_TYPES = ["dormand-prince_6s", 
-                                  "dormand-prince_7s", 
-                                  "dormand-prince_13s", 
-                                  "rk4_4s", 
-                                  "rk38_4s",
-                                  "ralston_4s",
-                                  "dpmpp_3s",
-                                  "heun_3s", 
-                                  "houwen-wray_3s",
-                                  "kutta_3s", 
-                                  "ralston_3s",
-                                  "res_3s",
-                                  "ssprk3_3s",
-                                  "dpmpp_2s",
-                                  "dpmpp_sde_2s",
-                                  "heun_2s", 
-                                  "midpoint_2s",
-                                  "ralston_2s",
-                                  "res_2s", 
-                                  "dpmpp_3m",
-                                  "res_3m",
-                                  "dpmpp_2m",
-                                  "res_2m",
-                                  "deis_2m",
-                                  "deis_3m", 
-                                  "deis_4m",
-                                  "ddim",
-                                  "euler"]"""
 
-from comfy_extras.nodes_model_advanced import ModelSamplingSD3, ModelSamplingFlux, ModelSamplingAuraFlow, ModelSamplingStableCascade
-import comfy.supported_models
+RK_SAMPLER_NAMES = ["dormand-prince_6s", 
+                    "dormand-prince_7s", 
+                    "dormand-prince_13s", 
+                    "rk4_4s", 
+                    "rk38_4s",
+                    "ralston_4s",
+                    "dpmpp_3s",
+                    "heun_3s", 
+                    "houwen-wray_3s",
+                    "kutta_3s", 
+                    "ralston_3s",
+                    "res_3s",
+                    "ssprk3_3s",
+                    "dpmpp_2s",
+                    "dpmpp_sde_2s",
+                    "heun_2s", 
+                    "midpoint_2s",
+                    "ralston_2s",
+                    "res_2s", 
+                    "dpmpp_3m",
+                    "res_3m",
+                    "dpmpp_2m",
+                    "res_2m",
+                    "deis_2m",
+                    "deis_3m", 
+                    "deis_4m",
+                    "ddim",
+                    "euler"]
 
 class ClownsharKSampler:
     @classmethod
@@ -378,42 +362,14 @@ class ClownsharKSampler:
                     "eta": ("FLOAT", {"default": 0.25, "min": -100.0, "max": 100.0, "step":0.01, "round": False, "tooltip": "Calculated noise amount to be added, then removed, after each step."}),
                     "noise_seed": ("INT", {"default": 0, "min": -1, "max": 0xffffffffffffffff}),
                     "sampler_mode": (['standard', 'unsample', 'resample'],),
-                    "sampler_name": (["dormand-prince_6s", 
-                                  "dormand-prince_7s", 
-                                  "dormand-prince_13s", 
-                                  "rk4_4s", 
-                                  "rk38_4s",
-                                  "ralston_4s",
-                                  "dpmpp_3s",
-                                  "heun_3s", 
-                                  "houwen-wray_3s",
-                                  "kutta_3s", 
-                                  "ralston_3s",
-                                  "res_3s",
-                                  "ssprk3_3s",
-                                  "dpmpp_2s",
-                                  "dpmpp_sde_2s",
-                                  "heun_2s", 
-                                  "midpoint_2s",
-                                  "ralston_2s",
-                                  "res_2s", 
-                                  "dpmpp_3m",
-                                  "res_3m",
-                                  "dpmpp_2m",
-                                  "res_2m",
-                                  "deis_2m",
-                                  "deis_3m", 
-                                  "deis_4m",
-                                  "ddim",
-                                  "euler"], {"default": "res_2m"}), 
+                    "sampler_name": (RK_SAMPLER_NAMES, {"default": "res_2m"}), 
                     "implicit_sampler_name": (["default"], {"default": "default"}), 
                     "scheduler": (comfy.samplers.SCHEDULER_NAMES + ["beta57"], {"default": "beta57"},),
                     "steps": ("INT", {"default": 30, "min": 1, "max": 10000}),
                     "implicit_steps": ("INT", {"default": 0, "min": 0, "max": 10000}),
-
                     "denoise": ("FLOAT", {"default": 1.0, "min": -10000, "max": 10000, "step":0.01}),
                     "denoise_alt": ("FLOAT", {"default": 1.0, "min": -10000, "max": 10000, "step":0.01}),
-                    "cfg": ("FLOAT", {"default": 5.0, "min": 0.0, "max": 100.0, "step":0.1, "round": False, }),
+                    "cfg": ("FLOAT", {"default": 5.0, "min": -100.0, "max": 100.0, "step":0.1, "round": False, }),
                     "shift": ("FLOAT", {"default": 3.0, "min": 0.0, "max": 100.0, "step":0.1, "round": False, }),
                     "base_shift": ("FLOAT", {"default": 0.85, "min": 0.0, "max": 100.0, "step":0.1, "round": False, }),
                     "truncate_conditioning": (['false', 'true'], {"default": "true"}),
@@ -440,13 +396,40 @@ class ClownsharKSampler:
              noise_type_init="gaussian", noise_type_sde="brownian", noise_mode_sde="hard", latent_image=None, 
              positive=None, negative=None, sigmas=None, latent_noise=None, latent_noise_match=None,
              noise_stdev=1.0, noise_mean=0.0, noise_normalize=True, noise_is_latent=False, 
-             eta=0.25, eta_var=0.0, d_noise=1.0, s_noise=1.0, alpha=-1.0, k=1.0, cfgpp=0.0, multistep=False, noise_sampler_type="brownian", noise_mode="hard", noise_seed=-1, sampler_name="res_2m", implicit_sampler_name="default",
+             eta=0.25, eta_var=0.0, d_noise=1.0, s_noise=1.0, alpha_init=-1.0, k_init=1.0, alpha_sde=-1.0, k_sde=1.0, cfgpp=0.0, c2=0.5, c3=1.0, multistep=False, noise_seed=-1, sampler_name="res_2m", implicit_sampler_name="default",
                     exp_mode=False, t_fn_formula=None, sigma_fn_formula=None, implicit_steps=0,
                     latent_guide=None, latent_guide_inv=None, latent_guide_weight=0.0, guide_mode="blend", latent_guide_weights=None, latent_guide_mask=None, rescale_floor=True, sigmas_override=None,
                     shift=3.0, base_shift=0.85, guides=None, options=None,
                     ): 
             default_dtype = torch.float64
             max_steps = 10000
+
+
+            if noise_seed == -1:
+                seed = torch.initial_seed() + 1
+            else:
+                seed = noise_seed
+                torch.manual_seed(noise_seed)
+            noise_seed_sde = seed + 1
+
+            if options is not None:
+                noise_stdev = options.get('noise_init_stdev', noise_stdev)
+                noise_mean = options.get('noise_init_mean', noise_mean)
+                noise_type_init = options.get('noise_type_init', noise_type_init)
+                noise_type_sde = options.get('noise_type_sde', noise_type_sde)
+                noise_mode_sde = options.get('noise_mode_sde', noise_mode_sde)
+                eta = options.get('eta', eta)
+                s_noise = options.get('s_noise', s_noise)
+                d_noise = options.get('d_noise', d_noise)
+                alpha_init = options.get('alpha_init', alpha_init)
+                k_init = options.get('k_init', k_init)
+                alpha_sde = options.get('alpha_sde', alpha_sde)
+                k_sde = options.get('k_sde', k_sde)
+                noise_seed_sde = options.get('noise_seed_sde', noise_seed+1)
+                c2 = options.get('c2', c2)
+                c3 = options.get('c3', c3)
+                t_fn_formula = options.get('t_fn_formula', t_fn_formula)
+                sigma_fn_formula = options.get('sigma_fn_formula', sigma_fn_formula)
 
             if guides is not None:
                 guide_mode, rescale_floor, latent_guide_weight, latent_guide_weights, latent_guide, latent_guide_inv, latent_guide_mask, scheduler_, steps_, denoise_ = guides
@@ -455,18 +438,18 @@ class ClownsharKSampler:
                     latent_guide_weights = F.pad(latent_guide_weights, (0, max_steps), value=0.0)"""
                 if scheduler_ != "constant":
                     latent_guide_weights = get_sigmas(model, scheduler_, steps_, denoise_).to(default_dtype)
-            #else:
             latent_guide_weights = initialize_or_scale(latent_guide_weights, latent_guide_weight, max_steps).to(default_dtype)
             latent_guide_weights = F.pad(latent_guide_weights, (0, max_steps), value=0.0)
             
-            if isinstance(model.model.model_config, comfy.supported_models.SD3):
-                model = ModelSamplingSD3().patch(model, shift)[0] 
-            elif isinstance(model.model.model_config, comfy.supported_models.Flux) or isinstance(model.model.model_config, comfy.supported_models.FluxSchnell):
-                model = ModelSamplingFlux().patch(model, shift, base_shift, latent_image['samples'].shape[3], latent_image['samples'].shape[2])[0] 
-            elif isinstance(model.model.model_config, comfy.supported_models.AuraFlow):
-                model = ModelSamplingAuraFlow().patch_aura(model, shift)[0] 
-            elif isinstance(model.model.model_config, comfy.supported_models.Stable_Cascade_C):
-                model = ModelSamplingStableCascade().patch(model, shift)[0] 
+            if shift > 0 and base_shift > 0:
+                if isinstance(model.model.model_config, comfy.supported_models.SD3):
+                    model = ModelSamplingSD3().patch(model, shift)[0] 
+                elif isinstance(model.model.model_config, comfy.supported_models.Flux) or isinstance(model.model.model_config, comfy.supported_models.FluxSchnell):
+                    model = ModelSamplingFlux().patch(model, shift, base_shift, latent_image['samples'].shape[3], latent_image['samples'].shape[2])[0] 
+                elif isinstance(model.model.model_config, comfy.supported_models.AuraFlow):
+                    model = ModelSamplingAuraFlow().patch_aura(model, shift)[0] 
+                elif isinstance(model.model.model_config, comfy.supported_models.Stable_Cascade_C):
+                    model = ModelSamplingStableCascade().patch(model, shift)[0] 
 
             latent = latent_image
             latent_image_dtype = latent_image['samples'].dtype
@@ -491,14 +474,15 @@ class ClownsharKSampler:
                 
             if denoise_alt < 0:
                 d_noise = denoise_alt = -denoise_alt
+            if options is not None:
+                d_noise = options.get('d_noise', d_noise)
+            
             if sigmas is not None:
                 sigmas = sigmas.clone().to(default_dtype)
             else: 
                 sigmas = get_sigmas(model, scheduler, steps, denoise).to(default_dtype)
             sigmas *= denoise_alt
             
-                
-            #sigmas = sigmas.clone().to(torch.float64)
         
             if sampler_mode == "unsample": 
                 null = torch.tensor([0.0], device=sigmas.device, dtype=sigmas.dtype)
@@ -550,23 +534,15 @@ class ClownsharKSampler:
             sigmin = model.model.model_sampling.sigma_min
             sigmax = model.model.model_sampling.sigma_max
 
-            if noise_seed == -1:
-                seed = torch.initial_seed() + 1
-            else:
-                seed = noise_seed
-                torch.manual_seed(noise_seed)
-            
 
-
-            #if not add_noise:
             if noise_type_init == "none":
                 noise = torch.zeros_like(x)
             elif latent_noise is None:
                 noise_sampler_init = NOISE_GENERATOR_CLASSES_SIMPLE.get(noise_type_init)(x=x, seed=seed, sigma_min=sigmin, sigma_max=sigmax)
             
                 if noise_type_init == "fractal":
-                    noise_sampler_init.alpha = alpha
-                    noise_sampler_init.k = k
+                    noise_sampler_init.alpha = alpha_init
+                    noise_sampler_init.k = k_init
                     noise_sampler_init.scale = 0.1
                 noise = noise_sampler_init(sigma=sigmax, sigma_next=sigmin)
             else:
@@ -601,9 +577,15 @@ class ClownsharKSampler:
                 eta_var = eta
                 eta = 0.0
             
-            sampler = comfy.samplers.ksampler("rk", {"eta": eta, "eta_var": eta_var, "s_noise": s_noise, "d_noise": d_noise, "alpha": alpha, "k": k, "cfgpp": cfgpp, "MULTISTEP": multistep, "noise_sampler_type": noise_type_sde, "noise_mode": noise_mode, "noise_seed": noise_seed, "rk_type": sampler_name, 
+            if cfg < 0:
+                cfgpp = -cfg
+                cfg = 1.0
+                
+            sampler = comfy.samplers.ksampler("rk", {"eta": eta, "eta_var": eta_var, "s_noise": s_noise, "d_noise": d_noise, "alpha": alpha_sde, "k": k_sde, "c2": c2, "c3": c3, "cfgpp": cfgpp, "MULTISTEP": multistep, 
+                                                     "noise_sampler_type": noise_type_sde, "noise_mode": noise_mode_sde, "noise_seed": noise_seed_sde, "rk_type": sampler_name, 
                                                             "exp_mode": exp_mode, "t_fn_formula": t_fn_formula, "sigma_fn_formula": sigma_fn_formula, "implicit_steps": implicit_steps,
-                                                            "latent_guide": latent_guide, "latent_guide_inv": latent_guide_inv, "mask": latent_guide_mask, "latent_guide_weight": latent_guide_weight, "latent_guide_weights": latent_guide_weights, "guide_mode": guide_mode,
+                                                            "latent_guide": latent_guide, "latent_guide_inv": latent_guide_inv, "mask": latent_guide_mask, "latent_guide_weight": latent_guide_weight,
+                                                            "latent_guide_weights": latent_guide_weights, "guide_mode": guide_mode,
                                                             "LGW_MASK_RESCALE_MIN": rescale_floor, "sigmas_override": sigmas_override})
 
             samples = comfy.sample.sample_custom(model, noise, cfg, sampler, sigmas, positive, negative, x.clone(), 
@@ -616,25 +598,14 @@ class ClownsharKSampler:
                 out_denoised["samples"] = model.model.process_latent_out(x0_output["x0"].cpu())
             else:
                 out_denoised = out
-                
-            out_orig_dtype = out['samples'].clone().to(latent_image_dtype)
-            out_denoised_orig_dtype = out_denoised['samples'].clone().to(latent_image_dtype)
             
             out["samples_fp64"] = out["samples"].clone()
             out["samples"] = out["samples"].to(latent_image_dtype)
             
             out_denoised["samples_fp64"] = out_denoised["samples"].clone()
             out_denoised["samples"] = out_denoised["samples"].to(latent_image_dtype)
-                
-            """if sampler_mode == "unsample":
-                if "unsamples" in latent:
-                    out["unsamples"] = latent["unsamples"]
-                else:
-                    out["unsamples"] = x"""
-                
-            #return ( {'samples': out_orig_dtype}, {'samples': out_denoised_orig_dtype}, out, out_denoised,)
+
             return ( out, out_denoised, )
-            #return (out.to(latent_image_dtype), out_denoised.to(latent_image_dtype))
 
             
             
@@ -768,34 +739,7 @@ class SamplerRK:
                      "alpha": ("FLOAT", {"default": 0.0, "min": -10000.0, "max": 10000.0, "step":0.1, "round": False, "tooltip": "Fractal noise mode: <0 = extra high frequency noise, >0 = extra low frequency noise, 0 = white noise."}),
                      "k": ("FLOAT", {"default": 1.0, "min": -10000.0, "max": 10000.0, "step":2.0, "round": False, "tooltip": "Fractal noise mode: all that matters is positive vs. negative. Effect unclear."}),
                      "noise_seed": ("INT", {"default": -1, "min": -1, "max": 0xffffffffffffffff, "tooltip": "Seed for the SDE noise that is added after each step if eta or eta_var are non-zero. If set to -1, it will use the increment the seed most recently used by the workflow."}),
-                     "rk_type": (["dormand-prince_6s", 
-                                  "dormand-prince_7s", 
-                                  "dormand-prince_13s", 
-                                  "rk4_4s", 
-                                  "rk38_4s",
-                                  "ralston_4s",
-                                  "dpmpp_3s",
-                                  "heun_3s", 
-                                  "houwen-wray_3s",
-                                  "kutta_3s", 
-                                  "ralston_3s",
-                                  "res_3s",
-                                  "ssprk3_3s",
-                                  "dpmpp_2s",
-                                  "dpmpp_sde_2s",
-                                  "heun_2s", 
-                                  "midpoint_2s",
-                                  "ralston_2s",
-                                  "res_2s", 
-                                  "dpmpp_3m",
-                                  "res_3m",
-                                  "dpmpp_2m",
-                                  "res_2m",
-                                  "deis_2m",
-                                  "deis_3m", 
-                                  "deis_4m",
-                                  "ddim",
-                                  "euler"], {"default": "res_2m"}), 
+                     "rk_type": (RK_SAMPLER_NAMES, {"default": "res_2m"}), 
                      "exp_mode": ("BOOLEAN", {"default": False, "tooltip": "Convert linear RK methods to exponential form."}), 
                      "multistep": ("BOOLEAN", {"default": False, "tooltip": "For samplers ending in S only. Reduces cost by one model call per step by reusing the previous step as the current predictor step."}),
                      "implicit_steps": ("INT", {"default": 0, "min": 0, "max": 100, "step":1, "tooltip": "Number of implicit Runge-Kutta refinement steps to run after each explicit step."}),
@@ -871,15 +815,6 @@ class SamplerOptions_TimestepScaling:
 
         return (sampler, )
 
-
-def time_snr_shift_exponential(alpha, t):
-    return math.exp(alpha) / (math.exp(alpha) + (1 / t - 1) ** 1.0)
-
-def time_snr_shift_linear(alpha, t):
-    if alpha == 1.0:
-        return t
-    return alpha * t / (1 + (alpha - 1) * t)
-
     
 class SamplerOptions_GarbageCollection:
     @classmethod
@@ -908,6 +843,10 @@ class SamplerOptions_GarbageCollection:
 
 def time_snr_shift_exponential(alpha, t):
     return math.exp(alpha) / (math.exp(alpha) + (1 / t - 1) ** 1.0)
+for sd3.5 i was using 3/exponential for the shift whats the equivalent? 3 for max and 0 for base? is 1.5 and 1.5 the equivalent to what the flux node was doing?
+￼
+@dasilva333
+@Clownshark Batwing  so you got rid of eta_var? what's the alternative now? whats beta57 compared to beta? is there any benefit? do you recommend it for somoeone that uses beta for everythinig? whats denoisie_alt and how is it used? is it safe to just act like it doesn't exisit and use only the denoise field? for sd3.5 i was using 3/exponential for the shift whats the equivalent? 3 for max and 0 for base? is 1.5 and 1.5 the equivalent to what the flux node was doing?
 
 def time_snr_shift_linear(alpha, t):
     if alpha == 1.0:
@@ -989,8 +928,8 @@ class ClownsharKSamplerGuides:
         #    latent_guide_weights = get_sigmas(model, scheduler, steps, latent_guide_weight).to(default_dtype)
             
         if scheduler == "constant": 
-            latent_guide_weights = initialize_or_scale(latent_guide_weights, latent_guide_weight, max_steps).to(default_dtype)
-            latent_guide_weights = F.pad(latent_guide_weights, (0, max_steps), value=0.0)
+            latent_guide_weights = initialize_or_scale(None, latent_guide_weight, max_steps).to(default_dtype)
+            #latent_guide_weights = F.pad(latent_guide_weights, (0, max_steps), value=0.0)
         
         if latent_guide is not None:
             x = latent_guide["samples"].clone().to(default_dtype) 
@@ -1001,10 +940,7 @@ class ClownsharKSamplerGuides:
         return (guides, )
 
 
-
-
-
-class ClownsharKSamplerOptions:
+class ClownsharKSamplerOptions2:
     @classmethod
     def INPUT_TYPES(s):
         return {"required":
@@ -1050,3 +986,91 @@ class ClownsharKSamplerOptions:
         return (guides, )
 
 
+
+
+
+
+
+class ClownsharKSamplerOptions:
+    @classmethod
+    def INPUT_TYPES(s):
+        return {
+            "required": {
+                "noise_init_stdev": ("FLOAT", {"default": 1.0, "min": -10000.0, "max": 10000.0, "step":0.01, "round": False, }),
+                "noise_init_mean": ("FLOAT", {"default": 0.0, "min": -10000.0, "max": 10000.0, "step":0.01, "round": False, }),
+                "noise_type_init": (NOISE_GENERATOR_NAMES, {"default": "gaussian"}),
+                "noise_type_sde": (NOISE_GENERATOR_NAMES, {"default": "brownian"}),
+                "noise_mode_sde": (["hard", "hard_var", "hard_sq", "soft", "softer", "exp"], {"default": 'hard', "tooltip": "How noise scales with the sigma schedule. Hard is the most aggressive, the others start strong and drop rapidly."}),
+                "eta": ("FLOAT", {"default": 0.25, "min": -100.0, "max": 100.0, "step":0.01, "round": False}),
+                "s_noise": ("FLOAT", {"default": 1.0, "min": -10000, "max": 10000, "step":0.01, "round": False}),
+                "d_noise": ("FLOAT", {"default": 1.0, "min": -10000, "max": 10000, "step":0.01}),
+                "alpha_init": ("FLOAT", {"default": 0.0, "min": -10000.0, "max": 10000.0, "step": 0.1}),
+                "k_init": ("FLOAT", {"default": 1.0, "min": -10000.0, "max": 10000.0, "step": 2}),      
+                "alpha_sde": ("FLOAT", {"default": 0.0, "min": -10000.0, "max": 10000.0, "step": 0.1}),
+                "k_sde": ("FLOAT", {"default": 1.0, "min": -10000.0, "max": 10000.0, "step": 2}),      
+                "noise_seed": ("INT", {"default": -1, "min": -1, "max": 0xffffffffffffffff, "tooltip": "Seed for the SDE noise that is added after each step if eta or eta_var are non-zero. If set to -1, it will use the increment the seed most recently used by the workflow."}),
+                "c2": ("FLOAT", {"default": 0.5, "min": 0.0, "max": 10000.0, "step": 0.01}),
+                "c3": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 10000.0, "step": 0.01}),
+                "t_fn_formula": ("STRING", {"default": "", "multiline": True}),
+                "sigma_fn_formula": ("STRING", {"default": "", "multiline": True}),   
+            },
+            "optional": {
+                "options": ("OPTIONS",),
+            }
+        }
+    
+    RETURN_TYPES = ("OPTIONS",)
+    RETURN_NAMES = ("options",)
+    CATEGORY = "sampling/custom_sampling/samplers"
+
+    FUNCTION = "get_sampler"
+
+    def get_sampler(self, noise_init_stdev, noise_init_mean, c2, c3, eta, s_noise, d_noise, noise_type_init, noise_type_sde, noise_mode_sde, noise_seed,
+                    alpha_init, k_init, alpha_sde, k_sde, t_fn_formula=None, sigma_fn_formula=None,
+                    alphas=None, etas=None, s_noises=None, d_noises=None, c2s=None, c3s=None,
+                    options=None,
+                    ):
+    
+        if options is None:
+            options = {}
+
+        options['noise_init_stdev'] = noise_init_stdev
+        options['noise_init_mean'] = noise_init_mean
+        options['noise_type_init'] = noise_type_init
+        options['noise_type_sde'] = noise_type_sde
+        options['noise_mode_sde'] = noise_mode_sde
+        options['eta'] = eta
+        options['s_noise'] = s_noise
+        options['d_noise'] = d_noise
+        options['alpha_init'] = alpha_init
+        options['k_init'] = k_init
+        options['alpha_sde'] = alpha_sde
+        options['k_sde'] = k_sde
+        options['noise_seed_sde'] = noise_seed
+        options['c2'] = c2
+        options['c3'] = c3
+        options['t_fn_formula'] = t_fn_formula
+        options['sigma_fn_formula'] = sigma_fn_formula
+        
+        return (options,)
+    
+    
+    
+    
+    
+    
+""""options": ("OPTIONS",),
+"etas": ("SIGMAS", ),
+"s_noises": ("SIGMAS", ),
+"d_noises": ("SIGMAS", ),
+"alphas": ("SIGMAS", ),
+"c2s": ("SIGMAS", ),
+"c3s": ("SIGMAS", ),"""
+
+"""max_steps = 10000
+options['etas'] = initialize_or_scale(etas, eta, max_steps)
+options['s_noises'] = initialize_or_scale(s_noises, s_noise, max_steps)
+options['d_noises'] = initialize_or_scale(s_noises, s_noise, max_steps)
+options['c2s'] = initialize_or_scale(c2s, c2, max_steps)
+options['c3s'] = initialize_or_scale(c3s, c3, max_steps)
+options['alphas'] = initialize_or_scale(alphas, alpha, max_steps)"""

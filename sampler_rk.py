@@ -393,10 +393,10 @@ def get_denoised(model, x, sigma, **extra_args):
 
 
 @torch.no_grad()
-def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, noise_sampler=None, noise_sampler_type="brownian", noise_mode="hard", noise_seed=-1, rk_type="dormand-prince", 
+def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, noise_sampler=None, noise_sampler_type="brownian", noise_mode="hard", noise_seed=-1, rk_type="res_2m", 
               sigma_fn_formula="", t_fn_formula="",
-                  eta=0.5, eta_var=0.0, s_noise=1., d_noise=1., alpha=-1.0, k=1.0, scale=0.1, c2=0.5, c3=1.0, MULTISTEP=False, cfgpp=0.5, implicit_steps=0, reverse_weight=0.0, exp_mode=False,
-                  latent_guide=None, latent_guide_inv=None, latent_guide_weight=0.0, latent_guide_weights=None, guide_mode="hard_light",
+                  eta=0.0, eta_var=0.0, s_noise=1., d_noise=1., alpha=-1.0, k=1.0, scale=0.1, c2=0.5, c3=1.0, MULTISTEP=False, cfgpp=0.0, implicit_steps=0, reverse_weight=0.0, exp_mode=False,
+                  latent_guide=None, latent_guide_inv=None, latent_guide_weight=0.0, latent_guide_weights=None, guide_mode="blend",
                   GARBAGE_COLLECT=False, mask=None, LGW_MASK_RESCALE_MIN=True, sigmas_override=None,
                   ):
     extra_args = {} if extra_args is None else extra_args
@@ -439,8 +439,9 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
     else:
         y0_inv = latent_guide_inv = torch.zeros_like(x)
 
-    uncond = [0]
-    uncond[0] = torch.full_like(x, 0.0)
+    #uncond = [0]
+    #uncond[0] = torch.full_like(x, 0.0)
+    uncond = [torch.full_like(x, 0.0)]
     if cfgpp != 0.0:
         def post_cfg_function(args):
             uncond[0] = args["uncond_denoised"]
@@ -493,7 +494,7 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
         t_down, t = t_fn(sigma_down), t_fn(sigma)
         h = h_fn(sigma_down, sigma)
         
-        c2, c3 = get_res4lyf_half_step3(sigma, sigma_down, t_fn=t_fn, sigma_fn=sigma_fn, t_fn_formula=t_fn_formula, sigma_fn_formula=sigma_fn_formula)
+        c2, c3 = get_res4lyf_half_step3(sigma, sigma_down, c2, c3, t_fn=t_fn, sigma_fn=sigma_fn, t_fn_formula=t_fn_formula, sigma_fn_formula=sigma_fn_formula)
         ab, ci, multistep_order, EPS_PRED = get_rk_methods_coeff(rk_type, h, c2, c3, h_prev, h_prev2, _, sigmas)
         order = len(ci)-1
         

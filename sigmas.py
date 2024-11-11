@@ -9,6 +9,7 @@ import torch.nn as nn
 import torch.optim as optim
 
 from comfy.k_diffusion.sampling import get_sigmas_polyexponential, get_sigmas_karras
+import comfy.samplers
 
 def rescale_linear(input, input_min, input_max, output_min, output_max):
     output = ((input - input_min) / (input_max - input_min)) * (output_max - output_min) + output_min;
@@ -1152,6 +1153,23 @@ extra_schedulers = {
     "simple_exponential": get_sigmas_simple_exponential
 }
 
+
+
+
+def get_sigmas(model, scheduler, steps, denoise): #adapted from comfyui
+    total_steps = steps
+    if denoise < 1.0:
+        if denoise <= 0.0:
+            return (torch.FloatTensor([]),)
+        total_steps = int(steps/denoise)
+
+    if scheduler == "beta57":
+        sigmas = comfy.samplers.beta_scheduler(model.get_model_object("model_sampling"), total_steps, alpha=0.5, beta=0.7)
+    else:
+        sigmas = comfy.samplers.calculate_sigmas(model.get_model_object("model_sampling"), scheduler, total_steps).cpu()
+    
+    sigmas = sigmas[-(steps + 1):]
+    return sigmas
 
 
 

@@ -85,6 +85,7 @@ NODE_CLASS_MAPPINGS = {
     "SamplerRK": samplers.SamplerRK,
     
     "ClownsharKSamplerGuides": samplers.ClownsharKSamplerGuides,
+    "ClownsharKSamplerOptions": samplers.ClownsharKSamplerOptions,
 
 
     "SharkSampler": samplers.SharkSampler,
