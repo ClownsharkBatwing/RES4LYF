@@ -6,6 +6,7 @@ from . import latents
 from . import conditioning
 from . import images
 from . import models
+from . import helper_sigma_preview_image_preproc
 from .res4lyf import init, get_ext_dir
 
 import torch
@@ -84,6 +85,7 @@ NODE_CLASS_MAPPINGS = {
     "SamplerRK": samplers.SamplerRK,
     
     "ClownsharKSamplerGuides": samplers.ClownsharKSamplerGuides,
+    "ClownsharKSamplerOptions": samplers.ClownsharKSamplerOptions,
 
 
     "SharkSampler": samplers.SharkSampler,
@@ -179,6 +181,10 @@ NODE_CLASS_MAPPINGS = {
     "Frequency Separation Hard Light LAB": images.Frequency_Separation_Hard_Light_LAB,
     
     "UNetSave": models.UNetSave,
+    
+    "PrepForUnsampling": helper_sigma_preview_image_preproc.PrepForUnsampling,
+    
+    "SigmasPreview": helper_sigma_preview_image_preproc.SigmasPreview,
 }
 
 if flags["test_samplers"]:
