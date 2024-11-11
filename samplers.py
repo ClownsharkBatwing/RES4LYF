@@ -370,8 +370,8 @@ class ClownsharKSampler:
                     "denoise": ("FLOAT", {"default": 1.0, "min": -10000, "max": 10000, "step":0.01}),
                     "denoise_alt": ("FLOAT", {"default": 1.0, "min": -10000, "max": 10000, "step":0.01}),
                     "cfg": ("FLOAT", {"default": 5.0, "min": -100.0, "max": 100.0, "step":0.1, "round": False, }),
-                    "shift": ("FLOAT", {"default": 3.0, "min": 0.0, "max": 100.0, "step":0.1, "round": False, }),
-                    "base_shift": ("FLOAT", {"default": 0.85, "min": 0.0, "max": 100.0, "step":0.1, "round": False, }),
+                    "shift": ("FLOAT", {"default": 3.0, "min": -1.0, "max": 100.0, "step":0.1, "round": False, }),
+                    "base_shift": ("FLOAT", {"default": 0.85, "min": -1.0, "max": 100.0, "step":0.1, "round": False, }),
                     "truncate_conditioning": (['false', 'true'], {"default": "true"}),
                      },
                 "optional": 
@@ -441,7 +441,7 @@ class ClownsharKSampler:
             latent_guide_weights = initialize_or_scale(latent_guide_weights, latent_guide_weight, max_steps).to(default_dtype)
             latent_guide_weights = F.pad(latent_guide_weights, (0, max_steps), value=0.0)
             
-            if shift <= 0 or base_shift <= 0:
+            if shift < 0 or base_shift < 0:
                 if isinstance(model.model.model_config, comfy.supported_models.SD3):
                     model = ModelSamplingSD3().patch(model, shift)[0] 
                 elif isinstance(model.model.model_config, comfy.supported_models.Flux) or isinstance(model.model.model_config, comfy.supported_models.FluxSchnell):
