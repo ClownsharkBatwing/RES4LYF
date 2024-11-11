@@ -648,6 +648,8 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
                         last_value_ki_u = ki_u[-1]
                         ki.extend(  [last_value_ki]   * ((order + 1) - len(ki)))
                         ki_u.extend([last_value_ki_u] * ((order + 1) - len(ki_u)))
+                    if len(xi) < order + 2:
+                        xi.extend([torch.zeros_like(xi[0])] * ((order + 2) - len(xi)))
                     
                     ki[0]   = model_call(model, xi_0, sigma, **extra_args)
                     ki_u[0] = uncond[0]
