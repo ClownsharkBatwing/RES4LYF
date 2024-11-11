@@ -363,7 +363,11 @@ class ClownsharKSampler:
                     "noise_seed": ("INT", {"default": 0, "min": -1, "max": 0xffffffffffffffff}),
                     "sampler_mode": (['standard', 'unsample', 'resample'],),
                     "sampler_name": (RK_SAMPLER_NAMES, {"default": "res_2m"}), 
-                    "implicit_sampler_name": (["default"], {"default": "default"}), 
+                    "implicit_sampler_name": (["default", 
+                                               "gauss-legendre_3s", 
+                                               "gauss-legendre_2s",
+                                               "radau_iia_3s",
+                                               ], {"default": "default"}), 
                     "scheduler": (comfy.samplers.SCHEDULER_NAMES + ["beta57"], {"default": "beta57"},),
                     "steps": ("INT", {"default": 30, "min": 1, "max": 10000}),
                     "implicit_steps": ("INT", {"default": 0, "min": 0, "max": 10000}),
@@ -455,19 +459,13 @@ class ClownsharKSampler:
             latent = latent_image
             latent_image_dtype = latent_image['samples'].dtype
 
-            if positive is not None:
-                positive[0][0] = positive[0][0].clone().to(default_dtype)
-                positive[0][1]["pooled_output"] = positive[0][1]["pooled_output"].clone().to(default_dtype)
-            else:
+            if positive is None:
                 positive = [[
                     torch.zeros((1, 154, 4096)),
                     {'pooled_output': torch.zeros((1, 2048))}
                     ]]
             
-            if negative is not None:
-                negative[0][0] = negative[0][0].clone().to(default_dtype)
-                negative[0][1]["pooled_output"] = negative[0][1]["pooled_output"].clone().to(default_dtype)
-            else:
+            if negative is None:
                 negative = [[
                     torch.zeros((1, 154, 4096)),
                     {'pooled_output': torch.zeros((1, 2048))}
@@ -508,6 +506,12 @@ class ClownsharKSampler:
                 latent_noise_match["samples"] = latent_noise_match["samples"].clone().to(default_dtype)
 
             if truncate_conditioning == "true" or truncate_conditioning == "true_and_zero_neg":
+                if positive is not None:
+                    positive[0][0] = positive[0][0].clone().to(default_dtype)
+                    positive[0][1]["pooled_output"] = positive[0][1]["pooled_output"].clone().to(default_dtype)
+                if negative is not None:
+                    negative[0][0] = negative[0][0].clone().to(default_dtype)
+                    negative[0][1]["pooled_output"] = negative[0][1]["pooled_output"].clone().to(default_dtype)
                 c = []
                 for t in positive:
                     d = t[1].copy()
@@ -534,7 +538,6 @@ class ClownsharKSampler:
             
             sigmin = model.model.model_sampling.sigma_min
             sigmax = model.model.model_sampling.sigma_max
-
 
             if noise_type_init == "none":
                 noise = torch.zeros_like(x)
@@ -583,7 +586,7 @@ class ClownsharKSampler:
                 cfg = 1.0
                 
             sampler = comfy.samplers.ksampler("rk", {"eta": eta, "eta_var": eta_var, "s_noise": s_noise, "d_noise": d_noise, "alpha": alpha_sde, "k": k_sde, "c2": c2, "c3": c3, "cfgpp": cfgpp, "MULTISTEP": multistep, 
-                                                     "noise_sampler_type": noise_type_sde, "noise_mode": noise_mode_sde, "noise_seed": noise_seed_sde, "rk_type": sampler_name, 
+                                                     "noise_sampler_type": noise_type_sde, "noise_mode": noise_mode_sde, "noise_seed": noise_seed_sde, "rk_type": sampler_name, "implicit_sampler_name": implicit_sampler_name,
                                                             "exp_mode": exp_mode, "t_fn_formula": t_fn_formula, "sigma_fn_formula": sigma_fn_formula, "implicit_steps": implicit_steps,
                                                             "latent_guide": latent_guide, "latent_guide_inv": latent_guide_inv, "mask": latent_guide_mask, "latent_guide_weight": latent_guide_weight,
                                                             "latent_guide_weights": latent_guide_weights, "guide_mode": guide_mode,

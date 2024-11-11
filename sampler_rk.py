@@ -30,6 +30,32 @@ def calculate_gamma(c2, c3):
 
 
 rk_coeff = {
+    "gauss-legendre_3s": (
+        [
+            [5/36, 2/9 - 15**0.5 / 15, 5/36 - 15**0.5 / 30],
+            [5/36 + 15**0.5 / 24, 2/9, 5/36 - 15**0.5 / 24],
+            [5/36 + 15**0.5 / 30, 2/9 + 15**0.5 / 15, 5/36],
+            [5/18, 4/9, 5/18]
+        ],
+        [1/2 - 15**0.5 / 10, 1/2, 1/2 + 15**0.5 / 10]
+    ),
+    "gauss-legendre_2s": (
+        [
+            [1/4, 1/4 - 3**0.5 / 6],
+            [1/4 + 3**0.5 / 6, 1/4],
+            [1/2, 1/2],
+        ],
+        [1/2 - 3**0.5 / 6, 1/2 + 3**0.5 / 6]
+    ),
+    "radau_iia_3s": (
+        [    
+            [11/45 - 7*6**0.5 / 360, 37/225 - 169*6**0.5 / 1800, -2/225 + 6**0.5 / 75],
+            [37/225 + 169*6**0.5 / 1800, 11/45 + 7*6**0.5 / 360, -2/225 - 6**0.5 / 75],
+            [4/9 - 6**0.5 / 36, 4/9 + 6**0.5 / 36, 1/9],
+            [4/9 - 6**0.5 / 36, 4/9 + 6**0.5 / 36, 1/9],
+        ],
+        [2/5 - 6**0.5 / 10, 2/5 + 6**0.5 / 10, 1.]
+    ),
     "dormand-prince_13s": (
         [
             [1/18, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
@@ -324,7 +350,7 @@ def get_rk_methods(rk_type, h, c2=0.5, c3=1.0, h_prev=None, h_prev2=None, stepco
             ci = [0, c2, 1]
             
         case "dpmpp_sde_2s":
-            c2 = 1.0
+            c2 = 1.0 #hardcoded to 1.0 to more closely emulate the configuration for k-diffusion's implementation
             a2_1 =         c2   * phi(1, -h*c2)
             b1 = (1 - 1/(2*c2)) * phi(1, -h)
             b2 =     (1/(2*c2)) * phi(1, -h)
@@ -393,7 +419,7 @@ def get_denoised(model, x, sigma, **extra_args):
 
 
 @torch.no_grad()
-def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, noise_sampler=None, noise_sampler_type="brownian", noise_mode="hard", noise_seed=-1, rk_type="res_2m", 
+def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, noise_sampler=None, noise_sampler_type="brownian", noise_mode="hard", noise_seed=-1, rk_type="res_2m", implicit_sampler_name="default",
               sigma_fn_formula="", t_fn_formula="",
                   eta=0.0, eta_var=0.0, s_noise=1., d_noise=1., alpha=-1.0, k=1.0, scale=0.1, c2=0.5, c3=1.0, MULTISTEP=False, cfgpp=0.0, implicit_steps=0, reverse_weight=0.0, exp_mode=False,
                   latent_guide=None, latent_guide_inv=None, latent_guide_weight=0.0, latent_guide_weights=None, guide_mode="blend",
@@ -439,8 +465,6 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
     else:
         y0_inv = latent_guide_inv = torch.zeros_like(x)
 
-    #uncond = [0]
-    #uncond[0] = torch.full_like(x, 0.0)
     uncond = [torch.full_like(x, 0.0)]
     if cfgpp != 0.0:
         def post_cfg_function(args):
@@ -523,6 +547,17 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
 
         for iteration in range(implicit_steps+1):
             for i in range(multistep_order, order):
+                if implicit_steps > 0 and iteration > 0 and implicit_sampler_name != "default":
+                    ab, ci, multistep_order, EPS_PRED = get_rk_methods_coeff(implicit_sampler_name, h, c2, c3, h_prev, h_prev2, _, sigmas)
+                    order = len(ci)-1
+                    if len(ki) < order + 1:
+                        last_value_ki = ki[-1]
+                        last_value_ki_u = ki_u[-1]
+                        ki.extend(  [last_value_ki]   * ((order + 1) - len(ki)))
+                        ki_u.extend([last_value_ki_u] * ((order + 1) - len(ki_u)))
+                    
+                    ki[0]   = model_call(model, xi_0, sigma, **extra_args)
+                    ki_u[0] = uncond[0]
                 
                 sigma_mid = sigma_fn(t + h*ci[i+1])
                 alpha_t_1 = alpha_t_1_inv = torch.exp(torch.log(sigma_down/sigma) * ci[i+1])
@@ -614,15 +649,32 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
             for ms in range(multistep_order):
                 ki  [multistep_order - ms] = ki  [multistep_order - ms - 1]
                 ki_u[multistep_order - ms] = ki_u[multistep_order - ms - 1]
-            if iteration < implicit_steps:
+            if iteration < implicit_steps and implicit_sampler_name == "default":
                 ki  [0] = model_call(model, xi[0], sigma_down, **extra_args)
                 ki_u[0] = uncond[0]
+            elif iteration == implicit_steps and implicit_sampler_name != "default" and implicit_steps > 0:
+                ks, ks_u, ys, ys_inv = torch.zeros_like(x), torch.zeros_like(x), torch.zeros_like(x), torch.zeros_like(x)
+                for j in range(order):
+                    ks     += ab[i+1][j] * ki[j]
+                    ks_u   += ab[i+1][j] * ki_u[j]
+                    ys     += ab[i+1][j] * y0
+                    ys_inv += ab[i+1][j] * y0_inv
+                ks /= sum(ab[i+1])
+                
+                cfgpp_term = cfgpp*h*(ks - ks_u)  #GUIDES NOT FULLY IMPLEMENTED HERE WITH IMPLICIT FINAL STEP
+                xi[(i+1)%order]  = (1-UNSAMPLE * lgw_mask) * (alpha_t_1     * (xi_0 + cfgpp_term)    +    (1 - alpha_t_1)     * ks )     \
+                                    + UNSAMPLE * lgw_mask  * (alpha_t_1_inv * (xi_0 + cfgpp_term)    +    (1 - alpha_t_1_inv) * ys )
+                if UNSAMPLE:
+                    xi[(i+1)%order]  = (1-lgw_mask_inv) * xi[(i+1)%order]   + UNSAMPLE * lgw_mask_inv  * (alpha_t_1_inv * (xi_0 + cfgpp_term)    +      (1 - alpha_t_1_inv) * ys_inv )
+                
 
             if EPS_PRED == True and exp_mode == False and not rk_type.startswith("deis"):
                 denoised = alpha_fn(-h*ci[i+1]) * xi[0] - sigma * ks
             elif EPS_PRED == True and rk_type.startswith("deis"):
                 epsilon = (h * ks) / (sigma_down - sigma)
                 denoised = xi_0 - epsilon * sigma        # denoised
+            elif iteration == implicit_steps and implicit_sampler_name != "default" and implicit_steps > 0:
+                denoised = ks
             else:
                 denoised = ks / sum(ab[i])
             
