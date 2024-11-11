@@ -364,7 +364,7 @@ class ClownsharKSampler:
                     "sampler_mode": (['standard', 'unsample', 'resample'],),
                     "sampler_name": (RK_SAMPLER_NAMES, {"default": "res_2m"}), 
                     "implicit_sampler_name": (["default", 
-                                               #"gauss-legendre_5s",
+                                               "gauss-legendre_5s",
                                                "gauss-legendre_4s",
                                                "gauss-legendre_3s", 
                                                "gauss-legendre_2s",
