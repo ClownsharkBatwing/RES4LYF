@@ -670,7 +670,9 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
                     epsilon = (h * ks) / (sigma_down - sigma)       #xi[(i+1)%order]  = xi_0 + h*ks
                     ks = xi_0 - epsilon * sigma        # denoised
                 else:
-                    if iteration > 0 and implicit_sampler_name.startswith("lobatto") == False:
+                    if implicit_sampler_name.startswith("lobatto") == False:
+                        ks /= sum(ab[i])
+                    elif iteration == 0:
                         ks /= sum(ab[i])
                 
                 if UNSAMPLE == False and latent_guide is not None and latent_guide_weights[_] > 0.0:
