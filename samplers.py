@@ -441,15 +441,16 @@ class ClownsharKSampler:
             latent_guide_weights = initialize_or_scale(latent_guide_weights, latent_guide_weight, max_steps).to(default_dtype)
             latent_guide_weights = F.pad(latent_guide_weights, (0, max_steps), value=0.0)
             
-            if shift >= 0 and base_shift >= 0:
+            if shift >= 0:
                 if isinstance(model.model.model_config, comfy.supported_models.SD3):
                     model = ModelSamplingSD3().patch(model, shift)[0] 
-                elif isinstance(model.model.model_config, comfy.supported_models.Flux) or isinstance(model.model.model_config, comfy.supported_models.FluxSchnell):
-                    model = ModelSamplingFlux().patch(model, shift, base_shift, latent_image['samples'].shape[3], latent_image['samples'].shape[2])[0] 
                 elif isinstance(model.model.model_config, comfy.supported_models.AuraFlow):
                     model = ModelSamplingAuraFlow().patch_aura(model, shift)[0] 
                 elif isinstance(model.model.model_config, comfy.supported_models.Stable_Cascade_C):
                     model = ModelSamplingStableCascade().patch(model, shift)[0] 
+            if shift >= 0 and base_shift >= 0:
+                if isinstance(model.model.model_config, comfy.supported_models.Flux) or isinstance(model.model.model_config, comfy.supported_models.FluxSchnell):
+                    model = ModelSamplingFlux().patch(model, shift, base_shift, latent_image['samples'].shape[3], latent_image['samples'].shape[2])[0] 
 
             latent = latent_image
             latent_image_dtype = latent_image['samples'].dtype
