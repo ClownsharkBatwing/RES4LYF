@@ -76,8 +76,6 @@ extra_samplers = {
 }
 
 
-add_samplers()
-
 
 NODE_CLASS_MAPPINGS = {
     "ClownSampler": samplers.SamplerRK,
@@ -193,9 +191,12 @@ if flags["test_samplers"]:
     })
     extra_samplers.update({
         "rk_testnew":  test_samplers.sample_rk_testnew,
+
     })
 
 WEB_DIRECTORY = "./web"
 __all__ = ["NODE_CLASS_MAPPINGS",  "WEB_DIRECTORY"]
 
+
+add_samplers()
 
