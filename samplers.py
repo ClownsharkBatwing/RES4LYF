@@ -187,19 +187,12 @@ class SharkSampler:
             
             default_dtype = torch.float64
             
-            if positive is not None:
-                positive[0][0] = positive[0][0].clone().to(default_dtype)
-                positive[0][1]["pooled_output"] = positive[0][1]["pooled_output"].clone().to(default_dtype)
-            else:
+            if positive is None:
                 positive = [[
                     torch.zeros((1, 154, 4096)),  # blah[0][0], a tensor of shape (1, 154, 4096)
                     {'pooled_output': torch.zeros((1, 2048))}
                     ]]
-                
-            if negative is not None:
-                negative[0][0] = negative[0][0].clone().to(default_dtype)
-                negative[0][1]["pooled_output"] = negative[0][1]["pooled_output"].clone().to(default_dtype)
-            else:
+            if negative is None:
                 negative = [[
                     torch.zeros((1, 154, 4096)),  # blah[0][0], a tensor of shape (1, 154, 4096)
                     {'pooled_output': torch.zeros((1, 2048))}
@@ -234,6 +227,9 @@ class SharkSampler:
                 latent_noise_match["samples"] = latent_noise_match["samples"].clone().to(default_dtype)
 
             if truncate_conditioning == "true" or truncate_conditioning == "true_and_zero_neg":
+                if positive is not None:
+                    positive[0][0] = positive[0][0].clone().to(default_dtype)
+                    positive[0][1]["pooled_output"] = positive[0][1]["pooled_output"].clone().to(default_dtype)
                 c = []
                 for t in positive:
                     d = t[1].copy()
@@ -246,6 +242,9 @@ class SharkSampler:
                 
                 c = []
                 for t in negative:
+                    if negative is not None:
+                        negative[0][0] = negative[0][0].clone().to(default_dtype)
+                        negative[0][1]["pooled_output"] = negative[0][1]["pooled_output"].clone().to(default_dtype)
                     d = t[1].copy()
                     pooled_output = d.get("pooled_output", None)
                     if pooled_output is not None:

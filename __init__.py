@@ -187,7 +187,7 @@ NODE_CLASS_MAPPINGS = {
 
 if flags["test_samplers"]:
     NODE_CLASS_MAPPINGS.update({
-        "SamplerRK_TestNew": test_samplers.SamplerRK_TestNew,
+        "Sampler10th_World_Order": test_samplers.Sampler10th_World_Order,
     })
     extra_samplers.update({
         "rk_testnew":  test_samplers.sample_rk_testnew,
