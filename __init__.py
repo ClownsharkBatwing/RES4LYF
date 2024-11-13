@@ -76,8 +76,6 @@ extra_samplers = {
 }
 
 
-add_samplers()
-
 
 NODE_CLASS_MAPPINGS = {
     "ClownSampler": samplers.SamplerRK,
@@ -189,13 +187,16 @@ NODE_CLASS_MAPPINGS = {
 
 if flags["test_samplers"]:
     NODE_CLASS_MAPPINGS.update({
-        "SamplerRK_TestNew": test_samplers.SamplerRK_TestNew,
+        "Sampler10th_World_Order": test_samplers.Sampler10th_World_Order,
     })
     extra_samplers.update({
         "rk_testnew":  test_samplers.sample_rk_testnew,
+        "rk_rkexp_5s": test_samplers.sample_rk_rkexp_5s,
     })
 
 WEB_DIRECTORY = "./web/js"
 __all__ = ["NODE_CLASS_MAPPINGS",  "WEB_DIRECTORY"]
 
+
+add_samplers()
 

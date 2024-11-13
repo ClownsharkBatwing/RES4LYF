@@ -187,19 +187,12 @@ class SharkSampler:
             
             default_dtype = torch.float64
             
-            if positive is not None:
-                positive[0][0] = positive[0][0].clone().to(default_dtype)
-                positive[0][1]["pooled_output"] = positive[0][1]["pooled_output"].clone().to(default_dtype)
-            else:
+            if positive is None:
                 positive = [[
                     torch.zeros((1, 154, 4096)),  # blah[0][0], a tensor of shape (1, 154, 4096)
                     {'pooled_output': torch.zeros((1, 2048))}
                     ]]
-                
-            if negative is not None:
-                negative[0][0] = negative[0][0].clone().to(default_dtype)
-                negative[0][1]["pooled_output"] = negative[0][1]["pooled_output"].clone().to(default_dtype)
-            else:
+            if negative is None:
                 negative = [[
                     torch.zeros((1, 154, 4096)),  # blah[0][0], a tensor of shape (1, 154, 4096)
                     {'pooled_output': torch.zeros((1, 2048))}
@@ -234,6 +227,9 @@ class SharkSampler:
                 latent_noise_match["samples"] = latent_noise_match["samples"].clone().to(default_dtype)
 
             if truncate_conditioning == "true" or truncate_conditioning == "true_and_zero_neg":
+                if positive is not None:
+                    positive[0][0] = positive[0][0].clone().to(default_dtype)
+                    positive[0][1]["pooled_output"] = positive[0][1]["pooled_output"].clone().to(default_dtype)
                 c = []
                 for t in positive:
                     d = t[1].copy()
@@ -246,6 +242,9 @@ class SharkSampler:
                 
                 c = []
                 for t in negative:
+                    if negative is not None:
+                        negative[0][0] = negative[0][0].clone().to(default_dtype)
+                        negative[0][1]["pooled_output"] = negative[0][1]["pooled_output"].clone().to(default_dtype)
                     d = t[1].copy()
                     pooled_output = d.get("pooled_output", None)
                     if pooled_output is not None:
@@ -324,6 +323,7 @@ class SharkSampler:
 RK_SAMPLER_NAMES = ["dormand-prince_6s", 
                     "dormand-prince_7s", 
                     "dormand-prince_13s", 
+                    "bogacki-shampine_7s",
                     "rk4_4s", 
                     "rk38_4s",
                     "ralston_4s", 
@@ -405,7 +405,7 @@ class ClownsharKSampler:
              noise_type_init="gaussian", noise_type_sde="brownian", noise_mode_sde="hard", latent_image=None, 
              positive=None, negative=None, sigmas=None, latent_noise=None, latent_noise_match=None,
              noise_stdev=1.0, noise_mean=0.0, noise_normalize=True, noise_is_latent=False, 
-             eta=0.25, eta_var=0.0, d_noise=1.0, s_noise=1.0, alpha_init=-1.0, k_init=1.0, alpha_sde=-1.0, k_sde=1.0, cfgpp=0.0, c2=0.5, c3=1.0, multistep=False, noise_seed=-1, sampler_name="res_2m", implicit_sampler_name="default",
+             eta=0.25, eta_var=0.0, d_noise=1.0, s_noise=1.0, alpha_init=-1.0, k_init=1.0, alpha_sde=-1.0, k_sde=1.0, cfgpp=0.0, c1=0.0, c2=0.5, c3=1.0, multistep=False, noise_seed=-1, sampler_name="res_2m", implicit_sampler_name="default",
                     exp_mode=False, t_fn_formula=None, sigma_fn_formula=None, implicit_steps=0,
                     latent_guide=None, latent_guide_inv=None, latent_guide_weight=0.0, guide_mode="blend", latent_guide_weights=None, latent_guide_mask=None, rescale_floor=True, sigmas_override=None,
                     shift=3.0, base_shift=0.85, guides=None, options=None,
@@ -435,6 +435,7 @@ class ClownsharKSampler:
                 alpha_sde = options.get('alpha_sde', alpha_sde)
                 k_sde = options.get('k_sde', k_sde)
                 noise_seed_sde = options.get('noise_seed_sde', noise_seed+1)
+                c1 = options.get('c1', c1)
                 c2 = options.get('c2', c2)
                 c3 = options.get('c3', c3)
                 t_fn_formula = options.get('t_fn_formula', t_fn_formula)
@@ -590,7 +591,7 @@ class ClownsharKSampler:
                 cfgpp = -cfg
                 cfg = 1.0
                 
-            sampler = comfy.samplers.ksampler("rk", {"eta": eta, "eta_var": eta_var, "s_noise": s_noise, "d_noise": d_noise, "alpha": alpha_sde, "k": k_sde, "c2": c2, "c3": c3, "cfgpp": cfgpp, "MULTISTEP": multistep, 
+            sampler = comfy.samplers.ksampler("rk", {"eta": eta, "eta_var": eta_var, "s_noise": s_noise, "d_noise": d_noise, "alpha": alpha_sde, "k": k_sde, "c1": c1, "c2": c2, "c3": c3, "cfgpp": cfgpp, "MULTISTEP": multistep, 
                                                      "noise_sampler_type": noise_type_sde, "noise_mode": noise_mode_sde, "noise_seed": noise_seed_sde, "rk_type": sampler_name, "implicit_sampler_name": implicit_sampler_name,
                                                             "exp_mode": exp_mode, "t_fn_formula": t_fn_formula, "sigma_fn_formula": sigma_fn_formula, "implicit_steps": implicit_steps,
                                                             "latent_guide": latent_guide, "latent_guide_inv": latent_guide_inv, "mask": latent_guide_mask, "latent_guide_weight": latent_guide_weight,
@@ -1014,6 +1015,7 @@ class ClownsharKSamplerOptions:
                 "alpha_sde": ("FLOAT", {"default": 0.0, "min": -10000.0, "max": 10000.0, "step": 0.1}),
                 "k_sde": ("FLOAT", {"default": 1.0, "min": -10000.0, "max": 10000.0, "step": 2}),      
                 "noise_seed": ("INT", {"default": -1, "min": -1, "max": 0xffffffffffffffff, "tooltip": "Seed for the SDE noise that is added after each step if eta or eta_var are non-zero. If set to -1, it will use the increment the seed most recently used by the workflow."}),
+                "c1": ("FLOAT", {"default": 0.0, "min": 0.0, "max": 10000.0, "step": 0.01}),
                 "c2": ("FLOAT", {"default": 0.5, "min": 0.0, "max": 10000.0, "step": 0.01}),
                 "c3": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 10000.0, "step": 0.01}),
                 "t_fn_formula": ("STRING", {"default": "", "multiline": True}),
@@ -1030,7 +1032,7 @@ class ClownsharKSamplerOptions:
 
     FUNCTION = "get_sampler"
 
-    def get_sampler(self, noise_init_stdev, noise_init_mean, c2, c3, eta, s_noise, d_noise, noise_type_init, noise_type_sde, noise_mode_sde, noise_seed,
+    def get_sampler(self, noise_init_stdev, noise_init_mean, c1, c2, c3, eta, s_noise, d_noise, noise_type_init, noise_type_sde, noise_mode_sde, noise_seed,
                     alpha_init, k_init, alpha_sde, k_sde, t_fn_formula=None, sigma_fn_formula=None,
                     alphas=None, etas=None, s_noises=None, d_noises=None, c2s=None, c3s=None,
                     options=None,
@@ -1052,6 +1054,7 @@ class ClownsharKSamplerOptions:
         options['alpha_sde'] = alpha_sde
         options['k_sde'] = k_sde
         options['noise_seed_sde'] = noise_seed
+        options['c1'] = c1
         options['c2'] = c2
         options['c3'] = c3
         options['t_fn_formula'] = t_fn_formula
