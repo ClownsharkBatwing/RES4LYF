@@ -191,7 +191,7 @@ if flags["test_samplers"]:
     })
     extra_samplers.update({
         "rk_testnew":  test_samplers.sample_rk_testnew,
-
+        "rk_rkexp_5s": test_samplers.sample_rk_rkexp_5s,
     })
 
 WEB_DIRECTORY = "./web"
