@@ -485,6 +485,56 @@ def get_rk_methods(rk_type, h, c1=0.0, c2=0.5, c3=1.0, h_prev=None, h_prev2=None
                     [b1, b2, b3],
             ]
             ci = [0, c2, c3, 1]
+            
+        case "rk_exp_5s":
+                
+            c1, c2, c3, c4, c5 = 0., 0.5, 0.5, 1., 0.5
+            
+            a2_1 = 0.5 * phi(1, -h * c2)
+            
+            a3_1 = 0.5 * phi(1, -h * c3) - phi(2, -h * c3)
+            a3_2 = phi(2, -h * c3)
+            
+            a4_1 = phi(1, -h * c4) - 2 * phi(2, -h * c4)
+            a4_2 = a4_3 = phi(2, -h * c4)
+            
+            a5_2 = a5_3 = 0.5 * phi(2, -h * c5) - phi(3, -h * c4) + 0.25 * phi(2, -h * c4) - 0.5 * phi(3, -h * c5)
+            a5_4 = 0.25 * phi(2, -h * c5) - a5_2
+            a5_1 = 0.5 * phi(1, -h * c5) - 2 * a5_2 - a5_4
+                    
+            b1 = phi(1, -h) - 3 * phi(2, -h) + 4 * phi(3, -h)
+            b2 = b3 = 0
+            b4 = -phi(2, -h) + 4*phi(3, -h)
+            b5 = 4 * phi(2, -h) - 8 * phi(3, -h)
+            
+            a2_1 /= (1 - torch.exp(-h*c2)) / h
+            
+            a3_1 /= (1 - torch.exp(-h*c3)) / h
+            a3_2 /= (1 - torch.exp(-h*c3)) / h
+            
+            a4_1 /= (1 - torch.exp(-h*c4)) / h
+            a4_2 /= (1 - torch.exp(-h*c4)) / h
+            a4_3 /= (1 - torch.exp(-h*c4)) / h
+            
+            a5_1 /= (1 - torch.exp(-h*c5)) / h
+            a5_2 /= (1 - torch.exp(-h*c5)) / h
+            a5_3 /= (1 - torch.exp(-h*c5)) / h
+            a5_4 /= (1 - torch.exp(-h*c5)) / h
+            
+            b1 /= phi(1, -h)
+            b2 /= phi(1, -h)
+            b3 /= phi(1, -h)
+            b4 /= phi(1, -h)
+            b5 /= phi(1, -h)
+            
+            ab = [
+                    [a2_1, 0, 0, 0, 0],
+                    [a3_1, a3_2, 0, 0, 0],
+                    [a4_1, a4_2, a4_3, 0, 0],
+                    [a5_1, a5_2, a5_3, a5_4, 0],
+                    [b1, b2, b3, b4, b5],
+            ]
+            ci = [0., 0.5, 0.5, 1., 0.5, 1]
 
 
     return ab, ci, multistep_order, model_call, alpha_fn, t_fn, sigma_fn, h_fn, FSAL, EPS_PRED
