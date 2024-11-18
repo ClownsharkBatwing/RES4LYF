@@ -1342,7 +1342,7 @@ class ClownsharKSamplerOptions:
                 "c3": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 10000.0, "step": 0.01}),
                 "t_fn_formula": ("STRING", {"default": "", "multiline": True}),
                 "sigma_fn_formula": ("STRING", {"default": "", "multiline": True}),   
-                "unsampler_type": (['linear', 'exponential', 'constant'],),
+                #"unsampler_type": (['linear', 'exponential', 'constant'],),
             },
             "optional": {
                 "options": ("OPTIONS",),
