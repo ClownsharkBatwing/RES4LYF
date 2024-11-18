@@ -1015,6 +1015,7 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
     mask, LGW_MASK_RESCALE_MIN = rk.prepare_mask(x, mask, LGW_MASK_RESCALE_MIN)
 
     x, y0, y0_inv = rk.init_guides(x, latent_guide, latent_guide_inv, mask, sigmas, UNSAMPLE)
+    y0_tmp, y0_inv_tmp = y0.clone(), y0_inv.clone()
 
     uncond = [torch.full_like(x, 0.0)]
     if cfgpp != 0.0:
@@ -1082,10 +1083,6 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
                         t_i = s_[row]
                 else:
                     t_i = t_is[_]
-                    
-                if sum(rk.a[row]):
-                    vel_y = rk.data_to_vel(x_0, y0, s_[row])
-                    vel_y_inv = rk.data_to_vel(x_0, y0_inv, s_[row])
 
                 multiplier = torch.full_like(h, 1.)
                 if sigma_down > sigma and unsampler_type != "vp":
@@ -1098,9 +1095,22 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
                     multiplier = 1 / (1 + torch.exp(-h))
                 elif unsampler_type == "odds":
                     multiplier = sigma / (rk.sigma_max + sigma)
+                    
+                #y0_stdnorm = y0 / y0.std()
+                #y0_tmp = y0_stdnorm * data_[0].std()
+                if y0.max() > 0.0001:
+                    y0_tmp = data_[0].std() * y0 / y0.std()
+                if y0_inv.max() > 0.0001:
+                    y0_inv_tmp = data_[0].std() * y0_inv / y0_inv.std()
+                
+                if sum(rk.a[row]):
+                    vel_y = rk.data_to_vel(x_0, y0_tmp, s_[row])
+                    vel_y_inv = rk.data_to_vel(x_0, y0_inv_tmp, s_[row])
+                    #vel_y = rk.data_to_vel(x_0, y0, t_i)
+                    #vel_y_inv = rk.data_to_vel(x_0, y0_inv, t_i)
                             
                 if unsampler_type == "lin":            
-                    x_[row+1] = x_0         +   (1-UNSAMPLE * lgw[_]) * rk.a_k_sum(eps_, row) * h   +        (sum(rk.a[row]) > 0) * (     (UNSAMPLE * mask * lgw[_]) * ((y0_masked - x_0) / t_i) * (sigma-sigma_down)  )  # +    (UNSAMPLE * (1-mask) * lgw[_]) * ((y0_inv - x_0) / t_i) * (sigma-sigma_down)     )
+                    x_[row+1] = x_0         +   (1-UNSAMPLE * lgw[_]) * rk.a_k_sum(eps_, row) * h   +        (sum(rk.a[row]) > 0) * (     (UNSAMPLE * mask * lgw[_]) * ((y0 - x_0) / t_i) * (sigma-sigma_down)  )  # +    (UNSAMPLE * (1-mask) * lgw[_]) * ((y0_inv - x_0) / t_i) * (sigma-sigma_down)     )
                     """if sum(rk.a[row] > 0):
                         x_[row+1]    = (1-UNSAMPLE * lgw_mask) * (x_0    +  h * rk.a_k_sum(eps_, row))     \
                             + UNSAMPLE * lgw_mask  * (x_0   +  (y0-x_0)/t_i)*(sigma-sigma_down) 
@@ -1111,7 +1121,10 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
                 else:
                     #x_[row+1] = x_0         +   (1-UNSAMPLE * lgw[_]) * rk.a_k_sum(eps_, row) * h   +   (UNSAMPLE) * (h.abs()) * rk.a_k_sum(vel_y_masked * multiplier, row) 
                     
-                    #x_[row+1] = x_0         +   (1-UNSAMPLE * lgw[_]) * rk.a_k_sum(eps_, row) * h   +   (UNSAMPLE) * (h.abs()) * rk.a_k_sum(vel_y_masked * multiplier, row) 
+                    #x_[row+1] = x_0         +   (1-UNSAMPLE * lgw[_]) * rk.a_k_sum(eps_, row) * h   +    (sum(rk.a[row]) > 0) * (UNSAMPLE * lgw[_]) * (h.abs()) * rk.a_k_sum((y0_tmp - x_0) * multiplier, row) 
+                    
+                    #x_[row+1] = x_0         +   (1-UNSAMPLE * lgw[_]) * rk.a_k_sum(eps_, row) * h   +    (sum(rk.a[row]) > 0) * (UNSAMPLE * lgw[_]) * (h.abs()) * rk.a_k_sum((y0_tmp - x_0) * multiplier, row) 
+
                     x_[row+1]   = (1-UNSAMPLE * lgw_mask) * (x_0    +  h * rk.a_k_sum(eps_, row))     \
                                    + UNSAMPLE * lgw_mask  * (x_0   +  (h.abs()) * rk.a_k_sum(vel_y * multiplier, row) )
                     x_[row+1]  = (1-UNSAMPLE * lgw_mask_inv) * x_[row+1]   + UNSAMPLE * lgw_mask_inv  * (x_0   +       (h.abs()) * rk.a_k_sum(vel_y_inv * multiplier, row) )
@@ -1120,16 +1133,20 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
                 eps_[row], data_[row] = rk(x_0, x_[row+1], s_[row], h, **extra_args)
 
 
-
+            #y0_tmp = data_[0].std() * y0 / y0.std()
+            #y0_inv_tmp = data_[0].std() * y0_inv / y0_inv.std()
             if sum(rk.b[0]):
-                vel_y = rk.data_to_vel(x_0, y0, s_[rk.rows-1])
-                vel_y_inv = rk.data_to_vel(x_0, y0_inv, s_[rk.rows-1])
+                vel_y = rk.data_to_vel(x_0, y0_tmp, s_[rk.rows-1])
+                vel_y_inv = rk.data_to_vel(x_0, y0_inv_tmp, s_[rk.rows-1])
             if unsampler_type == "lin":
-                x = x_0       + (1-UNSAMPLE * lgw[_]) * h * rk.b_k_sum(eps_, 0)   +   (UNSAMPLE * mask * lgw[_]) * ((y0_masked - x_0) / t_i) * (sigma-sigma_down)   # +    (UNSAMPLE * (1-mask) * lgw[_]) * ((y0_inv - x_0) / t_i) * (sigma-sigma_down) 
+                x = x_0       + (1-UNSAMPLE * lgw[_]) * h * rk.b_k_sum(eps_, 0)   +   (UNSAMPLE * mask * lgw[_]) * ((y0 - x_0) / t_i) * (sigma-sigma_down)   # +    (UNSAMPLE * (1-mask) * lgw[_]) * ((y0_inv - x_0) / t_i) * (sigma-sigma_down) 
                 """x   = (1-UNSAMPLE * lgw_mask) * (x_0    +  h * rk.b_k_sum(eps_, 0))     \
                        + UNSAMPLE * lgw_mask  * (x_0   +  (y0-x_0)/t_i)*(sigma-sigma_down) 
                 x  = (1-UNSAMPLE * lgw_mask_inv) * x   + UNSAMPLE * lgw_mask_inv  * (x_0   +  (y0-x_0)/t_i)*(sigma-sigma_down) """
             else:
+                #x   = x_0    +  (1-UNSAMPLE * lgw[_]) * (h * rk.b_k_sum(eps_, 0))  +  (UNSAMPLE * lgw[_]) *  (h.abs()) * rk.b_k_sum((y0_tmp - x_0) * multiplier, 0) 
+                
+                #x   = x_0    +  (1-UNSAMPLE * lgw[_]) * (h * rk.b_k_sum(eps_, 0))  +  (UNSAMPLE * lgw[_]) *  (h.abs()) * rk.b_k_sum(vel_y * multiplier, 0) 
                 x   = (1-UNSAMPLE * lgw_mask) * (x_0    +  h * rk.b_k_sum(eps_, 0))     \
                        + UNSAMPLE * lgw_mask  * (x_0   +  (h.abs()) * rk.b_k_sum(vel_y * multiplier, 0) )
                 x  = (1-UNSAMPLE * lgw_mask_inv) * x   + UNSAMPLE * lgw_mask_inv  * (x_0   +       (h.abs()) * rk.b_k_sum(vel_y_inv * multiplier, 0) )
