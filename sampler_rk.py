@@ -15,7 +15,20 @@ from .noise_sigmas_timesteps_scaling import get_res4lyf_step_with_model, get_res
 from .latents import hard_light_blend
 
 
-def phi(j, neg_h):
+def get_epsilon(model, x, sigma, **extra_args):
+    s_in = x.new_ones([x.shape[0]])
+    x0 = model(x, sigma * s_in, **extra_args)
+    eps = (x - x0) / (sigma * s_in) 
+    return eps
+
+def get_denoised(model, x, sigma, **extra_args):
+    s_in = x.new_ones([x.shape[0]])
+    x0 = model(x, sigma * s_in, **extra_args)
+    return x0
+
+
+
+def __phi(j, neg_h):
   remainder = torch.zeros_like(neg_h)
   
   for k in range(j): 
@@ -27,6 +40,71 @@ def phi(j, neg_h):
   
 def calculate_gamma(c2, c3):
     return (3*(c3**3) - 2*c3) / (c2*(2 - 3*c2))
+
+
+
+
+from typing import Protocol, Optional, Dict, Any, TypedDict, NamedTuple
+
+
+def _gamma(n: int,) -> int:
+  """
+  https://en.wikipedia.org/wiki/Gamma_function
+  for every positive integer n,
+  Γ(n) = (n-1)!
+  """
+  return math.factorial(n-1)
+
+def _incomplete_gamma(s: int, x: float, gamma_s: Optional[int] = None) -> float:
+  """
+  https://en.wikipedia.org/wiki/Incomplete_gamma_function#Special_values
+  if s is a positive integer,
+  Γ(s, x) = (s-1)!*∑{k=0..s-1}(x^k/k!)
+  """
+  if gamma_s is None:
+    gamma_s = _gamma(s)
+
+  sum_: float = 0
+  # {k=0..s-1} inclusive
+  for k in range(s):
+    numerator: float = x**k
+    denom: int = math.factorial(k)
+    quotient: float = numerator/denom
+    sum_ += quotient
+  incomplete_gamma_: float = sum_ * math.exp(-x) * gamma_s
+  return incomplete_gamma_
+
+
+
+def phi(j: int, neg_h: float, ):
+  """
+  For j={1,2,3}: you could alternatively use Kat's phi_1, phi_2, phi_3 which perform fewer steps
+
+  Lemma 1
+  https://arxiv.org/abs/2308.02157
+  ϕj(-h) = 1/h^j*∫{0..h}(e^(τ-h)*(τ^(j-1))/((j-1)!)dτ)
+
+  https://www.wolframalpha.com/input?i=integrate+e%5E%28%CF%84-h%29*%28%CF%84%5E%28j-1%29%2F%28j-1%29%21%29d%CF%84
+  = 1/h^j*[(e^(-h)*(-τ)^(-j)*τ(j))/((j-1)!)]{0..h}
+  https://www.wolframalpha.com/input?i=integrate+e%5E%28%CF%84-h%29*%28%CF%84%5E%28j-1%29%2F%28j-1%29%21%29d%CF%84+between+0+and+h
+  = 1/h^j*((e^(-h)*(-h)^(-j)*h^j*(Γ(j)-Γ(j,-h)))/(j-1)!)
+  = (e^(-h)*(-h)^(-j)*h^j*(Γ(j)-Γ(j,-h))/((j-1)!*h^j)
+  = (e^(-h)*(-h)^(-j)*(Γ(j)-Γ(j,-h))/(j-1)!
+  = (e^(-h)*(-h)^(-j)*(Γ(j)-Γ(j,-h))/Γ(j)
+  = (e^(-h)*(-h)^(-j)*(1-Γ(j,-h)/Γ(j))
+
+  requires j>0
+  """
+  assert j > 0
+  gamma_: float = _gamma(j)
+  incomp_gamma_: float = _incomplete_gamma(j, neg_h, gamma_s=gamma_)
+  phi_: float = math.exp(neg_h) * neg_h**-j * (1-incomp_gamma_/gamma_)
+  return phi_
+
+
+
+
+
 
 
 rk_coeff = {
@@ -171,6 +249,17 @@ rk_coeff = {
         ],
         [0, 1/5, 3/10, 4/5, 8/9, 1],
     ),
+    "dormand-prince_6s_alt": (
+        [
+            [1/5, 0, 0, 0, 0, 0, 0],
+            [3/40, 9/40, 0, 0, 0, 0, 0],
+            [44/45, -56/15, 32/9, 0, 0, 0, 0],
+            [19372/6561, -25360/2187, 64448/6561, -212/729, 0, 0, 0],
+            [9017/3168, -355/33, 46732/5247, 49/176, -5103/18656, 0],
+            [35/384, 0, 500/1113, 125/192, -2187/6784, 11/84, 0],
+        ],
+        [0, 1/5, 3/10, 4/5, 8/9, 1],
+    ),
     "dormand-prince_7s": (
         [
             [1/5, 0, 0, 0, 0, 0, 0],
@@ -293,7 +382,7 @@ rk_coeff = {
 
 def get_rk_methods(rk_type, h, c1=0.0, c2=0.5, c3=1.0, h_prev=None, h_prev2=None, stepcount=0, sigmas=None):
     FSAL = False
-    multistep_order = 0
+    multistep_stages = 0
     
     if rk_type[:4] == "deis": 
         order = int(rk_type[-2])
@@ -307,12 +396,12 @@ def get_rk_methods(rk_type, h, c1=0.0, c2=0.5, c3=1.0, h_prev=None, h_prev2=None
                 rk_type = "res_2s"
         else:
             rk_type = "deis"
-            multistep_order = order-1
+            multistep_stages = order-1
 
     
     if rk_type[-2:] == "2m": #multistep method
         if h_prev is not None: 
-            multistep_order = 1
+            multistep_stages = 1
             c2 = -h_prev / h
             rk_type = rk_type[:-2] + "2s"
         else:
@@ -320,7 +409,7 @@ def get_rk_methods(rk_type, h, c1=0.0, c2=0.5, c3=1.0, h_prev=None, h_prev2=None
             
     if rk_type[-2:] == "3m": #multistep method
         if h_prev2 is not None: 
-            multistep_order = 2
+            multistep_stages = 2
             c2 = -h_prev2 / h_prev
             c3 = -h_prev / h
             rk_type = rk_type[:-2] + "3s"
@@ -356,16 +445,16 @@ def get_rk_methods(rk_type, h, c1=0.0, c2=0.5, c3=1.0, h_prev=None, h_prev2=None
             model_call = get_epsilon
             EPS_PRED = True
 
-            coeff_list = get_deis_coeff_list(sigmas, multistep_order+1, deis_mode="rhoab")
+            coeff_list = get_deis_coeff_list(sigmas, multistep_stages+1, deis_mode="rhoab")
             coeff_list = [[elem / h for elem in inner_list] for inner_list in coeff_list]
-            if multistep_order == 1:
+            if multistep_stages == 1:
                 b1, b2 = coeff_list[stepcount]
                 ab = [
                         [0, 0],
                         [b1, b2],
                 ]
                 ci = [0, 0, 1]
-            if multistep_order == 2:
+            if multistep_stages == 2:
                 b1, b2, b3 = coeff_list[stepcount]
                 ab = [
                         [0, 0, 0],
@@ -373,7 +462,7 @@ def get_rk_methods(rk_type, h, c1=0.0, c2=0.5, c3=1.0, h_prev=None, h_prev2=None
                         [b1, b2, b3],
                 ]
                 ci = [0, 0, 0, 1]
-            if multistep_order == 3:
+            if multistep_stages == 3:
                 b1, b2, b3, b4 = coeff_list[stepcount]
                 ab = [
                         [0, 0, 0, 0],
@@ -416,8 +505,7 @@ def get_rk_methods(rk_type, h, c1=0.0, c2=0.5, c3=1.0, h_prev=None, h_prev2=None
             b3 = (1 / (gamma * c2 + c3)) * phi(2, -h)      
             b2 = gamma * b3  #simplified version of: b2 = (gamma / (gamma * c2 + c3)) * phi_2_h  
             b1 = phi(1, -h) - b2 - b3     
-            
-            a2_1 /= (1 - torch.exp(-h*c2)) / h
+            0
             a3_2 /= (1 - torch.exp(-h*c3)) / h
             a3_1 /= (1 - torch.exp(-h*c3)) / h
             b1 /= phi(1, -h)
@@ -537,33 +625,29 @@ def get_rk_methods(rk_type, h, c1=0.0, c2=0.5, c3=1.0, h_prev=None, h_prev2=None
             ci = [0., 0.5, 0.5, 1., 0.5, 1]
 
 
-    return ab, ci, multistep_order, model_call, alpha_fn, t_fn, sigma_fn, h_fn, FSAL, EPS_PRED
+    return ab, ci, multistep_stages, model_call, alpha_fn, t_fn, sigma_fn, h_fn, FSAL, EPS_PRED
 
 def get_rk_methods_order(rk_type):
-    ab, ci, multistep_order, model_call, alpha_fn, t_fn, sigma_fn, h_fn, FSAL, EPS_PRED = get_rk_methods(rk_type, torch.tensor(1.0).to('cuda').to(torch.float64), c1=0.0, c2=0.5, c3=1.0)
+    ab, ci, multistep_stages, model_call, alpha_fn, t_fn, sigma_fn, h_fn, FSAL, EPS_PRED = get_rk_methods(rk_type, torch.tensor(1.0).to('cuda').to(torch.float64), c1=0.0, c2=0.5, c3=1.0)
     return len(ci)-1
 
 def get_rk_methods_order_and_fn(rk_type, h=None, c1=None, c2=None, c3=None, h_prev=None, h_prev2=None, stepcount=0, sigmas=None):
     if h == None:
-        ab, ci, multistep_order, model_call, alpha_fn, t_fn, sigma_fn, h_fn, FSAL, EPS_PRED = get_rk_methods(rk_type, torch.tensor(1.0).to('cuda').to(torch.float64), c1=0.0, c2=0.5, c3=1.0)
+        ab, ci, multistep_stages, model_call, alpha_fn, t_fn, sigma_fn, h_fn, FSAL, EPS_PRED = get_rk_methods(rk_type, torch.tensor(1.0).to('cuda').to(torch.float64), c1=0.0, c2=0.5, c3=1.0)
     else:
-        ab, ci, multistep_order, model_call, alpha_fn, t_fn, sigma_fn, h_fn, FSAL, EPS_PRED = get_rk_methods(rk_type, h, c1, c2, c3, h_prev, h_prev2, stepcount, sigmas)
+        ab, ci, multistep_stages, model_call, alpha_fn, t_fn, sigma_fn, h_fn, FSAL, EPS_PRED = get_rk_methods(rk_type, h, c1, c2, c3, h_prev, h_prev2, stepcount, sigmas)
     return len(ci)-1, model_call, alpha_fn, t_fn, sigma_fn, h_fn, FSAL, EPS_PRED
 
 def get_rk_methods_coeff(rk_type, h, c1, c2, c3, h_prev=None, h_prev2=None, stepcount=0, sigmas=None):
-    ab, ci, multistep_order, model_call, alpha_fn, t_fn, sigma_fn, h_fn, FSAL, EPS_PRED = get_rk_methods(rk_type, h, c1, c2, c3, h_prev, h_prev2, stepcount, sigmas)
-    return ab, ci, multistep_order, EPS_PRED
+    ab, ci, multistep_stages, model_call, alpha_fn, t_fn, sigma_fn, h_fn, FSAL, EPS_PRED = get_rk_methods(rk_type, h, c1, c2, c3, h_prev, h_prev2, stepcount, sigmas)
+    return ab, ci, multistep_stages, EPS_PRED
 
-def get_epsilon(model, x, sigma, **extra_args):
-    s_in = x.new_ones([x.shape[0]])
-    x0 = model(x, sigma * s_in, **extra_args)
-    eps = (x - x0) / (sigma * s_in) 
-    return eps
 
-def get_denoised(model, x, sigma, **extra_args):
-    s_in = x.new_ones([x.shape[0]])
-    x0 = model(x, sigma * s_in, **extra_args)
-    return x0
+
+
+
+
+
 
 
 
@@ -572,7 +656,7 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
               sigma_fn_formula="", t_fn_formula="",
                   eta=0.0, eta_var=0.0, s_noise=1., d_noise=1., alpha=-1.0, k=1.0, scale=0.1, c1=0.0, c2=0.5, c3=1.0, MULTISTEP=False, cfgpp=0.0, implicit_steps=0, reverse_weight=0.0, exp_mode=False,
                   latent_guide=None, latent_guide_inv=None, latent_guide_weight=0.0, latent_guide_weights=None, guide_mode="blend",
-                  GARBAGE_COLLECT=False, mask=None, LGW_MASK_RESCALE_MIN=True, sigmas_override=None,
+                  GARBAGE_COLLECT=False, mask=None, LGW_MASK_RESCALE_MIN=True, sigmas_override=None, t_is=None,
                   ):
     extra_args = {} if extra_args is None else extra_args
     
@@ -663,7 +747,7 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
         h = h_fn(sigma_down, sigma)
         
         c2, c3 = get_res4lyf_half_step3(sigma, sigma_down, c2, c3, t_fn=t_fn, sigma_fn=sigma_fn, t_fn_formula=t_fn_formula, sigma_fn_formula=sigma_fn_formula)
-        ab, ci, multistep_order, EPS_PRED = get_rk_methods_coeff(rk_type, h, c1, c2, c3, h_prev, h_prev2, _, sigmas)
+        ab, ci, multistep_stages, EPS_PRED = get_rk_methods_coeff(rk_type, h, c1, c2, c3, h_prev, h_prev2, _, sigmas)
         order = len(ci)-1
         
         if exp_mode:
@@ -690,9 +774,9 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
         ki_u[0] = uncond[0]
 
         for iteration in range(implicit_steps+1):
-            for i in range(multistep_order, order):
+            for i in range(multistep_stages, order):
                 if implicit_steps > 0 and iteration > 0 and implicit_sampler_name != "default":
-                    ab, ci, multistep_order, EPS_PRED = get_rk_methods_coeff(implicit_sampler_name, h, c1, c2, c3, h_prev, h_prev2, _, sigmas)
+                    ab, ci, multistep_stages, EPS_PRED = get_rk_methods_coeff(implicit_sampler_name, h, c1, c2, c3, h_prev, h_prev2, _, sigmas)
                     order = len(ci)-1
                     if len(ki) < order + 1:
                         last_value_ki = ki[-1]
@@ -781,7 +865,7 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
                 if UNSAMPLE:
                     xi[(i+1)%order]  = (1-lgw_mask_inv) * xi[(i+1)%order]   + UNSAMPLE * lgw_mask_inv  * (alpha_t_1_inv * (xi_0 + cfgpp_term)    +      (1 - alpha_t_1_inv) * ys_inv )
 
-                if (i+1)%order > 0 and (i+1)%order > multistep_order-1:
+                if (i+1)%order > 0 and (i+1)%order > multistep_stages-1:
                     if GARBAGE_COLLECT: gc.collect(); torch.cuda.empty_cache()
                     ki[i+1]   = model_call(model, xi[i+1], sigma_fn(t + h*ci[i+1]), **extra_args)
                     if EPS_PRED and rk_type.startswith("deis"):
@@ -795,9 +879,9 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
             if MULTISTEP and _ > 0:
                 ki  [0] = denoised
                 ki_u[0] = ki_u[order-1]
-            for ms in range(multistep_order):
-                ki  [multistep_order - ms] = ki  [multistep_order - ms - 1]
-                ki_u[multistep_order - ms] = ki_u[multistep_order - ms - 1]
+            for ms in range(multistep_stages):
+                ki  [multistep_stages - ms] = ki  [multistep_stages - ms - 1]
+                ki_u[multistep_stages - ms] = ki_u[multistep_stages - ms - 1]
             if iteration < implicit_steps and implicit_sampler_name == "default":
                 ki  [0] = model_call(model, xi[0], sigma_down, **extra_args)
                 ki_u[0] = uncond[0]
@@ -846,6 +930,490 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
                 noise = (1 - lgw_mask) * noise   +   lgw_mask * noise2
             
             xi[0] = alpha_ratio * xi[0] + noise * s_noise * sigma_up
+            
+        h_prev2 = h_prev
+        h_prev = h
+        
+    return xi[0]
+
+
+
+
+
+
+
+def get_irk_explicit_sigmas(model, x, sigmas, eta, eta_var, noise_mode, c1, c2, c3, rk, irk, rk_type, implicit_sampler_name, t_fn_formula="", sigma_fn_formula=""):
+    s_in = x.new_ones([x.shape[0]])
+    irk_sigmas = torch.empty_like(sigmas)
+    
+    eta, eta_var = 0, 0
+    
+    for _ in range(len(sigmas)-1):
+        sigma, sigma_next = sigmas[_], sigmas[_+1]
+        sigma_up, sigma, sigma_down, alpha_ratio = get_res4lyf_step_with_model(model, sigma, sigma_next, eta, eta_var, noise_mode, rk.h_fn(sigma_next,sigma) )
+        h     =  rk.h_fn(sigma_down, sigma)
+        h_irk = irk.h_fn(sigma_down, sigma)
+        
+        c2, c3 = get_res4lyf_half_step3(sigma, sigma_down, c2, c3, t_fn=rk.t_fn, sigma_fn=rk.sigma_fn, t_fn_formula=t_fn_formula, sigma_fn_formula=sigma_fn_formula)
+        
+        rk. set_coeff(rk_type, h, c1, c2, c3, _, sigmas, sigma, sigma_down)
+        irk.set_coeff(implicit_sampler_name, h_irk, c1, c2, c3, _, sigmas, sigma, sigma_down)
+        
+        s_irk    = [(  irk.sigma_fn(irk.t_fn(sigma) + h*c_)) * s_in for c_ in  irk.c]
+        
+        s_irk.append(sigma)
+        s_all = sorted(set(s_irk), reverse=True)
+        s_irk = s_irk[:-1]
+
+        s_all[0] = s_all[0].unsqueeze(dim=0)
+        s_all_sigmas = torch.stack(s_all, dim=0).squeeze(dim=1)
+        
+        
+        irk_sigmas = torch.cat((irk_sigmas, s_all_sigmas), dim=0)
+        
+    return irk_sigmas
+
+
+
+
+
+
+
+
+
+
+
+from .rk_method import RK_Method, RK_Method_Linear, RK_Method_Exponential
+
+
+@torch.no_grad()
+def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=None, noise_sampler=None, noise_sampler_type="brownian", noise_mode="hard", noise_seed=-1, rk_type="res_2m", implicit_sampler_name="default",
+              sigma_fn_formula="", t_fn_formula="",
+                  eta=0.0, eta_var=0.0, s_noise=1., d_noise=1., alpha=-1.0, k=1.0, scale=0.1, c1=0.0, c2=0.5, c3=1.0, MULTISTEP=False, cfgpp=0.0, implicit_steps=0, reverse_weight=0.0, exp_mode=False,
+                  latent_guide=None, latent_guide_inv=None, latent_guide_weights=None, guide_mode="blend", unsampler_type="linear",
+                  GARBAGE_COLLECT=False, mask=None, LGW_MASK_RESCALE_MIN=True, sigmas_override=None, t_is=None,
+                  ):
+    extra_args = {} if extra_args is None else extra_args
+    s_in = x.new_ones([x.shape[0]])
+    
+    lgw = latent_guide_weights
+    
+    if sigmas_override is not None:
+        sigmas = sigmas_override.clone()
+    sigmas = sigmas.clone() * d_noise
+    
+    if rk_type.startswith("dpmpp") or rk_type.startswith("res") or rk_type.startswith("rk_exp"):
+        rk  = RK_Method_Exponential(model, "midpoint_2s", "explicit", x.device)
+    else:
+        rk  = RK_Method_Linear(model, "midpoint_2s", "explicit", x.device)
+    rk.init_noise_sampler(x, noise_seed, noise_sampler_type, alpha=alpha, k=k)
+
+    irk = RK_Method_Linear(model, "crouzeix_2s", "implicit", x.device)
+    irk.init_noise_sampler(x, noise_seed+1, noise_sampler_type, alpha=alpha, k=k)
+
+    sigmas, UNSAMPLE = rk.prepare_sigmas(sigmas)
+    mask, LGW_MASK_RESCALE_MIN = rk.prepare_mask(x, mask, LGW_MASK_RESCALE_MIN)
+
+    x, y0, y0_inv = rk.init_guides(x, latent_guide, latent_guide_inv, mask, sigmas, UNSAMPLE)
+
+    uncond = [torch.full_like(x, 0.0)]
+    if cfgpp != 0.0:
+        def post_cfg_function(args):
+            uncond[0] = args["uncond_denoised"]
+            return args["denoised"]
+        model_options = extra_args.get("model_options", {}).copy()
+        extra_args["model_options"] = comfy.model_patcher.set_model_options_post_cfg_function(model_options, post_cfg_function, disable_cfg1_optimization=True)  
+
+    for _ in trange(len(sigmas)-1, disable=disable):
+        sigma, sigma_next = sigmas[_], sigmas[_+1]
+        
+        if sigma_next == 0.0:
+            rk_type = "euler"
+            rk  = RK_Method_Linear(model, "midpoint_2s", "explicit", x.device)
+            rk.init_noise_sampler(x, noise_seed, noise_sampler_type, alpha=alpha, k=k)
+            implicit_steps = 0
+            eta, eta_var = 0, 0
+
+        sigma_up, sigma, sigma_down, alpha_ratio = get_res4lyf_step_with_model(model, sigma, sigma_next, eta, eta_var, noise_mode, rk.h_fn(sigma_next,sigma) )
+        h     =  rk.h_fn(sigma_down, sigma)
+        h_irk = irk.h_fn(sigma_down, sigma)
+        
+        c2, c3 = get_res4lyf_half_step3(sigma, sigma_down, c2, c3, t_fn=rk.t_fn, sigma_fn=rk.sigma_fn, t_fn_formula=t_fn_formula, sigma_fn_formula=sigma_fn_formula)
+        
+        rk. set_coeff(rk_type, h, c1, c2, c3, _, sigmas, sigma, sigma_down)
+        irk.set_coeff(implicit_sampler_name, h_irk, c1, c2, c3, _, sigmas, sigma, sigma_down)
+        
+        if _ == 0:
+            x_, data_, data_u, eps_ = (torch.zeros(max(rk.rows, irk.rows) + 2, *x.shape, dtype=x.dtype, device=x.device) for _ in range(4))
+        
+        s_       = [(  rk.sigma_fn( rk.t_fn(sigma)   + h*c_)) * s_in for c_ in   rk.c]
+        s_irk_rk = [(  rk.sigma_fn( rk.t_fn(sigma)   + h*c_)) * s_in for c_ in   irk.c]
+        s_irk    = [( irk.sigma_fn(irk.t_fn(sigma) + h_irk*c_)) * s_in for c_ in  irk.c]
+
+        x_[0] = rk.add_noise_pre(x, sigma_up, sigma, sigma_next, sigma_down, alpha_ratio, s_noise, noise_mode)
+        
+        x_0 = x_[0].clone()
+        
+        for ms in range(rk.multistep_stages):
+            if rk_type.startswith("dpmpp") or rk_type.startswith("res") or rk_type.startswith("rk_exp"):
+                eps_ [rk.multistep_stages - ms] = data_ [rk.multistep_stages - ms] - x_0
+            else:
+                eps_ [rk.multistep_stages - ms] = (x_0 - data_ [rk.multistep_stages - ms]) / sigma
+            
+        if LGW_MASK_RESCALE_MIN: 
+            lgw_mask = mask * (1 - latent_guide_weights[_]) + latent_guide_weights[_]
+            lgw_mask_inv = (1-mask) * (1 - latent_guide_weights[_]) + latent_guide_weights[_]
+        else:
+            lgw_mask = mask * latent_guide_weights[_]    
+            lgw_mask_inv = (1-mask) * latent_guide_weights[_]   
+            
+        if implicit_steps == 0:
+            dt_inv = sigma - sigma_down
+            vel_y, vel_y_inv = torch.zeros_like(eps_[0]), torch.zeros_like(eps_[0])
+            for row in range(rk.rows - rk.multistep_stages):
+
+                vel_y_masked = lgw_mask * vel_y + lgw_mask_inv * vel_y_inv
+                y0_masked = lgw_mask * y0 + lgw_mask_inv * y0_inv
+
+                if t_is is None:
+                    if sigma_next > sigma:
+                        t_i = s_[row] - rk.sigma_max
+                    else:
+                        t_i = s_[row]
+                else:
+                    t_i = t_is[_]
+                    
+                if sum(rk.a[row]):
+                    vel_y = rk.data_to_vel(x_0, y0, s_[row])
+                    vel_y_inv = rk.data_to_vel(x_0, y0_inv, s_[row])
+
+                multiplier = torch.full_like(h, 1.)
+                if sigma_down > sigma and unsampler_type != "vp":
+                    if unsampler_type == "logit":
+                        multiplier = 1 / (1 + torch.exp(-h))
+                    if unsampler_type == "odds":
+                        if torch.allclose(rk.sigma_max, sigma_down, atol=1e-8) == False:
+                            multiplier = torch.nan_to_num((sigma / (rk.sigma_max - sigma)), 1.)
+                elif unsampler_type == "logit":
+                    multiplier = 1 / (1 + torch.exp(-h))
+                elif unsampler_type == "odds":
+                    multiplier = sigma / (rk.sigma_max + sigma)
+                            
+                if unsampler_type == "lin":            
+                    x_[row+1] = x_0         +   (1-UNSAMPLE * lgw[_]) * rk.a_k_sum(eps_, row) * h   +        (sum(rk.a[row]) > 0) * (     (UNSAMPLE * mask * lgw[_]) * ((y0_masked - x_0) / t_i) * (sigma-sigma_down)  )  # +    (UNSAMPLE * (1-mask) * lgw[_]) * ((y0_inv - x_0) / t_i) * (sigma-sigma_down)     )
+                    """if sum(rk.a[row] > 0):
+                        x_[row+1]    = (1-UNSAMPLE * lgw_mask) * (x_0    +  h * rk.a_k_sum(eps_, row))     \
+                            + UNSAMPLE * lgw_mask  * (x_0   +  (y0-x_0)/t_i)*(sigma-sigma_down) 
+                        x_[row+1]   = (1-UNSAMPLE * lgw_mask_inv) * x_[row+1]    + UNSAMPLE * lgw_mask_inv  * (x_0   +  (y0-x_0)/t_i)*(sigma-sigma_down) 
+                    else:
+                        x_[row+1] = x_0"""
+                    #x_[row+1] = x_[row+1]   +   (1-(sum(rk.a[row])>0)*UNSAMPLE * (1-mask) * lgw[_]) * rk.a_k_sum(eps_, row) * h   +   ((sum(rk.a[row])>0)*UNSAMPLE * (1-mask) * lgw[_]) * ((y0_inv - x_0) / t_i) * (sigma-sigma_down) 
+                else:
+                    #x_[row+1] = x_0         +   (1-UNSAMPLE * lgw[_]) * rk.a_k_sum(eps_, row) * h   +   (UNSAMPLE) * (h.abs()) * rk.a_k_sum(vel_y_masked * multiplier, row) 
+                    
+                    #x_[row+1] = x_0         +   (1-UNSAMPLE * lgw[_]) * rk.a_k_sum(eps_, row) * h   +   (UNSAMPLE) * (h.abs()) * rk.a_k_sum(vel_y_masked * multiplier, row) 
+                    x_[row+1]   = (1-UNSAMPLE * lgw_mask) * (x_0    +  h * rk.a_k_sum(eps_, row))     \
+                                   + UNSAMPLE * lgw_mask  * (x_0   +  (h.abs()) * rk.a_k_sum(vel_y * multiplier, row) )
+                    x_[row+1]  = (1-UNSAMPLE * lgw_mask_inv) * x_[row+1]   + UNSAMPLE * lgw_mask_inv  * (x_0   +       (h.abs()) * rk.a_k_sum(vel_y_inv * multiplier, row) )
+                    
+
+                eps_[row], data_[row] = rk(x_0, x_[row+1], s_[row], h, **extra_args)
+
+
+
+            if sum(rk.b[0]):
+                vel_y = rk.data_to_vel(x_0, y0, s_[rk.rows-1])
+                vel_y_inv = rk.data_to_vel(x_0, y0_inv, s_[rk.rows-1])
+            if unsampler_type == "lin":
+                x = x_0       + (1-UNSAMPLE * lgw[_]) * h * rk.b_k_sum(eps_, 0)   +   (UNSAMPLE * mask * lgw[_]) * ((y0_masked - x_0) / t_i) * (sigma-sigma_down)   # +    (UNSAMPLE * (1-mask) * lgw[_]) * ((y0_inv - x_0) / t_i) * (sigma-sigma_down) 
+                """x   = (1-UNSAMPLE * lgw_mask) * (x_0    +  h * rk.b_k_sum(eps_, 0))     \
+                       + UNSAMPLE * lgw_mask  * (x_0   +  (y0-x_0)/t_i)*(sigma-sigma_down) 
+                x  = (1-UNSAMPLE * lgw_mask_inv) * x   + UNSAMPLE * lgw_mask_inv  * (x_0   +  (y0-x_0)/t_i)*(sigma-sigma_down) """
+            else:
+                x   = (1-UNSAMPLE * lgw_mask) * (x_0    +  h * rk.b_k_sum(eps_, 0))     \
+                       + UNSAMPLE * lgw_mask  * (x_0   +  (h.abs()) * rk.b_k_sum(vel_y * multiplier, 0) )
+                x  = (1-UNSAMPLE * lgw_mask_inv) * x   + UNSAMPLE * lgw_mask_inv  * (x_0   +       (h.abs()) * rk.b_k_sum(vel_y_inv * multiplier, 0) )
+
+        else:
+            s2 = s_irk_rk[:]
+            s2.append(sigma.unsqueeze(dim=0))
+            s_all = torch.sort(torch.stack(s2, dim=0).squeeze(dim=1).unique(), descending=True)[0]
+            sigmas_and = torch.cat( (sigmas[0:_], s_all), dim=0)
+            
+            eps_ [0] = torch.zeros_like(eps_ [0])
+            data_ [0] = torch.zeros_like(data_[0])
+            eps_list = []
+            
+            x_mid = x
+            for i in range(len(s_all)-1):
+                x_mid, eps_mid, denoised_mid, eps_, data_ = get_explicit_rk_step(rk, rk_type, x_mid, s_all[i], s_all[i+1], eta, eta_var, s_noise, noise_mode, c2, c3, _+i, sigmas_and, x_, eps_, data_, **extra_args)
+                eps_list.append(eps_[0])
+
+                eps_ [0] = torch.zeros_like(eps_ [0])
+                data_[0] = torch.zeros_like(data_[0])
+                
+            if torch.allclose(s_all[-1], sigma_down, atol=1e-8):
+                eps_down, data_down = rk(x_0, x_mid, sigma_down, h, **extra_args)
+                eps_list.append(eps_down)
+                
+            s_all = [s for s in s_all if s in s_irk_rk]
+
+            eps_list = [eps_list[s_all.index(s)].clone() for s in s_irk_rk]
+            eps2_ = torch.stack(eps_list, dim=0)
+
+            for implicit_iter in range(implicit_steps):
+                for row in range(irk.rows):
+                    x_[row+1] = x_0 + h_irk * irk.a_k_sum(eps2_, row)
+                    eps2_[row], data_[row] = irk(x_0, x_[row+1], s_irk[row], h, **extra_args)
+                x = x_0 + h_irk * irk.b_k_sum(eps2_, 0)
+            
+        callback({'x': x, 'i': _, 'sigma': sigma, 'sigma_next': sigma_next, 'denoised': data_[0]}) if callback is not None else None
+
+        x = rk.add_noise_post(x, sigma_up, sigma, sigma_next, sigma_down, alpha_ratio, s_noise, noise_mode)
+        
+        for ms in range(rk.multistep_stages):
+            eps_ [rk.multistep_stages - ms] = eps_ [rk.multistep_stages - ms - 1]
+            data_[rk.multistep_stages - ms] = data_[rk.multistep_stages - ms - 1]
+        eps_ [0] = torch.zeros_like(eps_ [0])
+        data_[0] = torch.zeros_like(data_[0])
+        
+    return x
+
+
+
+def get_explicit_rk_step(rk, rk_type, x, sigma, sigma_next, eta, eta_var, s_noise, noise_mode, c2, c3, stepcount, sigmas, x_, eps_, data_, **extra_args):
+    extra_args = {} if extra_args is None else extra_args
+    s_in = x.new_ones([x.shape[0]])
+
+    sigma_up, sigma, sigma_down, alpha_ratio = get_res4lyf_step_with_model(rk.model, sigma, sigma_next, eta, eta_var, noise_mode, rk.h_fn(sigma_next,sigma) )
+    h = rk.h_fn(sigma_down, sigma)
+    c2, c3 = get_res4lyf_half_step3(sigma, sigma_down, c2, c3, t_fn=rk.t_fn, sigma_fn=rk.sigma_fn)
+    
+    rk.set_coeff(rk_type, h, c2=c2, c3=c3, stepcount=stepcount, sigmas=sigmas, sigma_down=sigma_down)
+
+    s_ = [(sigma + h * c_) * s_in for c_ in rk.c]
+    #x_, eps_, data_, data_u_ = (torch.zeros(rk.rows + 2, *x.shape, dtype=x.dtype, device=x.device) for _ in range(4))
+    x_[0] = rk.add_noise_pre(x, sigma_up, sigma, sigma_next, sigma_down, alpha_ratio, s_noise, noise_mode)
+    
+    x_0 = x_[0].clone()
+    
+    for ms in range(rk.multistep_stages):
+        if rk_type.startswith("dpmpp") or rk_type.startswith("res") or rk_type.startswith("rk_exp"):
+            eps_ [rk.multistep_stages - ms] = data_ [rk.multistep_stages - ms] - x_0
+        else:
+            eps_ [rk.multistep_stages - ms] = (x_0 - data_ [rk.multistep_stages - ms]) / sigma
+        
+    for row in range(rk.rows - rk.multistep_stages):
+        x_[row+1] = x_0 + h * rk.a_k_sum(eps_, row)
+        eps_[row], data_[row] = rk(x_0, x_[row+1], s_[row], h, **extra_args)
+    x = x_0 + h * rk.b_k_sum(eps_, 0)
+
+    denoised = rk.b_k_sum(data_, 0) / sum(rk.b[0])
+    eps = rk.b_k_sum(eps_, 0) / sum(rk.b[0])
+    
+    x = rk.add_noise_post(x, sigma_up, sigma, sigma_next, sigma_down, alpha_ratio, s_noise, noise_mode)
+
+    for ms in range(rk.multistep_stages):
+        eps_ [rk.multistep_stages - ms] = eps_ [rk.multistep_stages - ms - 1]
+        data_[rk.multistep_stages - ms] = data_[rk.multistep_stages - ms - 1]
+
+    return x, eps, denoised, eps_, data_
+
+
+
+
+
+
+
+
+
+
+
+
+
+@torch.no_grad()
+def sample_rk_old(model, x, sigmas, extra_args=None, callback=None, disable=None, noise_sampler=None, noise_sampler_type="brownian", noise_mode="hard", noise_seed=-1, rk_type="res_2m", implicit_sampler_name="default",
+              sigma_fn_formula="", t_fn_formula="",
+                  eta=0.0, eta_var=0.0, s_noise=1., d_noise=1., alpha=-1.0, k=1.0, scale=0.1, c1=0.0, c2=0.5, c3=1.0, MULTISTEP=False, cfgpp=0.0, implicit_steps=0, reverse_weight=0.0, exp_mode=False,
+                  latent_guide=None, latent_guide_inv=None, latent_guide_weights=None, guide_mode="blend",
+                  GARBAGE_COLLECT=False, mask=None, LGW_MASK_RESCALE_MIN=True, sigmas_override=None,
+                  ):
+    extra_args = {} if extra_args is None else extra_args
+    
+    if sigmas_override is not None:
+        sigmas = sigmas_override.clone()
+    sigmas = sigmas.clone() * d_noise
+    normalize 
+    rk = RK_Method_Exponential_Denoised(model, "res_2s", "explicit", x.device)
+    sigmas, UNSAMPLE = rk.prepare_sigmas(sigmas)
+    mask, LGW_MASK_RESCALE_MIN = rk.prepare_mask(x, mask, LGW_MASK_RESCALE_MIN)
+    rk.init_noise_sampler(x, noise_seed, noise_sampler_type, alpha=alpha, k=k)
+    x, y0, y0_inv = rk.init_guides(x, latent_guide, latent_guide_inv, mask, sigmas, UNSAMPLE)
+
+    uncond = [torch.full_like(x, 0.0)]
+    if cfgpp != 0.0:
+        def post_cfg_function(args):
+            uncond[0] = args["uncond_denoised"]
+            return args["denoised"]
+        model_options = extra_args.get("model_options", {}).copy()
+        extra_args["model_options"] = comfy.model_patcher.set_model_options_post_cfg_function(model_options, post_cfg_function, disable_cfg1_optimization=True)
+        
+    if implicit_sampler_name != "default":
+        order_implicit, model_call, alpha_fn, t_fn, sigma_fn, h_fn, FSAL, EPS_PRED = get_rk_methods_order_and_fn(implicit_sampler_name)
+    else:
+        order_implicit = 0
+    order, model_call, alpha_fn, t_fn, sigma_fn, h_fn, FSAL, EPS_PRED = get_rk_methods_order_and_fn(rk_type)
+    
+    max_stages = max(order, order_implicit)
+    xi, ki, ki_u = (torch.zeros(max_stages + 2, *x.shape, dtype=x.dtype, device=x.device) for _ in range(3))
+
+    h, h_prev, h_prev2 = None, None, None
+        
+    xi[0] = x
+
+    for _ in trange(len(sigmas)-1, disable=disable):
+        sigma, sigma_next = sigmas[_], sigmas[_+1]
+        
+        if sigma_next == 0.0:
+            rk_type = "euler"
+            eta, eta_var = 0, 0
+
+        order, model_call, alpha_fn, t_fn, sigma_fn, h_fn, FSAL, EPS_PRED = get_rk_methods_order_and_fn(rk_type)
+        
+        sigma_up, sigma, sigma_down, alpha_ratio = get_res4lyf_step_with_model(model, sigma, sigma_next, eta, eta_var, noise_mode, h_fn(sigma_next,sigma) )
+        t_down, t = t_fn(sigma_down), t_fn(sigma)
+        h = h_fn(sigma_down, sigma)
+        
+        c2, c3 = get_res4lyf_half_step3(sigma, sigma_down, c2, c3, t_fn=t_fn, sigma_fn=sigma_fn, t_fn_formula=t_fn_formula, sigma_fn_formula=sigma_fn_formula)
+        ab, ci, multistep_stages, EPS_PRED = get_rk_methods_coeff(rk_type, h, c1, c2, c3, h_prev, h_prev2, _, sigmas)
+        order = len(ci)-1
+        
+        rk.set_coeff(rk_type, h, c1, c2, c3, h_prev, h_prev2, _, sigmas)
+
+        xi[0] = rk.add_noise_pre(xi[0], sigma_up, sigma, sigma_down, alpha_ratio, s_noise, noise_mode)
+        xi_0 = xi[0].clone() # needed for implicit sampling
+
+        if (MULTISTEP == False and FSAL == False) or _ == 0:
+            ki[0]   = model_call(model, xi_0, sigma, **extra_args)
+            if EPS_PRED and rk_type.startswith("deis"):
+                ki[0] = (xi_0 - ki[0]) / sigma
+                ki[0] = ki[0] * (sigma_down-sigma)/(sigma_next-sigma)
+            ki_u[0] = uncond[0]
+
+        if cfgpp != 0.0:
+            ki[0] = uncond[0] + cfgpp * (ki[0] - uncond[0])
+        ki_u[0] = uncond[0]
+
+        for iteration in range(implicit_steps+1):
+            for row in range(multistep_stages, order):
+
+                #sigma_mid = sigma_fn(t + h*ci[i+1])
+                alpha_t_1 = alpha_t_1_inv = torch.exp(torch.log(sigma_down/sigma) * ci[row+1] )
+                if sigma_next > sigma:
+                    alpha_t_1_inv = torch.nan_to_num(   torch.exp(torch.log((rk.sigma_max  - sigma_down)/(rk.sigma_max  - sigma)) * ci[row+1]),    1.)
+                
+                lgw_mask, lgw_mask_inv = rk.prepare_weighted_mask(mask, latent_guide_weights[_], LGW_MASK_RESCALE_MIN)
+
+                ks     = rk.ab_k_sum(ki,     row)
+                ks_u   = rk.ab_k_sum(ki_u,   row)
+                ys, ys_inv = y0, y0_inv
+                #ys     = rk.ab_k_sum(y0,     row)
+                #ys_inv = rk.ab_k_sum(y0_inv, row)
+                    
+                if EPS_PRED and rk_type.startswith("deis"):
+                    epsilon = (h * ks) / (sigma_down - sigma)       #xi[(i+1)%order]  = xi_0 + h*ks
+                    ks = xi_0 - epsilon * sigma        # denoised
+                else:
+                    if implicit_sampler_name.startswith("lobatto") == False:
+                        #ks /= sum(ab[row])
+                        pass
+                    elif iteration == 0:
+                        #ks /= sum(ab[row])
+                        pass
+                
+                if UNSAMPLE == False and latent_guide is not None and latent_guide_weights[_] > 0.0:
+                    if guide_mode == "hard_light":
+                        lg = ys
+                        if EPS_PRED:
+                            lg = (alpha_fn(-h*ci[row+1]) * xi[0] - ys) / (sigma_fn(t + h*ci[row]) + 1e-8)
+                        hard_light_blend_1 = hard_light_blend(lg, ks)
+                        ks = (1-lgw_mask) * ks   +   lgw_mask * hard_light_blend_1
+                    elif guide_mode == "mean" or guide_mode == "std" or guide_mode == "mean_std":
+                        set_mean = True if guide_mode == "mean" or guide_mode == "mean_std" else False
+                        set_std  = True if guide_mode == "std"  or guide_mode == "mean_std" else False
+                        ks2     = normalize_channels_to_ref(ks, ys, set_mean=set_mean, set_std=set_std)
+                        ks2_inv = normalize_channels_to_ref(ks, ys, set_mean=set_mean, set_std=set_std)
+                        ks = (1-lgw_mask)     * ks   +   lgw_mask     * ks2
+                        ks = (1-lgw_mask_inv) * ks   +   lgw_mask_inv * ks2_inv
+                    elif guide_mode == "blend": 
+                        ks = (1-lgw_mask)     * ks   +   lgw_mask     * ys
+                        ks = (1-lgw_mask_inv) * ks   +   lgw_mask_inv * ys_inv
+                    elif guide_mode == "inversion": 
+                        UNSAMPLE = True
+                        
+
+                ys, ys_inv = y0, y0_inv
+                cfgpp_term = cfgpp*h*(ks - ks_u)
+                xi[(row+1)%order]  = (1-UNSAMPLE * lgw_mask) * (alpha_t_1     * (xi_0 + cfgpp_term)    +    (1 - alpha_t_1)     * ks )     \
+                                    + UNSAMPLE * lgw_mask  * (alpha_t_1_inv * (xi_0 + cfgpp_term)    +    (1 - alpha_t_1_inv) * ys )
+                if UNSAMPLE:
+                    xi[(row+1)%order]  = (1-lgw_mask_inv) * xi[(row+1)%order]   + UNSAMPLE * lgw_mask_inv  * (alpha_t_1_inv * (xi_0 + cfgpp_term)    +      (1 - alpha_t_1_inv) * ys_inv )
+
+                if (row+1)%order > 0 and (row+1)%order > multistep_stages-1:
+                    if GARBAGE_COLLECT: gc.collect(); torch.cuda.empty_cache()
+                    ki[row+1]   = model_call(model, xi[row+1], sigma_fn(t + h*ci[row+1]), **extra_args)
+                    if EPS_PRED and rk_type.startswith("deis"):
+                        ki[row+1] = (xi[row+1] - ki[row+1]) / sigma_fn(t + h*ci[row+1])
+                        ki[row+1] = ki[row+1] * (sigma_down-sigma)/(sigma_next-sigma)
+                    ki_u[row+1] = uncond[0]
+
+            if FSAL and _ > 0:
+                ki  [0] = ki[order-1]
+                ki_u[0] = ki_u[order-1]
+            if MULTISTEP and _ > 0:
+                ki  [0] = denoised
+                ki_u[0] = ki_u[order-1]
+            for ms in range(multistep_stages):
+                ki  [multistep_stages - ms] = ki  [multistep_stages - ms - 1]
+                ki_u[multistep_stages - ms] = ki_u[multistep_stages - ms - 1]
+            if iteration < implicit_steps and implicit_sampler_name == "default":
+                ki  [0] = model_call(model, xi[0], sigma_down, **extra_args)
+                ki_u[0] = uncond[0]
+            elif iteration == implicit_steps and implicit_sampler_name != "default" and implicit_steps > 0:
+                """ks, ks_u, ys, ys_inv = torch.zeros_like(x), torch.zeros_like(x), torch.zeros_like(x), torch.zeros_like(x)
+                for j in range(order):
+                    ks     += ab[row+1][j] * ki[j]
+                    ks_u   += ab[row+1][j] * ki_u[j]
+                    ys     += ab[row+1][j] * y0
+                    ys_inv += ab[row+1][j] * y0_inv"""
+                ks     = rk.ab_k_sum(ki,     row+1)
+                ks_u   = rk.ab_k_sum(ki_u,   row+1)
+                ys     = rk.ab_k_sum(y0,     row+1)
+                ys_inv = rk.ab_k_sum(y0_inv, row+1)
+                ks /= sum(ab[row+1])
+                
+                ys, ys_inv = y0, y0_inv
+                cfgpp_term = cfgpp*h*(ks - ks_u)  #GUIDES NOT FULLY IMPLEMENTED HERE WITH IMPLICIT FINAL STEP
+                xi[(row+1)%order]  = (1-UNSAMPLE * lgw_mask) * (alpha_t_1     * (xi_0 + cfgpp_term)    +    (1 - alpha_t_1)     * ks )     \
+                                      + UNSAMPLE * lgw_mask  * (alpha_t_1_inv * (xi_0 + cfgpp_term)    +    (1 - alpha_t_1_inv) * ys )
+                if UNSAMPLE:
+                    xi[(row+1)%order]  = (1-lgw_mask_inv) * xi[(row+1)%order]   + UNSAMPLE * lgw_mask_inv  * (alpha_t_1_inv * (xi_0 + cfgpp_term)    +      (1 - alpha_t_1_inv) * ys_inv )
+                
+
+            if EPS_PRED == True and exp_mode == False and not rk_type.startswith("deis"):
+                denoised = alpha_fn(-h*ci[row+1]) * xi[0] - sigma * ks
+            elif EPS_PRED == True and rk_type.startswith("deis"):
+                epsilon = (h * ks) / (sigma_down - sigma)
+                denoised = xi_0 - epsilon * sigma        # denoised
+            elif iteration == implicit_steps and implicit_sampler_name != "default" and implicit_steps > 0:
+                denoised = ks
+            else:
+                denoised = ks / sum(ab[row])
+
+        if callback is not None:
+            callback({'x': xi[0], 'i': _, 'sigma': sigma, 'sigma_next': sigma_next, 'denoised': denoised})
+            
+        xi[0] = rk.add_noise_post(xi[0], sigma_up, sigma, sigma_down, alpha_ratio, s_noise, noise_mode)
             
         h_prev2 = h_prev
         h_prev = h
