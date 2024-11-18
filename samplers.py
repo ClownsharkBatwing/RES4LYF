@@ -606,7 +606,7 @@ class ClownsharKSampler:
                                                      "noise_sampler_type": noise_type_sde, "noise_mode": noise_mode_sde, "noise_seed": noise_seed_sde, "rk_type": sampler_name, "implicit_sampler_name": implicit_sampler_name,
                                                             "exp_mode": exp_mode, "t_fn_formula": t_fn_formula, "sigma_fn_formula": sigma_fn_formula, "implicit_steps": implicit_steps,
                                                             "latent_guide": latent_guide, "latent_guide_inv": latent_guide_inv, "mask": latent_guide_mask, 
-                                                            "latent_guide_weights": latent_guide_weights, "t_is": t_is, "guide_mode": guide_mode, #"unsampler_type": unsampler_type,
+                                                            "latent_guide_weights": latent_guide_weights, "guide_mode": guide_mode, #"unsampler_type": unsampler_type,
                                                             "LGW_MASK_RESCALE_MIN": rescale_floor, "sigmas_override": sigmas_override})
 
             samples = comfy.sample.sample_custom(model, noise, cfg, sampler, sigmas, positive, negative, x.clone(), 
@@ -1254,8 +1254,8 @@ class ClownsharKSamplerGuides:
         #    latent_guide_weights = get_sigmas(model, scheduler, steps, latent_guide_weight).to(default_dtype)
             
         if scheduler == "constant": 
-            latent_guide_weights = initialize_or_scale(None, latent_guide_weight, max_steps).to(default_dtype)
-            #latent_guide_weights = F.pad(latent_guide_weights, (0, max_steps), value=0.0)
+            latent_guide_weights = initialize_or_scale(None, latent_guide_weight, steps).to(default_dtype)
+            latent_guide_weights = F.pad(latent_guide_weights, (0, max_steps), value=0.0)
         
         if latent_guide is not None:
             x = latent_guide["samples"].clone().to(default_dtype) 
