@@ -511,11 +511,12 @@ class ClownsharKSampler:
             else:
                 unsampler_type = ""
                 
+            x = latent_image["samples"].clone().to(default_dtype) 
             if latent_image is not None:
                 if "samples_fp64" in latent_image:
-                    x = latent_image["samples_fp64"].clone()
-                else:
-                    x = latent_image["samples"].clone().to(default_dtype) 
+                    if latent_image['samples'].shape == latent_image['samples_fp64'].shape:
+                        if torch.norm(latent_image['samples'] - latent_image['samples_fp64']) < 0.01:
+                            x = latent_image["samples_fp64"].clone()
                 
             if latent_noise is not None:
                 latent_noise["samples"] = latent_noise["samples"].clone().to(default_dtype)  
