@@ -683,6 +683,7 @@ class ClownsharKSampler_Beta:
                     "cfg": ("FLOAT", {"default": 5.0, "min": -100.0, "max": 100.0, "step":0.1, "round": False, }),
                     "shift": ("FLOAT", {"default": 3.0, "min": -1.0, "max": 100.0, "step":0.1, "round": False, }),
                     "base_shift": ("FLOAT", {"default": 0.85, "min": -1.0, "max": 100.0, "step":0.1, "round": False, }),
+                    "shift_scaling": (["exponential", "linear"], {"default": "exponential"}),
                     "truncate_conditioning": (['false', 'true'], {"default": "true"}),
                      },
                 "optional": 
@@ -711,7 +712,7 @@ class ClownsharKSampler_Beta:
              eta=0.25, eta_var=0.0, d_noise=1.0, s_noise=1.0, alpha_init=-1.0, k_init=1.0, alpha_sde=-1.0, k_sde=1.0, cfgpp=0.0, c1=0.0, c2=0.5, c3=1.0, multistep=False, noise_seed=-1, sampler_name="res_2m", implicit_sampler_name="default",
                     exp_mode=False, t_fn_formula=None, sigma_fn_formula=None, implicit_steps=0,
                     latent_guide=None, latent_guide_inv=None, latent_guide_weight=0.0, guide_mode="blend", latent_guide_weights=None, latent_guide_mask=None, rescale_floor=True, sigmas_override=None, unsampler_type="linear",
-                    shift=3.0, base_shift=0.85, guides=None, options=None, sde_noise=None,sde_noise_steps=1,
+                    shift=3.0, base_shift=0.85, guides=None, options=None, sde_noise=None,sde_noise_steps=1, t_is=None, shift_scaling="exponential",
                     ): 
             default_dtype = torch.float64
             max_steps = 10000
@@ -755,16 +756,23 @@ class ClownsharKSampler_Beta:
             latent_guide_weights = initialize_or_scale(latent_guide_weights, latent_guide_weight, max_steps).to(default_dtype)
             latent_guide_weights = F.pad(latent_guide_weights, (0, max_steps), value=0.0)
             
+            #ts_sigmas = model.get_model_object('model_sampling').sigmas.clone()
             if shift >= 0:
                 if isinstance(model.model.model_config, comfy.supported_models.SD3):
                     model = ModelSamplingSD3().patch(model, shift)[0] 
+                    model = SD35L_TimestepPatcher().main(model, shift_scaling, shift)[0]
+                    model.object_patches['model_sampling'].sigmas = model.model.model_sampling.sigmas
                 elif isinstance(model.model.model_config, comfy.supported_models.AuraFlow):
                     model = ModelSamplingAuraFlow().patch_aura(model, shift)[0] 
+                    model = SD35L_TimestepPatcher().main(model, shift_scaling, shift)[0]
+                    model.object_patches['model_sampling'].sigmas = model.model.model_sampling.sigmas
                 elif isinstance(model.model.model_config, comfy.supported_models.Stable_Cascade_C):
                     model = ModelSamplingStableCascade().patch(model, shift)[0] 
             if shift >= 0 and base_shift >= 0:
                 if isinstance(model.model.model_config, comfy.supported_models.Flux) or isinstance(model.model.model_config, comfy.supported_models.FluxSchnell):
                     model = ModelSamplingFlux().patch(model, shift, base_shift, latent_image['samples'].shape[3], latent_image['samples'].shape[2])[0] 
+                    model = SD35L_TimestepPatcher().main(model, shift_scaling, shift)[0]
+                    model.object_patches['model_sampling'].sigmas = model.model.model_sampling.sigmas
 
             latent = latent_image
             latent_image_dtype = latent_image['samples'].dtype
@@ -1205,6 +1213,13 @@ def time_snr_shift_linear(alpha, t):
         return t
     return alpha * t / (1 + (alpha - 1) * t)
 
+
+def create_sigma_function(multiplier):
+    def new_sigma(self, timestep):
+        return timestep * multiplier + self.shift
+    return new_sigma
+
+
 class SD35L_TimestepPatcher:
     # this is used to set the "shift" using either exponential scaling (default for SD3.5M and Flux) or linear scaling (default for SD3.5L and SD3 2B beta)
     @classmethod
@@ -1230,7 +1245,7 @@ class SD35L_TimestepPatcher:
     def main(self, model, scaling, shift):
         self.shift = shift
         self.multiplier = 1000
-        timesteps = 10000
+        timesteps = 1000 #this was 10000
 
         s_range = torch.arange(1, timesteps + 1, 1).to(torch.float64)
         if scaling == "exponential": 
