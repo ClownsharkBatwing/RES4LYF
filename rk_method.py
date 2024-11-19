@@ -704,22 +704,25 @@ class RK_Method:
         else:
             self.noise_sampler = NOISE_GENERATOR_CLASSES_SIMPLE.get(noise_sampler_type)(x=x, seed=seed, sigma_min=self.sigma_min, sigma_max=self.sigma_max)
             
-    def add_noise_pre(self, x, sigma_up, sigma, sigma_next, sigma_down, alpha_ratio, s_noise, noise_mode):
+    def add_noise_pre(self, x, sigma_up, sigma, sigma_next, sigma_down, alpha_ratio, s_noise, noise_mode, SDE_NOISE_EXTERNAL=False, sde_noise_t=None):
         if isinstance(self.model_sampling, comfy.model_sampling.CONST) == False and noise_mode == "hard":
-            return self.add_noise(x, sigma_up, sigma, sigma_next, sigma_down, alpha_ratio, s_noise)
+            return self.add_noise(x, sigma_up, sigma, sigma_next, sigma_down, alpha_ratio, s_noise, SDE_NOISE_EXTERNAL, sde_noise_t)
         else:
             return x
         
-    def add_noise_post(self, x, sigma_up, sigma, sigma_next, sigma_down, alpha_ratio, s_noise, noise_mode):
+    def add_noise_post(self, x, sigma_up, sigma, sigma_next, sigma_down, alpha_ratio, s_noise, noise_mode, SDE_NOISE_EXTERNAL=False, sde_noise_t=None):
         if isinstance(self.model_sampling, comfy.model_sampling.CONST) == True  or  noise_mode != "hard":
-            return self.add_noise(x, sigma_up, sigma, sigma_next, sigma_down, alpha_ratio, s_noise)
+            return self.add_noise(x, sigma_up, sigma, sigma_next, sigma_down, alpha_ratio, s_noise, SDE_NOISE_EXTERNAL, sde_noise_t)
         else:
             return x
     
-    def add_noise(self, x, sigma_up, sigma, sigma_next, sigma_down, alpha_ratio, s_noise):
+    def add_noise(self, x, sigma_up, sigma, sigma_next, sigma_down, alpha_ratio, s_noise, SDE_NOISE_EXTERNAL, sde_noise_t):
         if sigma_next > 0.0:
-            noise = self.noise_sampler(sigma=sigma, sigma_next=sigma_next)
-            noise = torch.nan_to_num((noise - noise.mean()) / noise.std(), 0.0)
+            if SDE_NOISE_EXTERNAL:
+                noise = sde_noise_t
+            else:
+                noise = self.noise_sampler(sigma=sigma, sigma_next=sigma_next)
+                noise = torch.nan_to_num((noise - noise.mean()) / noise.std(), 0.0)
             return alpha_ratio * x + noise * s_noise * sigma_up
         else:
             return x
@@ -801,6 +804,7 @@ class RK_Method:
         if latent_guide is not None:
             if sigmas[0] > sigmas[1]:
                 y0 = latent_guide = self.model.inner_model.inner_model.process_latent_in(latent_guide['samples']).clone().to(x.device)
+                y0 = (y0 - y0.mean()) / y0.std()
             else:
                 x = self.model.inner_model.inner_model.process_latent_in(latent_guide['samples']).clone().to(x.device)
 

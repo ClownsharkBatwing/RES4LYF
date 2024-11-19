@@ -991,10 +991,15 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
               sigma_fn_formula="", t_fn_formula="",
                   eta=0.0, eta_var=0.0, s_noise=1., d_noise=1., alpha=-1.0, k=1.0, scale=0.1, c1=0.0, c2=0.5, c3=1.0, MULTISTEP=False, cfgpp=0.0, implicit_steps=0, reverse_weight=0.0, exp_mode=False,
                   latent_guide=None, latent_guide_inv=None, latent_guide_weights=None, guide_mode="blend", unsampler_type="linear",
-                  GARBAGE_COLLECT=False, mask=None, LGW_MASK_RESCALE_MIN=True, sigmas_override=None, t_is=None,
+                  GARBAGE_COLLECT=False, mask=None, LGW_MASK_RESCALE_MIN=True, sigmas_override=None, t_is=None,sde_noise=None,
                   ):
     extra_args = {} if extra_args is None else extra_args
     s_in = x.new_ones([x.shape[0]])
+    
+    if len(sde_noise) > 0 and sigmas[1] > sigmas[2]:
+        SDE_NOISE_EXTERNAL = True
+    else:
+        SDE_NOISE_EXTERNAL = False
     
     lgw = latent_guide_weights
     
@@ -1051,7 +1056,13 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
         s_irk_rk = [(  rk.sigma_fn( rk.t_fn(sigma)   + h*c_)) * s_in for c_ in   irk.c]
         s_irk    = [( irk.sigma_fn(irk.t_fn(sigma) + h_irk*c_)) * s_in for c_ in  irk.c]
 
-        x_[0] = rk.add_noise_pre(x, sigma_up, sigma, sigma_next, sigma_down, alpha_ratio, s_noise, noise_mode)
+        sde_noise_t = None
+        if SDE_NOISE_EXTERNAL:
+            if _ >= len(sde_noise):
+                SDE_NOISE_EXTERNAL=False
+            else:
+                sde_noise_t = sde_noise[_]
+        x_[0] = rk.add_noise_pre(x, sigma_up, sigma, sigma_next, sigma_down, alpha_ratio, s_noise, noise_mode, SDE_NOISE_EXTERNAL, sde_noise_t)
         
         x_0 = x_[0].clone()
         
@@ -1096,18 +1107,33 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
                 elif unsampler_type == "odds":
                     multiplier = sigma / (rk.sigma_max + sigma)
                     
-                #y0_stdnorm = y0 / y0.std()
-                #y0_tmp = y0_stdnorm * data_[0].std()
-                if y0.max() > 0.0001:
+                y0_tmp, y0_inv_tmp = y0, y0_inv
+                """if UNSAMPLE and sigma_next > sigma:
+                    y0_stdnorm = y0 / y0.std()
+                    y0_tmp = y0_stdnorm * data_[0].std()
+                    
+                    y0_inv_stdnorm = y0_inv / y0_inv.std()
+                    y0_inv_tmp = y0_inv_stdnorm * data_[0].std()"""
+                   
+                """if y0.max() > 0.0001:
                     y0_tmp = data_[0].std() * y0 / y0.std()
                 if y0_inv.max() > 0.0001:
                     y0_inv_tmp = data_[0].std() * y0_inv / y0_inv.std()
-                
+                """
                 if sum(rk.a[row]):
+                    #vel_y = (y0_tmp - x_0) / t_i
+                    #vel_y_inv = (y0_inv_tmp - x_0) / t_i
                     vel_y = rk.data_to_vel(x_0, y0_tmp, s_[row])
                     vel_y_inv = rk.data_to_vel(x_0, y0_inv_tmp, s_[row])
+                    
                     #vel_y = rk.data_to_vel(x_0, y0, t_i)
                     #vel_y_inv = rk.data_to_vel(x_0, y0_inv, t_i)
+                    
+                """if sum(rk.a[row]):
+                    vel_y = rk.data_to_vel(x_0, y0, s_[row])
+                    vel_y_inv = rk.data_to_vel(x_0, y0_inv, s_[row])
+                    vel_y = eps_[0].std() * vel_y / vel_y.std()
+                    vel_y_inv = eps_[0].std() * vel_y_inv / vel_y_inv.std()"""
                             
                 if unsampler_type == "lin":            
                     x_[row+1] = x_0         +   (1-UNSAMPLE * lgw[_]) * rk.a_k_sum(eps_, row) * h   +        (sum(rk.a[row]) > 0) * (     (UNSAMPLE * mask * lgw[_]) * ((y0 - x_0) / t_i) * (sigma-sigma_down)  )  # +    (UNSAMPLE * (1-mask) * lgw[_]) * ((y0_inv - x_0) / t_i) * (sigma-sigma_down)     )
@@ -1128,7 +1154,6 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
                     x_[row+1]   = (1-UNSAMPLE * lgw_mask) * (x_0    +  h * rk.a_k_sum(eps_, row))     \
                                    + UNSAMPLE * lgw_mask  * (x_0   +  (h.abs()) * rk.a_k_sum(vel_y * multiplier, row) )
                     x_[row+1]  = (1-UNSAMPLE * lgw_mask_inv) * x_[row+1]   + UNSAMPLE * lgw_mask_inv  * (x_0   +       (h.abs()) * rk.a_k_sum(vel_y_inv * multiplier, row) )
-                    
 
                 eps_[row], data_[row] = rk(x_0, x_[row+1], s_[row], h, **extra_args)
 
@@ -1136,8 +1161,17 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
             #y0_tmp = data_[0].std() * y0 / y0.std()
             #y0_inv_tmp = data_[0].std() * y0_inv / y0_inv.std()
             if sum(rk.b[0]):
+                #vel_y = (y0_tmp - x_0) / t_i
+                #vel_y_inv = (y0_inv_tmp - x_0) / t_i
                 vel_y = rk.data_to_vel(x_0, y0_tmp, s_[rk.rows-1])
                 vel_y_inv = rk.data_to_vel(x_0, y0_inv_tmp, s_[rk.rows-1])
+                
+            """if sum(rk.b[0]):
+                vel_y = rk.data_to_vel(x_0, y0, s_[rk.rows-1])
+                vel_y_inv = rk.data_to_vel(x_0, y0_inv, s_[rk.rows-1])
+                vel_y = eps_[0].std() * vel_y / vel_y.std()
+                vel_y_inv = eps_[0].std() * vel_y_inv / vel_y_inv.std()"""
+
             if unsampler_type == "lin":
                 x = x_0       + (1-UNSAMPLE * lgw[_]) * h * rk.b_k_sum(eps_, 0)   +   (UNSAMPLE * mask * lgw[_]) * ((y0 - x_0) / t_i) * (sigma-sigma_down)   # +    (UNSAMPLE * (1-mask) * lgw[_]) * ((y0_inv - x_0) / t_i) * (sigma-sigma_down) 
                 """x   = (1-UNSAMPLE * lgw_mask) * (x_0    +  h * rk.b_k_sum(eps_, 0))     \
@@ -1150,6 +1184,10 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
                 x   = (1-UNSAMPLE * lgw_mask) * (x_0    +  h * rk.b_k_sum(eps_, 0))     \
                        + UNSAMPLE * lgw_mask  * (x_0   +  (h.abs()) * rk.b_k_sum(vel_y * multiplier, 0) )
                 x  = (1-UNSAMPLE * lgw_mask_inv) * x   + UNSAMPLE * lgw_mask_inv  * (x_0   +       (h.abs()) * rk.b_k_sum(vel_y_inv * multiplier, 0) )
+                
+            """if UNSAMPLE and sigma_next > sigma:
+                sde_noise_next = (x - x_0) / sigma_next
+                sde_noise.append(sde_noise_next)"""
 
         else:
             s2 = s_irk_rk[:]
@@ -1186,7 +1224,13 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
             
         callback({'x': x, 'i': _, 'sigma': sigma, 'sigma_next': sigma_next, 'denoised': data_[0]}) if callback is not None else None
 
-        x = rk.add_noise_post(x, sigma_up, sigma, sigma_next, sigma_down, alpha_ratio, s_noise, noise_mode)
+        sde_noise_t = None
+        if SDE_NOISE_EXTERNAL:
+            if _ >= len(sde_noise):
+                SDE_NOISE_EXTERNAL=False
+            else:
+                sde_noise_t = sde_noise[_]
+        x = rk.add_noise_post(x, sigma_up, sigma, sigma_next, sigma_down, alpha_ratio, s_noise, noise_mode, SDE_NOISE_EXTERNAL, sde_noise_t)
         
         for ms in range(rk.multistep_stages):
             eps_ [rk.multistep_stages - ms] = eps_ [rk.multistep_stages - ms - 1]

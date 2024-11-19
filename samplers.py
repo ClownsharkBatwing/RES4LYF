@@ -676,6 +676,7 @@ class ClownsharKSampler_Beta:
                                                ], {"default": "default"}), 
                     "scheduler": (comfy.samplers.SCHEDULER_NAMES + ["beta57"], {"default": "beta57"},),
                     "steps": ("INT", {"default": 30, "min": 1, "max": 10000}),
+                    "sde_noise_steps": ("INT", {"default": 1, "min": 1, "max": 10000}),
                     "implicit_steps": ("INT", {"default": 0, "min": 0, "max": 10000}),
                     "denoise": ("FLOAT", {"default": 1.0, "min": -10000, "max": 10000, "step":0.01}),
                     "denoise_alt": ("FLOAT", {"default": 1.0, "min": -10000, "max": 10000, "step":0.01}),
@@ -692,11 +693,12 @@ class ClownsharKSampler_Beta:
                     "latent_image": ("LATENT", ),     
                     "guides": ("GUIDES", ),     
                     "options": ("OPTIONS", ),   
+                    "sde_noise": ("LATENT",),
                     }
                 }
 
-    RETURN_TYPES = ("LATENT","LATENT", ) #"LATENT","LATENT")
-    RETURN_NAMES = ("output", "denoised",) # "output_fp64", "denoised_fp64")
+    RETURN_TYPES = ("LATENT","LATENT", "LATENT",) #"LATENT","LATENT")
+    RETURN_NAMES = ("output", "denoised","sde_noise",) # "output_fp64", "denoised_fp64")
 
     FUNCTION = "main"
 
@@ -709,7 +711,7 @@ class ClownsharKSampler_Beta:
              eta=0.25, eta_var=0.0, d_noise=1.0, s_noise=1.0, alpha_init=-1.0, k_init=1.0, alpha_sde=-1.0, k_sde=1.0, cfgpp=0.0, c1=0.0, c2=0.5, c3=1.0, multistep=False, noise_seed=-1, sampler_name="res_2m", implicit_sampler_name="default",
                     exp_mode=False, t_fn_formula=None, sigma_fn_formula=None, implicit_steps=0,
                     latent_guide=None, latent_guide_inv=None, latent_guide_weight=0.0, guide_mode="blend", latent_guide_weights=None, latent_guide_mask=None, rescale_floor=True, sigmas_override=None, unsampler_type="linear",
-                    shift=3.0, base_shift=0.85, guides=None, options=None,
+                    shift=3.0, base_shift=0.85, guides=None, options=None, sde_noise=None,sde_noise_steps=1,
                     ): 
             default_dtype = torch.float64
             max_steps = 10000
@@ -853,77 +855,100 @@ class ClownsharKSampler_Beta:
             sigmin = model.model.model_sampling.sigma_min
             sigmax = model.model.model_sampling.sigma_max
 
-            if noise_type_init == "none":
-                noise = torch.zeros_like(x)
-            elif latent_noise is None:
-                noise_sampler_init = NOISE_GENERATOR_CLASSES_SIMPLE.get(noise_type_init)(x=x, seed=seed, sigma_min=sigmin, sigma_max=sigmax)
-            
-                if noise_type_init == "fractal":
-                    noise_sampler_init.alpha = alpha_init
-                    noise_sampler_init.k = k_init
-                    noise_sampler_init.scale = 0.1
-                noise = noise_sampler_init(sigma=sigmax, sigma_next=sigmin)
+            if sde_noise is None and sampler_mode.startswith("unsample"):
+                total_steps = len(sigmas)+1
+                sde_noise = []
             else:
-                noise = latent_noise["samples"]
+                total_steps = 1
 
-            if noise_is_latent: #add noise and latent together and normalize --> noise
-                noise += x.cpu()
-                noise.sub_(noise.mean()).div_(noise.std())
-
-            if noise_normalize and noise.std() > 0:
-                noise.sub_(noise.mean()).div_(noise.std())
-            noise *= noise_stdev
-            noise = (noise - noise.mean()) + noise_mean
-            
-            if latent_noise_match:
-                for i in range(latent_noise_match["samples"].shape[1]):
-                    noise[0][i] = (noise[0][i] - noise[0][i].mean())
-                    noise[0][i] = (noise[0][i]) + latent_noise_match["samples"][0][i].mean()
-
-            noise_mask = latent["noise_mask"] if "noise_mask" in latent else None
-
-            x0_output = {}
-
-            callback = latent_preview.prepare_callback(model, sigmas.shape[-1] - 1, x0_output)
-
-            disable_pbar = False
-            
-            if noise_type_sde == "none":
-                eta_var = eta = 0.0
-                noise_type_sde = "gaussian"
-            if noise_mode_sde == "hard_var":
-                eta_var = eta
-                eta = 0.0
-            
-            if cfg < 0:
-                cfgpp = -cfg
-                cfg = 1.0
+            for total_steps_iter in range (sde_noise_steps):
+                    
+                if noise_type_init == "none":
+                    noise = torch.zeros_like(x)
+                elif latent_noise is None:
+                    noise_sampler_init = NOISE_GENERATOR_CLASSES_SIMPLE.get(noise_type_init)(x=x, seed=seed, sigma_min=sigmin, sigma_max=sigmax)
                 
-            sampler = comfy.samplers.ksampler("rk_beta", {"eta": eta, "eta_var": eta_var, "s_noise": s_noise, "d_noise": d_noise, "alpha": alpha_sde, "k": k_sde, "c1": c1, "c2": c2, "c3": c3, "cfgpp": cfgpp, "MULTISTEP": multistep, 
-                                                     "noise_sampler_type": noise_type_sde, "noise_mode": noise_mode_sde, "noise_seed": noise_seed_sde, "rk_type": sampler_name, "implicit_sampler_name": implicit_sampler_name,
-                                                            "exp_mode": exp_mode, "t_fn_formula": t_fn_formula, "sigma_fn_formula": sigma_fn_formula, "implicit_steps": implicit_steps,
-                                                            "latent_guide": latent_guide, "latent_guide_inv": latent_guide_inv, "mask": latent_guide_mask, 
-                                                            "latent_guide_weights": latent_guide_weights, "t_is": t_is, "guide_mode": guide_mode, "unsampler_type": unsampler_type,
-                                                            "LGW_MASK_RESCALE_MIN": rescale_floor, "sigmas_override": sigmas_override})
+                    if noise_type_init == "fractal":
+                        noise_sampler_init.alpha = alpha_init
+                        noise_sampler_init.k = k_init
+                        noise_sampler_init.scale = 0.1
+                    noise = noise_sampler_init(sigma=sigmax, sigma_next=sigmin)
+                else:
+                    noise = latent_noise["samples"]
 
-            samples = comfy.sample.sample_custom(model, noise, cfg, sampler, sigmas, positive, negative, x.clone(), 
-                                                 noise_mask=noise_mask, callback=callback, disable_pbar=disable_pbar, seed=noise_seed)
+                if noise_is_latent: #add noise and latent together and normalize --> noise
+                    noise += x.cpu()
+                    noise.sub_(noise.mean()).div_(noise.std())
 
-            out = latent.copy()
-            out["samples"] = samples
-            if "x0" in x0_output:
-                out_denoised = latent.copy()
-                out_denoised["samples"] = model.model.process_latent_out(x0_output["x0"].cpu())
-            else:
-                out_denoised = out
-            
-            out["samples_fp64"] = out["samples"].clone()
-            out["samples"] = out["samples"].to(latent_image_dtype)
-            
-            out_denoised["samples_fp64"] = out_denoised["samples"].clone()
-            out_denoised["samples"] = out_denoised["samples"].to(latent_image_dtype)
+                if noise_normalize and noise.std() > 0:
+                    noise.sub_(noise.mean()).div_(noise.std())
+                noise *= noise_stdev
+                noise = (noise - noise.mean()) + noise_mean
+                
+                if latent_noise_match:
+                    for i in range(latent_noise_match["samples"].shape[1]):
+                        noise[0][i] = (noise[0][i] - noise[0][i].mean())
+                        noise[0][i] = (noise[0][i]) + latent_noise_match["samples"][0][i].mean()
 
-            return ( out, out_denoised, )
+                noise_mask = latent["noise_mask"] if "noise_mask" in latent else None
+
+                x0_output = {}
+
+                callback = latent_preview.prepare_callback(model, sigmas.shape[-1] - 1, x0_output)
+
+                disable_pbar = False
+                
+                if noise_type_sde == "none":
+                    eta_var = eta = 0.0
+                    noise_type_sde = "gaussian"
+                if noise_mode_sde == "hard_var":
+                    eta_var = eta
+                    eta = 0.0
+                
+                if cfg < 0:
+                    cfgpp = -cfg
+                    cfg = 1.0
+                    
+                if sde_noise is None:
+                    sde_noise = []
+                else:
+                    sde_noise = copy.deepcopy(sde_noise)
+                    for i in range(len(sde_noise)):
+                        #sde_noise[i] = (sde_noise[i] / sde_noise[i].std()).to('cuda')
+                        sde_noise[i] = ((sde_noise[i] - sde_noise[i].mean()) / sde_noise[i].std()).to('cuda')
+
+                        
+                sampler = comfy.samplers.ksampler("rk_beta", {"eta": eta, "eta_var": eta_var, "s_noise": s_noise, "d_noise": d_noise, "alpha": alpha_sde, "k": k_sde, "c1": c1, "c2": c2, "c3": c3, "cfgpp": cfgpp, "MULTISTEP": multistep, 
+                                                        "noise_sampler_type": noise_type_sde, "noise_mode": noise_mode_sde, "noise_seed": noise_seed_sde, "rk_type": sampler_name, "implicit_sampler_name": implicit_sampler_name,
+                                                                "exp_mode": exp_mode, "t_fn_formula": t_fn_formula, "sigma_fn_formula": sigma_fn_formula, "implicit_steps": implicit_steps,
+                                                                "latent_guide": latent_guide, "latent_guide_inv": latent_guide_inv, "mask": latent_guide_mask, 
+                                                                "latent_guide_weights": latent_guide_weights, "t_is": t_is, "guide_mode": guide_mode, "unsampler_type": unsampler_type,
+                                                                "LGW_MASK_RESCALE_MIN": rescale_floor, "sigmas_override": sigmas_override, "sde_noise": sde_noise,})
+
+                samples = comfy.sample.sample_custom(model, noise, cfg, sampler, sigmas, positive, negative, x.clone(), 
+                                                    noise_mask=noise_mask, callback=callback, disable_pbar=disable_pbar, seed=noise_seed)
+
+                out = latent.copy()
+                out["samples"] = samples
+                if "x0" in x0_output:
+                    out_denoised = latent.copy()
+                    out_denoised["samples"] = model.model.process_latent_out(x0_output["x0"].cpu())
+                else:
+                    out_denoised = out
+                
+                out["samples_fp64"] = out["samples"].clone()
+                out["samples"] = out["samples"].to(latent_image_dtype)
+                
+                out_denoised["samples_fp64"] = out_denoised["samples"].clone()
+                out_denoised["samples"] = out_denoised["samples"].to(latent_image_dtype)
+                
+                seed += 1
+                torch.manual_seed(seed)
+                noise_seed_sde += 1
+                
+                sde_noise.append(out["samples_fp64"])
+
+            return ( out, out_denoised, sde_noise,)
 
 
 
