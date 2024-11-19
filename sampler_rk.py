@@ -1108,12 +1108,12 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
                     multiplier = sigma / (rk.sigma_max + sigma)
                     
                 y0_tmp, y0_inv_tmp = y0, y0_inv
-                """if UNSAMPLE and sigma_next > sigma:
+                if UNSAMPLE and sigma_next > sigma:
                     y0_stdnorm = y0 / y0.std()
                     y0_tmp = y0_stdnorm * data_[0].std()
                     
                     y0_inv_stdnorm = y0_inv / y0_inv.std()
-                    y0_inv_tmp = y0_inv_stdnorm * data_[0].std()"""
+                    y0_inv_tmp = y0_inv_stdnorm * data_[0].std()
                    
                 """if y0.max() > 0.0001:
                     y0_tmp = data_[0].std() * y0 / y0.std()

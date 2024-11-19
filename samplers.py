@@ -945,8 +945,8 @@ class ClownsharKSampler_Beta:
                 seed += 1
                 torch.manual_seed(seed)
                 noise_seed_sde += 1
-                
-                sde_noise.append(out["samples_fp64"])
+                if total_steps_iter > 1: 
+                    sde_noise.append(out["samples_fp64"])
 
             return ( out, out_denoised, sde_noise,)
 
