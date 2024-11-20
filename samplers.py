@@ -923,7 +923,10 @@ class ClownsharKSampler_Beta:
                     sde_noise = copy.deepcopy(sde_noise)
                     for i in range(len(sde_noise)):
                         #sde_noise[i] = (sde_noise[i] / sde_noise[i].std()).to('cuda')
-                        sde_noise[i] = ((sde_noise[i] - sde_noise[i].mean()) / sde_noise[i].std()).to('cuda')
+                        #sde_noise[i] = ((sde_noise[i] - sde_noise[i].mean()) / sde_noise[i].std()).to('cuda')
+                        sde_noise[i] = sde_noise[i].to('cuda')
+                        for j in range(sde_noise[i].shape[1]):
+                            sde_noise[i][0][j] = ((sde_noise[i][0][j] - sde_noise[i][0][j].mean()) / sde_noise[i][0][j].std()) #.to('cuda')
 
                         
                 sampler = comfy.samplers.ksampler("rk_beta", {"eta": eta, "eta_var": eta_var, "s_noise": s_noise, "d_noise": d_noise, "alpha": alpha_sde, "k": k_sde, "c1": c1, "c2": c2, "c3": c3, "cfgpp": cfgpp, "MULTISTEP": multistep, 
