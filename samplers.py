@@ -659,9 +659,9 @@ class ClownsharKSampler_Beta:
                     "noise_mode_sde": (["hard", "hard_var", "hard_sq", "soft", "softer", "exp"], {"default": 'hard', "tooltip": "How noise scales with the sigma schedule. Hard is the most aggressive, the others start strong and drop rapidly."}),
                     "eta": ("FLOAT", {"default": 0.25, "min": -100.0, "max": 100.0, "step":0.01, "round": False, "tooltip": "Calculated noise amount to be added, then removed, after each step."}),
                     "noise_seed": ("INT", {"default": 0, "min": -1, "max": 0xffffffffffffffff}),
-                    #"sampler_mode": (['standard', 'unsample', 'resample'],),
-                    "sampler_mode": (['standard', 'unsample_vp', 'unsample_odds', 'unsample_logit', 'unsample_lin', #'unsample_log',
-                                                  'resample_vp', 'resample_odds', 'resample_logit', 'resample_lin',],),
+                    "sampler_mode": (['standard', 'unsample', 'resample'],),
+                    #"sampler_mode": (['standard', 'unsample_vp', 'unsample_odds', 'unsample_logit', 'unsample_lin', #'unsample_log',
+                    #                              'resample_vp', 'resample_odds', 'resample_logit', 'resample_lin',],),
                     "sampler_name": (RK_SAMPLER_NAMES, {"default": "res_2m"}), 
                     "implicit_sampler_name": (["default", 
                                                "gauss-legendre_5s",
@@ -928,7 +928,6 @@ class ClownsharKSampler_Beta:
                         for j in range(sde_noise[i].shape[1]):
                             sde_noise[i][0][j] = ((sde_noise[i][0][j] - sde_noise[i][0][j].mean()) / sde_noise[i][0][j].std()) #.to('cuda')
 
-                        
                 sampler = comfy.samplers.ksampler("rk_beta", {"eta": eta, "eta_var": eta_var, "s_noise": s_noise, "d_noise": d_noise, "alpha": alpha_sde, "k": k_sde, "c1": c1, "c2": c2, "c3": c3, "cfgpp": cfgpp, "MULTISTEP": multistep, 
                                                         "noise_sampler_type": noise_type_sde, "noise_mode": noise_mode_sde, "noise_seed": noise_seed_sde, "rk_type": sampler_name, "implicit_sampler_name": implicit_sampler_name,
                                                                 "exp_mode": exp_mode, "t_fn_formula": t_fn_formula, "sigma_fn_formula": sigma_fn_formula, "implicit_steps": implicit_steps,
