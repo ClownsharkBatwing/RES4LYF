@@ -1102,7 +1102,7 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
             
             x_mid = x
             for i in range(len(s_all)-1):
-                x_mid, eps_mid, denoised_mid, eps_, data_ = get_explicit_rk_step(rk, rk_type, x_mid, s_all[i], s_all[i+1], eta, eta_var, s_noise, noise_mode, c2, c3, _+i, sigmas_and, x_, eps_, data_, **extra_args)
+                x_mid, eps_mid, denoised_mid, eps_, data_ = get_explicit_rk_step(rk, rk_type, x_mid, y0, lgw, s_all[i], s_all[i+1], eta, eta_var, s_noise, noise_mode, c2, c3, _+i, sigmas_and, x_, eps_, data_, **extra_args)
                 eps_list.append(eps_[0])
 
                 eps_ [0] = torch.zeros_like(eps_ [0])
@@ -1121,6 +1121,9 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
                 for row in range(irk.rows):
                     x_[row+1] = x_0 + h_irk * irk.a_k_sum(eps2_, row)
                     eps2_[row], data_[row] = irk(x_0, x_[row+1], s_irk[row], h, **extra_args)
+                    
+                    cvf = irk.get_epsilon(x_0, x_[row+1], y0, sigma, s_irk[row], sigma_down)
+                    eps2_[row] = eps2_[row] + lgw[_] * (cvf - eps2_[row])
                 x = x_0 + h_irk * irk.b_k_sum(eps2_, 0)
             
         callback({'x': x, 'i': _, 'sigma': sigma, 'sigma_next': sigma_next, 'denoised': data_[0]}) if callback is not None else None
@@ -1143,7 +1146,7 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
 
 
 
-def get_explicit_rk_step(rk, rk_type, x, sigma, sigma_next, eta, eta_var, s_noise, noise_mode, c2, c3, stepcount, sigmas, x_, eps_, data_, **extra_args):
+def get_explicit_rk_step(rk, rk_type, x, y0, lgw, sigma, sigma_next, eta, eta_var, s_noise, noise_mode, c2, c3, stepcount, sigmas, x_, eps_, data_, **extra_args):
     extra_args = {} if extra_args is None else extra_args
     s_in = x.new_ones([x.shape[0]])
 
@@ -1155,7 +1158,7 @@ def get_explicit_rk_step(rk, rk_type, x, sigma, sigma_next, eta, eta_var, s_nois
 
     s_ = [(sigma + h * c_) * s_in for c_ in rk.c]
     #x_, eps_, data_, data_u_ = (torch.zeros(rk.rows + 2, *x.shape, dtype=x.dtype, device=x.device) for _ in range(4))
-    x_[0] = rk.add_noise_pre(x, sigma_up, sigma, sigma_next, sigma_down, alpha_ratio, s_noise, noise_mode)
+    x_[0] = rk.add_noise_pre(x, y0, lgw, sigma_up, sigma, sigma_next, sigma_down, alpha_ratio, s_noise, noise_mode)
     
     x_0 = x_[0].clone()
     
@@ -1168,12 +1171,15 @@ def get_explicit_rk_step(rk, rk_type, x, sigma, sigma_next, eta, eta_var, s_nois
     for row in range(rk.rows - rk.multistep_stages):
         x_[row+1] = x_0 + h * rk.a_k_sum(eps_, row)
         eps_[row], data_[row] = rk(x_0, x_[row+1], s_[row], h, **extra_args)
+        
+        cvf = rk.get_epsilon(x_0, x_[row+1], y0, sigma, s_[row], sigma_down)
+        eps_[row] = eps_[row] + lgw[stepcount] * (cvf - eps_[row])
     x = x_0 + h * rk.b_k_sum(eps_, 0)
 
     denoised = rk.b_k_sum(data_, 0) / sum(rk.b[0])
     eps = rk.b_k_sum(eps_, 0) / sum(rk.b[0])
     
-    x = rk.add_noise_post(x, sigma_up, sigma, sigma_next, sigma_down, alpha_ratio, s_noise, noise_mode)
+    x = rk.add_noise_post(x, y0, lgw, sigma_up, sigma, sigma_next, sigma_down, alpha_ratio, s_noise, noise_mode)
 
     for ms in range(rk.multistep_stages):
         eps_ [rk.multistep_stages - ms] = eps_ [rk.multistep_stages - ms - 1]
