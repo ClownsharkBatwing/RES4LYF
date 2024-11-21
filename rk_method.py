@@ -670,14 +670,14 @@ class RK_Method:
     def __call__(self):
         raise NotImplementedError("This method got clownsharked!")
     
-    def get_epsilon(self, x, sigma, **extra_args):
+    def model_epsilon(self, x, sigma, **extra_args):
         s_in = x.new_ones([x.shape[0]])
         x0 = self.model(x, sigma * s_in, **extra_args)
         #return x0 ###################################THIS WORKS ONLY WITH THE MODEL SAMPLING PATCH
         eps = (x - x0) / (sigma * s_in) 
         return eps
     
-    def get_denoised(self, x, sigma, **extra_args):
+    def model_denoised(self, x, sigma, **extra_args):
         s_in = x.new_ones([x.shape[0]])
         x0 = self.model(x, sigma * s_in, **extra_args)
         return x0
@@ -704,22 +704,34 @@ class RK_Method:
         else:
             self.noise_sampler = NOISE_GENERATOR_CLASSES_SIMPLE.get(noise_sampler_type)(x=x, seed=seed, sigma_min=self.sigma_min, sigma_max=self.sigma_max)
             
-    def add_noise_pre(self, x, sigma_up, sigma, sigma_next, sigma_down, alpha_ratio, s_noise, noise_mode):
+    def add_noise_pre(self, x, y0, lgw, sigma_up, sigma, sigma_next, sigma_down, alpha_ratio, s_noise, noise_mode, SDE_NOISE_EXTERNAL=False, sde_noise_t=None):
         if isinstance(self.model_sampling, comfy.model_sampling.CONST) == False and noise_mode == "hard":
-            return self.add_noise(x, sigma_up, sigma, sigma_next, sigma_down, alpha_ratio, s_noise)
+            return self.add_noise(x, y0, lgw, sigma_up, sigma, sigma_next, sigma_down, alpha_ratio, s_noise, SDE_NOISE_EXTERNAL, sde_noise_t)
         else:
             return x
         
-    def add_noise_post(self, x, sigma_up, sigma, sigma_next, sigma_down, alpha_ratio, s_noise, noise_mode):
-        if isinstance(self.model_sampling, comfy.model_sampling.CONST) == True  or  noise_mode != "hard":
-            return self.add_noise(x, sigma_up, sigma, sigma_next, sigma_down, alpha_ratio, s_noise)
+    def add_noise_post(self, x, y0, lgw, sigma_up, sigma, sigma_next, sigma_down, alpha_ratio, s_noise, noise_mode, SDE_NOISE_EXTERNAL=False, sde_noise_t=None):
+        if isinstance(self.model_sampling, comfy.model_sampling.CONST) == True  or (isinstance(self.model_sampling, comfy.model_sampling.CONST) == False and noise_mode != "hard"):
+            return self.add_noise(x, y0, lgw, sigma_up, sigma, sigma_next, sigma_down, alpha_ratio, s_noise, SDE_NOISE_EXTERNAL, sde_noise_t)
         else:
             return x
     
-    def add_noise(self, x, sigma_up, sigma, sigma_next, sigma_down, alpha_ratio, s_noise):
+    def add_noise(self, x, y0, lgw, sigma_up, sigma, sigma_next, sigma_down, alpha_ratio, s_noise, SDE_NOISE_EXTERNAL, sde_noise_t):
+        noise = self.noise_sampler(sigma=sigma, sigma_next=sigma_next)
+        noise = torch.nan_to_num((noise - noise.mean()) / noise.std(), 0.0)
+        
+        return alpha_ratio * x + noise * s_noise * sigma_up
+
+    
+    
+    
+    def add_noise_orig(self, x, y0, sigma_up, sigma, sigma_next, sigma_down, alpha_ratio, s_noise, SDE_NOISE_EXTERNAL, sde_noise_t):
         if sigma_next > 0.0:
-            noise = self.noise_sampler(sigma=sigma, sigma_next=sigma_next)
-            noise = torch.nan_to_num((noise - noise.mean()) / noise.std(), 0.0)
+            if SDE_NOISE_EXTERNAL:
+                noise = sde_noise_t
+            else:
+                noise = self.noise_sampler(sigma=sigma, sigma_next=sigma_next)
+                noise = torch.nan_to_num((noise - noise.mean()) / noise.std(), 0.0)
             return alpha_ratio * x + noise * s_noise * sigma_up
         else:
             return x
@@ -801,12 +813,23 @@ class RK_Method:
         if latent_guide is not None:
             if sigmas[0] > sigmas[1]:
                 y0 = latent_guide = self.model.inner_model.inner_model.process_latent_in(latent_guide['samples']).clone().to(x.device)
+                #x = (x - x.mean()) / x.std()
+                #for i in range(x.shape[1]):
+                #    x[0][i] = x[0][i] / x[0][i].std()
+                #x = x / x.std()
+                #y0 = latent_guide = latent_guide['samples'].clone().to(x.device)
+                #y0 = (y0 - y0.mean()) / y0.std()
+            elif UNSAMPLE and mask is not None:
+                x = x
+                x = (1-mask) * x + mask * self.model.inner_model.inner_model.process_latent_in(latent_guide['samples']).clone().to(x.device)
             else:
+                x = x
                 x = self.model.inner_model.inner_model.process_latent_in(latent_guide['samples']).clone().to(x.device)
 
         if latent_guide_inv is not None:
             if sigmas[0] > sigmas[1]:
-                y0_inv = latent_guide_inv = self.model.inner_model.inner_model.process_latent_in(latent_guide_inv['samples']).clone().to(x.device)
+                #y0_inv = latent_guide_inv = self.model.inner_model.inner_model.process_latent_in(latent_guide_inv['samples']).clone().to(x.device)
+                y0_inv = latent_guide_inv = latent_guide_inv['samples'].clone().to(x.device)
             elif UNSAMPLE and mask is not None:
                 x = mask * x + (1-mask) * self.model.inner_model.inner_model.process_latent_in(latent_guide_inv['samples']).clone().to(x.device)
                 
@@ -815,6 +838,7 @@ class RK_Method:
             y0 = (y0 - y0.mean()) / y0.std()
             y0_inv = self.noise_sampler(sigma=self.sigma_max, sigma_next=self.sigma_min)
             y0_inv = (y0_inv - y0_inv.mean()) / y0_inv.std()
+            #x = (x - x.mean()) / x.std()
             
         return x, y0, y0_inv
     
@@ -897,7 +921,7 @@ class RK_Method_Exponential(RK_Method):
 
     def __call__(self, x_0, x, sigma, h, **extra_args):
 
-        denoised = self.get_denoised(x, sigma, **extra_args)
+        denoised = self.model_denoised(x, sigma, **extra_args)
         epsilon = denoised - x_0
         
         if self.uncond == None:
@@ -915,7 +939,17 @@ class RK_Method_Exponential(RK_Method):
     def data_to_vel(self, x, data, sigma):
         return data - x
     
-    
+    def get_epsilon(self, x_0, x, y, sigma, sigma_cur, sigma_down=None):
+        if sigma_down > sigma:
+            sigma_cur = self.sigma_max - sigma_cur.clone()
+        if sigma_down is None:
+            return y - x_0
+        else:
+            if sigma_down > sigma:
+                return (x_0 - y) * sigma_cur
+            else:
+                return (y - x_0) * sigma_cur
+            
     
 class RK_Method_Linear(RK_Method):
     def __init__(self, model, name="", method="explicit", device='cuda', dtype=torch.float64):
@@ -942,7 +976,7 @@ class RK_Method_Linear(RK_Method):
     def __call__(self, x_0, x, sigma, h, **extra_args):
         s_in = x.new_ones([x.shape[0]])
         
-        epsilon = self.get_epsilon(x, sigma, **extra_args)
+        epsilon = self.model_epsilon(x, sigma, **extra_args)
         denoised = x - sigma * epsilon
         
         if self.uncond == None:
@@ -959,6 +993,17 @@ class RK_Method_Linear(RK_Method):
 
     def data_to_vel(self, x, data, sigma):
         return (data - x) / sigma
+    
+    def get_epsilon(self, x_0, x, y, sigma, sigma_cur, sigma_down=None):
+        if sigma_down > sigma:
+            sigma_cur = self.sigma_max - sigma_cur.clone()
+        if sigma_down is None:
+            return (x - y) / sigma_cur
+        else:
+            if sigma_down > sigma:
+                return (y - x) / sigma_cur
+            else:
+                return (x - y) / sigma_cur
     
     
     

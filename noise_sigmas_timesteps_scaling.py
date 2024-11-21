@@ -98,6 +98,8 @@ def get_res4lyf_step_with_model(model, sigma, sigma_next, eta=0.0, eta_var=1.0, 
         su, sd, alpha_ratio = get_ancestral_step_RF_sqrd(sigma, sigma_next, eta)
       elif noise_mode == "exp": 
         su, sd, alpha_ratio = get_ancestral_step_RF_exp(sigma_next, eta, h)
+      else: #fall back to hard noise from hard_var
+        su, sd, alpha_ratio = get_ancestral_step_RF_hard(sigma_next, eta)
   else:
     alpha_ratio = torch.full_like(sigma, 1.0)
     if noise_mode == "hard":
