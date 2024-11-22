@@ -687,6 +687,7 @@ class ClownsharKSampler_Beta:
                     "truncate_conditioning": (['false', 'true'], {"default": "true"}),
                     "input_std": ("FLOAT", {"default": 1.0, "min": -10000, "max": 10000, "step":0.01}),
                     "input_normalization": (["none", "mean_std", "std", "channels_mean_std", "channels_std", "process_latent_in"], {"default": "channels_mean_std"}),
+                    "extra_options": ("STRING", {"default": "", "multiline": True}),   
                      },
                 "optional": 
                     {
@@ -716,7 +717,7 @@ class ClownsharKSampler_Beta:
                     exp_mode=False, t_fn_formula=None, sigma_fn_formula=None, implicit_steps=0,
                     latent_guide=None, latent_guide_inv=None, latent_guide_weight=0.0, guide_mode="blend", latent_guide_weights=None, latent_guide_mask=None, rescale_floor=True, sigmas_override=None, unsampler_type="linear",
                     shift=3.0, base_shift=0.85, guides=None, options=None, sde_noise=None,sde_noise_steps=1, t_is=None, shift_scaling="exponential",
-                    input_std=1.0, input_normalization="channels",
+                    input_std=1.0, input_normalization="channels", extra_options="",
                     ): 
             default_dtype = torch.float64
             max_steps = 10000
@@ -941,7 +942,7 @@ class ClownsharKSampler_Beta:
                                                                 "latent_guide": latent_guide, "latent_guide_inv": latent_guide_inv, "mask": latent_guide_mask, 
                                                                 "latent_guide_weights": latent_guide_weights, "t_is": t_is, "guide_mode": guide_mode, "unsampler_type": unsampler_type,
                                                                 "LGW_MASK_RESCALE_MIN": rescale_floor, "sigmas_override": sigmas_override, "sde_noise": sde_noise,
-                                                                "input_std": input_std, "input_normalization": input_normalization,
+                                                                "input_std": input_std, "input_normalization": input_normalization, "extra_options": extra_options,
                                                                 })
 
                 samples = comfy.sample.sample_custom(model, noise, cfg, sampler, sigmas, positive, negative, x.clone(), 

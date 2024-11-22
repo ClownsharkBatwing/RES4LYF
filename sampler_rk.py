@@ -1,6 +1,8 @@
 import torch
 import torch.nn.functional as F
 import torchvision.transforms as T
+import re
+
 
 from tqdm.auto import trange
 import math
@@ -992,7 +994,7 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
                   eta=0.0, eta_var=0.0, s_noise=1., d_noise=1., alpha=-1.0, k=1.0, scale=0.1, c1=0.0, c2=0.5, c3=1.0, MULTISTEP=False, cfgpp=0.0, implicit_steps=0, reverse_weight=0.0, exp_mode=False,
                   latent_guide=None, latent_guide_inv=None, latent_guide_weights=None, guide_mode="blend", unsampler_type="linear",
                   GARBAGE_COLLECT=False, mask=None, LGW_MASK_RESCALE_MIN=True, sigmas_override=None, t_is=None,sde_noise=None,
-                  input_std=1.0, input_normalization="channels",
+                  input_std=1.0, input_normalization="channels", extra_options="",
                   ):
     extra_args = {} if extra_args is None else extra_args
     s_in = x.new_ones([x.shape[0]])
@@ -1119,15 +1121,43 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
                 
                 cvf = rk.get_epsilon(x_0, x_[row+1], y0, sigma, s_[row], sigma_down, t_i)
                 
-                avg = 0
-                for i4 in range(x.shape[1]):
-                    avg += torch.norm(data_[row][0][i4] - y0[0][i4])
-                avg /= x.shape[1]
-                
-                for i4 in range(x.shape[1]):
-                    ratio = torch.norm(data_[row][0][i4] - y0[0][i4])   /   avg
-                    lgw_tmp = lgw[_] * ratio
-                    eps_[row][0][i4] = eps_[row][0][i4]  + lgw_tmp * (cvf[0][i4]  - eps_[row][0][i4] )
+                match = re.search(r"tol\s*=\s*([\d.]+)", extra_options)
+                if match:
+                    tol_value = float(match.group(1))
+                    print(f"Extracted tol value: {tol_value}")
+                    
+                    for i4 in range(x.shape[1]):
+                        current_diff = torch.norm(data_[row][0][i4] - y0[0][i4]) 
+                        #current_diff = torch.norm(eps_[row][0][i4] - cvf[0][i4]) 
+                        scaling_factor = tol_value / current_diff
+                        
+                        #diff_weighted = (1 - scaling_factor) * x + scaling_factor * y
+                        
+                        #lgw_tmp = lgw[_] * ratio
+                        #lgw_tmp = 1 - scaling_factor
+                        #lgw_tmp = scaling_factor
+                        
+                        lgw_tmp = min(lgw[_], 1-scaling_factor)
+                        
+                        eps_[row][0][i4] = eps_[row][0][i4]  + lgw_tmp * (cvf[0][i4]  - eps_[row][0][i4] )
+                        
+                    
+                else:
+                    blahblahblah = 0
+                    
+                    #if extra_options == "disable_lgw_scaling":
+                    if re.search(r"\bdisable_lgw_scaling\b", extra_options):
+                        eps_[row] = eps_[row] + lgw[_] * (cvf - eps_[row])
+                    else:
+                        avg = 0
+                        for i4 in range(x.shape[1]):
+                            avg += torch.norm(data_[row][0][i4] - y0[0][i4])
+                        avg /= x.shape[1]
+                        
+                        for i4 in range(x.shape[1]):
+                            ratio = torch.norm(data_[row][0][i4] - y0[0][i4])   /   avg
+                            lgw_tmp = lgw[_] * ratio
+                            eps_[row][0][i4] = eps_[row][0][i4]  + lgw_tmp * (cvf[0][i4]  - eps_[row][0][i4] )
                 
                 #eps_[row] = eps_[row] + lgw[_] * (cvf - eps_[row])
                 print(torch.norm(data_[row] - y0))
