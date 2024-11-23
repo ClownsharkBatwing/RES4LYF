@@ -15,7 +15,7 @@ def get_ancestral_step_RF_var(sigma, sigma_next, eta):
     sigma_down = torch.sqrt(sigma_down_num) / ((1 - sigma_next).to(torch.float64) + torch.sqrt(sigma_down_num).to(torch.float64))
 
     alpha_ratio = (1 - sigma_next).to(torch.float64) / (1 - sigma_down).to(torch.float64)
-    return sigma_up.to(dtype), sigma_down.to(dtype), alpha_ratio.to(dtype)
+    return sigma_up.to(dtype),  sigma_down.to(dtype), alpha_ratio.to(dtype)
 
 def get_ancestral_step_EPS(sigma, sigma_next, eta=1.):
     # Calculates the noise level (sigma_down) to step down to and the amount of noise to add (sigma_up) when doing an ancestral sampling step.
@@ -81,6 +81,19 @@ def get_ancestral_step_RF_hard(sigma_next, eta, sigma_max=1.0):
     
     return sigma_up, sigma_down, alpha_ratio
 
+def get_ancestral_step_RF_odds(sigma, sigma_next, eta, sigma_max=1.0):
+    alpha_ratio = (1 / (1 - sigma)) * (sigma_next - sigma)
+    sigma_up = torch.sqrt((2 * sigma) / (1 - sigma)) * torch.sqrt( (sigma_next - sigma).abs())
+    #sigma_up = sigma_next * eta 
+    
+    sigma_signal = sigma_max - sigma_next
+    sigma_residual = torch.sqrt(sigma_next**2 - sigma_up**2)
+
+    #alpha_ratio = sigma_signal + sigma_residual
+    sigma_down = sigma_residual / alpha_ratio
+    
+    return sigma_up, sigma_down, alpha_ratio
+
 
 def get_res4lyf_step_with_model(model, sigma, sigma_next, eta=0.0, eta_var=1.0, noise_mode="hard", h=None):
   if isinstance(model.inner_model.inner_model.model_sampling, comfy.model_sampling.CONST):
@@ -98,6 +111,8 @@ def get_res4lyf_step_with_model(model, sigma, sigma_next, eta=0.0, eta_var=1.0, 
         su, sd, alpha_ratio = get_ancestral_step_RF_sqrd(sigma, sigma_next, eta)
       elif noise_mode == "exp": 
         su, sd, alpha_ratio = get_ancestral_step_RF_exp(sigma_next, eta, h)
+      elif noise_mode == "odds":
+        su, sd, alpha_ratio = get_ancestral_step_RF_odds(sigma, sigma_next, eta)
       else: #fall back to hard noise from hard_var
         su, sd, alpha_ratio = get_ancestral_step_RF_hard(sigma_next, eta)
   else:

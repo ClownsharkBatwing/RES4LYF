@@ -685,6 +685,9 @@ class ClownsharKSampler_Beta:
                     "base_shift": ("FLOAT", {"default": 0.85, "min": -1.0, "max": 100.0, "step":0.1, "round": False, }),
                     "shift_scaling": (["exponential", "linear"], {"default": "exponential"}),
                     "truncate_conditioning": (['false', 'true'], {"default": "true"}),
+                    "input_std": ("FLOAT", {"default": 1.0, "min": -10000, "max": 10000, "step":0.01}),
+                    "input_normalization": (["none", "mean_std", "std", "channels_mean_std", "channels_std", "process_latent_in"], {"default": "channels_mean_std"}),
+                    "extra_options": ("STRING", {"default": "", "multiline": True}),   
                      },
                 "optional": 
                     {
@@ -695,6 +698,7 @@ class ClownsharKSampler_Beta:
                     "guides": ("GUIDES", ),     
                     "options": ("OPTIONS", ),   
                     "sde_noise": ("LATENT",),
+                    "t_is": ("SIGMAS", ),
                     }
                 }
 
@@ -713,11 +717,12 @@ class ClownsharKSampler_Beta:
                     exp_mode=False, t_fn_formula=None, sigma_fn_formula=None, implicit_steps=0,
                     latent_guide=None, latent_guide_inv=None, latent_guide_weight=0.0, guide_mode="blend", latent_guide_weights=None, latent_guide_mask=None, rescale_floor=True, sigmas_override=None, unsampler_type="linear",
                     shift=3.0, base_shift=0.85, guides=None, options=None, sde_noise=None,sde_noise_steps=1, t_is=None, shift_scaling="exponential",
+                    input_std=1.0, input_normalization="channels", extra_options="",
                     ): 
             default_dtype = torch.float64
             max_steps = 10000
 
-
+            t_is_override = t_is
             if noise_seed == -1:
                 seed = torch.initial_seed() + 1
             else:
@@ -927,13 +932,18 @@ class ClownsharKSampler_Beta:
                         sde_noise[i] = sde_noise[i].to('cuda')
                         for j in range(sde_noise[i].shape[1]):
                             sde_noise[i][0][j] = ((sde_noise[i][0][j] - sde_noise[i][0][j].mean()) / sde_noise[i][0][j].std()) #.to('cuda')
+                            
+                if t_is_override is not None:
+                    t_is = t_is_override
 
                 sampler = comfy.samplers.ksampler("rk_beta", {"eta": eta, "eta_var": eta_var, "s_noise": s_noise, "d_noise": d_noise, "alpha": alpha_sde, "k": k_sde, "c1": c1, "c2": c2, "c3": c3, "cfgpp": cfgpp, "MULTISTEP": multistep, 
                                                         "noise_sampler_type": noise_type_sde, "noise_mode": noise_mode_sde, "noise_seed": noise_seed_sde, "rk_type": sampler_name, "implicit_sampler_name": implicit_sampler_name,
                                                                 "exp_mode": exp_mode, "t_fn_formula": t_fn_formula, "sigma_fn_formula": sigma_fn_formula, "implicit_steps": implicit_steps,
                                                                 "latent_guide": latent_guide, "latent_guide_inv": latent_guide_inv, "mask": latent_guide_mask, 
                                                                 "latent_guide_weights": latent_guide_weights, "t_is": t_is, "guide_mode": guide_mode, "unsampler_type": unsampler_type,
-                                                                "LGW_MASK_RESCALE_MIN": rescale_floor, "sigmas_override": sigmas_override, "sde_noise": sde_noise,})
+                                                                "LGW_MASK_RESCALE_MIN": rescale_floor, "sigmas_override": sigmas_override, "sde_noise": sde_noise,
+                                                                "input_std": input_std, "input_normalization": input_normalization, "extra_options": extra_options,
+                                                                })
 
                 samples = comfy.sample.sample_custom(model, noise, cfg, sampler, sigmas, positive, negative, x.clone(), 
                                                     noise_mask=noise_mask, callback=callback, disable_pbar=disable_pbar, seed=noise_seed)
@@ -1020,7 +1030,7 @@ class UltraSharkSampler:
             if model.model.model_config.unet_config.get('stable_cascade_stage') == 'up':
                 model = model.clone()
                 x_lr = guide['samples'] if guide is not None else None
-                guide_weights = initialize_or_scale(guide_weights, guide_weight, 10000)
+                guide_weights = initialize_or_scale(guide_weights, guide_weight, 10000)("FLOAT", {"default": 1.0, "min": -10000, "max": 10000, "step":0.01}),
                 #model.model.diffusion_model.set_guide_weights(guide_weights=guide_weights)
                 #model.model.diffusion_model.set_guide_type(guide_type=guide_type)
                 #model.model.diffusion_model.set_x_lr(x_lr=x_lr)

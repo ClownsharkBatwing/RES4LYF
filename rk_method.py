@@ -15,6 +15,7 @@ import functools
 from .noise_classes import *
 
 import comfy.model_patcher
+import comfy.supported_models
 from .extra_samplers_helpers import get_deis_coeff_list
 
 
@@ -716,23 +717,37 @@ class RK_Method:
         else:
             return x
     
-    def add_noise(self, x, y0, lgw, sigma_up, sigma, sigma_next, sigma_down, alpha_ratio, s_noise, SDE_NOISE_EXTERNAL, sde_noise_t):
+    """   def add_noise(self, x, y0, lgw, sigma_up, sigma, sigma_next, sigma_down, alpha_ratio, s_noise, SDE_NOISE_EXTERNAL, sde_noise_t):
         noise = self.noise_sampler(sigma=sigma, sigma_next=sigma_next)
         noise = torch.nan_to_num((noise - noise.mean()) / noise.std(), 0.0)
         
-        return alpha_ratio * x + noise * s_noise * sigma_up
+        return alpha_ratio * x + noise * s_noise * sigma_up"""
 
     
     
     
-    def add_noise_orig(self, x, y0, sigma_up, sigma, sigma_next, sigma_down, alpha_ratio, s_noise, SDE_NOISE_EXTERNAL, sde_noise_t):
+    #def add_noise_orig(self, x, y0, sigma_up, sigma, sigma_next, sigma_down, alpha_ratio, s_noise, SDE_NOISE_EXTERNAL, sde_noise_t):
+    
+    def add_noise(self, x, y0, lgw, sigma_up, sigma, sigma_next, sigma_down, alpha_ratio, s_noise, SDE_NOISE_EXTERNAL, sde_noise_t):
+        
+        
         if sigma_next > 0.0:
+
+            noise = self.noise_sampler(sigma=sigma, sigma_next=sigma_next)
+            noise = torch.nan_to_num((noise - noise.mean()) / noise.std(), 0.0)
+            
+            #cvf = self.get_epsilon(x, x, y0, sigma, sigma_up, sigma_down, None)
+            #for i in range(cvf.shape[1]):
+            #    cvf[0][i] = (cvf[0][i] - cvf[0][i].mean()) / cvf[0][i].std()
+            #noise = noise + lgw * (cvf - noise)
+            
+            #x = (1 - s_noise) * x + s_noise * (y0 + sigma_down * noise)
             if SDE_NOISE_EXTERNAL:
-                noise = sde_noise_t
-            else:
-                noise = self.noise_sampler(sigma=sigma, sigma_next=sigma_next)
-                noise = torch.nan_to_num((noise - noise.mean()) / noise.std(), 0.0)
-            return alpha_ratio * x + noise * s_noise * sigma_up
+                noise = (1-s_noise) * noise + s_noise * sde_noise_t
+            
+            return alpha_ratio * x + noise * sigma_up  #removed s_noise for hack use
+        
+            #return alpha_ratio * x + noise * s_noise * sigma_up
         else:
             return x
     
@@ -817,13 +832,17 @@ class RK_Method:
                 #for i in range(x.shape[1]):
                 #    x[0][i] = x[0][i] / x[0][i].std()
                 #x = x / x.std()
-                #y0 = latent_guide = latent_guide['samples'].clone().to(x.device)
-                #y0 = (y0 - y0.mean()) / y0.std()
+                #if isinstance(self.model.inner_model.inner_model.model_config, comfy.supported_models.Flux) or isinstance(self.model.inner_model.inner_model.model_config, comfy.supported_models.FluxSchnell):
+                #    pass
+                    #x = (x - x.mean()) / x.std()
+                    #y0 = latent_guide = latent_guide['samples'].clone().to(x.device)
+                    #y0 = (y0 - y0.mean()) / y0.std()
+                    #for i in range(x.shape[1]):
+                    #    x[0][i] = x[0][i] / x[0][i].std()
+                    
             elif UNSAMPLE and mask is not None:
-                x = x
                 x = (1-mask) * x + mask * self.model.inner_model.inner_model.process_latent_in(latent_guide['samples']).clone().to(x.device)
             else:
-                x = x
                 x = self.model.inner_model.inner_model.process_latent_in(latent_guide['samples']).clone().to(x.device)
 
         if latent_guide_inv is not None:
@@ -939,9 +958,11 @@ class RK_Method_Exponential(RK_Method):
     def data_to_vel(self, x, data, sigma):
         return data - x
     
-    def get_epsilon(self, x_0, x, y, sigma, sigma_cur, sigma_down=None):
+    def get_epsilon(self, x_0, x, y, sigma, sigma_cur, sigma_down=None, t_i=None):
         if sigma_down > sigma:
             sigma_cur = self.sigma_max - sigma_cur.clone()
+        sigma_cur = t_i if t_i is not None else sigma_cur
+
         if sigma_down is None:
             return y - x_0
         else:
@@ -994,9 +1015,11 @@ class RK_Method_Linear(RK_Method):
     def data_to_vel(self, x, data, sigma):
         return (data - x) / sigma
     
-    def get_epsilon(self, x_0, x, y, sigma, sigma_cur, sigma_down=None):
+    def get_epsilon(self, x_0, x, y, sigma, sigma_cur, sigma_down=None, t_i=None):
         if sigma_down > sigma:
             sigma_cur = self.sigma_max - sigma_cur.clone()
+        sigma_cur = t_i if t_i is not None else sigma_cur
+
         if sigma_down is None:
             return (x - y) / sigma_cur
         else:
