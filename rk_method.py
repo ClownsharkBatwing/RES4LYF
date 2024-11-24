@@ -676,7 +676,7 @@ class RK_Method:
         x0 = self.model(x, sigma * s_in, **extra_args)
         #return x0 ###################################THIS WORKS ONLY WITH THE MODEL SAMPLING PATCH
         eps = (x - x0) / (sigma * s_in) 
-        return eps
+        return eps, x0
     
     def model_denoised(self, x, sigma, **extra_args):
         s_in = x.new_ones([x.shape[0]])
@@ -766,6 +766,10 @@ class RK_Method:
             sigmas = sigmas[1:-1]
         else: 
             UNSAMPLE = False
+            
+        if hasattr(self.model, "sigmas"):
+            self.model.sigmas = sigmas
+            
         return sigmas, UNSAMPLE
     
     def prepare_mask(self, x, mask, LGW_MASK_RESCALE_MIN):
@@ -821,8 +825,6 @@ class RK_Method:
         ks = (k[0:self.cols] * self.b[row]).sum(dim=0)
         return ks
 
-        return #ab, ci, multistep_stages, EPS_PRED
-    
     def init_guides(self, x, latent_guide, latent_guide_inv, mask, sigmas, UNSAMPLE):
         y0, y0_inv = torch.zeros_like(x), torch.zeros_like(x)
         if latent_guide is not None:
@@ -997,8 +999,8 @@ class RK_Method_Linear(RK_Method):
     def __call__(self, x_0, x, sigma, h, **extra_args):
         s_in = x.new_ones([x.shape[0]])
         
-        epsilon = self.model_epsilon(x, sigma, **extra_args)
-        denoised = x - sigma * epsilon
+        epsilon, denoised = self.model_epsilon(x, sigma, **extra_args)
+        #denoised = x - sigma * epsilon
         
         if self.uncond == None:
             self.uncond = torch.zeros_like(x)
