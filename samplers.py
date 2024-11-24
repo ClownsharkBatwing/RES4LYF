@@ -133,6 +133,7 @@ class LatentNoised:
 
             return (latent_out,)
 
+
 #SCHEDULER_NAMES = comfy.samplers.SCHEDULER_NAMES + ["beta57"]
 
 class SharkSampler:
@@ -1170,10 +1171,10 @@ class SamplerRK:
 
         if latent_guide is None and latent_guide_inv is None:
             latent_guide_weight = 0.0
-            
+
         steps = 10000
         latent_guide_weights = initialize_or_scale(latent_guide_weights, latent_guide_weight, steps)
-        
+            
         latent_guide_weights = F.pad(latent_guide_weights, (0, 10000), value=0.0)
 
         sampler = comfy.samplers.ksampler(sampler_name, {"eta": eta, "eta_var": eta_var, "s_noise": s_noise, "d_noise": d_noise, "alpha": alpha, "k": k, "cfgpp": cfgpp, "MULTISTEP": multistep, "noise_sampler_type": noise_sampler_type, "noise_mode": noise_mode, "noise_seed": noise_seed, "rk_type": rk_type, 
