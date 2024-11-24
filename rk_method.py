@@ -1031,68 +1031,6 @@ class RK_Method_Linear(RK_Method):
                 return (x - y) / sigma_cur
     
     
-    
-    
-    
-    
-
-
-
-
-
-
-
-class RK_Method_trash:
-    def __init__(self, device='cuda', dtype=torch.float64, option=None):
-        self.device = device
-        self.dtype = dtype
-        self.option = option
-        self.eps_pred = getattr(self, 'eps_pred')  # Set default from subclass or 'linear'
-        
-        self.ab = None
-        self.c = None
-        
-        self.t_fn = None 
-        self.sigma_fn = None
-
-
-        self._set_sigma_timestep_scaling()
-        self._define_tableaus()
-        self._handle_option()
-
-    def _set_sigma_timestep_scaling(self):
-        if self.method_type == 'exponential':
-            self.step_function = lambda x, h: torch.exp(-h) * x
-            print("Exponential step function selected.")
-        elif self.method_type == 'linear':
-            self.step_function = lambda x, h: x - h
-            print("Linear step function selected.")
-        else:
-            raise ValueError(f"Unknown method type: {self.method_type}")
-
-    def _define_tableaus(self):
-        """Should be overridden by subclasses to define 'ab' and 'c'."""
-        raise NotImplementedError("Subclasses should define 'ab' and 'c' coefficients.")
-
-    def _handle_option(self):
-        if self.option == 'advanced':
-            print("Advanced option selected.")
-        elif self.option == 'basic':
-            print("Basic option selected.")
-        else:
-            print("No specific option selected.")
-
-    def __call__(self, x, h):
-        return self.step_function(x, h)
-
-class RK4Method(RK_Method):
-    eps_pred = 'exponential'  # Automatically set 'exponential' as the default
-
-    def _define_tableaus(self):
-        """Define the Butcher tableau for RK4."""
-        self.ab = torch.tensor([[0.5, 0.5], [0, 1.0], [0, 0.5]], device=self.device, dtype=self.dtype)
-        self.c = torch.tensor([0, 0.5, 1.0], device=self.device, dtype=self.dtype)
-
 
 
 
