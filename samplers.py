@@ -93,46 +93,45 @@ class LatentNoised:
     CATEGORY = "sampling/custom_sampling"
     
     def main(self, add_noise, noise_is_latent, noise_type, noise_seed, alpha, k, latent_image, noise_strength, normalize, latent_noise=None, mask=None):
-            latent = latent_image
-            latent_image = latent["samples"]
+            latent_out = latent_image.copy()
+            samples = latent_out["samples"].clone()
 
             torch.manual_seed(noise_seed)
 
             if not add_noise:
-                noise = torch.zeros(latent_image.size(), dtype=latent_image.dtype, layout=latent_image.layout, device="cpu")
+                noise = torch.zeros(samples.size(), dtype=samples.dtype, layout=samples.layout, device="cpu")
             elif latent_noise is None:
-                batch_inds = latent["batch_index"] if "batch_index" in latent else None
-                noise = prepare_noise(latent_image, noise_seed, noise_type, batch_inds, alpha, k)
+                batch_inds = latent_out["batch_index"] if "batch_index" in latent_out else None
+                noise = prepare_noise(samples, noise_seed, noise_type, batch_inds, alpha, k)
             else:
                 noise = latent_noise["samples"]
 
             if normalize == "true":
-                latent_mean = latent_image.mean()
-                latent_std = latent_image.std()
+                latent_mean = samples.mean()
+                latent_std = samples.std()
                 noise = noise * latent_std + latent_mean
 
             if noise_is_latent:
-                noise += latent_image.cpu()
+                noise += samples.cpu()
                 noise.sub_(noise.mean()).div_(noise.std())
             
             noise = noise * noise_strength
 
             if mask is not None:
                 mask = F.interpolate(mask.reshape((-1, 1, mask.shape[-2], mask.shape[-1])), 
-                                     size=(latent_image.shape[2], latent_image.shape[3]), 
-                                     mode="bilinear")
-                mask = mask.expand((-1, latent_image.shape[1], -1, -1)).to(latent_image.device)
-                if mask.shape[0] < latent_image.shape[0]:
-                    mask = mask.repeat((latent_image.shape[0] - 1) // mask.shape[0] + 1, 1, 1, 1)[:latent_image.shape[0]]
-                elif mask.shape[0] > latent_image.shape[0]:
-                    mask = mask[:latent_image.shape[0]]
+                                    size=(samples.shape[2], samples.shape[3]), 
+                                    mode="bilinear")
+                mask = mask.expand((-1, samples.shape[1], -1, -1)).to(samples.device)
+                if mask.shape[0] < samples.shape[0]:
+                    mask = mask.repeat((samples.shape[0] - 1) // mask.shape[0] + 1, 1, 1, 1)[:samples.shape[0]]
+                elif mask.shape[0] > samples.shape[0]:
+                    mask = mask[:samples.shape[0]]
                 
                 noise = mask * noise + (1 - mask) * torch.zeros_like(noise)
 
-            noised_latent = latent_image.cpu() + noise
+            latent_out["samples"] = samples.cpu() + noise
 
-            return ({'samples': noised_latent},)
-
+            return (latent_out,)
 
 #SCHEDULER_NAMES = comfy.samplers.SCHEDULER_NAMES + ["beta57"]
 
@@ -1148,9 +1147,12 @@ class SamplerRK:
                     ):
         sampler_name = "rk"
 
+        if latent_guide is None and latent_guide_inv is None:
+            latent_guide_weight = 0.0
+            
         steps = 10000
         latent_guide_weights = initialize_or_scale(latent_guide_weights, latent_guide_weight, steps)
-            
+        
         latent_guide_weights = F.pad(latent_guide_weights, (0, 10000), value=0.0)
 
         sampler = comfy.samplers.ksampler(sampler_name, {"eta": eta, "eta_var": eta_var, "s_noise": s_noise, "d_noise": d_noise, "alpha": alpha, "k": k, "cfgpp": cfgpp, "MULTISTEP": multistep, "noise_sampler_type": noise_sampler_type, "noise_mode": noise_mode, "noise_seed": noise_seed, "rk_type": rk_type, 
