@@ -1,7 +1,7 @@
 import { app } from "../../scripts/app.js";
 
-let RESDEBUG = true;
-let ENABLE_WIDGET_HIDING = true;
+let ENABLE_WIDGET_HIDING = false; 
+let RESDEBUG = false;
 
 function resDebugLog(...args) {
     if (RESDEBUG) {
@@ -9,132 +9,188 @@ function resDebugLog(...args) {
     }
 }
 
-// Constant used to mark hidden widgets
 const HIDDEN_TAG = "RES4LYF_hidden";
-
-// Object to store original widget properties
 let origProps = {};
+const nodeConfigs = {};
 
-const nodeConfigs = {
-    "AdvancedNoise": {
-        relevantWidgets: ["noise_type", "noise_sampler_type"],
-    },
-    "ClownSamplerLegacy": {
-        relevantWidgets: ["noise_type", "noise_sampler_type"],
-    },
-    "ClownSampler": {
-        relevantWidgets: ["noise_type", "noise_sampler_type"],
-    },
-    "KSamplerSelectAdvanced": {
-        relevantWidgets: ["noise_type", "noise_sampler_type"],
-    },
-    "LatentNoised": {
-        relevantWidgets: ["noise_type", "noise_sampler_type"],
-    },
-    "SamplerCorona": {
-        relevantWidgets: ["noise_type", "noise_sampler_type"],
-    },
-    "SamplerDEIS_SDE": {
-        relevantWidgets: ["noise_type", "noise_sampler_type"],
-    },
-    "SamplerDPMPP_2M_SDE_Advanced": {
-        relevantWidgets: ["noise_type", "noise_sampler_type"],
-    },
-    "SamplerDPMPP_2S_Ancestral_Advanced": {
-        relevantWidgets: ["noise_type", "noise_sampler_type"],
-    },
-    "SamplerDPMPP_3M_SDE_Advanced": {
-        relevantWidgets: ["noise_type", "noise_sampler_type"],
-    },
-    "SamplerDPMPP_DualSDE_Advanced": {
-        relevantWidgets: ["noise_type", "noise_sampler_type"],
-    },
-    "SamplerDPMPP_SDE_Advanced": {
-        relevantWidgets: ["noise_type", "noise_sampler_type"],
-    },
-    "SamplerDPMPP_SDE_CFG++_Advanced": {
-        relevantWidgets: ["noise_type", "noise_sampler_type"],
-    },
-    "SamplerEulerAncestral_Advanced": {
-        relevantWidgets: ["noise_type", "noise_sampler_type"],
-    },
-    "SamplerNoiseInversion": {
-        relevantWidgets: ["noise_type", "noise_sampler_type"],
-    },
-    "SamplerRES_Implicit": {
-        relevantWidgets: ["noise_type", "noise_sampler_type"],
-    },
-    "SamplerRES3_Implicit_Automation": {
-        relevantWidgets: ["noise_type", "noise_sampler_type"],
-    },
-    "SamplerRK": {
-        relevantWidgets: ["noise_type", "noise_sampler_type"],
-    },
-    "SamplerRK_Test": {
-        relevantWidgets: ["noise_type", "noise_sampler_type"],
-    },
-    "SharkSampler": {
-        relevantWidgets: ["noise_type", "noise_sampler_type"],
-    },
-    "UltraSharkSampler": {
-        relevantWidgets: ["noise_type", "noise_sampler_type"],
-    },
-    "UltraSharkSampler Tiled": {
-        relevantWidgets: ["noise_type", "noise_sampler_type"],
-    },
-    
+/**
+ * Dynamic Widget Management Configuration
+ * This system manages two types of widget visibility:
+ * 1. Widget Dependencies: Widgets that show/hide based on other widgets' values
+ * 2. Optional Input Dependencies: Widgets that show/hide based on input connections
+ */
+
+// 1. Widget Dependencies - These are common configurations that are shared across multiple nodes
+const commonDependentWidgets = {
+    groups: [
+        {
+            inputWidgetNames: ["noise_type", "noise_sampler_type"],     // Controlling widgets
+            independentValues: ["fractal"],                             // Values that trigger showing dependent widgets
+            widgetsToShow: ["alpha", "k"]                        // Widgets to show/hide
+        },
+        {
+            inputWidgetNames: ["rk_type"],
+            independentValues: [
+                "dormand-prince_6s", 
+                "dormand-prince_7s", 
+                "dormand-prince_13s",
+                "bogacki-shampine_7s",
+                "rk_exp_5s", 
+                "rk4_4s", 
+                "rk38_4s", 
+                "ralston_4s", 
+                "dpmpp_3s", 
+                "heun_3s", 
+                "houwen-wray_3s", 
+                "kutta_3s", 
+                "ralston_3s", 
+                "res_3s", 
+                "ssprk3_3s", 
+                "dpmpp_2s", 
+                "dpmpp_sde_2s", 
+                "heun_2s", 
+                "ralston_2s", 
+                "res_2s"
+            ],
+            widgetsToShow: ["multistep"]
+        }
+    ]
 };
+
+// Names of nodes that will use commonDependentWidgets config
+const nodesWithCommonConfig = [
+    "AdvancedNoise",
+    "ClownSampler",
+    "ClownSamplerLegacy",
+    "KSamplerSelectAdvanced",
+    "LatentNoised",
+    "SamplerCorona",
+    "SamplerDEIS_SDE",
+    "SamplerDPMPP_2M_SDE_Advanced",
+    "SamplerDPMPP_2S_Ancestral_Advanced",
+    "SamplerDPMPP_3M_SDE_Advanced",
+    "SamplerDPMPP_DualSDE_Advanced",
+    "SamplerDPMPP_SDE_Advanced",
+    "SamplerDPMPP_SDE_CFG++_Advanced",
+    "SamplerEulerAncestral_Advanced",
+    "SamplerNoiseInversion",
+    "SamplerRES_Implicit",
+    "SamplerRES3_Implicit_Automation",
+    "SamplerRK",
+    "SamplerRK_Test",
+    "SharkSampler",
+    "UltraSharkSampler",
+    "UltraSharkSampler Tiled"
+];
+
+// 2. Optional Input Dependencies - These are unique configurations for specific nodes
+nodeConfigs["ClownSampler"] = createNodeConfig("ClownSampler", {
+    optionalInputWidgets: {
+        // Define groups of widgets that should be shown/hidden based on input connections
+        groups: [
+            {
+                inputs: ["latent_guide", "latent_guide_inv"],   // Show widgets if ANY of these inputs are connected
+                widgets: ["latent_guide_weight", "guide_mode"]  // Widgets to show/hide
+            },
+            {
+                inputs: ["latent_guide_mask"],
+                widgets: ["rescale_floor"]
+            }
+        ]
+    }
+});
+
+nodeConfigs["SamplerRK"] = createNodeConfig("SamplerRK", {
+    optionalInputWidgets: {
+        groups: [
+            {
+                inputs: ["latent_guide", "latent_guide_inv"],
+                widgets: ["latent_guide_weight", "guide_mode"]
+            }
+        ]
+    }
+});
+
+// Function to create node configurations
+function createNodeConfig(nodeName, uniqueConfig = {}) {
+    const config = { ...uniqueConfig };
+
+    if (nodesWithCommonConfig.includes(nodeName)) {
+        config.dependentWidgets = commonDependentWidgets;
+    }
+
+    return config;
+}
+
+// Add remaining nodes with common configurations but no unique configurations
+nodesWithCommonConfig.forEach(nodeName => {
+    if (!nodeConfigs[nodeName]) {
+        nodeConfigs[nodeName] = createNodeConfig(nodeName);
+    }
+});
 
 /**
  * Toggles the visibility of a widget
  * @param {object} node - The node object
  * @param {object} widget - The widget to toggle
- * @param {boolean} show - Whether to show or hide the widget
+ * @param {boolean} shouldShow - Whether the widget should be shown
  */
-function toggleWidget(node, widget, show = false) {
-    if (!widget || !ENABLE_WIDGET_HIDING) return;
+function toggleWidget(node, widget, shouldShow = false) {
+    if (!widget) return;
+
+    resDebugLog(`Toggling widget ${widget.name} in ${node.comfyClass}: shouldShow=${shouldShow}, ENABLE_WIDGET_HIDING=${ENABLE_WIDGET_HIDING}`);
+    
     if (!origProps[widget.name]) {
-        origProps[widget.name] = { origType: widget.type, origComputeSize: widget.computeSize };
+        origProps[widget.name] = { 
+            origType: widget.type,
+            origComputeSize: widget.computeSize 
+        };
     }
+    
     const origSize = node.size;
 
-    widget.type = show ? origProps[widget.name].origType : HIDDEN_TAG;
-    widget.computeSize = show ? origProps[widget.name].origComputeSize : () => [0, -4];
+    widget._RES4LYF_hidden = !shouldShow;
+    widget.type = shouldShow || !ENABLE_WIDGET_HIDING ? origProps[widget.name].origType : HIDDEN_TAG;
+    widget.computeSize = shouldShow || !ENABLE_WIDGET_HIDING ? 
+        origProps[widget.name].origComputeSize : 
+        () => [0, -4];
 
-    if (show)
+    if (shouldShow || !ENABLE_WIDGET_HIDING)
         delete widget.computedHeight;
     else
         widget.computedHeight = 0;
 
     const newSize = node.computeSize();
-    const height = show ? Math.max(newSize[1], origSize[1]) : newSize[1];
+    const height = shouldShow || !ENABLE_WIDGET_HIDING ? 
+        Math.max(newSize[1], origSize[1]) : 
+        newSize[1];
     node.setSize([node.size[0], height]);
 }
 
 /**
  * Creates a generic node change handler
  * @param {object} node - The node object
- * @param {array} relevantWidgets - Array of relevant widget names
+ * @param {array} dependentWidgetsConfig - Array of relevant widget names
  * @returns {function} - The node change handler
  */
-function createGenericHandler(node, relevantWidgets) {
+function createGenericHandler(node, dependentWidgetsConfig) {
     return () => {
         resDebugLog(`${node.comfyClass} onNodeChange called`);
-        const noiseTypeWidget = node.widgets.find(w => w.name === "noise_type");
-        const noiseSamplerTypeWidget = node.widgets.find(w => w.name === "noise_sampler_type");
-        const alphaWidget = node.widgets.find(w => w.name === "alpha");
-        const kWidget = node.widgets.find(w => w.name === "k");
 
-        if (noiseTypeWidget && alphaWidget && kWidget) {
-            const showFractalInputs = noiseTypeWidget.value === "fractal";
-            toggleWidget(node, alphaWidget, showFractalInputs);
-            toggleWidget(node, kWidget, showFractalInputs);
-        }
+        if (dependentWidgetsConfig?.groups) {
+            dependentWidgetsConfig.groups.forEach(group => {
+                const { inputWidgetNames, independentValues, widgetsToShow } = group;
 
-        if (noiseSamplerTypeWidget && alphaWidget && kWidget) {
-            const showFractalInputs = noiseSamplerTypeWidget.value === "fractal";
-            toggleWidget(node, alphaWidget, showFractalInputs);
-            toggleWidget(node, kWidget, showFractalInputs);
+                const showWidgets = inputWidgetNames.some(widgetName => {
+                    const widget = node.widgets.find(w => w.name === widgetName);
+                    return widget && independentValues.includes(widget.value);
+                });
+
+                widgetsToShow.forEach(widgetName => {
+                    const widget = node.widgets.find(w => w.name === widgetName);
+                    toggleWidget(node, widget, showWidgets);
+                });
+            });
         }
     };
 }
@@ -142,47 +198,149 @@ function createGenericHandler(node, relevantWidgets) {
 /**
  * Sets up dynamic widgets for a node
  * @param {object} node - The node object
- * @param {array} relevantWidgets - Array of relevant widget names
+ * @param {array} dependentWidgets - Array of relevant widget names
  */
-function setupDynamicWidgets(node, relevantWidgets) {
+function setupDynamicWidgets(node, dependentWidgetsConfig) {
     resDebugLog("Setting up dynamic widgets for", node.comfyClass);
-    resDebugLog("Relevant widgets:", relevantWidgets);
-    const onNodeChange = createGenericHandler(node, relevantWidgets);
+    const onNodeChange = createGenericHandler(node, dependentWidgetsConfig);
 
-    // Call onNodeChange initially
     onNodeChange();
 
-    // Set up the callback for relevant widgets
-    relevantWidgets.forEach(widgetName => {
-        const widget = node.widgets.find(w => w.name === widgetName);
-        if (widget) {
-            resDebugLog(`Setting up ${widgetName} callback for ${node.comfyClass}`);
-            widget.callback = onNodeChange;
-        }
-    });
+    if (dependentWidgetsConfig?.groups) {
+        dependentWidgetsConfig.groups.forEach(group => {
+            group.inputWidgetNames.forEach(widgetName => {
+                const widget = node.widgets.find(w => w.name === widgetName);
+                if (widget) {
+                    widget.callback = onNodeChange;
+                }
+            });
+        });
+    }
 
+    // Connection change handler
+    function handleConnectionChange(type, index, connected, link_info) {
+        const config = nodeConfigs[node.comfyClass];
+        if (!config?.optionalInputWidgets?.groups) return;
+    
+        // Find which input changed
+        const inputName = node.inputs[index]?.name;
+        if (!inputName) return;
+    
+        // Check each group
+        config.optionalInputWidgets.groups.forEach(group => {
+            if (group.inputs.includes(inputName)) {
+                // Check if ANY input in the group is connected
+                const isAnyConnected = group.inputs.some(inputName => {
+                    const input = node.inputs.find(input => input.name === inputName);
+                    return input && input.link !== null;
+                });
+    
+                // Toggle all widgets in the group
+                group.widgets.forEach(widgetName => {
+                    const widget = node.widgets.find(w => w.name === widgetName);
+                    if (widget) {
+                        toggleWidget(node, widget, isAnyConnected);
+                    }
+                });
+            }
+        });
+    }
+    
     // Override the node's onConnectionsChange method
     const origOnConnectionsChange = node.onConnectionsChange;
     node.onConnectionsChange = function(type, index, connected, link_info) {
         if (origOnConnectionsChange) {
             origOnConnectionsChange.apply(this, arguments);
         }
+        handleConnectionChange(type, index, connected, link_info);
         onNodeChange();
     };
 
-    // Add custom menu option
-    const getExtraMenuOptions = node.getExtraMenuOptions;
-    node.getExtraMenuOptions = function(_, options) {
-        const result = getExtraMenuOptions ? getExtraMenuOptions.apply(this, arguments) : undefined;
-        options.push({
-            content: "Refresh Dynamic Widgets",
-            callback: onNodeChange
+    // Add refresh option to context menu
+    if (!node._RES4LYF_menuWrapped) {
+        const originalGetExtraMenuOptions = node.getExtraMenuOptions;
+        node.getExtraMenuOptions = function(_, options) {
+            if (originalGetExtraMenuOptions) {
+                originalGetExtraMenuOptions.apply(this, arguments);
+            }
+            options.push({
+                content: "Refresh RES4LYF widgets",
+                callback: onNodeChange
+            });
+        };
+        node._RES4LYF_menuWrapped = true;
+    }
+    
+    // Initialize optional input widgets' visibility
+    const config = nodeConfigs[node.comfyClass];
+    if (config?.optionalInputWidgets?.groups) {
+        config.optionalInputWidgets.groups.forEach(group => {
+            // Check if ANY input in the group is connected
+            const isAnyConnected = group.inputs.some(inputName => {
+                const input = node.inputs.find(input => input.name === inputName);
+                return input && input.link !== null;
+            });
+    
+            // Set initial visibility for all widgets in the group
+            group.widgets.forEach(widgetName => {
+                const widget = node.widgets.find(w => w.name === widgetName);
+                if (widget) {
+                    toggleWidget(node, widget, isAnyConnected);
+                }
+            });
         });
-        return result;
-    };
+    }
 }
 
 app.registerExtension({
+    async setup(app) {
+        app.ui.settings.addSetting({
+            id: "RES4LYF.enableDynamicWidgets",
+            name: "RES4LYF: Enable dynamic widget hiding",
+            defaultValue: false,
+            type: "boolean",
+            options: (value) => [
+                { value: true, text: "On", selected: value === true },
+                { value: false, text: "Off", selected: value === false },
+            ],
+            onChange: (value) => {
+                ENABLE_WIDGET_HIDING = value;
+                resDebugLog(`Dynamic widgets ${value ? "enabled" : "disabled"}`);
+                
+                for (const node of app.graph._nodes) {
+                    if (!nodeConfigs[node.comfyClass]) {
+                        resDebugLog(`Skipping node ${node.comfyClass} - not in config`);
+                        continue;
+                    }
+                    
+                    resDebugLog(`Processing node ${node.comfyClass}`);
+                    node.widgets.forEach(widget => {
+                        if (widget._RES4LYF_hidden !== undefined) {
+                            toggleWidget(node, widget, !widget._RES4LYF_hidden);
+                        }
+                    });
+                }
+            },
+        });
+    
+        app.ui.settings.addSetting({
+            id: "RES4LYF.enableDebugLogs",
+            name: "RES4LYF: Enable debug logging",
+            defaultValue: false,
+            type: "boolean",
+            options: (value) => [
+                { value: true, text: "On", selected: value === true },
+                { value: false, text: "Off", selected: value === false },
+            ],
+            onChange: (value) => {
+                RESDEBUG = value;
+                if (RESDEBUG) {
+                    console.log("RES4LYF debug logging enabled");
+                }
+            },
+        });
+    },
+
     name: "Comfy.RES4LYF.DynamicWidgets",
     nodeCreated(node) {
         resDebugLog("Node created:", node.comfyClass);
@@ -191,23 +349,28 @@ app.registerExtension({
         if (config) {
             resDebugLog(`${node.comfyClass} node detected`);
 
-            // Pass config.relevantWidgets to setupDynamicWidgets
-            setupDynamicWidgets(node, config.relevantWidgets);
+            // Set up dynamic widgets
+            setupDynamicWidgets(node, config.dependentWidgets);
 
-            // Override onConfigure
+            // Refresh widgets immediately
+            const onNodeChange = createGenericHandler(node, config.dependentWidgets);
+            onNodeChange();
+
+            // Handle configuration
             const onConfigure = node.onConfigure;
             node.onConfigure = function(o) {
                 const r = onConfigure ? onConfigure.apply(this, arguments) : undefined;
-                // Pass config.relevantWidgets here as well
-                setupDynamicWidgets(node, config.relevantWidgets);
+                setupDynamicWidgets(node, config.dependentWidgets);
                 return r;
             }
 
-            // Add onAfterGraphConfigured
+            // Handle graph configuration
             node.onAfterGraphConfigured = function () {
                 requestAnimationFrame(() => {
-                    const handler = createGenericHandler(node, config.relevantWidgets);
-                    handler();
+                    if (node && node.graph) {  // Check if node is still valid
+                        const handler = createGenericHandler(node, config.dependentWidgets);
+                        handler();
+                    }
                 });
             };
         }
