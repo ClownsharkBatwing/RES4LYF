@@ -676,7 +676,7 @@ class RK_Method:
         x0 = self.model(x, sigma * s_in, **extra_args)
         #return x0 ###################################THIS WORKS ONLY WITH THE MODEL SAMPLING PATCH
         eps = (x - x0) / (sigma * s_in) 
-        return eps
+        return eps, x0
     
     def model_denoised(self, x, sigma, **extra_args):
         s_in = x.new_ones([x.shape[0]])
@@ -766,6 +766,10 @@ class RK_Method:
             sigmas = sigmas[1:-1]
         else: 
             UNSAMPLE = False
+            
+        if hasattr(self.model, "sigmas"):
+            self.model.sigmas = sigmas
+            
         return sigmas, UNSAMPLE
     
     def prepare_mask(self, x, mask, LGW_MASK_RESCALE_MIN):
@@ -821,8 +825,6 @@ class RK_Method:
         ks = (k[0:self.cols] * self.b[row]).sum(dim=0)
         return ks
 
-        return #ab, ci, multistep_stages, EPS_PRED
-    
     def init_guides(self, x, latent_guide, latent_guide_inv, mask, sigmas, UNSAMPLE):
         y0, y0_inv = torch.zeros_like(x), torch.zeros_like(x)
         if latent_guide is not None:
@@ -997,8 +999,8 @@ class RK_Method_Linear(RK_Method):
     def __call__(self, x_0, x, sigma, h, **extra_args):
         s_in = x.new_ones([x.shape[0]])
         
-        epsilon = self.model_epsilon(x, sigma, **extra_args)
-        denoised = x - sigma * epsilon
+        epsilon, denoised = self.model_epsilon(x, sigma, **extra_args)
+        #denoised = x - sigma * epsilon
         
         if self.uncond == None:
             self.uncond = torch.zeros_like(x)
@@ -1029,68 +1031,6 @@ class RK_Method_Linear(RK_Method):
                 return (x - y) / sigma_cur
     
     
-    
-    
-    
-    
-
-
-
-
-
-
-
-class RK_Method_trash:
-    def __init__(self, device='cuda', dtype=torch.float64, option=None):
-        self.device = device
-        self.dtype = dtype
-        self.option = option
-        self.eps_pred = getattr(self, 'eps_pred')  # Set default from subclass or 'linear'
-        
-        self.ab = None
-        self.c = None
-        
-        self.t_fn = None 
-        self.sigma_fn = None
-
-
-        self._set_sigma_timestep_scaling()
-        self._define_tableaus()
-        self._handle_option()
-
-    def _set_sigma_timestep_scaling(self):
-        if self.method_type == 'exponential':
-            self.step_function = lambda x, h: torch.exp(-h) * x
-            print("Exponential step function selected.")
-        elif self.method_type == 'linear':
-            self.step_function = lambda x, h: x - h
-            print("Linear step function selected.")
-        else:
-            raise ValueError(f"Unknown method type: {self.method_type}")
-
-    def _define_tableaus(self):
-        """Should be overridden by subclasses to define 'ab' and 'c'."""
-        raise NotImplementedError("Subclasses should define 'ab' and 'c' coefficients.")
-
-    def _handle_option(self):
-        if self.option == 'advanced':
-            print("Advanced option selected.")
-        elif self.option == 'basic':
-            print("Basic option selected.")
-        else:
-            print("No specific option selected.")
-
-    def __call__(self, x, h):
-        return self.step_function(x, h)
-
-class RK4Method(RK_Method):
-    eps_pred = 'exponential'  # Automatically set 'exponential' as the default
-
-    def _define_tableaus(self):
-        """Define the Butcher tableau for RK4."""
-        self.ab = torch.tensor([[0.5, 0.5], [0, 1.0], [0, 0.5]], device=self.device, dtype=self.dtype)
-        self.c = torch.tensor([0, 0.5, 1.0], device=self.device, dtype=self.dtype)
-
 
 
 

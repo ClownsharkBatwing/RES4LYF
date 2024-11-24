@@ -643,6 +643,27 @@ class ClownsharKSampler:
 
 
 
+class StyleModelApplyAdvanced: 
+    @classmethod
+    def INPUT_TYPES(s):
+        return {"required": {"conditioning": ("CONDITIONING", ),
+                             "style_model": ("STYLE_MODEL", ),
+                             "clip_vision_output": ("CLIP_VISION_OUTPUT", ),
+                             "strength": ("FLOAT", {"default": 1.0, "min": -10.0, "max": 10.0, "step": 0.001}),
+                             }}
+    RETURN_TYPES = ("CONDITIONING",)
+    FUNCTION = "main"
+    CATEGORY = "advanced/conditioning"
+    DESCRIPTION = "Use with Flux Redux."
+
+    def main(self, clip_vision_output, style_model, conditioning, strength=1.0):
+        cond = style_model.get_cond(clip_vision_output).flatten(start_dim=0, end_dim=1).unsqueeze(dim=0)
+        cond = strength * cond
+        c = []
+        for t in conditioning:
+            n = [torch.cat((t[0], cond), dim=1), t[1].copy()]
+            c.append(n)
+        return (c, )
 
 
 
@@ -1279,7 +1300,7 @@ class ClownsharKSamplerGuides:
     @classmethod
     def INPUT_TYPES(s):
         return {"required":
-                    {"guide_mode": (["hard_light", "mean_std", "mean", "std", "blend",], {"default": 'blend', "tooltip": "The mode used."}),
+                    {"guide_mode": (["hard_light", "mean_std", "mean", "std", "blend", "epsilon", "data", "epsilon_data"], {"default": 'blend', "tooltip": "The mode used."}),
                      "latent_guide_weight": ("FLOAT", {"default": 0.0, "min": -100.0, "max": 100.0, "step":0.01, "round": False}),
                     "scheduler": (["constant"] + comfy.samplers.SCHEDULER_NAMES + ["beta57"], {"default": "beta57"},),
                     "steps": ("INT", {"default": 30, "min": 1, "max": 10000}),

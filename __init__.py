@@ -1,4 +1,5 @@
 from . import sampler_rk
+from . import sampler_rk_beta
 from . import samplers
 from . import samplers_tiled
 from . import sigmas
@@ -72,7 +73,7 @@ def add_samplers():
 
 extra_samplers = {
     "rk":  sampler_rk.sample_rk,
-    "rk_beta":  sampler_rk.sample_rk_beta,
+    "rk_beta":  sampler_rk_beta.sample_rk_beta,
     #"rk_testnew":  test_samplers.sample_rk_testnew,
 }
 
@@ -104,7 +105,8 @@ NODE_CLASS_MAPPINGS = {
     "StableCascade_StageB_Conditioning64": conditioning.StableCascade_StageB_Conditioning64,
     "ConditioningZeroAndTruncate": conditioning.ConditioningZeroAndTruncate,
     "ConditioningTruncate": conditioning.ConditioningTruncate,
-    
+    "StyleModelApplyAdvanced": samplers.StyleModelApplyAdvanced,
+
     "ConditioningToBase64": conditioning.ConditioningToBase64,
     "Base64ToConditioning": conditioning.Base64ToConditioning,
 
@@ -203,7 +205,7 @@ if flags["test_samplers"]:
         "sample_rk_testnew_working_noisepred2": test_samplers.sample_rk_testnew_working_noisepred2,
     })
 
-WEB_DIRECTORY = "./web/js"
+WEB_DIRECTORY = "./web"
 __all__ = ["NODE_CLASS_MAPPINGS",  "WEB_DIRECTORY"]
 
 

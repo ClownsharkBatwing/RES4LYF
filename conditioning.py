@@ -37,7 +37,53 @@ def multiply_nested_tensors(structure, scalar):
     else:
         return structure
 
+class StyleModelApplyAdvanced: 
+    @classmethod
+    def INPUT_TYPES(s):
+        return {"required": {"conditioning": ("CONDITIONING", ),
+                             "style_model": ("STYLE_MODEL", ),
+                             "clip_vision_output": ("CLIP_VISION_OUTPUT", ),
+                             "strength": ("FLOAT", {"default": 1.0, "min": -10.0, "max": 10.0, "step": 0.001}),
+                             }}
+    RETURN_TYPES = ("CONDITIONING",)
+    FUNCTION = "main"
+    CATEGORY = "advanced/conditioning"
+    DESCRIPTION = "Use with Flux Redux."
+
+    def main(self, clip_vision_output, style_model, conditioning, strength=1.0):
+        cond = style_model.get_cond(clip_vision_output).flatten(start_dim=0, end_dim=1).unsqueeze(dim=0)
+        cond = strength * cond
+        c = []
+        for t in conditioning:
+            n = [torch.cat((t[0], cond), dim=1), t[1].copy()]
+            c.append(n)
+        return (c, )
+
 class ConditioningZeroAndTruncate: 
+    # needs updating to ensure dims are correct for arbitrary models without hardcoding. 
+    # vanilla ConditioningZeroOut node doesn't truncate and SD3.5M degrades badly with large embeddings, even if zeroed out, as the negative conditioning
+    @classmethod
+    def INPUT_TYPES(s):
+        return { "required": {"conditioning": ("CONDITIONING", )}}
+    RETURN_TYPES = ("CONDITIONING",)
+    FUNCTION = "zero_out"
+
+    CATEGORY = "advanced/conditioning"
+    DESCRIPTION = "Use for negative conditioning with SD3.5. ConditioningZeroOut does not truncate the embedding, \
+                   which results in severe degradation of image quality with SD3.5 when the token limit is exceeded."
+
+    def zero_out(self, conditioning):
+        c = []
+        for t in conditioning:
+            d = t[1].copy()
+            pooled_output = d.get("pooled_output", None)
+            if pooled_output is not None:
+                d["pooled_output"] = torch.zeros((1,2048), dtype=t[0].dtype, device=t[0].device)
+                n = [torch.zeros((1,154,4096), dtype=t[0].dtype, device=t[0].device), d]
+            c.append(n)
+        return (c, )
+
+class ConditioningZeroAndTruncate2: 
     # needs updating to ensure dims are correct for arbitrary models without hardcoding. 
     # vanilla ConditioningZeroOut node doesn't truncate and SD3.5M degrades badly with large embeddings, even if zeroed out, as the negative conditioning
     @classmethod
