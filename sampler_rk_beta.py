@@ -267,6 +267,12 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
 
                 eps_[row], data_[row] = rk(x_0, x_[row+1], s_[row], h, **extra_args)
                 
+                if guide_mode == "data":
+                    y0_plus1 = (1-lgw[_]) * data_[row]    +   lgw[_] * y0
+                    x_[row+1] = y0_plus1 + eps_[row]
+                    
+                
+                
                 if guide_mode == "epsilon":
                     if sigma > sigma_next:
                         eps_plus1 = (s_[row] * eps_[row]) / s_[row+1]

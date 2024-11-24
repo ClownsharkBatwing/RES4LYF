@@ -1298,7 +1298,7 @@ class ClownsharKSamplerGuides:
     @classmethod
     def INPUT_TYPES(s):
         return {"required":
-                    {"guide_mode": (["hard_light", "mean_std", "mean", "std", "blend", "epsilon"], {"default": 'blend', "tooltip": "The mode used."}),
+                    {"guide_mode": (["hard_light", "mean_std", "mean", "std", "blend", "epsilon", "data"], {"default": 'blend', "tooltip": "The mode used."}),
                      "latent_guide_weight": ("FLOAT", {"default": 0.0, "min": -100.0, "max": 100.0, "step":0.01, "round": False}),
                     "scheduler": (["constant"] + comfy.samplers.SCHEDULER_NAMES + ["beta57"], {"default": "beta57"},),
                     "steps": ("INT", {"default": 30, "min": 1, "max": 10000}),
