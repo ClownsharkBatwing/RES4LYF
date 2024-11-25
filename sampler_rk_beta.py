@@ -277,7 +277,8 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
                          
                         if latent_guide_inv is None:
                             y0_tmp = y0
-                            y0_tmp = (1-lgw[_]) * data_[row]    +   lgw[_] * y0
+                            y0_tmp = (1-lgw_mask) * data_[row] + lgw_mask * y0
+                            #y0_tmp = (1-lgw[_]) * data_[row]    +   lgw[_] * y0
 
                         if latent_guide_inv is not None:
                             y0_tmp = (1-lgw_mask) * data_[row] + lgw_mask * y0
