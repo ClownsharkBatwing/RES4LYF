@@ -268,44 +268,49 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
                 eps_[row], data_[row] = rk(x_0, x_[row+1], s_[row], h, **extra_args)
                 
                 if "data" in guide_mode:
-                    #y0_plus1 = (1-lgw[_]) * data_[row]    +   lgw[_] * y0
-                    
                     y0_tmp = (1-lgw_mask) * data_[row] + lgw_mask * y0
                     y0_tmp = (1-lgw_mask_inv) * y0_tmp + lgw_mask_inv * y0_inv
                     x_[row+1] = y0_tmp + eps_[row]
-                    
-                    #y0_plus1 = (1-lgw[_]) * data_[row]    +   lgw[_] * y0
-                    #x_[row+1] = y0_plus1 + eps_[row]
-                    
+
                 elif "epsilon" in guide_mode:
                     if sigma > sigma_next:
-                        eps_plus1 = (s_[row] * eps_[row]) / s_[row+1]
-                            
+                         
                         if latent_guide_inv is None:
                             y0_tmp = y0
                             y0_tmp = (1-lgw[_]) * data_[row]    +   lgw[_] * y0
+
                         if latent_guide_inv is not None:
                             y0_tmp = (1-lgw_mask) * data_[row] + lgw_mask * y0
                             y0_tmp = (1-lgw_mask_inv) * y0_tmp + lgw_mask_inv * y0_inv
-                        
-                        #y0_plus1 = (1-lgw[_]) * data_[row]    +   lgw[_] * y0
-                        
-                        if rk_type.startswith("dpmpp") or rk_type.startswith("res") or rk_type.startswith("rk_exp"):
-                            eps_[row] = y0_tmp - x_0 #x_[row+1] #x_0
+
+                        if re.search(r"\bdisable_lgw_scaling\b", extra_options) and lgw[_] > 0:
+                            avg = 0
+                            for i4 in range(x.shape[1]):
+                                avg += torch.norm(data_[row][0][i4] - y0_tmp[0][i4])
+                            avg /= x.shape[1]
+                            
+                            for i4 in range(x.shape[1]):
+                                ratio = torch.norm(data_[row][0][i4] - y0_tmp[0][i4])   /   avg
+                                lgw_tmp = lgw[_] * ratio
+                                
+                                if rk_type.startswith("dpmpp") or rk_type.startswith("res") or rk_type.startswith("rk_exp"):
+                                    eps_row = y0_tmp[0][i4] - x_0[0][i4] #x_[row+1] #x_0
+                                    #eps_[row][0][i4] = eps_[row][0][i4] + lgw_tmp * (eps_row - eps_[row][0][i4])
+                                else:
+                                    eps_row = (x_[row+1][0][i4] - y0_tmp[0][i4]) / (s_[row] * s_in)
+                                eps_[row][0][i4] = eps_[row][0][i4] + lgw_tmp * (eps_row - eps_[row][0][i4])
+                                
                         else:
-                            eps_[row] = (x_[row+1] - y0_tmp) / (s_[row] * s_in)
-                        
-                        
-                        #eps_[row] = rk.get_epsilon(x_0, x_[row+1], y0_plus1, sigma, s_[row], sigma_down, t_i)
+                            if rk_type.startswith("dpmpp") or rk_type.startswith("res") or rk_type.startswith("rk_exp"):
+                                eps_[row] = y0_tmp - x_0 #x_[row+1] #x_0
+                            else:
+                                eps_[row] = (x_[row+1] - y0_tmp) / (s_[row] * s_in)
+
                     else:
                         y0_tmp = (1-lgw[_]) * data_[row]    +   lgw[_] * x_guide_maybe
                         x_plus1 = y0_tmp + eps_[row]
-                        
                         eps_[row] = (y0 - x_plus1)   / (s_[row] * s_in)
-                        #eps_[row] = (x_[row+1] - y0_plus1) / (s_[row] * s_in)
-                        #eps_[row] = (1-lgw[_]) * eps_[row]    +   lgw[_] * y0
-                        
-                        
+
                 elif lgw[_] > 0:
                     y0_tmp = y0
                     if latent_guide_inv is not None:
@@ -338,24 +343,9 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
                                 lgw_tmp = lgw[_] * ratio
                                 eps_[row][0][i4] = eps_[row][0][i4]  + lgw_tmp * (cvf[0][i4]  - eps_[row][0][i4] )
                     
-                    
-                """if isinstance(rk.model.inner_model.inner_model.model_config, comfy.supported_models.Flux) or isinstance(rk.model.inner_model.inner_model.model_config, comfy.supported_models.FluxSchnell):
-                    y0_tmp, y0_inv_tmp = y0, y0_inv
-                    if UNSAMPLE and sigma_next > sigma:
-                        y0_stdnorm = y0 / y0.std()
-                        y0_tmp = y0_stdnorm * data_[row].std()
-                        
-                        y0_inv_stdnorm = y0_inv / y0_inv.std()
-                        y0_inv_tmp = y0_inv_stdnorm * data_[row].std()"""
-                #    if sigma_down > sigma:
-                #        y0_tmp = (y0 / y0.std()) * data_[row].std()
-               
-
-
             x = x_0 + h * rk.b_k_sum(eps_, 0) 
             
             denoised = x_0 + (sigma / (sigma - sigma_down)) *  h * rk.b_k_sum(eps_, 0) 
-            
 
         else:
             s2 = s_irk_rk[:]
