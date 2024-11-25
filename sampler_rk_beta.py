@@ -280,22 +280,28 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
                 elif "epsilon" in guide_mode:
                     if sigma > sigma_next:
                         eps_plus1 = (s_[row] * eps_[row]) / s_[row+1]
-                        y0_plus1 = (1-lgw[_]) * data_[row]    +   lgw[_] * y0
+                        
+                        y0_tmp = (1-lgw_mask) * data_[row] + lgw_mask * y0
+                        y0_tmp = (1-lgw_mask_inv) * y0_tmp + lgw_mask_inv * y0_inv
+                        
+                        #y0_plus1 = (1-lgw[_]) * data_[row]    +   lgw[_] * y0
                         
                         if rk_type.startswith("dpmpp") or rk_type.startswith("res") or rk_type.startswith("rk_exp"):
-                            eps_[row] = y0_plus1 - x_0 #x_[row+1] #x_0
+                            eps_[row] = y0_tmp - x_0 #x_[row+1] #x_0
                         else:
-                            eps_[row] = (x_[row+1] - y0_plus1) / (s_[row] * s_in)
+                            eps_[row] = (x_[row+1] - y0_tmp) / (s_[row] * s_in)
                         
                         
                         #eps_[row] = rk.get_epsilon(x_0, x_[row+1], y0_plus1, sigma, s_[row], sigma_down, t_i)
                     else:
-                        y0_plus1 = (1-lgw[_]) * data_[row]    +   lgw[_] * x_guide_maybe
-                        x_plus1 = y0_plus1 + eps_[row]
+                        y0_tmp = (1-lgw[_]) * data_[row]    +   lgw[_] * x_guide_maybe
+                        x_plus1 = y0_tmp + eps_[row]
                         
                         eps_[row] = (y0 - x_plus1)   / (s_[row] * s_in)
                         #eps_[row] = (x_[row+1] - y0_plus1) / (s_[row] * s_in)
                         #eps_[row] = (1-lgw[_]) * eps_[row]    +   lgw[_] * y0
+                        
+                        
                 elif lgw[_] > 0:
                     y0_tmp = y0
                     if latent_guide_inv is not None:
