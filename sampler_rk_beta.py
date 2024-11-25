@@ -280,9 +280,11 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
                 elif "epsilon" in guide_mode:
                     if sigma > sigma_next:
                         eps_plus1 = (s_[row] * eps_[row]) / s_[row+1]
-                        
-                        y0_tmp = (1-lgw_mask) * data_[row] + lgw_mask * y0
-                        y0_tmp = (1-lgw_mask_inv) * y0_tmp + lgw_mask_inv * y0_inv
+                            
+                        y0_tmp = y0
+                        if latent_guide_inv is not None:
+                            y0_tmp = (1-lgw_mask) * data_[row] + lgw_mask * y0
+                            y0_tmp = (1-lgw_mask_inv) * y0_tmp + lgw_mask_inv * y0_inv
                         
                         #y0_plus1 = (1-lgw[_]) * data_[row]    +   lgw[_] * y0
                         
