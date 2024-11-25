@@ -281,7 +281,9 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
                     if sigma > sigma_next:
                         eps_plus1 = (s_[row] * eps_[row]) / s_[row+1]
                             
-                        y0_tmp = y0
+                        if latent_guide_inv is None:
+                            y0_tmp = y0
+                            y0_tmp = (1-lgw[_]) * data_[row]    +   lgw[_] * y0
                         if latent_guide_inv is not None:
                             y0_tmp = (1-lgw_mask) * data_[row] + lgw_mask * y0
                             y0_tmp = (1-lgw_mask_inv) * y0_tmp + lgw_mask_inv * y0_inv
@@ -392,9 +394,9 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
                 x = x_0 + h_irk * irk.b_k_sum(eps2_, 0)
             
         #print("x stats: ", x.std(), x.mean(), x.abs().mean(), x.max())
-        callback({'x': x, 'i': _, 'sigma': sigma, 'sigma_next': sigma_next, 'denoised': denoised}) if callback is not None else None
+        #callback({'x': x, 'i': _, 'sigma': sigma, 'sigma_next': sigma_next, 'denoised': denoised}) if callback is not None else None
 
-        #callback({'x': x, 'i': _, 'sigma': sigma, 'sigma_next': sigma_next, 'denoised': data_[0]}) if callback is not None else None
+        callback({'x': x, 'i': _, 'sigma': sigma, 'sigma_next': sigma_next, 'denoised': data_[0]}) if callback is not None else None
 
         sde_noise_t = None
         if SDE_NOISE_EXTERNAL:
