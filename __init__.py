@@ -2,6 +2,7 @@ from . import sampler_rk
 from . import sampler_rk_beta
 from . import samplers
 from . import samplers_tiled
+from . import loaders
 from . import sigmas
 from . import latents
 from . import conditioning
@@ -98,6 +99,8 @@ NODE_CLASS_MAPPINGS = {
     "SD35L_TimestepPatcher": samplers.SD35L_TimestepPatcher,
     
     "AdvancedNoise": samplers.AdvancedNoise,
+    
+    "FluxLoader": loaders.FluxLoader,
 
     "ConditioningAverageScheduler": conditioning.ConditioningAverageScheduler,
     "ConditioningMultiply": conditioning.ConditioningMultiply,
