@@ -268,10 +268,16 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
                 eps_[row], data_[row] = rk(x_0, x_[row+1], s_[row], h, **extra_args)
                 
                 if "data" in guide_mode:
-                    y0_plus1 = (1-lgw[_]) * data_[row]    +   lgw[_] * y0
-                    x_[row+1] = y0_plus1 + eps_[row]
+                    #y0_plus1 = (1-lgw[_]) * data_[row]    +   lgw[_] * y0
                     
-                if "epsilon" in guide_mode:
+                    y0_tmp = (1-lgw_mask) * data_[row] + lgw_mask * y0
+                    y0_tmp = (1-lgw_mask_inv) * y0_tmp + lgw_mask_inv * y0_inv
+                    x_[row+1] = y0_tmp + eps_[row]
+                    
+                    #y0_plus1 = (1-lgw[_]) * data_[row]    +   lgw[_] * y0
+                    #x_[row+1] = y0_plus1 + eps_[row]
+                    
+                elif "epsilon" in guide_mode:
                     if sigma > sigma_next:
                         eps_plus1 = (s_[row] * eps_[row]) / s_[row+1]
                         y0_plus1 = (1-lgw[_]) * data_[row]    +   lgw[_] * y0
@@ -337,6 +343,9 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
 
 
             x = x_0 + h * rk.b_k_sum(eps_, 0) 
+            
+            denoised = x_0 + (sigma / (sigma - sigma_down)) *  h * rk.b_k_sum(eps_, 0) 
+            
 
         else:
             s2 = s_irk_rk[:]
@@ -375,7 +384,9 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
                 x = x_0 + h_irk * irk.b_k_sum(eps2_, 0)
             
         print("x stats: ", x.std(), x.mean(), x.abs().mean(), x.max())
-        callback({'x': x, 'i': _, 'sigma': sigma, 'sigma_next': sigma_next, 'denoised': data_[0]}) if callback is not None else None
+        callback({'x': x, 'i': _, 'sigma': sigma, 'sigma_next': sigma_next, 'denoised': denoised}) if callback is not None else None
+
+        #callback({'x': x, 'i': _, 'sigma': sigma, 'sigma_next': sigma_next, 'denoised': data_[0]}) if callback is not None else None
 
         sde_noise_t = None
         if SDE_NOISE_EXTERNAL:
