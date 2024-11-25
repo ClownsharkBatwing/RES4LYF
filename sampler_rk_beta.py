@@ -283,7 +283,21 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
                             y0_tmp = (1-lgw_mask) * data_[row] + lgw_mask * y0
                             y0_tmp = (1-lgw_mask_inv) * y0_tmp + lgw_mask_inv * y0_inv
 
-                        if re.search(r"\bdisable_lgw_scaling\b", extra_options) and lgw[_] > 0:
+
+                        if re.search(r"tol\s*=\s*([\d.]+)", extra_options) and lgw[_] > 0:
+                            tol_value = float(re.search(r"tol\s*=\s*([\d.]+)", extra_options).group(1))                    
+                            for i4 in range(x.shape[1]):
+                                current_diff = torch.norm(data_[row][0][i4] - y0_tmp[0][i4]) 
+                                lgw_tmp = min(lgw[_], 1-(tol_value/current_diff))
+                                
+                                if rk_type.startswith("dpmpp") or rk_type.startswith("res") or rk_type.startswith("rk_exp"):
+                                    eps_row = y0_tmp[0][i4] - x_0[0][i4]
+                                else:
+                                    eps_row = (x_[row+1][0][i4] - y0_tmp[0][i4]) / (s_[row] * s_in)
+                                    
+                                eps_[row][0][i4] = eps_[row][0][i4] + lgw_tmp * (eps_row - eps_[row][0][i4])
+                                
+                        elif re.search(r"\bdisable_lgw_scaling\b", extra_options) and lgw[_] > 0:
                             avg = 0
                             for i4 in range(x.shape[1]):
                                 avg += torch.norm(data_[row][0][i4] - y0_tmp[0][i4])
@@ -294,8 +308,7 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
                                 lgw_tmp = lgw[_] * ratio
                                 
                                 if rk_type.startswith("dpmpp") or rk_type.startswith("res") or rk_type.startswith("rk_exp"):
-                                    eps_row = y0_tmp[0][i4] - x_0[0][i4] #x_[row+1] #x_0
-                                    #eps_[row][0][i4] = eps_[row][0][i4] + lgw_tmp * (eps_row - eps_[row][0][i4])
+                                    eps_row = y0_tmp[0][i4] - x_0[0][i4]
                                 else:
                                     eps_row = (x_[row+1][0][i4] - y0_tmp[0][i4]) / (s_[row] * s_in)
                                 eps_[row][0][i4] = eps_[row][0][i4] + lgw_tmp * (eps_row - eps_[row][0][i4])
@@ -329,19 +342,18 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
                             current_diff = torch.norm(data_[row][0][i4] - y0_tmp[0][i4]) 
                             lgw_tmp = min(lgw[_], 1-(tol_value/current_diff))
                             eps_[row][0][i4] = eps_[row][0][i4]  + lgw_tmp * (cvf[0][i4]  - eps_[row][0][i4] )
+                    elif re.search(r"\bdisable_lgw_scaling\b", extra_options):
+                        eps_[row] = eps_[row] + lgw[_] * (cvf - eps_[row])
                     else:
-                        if re.search(r"\bdisable_lgw_scaling\b", extra_options):
-                            eps_[row] = eps_[row] + lgw[_] * (cvf - eps_[row])
-                        else:
-                            avg = 0
-                            for i4 in range(x.shape[1]):
-                                avg += torch.norm(data_[row][0][i4] - y0_tmp[0][i4])
-                            avg /= x.shape[1]
-                            
-                            for i4 in range(x.shape[1]):
-                                ratio = torch.norm(data_[row][0][i4] - y0_tmp[0][i4])   /   avg
-                                lgw_tmp = lgw[_] * ratio
-                                eps_[row][0][i4] = eps_[row][0][i4]  + lgw_tmp * (cvf[0][i4]  - eps_[row][0][i4] )
+                        avg = 0
+                        for i4 in range(x.shape[1]):
+                            avg += torch.norm(data_[row][0][i4] - y0_tmp[0][i4])
+                        avg /= x.shape[1]
+                        
+                        for i4 in range(x.shape[1]):
+                            ratio = torch.norm(data_[row][0][i4] - y0_tmp[0][i4])   /   avg
+                            lgw_tmp = lgw[_] * ratio
+                            eps_[row][0][i4] = eps_[row][0][i4]  + lgw_tmp * (cvf[0][i4]  - eps_[row][0][i4] )
                     
             x = x_0 + h * rk.b_k_sum(eps_, 0) 
             

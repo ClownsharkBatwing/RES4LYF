@@ -777,7 +777,7 @@ class ClownsharKSampler_Beta:
                 """if scheduler == "constant": 
                     latent_guide_weights = initialize_or_scale(latent_guide_weights, latent_guide_weight, max_steps).to(default_dtype)
                     latent_guide_weights = F.pad(latent_guide_weights, (0, max_steps), value=0.0)"""
-                if scheduler_ != "constant":
+                if scheduler_ != "constant" and latent_guide_weights is None:
                     latent_guide_weights = get_sigmas(model, scheduler_, steps_, denoise_).to(default_dtype)
             latent_guide_weights = initialize_or_scale(latent_guide_weights, latent_guide_weight, max_steps).to(default_dtype)
             latent_guide_weights = F.pad(latent_guide_weights, (0, max_steps), value=0.0)
