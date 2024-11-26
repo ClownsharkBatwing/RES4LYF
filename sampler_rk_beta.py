@@ -162,7 +162,7 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
     else:
         SDE_NOISE_EXTERNAL = False
     
-    lgw = latent_guide_weights
+    lgw = latent_guide_weights.to(x.device)
     
     if sigmas_override is not None:
         sigmas = sigmas_override.clone()
@@ -288,39 +288,39 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
 
                         if re.search(r"\bdisable_lgw_scaling\b", extra_options) and lgw[_] > 0:
                             if rk_type.startswith("dpmpp") or rk_type.startswith("res") or rk_type.startswith("rk_exp"):
-                                #eps_[row] = y0_tmp - x_0 #x_[row+1] #x_0
-                                
                                 eps_m   = y0     - x_0
                                 eps_inv = y0_inv - x_0
-                                
-                                """eps_[row] = lgw[_]*(1-mask) * eps_[row]     +     lgw[_]*mask * eps_m
-                                if latent_guide_inv is not None:
-                                    eps_[row] = lgw[_]*mask * eps_[row]    +      lgw[_]*(1-mask)* eps_inv"""
-                                    
-                                #eps_[row] = (1-lgw_mask) * eps_[row]    +    lgw_mask * eps_m      +     (1-lgw_mask_inv) * eps_[row]     +    lgw_mask_inv * eps_inv
-                                
-                                #eps_[row] = eps_[row] - eps_[row] * lgw_mask   -  eps_[row]*lgw_mask_inv    +    lgw_mask * eps_m      +    lgw_mask_inv * eps_inv
-                                
-                                eps_[row] = eps_[row]      +     lgw_mask * (eps_m - eps_row[row])    +    lgw_mask_inv * (eps_inv - eps_row[row])
-                                
-                                #eps_[row] = (1 - lgw[_] * lgw_mask) * eps_[row] + lgw[_] * lgw_mask * eps_m
-                                #if latent_guide_inv is not None:
-                                #    eps_[row] = (1-lgw[_] * lgw_mask_inv) * eps_[row] + lgw[_] * lgw_mask_inv * eps_inv
-                                
                             else:
-                                eps_[row] = (x_[row+1] - y0_tmp) / (s_[row] * s_in)
+                                eps_m   = (x_[row+1] - y0)     / (s_[row] * s_in)
+                                eps_inv = (x_[row+1] - y0_inv) / (s_[row] * s_in)
+                            eps_[row] = eps_[row]      +     lgw_mask * (eps_m - eps_row[row])    +    lgw_mask_inv * (eps_inv - eps_row[row])
+                                #eps_[row] = (x_[row+1] - y0_tmp) / (s_[row] * s_in)
+                                
                         elif re.search(r"tol\s*=\s*([\d.]+)", extra_options) and lgw[_] > 0:
                             tol_value = float(re.search(r"tol\s*=\s*([\d.]+)", extra_options).group(1))                    
                             for i4 in range(x.shape[1]):
-                                current_diff = torch.norm(data_[row][0][i4] - y0_tmp[0][i4]) 
-                                lgw_tmp = min(lgw[_], 1-(tol_value/current_diff))
+                                #current_diff = torch.norm(data_[row][0][i4] - y0_tmp[0][i4]) 
+                                current_diff = torch.norm(data_[row][0][i4] - y0[0][i4]) 
+                                current_diff_inv = torch.norm(data_[row][0][i4] - y0_inv[0][i4]) 
+                                lgw_tmp     = min(lgw[_], 1-(tol_value/current_diff))
+                                lgw_tmp_inv = min(lgw[_], 1-(tol_value/current_diff_inv))
                                 
-                                if rk_type.startswith("dpmpp") or rk_type.startswith("res") or rk_type.startswith("rk_exp"):
+                                lgw_mask_clamp = torch.clamp(lgw_mask, max=lgw_tmp)
+                                lgw_mask_clamp_inv = torch.clamp(lgw_mask_inv, max=lgw_tmp_inv)
+                                
+                                """if rk_type.startswith("dpmpp") or rk_type.startswith("res") or rk_type.startswith("rk_exp"):
                                     eps_row = y0_tmp[0][i4] - x_0[0][i4]
                                 else:
-                                    eps_row = (x_[row+1][0][i4] - y0_tmp[0][i4]) / (s_[row] * s_in)
+                                    eps_row = (x_[row+1][0][i4] - y0_tmp[0][i4]) / (s_[row] * s_in)"""
                                     
-                                eps_[row][0][i4] = eps_[row][0][i4] + lgw_tmp * (eps_row - eps_[row][0][i4])
+                                if rk_type.startswith("dpmpp") or rk_type.startswith("res") or rk_type.startswith("rk_exp"):
+                                    eps_row     = y0[0][i4]     - x_0[0][i4]
+                                    eps_row_inv = y0_inv[0][i4] - x_0[0][i4]
+                                else:
+                                    eps_row     = (x_[row+1][0][i4] - y0[0][i4])     / (s_[row] * s_in)
+                                    eps_row_inv = (x_[row+1][0][i4] - y0_inv[0][i4]) / (s_[row] * s_in)
+                                    
+                                eps_[row][0][i4] = eps_[row][0][i4] + lgw_mask_clamp[0][i4] * (eps_row - eps_[row][0][i4]) + lgw_mask_clamp_inv[0][i4] * (eps_row_inv - eps_[row][0][i4])
                                 
                         elif lgw[_] > 0:
                             avg, avg_inv = 0, 0
@@ -333,8 +333,6 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
                             for i4 in range(x.shape[1]):
                                 ratio = torch.norm(data_[row][0][i4] - y0[0][i4])   /   avg
                                 ratio_inv = torch.norm(data_[row][0][i4] - y0_inv[0][i4])   /   avg_inv
-                                lgw_tmp = lgw[_] * ratio
-                                lgw_tmp_inv = lgw[_] * ratio_inv
                                 
                                 if rk_type.startswith("dpmpp") or rk_type.startswith("res") or rk_type.startswith("rk_exp"):
                                     eps_row     = y0[0][i4]     - x_0[0][i4]
@@ -344,24 +342,6 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
                                     eps_row_inv = (x_[row+1][0][i4] - y0_inv[0][i4]) / (s_[row] * s_in)
                                                                     
                                 eps_[row][0][i4] = eps_[row][0][i4]      +     ratio * lgw_mask[0][i4] * (eps_row - eps_[row][0][i4])    +    ratio_inv * lgw_mask_inv[0][i4] * (eps_row_inv - eps_[row][0][i4])
-                                
-                                
-                        """elif lgw[_] > 0:
-                            avg = 0
-                            for i4 in range(x.shape[1]):
-                                avg += torch.norm(data_[row][0][i4] - y0_tmp[0][i4])
-                            avg /= x.shape[1]
-                            
-                            for i4 in range(x.shape[1]):
-                                ratio = torch.norm(data_[row][0][i4] - y0_tmp[0][i4])   /   avg
-                                lgw_tmp = lgw[_] * ratio
-                                
-                                if rk_type.startswith("dpmpp") or rk_type.startswith("res") or rk_type.startswith("rk_exp"):
-                                    eps_row = y0_tmp[0][i4] - x_0[0][i4]
-                                else:
-                                    eps_row = (x_[row+1][0][i4] - y0_tmp[0][i4]) / (s_[row] * s_in)
-                                eps_[row][0][i4] = eps_[row][0][i4] + lgw_tmp * (eps_row - eps_[row][0][i4])"""
-                                
 
 
                     else:

@@ -1216,6 +1216,61 @@ class SamplerOptions_TimestepScaling:
         return (sampler, )
 
     
+    
+    
+class TextBox1:
+    # for patching the t_fn and sigma_fn (sigma <-> timestep) formulas to allow picking Runge-Kutta Ci values ("midpoints") with different scaling.
+    @classmethod
+    def INPUT_TYPES(s):
+        return {"required":
+                    {
+                     "text1": ("STRING", {"default": "", "multiline": True}),
+                    },
+                     "optional": 
+                    {
+                    }  
+               }
+    RETURN_TYPES = ("STRING",)
+    RETURN_NAMES = ("text1",)
+    FUNCTION = "main"
+    
+    CATEGORY = "sampling/custom_sampling/samplers"
+    DESCRIPTION = "Multiline textbox for any purpose."
+
+    def main(self, text1):
+
+        return (text1,)
+
+    
+    
+class TextBox3:
+    # for patching the t_fn and sigma_fn (sigma <-> timestep) formulas to allow picking Runge-Kutta Ci values ("midpoints") with different scaling.
+    @classmethod
+    def INPUT_TYPES(s):
+        return {"required":
+                    {
+                     "text1": ("STRING", {"default": "", "multiline": True}),
+                     "text2": ("STRING", {"default": "", "multiline": True}),
+                     "text3": ("STRING", {"default": "", "multiline": True}),
+                    },
+                     "optional": 
+                    {
+                    }  
+               }
+    RETURN_TYPES = ("STRING", "STRING","STRING",)
+    RETURN_NAMES = ("text1", "text2", "text3",)
+    FUNCTION = "main"
+    
+    CATEGORY = "sampling/custom_sampling/samplers"
+    DESCRIPTION = "Multiline textbox for any purpose."
+
+    def main(self, text1, text2, text3 ):
+
+        return (text1, text2, text3, )
+
+    
+    
+    
 class SamplerOptions_GarbageCollection:
     @classmethod
     def INPUT_TYPES(s):
