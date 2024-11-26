@@ -145,6 +145,7 @@ NODE_CLASS_MAPPINGS = {
 
     "Sigmas Recast": sigmas.set_precision_sigmas,
     "Sigmas Noise Inversion": sigmas.sigmas_noise_inversion,
+    "Sigmas From Text": sigmas.sigmas_from_text, 
 
     "Sigmas Variance Floor": sigmas.sigmas_variance_floor,
     "Sigmas Truncate": sigmas.sigmas_truncate,
