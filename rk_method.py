@@ -849,10 +849,12 @@ class RK_Method:
 
         if latent_guide_inv is not None:
             if sigmas[0] > sigmas[1]:
-                #y0_inv = latent_guide_inv = self.model.inner_model.inner_model.process_latent_in(latent_guide_inv['samples']).clone().to(x.device)
-                y0_inv = latent_guide_inv = latent_guide_inv['samples'].clone().to(x.device)
+                y0_inv = latent_guide_inv = self.model.inner_model.inner_model.process_latent_in(latent_guide_inv['samples']).clone().to(x.device)
+                #y0_inv = latent_guide_inv = latent_guide_inv['samples'].clone().to(x.device)
             elif UNSAMPLE and mask is not None:
                 x = mask * x + (1-mask) * self.model.inner_model.inner_model.process_latent_in(latent_guide_inv['samples']).clone().to(x.device)
+            else:
+                x = self.model.inner_model.inner_model.process_latent_in(latent_guide_inv['samples']).clone().to(x.device)   #THIS COULD LEAD TO WEIRD BEHAVIOR! OVERWRITING X WITH LG_INV AFTER SETTING TO LG above!
                 
         if UNSAMPLE and sigmas[0] < sigmas[1]: #sigma_next > sigma:
             y0 = self.noise_sampler(sigma=self.sigma_max, sigma_next=self.sigma_min)
