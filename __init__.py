@@ -101,6 +101,9 @@ NODE_CLASS_MAPPINGS = {
     "AdvancedNoise": samplers.AdvancedNoise,
     
     "FluxLoader": loaders.FluxLoader,
+    
+    "TextBox1": samplers.TextBox1,
+    "TextBox3": samplers.TextBox3,
 
     "ConditioningAverageScheduler": conditioning.ConditioningAverageScheduler,
     "ConditioningMultiply": conditioning.ConditioningMultiply,
