@@ -27,6 +27,8 @@ try:
 except ImportError:
     pass
 
+res4lyf.init()
+
 """def get_ext_dir(subpath=None, mkdir=False):
     dir = os.path.dirname(__file__)
     if subpath is not None:
