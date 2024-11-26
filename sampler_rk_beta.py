@@ -149,7 +149,7 @@ from .rk_method import RK_Method, RK_Method_Linear, RK_Method_Exponential
 def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=None, noise_sampler=None, noise_sampler_type="brownian", noise_mode="hard", noise_seed=-1, rk_type="res_2m", implicit_sampler_name="default",
               sigma_fn_formula="", t_fn_formula="",
                   eta=0.0, eta_var=0.0, s_noise=1., d_noise=1., alpha=-1.0, k=1.0, scale=0.1, c1=0.0, c2=0.5, c3=1.0, MULTISTEP=False, cfgpp=0.0, implicit_steps=0, reverse_weight=0.0, exp_mode=False,
-                  latent_guide=None, latent_guide_inv=None, latent_guide_weights=None, guide_mode="blend", unsampler_type="linear",
+                  latent_guide=None, latent_guide_inv=None, latent_guide_weights=None, latent_guide_weights_inv=None, guide_mode="blend", unsampler_type="linear",
                   GARBAGE_COLLECT=False, mask=None, LGW_MASK_RESCALE_MIN=True, sigmas_override=None, t_is=None,sde_noise=None,
                   input_std=1.0, input_normalization="channels", extra_options="",
                   etas=None, s_noises=None, momentums=None,
@@ -163,6 +163,7 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
         SDE_NOISE_EXTERNAL = False
     
     lgw = latent_guide_weights.to(x.device)
+    lgw_inv = latent_guide_weights_inv.to(x.device)
     
     if sigmas_override is not None:
         sigmas = sigmas_override.clone()
@@ -244,7 +245,7 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
                 SDE_NOISE_EXTERNAL=False
             else:
                 sde_noise_t = sde_noise[_]
-        x_[0] = rk.add_noise_pre(x, y0, lgw[_], sigma_up, sigma, sigma_next, sigma_down, alpha_ratio, s_noise, noise_mode, SDE_NOISE_EXTERNAL, sde_noise_t)
+        x_[0] = rk.add_noise_pre(x, y0, lgw[_], sigma_up, sigma, sigma_next, sigma_down, alpha_ratio, s_noise, noise_mode, SDE_NOISE_EXTERNAL, sde_noise_t) #y0, lgw, sigma_down are currently unused
         
         x_0 = x_[0].clone()
         
@@ -256,14 +257,16 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
             
         if LGW_MASK_RESCALE_MIN: 
             lgw_mask = mask * (1 - lgw[_]) + lgw[_]
-            lgw_mask_inv = (1-mask) * (1 - lgw[_]) + lgw[_]
+            #lgw_mask_inv = (1-mask) * (1 - lgw[_]) + lgw[_]
+            lgw_mask_inv = (1-mask) * (1 - lgw_inv[_]) + lgw_inv[_]
         else:
             if latent_guide is not None:
                 lgw_mask = mask * lgw[_]
             else:
                 lgw_mask = torch.zeros_like(mask)
             if latent_guide_inv is not None:
-                lgw_mask_inv = (1-mask) * lgw[_]   
+                #lgw_mask_inv = (1-mask) * lgw[_]   
+                lgw_mask_inv = (1-mask) * lgw_inv[_]   
             else:
                 lgw_mask_inv = torch.zeros_like(mask)
             
@@ -287,7 +290,7 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
                 elif "epsilon" in guide_mode:
                     if sigma > sigma_next:
                          
-                        if re.search(r"\bdisable_lgw_scaling\b", extra_options) and lgw[_] > 0:
+                        if re.search(r"\bdisable_lgw_scaling\b", extra_options): # and lgw[_] > 0:
                             if rk_type.startswith("dpmpp") or rk_type.startswith("res") or rk_type.startswith("rk_exp"):
                                 eps_m   = y0     - x_0
                                 eps_inv = y0_inv - x_0
@@ -297,43 +300,47 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
                                 
                             eps_[row] = eps_[row]      +     lgw_mask * (eps_m - eps_[row])    +    lgw_mask_inv * (eps_inv - eps_[row])
                                 
-                        elif re.search(r"tol\s*=\s*([\d.]+)", extra_options) and lgw[_] > 0:
+                        elif re.search(r"tol\s*=\s*([\d.]+)", extra_options) and (lgw[_] > 0 or lgw_inv[_] > 0):
                             tol_value = float(re.search(r"tol\s*=\s*([\d.]+)", extra_options).group(1))                    
                             for i4 in range(x.shape[1]):
-                                current_diff = torch.norm(data_[row][0][i4] - y0[0][i4]) 
+                                current_diff     = torch.norm(data_[row][0][i4] - y0    [0][i4]) 
                                 current_diff_inv = torch.norm(data_[row][0][i4] - y0_inv[0][i4]) 
-                                lgw_tmp     = min(lgw[_], 1-(tol_value/current_diff))
-                                lgw_tmp_inv = min(lgw[_], 1-(tol_value/current_diff_inv))
                                 
+                                lgw_scaled     = torch.nan_to_num(1-(tol_value/current_diff),     0)
+                                lgw_scaled_inv = torch.nan_to_num(1-(tol_value/current_diff_inv), 0)
+                                
+                                lgw_tmp     = min(lgw    [_], lgw_scaled)
+                                lgw_tmp_inv = min(lgw_inv[_], lgw_scaled_inv)
+
                                 lgw_mask_clamp = torch.clamp(lgw_mask, max=lgw_tmp)
                                 lgw_mask_clamp_inv = torch.clamp(lgw_mask_inv, max=lgw_tmp_inv)
 
                                 if rk_type.startswith("dpmpp") or rk_type.startswith("res") or rk_type.startswith("rk_exp"):
-                                    eps_row     = y0[0][i4]     - x_0[0][i4]
+                                    eps_row     = y0    [0][i4] - x_0[0][i4]
                                     eps_row_inv = y0_inv[0][i4] - x_0[0][i4]
                                 else:
-                                    eps_row     = (x_[row+1][0][i4] - y0[0][i4])     / (s_[row] * s_in)
+                                    eps_row     = (x_[row+1][0][i4] - y0    [0][i4]) / (s_[row] * s_in)
                                     eps_row_inv = (x_[row+1][0][i4] - y0_inv[0][i4]) / (s_[row] * s_in)
                                     
                                 eps_[row][0][i4] = eps_[row][0][i4] + lgw_mask_clamp[0][i4] * (eps_row - eps_[row][0][i4]) + lgw_mask_clamp_inv[0][i4] * (eps_row_inv - eps_[row][0][i4])
                                 
-                        elif lgw[_] > 0:
+                        elif (lgw[_] > 0 or lgw_inv[_] > 0):
                             avg, avg_inv = 0, 0
                             for i4 in range(x.shape[1]):
-                                avg += torch.norm(data_[row][0][i4] - y0[0][i4])
-                                avg_inv += torch.norm(data_[row][0][i4] - y0[0][i4])
+                                avg     += torch.norm(data_[row][0][i4] - y0    [0][i4])
+                                avg_inv += torch.norm(data_[row][0][i4] - y0_inv[0][i4])
                             avg /= x.shape[1]
                             avg_inv /= x.shape[1]
                             
                             for i4 in range(x.shape[1]):
-                                ratio = torch.norm(data_[row][0][i4] - y0[0][i4])   /   avg
-                                ratio_inv = torch.norm(data_[row][0][i4] - y0_inv[0][i4])   /   avg_inv
+                                ratio     = torch.nan_to_num(torch.norm(data_[row][0][i4] - y0    [0][i4])   /   avg,     0)
+                                ratio_inv = torch.nan_to_num(torch.norm(data_[row][0][i4] - y0_inv[0][i4])   /   avg_inv, 0)
                                 
                                 if rk_type.startswith("dpmpp") or rk_type.startswith("res") or rk_type.startswith("rk_exp"):
-                                    eps_row     = y0[0][i4]     - x_0[0][i4]
+                                    eps_row     = y0    [0][i4] - x_0[0][i4]
                                     eps_row_inv = y0_inv[0][i4] - x_0[0][i4]
                                 else:
-                                    eps_row     = (x_[row+1][0][i4] - y0[0][i4])     / (s_[row] * s_in)
+                                    eps_row     = (x_[row+1][0][i4] - y0    [0][i4]) / (s_[row] * s_in)
                                     eps_row_inv = (x_[row+1][0][i4] - y0_inv[0][i4]) / (s_[row] * s_in)
                                                                     
                                 eps_[row][0][i4] = eps_[row][0][i4]      +     ratio * lgw_mask[0][i4] * (eps_row - eps_[row][0][i4])    +    ratio_inv * lgw_mask_inv[0][i4] * (eps_row_inv - eps_[row][0][i4])
@@ -497,7 +504,7 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
                 SDE_NOISE_EXTERNAL=False
             else:
                 sde_noise_t = sde_noise[_]
-        x = rk.add_noise_post(x, y0, lgw[_], sigma_up, sigma, sigma_next, sigma_down, alpha_ratio, s_noise, noise_mode, SDE_NOISE_EXTERNAL, sde_noise_t)
+        x = rk.add_noise_post(x, y0, lgw[_], sigma_up, sigma, sigma_next, sigma_down, alpha_ratio, s_noise, noise_mode, SDE_NOISE_EXTERNAL, sde_noise_t)    #y0, lgw, sigma_down are currently unused
         
         for ms in range(rk.multistep_stages):
             eps_ [rk.multistep_stages - ms] = eps_ [rk.multistep_stages - ms - 1]

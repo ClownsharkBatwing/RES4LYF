@@ -825,23 +825,14 @@ class RK_Method:
         ks = (k[0:self.cols] * self.b[row]).sum(dim=0)
         return ks
 
+
+
     def init_guides(self, x, latent_guide, latent_guide_inv, mask, sigmas, UNSAMPLE):
         y0, y0_inv = torch.zeros_like(x), torch.zeros_like(x)
+        
         if latent_guide is not None:
             if sigmas[0] > sigmas[1]:
                 y0 = latent_guide = self.model.inner_model.inner_model.process_latent_in(latent_guide['samples']).clone().to(x.device)
-                #x = (x - x.mean()) / x.std()
-                #for i in range(x.shape[1]):
-                #    x[0][i] = x[0][i] / x[0][i].std()
-                #x = x / x.std()
-                #if isinstance(self.model.inner_model.inner_model.model_config, comfy.supported_models.Flux) or isinstance(self.model.inner_model.inner_model.model_config, comfy.supported_models.FluxSchnell):
-                #    pass
-                    #x = (x - x.mean()) / x.std()
-                    #y0 = latent_guide = latent_guide['samples'].clone().to(x.device)
-                    #y0 = (y0 - y0.mean()) / y0.std()
-                    #for i in range(x.shape[1]):
-                    #    x[0][i] = x[0][i] / x[0][i].std()
-                    
             elif UNSAMPLE and mask is not None:
                 x = (1-mask) * x + mask * self.model.inner_model.inner_model.process_latent_in(latent_guide['samples']).clone().to(x.device)
             else:
@@ -850,7 +841,6 @@ class RK_Method:
         if latent_guide_inv is not None:
             if sigmas[0] > sigmas[1]:
                 y0_inv = latent_guide_inv = self.model.inner_model.inner_model.process_latent_in(latent_guide_inv['samples']).clone().to(x.device)
-                #y0_inv = latent_guide_inv = latent_guide_inv['samples'].clone().to(x.device)
             elif UNSAMPLE and mask is not None:
                 x = mask * x + (1-mask) * self.model.inner_model.inner_model.process_latent_in(latent_guide_inv['samples']).clone().to(x.device)
             else:
@@ -865,6 +855,8 @@ class RK_Method:
             
         return x, y0, y0_inv
     
+    
+    
     def init_cfgpp(self, model, x, cfgpp, extra_args):
         self.uncond = [torch.full_like(x, 0.0)]
         if cfgpp != 0.0:
@@ -873,6 +865,7 @@ class RK_Method:
                 return args["denoised"]
             model_options = extra_args.get("model_options", {}).copy()
             extra_args["model_options"] = comfy.model_patcher.set_model_options_post_cfg_function(model_options, post_cfg_function, disable_cfg1_optimization=True)
+    
     
     
     def process_guides(self, guide_mode, latent_guide, latent_guide_inv, lgw_mask, lgw_mask_inv, weight, sigma_mid, EPS_PRED, UNSAMPLE):
