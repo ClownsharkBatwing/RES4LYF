@@ -6,11 +6,60 @@ import json
 import shutil
 import inspect
 import aiohttp
+import math
+import comfy.model_sampling
+from aiohttp import web
 from server import PromptServer
 from tqdm import tqdm
 
-config = None
+using_RES4LYF_time_snr_shift = True
+original_time_snr_shift = comfy.model_sampling.time_snr_shift
 
+def time_snr_shift_RES4LYF(alpha, t):
+    if using_RES4LYF_time_snr_shift:
+        out = math.exp(alpha) / (math.exp(alpha) + (1 / t - 1) ** 1.0)
+    else:
+        out = original_time_snr_shift(alpha, t)
+    print(f"Using RES4LYF time_snr_shift: {using_RES4LYF_time_snr_shift}, alpha: {alpha}")
+    return out
+    
+@PromptServer.instance.routes.post("/reslyf/settings")
+async def update_using_RES4LYF_time_snr_shift(request):
+    try:
+        json_data = await request.json()
+        setting = json_data.get("setting")
+        value = json_data.get("value")
+
+        if setting == "updatedTimestepScaling":
+            global using_RES4LYF_time_snr_shift
+            using_RES4LYF_time_snr_shift = value
+                
+        return web.Response(status=200)
+    except Exception as e:
+        return web.Response(status=500)
+    
+
+def init(check_imports=None):
+    log("Init")
+
+    # monkey patch comfy.model_sampling.time_snr_shift with custom implementation
+    comfy.model_sampling.time_snr_shift = time_snr_shift_RES4LYF
+    return True
+
+    # if check_imports is not None:
+    #     import importlib.util
+    #     for imp in check_imports:
+    #         spec = importlib.util.find_spec(imp)
+    #         if spec is None:
+    #             log(f"{imp} is required, please check requirements are installed.",
+    #                 type="ERROR", always=True)
+    #             return False
+
+    # install_js()
+    # return True
+
+
+config = None
 
 def is_logging_enabled():
     config = get_extension_config()
@@ -157,23 +206,6 @@ def install_js():
 
 def should_install_js():
     return not hasattr(PromptServer.instance, "supports") or "custom_nodes_from_web" not in PromptServer.instance.supports
-
-
-def init(check_imports=None):
-    log("Init")
-
-    if check_imports is not None:
-        import importlib.util
-        for imp in check_imports:
-            spec = importlib.util.find_spec(imp)
-            if spec is None:
-                log(f"{imp} is required, please check requirements are installed.",
-                    type="ERROR", always=True)
-                return False
-
-    install_js()
-    return True
-
 
 def get_async_loop():
     loop = None

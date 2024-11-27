@@ -2,6 +2,7 @@ import { app } from "../../scripts/app.js";
 
 let ENABLE_WIDGET_HIDING = false; 
 let RESDEBUG = false;
+let ENABLE_UPDATED_TIMESTEP_SCALING = true;
 
 function resDebugLog(...args) {
     if (RESDEBUG) {
@@ -334,10 +335,41 @@ app.registerExtension({
             ],
             onChange: (value) => {
                 RESDEBUG = value;
-                if (RESDEBUG) {
-                    console.log("RES4LYF debug logging enabled");
-                }
+                resDebugLog(`Debug logging ${value ? "enabled" : "disabled"}`);
             },
+        });
+
+        app.ui.settings.addSetting({
+            id: "RES4LYF.enableUpdatedTimestepScaling",
+            name: "RES4LYF: Enable \"improved\" timestep scaling",
+            defaultValue: true,
+            type: "boolean",
+            options: (value) => [
+                { value: true, text: "On", selected: value === true },
+                { value: false, text: "Off", selected: value === false },
+            ],
+            onChange: (value) => {
+                // Send to backend
+                fetch('/reslyf/settings', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        setting: "updatedTimestepScaling",
+                        value: value
+                    })
+                }).then(response => {
+                    if (response.ok) {
+                        ENABLE_UPDATED_TIMESTEP_SCALING = value;
+                        resDebugLog(`Updated timestep scaling ${value ? "enabled" : "disabled"}`);
+                    } else {
+                        resDebugLog(`Failed to update updatedTimestepScaling setting`);
+                    }
+                }).catch(error => {
+                    resDebugLog(`Error updating updatedTimestepScaling setting: ${error}`);
+                });
+            }
         });
     },
 
