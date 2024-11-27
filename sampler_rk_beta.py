@@ -333,7 +333,6 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
                                 else:
                                     eps_row     = (x_[row+1][0][i4] - y0    [0][i4]) / (s_[row] * s_in)
                                     eps_row_inv = (x_[row+1][0][i4] - y0_inv[0][i4]) / (s_[row] * s_in)
-                                    
                                 eps_[row][0][i4] = eps_[row][0][i4] + lgw_mask_clamp[0][i4] * (eps_row - eps_[row][0][i4]) + lgw_mask_clamp_inv[0][i4] * (eps_row_inv - eps_[row][0][i4])
                                 
                         elif (lgw[_] > 0 or lgw_inv[_] > 0):
@@ -353,8 +352,7 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
                                     eps_row_inv = y0_inv[0][i4] - x_0[0][i4]
                                 else:
                                     eps_row     = (x_[row+1][0][i4] - y0    [0][i4]) / (s_[row] * s_in)
-                                    eps_row_inv = (x_[row+1][0][i4] - y0_inv[0][i4]) / (s_[row] * s_in)
-                                                                    
+                                    eps_row_inv = (x_[row+1][0][i4] - y0_inv[0][i4]) / (s_[row] * s_in)            
                                 eps_[row][0][i4] = eps_[row][0][i4]      +     ratio * lgw_mask[0][i4] * (eps_row - eps_[row][0][i4])    +    ratio_inv * lgw_mask_inv[0][i4] * (eps_row_inv - eps_[row][0][i4])
 
 
