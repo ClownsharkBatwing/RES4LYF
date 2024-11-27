@@ -736,7 +736,7 @@ class ClownsharKSampler_Beta:
              noise_stdev=1.0, noise_mean=0.0, noise_normalize=True, noise_is_latent=False, 
              eta=0.25, eta_var=0.0, d_noise=1.0, s_noise=1.0, alpha_init=-1.0, k_init=1.0, alpha_sde=-1.0, k_sde=1.0, cfgpp=0.0, c1=0.0, c2=0.5, c3=1.0, multistep=False, noise_seed=-1, sampler_name="res_2m", implicit_sampler_name="default",
                     exp_mode=False, t_fn_formula=None, sigma_fn_formula=None, implicit_steps=0,
-                    latent_guide=None, latent_guide_inv=None, latent_guide_weight=0.0, guide_mode="blend", latent_guide_weights=None, latent_guide_mask=None, latent_guide_mask_inv=None, rescale_floor=True, sigmas_override=None, unsampler_type="linear",
+                    latent_guide=None, latent_guide_inv=None, latent_guide_weight=0.0, latent_guide_weight_inv=0.0, guide_mode="blend", latent_guide_weights=None, latent_guide_weights_inv=None, latent_guide_mask=None, latent_guide_mask_inv=None, rescale_floor=True, sigmas_override=None, unsampler_type="linear",
                     shift=3.0, base_shift=0.85, guides=None, options=None, sde_noise=None,sde_noise_steps=1, t_is=None, shift_scaling="exponential",
                     input_std=1.0, input_normalization="channels", extra_options="",
                     ): 
