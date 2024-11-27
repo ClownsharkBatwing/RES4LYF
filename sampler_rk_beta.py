@@ -275,9 +275,8 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
             else:
                 lgw_mask = torch.zeros_like(mask)
             if latent_guide_inv is not None:
-                #lgw_mask_inv = (1-mask) * lgw[_]   
                 if mask_inv is not None:
-                    lgw_mask_inv = torch.maximum(1-mask_inv, (1-mask) * lgw_inv[_])
+                    lgw_mask_inv = torch.minimum(1-mask_inv, (1-mask) * lgw_inv[_])
                 else:
                     lgw_mask_inv = (1-mask) * lgw_inv[_]   
             else:
@@ -404,14 +403,9 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
             eps = x - denoised
             
             if guide_mode == "epsilon_mean_std":
-                #denoised_mask     = denoised[mask == 0]
-                #denoised_mask_inv = denoised[mask == 1]
-                #denoised_mask_intermediate = denoised[(mask > 0) & (mask < 1)]
-                
                 denoised_masked     = denoised * ((mask==1)*mask)
                 denoised_masked_inv = denoised * ((mask==0)*(1-mask))
                 denoised_masked_intermediate = denoised - denoised_masked - denoised_masked_inv
-                #denoised_masked_intermediate = denoised * (((mask > 0) & (mask < 1))*mask)
                 
                 ks3 = torch.zeros_like(x)
                 for n in range(denoised.shape[1]):
@@ -423,11 +417,7 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
                     #ks3[0][n] = (ks3[0][n] * y0_inv[0][n].std()) + y0_inv[0][n].mean()
                     ks3[0][n] = (ks3[0][n] * denoised_mask_inv.std()) + denoised_mask_inv.mean()
                     
-                #denoised_masked = ks3
                 x = 0.005 * ks3 + (1-0.005) * denoised_masked           + denoised_masked_intermediate +  denoised_masked_inv + eps
-                #x = lgw[_] * ks3 + (1-lgw[_]) * denoised_masked           + denoised_masked_intermediate +  denoised_masked_inv + eps
-                #x = denoised_masked_intermediate + lgw[_] * ks3 + (1-lgw[_]) * denoised_masked_intermediate +  denoised_masked_inv + eps
-            
             
             if UNSAMPLE == False and latent_guide is not None and lgw[_] > 0:
                 y0_tmp = y0
@@ -532,9 +522,6 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
                     eps2_[row] = eps2_[row] + lgw[_] * (cvf - eps2_[row])
                 x = x_0 + h_irk * irk.b_k_sum(eps2_, 0)
             
-        #print("x stats: ", x.std(), x.mean(), x.abs().mean(), x.max())
-        #callback({'x': x, 'i': _, 'sigma': sigma, 'sigma_next': sigma_next, 'denoised': denoised}) if callback is not None else None
-
         callback({'x': x, 'i': _, 'sigma': sigma, 'sigma_next': sigma_next, 'denoised': data_[0]}) if callback is not None else None
 
         sde_noise_t = None
@@ -551,7 +538,6 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
         eps_ [0] = torch.zeros_like(eps_ [0])
         data_[0] = torch.zeros_like(data_[0])
         
-    #print("x stats (end): ", x.std(), x.mean(), x.abs().mean(), x.max())
     return x
 
 
