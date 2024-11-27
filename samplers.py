@@ -736,7 +736,7 @@ class ClownsharKSampler_Beta:
              noise_stdev=1.0, noise_mean=0.0, noise_normalize=True, noise_is_latent=False, 
              eta=0.25, eta_var=0.0, d_noise=1.0, s_noise=1.0, alpha_init=-1.0, k_init=1.0, alpha_sde=-1.0, k_sde=1.0, cfgpp=0.0, c1=0.0, c2=0.5, c3=1.0, multistep=False, noise_seed=-1, sampler_name="res_2m", implicit_sampler_name="default",
                     exp_mode=False, t_fn_formula=None, sigma_fn_formula=None, implicit_steps=0,
-                    latent_guide=None, latent_guide_inv=None, latent_guide_weight=0.0, guide_mode="blend", latent_guide_weights=None, latent_guide_mask=None, rescale_floor=True, sigmas_override=None, unsampler_type="linear",
+                    latent_guide=None, latent_guide_inv=None, latent_guide_weight=0.0, guide_mode="blend", latent_guide_weights=None, latent_guide_mask=None, latent_guide_mask_inv=None, rescale_floor=True, sigmas_override=None, unsampler_type="linear",
                     shift=3.0, base_shift=0.85, guides=None, options=None, sde_noise=None,sde_noise_steps=1, t_is=None, shift_scaling="exponential",
                     input_std=1.0, input_normalization="channels", extra_options="",
                     ): 
@@ -775,7 +775,7 @@ class ClownsharKSampler_Beta:
             if guides is not None:
                 #guides = (guide_mode, rescale_floor, latent_guide_weight, latent_guide_weight_inv, latent_guide_weights, latent_guide_weights_inv, t_is, latent_guide, latent_guide_inv, latent_guide_mask, 
                 #            scheduler, scheduler_inv, steps, steps_inv, denoise, denoise_inv)
-                guide_mode, rescale_floor, latent_guide_weight, latent_guide_weight_inv, latent_guide_weights, latent_guide_weights_inv, t_is, latent_guide, latent_guide_inv, latent_guide_mask, scheduler_, scheduler_inv_, steps_, steps_inv_, denoise_, denoise_inv_ = guides
+                guide_mode, rescale_floor, latent_guide_weight, latent_guide_weight_inv, latent_guide_weights, latent_guide_weights_inv, t_is, latent_guide, latent_guide_inv, latent_guide_mask, latent_guide_mask_inv, scheduler_, scheduler_inv_, steps_, steps_inv_, denoise_, denoise_inv_ = guides
                 #guide_mode, rescale_floor, latent_guide_weight, latent_guide_weights, t_is, latent_guide, latent_guide_inv, latent_guide_mask, scheduler_, steps_, denoise_ = guides
                 """if scheduler == "constant": 
                     latent_guide_weights = initialize_or_scale(latent_guide_weights, latent_guide_weight, max_steps).to(default_dtype)
@@ -968,7 +968,7 @@ class ClownsharKSampler_Beta:
                 sampler = comfy.samplers.ksampler("rk_beta", {"eta": eta, "eta_var": eta_var, "s_noise": s_noise, "d_noise": d_noise, "alpha": alpha_sde, "k": k_sde, "c1": c1, "c2": c2, "c3": c3, "cfgpp": cfgpp, "MULTISTEP": multistep, 
                                                         "noise_sampler_type": noise_type_sde, "noise_mode": noise_mode_sde, "noise_seed": noise_seed_sde, "rk_type": sampler_name, "implicit_sampler_name": implicit_sampler_name,
                                                                 "exp_mode": exp_mode, "t_fn_formula": t_fn_formula, "sigma_fn_formula": sigma_fn_formula, "implicit_steps": implicit_steps,
-                                                                "latent_guide": latent_guide, "latent_guide_inv": latent_guide_inv, "mask": latent_guide_mask, 
+                                                                "latent_guide": latent_guide, "latent_guide_inv": latent_guide_inv, "mask": latent_guide_mask, "mask_inv": latent_guide_mask_inv,
                                                                 "latent_guide_weights": latent_guide_weights, "latent_guide_weights_inv": latent_guide_weights_inv, "t_is": t_is, "guide_mode": guide_mode, "unsampler_type": unsampler_type,
                                                                 "LGW_MASK_RESCALE_MIN": rescale_floor, "sigmas_override": sigmas_override, "sde_noise": sde_noise,
                                                                 "input_std": input_std, "input_normalization": input_normalization, "extra_options": extra_options,
@@ -1429,6 +1429,7 @@ class ClownsharKSamplerGuides_Beta:
                         "latent_guide": ("LATENT", ),
                         "latent_guide_inv": ("LATENT", ),
                         "latent_guide_mask": ("MASK", ),
+                        "latent_guide_mask_inv": ("MASK", ),
                         "latent_guide_weights": ("SIGMAS", ),
                         "latent_guide_weights_inv": ("SIGMAS", ),
                         #"t_is": ("SIGMAS",),
@@ -1440,7 +1441,7 @@ class ClownsharKSamplerGuides_Beta:
     FUNCTION = "get_sampler"
 
     def get_sampler(self, model=None, scheduler="constant", scheduler_inv="constant", steps=30, steps_inv=30, denoise=1.0, denoise_inv=1.0, latent_guide=None, latent_guide_inv=None, latent_guide_weight=0.0, latent_guide_weight_inv=0.0, 
-                    guide_mode="blend", latent_guide_weights=None, latent_guide_weights_inv=None, latent_guide_mask=None, rescale_floor=True, t_is=None,
+                    guide_mode="blend", latent_guide_weights=None, latent_guide_weights_inv=None, latent_guide_mask=None, latent_guide_mask_inv=None, rescale_floor=True, t_is=None,
                     ):
         default_dtype = torch.float64
         
@@ -1462,7 +1463,7 @@ class ClownsharKSamplerGuides_Beta:
         if latent_guide_inv is not None:
             x = latent_guide_inv["samples"].clone().to(default_dtype) 
 
-        guides = (guide_mode, rescale_floor, latent_guide_weight, latent_guide_weight_inv, latent_guide_weights, latent_guide_weights_inv, t_is, latent_guide, latent_guide_inv, latent_guide_mask, 
+        guides = (guide_mode, rescale_floor, latent_guide_weight, latent_guide_weight_inv, latent_guide_weights, latent_guide_weights_inv, t_is, latent_guide, latent_guide_inv, latent_guide_mask, latent_guide_mask_inv,
                   scheduler, scheduler_inv, steps, steps_inv, denoise, denoise_inv)
         return (guides, )
 

@@ -150,7 +150,7 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
               sigma_fn_formula="", t_fn_formula="",
                   eta=0.0, eta_var=0.0, s_noise=1., d_noise=1., alpha=-1.0, k=1.0, scale=0.1, c1=0.0, c2=0.5, c3=1.0, MULTISTEP=False, cfgpp=0.0, implicit_steps=0, reverse_weight=0.0, exp_mode=False,
                   latent_guide=None, latent_guide_inv=None, latent_guide_weights=None, latent_guide_weights_inv=None, guide_mode="blend", unsampler_type="linear",
-                  GARBAGE_COLLECT=False, mask=None, LGW_MASK_RESCALE_MIN=True, sigmas_override=None, t_is=None,sde_noise=None,
+                  GARBAGE_COLLECT=False, mask=None, mask_inv=None, LGW_MASK_RESCALE_MIN=True, sigmas_override=None, t_is=None,sde_noise=None,
                   input_std=1.0, input_normalization="channels", extra_options="",
                   etas=None, s_noises=None, momentums=None,
                   ):
@@ -180,7 +180,9 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
 
     sigmas, UNSAMPLE = rk.prepare_sigmas(sigmas)
     mask, LGW_MASK_RESCALE_MIN = rk.prepare_mask(x, mask, LGW_MASK_RESCALE_MIN)
-
+    if mask_inv is not None:
+        mask_inv, LGW_MASK_RESCALE_MIN = rk.prepare_mask(x, mask_inv, LGW_MASK_RESCALE_MIN)
+    
     x, y0, y0_inv = rk.init_guides(x, latent_guide, latent_guide_inv, mask, sigmas, UNSAMPLE)
     
     if guide_mode == "epsilon_match_mean_std":
@@ -274,7 +276,10 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
                 lgw_mask = torch.zeros_like(mask)
             if latent_guide_inv is not None:
                 #lgw_mask_inv = (1-mask) * lgw[_]   
-                lgw_mask_inv = (1-mask) * lgw_inv[_]   
+                if mask_inv is not None:
+                    lgw_mask_inv = torch.maximum(1-mask_inv, (1-mask) * lgw_inv[_])
+                else:
+                    lgw_mask_inv = (1-mask) * lgw_inv[_]   
             else:
                 lgw_mask_inv = torch.zeros_like(mask)
             
