@@ -182,6 +182,14 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
     mask, LGW_MASK_RESCALE_MIN = rk.prepare_mask(x, mask, LGW_MASK_RESCALE_MIN)
 
     x, y0, y0_inv = rk.init_guides(x, latent_guide, latent_guide_inv, mask, sigmas, UNSAMPLE)
+    
+    if guide_mode == "epsilon_match_mean_std":
+        ks3 = torch.zeros_like(x)
+        for n in range(y0_inv.shape[1]):
+            ks3[0][n] = (y0[0][n] - y0[0][n].mean()) / y0[0][n].std()
+            ks3[0][n] = (ks3[0][n] * y0_inv[0][n].std()) + y0_inv[0][n].mean()
+        y0 = ks3
+
     x_guide_maybe = x
     
     if input_normalization == "channels_mean_std":
@@ -389,6 +397,32 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
             
             denoised = x + (sigma / (sigma - sigma_down)) *  h * rk.b_k_sum(eps_, 0) 
             eps = x - denoised
+            
+            if guide_mode == "epsilon_mean_std":
+                #denoised_mask     = denoised[mask == 0]
+                #denoised_mask_inv = denoised[mask == 1]
+                #denoised_mask_intermediate = denoised[(mask > 0) & (mask < 1)]
+                
+                denoised_masked     = denoised * ((mask==1)*mask)
+                denoised_masked_inv = denoised * ((mask==0)*(1-mask))
+                denoised_masked_intermediate = denoised - denoised_masked - denoised_masked_inv
+                #denoised_masked_intermediate = denoised * (((mask > 0) & (mask < 1))*mask)
+                
+                ks3 = torch.zeros_like(x)
+                for n in range(denoised.shape[1]):
+                    denoised_mask     = denoised[0][n][mask[0][n] == 1]
+                    denoised_mask_inv = denoised[0][n][mask[0][n] == 0]
+                    
+                    
+                    ks3[0][n] = (denoised_masked[0][n] - denoised_mask.mean()) / denoised_mask.std()
+                    #ks3[0][n] = (ks3[0][n] * y0_inv[0][n].std()) + y0_inv[0][n].mean()
+                    ks3[0][n] = (ks3[0][n] * denoised_mask_inv.std()) + denoised_mask_inv.mean()
+                    
+                #denoised_masked = ks3
+                x = 0.005 * ks3 + (1-0.005) * denoised_masked           + denoised_masked_intermediate +  denoised_masked_inv + eps
+                #x = lgw[_] * ks3 + (1-lgw[_]) * denoised_masked           + denoised_masked_intermediate +  denoised_masked_inv + eps
+                #x = denoised_masked_intermediate + lgw[_] * ks3 + (1-lgw[_]) * denoised_masked_intermediate +  denoised_masked_inv + eps
+            
             
             if UNSAMPLE == False and latent_guide is not None and lgw[_] > 0:
                 y0_tmp = y0
