@@ -149,4 +149,35 @@ class FluxLoader:
 
 
 
+class SD35Loader:
+    # adapted from https://github.com/comfyanonymous/ComfyUI/blob/master/nodes.py
+    @classmethod
+    def INPUT_TYPES(s):
+        return {"required": { 
+                        "ckpt_name": (folder_paths.get_filename_list("checkpoints"), ),
+                        "clip_name1": (folder_paths.get_filename_list("text_encoders"), ),
+                        "clip_name2": (folder_paths.get_filename_list("text_encoders"), ),
+                        "clip_name3": (folder_paths.get_filename_list("text_encoders"), ),
+                         }
+               }
+    RETURN_TYPES = ("MODEL","CLIP","VAE",)
+    RETURN_NAMES = ("model","clip","vae",)
+    FUNCTION = "main"
+
+    CATEGORY = "advanced/loaders"
+
+    def main(self, ckpt_name, clip_name1, clip_name2, clip_name3):
+
+        ckpt_path = folder_paths.get_full_path_or_raise("checkpoints", ckpt_name)
+        out = comfy.sd.load_checkpoint_guess_config(ckpt_path, output_vae=True, output_clip=True, embedding_directory=folder_paths.get_folder_paths("embeddings"))
+        
+        clip_path1 = folder_paths.get_full_path_or_raise("text_encoders", clip_name1)
+        clip_path2 = folder_paths.get_full_path_or_raise("text_encoders", clip_name2)
+        clip_path3 = folder_paths.get_full_path_or_raise("text_encoders", clip_name3)
+        clip = comfy.sd.load_clip(ckpt_paths=[clip_path1, clip_path2, clip_path3], embedding_directory=folder_paths.get_folder_paths("embeddings"))
+        
+        #return out[:3]
+        model = out[0]
+        vae = out[2]
+        return (model, clip, vae,)
 

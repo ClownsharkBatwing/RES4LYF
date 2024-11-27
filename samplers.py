@@ -773,13 +773,7 @@ class ClownsharKSampler_Beta:
                 unsampler_type = options.get('unsampler_type', unsampler_type)
 
             if guides is not None:
-                #guides = (guide_mode, rescale_floor, latent_guide_weight, latent_guide_weight_inv, latent_guide_weights, latent_guide_weights_inv, t_is, latent_guide, latent_guide_inv, latent_guide_mask, 
-                #            scheduler, scheduler_inv, steps, steps_inv, denoise, denoise_inv)
                 guide_mode, rescale_floor, latent_guide_weight, latent_guide_weight_inv, latent_guide_weights, latent_guide_weights_inv, t_is, latent_guide, latent_guide_inv, latent_guide_mask, latent_guide_mask_inv, scheduler_, scheduler_inv_, steps_, steps_inv_, denoise_, denoise_inv_ = guides
-                #guide_mode, rescale_floor, latent_guide_weight, latent_guide_weights, t_is, latent_guide, latent_guide_inv, latent_guide_mask, scheduler_, steps_, denoise_ = guides
-                """if scheduler == "constant": 
-                    latent_guide_weights = initialize_or_scale(latent_guide_weights, latent_guide_weight, max_steps).to(default_dtype)
-                    latent_guide_weights = F.pad(latent_guide_weights, (0, max_steps), value=0.0)"""
                 if scheduler_ != "constant" and latent_guide_weights is None:
                     latent_guide_weights = get_sigmas(model, scheduler_, steps_, denoise_).to(default_dtype)
                 if scheduler_inv_ != "constant" and latent_guide_weights_inv is None:
@@ -790,7 +784,6 @@ class ClownsharKSampler_Beta:
             latent_guide_weights_inv = initialize_or_scale(latent_guide_weights_inv, latent_guide_weight_inv, max_steps).to(default_dtype)
             latent_guide_weights_inv = F.pad(latent_guide_weights_inv, (0, max_steps), value=0.0)
             
-            #ts_sigmas = model.get_model_object('model_sampling').sigmas.clone()
             if shift >= 0:
                 if isinstance(model.model.model_config, comfy.supported_models.SD3):
                     model = ModelSamplingSD3().patch(model, shift)[0] 

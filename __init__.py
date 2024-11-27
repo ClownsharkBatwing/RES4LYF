@@ -102,6 +102,7 @@ NODE_CLASS_MAPPINGS = {
     "AdvancedNoise": samplers.AdvancedNoise,
     
     "FluxLoader": loaders.FluxLoader,
+    "SD35Loader": loaders.SD35Loader,
     
     "TextBox1": samplers.TextBox1,
     "TextBox3": samplers.TextBox3,
