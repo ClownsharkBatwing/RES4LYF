@@ -321,6 +321,33 @@ class sigmas_variance_floor:
         return (sigmas.to(dtype),)
 
 
+class sigmas_from_text:
+    def __init__(self):
+        pass
+    
+    @classmethod
+    def INPUT_TYPES(s):
+        return {
+            "required": {
+                "text": ("STRING", {"default": "", "multiline": True}),
+            }
+        }
+
+    FUNCTION = "main"
+    RETURN_TYPES = ("SIGMAS",)
+    RETURN_NAMES = ("sigmas",)
+    CATEGORY = "sampling/custom_sampling/sigmas"
+    
+    def main(self, text):
+        text_list = [float(val) for val in text.replace(",", " ").split()]
+        #text_list = [float(val.strip()) for val in text.split(",")]
+
+        sigmas = torch.tensor(text_list).to('cuda').to(torch.float64)
+        
+        return (sigmas,)
+
+
+
 class sigmas_concatenate:
     def __init__(self):
         pass
