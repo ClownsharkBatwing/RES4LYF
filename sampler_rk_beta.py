@@ -154,6 +154,7 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
                   input_std=1.0, input_normalization="channels", extra_options="",
                   etas=None, s_noises=None, momentums=None,
                   ):
+    mean_weight = 0.01
     extra_args = {} if extra_args is None else extra_args
     s_in = x.new_ones([x.shape[0]])
     
@@ -416,6 +417,23 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
                     ks3[0][n] = (ks3[0][n] * denoised_mask_inv.std()) + denoised_mask_inv.mean()
                     
                 x = 0.005 * ks3 + (1-0.005) * denoised_masked           + denoised_masked_intermediate +  denoised_masked_inv + eps
+            elif guide_mode == "epsilon_mean":
+                denoised_masked     = denoised * ((mask==1)*mask)
+                denoised_masked_inv = denoised * ((mask==0)*(1-mask))
+                denoised_masked_intermediate = denoised - denoised_masked - denoised_masked_inv
+                
+                ks3 = torch.zeros_like(x)
+                for n in range(denoised.shape[1]):
+                    denoised_mask     = denoised[0][n][mask[0][n] == 1]
+                    denoised_mask_inv = denoised[0][n][mask[0][n] == 0]
+                    
+                    
+                    ks3[0][n] = (denoised_masked[0][n] - denoised_mask.mean())
+                    #ks3[0][n] = (ks3[0][n] * y0_inv[0][n].std()) + y0_inv[0][n].mean()
+                    ks3[0][n] = (ks3[0][n]) + denoised_mask_inv.mean()
+                    
+                x = mean_weight * ks3 + (1-mean_weight) * denoised_masked           + denoised_masked_intermediate +  denoised_masked_inv + eps
+            
             
             if UNSAMPLE == False and latent_guide is not None and lgw[_] > 0:
                 y0_tmp = y0

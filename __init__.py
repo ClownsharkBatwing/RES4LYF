@@ -5,6 +5,7 @@ from . import samplers_tiled
 from . import loaders
 from . import sigmas
 from . import latents
+from . import latent_images
 from . import conditioning
 from . import images
 from . import models
@@ -26,8 +27,6 @@ try:
     print("Importing test_samplers.py")
 except ImportError:
     pass
-
-res4lyf.init()
 
 """def get_ext_dir(subpath=None, mkdir=False):
     dir = os.path.dirname(__file__)
@@ -123,6 +122,8 @@ NODE_CLASS_MAPPINGS = {
     "Set Precision": latents.set_precision,
     "Set Precision Universal": latents.set_precision_universal,
     "Set Precision Advanced": latents.set_precision_advanced,
+    
+    "Latent Match Channelwise": latent_images.latent_channelwise_match,
 
     "LatentNoised": samplers.LatentNoised,
     "LatentNoiseList": latents.LatentNoiseList,
@@ -185,6 +186,7 @@ NODE_CLASS_MAPPINGS = {
     "Tan Scheduler 2": sigmas.tan_scheduler_2stage,
     "Tan Scheduler 2 Simple": sigmas.tan_scheduler_2stage_simple,
     
+    #"VGG19StyleTransfer": images.VGG19StyleTransfer,
     "Image Channels LAB": images.Image_Channels_LAB,
     "Image Median Blur": images.ImageMedianBlur,
     "Image Pair Split": images.Image_Pair_Split,

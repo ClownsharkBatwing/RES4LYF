@@ -574,4 +574,163 @@ class Image_Crop_Location_Exact:
     
 
 
+"""
 
+import torch
+import torch.nn as nn
+import torch.optim as optim
+from torchvision import models, transforms
+
+class VGG19StyleTransfer:
+    def __init__(self):
+        pass
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "content_image": ("IMAGE",),
+                "style_image": ("IMAGE",),
+                "style_weight": ("FLOAT", {
+                    "default": 1e6,
+                    "min": 1e3,
+                    "max": 1e7,
+                    "step": 1e3,
+                }),
+                "content_weight": ("FLOAT", {
+                    "default": 1.0,
+                    "min": 0.01,
+                    "max": 100.0,
+                    "step": 0.01,
+                }),
+                "num_steps": ("INT", {
+                    "default": 500,
+                    "min": 10,
+                    "max": 1000,
+                    "step": 10,
+                }),
+            },
+        }
+
+    RETURN_TYPES = ("IMAGE",)
+    FUNCTION = "main"
+    CATEGORY = "image/stylization"
+    def main(self, content_image, style_image, style_weight, content_weight, num_steps):
+        # Explicitly enable gradients
+        with torch.inference_mode(False):
+            with torch.enable_grad():
+                # Preprocess and reattach images
+                content_image = content_image.clone().detach().float().requires_grad_(False)
+                style_image = style_image.clone().detach().float().requires_grad_(False)
+
+                content_image = self._preprocess(content_image)
+                style_image = self._preprocess(style_image)
+
+                # Load VGG19 model
+                vgg = self._load_vgg19()
+
+                # Extract content and style features
+                content_layers = [21]  # relu4_2
+                style_layers = [1, 6, 11, 20, 29]  # relu1_1, relu2_1, ..., relu5_1
+                content_features = self._extract_features(content_image, vgg, content_layers)
+                style_features = self._extract_features(style_image, vgg, style_layers, gram=True)
+
+                # Initialize generated image and attach to computation graph
+                generated_image = content_image.clone().detach().requires_grad_(True)
+                generated_image = torch.nn.Parameter(generated_image)
+
+                # Use LBFGS optimizer
+                optimizer = optim.LBFGS([generated_image])
+
+                # Optimization loop
+                def closure():
+                    optimizer.zero_grad()
+
+                    # Extract features from the generated image
+                    gen_content_features = self._extract_features(generated_image, vgg, content_layers)
+                    gen_style_features = self._extract_features(generated_image, vgg, style_layers, gram=True)
+
+                    # Compute losses
+                    content_loss = self._compute_content_loss(gen_content_features, content_features, content_weight)
+                    style_loss = self._compute_style_loss(gen_style_features, style_features, style_weight)
+
+                    # Combine losses
+                    total_loss = content_loss + style_loss
+
+                    # Debugging to ensure proper gradient flow
+                    print("Content Loss:", content_loss)
+                    print("Style Loss:", style_loss)
+                    print("Total Loss:", total_loss)
+                    print("Generated Image grad_fn:", generated_image.grad_fn)
+
+                    # Backpropagate gradients
+                    total_loss.backward()
+
+                    return total_loss  # Return the total loss (tensor) for LBFGS
+
+                # Run optimization
+                for step in range(num_steps):
+                    optimizer.step(closure)
+                    if step % 50 == 0:
+                        print(f"Step {step}/{num_steps}")
+
+                # Postprocess and return the result
+                generated_image = self._postprocess(generated_image.detach())
+            return (generated_image,)
+
+
+    def _load_vgg19(self):
+        # Load pretrained VGG19 model and freeze weights
+        vgg = models.vgg19(pretrained=True).features
+        for param in vgg.parameters():
+            param.requires_grad = False
+        return vgg.to("cuda").eval()
+
+    def _preprocess(self, img):
+        # Normalize the input image to [0, 1] and apply VGG-specific normalization
+        img = img / 255.0  # Normalize to [0, 1]
+        img = img.permute(0, 3, 1, 2)  # Convert to (B, C, H, W)
+        mean = torch.tensor([0.485, 0.456, 0.406], device=img.device).view(1, 3, 1, 1)
+        std = torch.tensor([0.229, 0.224, 0.225], device=img.device).view(1, 3, 1, 1)
+        return (img - mean) / std
+
+    def _postprocess(self, img):
+        # Reverse the normalization and convert back to [0, 255]
+        mean = torch.tensor([0.485, 0.456, 0.406], device=img.device).view(1, 3, 1, 1)
+        std = torch.tensor([0.229, 0.224, 0.225], device=img.device).view(1, 3, 1, 1)
+        img = img * std + mean  # Denormalize
+        img = torch.clamp(img, 0, 1)  # Clamp to valid range
+        img = (img * 255).to(torch.uint8)  # Convert to [0, 255]
+        return img.permute(0, 2, 3, 1)  # Convert back to (B, H, W, C)
+
+    def _extract_features(self, img, model, layers, gram=False):
+        # Extract features from specified layers
+        features = {}
+        x = img
+        for idx, layer in enumerate(model.children()):
+            x = layer(x)
+            if idx in layers:
+                features[idx] = self._gram_matrix(x) if gram else x
+        return features
+
+    def _gram_matrix(self, tensor):
+        # Compute Gram matrix for style representation
+        _, c, h, w = tensor.size()
+        tensor = tensor.view(c, h * w)
+        gram = torch.mm(tensor, tensor.t())
+        return gram / (c * h * w)
+
+    def _compute_content_loss(self, gen_features, content_features, weight):
+        # Compute content loss (MSE)
+        loss = 0
+        for layer in gen_features.keys():
+            loss += torch.mean((gen_features[layer] - content_features[layer]) ** 2)
+        return weight * loss
+
+    def _compute_style_loss(self, gen_features, style_features, weight):
+        # Compute style loss (MSE on Gram matrices)
+        loss = 0
+        for layer in gen_features.keys():
+            loss += torch.mean((gen_features[layer] - style_features[layer]) ** 2)
+        return weight * loss
+"""
