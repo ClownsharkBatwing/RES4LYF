@@ -1451,10 +1451,10 @@ class ClownsharKSamplerGuides_Beta:
             latent_guide_weights_inv = initialize_or_scale(None, latent_guide_weight_inv, steps_inv).to(default_dtype)
             latent_guide_weights_inv = F.pad(latent_guide_weights_inv, (0, max_steps), value=0.0)
         
-        if latent_guide is not None:
+        """if latent_guide is not None:
             x = latent_guide["samples"].clone().to(default_dtype) 
         if latent_guide_inv is not None:
-            x = latent_guide_inv["samples"].clone().to(default_dtype) 
+            x = latent_guide_inv["samples"].clone().to(default_dtype) """
 
         guides = (guide_mode, rescale_floor, latent_guide_weight, latent_guide_weight_inv, latent_guide_weights, latent_guide_weights_inv, t_is, latent_guide, latent_guide_inv, latent_guide_mask, latent_guide_mask_inv,
                   scheduler, scheduler_inv, steps, steps_inv, denoise, denoise_inv)

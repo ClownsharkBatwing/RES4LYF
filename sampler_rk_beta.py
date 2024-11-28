@@ -267,9 +267,8 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
                 eps_ [rk.multistep_stages - ms] = (x_0 - data_ [rk.multistep_stages - ms]) / sigma
             
         if LGW_MASK_RESCALE_MIN: 
-            lgw_mask = mask * (1 - lgw[_]) + lgw[_]
-            #lgw_mask_inv = (1-mask) * (1 - lgw[_]) + lgw[_]
-            lgw_mask_inv = (1-mask) * (1 - lgw_inv[_]) + lgw_inv[_]
+            lgw_mask     =    mask  * (1-lgw    [_]) + lgw    [_]
+            lgw_mask_inv = (1-mask) * (1-lgw_inv[_]) + lgw_inv[_]
         else:
             if latent_guide is not None:
                 lgw_mask = mask * lgw[_]
@@ -327,6 +326,8 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
 
                                 lgw_mask_clamp = torch.clamp(lgw_mask, max=lgw_tmp)
                                 lgw_mask_clamp_inv = torch.clamp(lgw_mask_inv, max=lgw_tmp_inv)
+                                
+                                #rk.process_guide_row(x_0, x_, y0, y0_inv, lgw_mask_clamp[0][i4], lgw_mask_clamp_inv[0][i4] )
 
                                 if rk_type.startswith("dpmpp") or rk_type.startswith("res") or rk_type.startswith("rk_exp"):
                                     eps_row     = y0    [0][i4] - x_0[0][i4]
@@ -394,10 +395,7 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
                             eps_[row][0][i4] = eps_[row][0][i4]  + lgw_tmp * (cvf[0][i4]  - eps_[row][0][i4] )
                     
             x = x_0 + h * rk.b_k_sum(eps_, 0) 
-            
-            #denoised = x_0 + (sigma / (sigma - sigma_down)) *  h * rk.b_k_sum(eps_, 0) 
-            #ps = x_0 - denoised
-            
+
             denoised = x + (sigma / (sigma - sigma_down)) *  h * rk.b_k_sum(eps_, 0) 
             eps = x - denoised
             
@@ -411,9 +409,7 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
                     denoised_mask     = denoised[0][n][mask[0][n] == 1]
                     denoised_mask_inv = denoised[0][n][mask[0][n] == 0]
                     
-                    
                     ks3[0][n] = (denoised_masked[0][n] - denoised_mask.mean()) / denoised_mask.std()
-                    #ks3[0][n] = (ks3[0][n] * y0_inv[0][n].std()) + y0_inv[0][n].mean()
                     ks3[0][n] = (ks3[0][n] * denoised_mask_inv.std()) + denoised_mask_inv.mean()
                     
                 x = 0.005 * ks3 + (1-0.005) * denoised_masked           + denoised_masked_intermediate +  denoised_masked_inv + eps
@@ -427,79 +423,42 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
                     denoised_mask     = denoised[0][n][mask[0][n] == 1]
                     denoised_mask_inv = denoised[0][n][mask[0][n] == 0]
                     
-                    
                     ks3[0][n] = (denoised_masked[0][n] - denoised_mask.mean())
-                    #ks3[0][n] = (ks3[0][n] * y0_inv[0][n].std()) + y0_inv[0][n].mean()
                     ks3[0][n] = (ks3[0][n]) + denoised_mask_inv.mean()
                     
                 x = mean_weight * ks3 + (1-mean_weight) * denoised_masked           + denoised_masked_intermediate +  denoised_masked_inv + eps
             
             
-            if UNSAMPLE == False and latent_guide is not None and lgw[_] > 0:
-                y0_tmp = y0
-                if latent_guide_inv is not None:
-                    y0_tmp = (1-lgw_mask) * denoised + lgw_mask * y0
-                    y0_tmp = (1-lgw_mask_inv) * y0_tmp + lgw_mask_inv * y0_inv
-                if guide_mode == "hard_light":
-                    blend = hard_light_blend(y0, denoised)
-                    denoised = (1-lgw_mask) * denoised + lgw_mask * blend
-                    if latent_guide_inv is not None:
-                        blend_inv = hard_light_blend(y0_inv, denoised)
-                        denoised = (1-lgw_mask_inv) * denoised + lgw_mask_inv * blend_inv
-                    x = denoised + eps
-                elif guide_mode == "blend":
-                    denoised = (1-lgw_mask) * denoised + lgw_mask * y0
-                    denoised = (1-lgw_mask_inv) * denoised + lgw_mask_inv * y0_inv
-                    x = denoised + eps
-
-                elif guide_mode == "mean_std":
-                    ks2 = torch.zeros_like(x)
-                    for n in range(y0.shape[1]):
-                        ks2[0][n] = (denoised[0][n] - denoised[0][n].mean()) / denoised[0][n].std()
-                        ks2[0][n] = (ks2[0][n] * y0[0][n].std()) + y0[0][n].mean()
-                        
-                    ks3 = torch.zeros_like(x)
-                    for n in range(y0_inv.shape[1]):
-                        ks3[0][n] = (denoised[0][n] - denoised[0][n].mean()) / denoised[0][n].std()
-                        ks3[0][n] = (ks3[0][n] * y0_inv[0][n].std()) + y0_inv[0][n].mean()
-                        
-                    denoised = (1 - lgw_mask) * denoised   +   lgw_mask * ks2
-                    denoised = (1 - lgw_mask_inv) * denoised   +   lgw_mask_inv * ks3
-                    x = denoised + eps
-                    
-                elif guide_mode == "mean":
-                    ks2 = torch.zeros_like(x)
-                    for n in range(y0.shape[1]):
-                        ks2[0][n] = (denoised[0][n] - denoised[0][n].mean())
-                        ks2[0][n] = (ks2[0][n]) + y0[0][n].mean()
-                        
-                    ks3 = torch.zeros_like(x)
-                    for n in range(y0_inv.shape[1]):
-                        ks3[0][n] = (denoised[0][n] - denoised[0][n].mean())
-                        ks3[0][n] = (ks3[0][n]) + y0_inv[0][n].mean()
-                        
-                    denoised = (1 - lgw_mask) * denoised   +   lgw_mask * ks2
-                    denoised = (1 - lgw_mask_inv) * denoised   +   lgw_mask_inv * ks3
-                    x = denoised + eps
-                    
-                elif guide_mode == "std":
-                    ks2 = torch.zeros_like(x)
-                    for n in range(y0.shape[1]):
-                        ks2[0][n] = (denoised[0][n]) / denoised[0][n].std()
-                        ks2[0][n] = (ks2[0][n] * y0[0][n].std())
-                        
-                    ks3 = torch.zeros_like(x)
-                    for n in range(y0_inv.shape[1]):
-                        ks3[0][n] = (denoised[0][n]) / denoised[0][n].std()
-                        ks3[0][n] = (ks3[0][n] * y0_inv[0][n].std())
-                        
-                    denoised = (1 - lgw_mask) * denoised   +   lgw_mask * ks2
-                    denoised = (1 - lgw_mask_inv) * denoised   +   lgw_mask_inv * ks3
-                    x = denoised + eps
-                    #if latent_guide_inv is not None:
-                    #    blend_inv = (1-lgw_mask_inv) * y0_tmp + lgw_mask_inv * y0_inv
+            if UNSAMPLE == False and (latent_guide is not None or latent_guide_inv is not None):
+                d_norm, d_shift, d_shift_inv = torch.zeros_like(x), torch.zeros_like(x), torch.zeros_like(x)
                 
-            
+                if guide_mode == "hard_light":
+                    d_shift     = hard_light_blend(y0,     denoised)
+                    d_shift_inv = hard_light_blend(y0_inv, denoised)
+                    
+                elif guide_mode == "blend":
+                    d_shift     = y0
+                    d_shift_inv = y0_inv               
+                    
+                elif guide_mode == "mean_std":
+                    for n in range(y0.shape[1]):
+                        d_norm     [0][n] = (denoised[0][n] - denoised[0][n].mean()) / denoised[0][n].std()
+                        d_shift    [0][n] = (d_norm[0][n] * y0    [0][n].std()) + y0    [0][n].mean()
+                        d_shift_inv[0][n] = (d_norm[0][n] * y0_inv[0][n].std()) + y0_inv[0][n].mean()
+                elif guide_mode == "mean":
+                    for n in range(y0.shape[1]):
+                        d_norm     [0][n] = denoised[0][n] - denoised[0][n].mean()
+                        d_shift    [0][n] = d_norm[0][n] + y0    [0][n].mean()
+                        d_shift_inv[0][n] = d_norm[0][n] + y0_inv[0][n].mean()
+                elif guide_mode == "std":
+                    for n in range(y0.shape[1]):
+                        d_norm     [0][n] = denoised[0][n] / denoised[0][n].std()
+                        d_shift    [0][n] = d_norm[0][n] * y0    [0][n].std()
+                        d_shift_inv[0][n] = d_norm[0][n] * y0_inv[0][n].std()
+
+                denoised_shifted = denoised   +   lgw_mask * (d_shift - denoised)   +   lgw_mask_inv * (d_shift_inv - denoised)
+                x = denoised_shifted + eps
+
 
 
         else:

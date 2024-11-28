@@ -1508,6 +1508,9 @@ class latent_normalize_channels:
 
 
 def hard_light_blend(base_latent, blend_latent):
+    if base_latent.sum() == 0 and base_latent.std() == 0:
+        return base_latent
+    
     blend_latent = (blend_latent - blend_latent.min()) / (blend_latent.max() - blend_latent.min())
 
     positive_mask = base_latent >= 0
