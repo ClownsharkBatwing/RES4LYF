@@ -399,7 +399,7 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
             denoised = x + (sigma / (sigma - sigma_down)) *  h * rk.b_k_sum(eps_, 0) 
             eps = x - denoised
             
-            if guide_mode == "epsilon_mean_std":
+            """if guide_mode == "epsilon_mean_std":
                 denoised_masked     = denoised * ((mask==1)*mask)
                 denoised_masked_inv = denoised * ((mask==0)*(1-mask))
                 denoised_masked_intermediate = denoised - denoised_masked - denoised_masked_inv
@@ -426,7 +426,51 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
                     ks3[0][n] = (denoised_masked[0][n] - denoised_mask.mean())
                     ks3[0][n] = (ks3[0][n]) + denoised_mask_inv.mean()
                     
-                x = mean_weight * ks3 + (1-mean_weight) * denoised_masked           + denoised_masked_intermediate +  denoised_masked_inv + eps
+                x = mean_weight * ks3 + (1-mean_weight) * denoised_masked           + denoised_masked_intermediate +  denoised_masked_inv + eps"""
+            
+            if guide_mode == "epsilon_mean_std" or guide_mode == "epsilon_mean" or guide_mode == "epsilon_std":
+                denoised_masked     = denoised * ((mask==1)*mask)
+                denoised_masked_inv = denoised * ((mask==0)*(1-mask))
+                denoised_masked_intermediate = denoised - denoised_masked - denoised_masked_inv
+                
+                if guide_mode == "epsilon_mean_std":
+
+                    ks3 = torch.zeros_like(x)
+                    for n in range(denoised.shape[1]):
+                        denoised_mask     = denoised[0][n][mask[0][n] == 1]
+                        denoised_mask_inv = denoised[0][n][mask[0][n] == 0]
+                        
+                        ks3[0][n] = (denoised_masked[0][n] - denoised_mask.mean()) / denoised_mask.std()
+                        ks3[0][n] = (ks3[0][n] * denoised_mask_inv.std()) + denoised_mask_inv.mean()
+                        
+                    x = 0.005 * ks3 + (1-0.005) * denoised_masked           + denoised_masked_intermediate +  denoised_masked_inv + eps
+                elif guide_mode == "epsilon_mean":
+                    denoised_masked     = denoised * ((mask==1)*mask)
+                    denoised_masked_inv = denoised * ((mask==0)*(1-mask))
+                    denoised_masked_intermediate = denoised - denoised_masked - denoised_masked_inv
+                    
+                    d_shift, d_shift_inv = torch.zeros_like(x), torch.zeros_like(x)
+                    for n in range(denoised.shape[1]):
+                        denoised_mask     = denoised[0][n][mask[0][n] == 1]
+                        denoised_mask_inv = denoised[0][n][mask[0][n] == 0]
+                        
+                        d_shift[0][n] = (denoised_masked[0][n] - denoised_mask.mean())
+                        d_shift[0][n] = (d_shift[0][n]) + denoised_mask_inv.mean()
+                        
+                        d_shift_inv[0][n] = (denoised_masked_inv[0][n] - denoised_mask_inv.mean())
+                        d_shift_inv[0][n] = (d_shift_inv[0][n]) + denoised_mask.mean()
+                        
+                    """for n in range(denoised.shape[1]):
+                        denoised_mask     = denoised[0][n][mask[0][n] == 1]
+                        denoised_mask_inv = denoised[0][n][mask[0][n] == 0]
+                        
+                        ks3[0][n] = (denoised_masked[0][n] - denoised_mask.mean())
+                        ks3[0][n] = (ks3[0][n]) + denoised_mask_inv.mean()"""
+                        
+                    #x = mean_weight * ks3 + (1-mean_weight) * denoised_masked           + denoised_masked_intermediate +  denoised_masked_inv + eps
+                    
+                    denoised_shifted = denoised   +   mean_weight * lgw_mask * (d_shift - denoised_masked)   +   mean_weight * lgw_mask_inv * (d_shift_inv - denoised_masked_inv)
+                    x = denoised_shifted + eps
             
             
             if UNSAMPLE == False and (latent_guide is not None or latent_guide_inv is not None):
@@ -456,8 +500,9 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
                         d_shift    [0][n] = d_norm[0][n] * y0    [0][n].std()
                         d_shift_inv[0][n] = d_norm[0][n] * y0_inv[0][n].std()
 
-                denoised_shifted = denoised   +   lgw_mask * (d_shift - denoised)   +   lgw_mask_inv * (d_shift_inv - denoised)
-                x = denoised_shifted + eps
+                if guide_mode in ("hard_light", "blend", "mean_std", "mean", "std"):
+                    denoised_shifted = denoised   +   lgw_mask * (d_shift - denoised)   +   lgw_mask_inv * (d_shift_inv - denoised)
+                    x = denoised_shifted + eps
 
 
 

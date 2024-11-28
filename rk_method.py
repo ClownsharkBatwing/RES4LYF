@@ -866,6 +866,16 @@ class RK_Method:
             model_options = extra_args.get("model_options", {}).copy()
             extra_args["model_options"] = comfy.model_patcher.set_model_options_post_cfg_function(model_options, post_cfg_function, disable_cfg1_optimization=True)
     
+    def process_guide_row(self, x_0, ):
+        if rk_type.startswith("dpmpp") or rk_type.startswith("res") or rk_type.startswith("rk_exp"):
+            eps_row     = y0    [0][i4] - x_0[0][i4]
+            eps_row_inv = y0_inv[0][i4] - x_0[0][i4]
+        else:
+            eps_row     = (x_[row+1][0][i4] - y0    [0][i4]) / (s_[row] * s_in)
+            eps_row_inv = (x_[row+1][0][i4] - y0_inv[0][i4]) / (s_[row] * s_in)
+        eps_[row][0][i4] = eps_[row][0][i4] + lgw_mask_clamp[0][i4] * (eps_row - eps_[row][0][i4]) + lgw_mask_clamp_inv[0][i4] * (eps_row_inv - eps_[row][0][i4])
+    
+    
     
     
     def process_guides(self, guide_mode, latent_guide, latent_guide_inv, lgw_mask, lgw_mask_inv, weight, sigma_mid, EPS_PRED, UNSAMPLE):
