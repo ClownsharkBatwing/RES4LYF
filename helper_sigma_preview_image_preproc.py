@@ -224,7 +224,7 @@ def image_resize(image, width, height, method="stretch", interpolation="nearest"
 
     return outputs
 
-    
+
 class PrepForUnsampling:
     @classmethod
     def INPUT_TYPES(s):

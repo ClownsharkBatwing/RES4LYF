@@ -185,6 +185,8 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
         mask_inv, LGW_MASK_RESCALE_MIN = rk.prepare_mask(x, mask_inv, LGW_MASK_RESCALE_MIN)
     
     x, y0, y0_inv = rk.init_guides(x, latent_guide, latent_guide_inv, mask, sigmas, UNSAMPLE)
+    y0_orig, y0_inv_orig = y0.clone(), y0_inv.clone()
+    
     
     if guide_mode == "epsilon_match_mean_std":
         ks3 = torch.zeros_like(x)
@@ -286,7 +288,35 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
             for row in range(rk.rows - rk.multistep_stages):
                 x_[row+1] = x_0 + h * rk.a_k_sum(eps_, row)
 
-                eps_[row], data_[row] = rk(x_0, x_[row+1], s_[row], h, **extra_args)
+                eps_[row], data_[row] = rk(x_0, x_[row+1], s_[row], h, **extra_args)       #MODEL CALL
+                
+                if re.search(r"\bdynamic_guides_mean_std\b", extra_options):
+                    y_norm, y_shift = torch.zeros_like(x), torch.zeros_like(x)
+                    y_inv_norm, y_inv_shift = torch.zeros_like(x), torch.zeros_like(x)
+                    
+                    for n in range(y0.shape[1]):
+                        y_norm     [0][n] = (y0_orig[0][n] - y0_orig[0][n].mean()) / y0_orig[0][n].std()
+                        y_shift    [0][n] = (y_norm[0][n] * data_[row]    [0][n].std()) + data_[row]    [0][n].mean()
+                        
+                        y_inv_norm     [0][n] = (y0_inv_orig[0][n] - y0_inv_orig[0][n].mean()) / y0_inv_orig[0][n].std()
+                        y_inv_shift[0][n] = (y_inv_norm[0][n] * data_[row][0][n].std()) + data_[row][0][n].mean()
+                    y0 = y_shift
+                    if re.search(r"\bdynamic_guides_inv\b", extra_options):
+                        y0_inv = y_inv_shift
+                        
+                if re.search(r"\bdynamic_guides_mean\b", extra_options):
+                    y_norm, y_shift = torch.zeros_like(x), torch.zeros_like(x)
+                    y_inv_norm, y_inv_shift = torch.zeros_like(x), torch.zeros_like(x)
+                    
+                    for n in range(y0.shape[1]):
+                        y_norm     [0][n] = (y0_orig[0][n] - y0_orig[0][n].mean())
+                        y_shift    [0][n] = (y_norm[0][n]) + data_[row]    [0][n].mean()
+                        
+                        y_inv_norm     [0][n] = (y0_inv_orig[0][n] - y0_inv_orig[0][n].mean())
+                        y_inv_shift[0][n] = (y_inv_norm[0][n]) + data_[row][0][n].mean()
+                    y0 = y_shift
+                    if re.search(r"\bdynamic_guides_inv\b", extra_options):
+                        y0_inv = y_inv_shift
                 
                 if latent_guide_inv is None:
                     y0_tmp = y0
@@ -342,7 +372,7 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
                             for i4 in range(x.shape[1]):
                                 avg     += torch.norm(data_[row][0][i4] - y0    [0][i4])
                                 avg_inv += torch.norm(data_[row][0][i4] - y0_inv[0][i4])
-                            avg /= x.shape[1]
+                            avg     /= x.shape[1]
                             avg_inv /= x.shape[1]
                             
                             for i4 in range(x.shape[1]):
@@ -428,7 +458,7 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
                     
                 x = mean_weight * ks3 + (1-mean_weight) * denoised_masked           + denoised_masked_intermediate +  denoised_masked_inv + eps"""
             
-            if guide_mode == "epsilon_mean_std" or guide_mode == "epsilon_mean" or guide_mode == "epsilon_std":
+            if guide_mode == "epsilon_mean_std" or guide_mode == "epsilon_mean" or guide_mode == "epsilon_std" or guide_mode == "epsilon_mean_use_inv":
                 denoised_masked     = denoised * ((mask==1)*mask)
                 denoised_masked_inv = denoised * ((mask==0)*(1-mask))
                 denoised_masked_intermediate = denoised - denoised_masked - denoised_masked_inv
@@ -459,17 +489,27 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
                         
                         d_shift_inv[0][n] = (denoised_masked_inv[0][n] - denoised_mask_inv.mean())
                         d_shift_inv[0][n] = (d_shift_inv[0][n]) + denoised_mask.mean()
-                        
-                    """for n in range(denoised.shape[1]):
+
+                    denoised_shifted = denoised   +   mean_weight * lgw_mask * (d_shift - denoised_masked)   +   mean_weight * lgw_mask_inv * (d_shift_inv - denoised_masked_inv)
+                    x = denoised_shifted + eps
+                    
+                elif guide_mode == "epsilon_mean_use_inv":
+                    denoised_masked     = denoised * ((mask==1)*mask)
+                    denoised_masked_inv = denoised * ((mask==0)*(1-mask))
+                    denoised_masked_intermediate = denoised - denoised_masked - denoised_masked_inv
+                    
+                    d_shift, d_shift_inv = torch.zeros_like(x), torch.zeros_like(x)
+                    for n in range(denoised.shape[1]):
                         denoised_mask     = denoised[0][n][mask[0][n] == 1]
                         denoised_mask_inv = denoised[0][n][mask[0][n] == 0]
                         
-                        ks3[0][n] = (denoised_masked[0][n] - denoised_mask.mean())
-                        ks3[0][n] = (ks3[0][n]) + denoised_mask_inv.mean()"""
+                        d_shift[0][n] = (denoised_masked[0][n] - denoised_mask.mean())
+                        d_shift[0][n] = (d_shift[0][n]) + denoised_mask_inv.mean()
                         
-                    #x = mean_weight * ks3 + (1-mean_weight) * denoised_masked           + denoised_masked_intermediate +  denoised_masked_inv + eps
-                    
-                    denoised_shifted = denoised   +   mean_weight * lgw_mask * (d_shift - denoised_masked)   +   mean_weight * lgw_mask_inv * (d_shift_inv - denoised_masked_inv)
+                        #d_shift_inv[0][n] = (denoised_masked_inv[0][n] - denoised_mask_inv.mean())
+                        #d_shift_inv[0][n] = (d_shift_inv[0][n]) + denoised_mask.mean()
+
+                    denoised_shifted = denoised   +   mean_weight * lgw_mask * (d_shift - denoised_masked)  # +   mean_weight * lgw_mask_inv * (d_shift_inv - denoised_masked_inv)
                     x = denoised_shifted + eps
             
             
