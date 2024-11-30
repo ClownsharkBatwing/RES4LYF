@@ -101,8 +101,12 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
         eta = eta_var = etas[step] if etas is not None else eta
         
         if sigma_next == 0.0:
-            rk = RK_Method.create(model, "euler", x.device)
-            rk.init_noise_sampler(x, noise_seed, noise_sampler_type, alpha=alpha, k=k)
+            #rk = RK_Method.create(model, "euler", x.device)
+            #rk.init_noise_sampler(x, noise_seed, noise_sampler_type, alpha=alpha, k=k)
+            rk_type = "euler"
+            rk = RK_Method.create(model, rk_type, x.device)
+            final_seed = torch.initial_seed() + 1
+            rk.init_noise_sampler(x, final_seed, noise_sampler_type, alpha=alpha, k=k)
             implicit_steps = 0
             eta, eta_var = 0, 0
 
