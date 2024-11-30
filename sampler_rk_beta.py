@@ -15,29 +15,52 @@ from .rk_method import RK_Method
 from .rk_guide_func import *
 
 from .latents import normalize_latent
+from .helper import get_extra_options_kv
 
 
-def normalize_inputs(x, y0, y0_inv, input_normalization, guide_mode, input_std, extra_options):
+
+def normalize_inputs(x, y0, y0_inv, guide_mode,  extra_options):
     
     if guide_mode == "epsilon_match_mean_std":
         y0 = normalize_latent(y0, y0_inv)
+        
+    input_norm = get_extra_options_kv("input_norm", "", extra_options)
+    input_std = float(get_extra_options_kv("input_std", "1.0", extra_options))
     
-    #if input_normalization == "channels_mean_std":
-    if re.search(r"\binput_norm=ch_mean_std\b", extra_options):
-        for i in range(x.shape[1]):
-            x[0][i] = (x[0][i] - x[0][i].mean()) * (input_std / x[0][i].std())
-    #if input_normalization == "channels_std":
-    if re.search(r"\binput_norm=ch_std\b", extra_options):
-        for i in range(x.shape[1]):
-            x[0][i] = (x[0][i]) * (input_std / x[0][i].std())
-    #if input_normalization == "mean_std":
-    if re.search(r"\binput_norm=mean_std\b", extra_options):
-        x = (x - x.mean()) * (input_std / x.std())
-    #if input_normalization == "std":
-    if re.search(r"\binput_norm=std\b", extra_options):
-        x = x * (input_std / x.std())
+    if input_norm == "input_ch_mean_set_std_to":
+        x = normalize_latent(x, set_std=input_std)
+
+    if input_norm == "input_ch_set_std_to":
+        x = normalize_latent(x, set_std=input_std, mean=False)
+            
+    if input_norm == "input_mean_set_std_to":
+        x = normalize_latent(x, set_std=input_std, channelwise=False)
+        
+    if input_norm == "input_std_set_std_to":
+        x = normalize_latent(x, set_std=input_std, mean=False, channelwise=False)
     
     return x, y0, y0_inv
+
+
+def prepare_step_to_sigma_zero(rk, irk, rk_type, irk_type, model, x, extra_options, alpha, k, noise_sampler_type):
+    rk_type_final_step = f"ralston_{rk_type[-2:]}" if rk_type[-2:] in {"2s", "3s", "4s"} else "ralston_4s"
+    rk_type_final_step =    f"deis_{rk_type[-2:]}" if rk_type[-2:] in {"2m", "3m", "4m"} else rk_type_final_step
+    rk_type_final_step = get_extra_options_kv("rk_type_final_step", rk_type_final_step, extra_options)
+    rk = RK_Method.create(model, rk_type_final_step, x.device)
+    rk.init_noise_sampler(x, torch.initial_seed() + 1, noise_sampler_type, alpha=alpha, k=k)
+
+    if irk_type == rk_type:
+        irk_type_final_step = f"gauss-legendre_{rk_type[-2:]}" if rk_type[-2:] in {"2s", "3s", "4s", "5s"} else "gauss-legendre_2s"
+        irk_type_final_step =           f"deis_{rk_type[-2:]}" if rk_type[-2:] in {"2m", "3m", "4m"}       else irk_type_final_step
+        irk_type_final_step = get_extra_options_kv("irk_type_final_step", irk_type_final_step, extra_options)
+        irk = RK_Method.create(model, irk_type_final_step, x.device)
+        irk.init_noise_sampler(x, torch.initial_seed() + 2, noise_sampler_type, alpha=alpha, k=k)
+    else:
+        irk_type_final_step = irk_type
+
+    eta, eta_var = 0, 0
+    return rk, irk, rk_type_final_step, irk_type_final_step, eta, eta_var
+
 
 
 @torch.no_grad()
@@ -46,7 +69,7 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
                   eta=0.0, eta_var=0.0, s_noise=1., d_noise=1., alpha=-1.0, k=1.0, scale=0.1, c1=0.0, c2=0.5, c3=1.0, MULTISTEP=False, cfgpp=0.0, implicit_steps=0, reverse_weight=0.0, exp_mode=False,
                   latent_guide=None, latent_guide_inv=None, latent_guide_weights=None, latent_guide_weights_inv=None, guide_mode="blend", unsampler_type="linear",
                   GARBAGE_COLLECT=False, mask=None, mask_inv=None, LGW_MASK_RESCALE_MIN=True, sigmas_override=None, t_is=None,sde_noise=None,
-                  input_std=1.0, input_normalization="channels", extra_options="",
+                  extra_options="",
                   etas=None, s_noises=None, momentums=None,
                   ):
     extra_args = {} if extra_args is None else extra_args
@@ -67,19 +90,19 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
     rk = RK_Method.create(model, rk_type, x.device)
     rk.init_noise_sampler(x, noise_seed, noise_sampler_type, alpha=alpha, k=k)
 
-    irk_type = implicit_sampler_name if implicit_sampler_name != "default" else rk_type
+    irk_type = implicit_sampler_name if implicit_sampler_name != "use_explicit" else rk_type
     irk = RK_Method.create(model, irk_type, x.device)
     irk.init_noise_sampler(x, noise_seed+1, noise_sampler_type, alpha=alpha, k=k)
 
     sigmas, UNSAMPLE = rk.prepare_sigmas(sigmas)
-    mask, LGW_MASK_RESCALE_MIN = rk.prepare_mask(x, mask, LGW_MASK_RESCALE_MIN)
+    mask, LGW_MASK_RESCALE_MIN = prepare_mask(x, mask, LGW_MASK_RESCALE_MIN)
     if mask_inv is not None:
-        mask_inv, LGW_MASK_RESCALE_MIN = rk.prepare_mask(x, mask_inv, LGW_MASK_RESCALE_MIN)
-    elif sigmas[1] < sigmas[2]:
+        mask_inv, LGW_MASK_RESCALE_MIN = prepare_mask(x, mask_inv, LGW_MASK_RESCALE_MIN)
+    elif sigmas[0] < sigmas[1]:
         mask_inv = (1-mask)
     
     x, y0, y0_inv = rk.init_guides(x, latent_guide, latent_guide_inv, mask, sigmas, UNSAMPLE)
-    x, y0, y0_inv = normalize_inputs(x, y0, y0_inv, input_normalization, guide_mode, input_std, extra_options)
+    x, y0, y0_inv = normalize_inputs(x, y0, y0_inv, guide_mode, extra_options)
         
     if SDE_NOISE_EXTERNAL:
         sigma_up_total = torch.zeros_like(sigmas[0])
@@ -100,15 +123,8 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
         t_i = t_is[step] if t_is is not None else None
         eta = eta_var = etas[step] if etas is not None else eta
         
-        if sigma_next == 0.0:
-            #rk = RK_Method.create(model, "euler", x.device)
-            #rk.init_noise_sampler(x, noise_seed, noise_sampler_type, alpha=alpha, k=k)
-            rk_type = "euler"
-            rk = RK_Method.create(model, rk_type, x.device)
-            final_seed = torch.initial_seed() + 1
-            rk.init_noise_sampler(x, final_seed, noise_sampler_type, alpha=alpha, k=k)
-            implicit_steps = 0
-            eta, eta_var = 0, 0
+        if sigma_next == 0 and RK_Method.is_exponential(rk_type):
+            rk, irk, rk_type, irk_type, eta, eta_var = prepare_step_to_sigma_zero(rk, irk, rk_type, irk_type, model, x, extra_options, alpha, k, noise_sampler_type)
 
         sigma_up, sigma, sigma_down, alpha_ratio = get_res4lyf_step_with_model(model, sigma, sigma_next, eta, eta_var, noise_mode, rk.h_fn(sigma_next,sigma) )
         h     =  rk.h_fn(sigma_down, sigma)
@@ -117,7 +133,7 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
         c2, c3 = get_res4lyf_half_step3(sigma, sigma_down, c2, c3, t_fn=rk.t_fn, sigma_fn=rk.sigma_fn, t_fn_formula=t_fn_formula, sigma_fn_formula=sigma_fn_formula)
         
         rk. set_coeff(rk_type, h, c1, c2, c3, step, sigmas, sigma, sigma_down)
-        irk.set_coeff(implicit_sampler_name, h_irk, c1, c2, c3, step, sigmas, sigma, sigma_down)
+        irk.set_coeff(irk_type, h_irk, c1, c2, c3, step, sigmas, sigma, sigma_down)
         
         if step == 0:
             x_, data_, data_u, eps_ = (torch.zeros(max(rk.rows, irk.rows) + 2, *x.shape, dtype=x.dtype, device=x.device) for step in range(4))
@@ -142,7 +158,7 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
             else:
                 eps_ [rk.multistep_stages - ms] = (x_0 - data_ [rk.multistep_stages - ms]) / sigma
             
-        lgw_mask, lgw_mask_inv = rk.prepare_weighted_masks(mask, mask_inv, lgw[step], lgw_inv[step], latent_guide, latent_guide_inv, LGW_MASK_RESCALE_MIN)
+        lgw_mask, lgw_mask_inv = prepare_weighted_masks(mask, mask_inv, lgw[step], lgw_inv[step], latent_guide, latent_guide_inv, LGW_MASK_RESCALE_MIN)
 
         if implicit_steps == 0:
             for row in range(rk.rows - rk.multistep_stages):
@@ -248,9 +264,5 @@ def get_explicit_rk_step(rk, rk_type, x, y0, y0_inv, lgw, lgw_inv, mask, lgw_mas
         data_[rk.multistep_stages - ms] = data_[rk.multistep_stages - ms - 1]
 
     return x, eps_, data_
-
-
-
-
 
 

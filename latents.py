@@ -30,38 +30,57 @@ def latent_meancenter_channels(x):
     return  x - mean
 
 
-def normalize_latent(target, source=None, mean=True, std=True, channelwise=True):
-    
-    y = torch.zeros_like(target)
-    for b in range(y.shape[0]):
-        if channelwise:
-            for c in range(y.shape[1]):
+
+def normalize_latent(target, source=None, mean=True, std=True, set_mean=None, set_std=None, channelwise=True):
+    def normalize_single_latent(single_target, single_source=None):
+        y = torch.zeros_like(single_target)
+        for b in range(y.shape[0]):
+            if channelwise:
+                for c in range(y.shape[1]):
+                    single_source_mean = single_source[b][c].mean() if set_mean is None else set_mean
+                    single_source_std  = single_source[b][c].std()  if set_std  is None else set_std
+                    
+                    if mean and std:
+                        y[b][c] = (single_target[b][c] - single_target[b][c].mean()) / single_target[b][c].std()
+                        if single_source is not None:
+                            y[b][c] = y[b][c] * single_source_std + single_source_mean
+                    elif mean:
+                        y[b][c] = single_target[b][c] - single_target[b][c].mean()
+                        if single_source is not None:
+                            y[b][c] = y[b][c] + single_source_mean
+                    elif std:
+                        y[b][c] = single_target[b][c] / single_target[b][c].std()
+                        if single_source is not None:
+                            y[b][c] = y[b][c] * single_source_std
+            else:
+                single_source_mean = single_source[b].mean() if set_mean is None else set_mean
+                single_source_std  = single_source[b].std()  if set_std  is None else set_std
+                
                 if mean and std:
-                    y[b][c] = (target[b][c] - target[b][c].mean()) / target[b][c].std()
-                    if source is not None:
-                        y[b][c] = y[b][c] * source[b][c].std() + source[b][c].mean()
+                    y[b] = (single_target[b] - single_target[b].mean()) / single_target[b].std()
+                    if single_source is not None:
+                        y[b] = y[b] * single_source_std + single_source_mean
                 elif mean:
-                    y[b][c] = target[b][c] - target[b][c].mean()
-                    if source is not None:
-                        y[b][c] = y[b][c] + source[b][c].mean()
+                    y[b] = single_target[b] - single_target[b].mean()
+                    if single_source is not None:
+                        y[b] = y[b] + single_source_mean
                 elif std:
-                    y[b][c] = target[b][c] / target[b][c].std()
-                    if source is not None:
-                        y[b][c] = y[b][c] * source[b][c].std()
+                    y[b] = single_target[b] / single_target[b].std()
+                    if single_source is not None:
+                        y[b] = y[b] * single_source_std
+        return y
+
+    if isinstance(target, (list, tuple)):
+        if source is not None:
+            assert isinstance(source, (list, tuple)) and len(source) == len(target), \
+                "If target is a list/tuple, source must be a list/tuple of the same length."
+            return [normalize_single_latent(t, s) for t, s in zip(target, source)]
         else:
-            if mean and std:
-                y[b] = (target[b] - target[b].mean()) / target[b].std()
-                if source is not None:
-                    y[b] = y[b] * source[b].std() + source[b].mean()
-            elif mean:
-                y[b] = target[b] - target[b].mean()
-                if source is not None:
-                    y[b] = y[b] + source[b].mean()
-            elif std:
-                y[b] = target[b] / target[b].std()
-                if source is not None:
-                    y[b] = y[b] * source[b].std()
-    return y
+            return [normalize_single_latent(t) for t in target]
+    else:
+        return normalize_single_latent(target, source)
+
+
 
 
 class set_precision:

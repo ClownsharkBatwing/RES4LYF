@@ -681,7 +681,7 @@ class ClownsharKSampler_Beta:
                     "noise_seed": ("INT", {"default": 0, "min": -1, "max": 0xffffffffffffffff}),
                     "sampler_mode": (['standard', 'unsample', 'resample'],),
                     "sampler_name": (RK_SAMPLER_NAMES, {"default": "res_2m"}), 
-                    "implicit_sampler_name": (["default", 
+                    "implicit_sampler_name": (["use_explicit", 
                                                "gauss-legendre_5s",
                                                "gauss-legendre_4s",
                                                "gauss-legendre_3s", 
@@ -691,7 +691,7 @@ class ClownsharKSampler_Beta:
                                                "radau_iia_2s",
                                                "lobatto_iiic_3s",
                                                "lobatto_iiic_2s",
-                                               ], {"default": "default"}), 
+                                               ], {"default": "gauss-legendre_2s"}), 
                     "scheduler": (comfy.samplers.SCHEDULER_NAMES + ["beta57"], {"default": "beta57"},),
                     "steps": ("INT", {"default": 30, "min": 1, "max": 10000}),
                     "sde_noise_steps": ("INT", {"default": 1, "min": 1, "max": 10000}),
@@ -703,8 +703,6 @@ class ClownsharKSampler_Beta:
                     "base_shift": ("FLOAT", {"default": 0.85, "min": -1.0, "max": 100.0, "step":0.1, "round": False, }),
                     "shift_scaling": (["exponential", "linear"], {"default": "exponential"}),
                     "truncate_conditioning": (['false', 'true'], {"default": "true"}),
-                    #"input_std": ("FLOAT", {"default": 1.0, "min": -10000, "max": 10000, "step":0.01}),
-                    #"input_normalization": (["none", "mean_std", "std", "channels_mean_std", "channels_std",], {"default": "channels_mean_std"}),
                     "extra_options": ("STRING", {"default": "", "multiline": True}),   
                      },
                 "optional": 
@@ -968,7 +966,7 @@ class ClownsharKSampler_Beta:
                                                                 "latent_guide": latent_guide, "latent_guide_inv": latent_guide_inv, "mask": latent_guide_mask, "mask_inv": latent_guide_mask_inv,
                                                                 "latent_guide_weights": latent_guide_weights, "latent_guide_weights_inv": latent_guide_weights_inv, "guide_mode": guide_mode, "unsampler_type": unsampler_type,
                                                                 "LGW_MASK_RESCALE_MIN": rescale_floor, "sigmas_override": sigmas_override, "sde_noise": sde_noise,
-                                                                "input_std": input_std, "input_normalization": input_normalization, "extra_options": extra_options,
+                                                                "extra_options": extra_options,
                                                                 "etas": etas, "s_noises": s_noises, "t_is": t_is,
                                                                 })
 

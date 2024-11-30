@@ -158,34 +158,6 @@ class RK_Method:
             
         return sigmas, UNSAMPLE
     
-    def prepare_mask(self, x, mask, LGW_MASK_RESCALE_MIN):
-        if mask is None:
-            mask = torch.ones_like(x)
-            LGW_MASK_RESCALE_MIN = False
-        else:
-            mask = mask.unsqueeze(1)
-            mask = mask.repeat(1, x.shape[1], 1, 1) 
-            mask = F.interpolate(mask, size=(x.shape[2], x.shape[3]), mode='bilinear', align_corners=False)
-            mask = mask.to(x.dtype).to(x.device)
-        return mask, LGW_MASK_RESCALE_MIN
-        
-    def prepare_weighted_masks(self, mask, mask_inv, lgw_, lgw_inv_, latent_guide, latent_guide_inv, LGW_MASK_RESCALE_MIN):
-        if LGW_MASK_RESCALE_MIN: 
-            lgw_mask     =    mask  * (1-lgw_) + lgw_
-            lgw_mask_inv = (1-mask) * (1-lgw_inv_) + lgw_inv_
-        else:
-            if latent_guide is not None:
-                lgw_mask = mask * lgw_
-            else:
-                lgw_mask = torch.zeros_like(mask)
-            if latent_guide_inv is not None:
-                if mask_inv is not None:
-                    lgw_mask_inv = torch.minimum(1-mask_inv, (1-mask) * lgw_inv_)
-                else:
-                    lgw_mask_inv = (1-mask) * lgw_inv_
-            else:
-                lgw_mask_inv = torch.zeros_like(mask)
-        return lgw_mask, lgw_mask_inv
     
     def set_coeff(self, rk_type, h, c1=0.0, c2=0.5, c3=1.0, stepcount=0, sigmas=None, sigma=None, sigma_down=None):
         if rk_type == "default": 
@@ -246,7 +218,6 @@ class RK_Method:
             y0 = (y0 - y0.mean()) / y0.std()
             y0_inv = self.noise_sampler(sigma=self.sigma_max, sigma_next=self.sigma_min)
             y0_inv = (y0_inv - y0_inv.mean()) / y0_inv.std()
-            #x = (x - x.mean()) / x.std()
             
         return x, y0, y0_inv
 
