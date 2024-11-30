@@ -3,146 +3,41 @@ import torch.nn.functional as F
 import torchvision.transforms as T
 import re
 
-
 from tqdm.auto import trange
-import math
-import copy
 import gc
 
 import comfy.model_patcher
 
 from .noise_classes import *
-from .extra_samplers_helpers import get_deis_coeff_list
 from .noise_sigmas_timesteps_scaling import get_res4lyf_step_with_model, get_res4lyf_half_step3
-from .latents import hard_light_blend
+
+from .rk_method import RK_Method
+from .rk_guide_func import *
+
+from .latents import normalize_latent
 
 
-def get_epsilon(model, x, sigma, **extra_args):
-    s_in = x.new_ones([x.shape[0]])
-    x0 = model(x, sigma * s_in, **extra_args)
-    eps = (x - x0) / (sigma * s_in) 
-    return eps
-
-def get_denoised(model, x, sigma, **extra_args):
-    s_in = x.new_ones([x.shape[0]])
-    x0 = model(x, sigma * s_in, **extra_args)
-    return x0
-
-
-
-def __phi(j, neg_h):
-  remainder = torch.zeros_like(neg_h)
-  
-  for k in range(j): 
-    remainder += (neg_h)**k / math.factorial(k)
-  phi_j_h = ((neg_h).exp() - remainder) / (neg_h)**j
-  
-  return phi_j_h
-  
-  
-def calculate_gamma(c2, c3):
-    return (3*(c3**3) - 2*c3) / (c2*(2 - 3*c2))
-
-
-
-
-from typing import Protocol, Optional, Dict, Any, TypedDict, NamedTuple
-
-
-def _gamma(n: int,) -> int:
-  """
-  https://en.wikipedia.org/wiki/Gamma_function
-  for every positive integer n,
-  Γ(n) = (n-1)!
-  """
-  return math.factorial(n-1)
-
-def _incomplete_gamma(s: int, x: float, gamma_s: Optional[int] = None) -> float:
-  """
-  https://en.wikipedia.org/wiki/Incomplete_gamma_function#Special_values
-  if s is a positive integer,
-  Γ(s, x) = (s-1)!*∑{k=0..s-1}(x^k/k!)
-  """
-  if gamma_s is None:
-    gamma_s = _gamma(s)
-
-  sum_: float = 0
-  # {k=0..s-1} inclusive
-  for k in range(s):
-    numerator: float = x**k
-    denom: int = math.factorial(k)
-    quotient: float = numerator/denom
-    sum_ += quotient
-  incomplete_gamma_: float = sum_ * math.exp(-x) * gamma_s
-  return incomplete_gamma_
-
-
-
-def phi(j: int, neg_h: float, ):
-  """
-  For j={1,2,3}: you could alternatively use Kat's phi_1, phi_2, phi_3 which perform fewer steps
-
-  Lemma 1
-  https://arxiv.org/abs/2308.02157
-  ϕj(-h) = 1/h^j*∫{0..h}(e^(τ-h)*(τ^(j-1))/((j-1)!)dτ)
-
-  https://www.wolframalpha.com/input?i=integrate+e%5E%28%CF%84-h%29*%28%CF%84%5E%28j-1%29%2F%28j-1%29%21%29d%CF%84
-  = 1/h^j*[(e^(-h)*(-τ)^(-j)*τ(j))/((j-1)!)]{0..h}
-  https://www.wolframalpha.com/input?i=integrate+e%5E%28%CF%84-h%29*%28%CF%84%5E%28j-1%29%2F%28j-1%29%21%29d%CF%84+between+0+and+h
-  = 1/h^j*((e^(-h)*(-h)^(-j)*h^j*(Γ(j)-Γ(j,-h)))/(j-1)!)
-  = (e^(-h)*(-h)^(-j)*h^j*(Γ(j)-Γ(j,-h))/((j-1)!*h^j)
-  = (e^(-h)*(-h)^(-j)*(Γ(j)-Γ(j,-h))/(j-1)!
-  = (e^(-h)*(-h)^(-j)*(Γ(j)-Γ(j,-h))/Γ(j)
-  = (e^(-h)*(-h)^(-j)*(1-Γ(j,-h)/Γ(j))
-
-  requires j>0
-  """
-  assert j > 0
-  gamma_: float = _gamma(j)
-  incomp_gamma_: float = _incomplete_gamma(j, neg_h, gamma_s=gamma_)
-  phi_: float = math.exp(neg_h) * neg_h**-j * (1-incomp_gamma_/gamma_)
-  return phi_
-
-
-
-
-
-def get_irk_explicit_sigmas(model, x, sigmas, eta, eta_var, noise_mode, c1, c2, c3, rk, irk, rk_type, implicit_sampler_name, t_fn_formula="", sigma_fn_formula=""):
-    s_in = x.new_ones([x.shape[0]])
-    irk_sigmas = torch.empty_like(sigmas)
+def normalize_inputs(x, y0, y0_inv, input_normalization, guide_mode, input_std, extra_options):
     
-    eta, eta_var = 0, 0
+    if guide_mode == "epsilon_match_mean_std":
+        y0 = normalize_latent(y0, y0_inv)
     
-    for _ in range(len(sigmas)-1):
-        sigma, sigma_next = sigmas[_], sigmas[_+1]
-        sigma_up, sigma, sigma_down, alpha_ratio = get_res4lyf_step_with_model(model, sigma, sigma_next, eta, eta_var, noise_mode, rk.h_fn(sigma_next,sigma) )
-        h     =  rk.h_fn(sigma_down, sigma)
-        h_irk = irk.h_fn(sigma_down, sigma)
-        
-        c2, c3 = get_res4lyf_half_step3(sigma, sigma_down, c2, c3, t_fn=rk.t_fn, sigma_fn=rk.sigma_fn, t_fn_formula=t_fn_formula, sigma_fn_formula=sigma_fn_formula)
-        
-        rk. set_coeff(rk_type, h, c1, c2, c3, _, sigmas, sigma, sigma_down)
-        irk.set_coeff(implicit_sampler_name, h_irk, c1, c2, c3, _, sigmas, sigma, sigma_down)
-        
-        s_irk    = [(  irk.sigma_fn(irk.t_fn(sigma) + h*c_)) * s_in for c_ in  irk.c]
-        
-        s_irk.append(sigma)
-        s_all = sorted(set(s_irk), reverse=True)
-        s_irk = s_irk[:-1]
-
-        s_all[0] = s_all[0].unsqueeze(dim=0)
-        s_all_sigmas = torch.stack(s_all, dim=0).squeeze(dim=1)
-        
-        
-        irk_sigmas = torch.cat((irk_sigmas, s_all_sigmas), dim=0)
-        
-    return irk_sigmas
-
-
-
-
-
-from .rk_method import RK_Method, RK_Method_Linear, RK_Method_Exponential
+    #if input_normalization == "channels_mean_std":
+    if re.search(r"\binput_norm=ch_mean_std\b", extra_options):
+        for i in range(x.shape[1]):
+            x[0][i] = (x[0][i] - x[0][i].mean()) * (input_std / x[0][i].std())
+    #if input_normalization == "channels_std":
+    if re.search(r"\binput_norm=ch_std\b", extra_options):
+        for i in range(x.shape[1]):
+            x[0][i] = (x[0][i]) * (input_std / x[0][i].std())
+    #if input_normalization == "mean_std":
+    if re.search(r"\binput_norm=mean_std\b", extra_options):
+        x = (x - x.mean()) * (input_std / x.std())
+    #if input_normalization == "std":
+    if re.search(r"\binput_norm=std\b", extra_options):
+        x = x * (input_std / x.std())
+    
+    return x, y0, y0_inv
 
 
 @torch.no_grad()
@@ -154,7 +49,6 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
                   input_std=1.0, input_normalization="channels", extra_options="",
                   etas=None, s_noises=None, momentums=None,
                   ):
-    mean_weight = 0.01
     extra_args = {} if extra_args is None else extra_args
     s_in = x.new_ones([x.shape[0]])
     
@@ -170,51 +64,27 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
         sigmas = sigmas_override.clone()
     sigmas = sigmas.clone() * d_noise
     
-    if rk_type.startswith("dpmpp") or rk_type.startswith("res") or rk_type.startswith("rk_exp") or rk_type.startswith("ddim"):
-        rk  = RK_Method_Exponential(model, "midpoint_2s", "explicit", x.device)
-    else:
-        rk  = RK_Method_Linear(model, "midpoint_2s", "explicit", x.device)
+    rk = RK_Method.create(model, rk_type, x.device)
     rk.init_noise_sampler(x, noise_seed, noise_sampler_type, alpha=alpha, k=k)
 
-    irk = RK_Method_Linear(model, "crouzeix_2s", "implicit", x.device)
+    irk_type = implicit_sampler_name if implicit_sampler_name != "default" else rk_type
+    irk = RK_Method.create(model, irk_type, x.device)
     irk.init_noise_sampler(x, noise_seed+1, noise_sampler_type, alpha=alpha, k=k)
 
     sigmas, UNSAMPLE = rk.prepare_sigmas(sigmas)
     mask, LGW_MASK_RESCALE_MIN = rk.prepare_mask(x, mask, LGW_MASK_RESCALE_MIN)
     if mask_inv is not None:
         mask_inv, LGW_MASK_RESCALE_MIN = rk.prepare_mask(x, mask_inv, LGW_MASK_RESCALE_MIN)
+    elif sigmas[1] < sigmas[2]:
+        mask_inv = (1-mask)
     
     x, y0, y0_inv = rk.init_guides(x, latent_guide, latent_guide_inv, mask, sigmas, UNSAMPLE)
-    y0_orig, y0_inv_orig = y0.clone(), y0_inv.clone()
-    
-    
-    if guide_mode == "epsilon_match_mean_std":
-        ks3 = torch.zeros_like(x)
-        for n in range(y0_inv.shape[1]):
-            ks3[0][n] = (y0[0][n] - y0[0][n].mean()) / y0[0][n].std()
-            ks3[0][n] = (ks3[0][n] * y0_inv[0][n].std()) + y0_inv[0][n].mean()
-        y0 = ks3
-
-    x_guide_maybe = x
-    
-    if input_normalization == "channels_mean_std":
-        for i in range(x.shape[1]):
-            x[0][i] = (x[0][i] - x[0][i].mean()) * (input_std / x[0][i].std())
-    if input_normalization == "channels_std":
-        for i in range(x.shape[1]):
-            x[0][i] = (x[0][i]) * (input_std / x[0][i].std())
-    if input_normalization == "mean_std":
-        x = (x - x.mean()) * (input_std / x.std())
-    if input_normalization == "std":
-        x = x * (input_std / x.std())
-    if input_normalization == "process_latent_in":
-        x = model.inner_model.inner_model.process_latent_in(x).clone().to(x.device)
+    x, y0, y0_inv = normalize_inputs(x, y0, y0_inv, input_normalization, guide_mode, input_std, extra_options)
         
-    sigma_up_total = torch.zeros_like(sigmas[0])
     if SDE_NOISE_EXTERNAL:
-        for i3 in range(len(sde_noise)-1):
-            #sigma_up, sigma, sigma_down, alpha_ratio = get_res4lyf_step_with_model(model, sigmas[i3], sigmas[i3+1], eta, eta, noise_mode, rk.h_fn(sigmas[i3+1],sigmas[i3]) )
-            sigma_up_total += sigmas[i3+1]
+        sigma_up_total = torch.zeros_like(sigmas[0])
+        for i in range(len(sde_noise)-1):
+            sigma_up_total += sigmas[i+1]
         eta = eta / sigma_up_total
 
     uncond = [torch.full_like(x, 0.0)]
@@ -225,13 +95,13 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
         model_options = extra_args.get("model_options", {}).copy()
         extra_args["model_options"] = comfy.model_patcher.set_model_options_post_cfg_function(model_options, post_cfg_function, disable_cfg1_optimization=True)  
 
-    for _ in trange(len(sigmas)-1, disable=disable):
-        sigma, sigma_next = sigmas[_], sigmas[_+1]
-        t_i = t_is[_] if t_is is not None else None
+    for step in trange(len(sigmas)-1, disable=disable):
+        sigma, sigma_next = sigmas[step], sigmas[step+1]
+        t_i = t_is[step] if t_is is not None else None
+        eta = eta_var = etas[step] if etas is not None else eta
         
         if sigma_next == 0.0:
-            rk_type = "euler"
-            rk  = RK_Method_Linear(model, "midpoint_2s", "explicit", x.device)
+            rk = RK_Method.create(model, "euler", x.device)
             rk.init_noise_sampler(x, noise_seed, noise_sampler_type, alpha=alpha, k=k)
             implicit_steps = 0
             eta, eta_var = 0, 0
@@ -242,11 +112,11 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
         
         c2, c3 = get_res4lyf_half_step3(sigma, sigma_down, c2, c3, t_fn=rk.t_fn, sigma_fn=rk.sigma_fn, t_fn_formula=t_fn_formula, sigma_fn_formula=sigma_fn_formula)
         
-        rk. set_coeff(rk_type, h, c1, c2, c3, _, sigmas, sigma, sigma_down)
-        irk.set_coeff(implicit_sampler_name, h_irk, c1, c2, c3, _, sigmas, sigma, sigma_down)
+        rk. set_coeff(rk_type, h, c1, c2, c3, step, sigmas, sigma, sigma_down)
+        irk.set_coeff(implicit_sampler_name, h_irk, c1, c2, c3, step, sigmas, sigma, sigma_down)
         
-        if _ == 0:
-            x_, data_, data_u, eps_ = (torch.zeros(max(rk.rows, irk.rows) + 2, *x.shape, dtype=x.dtype, device=x.device) for _ in range(4))
+        if step == 0:
+            x_, data_, data_u, eps_ = (torch.zeros(max(rk.rows, irk.rows) + 2, *x.shape, dtype=x.dtype, device=x.device) for step in range(4))
         
         s_       = [(  rk.sigma_fn( rk.t_fn(sigma) +     h*c_)) * s_in for c_ in   rk.c]
         s_irk_rk = [(  rk.sigma_fn( rk.t_fn(sigma) +     h*c_)) * s_in for c_ in  irk.c]
@@ -254,11 +124,11 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
 
         sde_noise_t = None
         if SDE_NOISE_EXTERNAL:
-            if _ >= len(sde_noise):
+            if step >= len(sde_noise):
                 SDE_NOISE_EXTERNAL=False
             else:
-                sde_noise_t = sde_noise[_]
-        x_[0] = rk.add_noise_pre(x, y0, lgw[_], sigma_up, sigma, sigma_next, sigma_down, alpha_ratio, s_noise, noise_mode, SDE_NOISE_EXTERNAL, sde_noise_t) #y0, lgw, sigma_down are currently unused
+                sde_noise_t = sde_noise[step]
+        x_[0] = rk.add_noise_pre(x, y0, lgw[step], sigma_up, sigma, sigma_next, sigma_down, alpha_ratio, s_noise, noise_mode, SDE_NOISE_EXTERNAL, sde_noise_t) #y0, lgw, sigma_down are currently unused
         
         x_0 = x_[0].clone()
         
@@ -268,301 +138,32 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
             else:
                 eps_ [rk.multistep_stages - ms] = (x_0 - data_ [rk.multistep_stages - ms]) / sigma
             
-        if LGW_MASK_RESCALE_MIN: 
-            lgw_mask     =    mask  * (1-lgw    [_]) + lgw    [_]
-            lgw_mask_inv = (1-mask) * (1-lgw_inv[_]) + lgw_inv[_]
-        else:
-            if latent_guide is not None:
-                lgw_mask = mask * lgw[_]
-            else:
-                lgw_mask = torch.zeros_like(mask)
-            if latent_guide_inv is not None:
-                if mask_inv is not None:
-                    lgw_mask_inv = torch.minimum(1-mask_inv, (1-mask) * lgw_inv[_])
-                else:
-                    lgw_mask_inv = (1-mask) * lgw_inv[_]   
-            else:
-                lgw_mask_inv = torch.zeros_like(mask)
-            
+        lgw_mask, lgw_mask_inv = rk.prepare_weighted_masks(mask, mask_inv, lgw[step], lgw_inv[step], latent_guide, latent_guide_inv, LGW_MASK_RESCALE_MIN)
+
         if implicit_steps == 0:
             for row in range(rk.rows - rk.multistep_stages):
                 x_[row+1] = x_0 + h * rk.a_k_sum(eps_, row)
-
                 eps_[row], data_[row] = rk(x_0, x_[row+1], s_[row], h, **extra_args)       #MODEL CALL
-                
-                if re.search(r"\bdynamic_guides_mean_std\b", extra_options):
-                    y_norm, y_shift = torch.zeros_like(x), torch.zeros_like(x)
-                    y_inv_norm, y_inv_shift = torch.zeros_like(x), torch.zeros_like(x)
-                    
-                    for n in range(y0.shape[1]):
-                        y_norm     [0][n] = (y0_orig[0][n] - y0_orig[0][n].mean()) / y0_orig[0][n].std()
-                        y_shift    [0][n] = (y_norm[0][n] * data_[row]    [0][n].std()) + data_[row]    [0][n].mean()
-                        
-                        y_inv_norm     [0][n] = (y0_inv_orig[0][n] - y0_inv_orig[0][n].mean()) / y0_inv_orig[0][n].std()
-                        y_inv_shift[0][n] = (y_inv_norm[0][n] * data_[row][0][n].std()) + data_[row][0][n].mean()
-                    y0 = y_shift
-                    if re.search(r"\bdynamic_guides_inv\b", extra_options):
-                        y0_inv = y_inv_shift
-                        
-                if re.search(r"\bdynamic_guides_mean\b", extra_options):
-                    y_norm, y_shift = torch.zeros_like(x), torch.zeros_like(x)
-                    y_inv_norm, y_inv_shift = torch.zeros_like(x), torch.zeros_like(x)
-                    
-                    for n in range(y0.shape[1]):
-                        y_norm     [0][n] = (y0_orig[0][n] - y0_orig[0][n].mean())
-                        y_shift    [0][n] = (y_norm[0][n]) + data_[row]    [0][n].mean()
-                        
-                        y_inv_norm     [0][n] = (y0_inv_orig[0][n] - y0_inv_orig[0][n].mean())
-                        y_inv_shift[0][n] = (y_inv_norm[0][n]) + data_[row][0][n].mean()
-                    y0 = y_shift
-                    if re.search(r"\bdynamic_guides_inv\b", extra_options):
-                        y0_inv = y_inv_shift
-                
-                if latent_guide_inv is None:
-                    y0_tmp = y0
-                    y0_tmp = (1-lgw_mask) * data_[row] + lgw_mask * y0
-
-                elif latent_guide_inv is not None:
-                    y0_tmp = (1-lgw_mask) * data_[row] + lgw_mask * y0
-                    y0_tmp = (1-lgw_mask_inv) * y0_tmp + lgw_mask_inv * y0_inv
-
-                if "data" in guide_mode:
-                    x_[row+1] = y0_tmp + eps_[row]
-
-                elif "epsilon" in guide_mode:
-                    if sigma > sigma_next:
-                         
-                        if re.search(r"\bdisable_lgw_scaling\b", extra_options): # and lgw[_] > 0:
-                            if rk_type.startswith("dpmpp") or rk_type.startswith("res") or rk_type.startswith("rk_exp"):
-                                eps_m   = y0     - x_0
-                                eps_inv = y0_inv - x_0
-                            else:
-                                eps_m   = (x_[row+1] - y0)     / (s_[row] * s_in)
-                                eps_inv = (x_[row+1] - y0_inv) / (s_[row] * s_in)
-                                
-                            eps_[row] = eps_[row]      +     lgw_mask * (eps_m - eps_[row])    +    lgw_mask_inv * (eps_inv - eps_[row])
-                                
-                        elif re.search(r"tol\s*=\s*([\d.]+)", extra_options) and (lgw[_] > 0 or lgw_inv[_] > 0):
-                            tol_value = float(re.search(r"tol\s*=\s*([\d.]+)", extra_options).group(1))                    
-                            for i4 in range(x.shape[1]):
-                                current_diff     = torch.norm(data_[row][0][i4] - y0    [0][i4]) 
-                                current_diff_inv = torch.norm(data_[row][0][i4] - y0_inv[0][i4]) 
-                                
-                                lgw_scaled     = torch.nan_to_num(1-(tol_value/current_diff),     0)
-                                lgw_scaled_inv = torch.nan_to_num(1-(tol_value/current_diff_inv), 0)
-                                
-                                lgw_tmp     = min(lgw    [_], lgw_scaled)
-                                lgw_tmp_inv = min(lgw_inv[_], lgw_scaled_inv)
-
-                                lgw_mask_clamp = torch.clamp(lgw_mask, max=lgw_tmp)
-                                lgw_mask_clamp_inv = torch.clamp(lgw_mask_inv, max=lgw_tmp_inv)
-                                
-                                #rk.process_guide_row(x_0, x_, y0, y0_inv, lgw_mask_clamp[0][i4], lgw_mask_clamp_inv[0][i4] )
-
-                                if rk_type.startswith("dpmpp") or rk_type.startswith("res") or rk_type.startswith("rk_exp"):
-                                    eps_row     = y0    [0][i4] - x_0[0][i4]
-                                    eps_row_inv = y0_inv[0][i4] - x_0[0][i4]
-                                else:
-                                    eps_row     = (x_[row+1][0][i4] - y0    [0][i4]) / (s_[row] * s_in)
-                                    eps_row_inv = (x_[row+1][0][i4] - y0_inv[0][i4]) / (s_[row] * s_in)
-                                eps_[row][0][i4] = eps_[row][0][i4] + lgw_mask_clamp[0][i4] * (eps_row - eps_[row][0][i4]) + lgw_mask_clamp_inv[0][i4] * (eps_row_inv - eps_[row][0][i4])
-                                
-                        elif (lgw[_] > 0 or lgw_inv[_] > 0):
-                            avg, avg_inv = 0, 0
-                            for i4 in range(x.shape[1]):
-                                avg     += torch.norm(data_[row][0][i4] - y0    [0][i4])
-                                avg_inv += torch.norm(data_[row][0][i4] - y0_inv[0][i4])
-                            avg     /= x.shape[1]
-                            avg_inv /= x.shape[1]
-                            
-                            for i4 in range(x.shape[1]):
-                                ratio     = torch.nan_to_num(torch.norm(data_[row][0][i4] - y0    [0][i4])   /   avg,     0)
-                                ratio_inv = torch.nan_to_num(torch.norm(data_[row][0][i4] - y0_inv[0][i4])   /   avg_inv, 0)
-                                
-                                if rk_type.startswith("dpmpp") or rk_type.startswith("res") or rk_type.startswith("rk_exp"):
-                                    eps_row     = y0    [0][i4] - x_0[0][i4]
-                                    eps_row_inv = y0_inv[0][i4] - x_0[0][i4]
-                                else:
-                                    eps_row     = (x_[row+1][0][i4] - y0    [0][i4]) / (s_[row] * s_in)
-                                    eps_row_inv = (x_[row+1][0][i4] - y0_inv[0][i4]) / (s_[row] * s_in)            
-                                eps_[row][0][i4] = eps_[row][0][i4]      +     ratio * lgw_mask[0][i4] * (eps_row - eps_[row][0][i4])    +    ratio_inv * lgw_mask_inv[0][i4] * (eps_row_inv - eps_[row][0][i4])
-
-
-                    else:
-                        y0_tmp = (1-lgw[_]) * data_[row]    +   lgw[_] * x_guide_maybe
-                        x_plus1 = y0_tmp + eps_[row]
-                        eps_[row] = (y0 - x_plus1)   / (s_[row] * s_in)
-
-                elif (UNSAMPLE or "resampler" in guide_mode) and lgw[_] > 0:
-                    y0_tmp = y0
-                    if latent_guide_inv is not None:
-                        y0_tmp = (1-lgw_mask) * data_[row] + lgw_mask * y0
-                        y0_tmp = (1-lgw_mask_inv) * y0_tmp + lgw_mask_inv * y0_inv
-                        
-                    cvf = rk.get_epsilon(x_0, x_[row+1], y0, sigma, s_[row], sigma_down, t_i)
-                    if UNSAMPLE and sigma > sigma_next and latent_guide_inv is not None:
-                        cvf_inv = rk.get_epsilon(x_0, x_[row+1], y0_inv, sigma, s_[row], sigma_down, t_i)      
-                        cvf = (1-lgw_mask)     * eps_[row] + lgw_mask     * cvf
-                        cvf = (1-lgw_mask_inv) * cvf       + lgw_mask_inv * cvf_inv
-
-                    if re.search(r"tol\s*=\s*([\d.]+)", extra_options):
-                        tol_value = float(re.search(r"tol\s*=\s*([\d.]+)", extra_options).group(1))                    
-                        for i4 in range(x.shape[1]):
-                            current_diff = torch.norm(data_[row][0][i4] - y0_tmp[0][i4]) 
-                            lgw_tmp = min(lgw[_], 1-(tol_value/current_diff))
-                            eps_[row][0][i4] = eps_[row][0][i4]  + lgw_tmp * (cvf[0][i4]  - eps_[row][0][i4] )
-                    elif re.search(r"\bdisable_lgw_scaling\b", extra_options):
-                        eps_[row] = eps_[row] + lgw[_] * (cvf - eps_[row])
-                    else:
-                        avg = 0
-                        for i4 in range(x.shape[1]):
-                            avg += torch.norm(data_[row][0][i4] - y0_tmp[0][i4])
-                        avg /= x.shape[1]
-                        
-                        for i4 in range(x.shape[1]):
-                            ratio = torch.norm(data_[row][0][i4] - y0_tmp[0][i4])   /   avg
-                            lgw_tmp = lgw[_] * ratio
-                            eps_[row][0][i4] = eps_[row][0][i4]  + lgw_tmp * (cvf[0][i4]  - eps_[row][0][i4] )
-                    
+                eps_ = process_guides_substep(x_0, x_, eps_, data_, row, y0, y0_inv, lgw[step], lgw_inv[step], lgw_mask, lgw_mask_inv, step, sigma, sigma_next, sigma_down, s_, t_i, rk, rk_type, guide_mode, latent_guide_inv, UNSAMPLE, extra_options)
             x = x_0 + h * rk.b_k_sum(eps_, 0) 
-
             denoised = x + (sigma / (sigma - sigma_down)) *  h * rk.b_k_sum(eps_, 0) 
             eps = x - denoised
-            
-            """if guide_mode == "epsilon_mean_std":
-                denoised_masked     = denoised * ((mask==1)*mask)
-                denoised_masked_inv = denoised * ((mask==0)*(1-mask))
-                denoised_masked_intermediate = denoised - denoised_masked - denoised_masked_inv
-                
-                ks3 = torch.zeros_like(x)
-                for n in range(denoised.shape[1]):
-                    denoised_mask     = denoised[0][n][mask[0][n] == 1]
-                    denoised_mask_inv = denoised[0][n][mask[0][n] == 0]
-                    
-                    ks3[0][n] = (denoised_masked[0][n] - denoised_mask.mean()) / denoised_mask.std()
-                    ks3[0][n] = (ks3[0][n] * denoised_mask_inv.std()) + denoised_mask_inv.mean()
-                    
-                x = 0.005 * ks3 + (1-0.005) * denoised_masked           + denoised_masked_intermediate +  denoised_masked_inv + eps
-            elif guide_mode == "epsilon_mean":
-                denoised_masked     = denoised * ((mask==1)*mask)
-                denoised_masked_inv = denoised * ((mask==0)*(1-mask))
-                denoised_masked_intermediate = denoised - denoised_masked - denoised_masked_inv
-                
-                ks3 = torch.zeros_like(x)
-                for n in range(denoised.shape[1]):
-                    denoised_mask     = denoised[0][n][mask[0][n] == 1]
-                    denoised_mask_inv = denoised[0][n][mask[0][n] == 0]
-                    
-                    ks3[0][n] = (denoised_masked[0][n] - denoised_mask.mean())
-                    ks3[0][n] = (ks3[0][n]) + denoised_mask_inv.mean()
-                    
-                x = mean_weight * ks3 + (1-mean_weight) * denoised_masked           + denoised_masked_intermediate +  denoised_masked_inv + eps"""
-            
-            if guide_mode == "epsilon_mean_std" or guide_mode == "epsilon_mean" or guide_mode == "epsilon_std" or guide_mode == "epsilon_mean_use_inv":
-                denoised_masked     = denoised * ((mask==1)*mask)
-                denoised_masked_inv = denoised * ((mask==0)*(1-mask))
-                denoised_masked_intermediate = denoised - denoised_masked - denoised_masked_inv
-                
-                if guide_mode == "epsilon_mean_std":
-
-                    ks3 = torch.zeros_like(x)
-                    for n in range(denoised.shape[1]):
-                        denoised_mask     = denoised[0][n][mask[0][n] == 1]
-                        denoised_mask_inv = denoised[0][n][mask[0][n] == 0]
-                        
-                        ks3[0][n] = (denoised_masked[0][n] - denoised_mask.mean()) / denoised_mask.std()
-                        ks3[0][n] = (ks3[0][n] * denoised_mask_inv.std()) + denoised_mask_inv.mean()
-                        
-                    x = 0.005 * ks3 + (1-0.005) * denoised_masked           + denoised_masked_intermediate +  denoised_masked_inv + eps
-                elif guide_mode == "epsilon_mean":
-                    denoised_masked     = denoised * ((mask==1)*mask)
-                    denoised_masked_inv = denoised * ((mask==0)*(1-mask))
-                    denoised_masked_intermediate = denoised - denoised_masked - denoised_masked_inv
-                    
-                    d_shift, d_shift_inv = torch.zeros_like(x), torch.zeros_like(x)
-                    for n in range(denoised.shape[1]):
-                        denoised_mask     = denoised[0][n][mask[0][n] == 1]
-                        denoised_mask_inv = denoised[0][n][mask[0][n] == 0]
-                        
-                        d_shift[0][n] = (denoised_masked[0][n] - denoised_mask.mean())
-                        d_shift[0][n] = (d_shift[0][n]) + denoised_mask_inv.mean()
-                        
-                        d_shift_inv[0][n] = (denoised_masked_inv[0][n] - denoised_mask_inv.mean())
-                        d_shift_inv[0][n] = (d_shift_inv[0][n]) + denoised_mask.mean()
-
-                    denoised_shifted = denoised   +   mean_weight * lgw_mask * (d_shift - denoised_masked)   +   mean_weight * lgw_mask_inv * (d_shift_inv - denoised_masked_inv)
-                    x = denoised_shifted + eps
-                    
-                elif guide_mode == "epsilon_mean_use_inv":
-                    denoised_masked     = denoised * ((mask==1)*mask)
-                    denoised_masked_inv = denoised * ((mask==0)*(1-mask))
-                    denoised_masked_intermediate = denoised - denoised_masked - denoised_masked_inv
-                    
-                    d_shift, d_shift_inv = torch.zeros_like(x), torch.zeros_like(x)
-                    for n in range(denoised.shape[1]):
-                        denoised_mask     = denoised[0][n][mask[0][n] == 1]
-                        denoised_mask_inv = denoised[0][n][mask[0][n] == 0]
-                        
-                        d_shift[0][n] = (denoised_masked[0][n] - denoised_mask.mean())
-                        d_shift[0][n] = (d_shift[0][n]) + denoised_mask_inv.mean()
-                        
-                        #d_shift_inv[0][n] = (denoised_masked_inv[0][n] - denoised_mask_inv.mean())
-                        #d_shift_inv[0][n] = (d_shift_inv[0][n]) + denoised_mask.mean()
-
-                    denoised_shifted = denoised   +   mean_weight * lgw_mask * (d_shift - denoised_masked)  # +   mean_weight * lgw_mask_inv * (d_shift_inv - denoised_masked_inv)
-                    x = denoised_shifted + eps
-            
-            
-            if UNSAMPLE == False and (latent_guide is not None or latent_guide_inv is not None):
-                d_norm, d_shift, d_shift_inv = torch.zeros_like(x), torch.zeros_like(x), torch.zeros_like(x)
-                
-                if guide_mode == "hard_light":
-                    d_shift     = hard_light_blend(y0,     denoised)
-                    d_shift_inv = hard_light_blend(y0_inv, denoised)
-                    
-                elif guide_mode == "blend":
-                    d_shift     = y0
-                    d_shift_inv = y0_inv               
-                    
-                elif guide_mode == "mean_std":
-                    for n in range(y0.shape[1]):
-                        d_norm     [0][n] = (denoised[0][n] - denoised[0][n].mean()) / denoised[0][n].std()
-                        d_shift    [0][n] = (d_norm[0][n] * y0    [0][n].std()) + y0    [0][n].mean()
-                        d_shift_inv[0][n] = (d_norm[0][n] * y0_inv[0][n].std()) + y0_inv[0][n].mean()
-                elif guide_mode == "mean":
-                    for n in range(y0.shape[1]):
-                        d_norm     [0][n] = denoised[0][n] - denoised[0][n].mean()
-                        d_shift    [0][n] = d_norm[0][n] + y0    [0][n].mean()
-                        d_shift_inv[0][n] = d_norm[0][n] + y0_inv[0][n].mean()
-                elif guide_mode == "std":
-                    for n in range(y0.shape[1]):
-                        d_norm     [0][n] = denoised[0][n] / denoised[0][n].std()
-                        d_shift    [0][n] = d_norm[0][n] * y0    [0][n].std()
-                        d_shift_inv[0][n] = d_norm[0][n] * y0_inv[0][n].std()
-
-                if guide_mode in ("hard_light", "blend", "mean_std", "mean", "std"):
-                    denoised_shifted = denoised   +   lgw_mask * (d_shift - denoised)   +   lgw_mask_inv * (d_shift_inv - denoised)
-                    x = denoised_shifted + eps
-
-
+            x = process_guides_poststep(x, denoised, eps, y0, y0_inv, mask, lgw_mask, lgw_mask_inv, guide_mode, latent_guide, latent_guide_inv, UNSAMPLE, extra_options)
 
         else:
             s2 = s_irk_rk[:]
             s2.append(sigma.unsqueeze(dim=0))
             s_all = torch.sort(torch.stack(s2, dim=0).squeeze(dim=1).unique(), descending=True)[0]
-            sigmas_and = torch.cat( (sigmas[0:_], s_all), dim=0)
+            sigmas_and = torch.cat( (sigmas[0:step], s_all), dim=0)
             
-            eps_ [0] = torch.zeros_like(eps_ [0])
-            data_ [0] = torch.zeros_like(data_[0])
+            eps_ [0], data_ [0] = torch.zeros_like(eps_ [0]), torch.zeros_like(data_[0])
             eps_list = []
             
             x_mid = x
             for i in range(len(s_all)-1):
-                x_mid, eps_mid, denoised_mid, eps_, data_ = get_explicit_rk_step(rk, rk_type, x_mid, y0, lgw, s_all[i], s_all[i+1], eta, eta_var, s_noise, noise_mode, c2, c3, _+i, sigmas_and, x_, eps_, data_, **extra_args)
+                x_mid, eps_, data_ = get_explicit_rk_step(rk, rk_type, x_mid, y0, y0_inv, lgw[step], lgw_inv[step], mask, lgw_mask, lgw_mask_inv, step, s_all[i], s_all[i+1], eta, eta_var, s_noise, noise_mode, c2, c3, step+i, sigmas_and, x_, eps_, data_, t_i, guide_mode, latent_guide, latent_guide_inv, UNSAMPLE, extra_options, **extra_args)
                 eps_list.append(eps_[0])
-
-                eps_ [0] = torch.zeros_like(eps_ [0])
-                data_[0] = torch.zeros_like(data_[0])
+                eps_ [0], data_ [0] = torch.zeros_like(eps_ [0]), torch.zeros_like(data_[0])
                 
             if torch.allclose(s_all[-1], sigma_down, atol=1e-8):
                 eps_down, data_down = rk(x_0, x_mid, sigma_down, h, **extra_args)
@@ -577,20 +178,21 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
                 for row in range(irk.rows):
                     x_[row+1] = x_0 + h_irk * irk.a_k_sum(eps2_, row)
                     eps2_[row], data_[row] = irk(x_0, x_[row+1], s_irk[row], h, **extra_args)
-                    
-                    cvf = irk.get_epsilon(x_0, x_[row+1], y0, sigma, s_irk[row], sigma_down)
-                    eps2_[row] = eps2_[row] + lgw[_] * (cvf - eps2_[row])
+                    eps2_ = process_guides_substep(x_0, x_, eps2_, data_, row, y0, y0_inv, lgw[step], lgw_inv[step], lgw_mask, lgw_mask_inv, step, sigma, sigma_next, sigma_down, s_irk, t_i, irk, irk_type, guide_mode, latent_guide_inv, UNSAMPLE, extra_options)
                 x = x_0 + h_irk * irk.b_k_sum(eps2_, 0)
-            
-        callback({'x': x, 'i': _, 'sigma': sigma, 'sigma_next': sigma_next, 'denoised': data_[0]}) if callback is not None else None
+                denoised = x + (sigma / (sigma - sigma_down)) *  h * irk.b_k_sum(eps2_, 0) 
+                eps = x - denoised
+                x = process_guides_poststep(x, denoised, eps, y0, y0_inv, mask, lgw_mask, lgw_mask_inv, guide_mode, latent_guide, latent_guide_inv, UNSAMPLE, extra_options)
+                
+        callback({'x': x, 'i': step, 'sigma': sigma, 'sigma_next': sigma_next, 'denoised': data_[0]}) if callback is not None else None
 
         sde_noise_t = None
         if SDE_NOISE_EXTERNAL:
-            if _ >= len(sde_noise):
+            if step >= len(sde_noise):
                 SDE_NOISE_EXTERNAL=False
             else:
-                sde_noise_t = sde_noise[_]
-        x = rk.add_noise_post(x, y0, lgw[_], sigma_up, sigma, sigma_next, sigma_down, alpha_ratio, s_noise, noise_mode, SDE_NOISE_EXTERNAL, sde_noise_t)    #y0, lgw, sigma_down are currently unused
+                sde_noise_t = sde_noise[step]
+        x = rk.add_noise_post(x, y0, lgw[step], sigma_up, sigma, sigma_next, sigma_down, alpha_ratio, s_noise, noise_mode, SDE_NOISE_EXTERNAL, sde_noise_t)    #y0, lgw, sigma_down are currently unused
         
         for ms in range(rk.multistep_stages):
             eps_ [rk.multistep_stages - ms] = eps_ [rk.multistep_stages - ms - 1]
@@ -602,7 +204,7 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
 
 
 
-def get_explicit_rk_step(rk, rk_type, x, y0, lgw, sigma, sigma_next, eta, eta_var, s_noise, noise_mode, c2, c3, stepcount, sigmas, x_, eps_, data_, **extra_args):
+def get_explicit_rk_step(rk, rk_type, x, y0, y0_inv, lgw, lgw_inv, mask, lgw_mask, lgw_mask_inv, step, sigma, sigma_next, eta, eta_var, s_noise, noise_mode, c2, c3, stepcount, sigmas, x_, eps_, data_, t_i, guide_mode, latent_guide, latent_guide_inv, UNSAMPLE, extra_options, **extra_args):
     extra_args = {} if extra_args is None else extra_args
     s_in = x.new_ones([x.shape[0]])
 
@@ -613,13 +215,12 @@ def get_explicit_rk_step(rk, rk_type, x, y0, lgw, sigma, sigma_next, eta, eta_va
     rk.set_coeff(rk_type, h, c2=c2, c3=c3, stepcount=stepcount, sigmas=sigmas, sigma_down=sigma_down)
 
     s_ = [(sigma + h * c_) * s_in for c_ in rk.c]
-    #x_, eps_, data_, data_u_ = (torch.zeros(rk.rows + 2, *x.shape, dtype=x.dtype, device=x.device) for _ in range(4))
     x_[0] = rk.add_noise_pre(x, y0, lgw, sigma_up, sigma, sigma_next, sigma_down, alpha_ratio, s_noise, noise_mode)
     
     x_0 = x_[0].clone()
     
     for ms in range(rk.multistep_stages):
-        if rk_type.startswith("dpmpp") or rk_type.startswith("res") or rk_type.startswith("rk_exp"):
+        if RK_Method.is_exponential(rk_type):
             eps_ [rk.multistep_stages - ms] = data_ [rk.multistep_stages - ms] - x_0
         else:
             eps_ [rk.multistep_stages - ms] = (x_0 - data_ [rk.multistep_stages - ms]) / sigma
@@ -628,20 +229,21 @@ def get_explicit_rk_step(rk, rk_type, x, y0, lgw, sigma, sigma_next, eta, eta_va
         x_[row+1] = x_0 + h * rk.a_k_sum(eps_, row)
         eps_[row], data_[row] = rk(x_0, x_[row+1], s_[row], h, **extra_args)
         
-        cvf = rk.get_epsilon(x_0, x_[row+1], y0, sigma, s_[row], sigma_down)
-        eps_[row] = eps_[row] + lgw[stepcount] * (cvf - eps_[row])
+        eps_ = process_guides_substep(x_0, x_, eps_, data_, row, y0, y0_inv, lgw, lgw_inv, lgw_mask, lgw_mask_inv, step, sigma, sigma_next, sigma_down, s_, t_i, rk, rk_type, guide_mode, latent_guide_inv, UNSAMPLE, extra_options)
+        
     x = x_0 + h * rk.b_k_sum(eps_, 0)
-
-    denoised = rk.b_k_sum(data_, 0) / sum(rk.b[0])
-    eps = rk.b_k_sum(eps_, 0) / sum(rk.b[0])
     
+    denoised = x + (sigma / (sigma - sigma_down)) *  h * rk.b_k_sum(eps_, 0) 
+    eps = x - denoised
+    x = process_guides_poststep(x, denoised, eps, y0, y0_inv, mask, lgw_mask, lgw_mask_inv, guide_mode, latent_guide, latent_guide_inv, UNSAMPLE, extra_options)
+
     x = rk.add_noise_post(x, y0, lgw, sigma_up, sigma, sigma_next, sigma_down, alpha_ratio, s_noise, noise_mode)
 
     for ms in range(rk.multistep_stages):
         eps_ [rk.multistep_stages - ms] = eps_ [rk.multistep_stages - ms - 1]
         data_[rk.multistep_stages - ms] = data_[rk.multistep_stages - ms - 1]
 
-    return x, eps, denoised, eps_, data_
+    return x, eps_, data_
 
 
 

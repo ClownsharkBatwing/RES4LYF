@@ -2,8 +2,32 @@ import torch
 from .noise_classes import *
 import comfy.model_patcher
 
+def get_alpha_ratio_from_sigma_up(sigma_up, sigma_next, eta, sigma_max=1.0):
+    if sigma_up >= sigma_next:
+      print("Warning: maximum VPSDE noise level exceeded! Falling back to hard noise mode.")
+      if eta >= 1:
+        sigma_up = sigma_next * 0.9999 #avoid sqrt(neg_num) later 
+      else:
+        sigma_up = sigma_next * eta 
+        
+    sigma_signal = sigma_max - sigma_next
+    sigma_residual = torch.sqrt(sigma_next**2 - sigma_up**2)
 
-def get_ancestral_step_RF_var(sigma, sigma_next, eta):
+    alpha_ratio = sigma_signal + sigma_residual
+    sigma_down = sigma_residual / alpha_ratio
+    return alpha_ratio, sigma_up, sigma_down
+
+def get_alpha_ratio_from_sigma_down(sigma_down, sigma_next, eta, sigma_max=1.0):
+    alpha_ratio = (1 - sigma_next) / (1 - sigma_down) 
+    sigma_up = (sigma_next ** 2 - sigma_down ** 2 * alpha_ratio ** 2) ** 0.5 
+    
+    if sigma_up >= sigma_next:
+      alpha_ratio, sigma_up, sigma_down = get_alpha_ratio_from_sigma_up(sigma_up, sigma_next, eta, sigma_max)
+      
+    return alpha_ratio, sigma_up, sigma_down
+  
+
+def get_ancestral_step_RF_var(sigma, sigma_next, eta, sigma_max=1.0):
     dtype = sigma.dtype #calculate variance adjusted sigma up... sigma_up = sqrt(dt)
 
     sigma, sigma_next = sigma.to(torch.float64), sigma_next.to(torch.float64) # float64 is very important to avoid numerical precision issues
@@ -15,6 +39,14 @@ def get_ancestral_step_RF_var(sigma, sigma_next, eta):
     sigma_down = torch.sqrt(sigma_down_num) / ((1 - sigma_next).to(torch.float64) + torch.sqrt(sigma_down_num).to(torch.float64))
 
     alpha_ratio = (1 - sigma_next).to(torch.float64) / (1 - sigma_down).to(torch.float64)
+    
+    return sigma_up.to(dtype),  sigma_down.to(dtype), alpha_ratio.to(dtype)
+  
+def get_ancestral_step_RF_lorentzian(sigma, sigma_next, eta, sigma_max=1.0):
+    dtype = sigma.dtype
+    alpha = 1 / ((sigma.to(torch.float64))**2 + 1)
+    sigma_up = eta * (1 - alpha) ** 0.5
+    alpha_ratio, sigma_up, sigma_down = get_alpha_ratio_from_sigma_up(sigma_up, sigma_next, eta, sigma_max)
     return sigma_up.to(dtype),  sigma_down.to(dtype), alpha_ratio.to(dtype)
 
 def get_ancestral_step_EPS(sigma, sigma_next, eta=1.):
@@ -29,69 +61,34 @@ def get_ancestral_step_EPS(sigma, sigma_next, eta=1.):
     
     return sigma_up, sigma_down, alpha_ratio
 
-def get_ancestral_step_RF_softer(sigma, sigma_next, eta):
+def get_ancestral_step_RF_softer(sigma, sigma_next, eta, sigma_max=1.0):
     # math adapted from get_ancestral_step_EPS to work with RF
     sigma_down = sigma_next * torch.sqrt(1 - (eta**2 * (sigma**2 - sigma_next**2)) / sigma**2)
-    alpha_ratio = (1 - sigma_next) / (1 - sigma_down) 
-    sigma_up = (sigma_next ** 2 - sigma_down ** 2 * alpha_ratio ** 2) ** 0.5 
+    alpha_ratio, sigma_up, sigma_down = get_alpha_ratio_from_sigma_down(sigma_down, sigma_next, eta, sigma_max)
     return sigma_up, sigma_down, alpha_ratio
 
-def get_ancestral_step_RF_soft(sigma, sigma_next, eta):
+def get_ancestral_step_RF_soft(sigma, sigma_next, eta, sigma_max=1.0):
     """Calculates the noise level (sigma_down) to step down to and the amount of noise to add (sigma_up) when doing a rectified flow sampling step, 
     and a mixing ratio (alpha_ratio) for scaling the latent during noise addition. Scale is to shape the sigma_down curve."""
     down_ratio = (1 - eta) + eta * ((sigma_next) / sigma)
     sigma_down = down_ratio * sigma_next
-    alpha_ratio = (1 - sigma_next) / (1 - sigma_down)  
-    sigma_up = (sigma_next ** 2 - sigma_down ** 2 * alpha_ratio ** 2) ** 0.5 # variance preservation is required with RF
+    alpha_ratio, sigma_up, sigma_down = get_alpha_ratio_from_sigma_down(sigma_down, sigma_next, eta, sigma_max)
     return sigma_up, sigma_down, alpha_ratio
 
 def get_ancestral_step_RF_exp(sigma_next, eta, h=None, sigma_max=1.0): # TODO: fix black image issue with linear RK
     sigma_up = sigma_next * (1 - (-2*eta*h).exp())**0.5 
-    
-    sigma_signal = sigma_max - sigma_next
-    sigma_residual = (sigma_next**2 - sigma_up**2)**0.5
-
-    alpha_ratio = sigma_signal + sigma_residual
-    sigma_down = sigma_residual / alpha_ratio
-    
+    alpha_ratio, sigma_up, sigma_down = get_alpha_ratio_from_sigma_up(sigma_up, sigma_next, eta, sigma_max)
     return sigma_up, sigma_down, alpha_ratio
 
 def get_ancestral_step_RF_sqrd(sigma, sigma_next, eta, sigma_max=1.0):
     sigma_hat = sigma * (1 + eta)
     sigma_up = (sigma_hat ** 2 - sigma ** 2) ** .5
-
-    if sigma_next**2 <= sigma_up**2: #fallback to hard noise to avoid sqrt(neg)
-        sigma_up = sigma_next * eta 
-        
-    sigma_signal = sigma_max - sigma_next
-    sigma_residual = torch.sqrt(sigma_next**2 - sigma_up**2)
-
-    alpha_ratio = sigma_signal + sigma_residual
-    sigma_down = sigma_residual / alpha_ratio
+    alpha_ratio, sigma_up, sigma_down = get_alpha_ratio_from_sigma_up(sigma_up, sigma_next, eta, sigma_max)
     return sigma_up, sigma_down, alpha_ratio
 
 def get_ancestral_step_RF_hard(sigma_next, eta, sigma_max=1.0):
     sigma_up = sigma_next * eta 
-    
-    sigma_signal = sigma_max - sigma_next
-    sigma_residual = torch.sqrt(sigma_next**2 - sigma_up**2)
-
-    alpha_ratio = sigma_signal + sigma_residual
-    sigma_down = sigma_residual / alpha_ratio
-    
-    return sigma_up, sigma_down, alpha_ratio
-
-def get_ancestral_step_RF_odds(sigma, sigma_next, eta, sigma_max=1.0):
-    alpha_ratio = (1 / (1 - sigma)) * (sigma_next - sigma)
-    sigma_up = torch.sqrt((2 * sigma) / (1 - sigma)) * torch.sqrt( (sigma_next - sigma).abs())
-    #sigma_up = sigma_next * eta 
-    
-    sigma_signal = sigma_max - sigma_next
-    sigma_residual = torch.sqrt(sigma_next**2 - sigma_up**2)
-
-    #alpha_ratio = sigma_signal + sigma_residual
-    sigma_down = sigma_residual / alpha_ratio
-    
+    alpha_ratio, sigma_up, sigma_down = get_alpha_ratio_from_sigma_up(sigma_up, sigma_next, eta, sigma_max)
     return sigma_up, sigma_down, alpha_ratio
 
 
@@ -111,8 +108,8 @@ def get_res4lyf_step_with_model(model, sigma, sigma_next, eta=0.0, eta_var=1.0, 
         su, sd, alpha_ratio = get_ancestral_step_RF_sqrd(sigma, sigma_next, eta)
       elif noise_mode == "exp": 
         su, sd, alpha_ratio = get_ancestral_step_RF_exp(sigma_next, eta, h)
-      elif noise_mode == "odds":
-        su, sd, alpha_ratio = get_ancestral_step_RF_odds(sigma, sigma_next, eta)
+      elif noise_mode == "lorentzian":
+        su, sd, alpha_ratio = get_ancestral_step_RF_lorentzian(sigma, sigma_next, eta)
       else: #fall back to hard noise from hard_var
         su, sd, alpha_ratio = get_ancestral_step_RF_hard(sigma_next, eta)
   else:

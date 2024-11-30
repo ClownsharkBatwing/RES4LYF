@@ -674,15 +674,12 @@ class ClownsharKSampler_Beta:
     def INPUT_TYPES(s):
         return {"required":
                     {"model": ("MODEL",),
-                    #"add_noise": ("BOOLEAN", {"default": True}),
                     "noise_type_init": (NOISE_GENERATOR_NAMES_SIMPLE, {"default": "gaussian"}),
                     "noise_type_sde": (NOISE_GENERATOR_NAMES_SIMPLE, {"default": "brownian"}),
-                    "noise_mode_sde": (["hard", "hard_var", "hard_sq", "soft", "softer", "exp"], {"default": 'hard', "tooltip": "How noise scales with the sigma schedule. Hard is the most aggressive, the others start strong and drop rapidly."}),
+                    "noise_mode_sde": (["hard", "hard_var", "hard_sq", "soft", "softer", "exp", "lorentzian"], {"default": 'hard', "tooltip": "How noise scales with the sigma schedule. Hard is the most aggressive, the others start strong and drop rapidly."}),
                     "eta": ("FLOAT", {"default": 0.25, "min": -100.0, "max": 100.0, "step":0.01, "round": False, "tooltip": "Calculated noise amount to be added, then removed, after each step."}),
                     "noise_seed": ("INT", {"default": 0, "min": -1, "max": 0xffffffffffffffff}),
                     "sampler_mode": (['standard', 'unsample', 'resample'],),
-                    #"sampler_mode": (['standard', 'unsample_vp', 'unsample_odds', 'unsample_logit', 'unsample_lin', #'unsample_log',
-                    #                              'resample_vp', 'resample_odds', 'resample_logit', 'resample_lin',],),
                     "sampler_name": (RK_SAMPLER_NAMES, {"default": "res_2m"}), 
                     "implicit_sampler_name": (["default", 
                                                "gauss-legendre_5s",
@@ -707,7 +704,7 @@ class ClownsharKSampler_Beta:
                     "shift_scaling": (["exponential", "linear"], {"default": "exponential"}),
                     "truncate_conditioning": (['false', 'true'], {"default": "true"}),
                     "input_std": ("FLOAT", {"default": 1.0, "min": -10000, "max": 10000, "step":0.01}),
-                    "input_normalization": (["none", "mean_std", "std", "channels_mean_std", "channels_std", "process_latent_in"], {"default": "channels_mean_std"}),
+                    "input_normalization": (["none", "mean_std", "std", "channels_mean_std", "channels_std",], {"default": "channels_mean_std"}),
                     "extra_options": ("STRING", {"default": "", "multiline": True}),   
                      },
                 "optional": 
@@ -719,7 +716,7 @@ class ClownsharKSampler_Beta:
                     "guides": ("GUIDES", ),     
                     "options": ("OPTIONS", ),   
                     "sde_noise": ("LATENT",),
-                    "t_is": ("SIGMAS", ),
+                    "automation": ("AUTOMATION", ),
                     }
                 }
 
@@ -737,8 +734,8 @@ class ClownsharKSampler_Beta:
              eta=0.25, eta_var=0.0, d_noise=1.0, s_noise=1.0, alpha_init=-1.0, k_init=1.0, alpha_sde=-1.0, k_sde=1.0, cfgpp=0.0, c1=0.0, c2=0.5, c3=1.0, multistep=False, noise_seed=-1, sampler_name="res_2m", implicit_sampler_name="default",
                     exp_mode=False, t_fn_formula=None, sigma_fn_formula=None, implicit_steps=0,
                     latent_guide=None, latent_guide_inv=None, latent_guide_weight=0.0, latent_guide_weight_inv=0.0, guide_mode="blend", latent_guide_weights=None, latent_guide_weights_inv=None, latent_guide_mask=None, latent_guide_mask_inv=None, rescale_floor=True, sigmas_override=None, unsampler_type="linear",
-                    shift=3.0, base_shift=0.85, guides=None, options=None, sde_noise=None,sde_noise_steps=1, t_is=None, shift_scaling="exponential",
-                    input_std=1.0, input_normalization="channels", extra_options="",
+                    shift=3.0, base_shift=0.85, guides=None, options=None, sde_noise=None,sde_noise_steps=1, shift_scaling="exponential",
+                    input_std=1.0, input_normalization="channels", extra_options="", automation=None, etas=None, s_noises=None,t_is=None, 
                     ): 
             default_dtype = torch.float64
             max_steps = 10000
@@ -783,6 +780,13 @@ class ClownsharKSampler_Beta:
             latent_guide_weights = F.pad(latent_guide_weights, (0, max_steps), value=0.0)
             latent_guide_weights_inv = initialize_or_scale(latent_guide_weights_inv, latent_guide_weight_inv, max_steps).to(default_dtype)
             latent_guide_weights_inv = F.pad(latent_guide_weights_inv, (0, max_steps), value=0.0)
+            
+            if automation is not None:
+                etas, s_noises, t_is = automation
+            etas = initialize_or_scale(etas, eta, max_steps).to(default_dtype)
+            etas = F.pad(etas, (0, max_steps), value=0.0)
+            s_noises = initialize_or_scale(s_noises, s_noise, max_steps).to(default_dtype)
+            s_noises = F.pad(s_noises, (0, max_steps), value=0.0)
             
             if shift >= 0:
                 if isinstance(model.model.model_config, comfy.supported_models.SD3):
@@ -962,9 +966,10 @@ class ClownsharKSampler_Beta:
                                                         "noise_sampler_type": noise_type_sde, "noise_mode": noise_mode_sde, "noise_seed": noise_seed_sde, "rk_type": sampler_name, "implicit_sampler_name": implicit_sampler_name,
                                                                 "exp_mode": exp_mode, "t_fn_formula": t_fn_formula, "sigma_fn_formula": sigma_fn_formula, "implicit_steps": implicit_steps,
                                                                 "latent_guide": latent_guide, "latent_guide_inv": latent_guide_inv, "mask": latent_guide_mask, "mask_inv": latent_guide_mask_inv,
-                                                                "latent_guide_weights": latent_guide_weights, "latent_guide_weights_inv": latent_guide_weights_inv, "t_is": t_is, "guide_mode": guide_mode, "unsampler_type": unsampler_type,
+                                                                "latent_guide_weights": latent_guide_weights, "latent_guide_weights_inv": latent_guide_weights_inv, "guide_mode": guide_mode, "unsampler_type": unsampler_type,
                                                                 "LGW_MASK_RESCALE_MIN": rescale_floor, "sigmas_override": sigmas_override, "sde_noise": sde_noise,
                                                                 "input_std": input_std, "input_normalization": input_normalization, "extra_options": extra_options,
+                                                                "etas": etas, "s_noises": s_noises, "t_is": t_is,
                                                                 })
 
                 samples = comfy.sample.sample_custom(model, noise, cfg, sampler, sigmas, positive, negative, x.clone(), 
@@ -1357,7 +1362,7 @@ class ClownsharKSamplerGuides:
     @classmethod
     def INPUT_TYPES(s):
         return {"required":
-                    {"guide_mode": (["hard_light", "mean_std", "mean", "std", "blend", "epsilon", "data", "epsilon_data", "resampler"], {"default": 'blend', "tooltip": "The mode used."}),
+                    {"guide_mode": (["hard_light", "mean_std", "mean", "std", "blend"], {"default": 'blend', "tooltip": "The mode used."}),
                      "latent_guide_weight": ("FLOAT", {"default": 0.0, "min": -100.0, "max": 100.0, "step":0.01, "round": False}),
                     "scheduler": (["constant"] + comfy.samplers.SCHEDULER_NAMES + ["beta57"], {"default": "beta57"},),
                     "steps": ("INT", {"default": 30, "min": 1, "max": 10000}),
@@ -1406,7 +1411,7 @@ class ClownsharKSamplerGuides_Beta:
     @classmethod
     def INPUT_TYPES(s):
         return {"required":
-                    {"guide_mode": (["hard_light", "mean_std", "mean", "std", "blend", "epsilon", "data", "epsilon_data", "resampler", "epsilon_mean_std", "epsilon_mean", "epsilon_mean_use_inv", "epsilon_match_mean_std"], {"default": 'epsilon', "tooltip": "The mode used."}),
+                    {"guide_mode": (["hard_light", "mean_std", "mean", "std", "blend", "epsilon", "data", "epsilon_data", "unsample", "resample", "epsilon_mean_std", "epsilon_mean", "epsilon_mean_use_inv", "epsilon_match_mean_std"], {"default": 'epsilon', "tooltip": "The mode used."}),
                      "latent_guide_weight": ("FLOAT", {"default": 0.0, "min": -100.0, "max": 100.0, "step":0.01, "round": False}),
                      "latent_guide_weight_inv": ("FLOAT", {"default": 0.0, "min": -100.0, "max": 100.0, "step":0.01, "round": False}),
                     "scheduler": (["constant"] + comfy.samplers.SCHEDULER_NAMES + ["beta57"], {"default": "beta57"},),
@@ -1460,6 +1465,34 @@ class ClownsharKSamplerGuides_Beta:
                   scheduler, scheduler_inv, steps, steps_inv, denoise, denoise_inv)
         return (guides, )
 
+
+
+
+class ClownsharKSamplerAutomation:
+    @classmethod
+    def INPUT_TYPES(s):
+        return {"required":
+                    {
+                    },
+                    "optional": 
+                    {
+                        "etas": ("SIGMAS", ),
+                        "s_noises": ("SIGMAS", ),
+                        "t_is": ("SIGMAS", ),
+
+                    }  
+               }
+    RETURN_TYPES = ("AUTOMATION",)
+    RETURN_NAMES = ("automation",)
+    CATEGORY = "sampling/custom_sampling/samplers"
+
+    FUNCTION = "main"
+
+    def main(self, etas=None, s_noises=None, t_is=None,
+                    ):
+
+        automation = (etas, s_noises, t_is)
+        return (automation, )
 
 
 

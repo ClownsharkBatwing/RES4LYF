@@ -3,7 +3,7 @@ import torch.nn.functional as F
 import numpy as np
 import folder_paths
 from PIL.PngImagePlugin import PngInfo
-from PIL import Image, ImageOps, ImageSequence, ImageFile
+from PIL import Image
 import json
 import os 
 import random
@@ -12,7 +12,6 @@ from io import BytesIO
 from comfy.cli_args import args
 import comfy.utils
 from nodes import MAX_RESOLUTION
-
 
 
 class SaveImage:
@@ -253,7 +252,7 @@ class PrepForUnsampling:
     CATEGORY = "essentials/image manipulation"
 
     def execute(self, width, height, resize_to_input="false", image_1=None, image_2=None, mask=None, invert_mask=False, method="stretch", interpolation="lanczos", condition="always", multiple_of=0, keep_proportion=False, mask_channel="red", latent=None, latent_type="16_channels", vae=None):
-
+        #NOTE: VAE encode with comyfui is *non-deterministic* in that each success encode will return slightly different latent images! The difference is visible after decoding.
         ratio = 8 # latent compression factor
 
         if latent is not None and resize_to_input == "latent":

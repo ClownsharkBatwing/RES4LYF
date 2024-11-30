@@ -30,6 +30,40 @@ def latent_meancenter_channels(x):
     return  x - mean
 
 
+def normalize_latent(target, source=None, mean=True, std=True, channelwise=True):
+    
+    y = torch.zeros_like(target)
+    for b in range(y.shape[0]):
+        if channelwise:
+            for c in range(y.shape[1]):
+                if mean and std:
+                    y[b][c] = (target[b][c] - target[b][c].mean()) / target[b][c].std()
+                    if source is not None:
+                        y[b][c] = y[b][c] * source[b][c].std() + source[b][c].mean()
+                elif mean:
+                    y[b][c] = target[b][c] - target[b][c].mean()
+                    if source is not None:
+                        y[b][c] = y[b][c] + source[b][c].mean()
+                elif std:
+                    y[b][c] = target[b][c] / target[b][c].std()
+                    if source is not None:
+                        y[b][c] = y[b][c] * source[b][c].std()
+        else:
+            if mean and std:
+                y[b] = (target[b] - target[b].mean()) / target[b].std()
+                if source is not None:
+                    y[b] = y[b] * source[b].std() + source[b].mean()
+            elif mean:
+                y[b] = target[b] - target[b].mean()
+                if source is not None:
+                    y[b] = y[b] + source[b].mean()
+            elif std:
+                y[b] = target[b] / target[b].std()
+                if source is not None:
+                    y[b] = y[b] * source[b].std()
+    return y
+
+
 class set_precision:
     def __init__(self):
         pass
