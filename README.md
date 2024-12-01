@@ -38,7 +38,7 @@ The only two mandatory inputs here are "model" and "latent_image".
 **CONTROL_AFTER_GENERATE:** Self-explanatory. I recommend setting to "fixed" or "increment" (as you don't have to reload the workflow to regenerate something, you can just decement it by one).
 
 ## SAMPLER SETTINGS:
-![image](https://github.com/user-attachments/assets/8aff7088-9661-4ea5-8715-6f3aee4c6542)
+![image](https://github.com/user-attachments/assets/4a60d816-7797-4d77-a8f2-9bacd439067c)
 
 **SAMPLER_MODE:** In virtually all situations, use "standard". However, if you are unsampling, set to "unsample", and if you are resampling (the stage after unsampling), set to "resample". Both of these modes will disable noise addition within ComfyUI, which is essential for these methods to work properly. 
 
