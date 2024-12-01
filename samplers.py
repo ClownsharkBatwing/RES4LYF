@@ -407,6 +407,14 @@ class StyleModelApplyAdvanced:
         return (c, )
 
 
+NOISE_MODE_NAMES = ["hard_sq",
+                    "hard",
+                    "lorentzian", 
+                    "soft", 
+                    "softer",
+                    "exp", 
+                    "hard_var", 
+                    ]
 
 
 class ClownsharKSampler:
@@ -417,7 +425,8 @@ class ClownsharKSampler:
                     "noise_type_init": (NOISE_GENERATOR_NAMES_SIMPLE, {"default": "gaussian"}),
                     "noise_type_sde": (NOISE_GENERATOR_NAMES_SIMPLE, {"default": "gaussian"}),
                     #"noise_mode_sde": (["lorentzian", "hard", "hard_var", "hard_sq", "soft", "softer", "exp"], {"default": 'hard', "tooltip": "How noise scales with the sigma schedule. Hard is the most aggressive, the others start strong and drop rapidly."}),
-                    "noise_mode_sde": (["linear", "linear_mild", "linear_strong", "decay", "rapid_decay", "dynamic", "dynamic_mild"], {"default": 'linear', "tooltip": "How noise scales with the sigma schedule. Hard is the most aggressive, the others start strong and drop rapidly."}),
+                    "noise_mode_sde": (NOISE_MODE_NAMES, {"default": 'linear', "tooltip": "How noise scales with the sigma schedule. Hard is the most aggressive, the others start strong and drop rapidly."}),
+                    #"noise_mode_sde": (["linear", "linear_mild", "linear_strong", "decay", "rapid_decay", "dynamic", "dynamic_mild"], {"default": 'linear', "tooltip": "How noise scales with the sigma schedule. Hard is the most aggressive, the others start strong and drop rapidly."}),
                     "eta": ("FLOAT", {"default": 0.5, "min": -100.0, "max": 100.0, "step":0.01, "round": False, "tooltip": "Calculated noise amount to be added, then removed, after each step."}),
                     "noise_seed": ("INT", {"default": 0, "min": -1, "max": 0xffffffffffffffff}),
                     "sampler_mode": (['standard', 'unsample', 'resample'],),
