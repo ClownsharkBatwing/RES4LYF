@@ -12,6 +12,21 @@ This is an all-in-one sampling node designed for convenience without compromisin
 
 There are several key sections to the parameters which will be explained below.
 
+## NOISE SETTINGS:
+![image](https://github.com/user-attachments/assets/caaa41a4-5afa-4c3c-8fb2-003b9a6b2578)
+
+**NOISE_TYPE_INIT:** This sets the initial noise type applied to the latent image. 
+
+**NOISE_TYPE_SDE:** This sets the noise type used during SDE sampling. Note that SDE sampling is identical to ODE sampling in most ways - the difference is that noise is added after each step. It's like a form of carefully controlled continuous noise injection.
+
+**NOISE_MODE_SDE:** This determines what method is used for scaling the amount of noise to be added based on the "eta" setting below. They are listed in order of strength of the effect. 
+
+**ETA:** This controls how much noise is added after each step. Note that for most of the noise modes, anything equal to or greater than 1.0 will trigger internal scaling to prevent NaN errors. The exception is the noise mode "exp" which allows for settings far above 1.0. 
+
+**NOISE_SEED:** Largely identical to the setting in KSampler. Set to -1 to have it increment the most recently used seed (by the workflow) by 1.
+
+**CONTROL_AFTER_GENERATE:** Self-explanatory. I recommend setting to "fixed" or "increment" (as you don't have to reload the workflow to regenerate something, you can just decement it by one).
+
 ## SAMPLER SETTINGS:
 ![image](https://github.com/user-attachments/assets/8aff7088-9661-4ea5-8715-6f3aee4c6542)
 
