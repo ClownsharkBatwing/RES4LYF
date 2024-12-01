@@ -25,7 +25,7 @@ This uses my amateur cell phone lora, which is freely available (https://hugging
 
 # PREVIOUS WORKFLOWS
 **THE FOLLOWING WORKFLOWS ARE FOR A PREVIOUS VERSION OF THE NODE.** 
-These will still work! They will, however, need slight modification as the layout of the nodes has been changed slightly. To replicate their behavior precisely, add to the new extra_options box in ClownsharKSampler: truncate_conditioning=true
+These will still work! You will, however, need to manually delete and recreate the sampler and guide nodes and input the settings as they appear in the screenshots. The layout of the nodes has been changed slightly. To replicate their behavior precisely, add to the new extra_options box in ClownsharKSampler: truncate_conditioning=true (if that setting was used in the screenshot for the node).
 
 ![image](https://github.com/user-attachments/assets/a55ec484-1339-45a2-bcc4-76934f4648d4)
 
