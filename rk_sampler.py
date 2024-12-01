@@ -19,9 +19,59 @@ from .helper import get_extra_options_kv
 
 
 
+def sample_res_2m(model, x, sigmas, extra_args=None, callback=None, disable=None):
+    return sample_rk(model, x, sigmas, extra_args, callback, disable, noise_sampler_type="gaussian", noise_mode="linear", noise_seed=-1, rk_type="res_2m", eta=0.0, )
+
+def sample_res_2s(model, x, sigmas, extra_args=None, callback=None, disable=None):
+    return sample_rk(model, x, sigmas, extra_args, callback, disable, noise_sampler_type="gaussian", noise_mode="linear", noise_seed=-1, rk_type="res_2s", eta=0.0, )
+
+def sample_res_3s(model, x, sigmas, extra_args=None, callback=None, disable=None):
+    return sample_rk(model, x, sigmas, extra_args, callback, disable, noise_sampler_type="gaussian", noise_mode="linear", noise_seed=-1, rk_type="res_3s", eta=0.0, )
+
+def sample_res_5s(model, x, sigmas, extra_args=None, callback=None, disable=None):
+    return sample_rk(model, x, sigmas, extra_args, callback, disable, noise_sampler_type="gaussian", noise_mode="linear", noise_seed=-1, rk_type="res_5s", eta=0.0, )
+
+
+
+def sample_res_2m_sde(model, x, sigmas, extra_args=None, callback=None, disable=None):
+    return sample_rk(model, x, sigmas, extra_args, callback, disable, noise_sampler_type="gaussian", noise_mode="linear", noise_seed=-1, rk_type="res_2m", eta=0.5, )
+
+def sample_res_2s_sde(model, x, sigmas, extra_args=None, callback=None, disable=None):
+    return sample_rk(model, x, sigmas, extra_args, callback, disable, noise_sampler_type="gaussian", noise_mode="linear", noise_seed=-1, rk_type="res_2s", eta=0.5, )
+
+def sample_res_3s_sde(model, x, sigmas, extra_args=None, callback=None, disable=None):
+    return sample_rk(model, x, sigmas, extra_args, callback, disable, noise_sampler_type="gaussian", noise_mode="linear", noise_seed=-1, rk_type="res_3s", eta=0.5, )
+
+def sample_res_5s_sde(model, x, sigmas, extra_args=None, callback=None, disable=None):
+    return sample_rk(model, x, sigmas, extra_args, callback, disable, noise_sampler_type="gaussian", noise_mode="linear", noise_seed=-1, rk_type="res_5s", eta=0.5, )
+
+
+
+def sample_deis_2m(model, x, sigmas, extra_args=None, callback=None, disable=None):
+    return sample_rk(model, x, sigmas, extra_args, callback, disable, noise_sampler_type="gaussian", noise_mode="linear", noise_seed=-1, rk_type="deis_2m", eta=0.0, )
+
+def sample_deis_3m(model, x, sigmas, extra_args=None, callback=None, disable=None):
+    return sample_rk(model, x, sigmas, extra_args, callback, disable, noise_sampler_type="gaussian", noise_mode="linear", noise_seed=-1, rk_type="deis_3m", eta=0.0, )
+
+def sample_deis_4m(model, x, sigmas, extra_args=None, callback=None, disable=None):
+    return sample_rk(model, x, sigmas, extra_args, callback, disable, noise_sampler_type="gaussian", noise_mode="linear", noise_seed=-1, rk_type="deis_4m", eta=0.0, )
+
+
+
+def sample_deis_2m_sde(model, x, sigmas, extra_args=None, callback=None, disable=None):
+    return sample_rk(model, x, sigmas, extra_args, callback, disable, noise_sampler_type="gaussian", noise_mode="linear", noise_seed=-1, rk_type="deis_2m", eta=0.5, )
+
+def sample_deis_3m_sde(model, x, sigmas, extra_args=None, callback=None, disable=None):
+    return sample_rk(model, x, sigmas, extra_args, callback, disable, noise_sampler_type="gaussian", noise_mode="linear", noise_seed=-1, rk_type="deis_3m", eta=0.5, )
+
+def sample_deis_4m_sde(model, x, sigmas, extra_args=None, callback=None, disable=None):
+    return sample_rk(model, x, sigmas, extra_args, callback, disable, noise_sampler_type="gaussian", noise_mode="linear", noise_seed=-1, rk_type="deis_4m", eta=0.5, )
+
+
+
 def normalize_inputs(x, y0, y0_inv, guide_mode,  extra_options):
     
-    if guide_mode == "epsilon_match_mean_std":
+    if guide_mode == "epsilon_guide_mean_std_from_bkg":
         y0 = normalize_latent(y0, y0_inv)
         
     input_norm = get_extra_options_kv("input_norm", "", extra_options)
@@ -43,18 +93,19 @@ def normalize_inputs(x, y0, y0_inv, guide_mode,  extra_options):
 
 
 def prepare_step_to_sigma_zero(rk, irk, rk_type, irk_type, model, x, extra_options, alpha, k, noise_sampler_type):
-    rk_type_final_step = f"ralston_{rk_type[-2:]}" if rk_type[-2:] in {"2s", "3s", "4s"} else "ralston_4s"
-    rk_type_final_step =    f"deis_{rk_type[-2:]}" if rk_type[-2:] in {"2m", "3m", "4m"} else rk_type_final_step
+    rk_type_final_step = f"ralston_{rk_type[-2:]}" if rk_type[-2:] in {"2s", "3s"} else "ralston_3s"
+    rk_type_final_step = f"deis_2m" if rk_type[-2:] in {"2m", "3m", "4m"} else rk_type_final_step
+    rk_type_final_step = f"euler" if rk_type in {"ddim"} else rk_type_final_step
     rk_type_final_step = get_extra_options_kv("rk_type_final_step", rk_type_final_step, extra_options)
     rk = RK_Method.create(model, rk_type_final_step, x.device)
     rk.init_noise_sampler(x, torch.initial_seed() + 1, noise_sampler_type, alpha=alpha, k=k)
 
     if irk_type == rk_type:
         irk_type_final_step = f"gauss-legendre_{rk_type[-2:]}" if rk_type[-2:] in {"2s", "3s", "4s", "5s"} else "gauss-legendre_2s"
-        irk_type_final_step =           f"deis_{rk_type[-2:]}" if rk_type[-2:] in {"2m", "3m", "4m"}       else irk_type_final_step
+        irk_type_final_step = f"deis_2m" if rk_type[-2:] in {"2m", "3m", "4m"} else irk_type_final_step
         irk_type_final_step = get_extra_options_kv("irk_type_final_step", irk_type_final_step, extra_options)
         irk = RK_Method.create(model, irk_type_final_step, x.device)
-        irk.init_noise_sampler(x, torch.initial_seed() + 2, noise_sampler_type, alpha=alpha, k=k)
+        irk.init_noise_sampler(x, torch.initial_seed() + 100, noise_sampler_type, alpha=alpha, k=k)
     else:
         irk_type_final_step = irk_type
 
@@ -62,28 +113,32 @@ def prepare_step_to_sigma_zero(rk, irk, rk_type, irk_type, model, x, extra_optio
     return rk, irk, rk_type_final_step, irk_type_final_step, eta, eta_var
 
 
-
 @torch.no_grad()
-def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=None, noise_sampler=None, noise_sampler_type="brownian", noise_mode="hard", noise_seed=-1, rk_type="res_2m", implicit_sampler_name="default",
+def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, noise_sampler=None, noise_sampler_type="gaussian", noise_mode="hard", noise_seed=-1, rk_type="res_2m", implicit_sampler_name="use_explicit",
               sigma_fn_formula="", t_fn_formula="",
-                  eta=0.25, eta_var=0.0, s_noise=1., d_noise=1., alpha=-1.0, k=1.0, scale=0.1, c1=0.0, c2=0.5, c3=1.0, MULTISTEP=False, cfgpp=0.0, implicit_steps=0, reverse_weight=0.0, exp_mode=False,
+                  eta=0.0, eta_var=0.0, s_noise=1., d_noise=1., alpha=-1.0, k=1.0, scale=0.1, c1=0.0, c2=0.5, c3=1.0, MULTISTEP=False, cfgpp=0.0, implicit_steps=0, reverse_weight=0.0, exp_mode=False,
                   latent_guide=None, latent_guide_inv=None, latent_guide_weights=None, latent_guide_weights_inv=None, guide_mode="blend", unsampler_type="linear",
-                  GARBAGE_COLLECT=False, mask=None, mask_inv=None, LGW_MASK_RESCALE_MIN=False, sigmas_override=None, t_is=None,sde_noise=[],
+                  GARBAGE_COLLECT=False, mask=None, mask_inv=None, LGW_MASK_RESCALE_MIN=True, sigmas_override=None, unsample_resample_scales=None,sde_noise=None,
                   extra_options="",
                   etas=None, s_noises=None, momentums=None,
                   ):
     extra_args = {} if extra_args is None else extra_args
     s_in = x.new_ones([x.shape[0]])
-    latent_guide_weights = torch.full((10000,),0) if latent_guide_weights is None else latent_guide_weights
-    latent_guide_weights_inv = torch.full((10000,),0) if latent_guide_weights_inv is None else latent_guide_weights_inv
     
-    if len(sde_noise) > 0 and sigmas[1] > sigmas[2]:
-        SDE_NOISE_EXTERNAL = True
+    SDE_NOISE_EXTERNAL = False
+    if sde_noise is not None:
+        if len(sde_noise) > 0 and sigmas[1] > sigmas[2]:
+            SDE_NOISE_EXTERNAL = True
+
+    
+    if latent_guide_weights is not None:
+        lgw = latent_guide_weights.to(x.device)
     else:
-        SDE_NOISE_EXTERNAL = False
-    
-    lgw = latent_guide_weights.to(x.device)
-    lgw_inv = latent_guide_weights_inv.to(x.device)
+        lgw = torch.full_like(sigmas, 0.)
+    if latent_guide_weights_inv is not None:
+        lgw_inv = latent_guide_weights_inv.to(x.device)
+    else:
+        lgw_inv = torch.full_like(sigmas, 0.)
     
     if sigmas_override is not None:
         sigmas = sigmas_override.clone()
@@ -94,7 +149,7 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
 
     irk_type = implicit_sampler_name if implicit_sampler_name != "use_explicit" else rk_type
     irk = RK_Method.create(model, irk_type, x.device)
-    irk.init_noise_sampler(x, noise_seed+1, noise_sampler_type, alpha=alpha, k=k)
+    irk.init_noise_sampler(x, noise_seed+100, noise_sampler_type, alpha=alpha, k=k)
 
     sigmas, UNSAMPLE = rk.prepare_sigmas(sigmas)
     mask, LGW_MASK_RESCALE_MIN = prepare_mask(x, mask, LGW_MASK_RESCALE_MIN)
@@ -122,11 +177,11 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
 
     for step in trange(len(sigmas)-1, disable=disable):
         sigma, sigma_next = sigmas[step], sigmas[step+1]
-        t_i = t_is[step] if t_is is not None else None
+        unsample_resample_scale = unsample_resample_scales[step] if unsample_resample_scales is not None else None
         eta = eta_var = etas[step] if etas is not None else eta
         s_noise = s_noises[step] if s_noises is not None else s_noise
         
-        if sigma_next == 0 and RK_Method.is_exponential(rk_type):
+        if sigma_next == 0:
             rk, irk, rk_type, irk_type, eta, eta_var = prepare_step_to_sigma_zero(rk, irk, rk_type, irk_type, model, x, extra_options, alpha, k, noise_sampler_type)
 
         sigma_up, sigma, sigma_down, alpha_ratio = get_res4lyf_step_with_model(model, sigma, sigma_next, eta, eta_var, noise_mode, rk.h_fn(sigma_next,sigma) )
@@ -142,12 +197,8 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
             x_, data_, data_u, eps_ = (torch.zeros(max(rk.rows, irk.rows) + 2, *x.shape, dtype=x.dtype, device=x.device) for step in range(4))
         
         s_       = [(  rk.sigma_fn( rk.t_fn(sigma) +     h*c_)) * s_in for c_ in   rk.c]
-        if irk.c is not None:
-            s_irk_rk = [(  rk.sigma_fn( rk.t_fn(sigma) +     h*c_)) * s_in for c_ in  irk.c]
-            s_irk    = [( irk.sigma_fn(irk.t_fn(sigma) + h_irk*c_)) * s_in for c_ in  irk.c]
-        else:
-            s_irk_rk = [(  rk.sigma_fn( rk.t_fn(sigma) +     h*c_)) * s_in for c_ in   rk.c]
-            s_irk    = [( irk.sigma_fn(irk.t_fn(sigma) + h_irk*c_)) * s_in for c_ in   rk.c]
+        s_irk_rk = [(  rk.sigma_fn( rk.t_fn(sigma) +     h*c_)) * s_in for c_ in  irk.c]
+        s_irk    = [( irk.sigma_fn(irk.t_fn(sigma) + h_irk*c_)) * s_in for c_ in  irk.c]
 
         sde_noise_t = None
         if SDE_NOISE_EXTERNAL:
@@ -171,7 +222,7 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
             for row in range(rk.rows - rk.multistep_stages):
                 x_[row+1] = x_0 + h * rk.a_k_sum(eps_, row)
                 eps_[row], data_[row] = rk(x_0, x_[row+1], s_[row], h, **extra_args)       #MODEL CALL
-                eps_ = process_guides_substep(x_0, x_, eps_, data_, row, y0, y0_inv, lgw[step], lgw_inv[step], lgw_mask, lgw_mask_inv, step, sigma, sigma_next, sigma_down, s_, t_i, rk, rk_type, guide_mode, latent_guide_inv, UNSAMPLE, extra_options)
+                eps_ = process_guides_substep(x_0, x_, eps_, data_, row, y0, y0_inv, lgw[step], lgw_inv[step], lgw_mask, lgw_mask_inv, step, sigma, sigma_next, sigma_down, s_, unsample_resample_scale, rk, rk_type, guide_mode, latent_guide_inv, UNSAMPLE, extra_options)
             
             x = x_0 + h * rk.b_k_sum(eps_, 0)
                     
@@ -186,7 +237,7 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
                 for diag_iter in range(implicit_steps+1):
                     x_[row+1] = x_0 + h * irk.a_k_sum(eps_, row)
                     eps_[row], data_[row] = irk(x_0, x_[row+1], s_irk[row], h, **extra_args)       #MODEL CALL
-                    eps_ = process_guides_substep(x_0, x_, eps_, data_, row, y0, y0_inv, lgw[step], lgw_inv[step], lgw_mask, lgw_mask_inv, step, sigma, sigma_next, sigma_down, s_irk, t_i, irk, irk_type, guide_mode, latent_guide_inv, UNSAMPLE, extra_options)
+                    eps_ = process_guides_substep(x_0, x_, eps_, data_, row, y0, y0_inv, lgw[step], lgw_inv[step], lgw_mask, lgw_mask_inv, step, sigma, sigma_next, sigma_down, s_irk, unsample_resample_scale, irk, irk_type, guide_mode, latent_guide_inv, UNSAMPLE, extra_options)
                     
             x = x_0 + h * irk.b_k_sum(eps_, 0) 
             
@@ -205,7 +256,7 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
             
             x_mid = x
             for i in range(len(s_all)-1):
-                x_mid, eps_, data_ = get_explicit_rk_step(rk, rk_type, x_mid, y0, y0_inv, lgw[step], lgw_inv[step], mask, lgw_mask, lgw_mask_inv, step, s_all[i], s_all[i+1], eta, eta_var, s_noise, noise_mode, c2, c3, step+i, sigmas_and, x_, eps_, data_, t_i, guide_mode, latent_guide, latent_guide_inv, UNSAMPLE, extra_options, **extra_args)
+                x_mid, eps_, data_ = get_explicit_rk_step(rk, rk_type, x_mid, y0, y0_inv, lgw[step], lgw_inv[step], mask, lgw_mask, lgw_mask_inv, step, s_all[i], s_all[i+1], eta, eta_var, s_noise, noise_mode, c2, c3, step+i, sigmas_and, x_, eps_, data_, unsample_resample_scale, guide_mode, latent_guide, latent_guide_inv, UNSAMPLE, extra_options, **extra_args)
                 eps_list.append(eps_[0])
                 eps_ [0], data_ [0] = torch.zeros_like(eps_ [0]), torch.zeros_like(data_[0])
                 
@@ -222,7 +273,7 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
                 for row in range(irk.rows):
                     x_[row+1] = x_0 + h_irk * irk.a_k_sum(eps2_, row)
                     eps2_[row], data_[row] = irk(x_0, x_[row+1], s_irk[row], h, **extra_args)
-                    eps2_ = process_guides_substep(x_0, x_, eps2_, data_, row, y0, y0_inv, lgw[step], lgw_inv[step], lgw_mask, lgw_mask_inv, step, sigma, sigma_next, sigma_down, s_irk, t_i, irk, irk_type, guide_mode, latent_guide_inv, UNSAMPLE, extra_options)
+                    eps2_ = process_guides_substep(x_0, x_, eps2_, data_, row, y0, y0_inv, lgw[step], lgw_inv[step], lgw_mask, lgw_mask_inv, step, sigma, sigma_next, sigma_down, s_irk, unsample_resample_scale, irk, irk_type, guide_mode, latent_guide_inv, UNSAMPLE, extra_options)
                 x = x_0 + h_irk * irk.b_k_sum(eps2_, 0)
                 denoised = x + (sigma / (sigma - sigma_down)) *  h * irk.b_k_sum(eps2_, 0) 
                 eps = x - denoised
@@ -250,7 +301,7 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
 
 
 
-def get_explicit_rk_step(rk, rk_type, x, y0, y0_inv, lgw, lgw_inv, mask, lgw_mask, lgw_mask_inv, step, sigma, sigma_next, eta, eta_var, s_noise, noise_mode, c2, c3, stepcount, sigmas, x_, eps_, data_, t_i, guide_mode, latent_guide, latent_guide_inv, UNSAMPLE, extra_options, **extra_args):
+def get_explicit_rk_step(rk, rk_type, x, y0, y0_inv, lgw, lgw_inv, mask, lgw_mask, lgw_mask_inv, step, sigma, sigma_next, eta, eta_var, s_noise, noise_mode, c2, c3, stepcount, sigmas, x_, eps_, data_, unsample_resample_scale, guide_mode, latent_guide, latent_guide_inv, UNSAMPLE, extra_options, **extra_args):
     extra_args = {} if extra_args is None else extra_args
     s_in = x.new_ones([x.shape[0]])
 
@@ -275,7 +326,7 @@ def get_explicit_rk_step(rk, rk_type, x, y0, y0_inv, lgw, lgw_inv, mask, lgw_mas
         x_[row+1] = x_0 + h * rk.a_k_sum(eps_, row)
         eps_[row], data_[row] = rk(x_0, x_[row+1], s_[row], h, **extra_args)
         
-        eps_ = process_guides_substep(x_0, x_, eps_, data_, row, y0, y0_inv, lgw, lgw_inv, lgw_mask, lgw_mask_inv, step, sigma, sigma_next, sigma_down, s_, t_i, rk, rk_type, guide_mode, latent_guide_inv, UNSAMPLE, extra_options)
+        eps_ = process_guides_substep(x_0, x_, eps_, data_, row, y0, y0_inv, lgw, lgw_inv, lgw_mask, lgw_mask_inv, step, sigma, sigma_next, sigma_down, s_, unsample_resample_scale, rk, rk_type, guide_mode, latent_guide_inv, UNSAMPLE, extra_options)
         
     x = x_0 + h * rk.b_k_sum(eps_, 0)
     

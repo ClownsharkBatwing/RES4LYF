@@ -65,7 +65,7 @@ def get_guide_epsilon(x_0, x_, y0, y0_inv, s_, row, rk_type, b=None, c=None):
 
 
 @torch.no_grad()
-def process_guides_substep(x_0, x_, eps_, data_, row, y0, y0_inv, lgw, lgw_inv, lgw_mask, lgw_mask_inv, step, sigma, sigma_next, sigma_down, s_, t_i, rk, rk_type, guide_mode, latent_guide_inv, UNSAMPLE, extra_options):
+def process_guides_substep(x_0, x_, eps_, data_, row, y0, y0_inv, lgw, lgw_inv, lgw_mask, lgw_mask_inv, step, sigma, sigma_next, sigma_down, s_, unsample_resample_scale, rk, rk_type, guide_mode, latent_guide_inv, UNSAMPLE, extra_options):
     
     if UNSAMPLE and RK_Method.is_exponential(rk_type):
         if not (extra_options_flag("disable_power_unsample", extra_options) or extra_options_flag("disable_power_resample", extra_options)):
@@ -138,9 +138,9 @@ def process_guides_substep(x_0, x_, eps_, data_, row, y0, y0_inv, lgw, lgw_inv, 
 
     elif (UNSAMPLE or guide_mode in {"resample", "unsample"}) and (lgw > 0 or lgw_inv > 0):
             
-        cvf = rk.get_epsilon(x_0, x_[row+1], y0, sigma, s_[row], sigma_down, t_i, extra_options)
+        cvf = rk.get_epsilon(x_0, x_[row+1], y0, sigma, s_[row], sigma_down, unsample_resample_scale, extra_options)
         if UNSAMPLE and sigma > sigma_next and latent_guide_inv is not None:
-            cvf_inv = rk.get_epsilon(x_0, x_[row+1], y0_inv, sigma, s_[row], sigma_down, t_i, extra_options)      
+            cvf_inv = rk.get_epsilon(x_0, x_[row+1], y0_inv, sigma, s_[row], sigma_down, unsample_resample_scale, extra_options)      
         else:
             cvf_inv = torch.zeros_like(cvf)
 
@@ -199,7 +199,7 @@ def process_guides_poststep(x, denoised, eps, y0, y0_inv, mask, lgw_mask, lgw_ma
     x_orig = x.clone()
     mean_weight = float(get_extra_options_kv("mean_weight", "0.01", extra_options))
     
-    if guide_mode in {"epsilon_mean_std", "epsilon_mean", "epsilon_std", "epsilon_mean_use_inv"}:
+    if guide_mode in {"epsilon_dynamic_mean_std", "epsilon_dynamic_mean", "epsilon_dynamic_std", "epsilon_dynamic_mean_from_bkg"}:
     
         denoised_masked     = denoised * ((mask==1)*mask)
         denoised_masked_inv = denoised * ((mask==0)*(1-mask))
@@ -211,20 +211,20 @@ def process_guides_poststep(x, denoised, eps, y0, y0_inv, mask, lgw_mask, lgw_ma
             denoised_mask     = denoised[b][c][mask[b][c] == 1]
             denoised_mask_inv = denoised[b][c][mask[b][c] == 0]
             
-            if guide_mode == "epsilon_mean_std":
+            if guide_mode == "epsilon_dynamic_mean_std":
                 d_shift[b][c] = (denoised_masked[b][c] - denoised_mask.mean()) / denoised_mask.std()
                 d_shift[b][c] = (d_shift[b][c] * denoised_mask_inv.std()) + denoised_mask_inv.mean()
                 
-            elif guide_mode == "epsilon_mean":
+            elif guide_mode == "epsilon_dynamic_mean":
                 d_shift[b][c]     = denoised_masked[b][c]     - denoised_mask.mean()     + denoised_mask_inv.mean()
                 d_shift_inv[b][c] = denoised_masked_inv[b][c] - denoised_mask_inv.mean() + denoised_mask.mean()
 
-            elif guide_mode == "epsilon_mean_use_inv":
+            elif guide_mode == "epsilon_dynamic_mean_from_bkg":
                 d_shift[b][c] = denoised_masked[b][c] - denoised_mask.mean() + denoised_mask_inv.mean()
 
-        if guide_mode in {"epsilon_mean_std", "epsilon_mean_use_inv"}:
+        if guide_mode in {"epsilon_dynamic_mean_std", "epsilon_dynamic_mean_from_bkg"}:
             denoised_shifted = denoised   +   mean_weight * lgw_mask * (d_shift - denoised_masked) 
-        elif guide_mode == "epsilon_mean":
+        elif guide_mode == "epsilon_dynamic_mean":
             denoised_shifted = denoised   +   mean_weight * lgw_mask * (d_shift - denoised_masked)   +   mean_weight * lgw_mask_inv * (d_shift_inv - denoised_masked_inv)
             
         x = denoised_shifted + eps
