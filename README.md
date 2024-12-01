@@ -12,6 +12,19 @@ This is an all-in-one sampling node designed for convenience without compromisin
 
 There are several key sections to the parameters which will be explained below.
 
+## SAMPLER SETTINGS:
+![image](https://github.com/user-attachments/assets/8aff7088-9661-4ea5-8715-6f3aee4c6542)
+
+**SAMPLER_NAME:** This is used similarly to the KSampler setting. This selects the explicit sampler type. Note the use of numbers and letters at the end of each sampler name: "2m, 3m, 2s, 3s, 5s, etc." 
+
+Samplers that end in "s" use substeps between each step. One ending with "2s" has two stages per step, therefore costs two model calls per step (Euler costs one - model calls are what determine inference time). "3s" would take three model calls per step, and therefore take three times as long to run as Euler. However, the increase in accuracy can be very dramatic, especially when using noise (SDE sampling). The "res" family of samplers are particularly notable (they are effectively refinements of the dpmpp family, with new, higher order, much more accurate versions implemented here).
+
+Samplers that end in "m" are "multistep" samplers, which instead of issuing new model calls for substeps, recycle previous steps as estimations for these substeps. They're less accurate, but all run at Euler speed (one model call per step). Sometimes this can be an advantage, as multistep samplers tend to converge more linearly toward a target image. This can be useful for img2img transformations, unsampling, or when using latent image guides.
+
+**IMPLICIT_SAMPLER_NAME:** This is very useful with SD3.5 Medium for improving coherence, reducing artifacts and mutations, etc. It may be difficult to use with a model like Flux unless you plan on setting up a queue of generations and walking away. It will use the explicit step type as a predictor for each of the implicit substeps, so if you choose a slow explicit sampler, you will be waiting a long time. Euler, res_2m, deis_2m, etc. will often suffice as a predictor for implicit sampling, though any sampler may be used. Try "res_5s" as your explicit sampler type, and "gauss-legendre_5s", if you wish to demonstrate your commitment to climate change (and image quality).
+
+Setting this to "none" has the same effect as setting implicit_steps = 0.
+
 ## SCHEDULER AND DENOISE SETTINGS:
 ![image](https://github.com/user-attachments/assets/d32e7f4e-a23f-4a26-8b79-15408bc9a376)
 
@@ -19,7 +32,7 @@ These are identical in most ways to the settings by the same name in KSampler.
 
 **SCHEDULER:** There is one extra sigma scheduler offered by default: "beta57" which is the beta schedule with modified parameters (alpha = 0.5, beta = 0.7).
 
-**IMPLICIT_STEPS:** This controls the number of implicit steps to run. Note that it will double, triple, etc. the runtime, so it may be difficult to use with a model like Flux unless you plan on setting up a queue of generations and walking away. It is however very useful with SD3.5 Medium for improving coherence, reducing artifacts and mutations, etc. It will use the explicit step type as a predictor for each of the implicit substeps, so if you choose a slow explicit sampler, you will be waiting a long time. Euler, res_2m, deis_2m, etc. will often suffice as a predictor for implicit sampling, though any sampler may be used.
+**IMPLICIT_STEPS:** This controls the number of implicit steps to run. Note that it will double, triple, etc. the runtime as you increase the stepcount. Typically, gains diminish quickly after 2-3 implicit steps.
 
 **DENOISE:** This is identical to the KSampler setting. Controls the amount of noise removed from the image. Note that with this method, the effect will change significantly depending on your choice of scheduler.
 
