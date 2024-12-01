@@ -21,9 +21,13 @@ These are identical in most ways to the settings by the same name in KSampler.
 
 **IMPLICIT_STEPS:** This controls the number of implicit steps to run. Note that it will double, triple, etc. the runtime, so it may be difficult to use with a model like Flux unless you plan on setting up a queue of generations and walking away. It is however very useful with SD3.5 Medium for improving coherence, reducing artifacts and mutations, etc. It will use the explicit step type as a predictor for each of the implicit substeps, so if you choose a slow explicit sampler, you will be waiting a long time. Euler, res_2m, deis_2m, etc. will often suffice as a predictor for implicit sampling, though any sampler may be used.
 
-**DENOISE:** This is identical the KSampler setting. Controls the amount of noise removed from the image. Note that with this method, the effect will change significantly depending on your choice of scheduler.
+**DENOISE:** This is identical to the KSampler setting. Controls the amount of noise removed from the image. Note that with this method, the effect will change significantly depending on your choice of scheduler.
 
 **DENOISE_ALT:** Instead of splitting the sigma schedule like "denoise", this multiplies them. The results are different, but track more closely from one scheduler to another when using the same value. This can be particularly useful for img2img workflows.
+
+**CFG:** This is identical to the KSampler setting. Typically, you'll set this to 1.0 (to disable it) when using Flux, if you're using Flux guidance. However, the effect is quite nice when using dedistilled models if you use "CLIP Text Encode" without any Flux guidance, and set CFG to 3.0. 
+
+If you've never quite understood CFG, you can think of it this way. Imagine you're walking down the street and see what looks like an enticing music festival in the distance (your positive conditioning). You're on the fence about attending, but then, suddenly, a horde of pickleshark cannibals come storming out of a nearby bar (your negative conditioning). Together, the two team up to drive you toward the music festival. That's CFG.
 
 # CURRENT FLUX WORKFLOWS
 
