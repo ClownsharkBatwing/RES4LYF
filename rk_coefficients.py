@@ -1,8 +1,11 @@
 import torch
 import copy
+import math
 
 from .extra_samplers_helpers import get_deis_coeff_list
 from .phi_functions import *
+
+alpha_crouzeix = (2/(3**0.5)) * math.cos(math.pi / 18)
 
 rk_coeff = {
     "gauss-legendre_5s": (
@@ -132,6 +135,18 @@ rk_coeff = {
             [1/2, 1/2],
         ],
         [0, 1]
+    ),
+
+    "crouzeix_3s": (
+        [
+            [(1+alpha_crouzeix)/2, 0, 0],
+            [-alpha_crouzeix/2, (1+alpha_crouzeix)/2, 0],
+            [1+alpha_crouzeix, -(1+2*alpha_crouzeix), (1+alpha_crouzeix)/2],
+        ],
+        [
+            [1/(6*alpha_crouzeix**2), 1-(1/(3*alpha_crouzeix**2)), 1/(6*alpha_crouzeix**2)],
+        ],
+        [(1+alpha_crouzeix)/2,   1/2,   (1-alpha_crouzeix)/2],
     ),
     
     "crouzeix_2s": (
@@ -535,6 +550,21 @@ def get_rk_methods(rk_type, h, c1=0.0, c2=0.5, c3=1.0, h_prev=None, h_prev2=None
             ]
             ci = [0., 0.5, 0.5, 1., 0.5]
 
+        case "irk_exp_diag_2s":
+            lam = (1 - torch.exp(-c1 * h)) / h
+            a2_1 = ( torch.exp(c2*h) - torch.exp(c1*h))    /    (h * torch.exp(2*c1*h))
+            b1 = (1 + c2*h + torch.exp(h) * (-1 + h - c2 *h))   /   (  (c1-c2) * h**2 * torch.exp(c1*h))
+            b2 = -(1 + c1*h - torch.exp(h) * (1-h+c1*h)) /  (   (c1-c2) * h**2 * torch.exp(c2*h))
+
+            a = [
+                    [lam, 0],
+                    [a2_1, lam],
+            ]
+            b = [
+                    [b1, b2],
+            ]
+            ci = [c1, c2]
+            
     ci = ci[:]
     if rk_type.startswith("lob") == False:
         ci.append(1)

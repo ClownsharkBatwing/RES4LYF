@@ -122,6 +122,7 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
         sigma, sigma_next = sigmas[step], sigmas[step+1]
         t_i = t_is[step] if t_is is not None else None
         eta = eta_var = etas[step] if etas is not None else eta
+        s_noise = s_noises[step] if s_noises is not None else s_noise
         
         if sigma_next == 0 and RK_Method.is_exponential(rk_type):
             rk, irk, rk_type, irk_type, eta, eta_var = prepare_step_to_sigma_zero(rk, irk, rk_type, irk_type, model, x, extra_options, alpha, k, noise_sampler_type)
@@ -153,20 +154,37 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
         x_0 = x_[0].clone()
         
         for ms in range(rk.multistep_stages):
-            if rk_type.startswith("dpmpp") or rk_type.startswith("res") or rk_type.startswith("rk_exp"):
+            if RK_Method.is_exponential(rk_type):
                 eps_ [rk.multistep_stages - ms] = data_ [rk.multistep_stages - ms] - x_0
             else:
                 eps_ [rk.multistep_stages - ms] = (x_0 - data_ [rk.multistep_stages - ms]) / sigma
             
-        lgw_mask, lgw_mask_inv = prepare_weighted_masks(mask, mask_inv, lgw[step], lgw_inv[step], latent_guide, latent_guide_inv, LGW_MASK_RESCALE_MIN)
+        lgw_mask, lgw_mask_inv = prepare_weighted_masks(mask, mask_inv, lgw[step], lgw_inv[step], latent_guide, latent_guide_inv, LGW_MASK_RESCALE_MIN)        
 
-        if implicit_steps == 0:
+        if implicit_steps == 0: 
             for row in range(rk.rows - rk.multistep_stages):
                 x_[row+1] = x_0 + h * rk.a_k_sum(eps_, row)
                 eps_[row], data_[row] = rk(x_0, x_[row+1], s_[row], h, **extra_args)       #MODEL CALL
                 eps_ = process_guides_substep(x_0, x_, eps_, data_, row, y0, y0_inv, lgw[step], lgw_inv[step], lgw_mask, lgw_mask_inv, step, sigma, sigma_next, sigma_down, s_, t_i, rk, rk_type, guide_mode, latent_guide_inv, UNSAMPLE, extra_options)
-            x = x_0 + h * rk.b_k_sum(eps_, 0) 
+            
+            x = x_0 + h * rk.b_k_sum(eps_, 0)
+                    
             denoised = x + (sigma / (sigma - sigma_down)) *  h * rk.b_k_sum(eps_, 0) 
+            eps = x - denoised
+            x = process_guides_poststep(x, denoised, eps, y0, y0_inv, mask, lgw_mask, lgw_mask_inv, guide_mode, latent_guide, latent_guide_inv, UNSAMPLE, extra_options)
+
+        elif any(irk_type.startswith(prefix) for prefix in {"crouzeix", "irk_exp_diag"}):
+            for row in range(irk.rows - irk.multistep_stages):
+                s_tmp = s_irk[row-1] if row >= 1 else sigma
+                eps_[row], data_[row] = irk(x_0, x_[row], s_tmp, h, **extra_args) 
+                for diag_iter in range(implicit_steps+1):
+                    x_[row+1] = x_0 + h * irk.a_k_sum(eps_, row)
+                    eps_[row], data_[row] = irk(x_0, x_[row+1], s_irk[row], h, **extra_args)       #MODEL CALL
+                    eps_ = process_guides_substep(x_0, x_, eps_, data_, row, y0, y0_inv, lgw[step], lgw_inv[step], lgw_mask, lgw_mask_inv, step, sigma, sigma_next, sigma_down, s_irk, t_i, irk, irk_type, guide_mode, latent_guide_inv, UNSAMPLE, extra_options)
+                    
+            x = x_0 + h * irk.b_k_sum(eps_, 0) 
+            
+            denoised = x + (sigma / (sigma - sigma_down)) *  h * irk.b_k_sum(eps_, 0) 
             eps = x - denoised
             x = process_guides_poststep(x, denoised, eps, y0, y0_inv, mask, lgw_mask, lgw_mask_inv, guide_mode, latent_guide, latent_guide_inv, UNSAMPLE, extra_options)
 
@@ -203,6 +221,8 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
                 denoised = x + (sigma / (sigma - sigma_down)) *  h * irk.b_k_sum(eps2_, 0) 
                 eps = x - denoised
                 x = process_guides_poststep(x, denoised, eps, y0, y0_inv, mask, lgw_mask, lgw_mask_inv, guide_mode, latent_guide, latent_guide_inv, UNSAMPLE, extra_options)
+                
+                
                 
         callback({'x': x, 'i': step, 'sigma': sigma, 'sigma_next': sigma_next, 'denoised': data_[0]}) if callback is not None else None
 
