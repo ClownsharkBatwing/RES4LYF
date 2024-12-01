@@ -6,6 +6,24 @@ A particular emphasis of this project has been to facilitate modulating paramete
 
 Much of this work remains experimental and is subject to further changes.
 
+**CURRENT FLUX WORKFLOWS**
+
+**TXT2IMG Workflow:**
+
+![image](https://github.com/ClownsharkBatwing/RES4LYF/blob/main/workflows/txt2img%20flux.png)
+![image](https://github.com/ClownsharkBatwing/RES4LYF/blob/main/workflows/txt2img%20WF%20flux.png)
+
+**INPAINTING Workflow:**
+
+![image](https://github.com/ClownsharkBatwing/RES4LYF/blob/main/workflows/inpainting%20flux.png)
+![image](https://github.com/ClownsharkBatwing/RES4LYF/blob/main/workflows/inpainting%20WF%20flux.png)
+
+****DUAL GUIDES WITH MASKS Workflow:**
+
+![image](https://github.com/ClownsharkBatwing/RES4LYF/blob/main/workflows/txt2img%20dual%20guides%20masked%20flux.png)
+![image](https://github.com/ClownsharkBatwing/RES4LYF/blob/main/workflows/txt2img%20dual%20guides%20masked%20WF%20flux.png)
+
+
 **THE FOLLOWING WORKFLOWS ARE FOR A PREVIOUS VERSION OF THE NODE.** 
 These will still work! They will, however, need slight modification as the layout of the nodes has been changed slightly. To replicate their behavior precisely, add to the new extra_options box in ClownsharKSampler: truncate_conditioning=true
 
