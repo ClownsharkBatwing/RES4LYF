@@ -351,7 +351,7 @@ RK_SAMPLER_NAMES = ["dormand-prince_6s",
                     "deis_4m",
                     "ddim",
                     "euler",
-                    "crouzeix_2s"]
+                    "crouzeix_2s",]
 
 class ClownsharKSampler:
     @classmethod
@@ -682,10 +682,12 @@ class ClownsharKSampler_Beta:
                     "sampler_mode": (['standard', 'unsample', 'resample'],),
                     "sampler_name": (RK_SAMPLER_NAMES, {"default": "res_2m"}), 
                     "implicit_sampler_name": (["use_explicit", 
+                                               "irk_exp_diag_2s",
                                                "gauss-legendre_5s",
                                                "gauss-legendre_4s",
                                                "gauss-legendre_3s", 
                                                "gauss-legendre_2s",
+                                               "crouzeix_3s",
                                                "crouzeix_2s",
                                                "radau_iia_3s",
                                                "radau_iia_2s",
