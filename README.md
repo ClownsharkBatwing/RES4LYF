@@ -7,6 +7,7 @@ A particular emphasis of this project has been to facilitate modulating paramete
 Much of this work remains experimental and is subject to further changes.
 
 # ClownsharKSampler
+![image](https://github.com/user-attachments/assets/430fb77a-7353-4b40-acb6-cbd33392f7fc)
 
 This is an all-in-one sampling node designed for convenience without compromising on control or quality. 
 
