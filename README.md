@@ -23,7 +23,7 @@ This uses my amateur cell phone lora, which is freely available (https://hugging
 ![image](https://github.com/ClownsharkBatwing/RES4LYF/blob/main/workflows/txt2img%20dual%20guides%20masked%20flux.png)
 ![image](https://github.com/ClownsharkBatwing/RES4LYF/blob/main/workflows/txt2img%20dual%20guides%20masked%20WF%20flux.png)
 
-
+# PREVIOUS WORKFLOWS
 **THE FOLLOWING WORKFLOWS ARE FOR A PREVIOUS VERSION OF THE NODE.** 
 These will still work! They will, however, need slight modification as the layout of the nodes has been changed slightly. To replicate their behavior precisely, add to the new extra_options box in ClownsharKSampler: truncate_conditioning=true
 
