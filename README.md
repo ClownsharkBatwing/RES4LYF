@@ -30,6 +30,8 @@ There are several key sections to the parameters which will be explained below.
 ## SAMPLER SETTINGS:
 ![image](https://github.com/user-attachments/assets/8aff7088-9661-4ea5-8715-6f3aee4c6542)
 
+**SAMPLER_MODE:** In virtually all situations, use "standard". However, if you are unsampling, set to "unsample", and if you are resampling (the stage after unsampling), set to "resample". Both of these modes will disable noise addition within ComfyUI, which is essential for these methods to work properly. 
+
 **SAMPLER_NAME:** This is used similarly to the KSampler setting. This selects the explicit sampler type. Note the use of numbers and letters at the end of each sampler name: "2m, 3m, 2s, 3s, 5s, etc." 
 
 Samplers that end in "s" use substeps between each step. One ending with "2s" has two stages per step, therefore costs two model calls per step (Euler costs one - model calls are what determine inference time). "3s" would take three model calls per step, and therefore take three times as long to run as Euler. However, the increase in accuracy can be very dramatic, especially when using noise (SDE sampling). The "res" family of samplers are particularly notable (they are effectively refinements of the dpmpp family, with new, higher order, much more accurate versions implemented here).
