@@ -787,9 +787,9 @@ class ClownsharKSampler_Beta:
                 sde_noise = options.get('sde_noise', sde_noise)
                 sde_noise_steps = options.get('sde_noise_steps', sde_noise_steps)
                 
-
+            rescale_floor = extra_options_flag("rescale_floor", extra_options)
             if guides is not None:
-                guide_mode, rescale_floor, latent_guide_weight, latent_guide_weight_inv, latent_guide_weights, latent_guide_weights_inv, t_is, latent_guide, latent_guide_inv, latent_guide_mask, latent_guide_mask_inv, scheduler_, scheduler_inv_, steps_, steps_inv_, denoise_, denoise_inv_ = guides
+                guide_mode, latent_guide_weight, latent_guide_weight_inv, latent_guide_weights, latent_guide_weights_inv, latent_guide, latent_guide_inv, latent_guide_mask, latent_guide_mask_inv, scheduler_, scheduler_inv_, steps_, steps_inv_, denoise_, denoise_inv_ = guides
                 if scheduler_ != "constant" and latent_guide_weights is None:
                     latent_guide_weights = get_sigmas(model, scheduler_, steps_, denoise_).to(default_dtype)
                 if scheduler_inv_ != "constant" and latent_guide_weights_inv is None:
@@ -1426,21 +1426,38 @@ class ClownsharKSamplerGuides:
 
 
 
+GUIDE_MODE_NAMES = ["unsample", 
+                    "resample", 
+                    "epsilon",
+                    "epsilon_mean",
+                    "epsilon_mean_std", 
+                    "epsilon_match_mean_std"
+                    "epsilon_mean_use_inv", 
+                    "epsilon_data",  
+                    "hard_light", 
+                    "blend", 
+                    "mean_std", 
+                    "mean", 
+                    "std", 
+                    "data",
+]
+
 
 class ClownsharKSamplerGuides_Beta:
     @classmethod
     def INPUT_TYPES(s):
         return {"required":
-                    {"guide_mode": (["hard_light", "mean_std", "mean", "std", "blend", "epsilon", "data", "epsilon_data", "unsample", "resample", "epsilon_mean_std", "epsilon_mean", "epsilon_mean_use_inv", "epsilon_match_mean_std"], {"default": 'epsilon', "tooltip": "The mode used."}),
+                    {"guide_mode": (GUIDE_MODE_NAMES, {"default": 'epsilon', "tooltip": "Recommended: epsilon or mean/mean_std with sampler_mode = standard, and unsample/resample with sampler_mode = unsample/resample. \
+                                                                                         Epsilon_mean, etc. are only used with two latent inputs and a mask. Blend/hard_light/mean/mean_std etc. require low strengths, start with 0.01-0.02."}),
                      "latent_guide_weight": ("FLOAT", {"default": 0.0, "min": -100.0, "max": 100.0, "step":0.01, "round": False}),
                      "latent_guide_weight_inv": ("FLOAT", {"default": 0.0, "min": -100.0, "max": 100.0, "step":0.01, "round": False}),
                     "scheduler": (["constant"] + comfy.samplers.SCHEDULER_NAMES + ["beta57"], {"default": "beta57"},),
                     "scheduler_inv": (["constant"] + comfy.samplers.SCHEDULER_NAMES + ["beta57"], {"default": "beta57"},),
                     "steps": ("INT", {"default": 30, "min": 1, "max": 10000}),
                     "steps_inv": ("INT", {"default": 30, "min": 1, "max": 10000}),
-                    "denoise": ("FLOAT", {"default": 1.0, "min": -100.0, "max": 100.0, "step":0.01, "round": False}),
-                    "denoise_inv": ("FLOAT", {"default": 1.0, "min": -100.0, "max": 100.0, "step":0.01, "round": False}),
-                     "rescale_floor": ("BOOLEAN", {"default": False, "tooltip": "If true, latent_guide_weight(s) primarily affect the masked areas. If false, they control the unmasked areas."}),
+                    "latent_guide_weight_scale": ("FLOAT", {"default": 1.0, "min": -100.0, "max": 100.0, "step":0.01, "round": False, "tooltip": "Another way to control latent_guide_weight. It works like the denoise control for sigmas schedules."}),
+                    "latent_guide_weight_inv_scale": ("FLOAT", {"default": 1.0, "min": -100.0, "max": 100.0, "step":0.01, "round": False, "tooltip": "Another way to control latent_guide_weight_inv. It works like the denoise control for sigmas schedules."}),
+                    #"rescale_floor": ("BOOLEAN", {"default": False, "tooltip": "If true, latent_guide_weight(s) primarily affect the masked areas. If false, they control the unmasked areas."}),
                     },
                     "optional": 
                     {
@@ -1450,7 +1467,6 @@ class ClownsharKSamplerGuides_Beta:
                         "latent_guide_mask_inv": ("MASK", ),
                         "latent_guide_weights": ("SIGMAS", ),
                         "latent_guide_weights_inv": ("SIGMAS", ),
-                        #"t_is": ("SIGMAS",),
                     }  
                }
     RETURN_TYPES = ("GUIDES",)
@@ -1458,16 +1474,15 @@ class ClownsharKSamplerGuides_Beta:
 
     FUNCTION = "get_sampler"
 
-    def get_sampler(self, model=None, scheduler="constant", scheduler_inv="constant", steps=30, steps_inv=30, denoise=1.0, denoise_inv=1.0, latent_guide=None, latent_guide_inv=None, latent_guide_weight=0.0, latent_guide_weight_inv=0.0, 
-                    guide_mode="blend", latent_guide_weights=None, latent_guide_weights_inv=None, latent_guide_mask=None, latent_guide_mask_inv=None, rescale_floor=True, t_is=None,
+    def get_sampler(self, model=None, scheduler="constant", scheduler_inv="constant", steps=30, steps_inv=30, latent_guide_weight_scale=1.0, latent_guide_weight_inv_scale=1.0, latent_guide=None, latent_guide_inv=None, latent_guide_weight=0.0, latent_guide_weight_inv=0.0, 
+                    guide_mode="blend", latent_guide_weights=None, latent_guide_weights_inv=None, latent_guide_mask=None, latent_guide_mask_inv=None,
                     ):
         default_dtype = torch.float64
         
         max_steps = 10000
         
-        #if scheduler != "constant": 
-        #    latent_guide_weights = get_sigmas(model, scheduler, steps, latent_guide_weight).to(default_dtype)
-            
+        denoise, denoise_inv = latent_guide_weight_scale, latent_guide_weight_inv_scale
+        
         if scheduler == "constant": 
             latent_guide_weights = initialize_or_scale(None, latent_guide_weight, steps).to(default_dtype)
             latent_guide_weights = F.pad(latent_guide_weights, (0, max_steps), value=0.0)
@@ -1475,13 +1490,8 @@ class ClownsharKSamplerGuides_Beta:
         if scheduler_inv == "constant": 
             latent_guide_weights_inv = initialize_or_scale(None, latent_guide_weight_inv, steps_inv).to(default_dtype)
             latent_guide_weights_inv = F.pad(latent_guide_weights_inv, (0, max_steps), value=0.0)
-        
-        """if latent_guide is not None:
-            x = latent_guide["samples"].clone().to(default_dtype) 
-        if latent_guide_inv is not None:
-            x = latent_guide_inv["samples"].clone().to(default_dtype) """
-
-        guides = (guide_mode, rescale_floor, latent_guide_weight, latent_guide_weight_inv, latent_guide_weights, latent_guide_weights_inv, t_is, latent_guide, latent_guide_inv, latent_guide_mask, latent_guide_mask_inv,
+            
+        guides = (guide_mode, latent_guide_weight, latent_guide_weight_inv, latent_guide_weights, latent_guide_weights_inv, latent_guide, latent_guide_inv, latent_guide_mask, latent_guide_mask_inv,
                   scheduler, scheduler_inv, steps, steps_inv, denoise, denoise_inv)
         return (guides, )
 
