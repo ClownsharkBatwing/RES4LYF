@@ -12,6 +12,14 @@ This is an all-in-one sampling node designed for convenience without compromisin
 
 There are several key sections to the parameters which will be explained below.
 
+## INPUTS
+![image](https://github.com/user-attachments/assets/e8fe825d-2fb1-4e93-874c-89fb73ba68f7)
+The only two mandatory inputs here are "model" and "latent_image". 
+
+**POSITIVE and NEGATIVE:** If you connect nothing to either of these inputs, the node will automatically generate null conditioning. If you are unsampling, you actually don't need to hook up any conditioning at all (and will set CFG = 1.0). In most cases, merely using the positive conditioning will suffice, unless you really need to use a specific negative prompt.
+
+**SIGMAS:** If a sigmas scheduler node is connected to this input, it will override the scheduler and steps settings chosen within the node.
+
 ## NOISE SETTINGS:
 ![image](https://github.com/user-attachments/assets/caaa41a4-5afa-4c3c-8fb2-003b9a6b2578)
 
