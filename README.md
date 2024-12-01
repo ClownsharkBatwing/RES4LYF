@@ -17,11 +17,13 @@ There are several key sections to the parameters which will be explained below.
 
 These are identical in most ways to the settings by the same name in KSampler. 
 
-**scheduler:** There is one extra sigma scheduler offered by default: "beta57" which is the beta schedule with modified parameters (alpha = 0.5, beta = 0.7).
+**SCHEDULER:** There is one extra sigma scheduler offered by default: "beta57" which is the beta schedule with modified parameters (alpha = 0.5, beta = 0.7).
 
-**implicit_steps:** This controls the number of implicit steps to run. Note that it will double, triple, etc. the runtime, so it may be difficult to use with a model like Flux unless you plan on setting up a queue of generations and walking away. It is however very useful with SD3.5 Medium for improving coherence, reducing artifacts and mutations, etc. It will use the explicit step type as a predictor for each of the implicit substeps, so if you choose a slow explicit sampler, you will be waiting a long time. Euler, res_2m, deis_2m, etc. will often suffice as a predictor for implicit sampling, though any sampler may be used.
+**IMPLICIT_STEPS:** This controls the number of implicit steps to run. Note that it will double, triple, etc. the runtime, so it may be difficult to use with a model like Flux unless you plan on setting up a queue of generations and walking away. It is however very useful with SD3.5 Medium for improving coherence, reducing artifacts and mutations, etc. It will use the explicit step type as a predictor for each of the implicit substeps, so if you choose a slow explicit sampler, you will be waiting a long time. Euler, res_2m, deis_2m, etc. will often suffice as a predictor for implicit sampling, though any sampler may be used.
 
+**DENOISE:** This is identical the KSampler setting. Controls the amount of noise removed from the image. Note that with this method, the effect will change significantly depending on your choice of scheduler.
 
+**DENOISE_ALT:** Instead of splitting the sigma schedule like "denoise", this multiplies them. The results are different, but track more closely from one scheduler to another when using the same value. This can be particularly useful for img2img workflows.
 
 # CURRENT FLUX WORKFLOWS
 
