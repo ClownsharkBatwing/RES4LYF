@@ -12,7 +12,7 @@ This is an all-in-one sampling node designed for convenience without compromisin
 
 There are several key sections to the parameters which will be explained below.
 
-**SCHEDULER AND DENOISE SETTINGS:**
+## SCHEDULER AND DENOISE SETTINGS:
 ![image](https://github.com/user-attachments/assets/d32e7f4e-a23f-4a26-8b79-15408bc9a376)
 
 These are identical in most ways to the settings by the same name in KSampler. 
