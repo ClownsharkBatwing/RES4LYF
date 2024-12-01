@@ -6,7 +6,7 @@ A particular emphasis of this project has been to facilitate modulating paramete
 
 Much of this work remains experimental and is subject to further changes.
 
-**CURRENT FLUX WORKFLOWS**
+# CURRENT FLUX WORKFLOWS
 
 **TXT2IMG Workflow:**
 This uses my amateur cell phone lora, which is freely available (https://huggingface.co/ClownsharkBatwing/CSBW_Style/blob/main/amateurphotos_1_amateurcellphonephoto_recapt2.safetensors). It significantly reduces the plastic, blurred look of Flux Dev.
