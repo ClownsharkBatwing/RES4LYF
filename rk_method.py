@@ -62,7 +62,7 @@ class RK_Method:
         
     @staticmethod
     def is_exponential(rk_type):
-        if rk_type.startswith(("res", "dpmpp", "ddim", "rk_exp")):
+        if rk_type.startswith(("res", "dpmpp", "ddim", "rk_exp")):   #, "irk_exp_diag"
             return True
         else:
             return False
