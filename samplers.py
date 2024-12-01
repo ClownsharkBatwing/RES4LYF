@@ -17,6 +17,8 @@ import torch.nn.functional as F
 import math
 import copy
 
+from .helper import get_extra_options_kv, extra_options_flag
+
 
 def initialize_or_scale(tensor, value, steps):
     if tensor is None:
@@ -320,38 +322,66 @@ class SharkSampler:
             return ( {'samples': out_orig_dtype}, {'samples': out_denoised_orig_dtype}, out, out_denoised,)
             
 
-RK_SAMPLER_NAMES = ["dormand-prince_6s", 
-                    "dormand-prince_6s_alt",
-                    "dormand-prince_7s", 
-                    "dormand-prince_13s", 
-                    "bogacki-shampine_7s",
-                    "rk_exp_5s",
-                    "rk4_4s", 
-                    "rk38_4s",
-                    "ralston_4s", 
-                    "dpmpp_3s",
-                    "heun_3s", 
-                    "houwen-wray_3s",
-                    "kutta_3s", 
-                    "ralston_3s",
-                    "res_3s",
-                    "ssprk3_3s",
-                    "dpmpp_2s",
-                    "dpmpp_sde_2s",
-                    "heun_2s", 
-                    "midpoint_2s",
-                    "ralston_2s",
-                    "res_2s", 
-                    "dpmpp_3m",
+RK_SAMPLER_NAMES = ["res_2m",
                     "res_3m",
-                    "dpmpp_2m",
-                    "res_2m",
+                    "res_2s", 
+                    "res_3s",
+                    "rk_exp_5s",
+
                     "deis_2m",
                     "deis_3m", 
                     "deis_4m",
+                    
+                    "ralston_2s",
+                    "ralston_3s",
+                    "ralston_4s", 
+                    
+                    "dpmpp_2m",
+                    "dpmpp_3m",
+                    "dpmpp_2s",
+                    "dpmpp_sde_2s",
+                    "dpmpp_3s",
+                    
+                    "midpoint_2s",
+                    "heun_2s", 
+                    "heun_3s", 
+                    
+                    "houwen-wray_3s",
+                    "kutta_3s", 
+                    "ssprk3_3s",
+                    
+                    "rk38_4s",
+                    "rk4_4s", 
+
+                    "dormand-prince_6s", 
+                    "dormand-prince_13s", 
+                    "bogacki-shampine_7s",
+
                     "ddim",
                     "euler",
-                    "crouzeix_2s",]
+                    ]
+
+
+IRK_SAMPLER_NAMES = [
+                    "gauss-legendre_2s",
+                    "gauss-legendre_3s", 
+                    "gauss-legendre_4s",
+                    "gauss-legendre_5s",
+                    
+                    "radau_iia_2s",
+                    "radau_iia_3s",
+                    
+                    "lobatto_iiic_2s",
+                    "lobatto_iiic_3s",
+                    
+                    "crouzeix_2s",
+                    "crouzeix_3s",
+                    
+                    "irk_exp_diag_2s",
+
+                    "use_explicit", 
+                    ]
+
 
 class ClownsharKSampler:
     @classmethod
@@ -681,22 +711,9 @@ class ClownsharKSampler_Beta:
                     "noise_seed": ("INT", {"default": 0, "min": -1, "max": 0xffffffffffffffff}),
                     "sampler_mode": (['standard', 'unsample', 'resample'],),
                     "sampler_name": (RK_SAMPLER_NAMES, {"default": "res_2m"}), 
-                    "implicit_sampler_name": (["use_explicit", 
-                                               "irk_exp_diag_2s",
-                                               "gauss-legendre_5s",
-                                               "gauss-legendre_4s",
-                                               "gauss-legendre_3s", 
-                                               "gauss-legendre_2s",
-                                               "crouzeix_3s",
-                                               "crouzeix_2s",
-                                               "radau_iia_3s",
-                                               "radau_iia_2s",
-                                               "lobatto_iiic_3s",
-                                               "lobatto_iiic_2s",
-                                               ], {"default": "gauss-legendre_2s"}), 
+                    "implicit_sampler_name": (IRK_SAMPLER_NAMES, {"default": "gauss-legendre_2s"}), 
                     "scheduler": (comfy.samplers.SCHEDULER_NAMES + ["beta57"], {"default": "beta57"},),
                     "steps": ("INT", {"default": 30, "min": 1, "max": 10000}),
-                    "sde_noise_steps": ("INT", {"default": 1, "min": 1, "max": 10000}),
                     "implicit_steps": ("INT", {"default": 0, "min": 0, "max": 10000}),
                     "denoise": ("FLOAT", {"default": 1.0, "min": -10000, "max": 10000, "step":0.01}),
                     "denoise_alt": ("FLOAT", {"default": 1.0, "min": -10000, "max": 10000, "step":0.01}),
@@ -704,7 +721,6 @@ class ClownsharKSampler_Beta:
                     "shift": ("FLOAT", {"default": 3.0, "min": -1.0, "max": 100.0, "step":0.1, "round": False, }),
                     "base_shift": ("FLOAT", {"default": 0.85, "min": -1.0, "max": 100.0, "step":0.1, "round": False, }),
                     "shift_scaling": (["exponential", "linear"], {"default": "exponential"}),
-                    "truncate_conditioning": (['false', 'true'], {"default": "true"}),
                     "extra_options": ("STRING", {"default": "", "multiline": True}),   
                      },
                 "optional": 
@@ -715,7 +731,6 @@ class ClownsharKSampler_Beta:
                     "latent_image": ("LATENT", ),     
                     "guides": ("GUIDES", ),     
                     "options": ("OPTIONS", ),   
-                    "sde_noise": ("LATENT",),
                     "automation": ("AUTOMATION", ),
                     }
                 }
@@ -727,7 +742,7 @@ class ClownsharKSampler_Beta:
 
     CATEGORY = "sampling/custom_sampling"
     
-    def main(self, model, cfg, truncate_conditioning, sampler_mode, scheduler, steps, denoise=1.0, denoise_alt=1.0,
+    def main(self, model, cfg, sampler_mode, scheduler, steps, denoise=1.0, denoise_alt=1.0,
              noise_type_init="gaussian", noise_type_sde="brownian", noise_mode_sde="hard", latent_image=None, 
              positive=None, negative=None, sigmas=None, latent_noise=None, latent_noise_match=None,
              noise_stdev=1.0, noise_mean=0.0, noise_normalize=True, noise_is_latent=False, 
@@ -735,7 +750,7 @@ class ClownsharKSampler_Beta:
                     exp_mode=False, t_fn_formula=None, sigma_fn_formula=None, implicit_steps=0,
                     latent_guide=None, latent_guide_inv=None, latent_guide_weight=0.0, latent_guide_weight_inv=0.0, guide_mode="blend", latent_guide_weights=None, latent_guide_weights_inv=None, latent_guide_mask=None, latent_guide_mask_inv=None, rescale_floor=True, sigmas_override=None, unsampler_type="linear",
                     shift=3.0, base_shift=0.85, guides=None, options=None, sde_noise=None,sde_noise_steps=1, shift_scaling="exponential",
-                    input_std=1.0, input_normalization="", extra_options="", automation=None, etas=None, s_noises=None,t_is=None, 
+                    extra_options="", automation=None, etas=None, s_noises=None,t_is=None, 
                     ): 
             default_dtype = torch.float64
             max_steps = 10000
@@ -768,6 +783,10 @@ class ClownsharKSampler_Beta:
                 t_fn_formula = options.get('t_fn_formula', t_fn_formula)
                 sigma_fn_formula = options.get('sigma_fn_formula', sigma_fn_formula)
                 unsampler_type = options.get('unsampler_type', unsampler_type)
+                
+                sde_noise = options.get('sde_noise', sde_noise)
+                sde_noise_steps = options.get('sde_noise_steps', sde_noise_steps)
+                
 
             if guides is not None:
                 guide_mode, rescale_floor, latent_guide_weight, latent_guide_weight_inv, latent_guide_weights, latent_guide_weights_inv, t_is, latent_guide, latent_guide_inv, latent_guide_mask, latent_guide_mask_inv, scheduler_, scheduler_inv_, steps_, steps_inv_, denoise_, denoise_inv_ = guides
@@ -860,6 +879,7 @@ class ClownsharKSampler_Beta:
             if latent_noise_match is not None:
                 latent_noise_match["samples"] = latent_noise_match["samples"].clone().to(default_dtype)
 
+            truncate_conditioning = extra_options_flag("truncate_conditionting", extra_options)
             if truncate_conditioning == "true" or truncate_conditioning == "true_and_zero_neg":
                 if positive is not None:
                     positive[0][0] = positive[0][0].clone().to(default_dtype)
@@ -1581,9 +1601,9 @@ class ClownsharKSamplerOptions:
     RETURN_NAMES = ("options",)
     CATEGORY = "sampling/custom_sampling/samplers"
 
-    FUNCTION = "get_sampler"
+    FUNCTION = "main"
 
-    def get_sampler(self, noise_init_stdev, noise_init_mean, c1, c2, c3, eta, s_noise, d_noise, noise_type_init, noise_type_sde, noise_mode_sde, noise_seed,
+    def main(self, noise_init_stdev, noise_init_mean, c1, c2, c3, eta, s_noise, d_noise, noise_type_init, noise_type_sde, noise_mode_sde, noise_seed,
                     alpha_init, k_init, alpha_sde, k_sde, t_fn_formula=None, sigma_fn_formula=None, unsampler_type="linear",
                     alphas=None, etas=None, s_noises=None, d_noises=None, c2s=None, c3s=None,
                     options=None,
@@ -1614,28 +1634,34 @@ class ClownsharKSamplerOptions:
         
         return (options,)
     
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-""""options": ("OPTIONS",),
-"etas": ("SIGMAS", ),
-"s_noises": ("SIGMAS", ),
-"d_noises": ("SIGMAS", ),
-"alphas": ("SIGMAS", ),
-"c2s": ("SIGMAS", ),
-"c3s": ("SIGMAS", ),"""
 
-"""max_steps = 10000
-options['etas'] = initialize_or_scale(etas, eta, max_steps)
-options['s_noises'] = initialize_or_scale(s_noises, s_noise, max_steps)
-options['d_noises'] = initialize_or_scale(s_noises, s_noise, max_steps)
-options['c2s'] = initialize_or_scale(c2s, c2, max_steps)
-options['c3s'] = initialize_or_scale(c3s, c3, max_steps)
-options['alphas'] = initialize_or_scale(alphas, alpha, max_steps)"""
+
+
+class ClownsharKSamplerOptions_SDE_Noise:
+    @classmethod
+    def INPUT_TYPES(s):
+        return {
+            "required": {
+                "sde_noise_steps": ("INT", {"default": 1, "min": 1, "max": 10000}),
+            },
+            "optional": {
+                "sde_noise": ("LATENT",),
+            }
+        }
+    
+    RETURN_TYPES = ("OPTIONS",)
+    RETURN_NAMES = ("options",)
+    CATEGORY = "sampling/custom_sampling/samplers"
+
+    FUNCTION = "main"
+
+    def main(self, sde_noise_steps, sde_noise, options=None,):
+    
+        if options is None:
+            options = {}
+
+        options['sde_noise_steps'] = sde_noise_steps
+        options['sde_noise'] = sde_noise
+        
+        return (options,)
+

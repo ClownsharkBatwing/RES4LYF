@@ -565,10 +565,9 @@ def get_rk_methods(rk_type, h, c1=0.0, c2=0.5, c3=1.0, h_prev=None, h_prev2=None
             ]
             ci = [c1, c2]
             
+
     ci = ci[:]
     if rk_type.startswith("lob") == False:
         ci.append(1)
     return a, b, ci, multistep_stages, FSAL
-
-
 

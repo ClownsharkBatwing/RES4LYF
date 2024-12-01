@@ -43,18 +43,19 @@ def normalize_inputs(x, y0, y0_inv, guide_mode,  extra_options):
 
 
 def prepare_step_to_sigma_zero(rk, irk, rk_type, irk_type, model, x, extra_options, alpha, k, noise_sampler_type):
-    rk_type_final_step = f"ralston_{rk_type[-2:]}" if rk_type[-2:] in {"2s", "3s", "4s"} else "ralston_4s"
-    rk_type_final_step =    f"deis_{rk_type[-2:]}" if rk_type[-2:] in {"2m", "3m", "4m"} else rk_type_final_step
+    rk_type_final_step = f"ralston_{rk_type[-2:]}" if rk_type[-2:] in {"2s", "3s"} else "ralston_3s"
+    rk_type_final_step = f"deis_2m" if rk_type[-2:] in {"2m", "3m", "4m"} else rk_type_final_step
+    rk_type_final_step = f"euler" if rk_type in {"ddim"} else rk_type_final_step
     rk_type_final_step = get_extra_options_kv("rk_type_final_step", rk_type_final_step, extra_options)
     rk = RK_Method.create(model, rk_type_final_step, x.device)
     rk.init_noise_sampler(x, torch.initial_seed() + 1, noise_sampler_type, alpha=alpha, k=k)
 
     if irk_type == rk_type:
         irk_type_final_step = f"gauss-legendre_{rk_type[-2:]}" if rk_type[-2:] in {"2s", "3s", "4s", "5s"} else "gauss-legendre_2s"
-        irk_type_final_step =           f"deis_{rk_type[-2:]}" if rk_type[-2:] in {"2m", "3m", "4m"}       else irk_type_final_step
+        irk_type_final_step = f"deis_2m" if rk_type[-2:] in {"2m", "3m", "4m"} else irk_type_final_step
         irk_type_final_step = get_extra_options_kv("irk_type_final_step", irk_type_final_step, extra_options)
         irk = RK_Method.create(model, irk_type_final_step, x.device)
-        irk.init_noise_sampler(x, torch.initial_seed() + 2, noise_sampler_type, alpha=alpha, k=k)
+        irk.init_noise_sampler(x, torch.initial_seed() + 100, noise_sampler_type, alpha=alpha, k=k)
     else:
         irk_type_final_step = irk_type
 
@@ -92,7 +93,7 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
 
     irk_type = implicit_sampler_name if implicit_sampler_name != "use_explicit" else rk_type
     irk = RK_Method.create(model, irk_type, x.device)
-    irk.init_noise_sampler(x, noise_seed+1, noise_sampler_type, alpha=alpha, k=k)
+    irk.init_noise_sampler(x, noise_seed+100, noise_sampler_type, alpha=alpha, k=k)
 
     sigmas, UNSAMPLE = rk.prepare_sigmas(sigmas)
     mask, LGW_MASK_RESCALE_MIN = prepare_mask(x, mask, LGW_MASK_RESCALE_MIN)
@@ -124,7 +125,7 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
         eta = eta_var = etas[step] if etas is not None else eta
         s_noise = s_noises[step] if s_noises is not None else s_noise
         
-        if sigma_next == 0 and RK_Method.is_exponential(rk_type):
+        if sigma_next == 0:
             rk, irk, rk_type, irk_type, eta, eta_var = prepare_step_to_sigma_zero(rk, irk, rk_type, irk_type, model, x, extra_options, alpha, k, noise_sampler_type)
 
         sigma_up, sigma, sigma_down, alpha_ratio = get_res4lyf_step_with_model(model, sigma, sigma_next, eta, eta_var, noise_mode, rk.h_fn(sigma_next,sigma) )
