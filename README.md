@@ -38,7 +38,7 @@ The only two mandatory inputs here are "model" and "latent_image".
 **CONTROL_AFTER_GENERATE:** Self-explanatory. I recommend setting to "fixed" or "increment" (as you don't have to reload the workflow to regenerate something, you can just decement it by one).
 
 ## SAMPLER SETTINGS:
-![image](https://github.com/user-attachments/assets/4a60d816-7797-4d77-a8f2-9bacd439067c)
+![image](https://github.com/user-attachments/assets/d5ef0bef-7388-44f0-a119-220beec9883d)
 
 **SAMPLER_MODE:** In virtually all situations, use "standard". However, if you are unsampling, set to "unsample", and if you are resampling (the stage after unsampling), set to "resample". Both of these modes will disable noise addition within ComfyUI, which is essential for these methods to work properly. 
 
@@ -53,7 +53,7 @@ Samplers that end in "m" are "multistep" samplers, which instead of issuing new 
 Setting this to "none" has the same effect as setting implicit_steps = 0.
 
 ## SCHEDULER AND DENOISE SETTINGS:
-![image](https://github.com/user-attachments/assets/d32e7f4e-a23f-4a26-8b79-15408bc9a376)
+![image](https://github.com/user-attachments/assets/b89d3956-1734-4368-8bb4-429b9989cd4d)
 
 These are identical in most ways to the settings by the same name in KSampler. 
 
