@@ -9,7 +9,7 @@ Much of this work remains experimental and is subject to further changes.
 **CURRENT FLUX WORKFLOWS**
 
 **TXT2IMG Workflow:**
-
+This uses my amateur cell phone lora, which is freely available (https://huggingface.co/ClownsharkBatwing/CSBW_Style/blob/main/amateurphotos_1_amateurcellphonephoto_recapt2.safetensors). It significantly reduces the plastic, blurred look of Flux Dev.
 ![image](https://github.com/ClownsharkBatwing/RES4LYF/blob/main/workflows/txt2img%20flux.png)
 ![image](https://github.com/ClownsharkBatwing/RES4LYF/blob/main/workflows/txt2img%20WF%20flux.png)
 
