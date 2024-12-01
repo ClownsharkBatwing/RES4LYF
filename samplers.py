@@ -363,7 +363,7 @@ RK_SAMPLER_NAMES = ["res_2m",
                     ]
 
 
-IRK_SAMPLER_NAMES = [
+IRK_SAMPLER_NAMES = ["none",
                     "gauss-legendre_2s",
                     "gauss-legendre_3s", 
                     "gauss-legendre_4s",
@@ -407,7 +407,8 @@ class StyleModelApplyAdvanced:
         return (c, )
 
 
-NOISE_MODE_NAMES = ["hard_sq",
+NOISE_MODE_NAMES = ["none",
+                    "hard_sq",
                     "hard",
                     "lorentzian", 
                     "soft", 
@@ -425,7 +426,7 @@ class ClownsharKSampler:
                     "noise_type_init": (NOISE_GENERATOR_NAMES_SIMPLE, {"default": "gaussian"}),
                     "noise_type_sde": (NOISE_GENERATOR_NAMES_SIMPLE, {"default": "gaussian"}),
                     #"noise_mode_sde": (["lorentzian", "hard", "hard_var", "hard_sq", "soft", "softer", "exp"], {"default": 'hard', "tooltip": "How noise scales with the sigma schedule. Hard is the most aggressive, the others start strong and drop rapidly."}),
-                    "noise_mode_sde": (NOISE_MODE_NAMES, {"default": 'linear', "tooltip": "How noise scales with the sigma schedule. Hard is the most aggressive, the others start strong and drop rapidly."}),
+                    "noise_mode_sde": (NOISE_MODE_NAMES, {"default": 'hard', "tooltip": "How noise scales with the sigma schedule. Hard is the most aggressive, the others start strong and drop rapidly."}),
                     #"noise_mode_sde": (["linear", "linear_mild", "linear_strong", "decay", "rapid_decay", "dynamic", "dynamic_mild"], {"default": 'linear', "tooltip": "How noise scales with the sigma schedule. Hard is the most aggressive, the others start strong and drop rapidly."}),
                     "eta": ("FLOAT", {"default": 0.5, "min": -100.0, "max": 100.0, "step":0.01, "round": False, "tooltip": "Calculated noise amount to be added, then removed, after each step."}),
                     "noise_seed": ("INT", {"default": 0, "min": -1, "max": 0xffffffffffffffff}),
@@ -437,8 +438,8 @@ class ClownsharKSampler:
                     "implicit_steps": ("INT", {"default": 0, "min": 0, "max": 10000}),
                     "denoise": ("FLOAT", {"default": 1.0, "min": -10000, "max": 10000, "step":0.01}),
                     "denoise_alt": ("FLOAT", {"default": 1.0, "min": -10000, "max": 10000, "step":0.01}),
-                    "cfg": ("FLOAT", {"default": 5.0, "min": -100.0, "max": 100.0, "step":0.1, "round": False, }),
-                    "shift": ("FLOAT", {"default": 3.0, "min": -1.0, "max": 100.0, "step":0.1, "round": False, }),
+                    "cfg": ("FLOAT", {"default": 3.0, "min": -100.0, "max": 100.0, "step":0.1, "round": False, }),
+                    "shift": ("FLOAT", {"default": 1.35, "min": -1.0, "max": 100.0, "step":0.1, "round": False, }),
                     "base_shift": ("FLOAT", {"default": 0.85, "min": -1.0, "max": 100.0, "step":0.1, "round": False, }),
                     "shift_scaling": (["exponential", "linear"], {"default": "exponential"}),
                     "extra_options": ("STRING", {"default": "", "multiline": True}),   
@@ -473,23 +474,13 @@ class ClownsharKSampler:
                     extra_options="", automation=None, etas=None, s_noises=None,unsample_resample_scales=None, 
                     EXPORT_SAMPLER=False,
                     ): 
-        
-            match noise_mode_sde:
-                case "linear":
-                    noise_mode_sde = "hard"
-                case "linear_mild":
-                    noise_mode_sde = "hard_var"
-                case "linear_strong":
-                    noise_mode_sde = "hard_sq"
-                case "decay":
-                    noise_mode_sde = "soft"
-                case "rapid_decay":
-                    noise_mode_sde = "softer"
-                case "dynamic":
-                    noise_mode_sde = "lorentzian"
-                case "dynamic_mild":
-                    noise_mode_sde = "exp"
-                    
+            if implicit_sampler_name == "none":
+                implicit_steps = 0 
+                implicit_sampler_name = "gauss-legendre_2s"
+
+            if noise_mode_sde == "none":
+                eta, eta_var = 0.0, 0.0
+                noise_mode_sde = "hard"
         
             default_dtype = torch.float64
             max_steps = 10000
@@ -1066,8 +1057,8 @@ class ClownsharKSamplerGuides:
         return {"required":
                     {"guide_mode": (GUIDE_MODE_NAMES, {"default": 'epsilon', "tooltip": "Recommended: epsilon or mean/mean_std with sampler_mode = standard, and unsample/resample with sampler_mode = unsample/resample. Epsilon_dynamic_mean, etc. are only used with two latent inputs and a mask. Blend/hard_light/mean/mean_std etc. require low strengths, start with 0.01-0.02."}),
                      "guide_weight": ("FLOAT", {"default": 0.75, "min": -100.0, "max": 100.0, "step":0.01, "round": False}),
-                     "guide_weight_scale": ("FLOAT", {"default": 1.0, "min": -100.0, "max": 100.0, "step":0.01, "round": False, "tooltip": "Another way to control guide_weight strength. It works like the denoise control for sigmas schedules. Can be used together with guide_weight."}),
                      "guide_weight_bkg": ("FLOAT", {"default": 0.75, "min": -100.0, "max": 100.0, "step":0.01, "round": False}),
+                     "guide_weight_scale": ("FLOAT", {"default": 1.0, "min": -100.0, "max": 100.0, "step":0.01, "round": False, "tooltip": "Another way to control guide_weight strength. It works like the denoise control for sigmas schedules. Can be used together with guide_weight."}),
                      "guide_weight_bkg_scale": ("FLOAT", {"default": 1.0, "min": -100.0, "max": 100.0, "step":0.01, "round": False, "tooltip": "Another way to control guide_weight strength. It works like the denoise control for sigmas schedules. Can be used together with guide_weight_bkg."}),
                     "guide_weight_scheduler": (["constant"] + comfy.samplers.SCHEDULER_NAMES + ["beta57"], {"default": "beta57"},),
                     "guide_weight_scheduler_bkg": (["constant"] + comfy.samplers.SCHEDULER_NAMES + ["beta57"], {"default": "beta57"},),

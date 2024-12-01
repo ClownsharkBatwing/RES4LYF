@@ -29,6 +29,7 @@ try:
 except ImportError:
     pass
 
+res4lyf.init()
 
 discard_penultimate_sigma_samplers = set((
 ))
