@@ -4,7 +4,7 @@ import comfy.model_patcher
 
 def get_alpha_ratio_from_sigma_up(sigma_up, sigma_next, eta, sigma_max=1.0):
     if sigma_up >= sigma_next and sigma_next > 0:
-      print("Warning: maximum VPSDE noise level exceeded! Falling back to hard noise mode.")
+      print("Maxximum VPSDE noise level exceeded: falling back to hard noise mode.")
       if eta >= 1:
         sigma_up = sigma_next * 0.9999 #avoid sqrt(neg_num) later 
       else:
