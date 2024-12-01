@@ -199,7 +199,7 @@ def process_guides_poststep(x, denoised, eps, y0, y0_inv, mask, lgw_mask, lgw_ma
     x_orig = x.clone()
     mean_weight = float(get_extra_options_kv("mean_weight", "0.01", extra_options))
     
-    if guide_mode in {"epsilon_mean_std", "epsilon_mean", "epsilon_std", "epsilon_mean_from_bkg"}:
+    if guide_mode in {"epsilon_dynamic_mean_std", "epsilon_dynamic_mean", "epsilon_dynamic_std", "epsilon_dynamic_mean_from_bkg"}:
     
         denoised_masked     = denoised * ((mask==1)*mask)
         denoised_masked_inv = denoised * ((mask==0)*(1-mask))
@@ -211,20 +211,20 @@ def process_guides_poststep(x, denoised, eps, y0, y0_inv, mask, lgw_mask, lgw_ma
             denoised_mask     = denoised[b][c][mask[b][c] == 1]
             denoised_mask_inv = denoised[b][c][mask[b][c] == 0]
             
-            if guide_mode == "epsilon_mean_std":
+            if guide_mode == "epsilon_dynamic_mean_std":
                 d_shift[b][c] = (denoised_masked[b][c] - denoised_mask.mean()) / denoised_mask.std()
                 d_shift[b][c] = (d_shift[b][c] * denoised_mask_inv.std()) + denoised_mask_inv.mean()
                 
-            elif guide_mode == "epsilon_mean":
+            elif guide_mode == "epsilon_dynamic_mean":
                 d_shift[b][c]     = denoised_masked[b][c]     - denoised_mask.mean()     + denoised_mask_inv.mean()
                 d_shift_inv[b][c] = denoised_masked_inv[b][c] - denoised_mask_inv.mean() + denoised_mask.mean()
 
-            elif guide_mode == "epsilon_mean_from_bkg":
+            elif guide_mode == "epsilon_dynamic_mean_from_bkg":
                 d_shift[b][c] = denoised_masked[b][c] - denoised_mask.mean() + denoised_mask_inv.mean()
 
-        if guide_mode in {"epsilon_mean_std", "epsilon_mean_from_bkg"}:
+        if guide_mode in {"epsilon_dynamic_mean_std", "epsilon_dynamic_mean_from_bkg"}:
             denoised_shifted = denoised   +   mean_weight * lgw_mask * (d_shift - denoised_masked) 
-        elif guide_mode == "epsilon_mean":
+        elif guide_mode == "epsilon_dynamic_mean":
             denoised_shifted = denoised   +   mean_weight * lgw_mask * (d_shift - denoised_masked)   +   mean_weight * lgw_mask_inv * (d_shift_inv - denoised_masked_inv)
             
         x = denoised_shifted + eps

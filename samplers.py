@@ -416,7 +416,8 @@ class ClownsharKSampler:
                     {"model": ("MODEL",),
                     "noise_type_init": (NOISE_GENERATOR_NAMES_SIMPLE, {"default": "gaussian"}),
                     "noise_type_sde": (NOISE_GENERATOR_NAMES_SIMPLE, {"default": "gaussian"}),
-                    "noise_mode_sde": (["lorentzian", "hard", "hard_var", "hard_sq", "soft", "softer", "exp"], {"default": 'hard', "tooltip": "How noise scales with the sigma schedule. Hard is the most aggressive, the others start strong and drop rapidly."}),
+                    #"noise_mode_sde": (["lorentzian", "hard", "hard_var", "hard_sq", "soft", "softer", "exp"], {"default": 'hard', "tooltip": "How noise scales with the sigma schedule. Hard is the most aggressive, the others start strong and drop rapidly."}),
+                    "noise_mode_sde": (["linear", "linear_mild", "linear_strong", "decay", "rapid_decay", "dynamic", "dynamic_mild"], {"default": 'linear', "tooltip": "How noise scales with the sigma schedule. Hard is the most aggressive, the others start strong and drop rapidly."}),
                     "eta": ("FLOAT", {"default": 0.5, "min": -100.0, "max": 100.0, "step":0.01, "round": False, "tooltip": "Calculated noise amount to be added, then removed, after each step."}),
                     "noise_seed": ("INT", {"default": 0, "min": -1, "max": 0xffffffffffffffff}),
                     "sampler_mode": (['standard', 'unsample', 'resample'],),
@@ -463,6 +464,24 @@ class ClownsharKSampler:
                     extra_options="", automation=None, etas=None, s_noises=None,unsample_resample_scales=None, 
                     EXPORT_SAMPLER=False,
                     ): 
+        
+            match noise_mode_sde:
+                case "linear":
+                    noise_mode_sde = "hard"
+                case "linear_mild":
+                    noise_mode_sde = "hard_var"
+                case "linear_strong":
+                    noise_mode_sde = "hard_sq"
+                case "decay":
+                    noise_mode_sde = "soft"
+                case "rapid_decay":
+                    noise_mode_sde = "softer"
+                case "dynamic":
+                    noise_mode_sde = "lorentzian"
+                case "dynamic_mild":
+                    noise_mode_sde = "exp"
+                    
+        
             default_dtype = torch.float64
             max_steps = 10000
 
@@ -1019,9 +1038,9 @@ class SD35L_TimestepPatcher:
 GUIDE_MODE_NAMES = ["unsample", 
                     "resample", 
                     "epsilon",
-                    "epsilon_mean",
-                    "epsilon_mean_std", 
-                    "epsilon_mean_from_bkg", 
+                    "epsilon_dynamic_mean",
+                    "epsilon_dynamic_mean_std", 
+                    "epsilon_dynamic_mean_from_bkg", 
                     "epsilon_guide_mean_std_from_bkg",
                     "hard_light", 
                     "blend", 
@@ -1036,11 +1055,11 @@ class ClownsharKSamplerGuides:
     @classmethod
     def INPUT_TYPES(s):
         return {"required":
-                    {"guide_mode": (GUIDE_MODE_NAMES, {"default": 'epsilon', "tooltip": "Recommended: epsilon or mean/mean_std with sampler_mode = standard, and unsample/resample with sampler_mode = unsample/resample. Epsilon_mean, etc. are only used with two latent inputs and a mask. Blend/hard_light/mean/mean_std etc. require low strengths, start with 0.01-0.02."}),
+                    {"guide_mode": (GUIDE_MODE_NAMES, {"default": 'epsilon', "tooltip": "Recommended: epsilon or mean/mean_std with sampler_mode = standard, and unsample/resample with sampler_mode = unsample/resample. Epsilon_dynamic_mean, etc. are only used with two latent inputs and a mask. Blend/hard_light/mean/mean_std etc. require low strengths, start with 0.01-0.02."}),
                      "guide_weight": ("FLOAT", {"default": 0.75, "min": -100.0, "max": 100.0, "step":0.01, "round": False}),
-                     "guide_weight_alt": ("FLOAT", {"default": 1.0, "min": -100.0, "max": 100.0, "step":0.01, "round": False, "tooltip": "Another way to control guide_weight strength. It works like the denoise control for sigmas schedules. Can be used together with guide_weight."}),
+                     "guide_weight_scale": ("FLOAT", {"default": 1.0, "min": -100.0, "max": 100.0, "step":0.01, "round": False, "tooltip": "Another way to control guide_weight strength. It works like the denoise control for sigmas schedules. Can be used together with guide_weight."}),
                      "guide_weight_bkg": ("FLOAT", {"default": 0.75, "min": -100.0, "max": 100.0, "step":0.01, "round": False}),
-                     "guide_weight_bkg_alt": ("FLOAT", {"default": 1.0, "min": -100.0, "max": 100.0, "step":0.01, "round": False, "tooltip": "Another way to control guide_weight strength. It works like the denoise control for sigmas schedules. Can be used together with guide_weight_bkg."}),
+                     "guide_weight_bkg_scale": ("FLOAT", {"default": 1.0, "min": -100.0, "max": 100.0, "step":0.01, "round": False, "tooltip": "Another way to control guide_weight strength. It works like the denoise control for sigmas schedules. Can be used together with guide_weight_bkg."}),
                     "guide_weight_scheduler": (["constant"] + comfy.samplers.SCHEDULER_NAMES + ["beta57"], {"default": "beta57"},),
                     "guide_weight_scheduler_bkg": (["constant"] + comfy.samplers.SCHEDULER_NAMES + ["beta57"], {"default": "beta57"},),
                     "guide_end_step": ("INT", {"default": 15, "min": 1, "max": 10000}),
@@ -1062,14 +1081,14 @@ class ClownsharKSamplerGuides:
 
     FUNCTION = "main"
 
-    def main(self, guide_weight_scheduler="constant", guide_weight_scheduler_bkg="constant", guide_end_step=30, guide_bkg_end_step=30, guide_weight_alt=1.0, guide_weight_bkg_alt=1.0, guide=None, guide_bkg=None, guide_weight=0.0, guide_weight_bkg=0.0, 
+    def main(self, guide_weight_scheduler="constant", guide_weight_scheduler_bkg="constant", guide_end_step=30, guide_bkg_end_step=30, guide_weight_scale=1.0, guide_weight_bkg_scale=1.0, guide=None, guide_bkg=None, guide_weight=0.0, guide_weight_bkg=0.0, 
                     guide_mode="blend", guide_weights=None, guide_weights_bkg=None, guide_mask=None, guide_mask_bkg=None,
                     ):
         default_dtype = torch.float64
         
         max_steps = 10000
         
-        denoise, denoise_bkg = guide_weight_alt, guide_weight_bkg_alt
+        denoise, denoise_bkg = guide_weight_scale, guide_weight_bkg_scale
         
         if guide_mode.startswith("epsilon") and guide_bkg == None:
             print("Warning: need two latent inputs for guide_mode=",guide_mode," to work. Falling back to epsilon.")
