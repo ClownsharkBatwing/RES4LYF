@@ -29,6 +29,17 @@ These are identical in most ways to the settings by the same name in KSampler.
 
 If you've never quite understood CFG, you can think of it this way. Imagine you're walking down the street and see what looks like an enticing music festival in the distance (your positive conditioning). You're on the fence about attending, but then, suddenly, a horde of pickleshark cannibals come storming out of a nearby bar (your negative conditioning). Together, the two team up to drive you toward the music festival. That's CFG.
 
+## SHIFT SETTINGS:
+![image](https://github.com/user-attachments/assets/e9a2e2d7-be5c-4b63-8647-275409600b56)
+
+These are present for convenience as they are used in virtually every workflow.
+
+**SHIFT:** This is the same as "shift" for the ModelSampling nodes for SD3.5, AuraFlow, etc., and is equivalent to "max_shift" for Flux. Set this value to -1 to disable setting shift (or max_shift) within the node.
+
+**BASE_SHIFT:** This is only used by Flux. Set this value to -1 to disable setting base_shift within the node.
+
+**SHIFT_SCALING:** This changes how the shift values are calculated. "exponential" is the default used by Flux, whereas "linear" is the default used by SD3.5 and AuraFlow. In most cases, "exponential" leads to better results, though "linear" has some niche uses. 
+
 # CURRENT FLUX WORKFLOWS
 
 ## TXT2IMG Workflow:
