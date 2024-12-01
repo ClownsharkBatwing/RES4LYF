@@ -6,6 +6,9 @@ A particular emphasis of this project has been to facilitate modulating paramete
 
 Much of this work remains experimental and is subject to further changes.
 
+**THE FOLLOWING WORKFLOWS ARE FOR A PREVIOUS VERSION OF THE NODE.** 
+These will still work! They will, however, need slight modification as the layout of the nodes has been changed slightly. To replicate their behavior precisely, add to the new extra_options box in ClownsharKSampler: truncate_conditioning=true
+
 ![image](https://github.com/user-attachments/assets/a55ec484-1339-45a2-bcc4-76934f4648d4)
 
 **TXT2IMG Workflow:** 
