@@ -517,7 +517,7 @@ def get_rk_methods(rk_type, h, c1=0.0, c2=0.5, c3=1.0, h_prev=None, h_prev2=None
             ]
             ci = [0, c2, c3]
             
-        case "rk_exp_5s":
+        case "res_5s":
                 
             c1, c2, c3, c4, c5 = 0., 0.5, 0.5, 1., 0.5
             

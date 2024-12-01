@@ -2,6 +2,7 @@ import torch
 import math
 from typing import Optional
 
+# Remainder solution
 def _phi(j, neg_h):
   remainder = torch.zeros_like(neg_h)
   
@@ -14,7 +15,7 @@ def _phi(j, neg_h):
 def calculate_gamma(c2, c3):
     return (3*(c3**3) - 2*c3) / (c2*(2 - 3*c2))
 
-
+# Exact analytic solution originally calculated by Clybius. https://github.com/Clybius/ComfyUI-Extra-Samplers/tree/main
 def _gamma(n: int,) -> int:
   """
   https://en.wikipedia.org/wiki/Gamma_function

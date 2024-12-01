@@ -278,10 +278,10 @@ class RK_Method_Exponential(RK_Method):
     def data_to_vel(self, x, data, sigma):
         return data - x
     
-    def get_epsilon(self, x_0, x, y, sigma, sigma_cur, sigma_down=None, t_i=None, extra_options=None):
+    def get_epsilon(self, x_0, x, y, sigma, sigma_cur, sigma_down=None, unsample_resample_scale=None, extra_options=None):
         if sigma_down > sigma:
             sigma_cur = self.sigma_max - sigma_cur.clone()
-        sigma_cur = t_i if t_i is not None else sigma_cur
+        sigma_cur = unsample_resample_scale if unsample_resample_scale is not None else sigma_cur
 
         if extra_options is not None:
             if re.search(r"\bpower_unsample\b", extra_options) or re.search(r"\bpower_resample\b", extra_options):
@@ -345,10 +345,10 @@ class RK_Method_Linear(RK_Method):
     def data_to_vel(self, x, data, sigma):
         return (data - x) / sigma
     
-    def get_epsilon(self, x_0, x, y, sigma, sigma_cur, sigma_down=None, t_i=None, extra_options=None):
+    def get_epsilon(self, x_0, x, y, sigma, sigma_cur, sigma_down=None, unsample_resample_scale=None, extra_options=None):
         if sigma_down > sigma:
             sigma_cur = self.sigma_max - sigma_cur.clone()
-        sigma_cur = t_i if t_i is not None else sigma_cur
+        sigma_cur = unsample_resample_scale if unsample_resample_scale is not None else sigma_cur
 
         if sigma_down is None:
             return (x - y) / sigma_cur

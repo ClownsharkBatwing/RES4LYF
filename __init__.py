@@ -1,5 +1,6 @@
-from . import sampler_rk
-from . import sampler_rk_beta
+from . import legacy_sampler_rk
+from . import legacy_samplers
+from . import rk_sampler
 from . import samplers
 from . import samplers_tiled
 from . import loaders
@@ -28,29 +29,6 @@ try:
 except ImportError:
     pass
 
-"""def get_ext_dir(subpath=None, mkdir=False):
-    dir = os.path.dirname(__file__)
-    if subpath is not None:
-        dir = os.path.join(dir, subpath)
-
-    dir = os.path.abspath(dir)
-
-    if mkdir and not os.path.exists(dir):
-        os.makedirs(dir)
-    return dir
-
-def get_web_ext_dir():
-    return os.path.abspath(os.path.join(os.path.dirname(__file__), "../../../web/extensions/res4lyf"))
-
-def install_js():
-    src_dir = get_ext_dir("web/js")
-    dst_dir = get_web_ext_dir()
-    if not os.path.exists(dst_dir):
-        os.makedirs(dst_dir)
-    if not os.path.islink(dst_dir):
-        shutil.copytree(src_dir, dst_dir, dirs_exist_ok=True)
-
-install_js()"""
 
 discard_penultimate_sigma_samplers = set((
 ))
@@ -74,23 +52,36 @@ def add_samplers():
         importlib.reload(k_diffusion_sampling)
 
 extra_samplers = {
-    "rk":  sampler_rk.sample_rk,
-    "rk_beta":  sampler_rk_beta.sample_rk_beta,
-    #"rk_testnew":  test_samplers.sample_rk_testnew,
+    "res_2m": rk_sampler.sample_res_2m,
+    "res_2s": rk_sampler.sample_res_2s,
+    "res_3s": rk_sampler.sample_res_3s,
+    "res_5s": rk_sampler.sample_res_5s,
+    "res_2m_sde": rk_sampler.sample_res_2m_sde,
+    "res_2s_sde": rk_sampler.sample_res_2s_sde,
+    "res_3s_sde": rk_sampler.sample_res_3s_sde,
+    "res_5s_sde": rk_sampler.sample_res_5s_sde,
+    "deis_2m": rk_sampler.sample_deis_2m,
+    "deis_3m": rk_sampler.sample_deis_3m,
+    "deis_4m": rk_sampler.sample_deis_4m,
+    "deis_2m_sde": rk_sampler.sample_deis_2m_sde,
+    "deis_3m_sde": rk_sampler.sample_deis_3m_sde,
+    "deis_4m_sde": rk_sampler.sample_deis_4m_sde,
+    "rk": rk_sampler.sample_rk,
 }
-
-
+extra_samplers = dict(reversed(extra_samplers.items()))
 
 NODE_CLASS_MAPPINGS = {
-    "ClownSampler": samplers.SamplerRK,
+    "Legacy_ClownSampler": legacy_samplers.Legacy_SamplerRK,
+    "Legacy_ClownsharKSampler": legacy_samplers.Legacy_ClownsharKSampler,
+    "Legacy_ClownsharKSamplerGuides": legacy_samplers.Legacy_ClownsharKSamplerGuides,
+    
+    
     "ClownsharKSampler": samplers.ClownsharKSampler,
-    "ClownsharKSampler_Beta": samplers.ClownsharKSampler_Beta,
-    "SamplerRK": samplers.SamplerRK,
-    
+    #"ClownSampler": samplers.ClownSampler,
     "ClownsharKSamplerGuides": samplers.ClownsharKSamplerGuides,
-    "ClownsharKSamplerGuides_Beta": samplers.ClownsharKSamplerGuides_Beta,
-    "ClownsharKSamplerOptions": samplers.ClownsharKSamplerOptions,
     
+    "ClownsharKSamplerOptions": samplers.ClownsharKSamplerOptions,
+    "ClownsharKSamplerOptions_SDE_Noise": samplers.ClownsharKSamplerOptions_SDE_Noise,
     "ClownsharKSamplerAutomation": samplers.ClownsharKSamplerAutomation,
 
 
