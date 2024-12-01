@@ -13,13 +13,14 @@ This is an all-in-one sampling node designed for convenience without compromisin
 There are several key sections to the parameters which will be explained below.
 
 **SCHEDULER AND DENOISE SETTINGS:**
+![image](https://github.com/user-attachments/assets/d32e7f4e-a23f-4a26-8b79-15408bc9a376)
+
 These are identical in most ways to the settings by the same name in KSampler. 
 
 **scheduler:** There is one extra sigma scheduler offered by default: "beta57" which is the beta schedule with modified parameters (alpha = 0.5, beta = 0.7).
 
 **implicit_steps:** This controls the number of implicit steps to run. Note that it will double, triple, etc. the runtime, so it may be difficult to use with a model like Flux unless you plan on setting up a queue of generations and walking away. It is however very useful with SD3.5 Medium for improving coherence, reducing artifacts and mutations, etc. It will use the explicit step type as a predictor for each of the implicit substeps, so if you choose a slow explicit sampler, you will be waiting a long time. Euler, res_2m, deis_2m, etc. will often suffice as a predictor for implicit sampling, though any sampler may be used.
 
-![image](https://github.com/user-attachments/assets/d32e7f4e-a23f-4a26-8b79-15408bc9a376)
 
 
 # CURRENT FLUX WORKFLOWS
