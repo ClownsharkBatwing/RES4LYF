@@ -139,17 +139,17 @@ irk_exp_diag_2s (features an exponential integrator)
 
 # CURRENT FLUX WORKFLOWS
 
-## TXT2IMG Workflow:
+## TXT2IMG:
 This uses my amateur cell phone lora, which is freely available (https://huggingface.co/ClownsharkBatwing/CSBW_Style/blob/main/amateurphotos_1_amateurcellphonephoto_recapt2.safetensors). It significantly reduces the plastic, blurred look of Flux Dev.
 ![image](https://github.com/ClownsharkBatwing/RES4LYF/blob/main/workflows/txt2img%20flux.png)
 ![image](https://github.com/ClownsharkBatwing/RES4LYF/blob/main/workflows/txt2img%20WF%20flux.png)
 
-## INPAINTING Workflow:
+## INPAINTING:
 
 ![image](https://github.com/ClownsharkBatwing/RES4LYF/blob/main/workflows/inpainting%20flux.png)
 ![image](https://github.com/ClownsharkBatwing/RES4LYF/blob/main/workflows/inpainting%20WF%20flux.png)
 
-## DUAL GUIDES WITH MASKS Workflow:
+## UNSAMPLING (Dual guides with masks):
 
 ![image](https://github.com/ClownsharkBatwing/RES4LYF/blob/main/workflows/txt2img%20dual%20guides%20masked%20flux.png)
 ![image](https://github.com/ClownsharkBatwing/RES4LYF/blob/main/workflows/txt2img%20dual%20guides%20masked%20WF%20flux.png)
