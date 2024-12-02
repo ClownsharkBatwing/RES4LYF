@@ -84,6 +84,7 @@ These are present for convenience as they are used in virtually every workflow.
 
 ## Explicit samplers
 Bolded samplers are added as options to the sampler dropdown in ComyfUI (an ODE and SDE version for each).
+
 **res_2m**
 
 **res_2/3/5s**
