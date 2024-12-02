@@ -153,31 +153,57 @@ class SD35Loader:
     # adapted from https://github.com/comfyanonymous/ComfyUI/blob/master/nodes.py
     @classmethod
     def INPUT_TYPES(s):
-        return {"required": { 
-                        "ckpt_name": (folder_paths.get_filename_list("checkpoints"), ),
-                        "clip_name1": (folder_paths.get_filename_list("text_encoders"), ),
-                        "clip_name2": (folder_paths.get_filename_list("text_encoders"), ),
-                        "clip_name3": (folder_paths.get_filename_list("text_encoders"), ),
-                         }
-               }
+        return {"required":{ 
+            "model_name": ([f for f in folder_paths.get_filename_list("checkpoints") + folder_paths.get_filename_list("diffusion_models") if f.endswith((".ckpt", ".safetensors", ".sft", ".pt"))], ),
+            "weight_dtype": (["default", "fp8_e4m3fn", "fp8_e4m3fn_fast", "fp8_e5m2"],),
+            "clip_name1": (folder_paths.get_filename_list("text_encoders"), ),
+            "clip_name2_opt": ([".none"] + folder_paths.get_filename_list("text_encoders"), ),
+            "clip_name3_opt": ([".none"] + folder_paths.get_filename_list("text_encoders"), ),
+            "vae_opt": ([".use_ckpt_vae"] + folder_paths.get_filename_list("vae"), ),
+            }
+            }   
     RETURN_TYPES = ("MODEL","CLIP","VAE",)
     RETURN_NAMES = ("model","clip","vae",)
     FUNCTION = "main"
 
     CATEGORY = "advanced/loaders"
 
-    def main(self, ckpt_name, clip_name1, clip_name2, clip_name3):
+    def main(self, model_name, weight_dtype, clip_name1, clip_name2_opt, clip_name3_opt, vae_opt):
+        model_options = {}
+        if weight_dtype == "fp8_e4m3fn":
+            model_options["dtype"] = torch.float8_e4m3fn
+        elif weight_dtype == "fp8_e4m3fn_fast":
+            model_options["dtype"] = torch.float8_e4m3fn
+            model_options["fp8_optimizations"] = True
+        elif weight_dtype == "fp8_e5m2":
+            model_options["dtype"] = torch.float8_e5m2
 
-        ckpt_path = folder_paths.get_full_path_or_raise("checkpoints", ckpt_name)
-        out = comfy.sd.load_checkpoint_guess_config(ckpt_path, output_vae=True, output_clip=True, embedding_directory=folder_paths.get_folder_paths("embeddings"))
+        # Load model/checkpoint
+        # Look in checkpoints first, then diffusion_models
+        try:
+            ckpt_path = folder_paths.get_full_path_or_raise("checkpoints", model_name)
+        except FileNotFoundError:
+            ckpt_path = folder_paths.get_full_path_or_raise("diffusion_models", model_name)
+
+        output_vae = True if vae_opt == ".use_ckpt_vae" else False
+        out = comfy.sd.load_checkpoint_guess_config(ckpt_path, output_vae=output_vae, output_clip=False, embedding_directory=folder_paths.get_folder_paths("embeddings"), model_options=model_options)
         
-        clip_path1 = folder_paths.get_full_path_or_raise("text_encoders", clip_name1)
-        clip_path2 = folder_paths.get_full_path_or_raise("text_encoders", clip_name2)
-        clip_path3 = folder_paths.get_full_path_or_raise("text_encoders", clip_name3)
-        clip = comfy.sd.load_clip(ckpt_paths=[clip_path1, clip_path2, clip_path3], embedding_directory=folder_paths.get_folder_paths("embeddings"))
+        # Load CLIP
+        clip_paths = [folder_paths.get_full_path_or_raise("text_encoders", clip_name1)]
+        for clip_name in [clip_name2_opt, clip_name3_opt]:
+            if clip_name != ".none":
+                clip_paths.append(folder_paths.get_full_path_or_raise("text_encoders", clip_name))
         
-        #return out[:3]
+        clip = comfy.sd.load_clip(ckpt_paths=clip_paths, embedding_directory=folder_paths.get_folder_paths("embeddings"), clip_type=comfy.sd.CLIPType.SD3)
+
+        # Load VAE
+        if vae_opt != ".use_ckpt_vae":
+            vae_path = folder_paths.get_full_path_or_raise("vae", vae_opt)
+            sd = comfy.utils.load_torch_file(vae_path)
+            vae = comfy.sd.VAE(sd=sd)
+        else:
+            vae = out[2]
+        
         model = out[0]
-        vae = out[2]
         return (model, clip, vae,)
 
