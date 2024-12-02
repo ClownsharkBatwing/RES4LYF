@@ -86,43 +86,40 @@ These are present for convenience as they are used in virtually every workflow.
 Bolded samplers are added as options to the sampler dropdown in ComyfUI (an ODE and SDE version for each).
 **res_2m**
 
-**res_3m**
+**res_2/3/5s**
 
-**res_2s**
+**deis_2/3/4m**
 
-**res_3s**
-**res_5s**
+ralston_2/3/4s
 
-**deis_2m
-deis_3m
-deis_4m**
+dpmpp_2/3m
 
-ralston_2s
-ralston_3s
-ralston_4s
-
-dpmpp_2m
-dpmpp_3m
-dpmpp_2s
 dpmpp_sde_2s
-dpmpp_3s
+
+dpmpp_2/3s
 
 midpoint_2s
-heun_2s
-heun_3s
+
+heun_2/3s
 
 houwen-wray_3s
+
 kutta_3s
+
 ssprk3_3s
 
 rk38_4s
+
 rk4_4s
 
 dormand-prince_6s
+
 dormand-prince_13s
+
 bogacki-shampine_7s
 
 ddim
+
 euler
 
 # CURRENT FLUX WORKFLOWS
