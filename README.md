@@ -22,7 +22,7 @@ The only two mandatory inputs here are "model" and "latent_image".
 
 **SIGMAS:** If a sigmas scheduler node is connected to this input, it will override the scheduler and steps settings chosen within the node.
 
-## NOISE SETTINGS:
+## NOISE SETTINGS
 ![image](https://github.com/user-attachments/assets/caaa41a4-5afa-4c3c-8fb2-003b9a6b2578)
 
 **NOISE_TYPE_INIT:** This sets the initial noise type applied to the latent image. 
@@ -37,7 +37,7 @@ The only two mandatory inputs here are "model" and "latent_image".
 
 **CONTROL_AFTER_GENERATE:** Self-explanatory. I recommend setting to "fixed" or "increment" (as you don't have to reload the workflow to regenerate something, you can just decement it by one).
 
-## SAMPLER SETTINGS:
+## SAMPLER SETTINGS
 ![image](https://github.com/user-attachments/assets/d5ef0bef-7388-44f0-a119-220beec9883d)
 
 **SAMPLER_MODE:** In virtually all situations, use "standard". However, if you are unsampling, set to "unsample", and if you are resampling (the stage after unsampling), set to "resample". Both of these modes will disable noise addition within ComfyUI, which is essential for these methods to work properly. 
@@ -52,7 +52,7 @@ Samplers that end in "m" are "multistep" samplers, which instead of issuing new 
 
 Setting this to "none" has the same effect as setting implicit_steps = 0.
 
-## SCHEDULER AND DENOISE SETTINGS:
+## SCHEDULER AND DENOISE SETTINGS
 ![image](https://github.com/user-attachments/assets/b89d3956-1734-4368-8bb4-429b9989cd4d)
 
 These are identical in most ways to the settings by the same name in KSampler. 
@@ -69,7 +69,7 @@ These are identical in most ways to the settings by the same name in KSampler.
 
 If you've never quite understood CFG, you can think of it this way. Imagine you're walking down the street and see what looks like an enticing music festival in the distance (your positive conditioning). You're on the fence about attending, but then, suddenly, a horde of pickleshark cannibals come storming out of a nearby bar (your negative conditioning). Together, the two team up to drive you toward the music festival. That's CFG.
 
-## SHIFT SETTINGS:
+## SHIFT SETTINGS
 ![image](https://github.com/user-attachments/assets/e9a2e2d7-be5c-4b63-8647-275409600b56)
 
 These are present for convenience as they are used in virtually every workflow.
