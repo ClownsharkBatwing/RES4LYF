@@ -347,7 +347,7 @@ class Legacy_ClownsharKSampler:
                 cfgpp = -cfg
                 cfg = 1.0
                 
-            sampler = comfy.samplers.ksampler(legacy_sample_rk, {"eta": eta, "eta_var": eta_var, "s_noise": s_noise, "d_noise": d_noise, "alpha": alpha_sde, "k": k_sde, "c1": c1, "c2": c2, "c3": c3, "cfgpp": cfgpp, "MULTISTEP": multistep, 
+            sampler = comfy.samplers.ksampler("legacy_rk", {"eta": eta, "eta_var": eta_var, "s_noise": s_noise, "d_noise": d_noise, "alpha": alpha_sde, "k": k_sde, "c1": c1, "c2": c2, "c3": c3, "cfgpp": cfgpp, "MULTISTEP": multistep, 
                                                      "noise_sampler_type": noise_type_sde, "noise_mode": noise_mode_sde, "noise_seed": noise_seed_sde, "rk_type": sampler_name, "implicit_sampler_name": implicit_sampler_name,
                                                             "exp_mode": exp_mode, "t_fn_formula": t_fn_formula, "sigma_fn_formula": sigma_fn_formula, "implicit_steps": implicit_steps,
                                                             "latent_guide": latent_guide, "latent_guide_inv": latent_guide_inv, "mask": latent_guide_mask, 
@@ -423,7 +423,7 @@ class Legacy_SamplerRK:
                     exp_mode=False, t_fn_formula=None, sigma_fn_formula=None, implicit_steps=0,
                     latent_guide=None, latent_guide_inv=None, latent_guide_weight=0.0, guide_mode="hard_light", latent_guide_weights=None, latent_guide_mask=None, rescale_floor=True, sigmas_override=None,
                     ):
-        sampler_name = legacy_sample_rk
+        sampler_name = "legacy_rk"
 
         if latent_guide is None and latent_guide_inv is None:
             latent_guide_weight = 0.0
