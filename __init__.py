@@ -101,6 +101,8 @@ NODE_CLASS_MAPPINGS = {
     
     "TextBox1": samplers.TextBox1,
     "TextBox3": samplers.TextBox3,
+    
+    "CLIPTextEncodeFluxUnguided": samplers.CLIPTextEncodeFluxUnguided,
 
     "ConditioningAverageScheduler": conditioning.ConditioningAverageScheduler,
     "ConditioningMultiply": conditioning.ConditioningMultiply,
