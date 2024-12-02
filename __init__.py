@@ -68,6 +68,7 @@ extra_samplers = {
     "deis_3m_sde": rk_sampler.sample_deis_3m_sde,
     "deis_4m_sde": rk_sampler.sample_deis_4m_sde,
     "rk": rk_sampler.sample_rk,
+    "rk_legacy": legacy_sampler_rk.sample_rk_legacy,
 }
 extra_samplers = dict(reversed(extra_samplers.items()))
 
