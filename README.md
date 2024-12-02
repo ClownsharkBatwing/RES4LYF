@@ -126,12 +126,15 @@ euler
 ## Fully Implicit Samplers
 
 gauss-legendre_2/3/4/5s
+
 radau_iia_2/3s
+
 lobatto_iiic_2/3s
 
 ## Diagonally Implicit Samplers
 
 crouzeix_2/3s
+
 irk_exp_diag_2s (features an exponential integrator)
 
 # CURRENT FLUX WORKFLOWS
