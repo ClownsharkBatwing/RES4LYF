@@ -34,6 +34,41 @@ def move_to_same_device(*tensors):
     device = tensors[0].device
     return tuple(tensor.to(device) for tensor in tensors)
 
+
+# List of sampler compatibility with custom noise sampler type
+KADVANCED_SAMPLER_NAMES = [
+    "dpmpp_sde_advanced",
+    "euler_ancestral_advanced",
+    "deis_sde",
+]
+
+class KSamplerSelectAdvanced:
+    @classmethod
+    def INPUT_TYPES(s):
+        return {
+            "required":
+            {
+                "sampler_name": (comfy.samplers.SAMPLER_NAMES, ),
+                "eta": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 100.0, "step":0.01, "round": False}),
+                "s_noise": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 100.0, "step":0.01, "round": False}),
+                "noise_type": (NOISE_GENERATOR_NAMES, ),
+                "alpha": ("FLOAT", {"default": 0.0, "min": -10000.0, "max": 10000.0, "step":0.1, "round": False}),
+                "k": ("FLOAT", {"default": 1.0, "min": -10000.0, "max": 10000.0, "step":2.0, "round": False}),
+            },
+        }
+    RETURN_TYPES = ("SAMPLER",)
+    CATEGORY = "sampling/custom_sampling/samplers"
+
+    FUNCTION = "get_sampler"
+
+    def get_sampler(self, eta, s_noise, alpha, k, noise_type, sampler_name, alphas=None):
+        # If the sampler is in the list of samplers that are compatible with custom noise sampler type, then we pass in the appropriate arguments
+        if (sampler_name in KADVANCED_SAMPLER_NAMES):
+            sampler = comfy.samplers.ksampler(sampler_name, {"eta": eta, "s_noise": s_noise, "alpha": alpha, "k": k, "noise_sampler_type": noise_type})
+        else:
+            sampler = comfy.samplers.ksampler(sampler_name)
+        return (sampler, )
+
 class AdvancedNoise:
     @classmethod
     def INPUT_TYPES(s):
