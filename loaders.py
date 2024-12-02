@@ -178,8 +178,7 @@ class SD35Loader:
         elif weight_dtype == "fp8_e5m2":
             model_options["dtype"] = torch.float8_e5m2
 
-        # Load model/checkpoint
-        # Look in checkpoints first, then diffusion_models
+        # Self-documenting code
         try:
             ckpt_path = folder_paths.get_full_path_or_raise("checkpoints", model_name)
         except FileNotFoundError:
@@ -188,7 +187,6 @@ class SD35Loader:
         output_vae = True if vae_opt == ".use_ckpt_vae" else False
         out = comfy.sd.load_checkpoint_guess_config(ckpt_path, output_vae=output_vae, output_clip=False, embedding_directory=folder_paths.get_folder_paths("embeddings"), model_options=model_options)
         
-        # Load CLIP
         clip_paths = [folder_paths.get_full_path_or_raise("text_encoders", clip_name1)]
         for clip_name in [clip_name2_opt, clip_name3_opt]:
             if clip_name != ".none":
@@ -196,7 +194,6 @@ class SD35Loader:
         
         clip = comfy.sd.load_clip(ckpt_paths=clip_paths, embedding_directory=folder_paths.get_folder_paths("embeddings"), clip_type=comfy.sd.CLIPType.SD3)
 
-        # Load VAE
         if vae_opt != ".use_ckpt_vae":
             vae_path = folder_paths.get_full_path_or_raise("vae", vae_opt)
             sd = comfy.utils.load_torch_file(vae_path)
@@ -206,4 +203,3 @@ class SD35Loader:
         
         model = out[0]
         return (model, clip, vae,)
-
