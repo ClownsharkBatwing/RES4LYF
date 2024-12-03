@@ -100,7 +100,9 @@ def prepare_step_to_sigma_zero(rk, irk, rk_type, irk_type, model, x, extra_optio
     rk = RK_Method.create(model, rk_type_final_step, x.device)
     rk.init_noise_sampler(x, torch.initial_seed() + 1, noise_sampler_type, alpha=alpha, k=k)
 
-    if irk_type == rk_type:
+    #if irk_type == rk_type or :
+    #if irk.c[-1] >= 1:
+    if any(element >= 1 for element in irk.c):
         irk_type_final_step = f"gauss-legendre_{rk_type[-2:]}" if rk_type[-2:] in {"2s", "3s", "4s", "5s"} else "gauss-legendre_2s"
         irk_type_final_step = f"deis_2m" if rk_type[-2:] in {"2m", "3m", "4m"} else irk_type_final_step
         irk_type_final_step = get_extra_options_kv("irk_type_final_step", irk_type_final_step, extra_options)
@@ -218,32 +220,49 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
             
         lgw_mask, lgw_mask_inv = prepare_weighted_masks(mask, mask_inv, lgw[step], lgw_inv[step], latent_guide, latent_guide_inv, LGW_MASK_RESCALE_MIN)        
 
+
+
         if implicit_steps == 0: 
             for row in range(rk.rows - rk.multistep_stages):
-                x_[row+1] = x_0 + h * rk.a_k_sum(eps_, row)
+                x_[row+1] = x_0 + h * rk.a_k_sum(eps_, row)     
+                
+                if guide_mode == "data":
+                    denoised = x_0 + ((sigma / (sigma - sigma_down)) *  h) * rk.a_k_sum(eps_, row) 
+                    eps = x_[row+1] - denoised
+                    if latent_guide_inv is None:
+                        denoised_shifted = denoised   +   lgw_mask * (y0 - denoised) 
+                    else:
+                        denoised_shifted = denoised   +   lgw_mask * (y0 - denoised)   +   lgw_mask_inv * (y0_inv - denoised)
+                    x_[row+1] = denoised_shifted + eps
+                           
                 eps_[row], data_[row] = rk(x_0, x_[row+1], s_[row], h, **extra_args)       #MODEL CALL
-                eps_ = process_guides_substep(x_0, x_, eps_, data_, row, y0, y0_inv, lgw[step], lgw_inv[step], lgw_mask, lgw_mask_inv, step, sigma, sigma_next, sigma_down, s_, unsample_resample_scale, rk, rk_type, guide_mode, latent_guide_inv, UNSAMPLE, extra_options)
+                eps_, x_ = process_guides_substep(x_0, x_, eps_, data_, row, y0, y0_inv, lgw[step], lgw_inv[step], lgw_mask, lgw_mask_inv, step, sigma, sigma_next, sigma_down, s_, unsample_resample_scale, rk, rk_type, guide_mode, latent_guide_inv, UNSAMPLE, extra_options)
             
             x = x_0 + h * rk.b_k_sum(eps_, 0)
                     
-            denoised = x + (sigma / (sigma - sigma_down)) *  h * rk.b_k_sum(eps_, 0) 
+            #denoised = x + (sigma_down / (sigma - sigma_down)) *  h * rk.b_k_sum(eps_, 0) 
+            denoised = x_0 + ((sigma / (sigma - sigma_down)) *  h) * rk.b_k_sum(eps_, 0) 
             eps = x - denoised
             x = process_guides_poststep(x, denoised, eps, y0, y0_inv, mask, lgw_mask, lgw_mask_inv, guide_mode, latent_guide, latent_guide_inv, UNSAMPLE, extra_options)
 
-        elif any(irk_type.startswith(prefix) for prefix in {"crouzeix", "irk_exp_diag"}):
+
+
+        elif any(irk_type.startswith(prefix) for prefix in {"crouzeix", "irk_exp_diag", "pareschi_russo", "kraaijevanger_spijker", "qin_zhang"}):
             for row in range(irk.rows - irk.multistep_stages):
                 s_tmp = s_irk[row-1] if row >= 1 else sigma
-                eps_[row], data_[row] = irk(x_0, x_[row], s_tmp, h, **extra_args) 
+                eps_[row], data_[row] = irk(x_0, x_[row], s_tmp, h_irk, **extra_args) 
                 for diag_iter in range(implicit_steps+1):
-                    x_[row+1] = x_0 + h * irk.a_k_sum(eps_, row)
-                    eps_[row], data_[row] = irk(x_0, x_[row+1], s_irk[row], h, **extra_args)       #MODEL CALL
-                    eps_ = process_guides_substep(x_0, x_, eps_, data_, row, y0, y0_inv, lgw[step], lgw_inv[step], lgw_mask, lgw_mask_inv, step, sigma, sigma_next, sigma_down, s_irk, unsample_resample_scale, irk, irk_type, guide_mode, latent_guide_inv, UNSAMPLE, extra_options)
+                    x_[row+1] = x_0 + h_irk * irk.a_k_sum(eps_, row)
+                    eps_[row], data_[row] = irk(x_0, x_[row+1], s_irk[row], h_irk, **extra_args)       #MODEL CALL
+                    eps_, x_ = process_guides_substep(x_0, x_, eps_, data_, row, y0, y0_inv, lgw[step], lgw_inv[step], lgw_mask, lgw_mask_inv, step, sigma, sigma_next, sigma_down, s_irk, unsample_resample_scale, irk, irk_type, guide_mode, latent_guide_inv, UNSAMPLE, extra_options)
                     
-            x = x_0 + h * irk.b_k_sum(eps_, 0) 
+            x = x_0 + h_irk * irk.b_k_sum(eps_, 0) 
             
-            denoised = x + (sigma / (sigma - sigma_down)) *  h * irk.b_k_sum(eps_, 0) 
+            denoised = x_0 + (sigma / (sigma - sigma_down)) *  h_irk * irk.b_k_sum(eps_, 0) 
             eps = x - denoised
             x = process_guides_poststep(x, denoised, eps, y0, y0_inv, mask, lgw_mask, lgw_mask_inv, guide_mode, latent_guide, latent_guide_inv, UNSAMPLE, extra_options)
+
+
 
         else:
             s2 = s_irk_rk[:]
@@ -261,7 +280,7 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
                 eps_ [0], data_ [0] = torch.zeros_like(eps_ [0]), torch.zeros_like(data_[0])
                 
             if torch.allclose(s_all[-1], sigma_down, atol=1e-8):
-                eps_down, data_down = rk(x_0, x_mid, sigma_down, h, **extra_args)
+                eps_down, data_down = rk(x_0, x_mid, sigma_down, h_irk, **extra_args)
                 eps_list.append(eps_down)
                 
             s_all = [s for s in s_all if s in s_irk_rk]
@@ -272,10 +291,10 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
             for implicit_iter in range(implicit_steps):
                 for row in range(irk.rows):
                     x_[row+1] = x_0 + h_irk * irk.a_k_sum(eps2_, row)
-                    eps2_[row], data_[row] = irk(x_0, x_[row+1], s_irk[row], h, **extra_args)
-                    eps2_ = process_guides_substep(x_0, x_, eps2_, data_, row, y0, y0_inv, lgw[step], lgw_inv[step], lgw_mask, lgw_mask_inv, step, sigma, sigma_next, sigma_down, s_irk, unsample_resample_scale, irk, irk_type, guide_mode, latent_guide_inv, UNSAMPLE, extra_options)
+                    eps2_[row], data_[row] = irk(x_0, x_[row+1], s_irk[row], h_irk, **extra_args)
+                    eps2_, x_ = process_guides_substep(x_0, x_, eps2_, data_, row, y0, y0_inv, lgw[step], lgw_inv[step], lgw_mask, lgw_mask_inv, step, sigma, sigma_next, sigma_down, s_irk, unsample_resample_scale, irk, irk_type, guide_mode, latent_guide_inv, UNSAMPLE, extra_options)
                 x = x_0 + h_irk * irk.b_k_sum(eps2_, 0)
-                denoised = x + (sigma / (sigma - sigma_down)) *  h * irk.b_k_sum(eps2_, 0) 
+                denoised = x_0 + (sigma / (sigma - sigma_down)) *  h_irk * irk.b_k_sum(eps2_, 0) 
                 eps = x - denoised
                 x = process_guides_poststep(x, denoised, eps, y0, y0_inv, mask, lgw_mask, lgw_mask_inv, guide_mode, latent_guide, latent_guide_inv, UNSAMPLE, extra_options)
                 
@@ -304,6 +323,8 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
 def get_explicit_rk_step(rk, rk_type, x, y0, y0_inv, lgw, lgw_inv, mask, lgw_mask, lgw_mask_inv, step, sigma, sigma_next, eta, eta_var, s_noise, noise_mode, c2, c3, stepcount, sigmas, x_, eps_, data_, unsample_resample_scale, guide_mode, latent_guide, latent_guide_inv, UNSAMPLE, extra_options, **extra_args):
     extra_args = {} if extra_args is None else extra_args
     s_in = x.new_ones([x.shape[0]])
+    
+    eta = get_extra_options_kv("implicit_substep_eta", eta, extra_options)
 
     sigma_up, sigma, sigma_down, alpha_ratio = get_res4lyf_step_with_model(rk.model, sigma, sigma_next, eta, eta_var, noise_mode, rk.h_fn(sigma_next,sigma) )
     h = rk.h_fn(sigma_down, sigma)
@@ -326,7 +347,7 @@ def get_explicit_rk_step(rk, rk_type, x, y0, y0_inv, lgw, lgw_inv, mask, lgw_mas
         x_[row+1] = x_0 + h * rk.a_k_sum(eps_, row)
         eps_[row], data_[row] = rk(x_0, x_[row+1], s_[row], h, **extra_args)
         
-        eps_ = process_guides_substep(x_0, x_, eps_, data_, row, y0, y0_inv, lgw, lgw_inv, lgw_mask, lgw_mask_inv, step, sigma, sigma_next, sigma_down, s_, unsample_resample_scale, rk, rk_type, guide_mode, latent_guide_inv, UNSAMPLE, extra_options)
+        eps_, x_ = process_guides_substep(x_0, x_, eps_, data_, row, y0, y0_inv, lgw, lgw_inv, lgw_mask, lgw_mask_inv, step, sigma, sigma_next, sigma_down, s_, unsample_resample_scale, rk, rk_type, guide_mode, latent_guide_inv, UNSAMPLE, extra_options)
         
     x = x_0 + h * rk.b_k_sum(eps_, 0)
     
