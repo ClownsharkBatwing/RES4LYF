@@ -329,6 +329,7 @@ RK_SAMPLER_NAMES = ["res_2m",
                     "res_3s",
                     "res_5s",
 
+
                     "deis_2m",
                     "deis_3m", 
                     "deis_4m",
@@ -369,17 +370,32 @@ IRK_SAMPLER_NAMES = ["none",
                     "gauss-legendre_4s",
                     "gauss-legendre_5s",
                     
+                    "radau_ia_2s",
+                    "radau_ia_3s",
                     "radau_iia_2s",
                     "radau_iia_3s",
                     
+                    "lobatto_iiia_2s",
+                    "lobatto_iiia_3s",
+                    "lobatto_iiib_2s",
+                    "lobatto_iiib_3s",
                     "lobatto_iiic_2s",
                     "lobatto_iiic_3s",
+                    "lobatto_iiic_star_2s",
+                    "lobatto_iiic_star_3s",
+                    "lobatto_iiid_2s",
+                    "lobatto_iiid_3s",
+                    
+                    "kraaijevanger_spijker_2s",
+                    "qin_zhang_2s",
+                    
+                    "pareschi_russo_2s",
+                    "pareschi_russo_alt_2s",
                     
                     "crouzeix_2s",
                     "crouzeix_3s",
                     
                     "irk_exp_diag_2s",
-
                     "use_explicit", 
                     ]
 

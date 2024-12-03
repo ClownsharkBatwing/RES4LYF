@@ -190,7 +190,7 @@ def process_guides_substep(x_0, x_, eps_, data_, row, y0, y0_inv, lgw, lgw_inv, 
         eps_[row] = normalize_latent(eps_[row], eps_orig[row], std=False, channelwise=False)
     if extra_options_flag("substep_eps_std", extra_options):
         eps_[row] = normalize_latent(eps_[row], eps_orig[row], mean=False, channelwise=False)
-    return eps_
+    return eps_, x_
 
 
 
@@ -243,7 +243,10 @@ def process_guides_poststep(x, denoised, eps, y0, y0_inv, mask, lgw_mask, lgw_ma
             d_shift, d_shift_inv = normalize_latent([denoised, denoised], [y0, y0_inv], mean=False)
 
         if guide_mode in ("hard_light", "blend", "mean_std", "mean", "std"):
-            denoised_shifted = denoised   +   lgw_mask * (d_shift - denoised)   +   lgw_mask_inv * (d_shift_inv - denoised)
+            if latent_guide_inv is None:
+                denoised_shifted = denoised   +   lgw_mask * (d_shift - denoised)
+            else:
+                denoised_shifted = denoised   +   lgw_mask * (d_shift - denoised)   +   lgw_mask_inv * (d_shift_inv - denoised)
         
             if extra_options_flag("poststep_denoised_ch_mean_std", extra_options):
                 denoised_shifted = normalize_latent(denoised_shifted, denoised)
