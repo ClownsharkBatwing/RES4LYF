@@ -3,6 +3,9 @@ import { app } from "../../scripts/app.js";
 let ENABLE_WIDGET_HIDING = false; 
 let RESDEBUG = false;
 let ENABLE_UPDATED_TIMESTEP_SCALING = true;
+let DEFAULT_WIDGET_STATES = {};
+
+const widgetToggleStates = new Map(); // Stores user-set toggle states for widgets
 
 function resDebugLog(...args) {
     if (RESDEBUG) {
@@ -16,10 +19,11 @@ const nodeConfigs = {};
 
 /**
  * Dynamic Widget Management Configuration
- * This system manages two types of widget visibility:
+ * This system manages three types of widget visibility:
  * 1. Widget Dependencies: Widgets that show/hide based on other widgets' values
  * 2. Optional Input Dependencies: Widgets that show/hide based on input connections
- */
+ * 3. User-Set Hidden Widgets: Widgets that the user can choose to hide or show, with default states configurable in settings
+**/
 
 // 1. Widget Dependencies - These are common configurations that are shared across multiple nodes
 const commonDependentWidgets = {
@@ -30,7 +34,7 @@ const commonDependentWidgets = {
             widgetsToShow: ["alpha", "k"]                        // Widgets to show/hide
         },
         {
-            inputWidgetNames: ["rk_type"],
+            inputWidgetNames: ["rk_type", "sampler_name"],
             independentValues: [
                 "dormand-prince_6s", 
                 "dormand-prince_7s", 
@@ -61,8 +65,11 @@ const commonDependentWidgets = {
 // Names of nodes that will use commonDependentWidgets config
 const nodesWithCommonConfig = [
     "AdvancedNoise",
+    "Legacy_ClownSampler",
     "ClownSampler",
     "ClownSamplerLegacy",
+    "ClownSharKSampler",
+    "ClownsharKSampler",
     "KSamplerSelectAdvanced",
     "LatentNoised",
     "SamplerCorona",
@@ -101,6 +108,22 @@ nodeConfigs["ClownSampler"] = createNodeConfig("ClownSampler", {
     }
 });
 
+nodeConfigs["Legacy_ClownSampler"] = createNodeConfig("Legacy_ClownSampler", {
+    optionalInputWidgets: {
+        // Define groups of widgets that should be shown/hidden based on input connections
+        groups: [
+            {
+                inputs: ["latent_guide", "latent_guide_inv"],   // Show widgets if ANY of these inputs are connected
+                widgets: ["latent_guide_weight", "guide_mode"]  // Widgets to show/hide
+            },
+            {
+                inputs: ["latent_guide_mask"],
+                widgets: ["rescale_floor"]
+            }
+        ]
+    }
+});
+
 nodeConfigs["SamplerRK"] = createNodeConfig("SamplerRK", {
     optionalInputWidgets: {
         groups: [
@@ -111,6 +134,20 @@ nodeConfigs["SamplerRK"] = createNodeConfig("SamplerRK", {
         ]
     }
 });
+
+// 3. User-Set Hidden Widgets - These are widgets that the user can choose to hide or show
+const TOGGLEABLE_WIDGETS = {
+    "extra_options": {
+        settingId: "RES4LYF.defaultHideExtraOptions",
+        settingName: "RES4LYF: Hide extra_options widget by default",
+        defaultValue: false
+    },
+    "truncate_conditioning": {
+        settingId: "RES4LYF.defaultHideTruncateConditioning",
+        settingName: "RES4LYF: Hide truncate_conditioning widget by default",
+        defaultValue: false
+    },
+};
 
 // Function to create node configurations
 function createNodeConfig(nodeName, uniqueConfig = {}) {
@@ -203,8 +240,21 @@ function createGenericHandler(node, dependentWidgetsConfig) {
  */
 function setupDynamicWidgets(node, dependentWidgetsConfig) {
     resDebugLog("Setting up dynamic widgets for", node.comfyClass);
-    const onNodeChange = createGenericHandler(node, dependentWidgetsConfig);
 
+    // Initialize toggleable widgets with their default states
+    Object.keys(TOGGLEABLE_WIDGETS).forEach(widgetName => {
+        const widget = node.widgets.find(w => w.name === widgetName);
+        if (widget) {
+            const stateKey = `${node.id}_${widgetName}`;
+            // Only apply default if user hasn't set a specific state
+            if (!widgetToggleStates.has(stateKey)) {
+                const defaultHidden = DEFAULT_WIDGET_STATES[widgetName];
+                toggleWidget(node, widget, !defaultHidden);
+            }
+        }
+    });
+
+    const onNodeChange = createGenericHandler(node, dependentWidgetsConfig);
     onNodeChange();
 
     if (dependentWidgetsConfig?.groups) {
@@ -257,16 +307,36 @@ function setupDynamicWidgets(node, dependentWidgetsConfig) {
         onNodeChange();
     };
 
-    // Add refresh option to context menu
+    // Add options to context menu
     if (!node._RES4LYF_menuWrapped) {
         const originalGetExtraMenuOptions = node.getExtraMenuOptions;
         node.getExtraMenuOptions = function(_, options) {
             if (originalGetExtraMenuOptions) {
                 originalGetExtraMenuOptions.apply(this, arguments);
             }
+    
             options.push({
                 content: "Refresh RES4LYF widgets",
                 callback: onNodeChange
+            });
+    
+            // Add toggle options for each toggleable widget
+            Object.keys(TOGGLEABLE_WIDGETS).forEach(widgetName => {
+                const widget = node.widgets.find(w => w.name === widgetName);
+                if (widget) {
+                    const stateKey = `${node.id}_${widgetName}`;
+                    const isHidden = widgetToggleStates.get(stateKey) ?? DEFAULT_WIDGET_STATES[widgetName];
+    
+                    options.push({
+                        content: `${isHidden ? "Show" : "Hide"} ${widgetName}`,
+                        callback: () => {
+                            const newState = !isHidden;
+                            widgetToggleStates.set(stateKey, newState);
+                            toggleWidget(node, widget, !newState);
+                            app.graph.setDirtyCanvas(true);
+                        }
+                    });
+                }
             });
         };
         node._RES4LYF_menuWrapped = true;
@@ -295,6 +365,41 @@ function setupDynamicWidgets(node, dependentWidgetsConfig) {
 
 app.registerExtension({
     async setup(app) {
+        // Add settings for each toggleable widget
+        Object.entries(TOGGLEABLE_WIDGETS).forEach(([widgetName, config]) => {
+            app.ui.settings.addSetting({
+                id: config.settingId,
+                name: config.settingName,
+                defaultValue: config.defaultValue,
+                type: "boolean",
+                options: (value) => [
+                    { value: true, text: "Hidden", selected: value === true },
+                    { value: false, text: "Shown", selected: value === false },
+                ],
+                onChange: (value) => {
+                    DEFAULT_WIDGET_STATES[widgetName] = value;
+                    resDebugLog(`Default state for ${widgetName} set to ${value ? "hidden" : "shown"}`);
+                    
+                    // Update all existing nodes
+                    for (const node of app.graph._nodes) {
+                        if (nodeConfigs[node.comfyClass]) {
+                            const widget = node.widgets.find(w => w.name === widgetName);
+                            if (widget) {
+                                // Only update if user hasn't set a specific state for this instance
+                                const stateKey = `${node.id}_${widgetName}`;
+                                if (!widgetToggleStates.has(stateKey)) {
+                                    toggleWidget(node, widget, !value);
+                                }
+                            }
+                        }
+                    }
+                },
+            });
+
+            // Initialize default state
+            DEFAULT_WIDGET_STATES[widgetName] = config.defaultValue;
+        });
+
         app.ui.settings.addSetting({
             id: "RES4LYF.enableDynamicWidgets",
             name: "RES4LYF: Enable dynamic widget hiding",
