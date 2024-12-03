@@ -14,58 +14,9 @@ from .noise_sigmas_timesteps_scaling import get_res4lyf_step_with_model, get_res
 from .rk_method import RK_Method
 from .rk_guide_func import *
 
-from .latents import normalize_latent
+from .latents import normalize_latent, initialize_or_scale
 from .helper import get_extra_options_kv
-
-
-
-def sample_res_2m(model, x, sigmas, extra_args=None, callback=None, disable=None):
-    return sample_rk(model, x, sigmas, extra_args, callback, disable, noise_sampler_type="gaussian", noise_mode="linear", noise_seed=-1, rk_type="res_2m", eta=0.0, )
-
-def sample_res_2s(model, x, sigmas, extra_args=None, callback=None, disable=None):
-    return sample_rk(model, x, sigmas, extra_args, callback, disable, noise_sampler_type="gaussian", noise_mode="linear", noise_seed=-1, rk_type="res_2s", eta=0.0, )
-
-def sample_res_3s(model, x, sigmas, extra_args=None, callback=None, disable=None):
-    return sample_rk(model, x, sigmas, extra_args, callback, disable, noise_sampler_type="gaussian", noise_mode="linear", noise_seed=-1, rk_type="res_3s", eta=0.0, )
-
-def sample_res_5s(model, x, sigmas, extra_args=None, callback=None, disable=None):
-    return sample_rk(model, x, sigmas, extra_args, callback, disable, noise_sampler_type="gaussian", noise_mode="linear", noise_seed=-1, rk_type="res_5s", eta=0.0, )
-
-
-
-def sample_res_2m_sde(model, x, sigmas, extra_args=None, callback=None, disable=None):
-    return sample_rk(model, x, sigmas, extra_args, callback, disable, noise_sampler_type="gaussian", noise_mode="linear", noise_seed=-1, rk_type="res_2m", eta=0.5, )
-
-def sample_res_2s_sde(model, x, sigmas, extra_args=None, callback=None, disable=None):
-    return sample_rk(model, x, sigmas, extra_args, callback, disable, noise_sampler_type="gaussian", noise_mode="linear", noise_seed=-1, rk_type="res_2s", eta=0.5, )
-
-def sample_res_3s_sde(model, x, sigmas, extra_args=None, callback=None, disable=None):
-    return sample_rk(model, x, sigmas, extra_args, callback, disable, noise_sampler_type="gaussian", noise_mode="linear", noise_seed=-1, rk_type="res_3s", eta=0.5, )
-
-def sample_res_5s_sde(model, x, sigmas, extra_args=None, callback=None, disable=None):
-    return sample_rk(model, x, sigmas, extra_args, callback, disable, noise_sampler_type="gaussian", noise_mode="linear", noise_seed=-1, rk_type="res_5s", eta=0.5, )
-
-
-
-def sample_deis_2m(model, x, sigmas, extra_args=None, callback=None, disable=None):
-    return sample_rk(model, x, sigmas, extra_args, callback, disable, noise_sampler_type="gaussian", noise_mode="linear", noise_seed=-1, rk_type="deis_2m", eta=0.0, )
-
-def sample_deis_3m(model, x, sigmas, extra_args=None, callback=None, disable=None):
-    return sample_rk(model, x, sigmas, extra_args, callback, disable, noise_sampler_type="gaussian", noise_mode="linear", noise_seed=-1, rk_type="deis_3m", eta=0.0, )
-
-def sample_deis_4m(model, x, sigmas, extra_args=None, callback=None, disable=None):
-    return sample_rk(model, x, sigmas, extra_args, callback, disable, noise_sampler_type="gaussian", noise_mode="linear", noise_seed=-1, rk_type="deis_4m", eta=0.0, )
-
-
-
-def sample_deis_2m_sde(model, x, sigmas, extra_args=None, callback=None, disable=None):
-    return sample_rk(model, x, sigmas, extra_args, callback, disable, noise_sampler_type="gaussian", noise_mode="linear", noise_seed=-1, rk_type="deis_2m", eta=0.5, )
-
-def sample_deis_3m_sde(model, x, sigmas, extra_args=None, callback=None, disable=None):
-    return sample_rk(model, x, sigmas, extra_args, callback, disable, noise_sampler_type="gaussian", noise_mode="linear", noise_seed=-1, rk_type="deis_3m", eta=0.5, )
-
-def sample_deis_4m_sde(model, x, sigmas, extra_args=None, callback=None, disable=None):
-    return sample_rk(model, x, sigmas, extra_args, callback, disable, noise_sampler_type="gaussian", noise_mode="linear", noise_seed=-1, rk_type="deis_4m", eta=0.5, )
+from .sigmas import get_sigmas
 
 
 
@@ -100,8 +51,6 @@ def prepare_step_to_sigma_zero(rk, irk, rk_type, irk_type, model, x, extra_optio
     rk = RK_Method.create(model, rk_type_final_step, x.device)
     rk.init_noise_sampler(x, torch.initial_seed() + 1, noise_sampler_type, alpha=alpha, k=k)
 
-    #if irk_type == rk_type or :
-    #if irk.c[-1] >= 1:
     if any(element >= 1 for element in irk.c):
         irk_type_final_step = f"gauss-legendre_{rk_type[-2:]}" if rk_type[-2:] in {"2s", "3s", "4s", "5s"} else "gauss-legendre_2s"
         irk_type_final_step = f"deis_2m" if rk_type[-2:] in {"2m", "3m", "4m"} else irk_type_final_step
@@ -122,16 +71,30 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
                   latent_guide=None, latent_guide_inv=None, latent_guide_weights=None, latent_guide_weights_inv=None, guide_mode="blend", unsampler_type="linear",
                   GARBAGE_COLLECT=False, mask=None, mask_inv=None, LGW_MASK_RESCALE_MIN=True, sigmas_override=None, unsample_resample_scales=None,sde_noise=[],
                   extra_options="",
-                  etas=None, s_noises=None, momentums=None,
+                  etas=None, s_noises=None, momentums=None, guides=None,
                   ):
     extra_args = {} if extra_args is None else extra_args
     s_in = x.new_ones([x.shape[0]])
+    default_dtype = torch.float64
+    max_steps=10000
     
     SDE_NOISE_EXTERNAL = False
     if sde_noise is not None:
         if len(sde_noise) > 0 and sigmas[1] > sigmas[2]:
             SDE_NOISE_EXTERNAL = True
 
+    if guides is not None:
+        guide_mode, latent_guide_weight, latent_guide_weight_inv, latent_guide_weights, latent_guide_weights_inv, latent_guide, latent_guide_inv, latent_guide_mask, latent_guide_mask_inv, scheduler_, scheduler_inv_, steps_, steps_inv_, denoise_, denoise_inv_ = guides
+        mask, mask_inv = latent_guide_mask, latent_guide_mask_inv
+        if scheduler_ != "constant" and latent_guide_weights is None:
+            latent_guide_weights = get_sigmas(model, scheduler_, steps_, denoise_).to(default_dtype)
+        if scheduler_inv_ != "constant" and latent_guide_weights_inv is None:
+            latent_guide_weights_inv = get_sigmas(model, scheduler_inv_, steps_inv_, denoise_inv_).to(default_dtype)
+            
+    latent_guide_weights = initialize_or_scale(latent_guide_weights, latent_guide_weight, max_steps).to(default_dtype)
+    latent_guide_weights = F.pad(latent_guide_weights, (0, max_steps), value=0.0)
+    latent_guide_weights_inv = initialize_or_scale(latent_guide_weights_inv, latent_guide_weight_inv, max_steps).to(default_dtype)
+    latent_guide_weights_inv = F.pad(latent_guide_weights_inv, (0, max_steps), value=0.0)
     
     if latent_guide_weights is not None:
         lgw = latent_guide_weights.to(x.device)
@@ -240,7 +203,6 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
             
             x = x_0 + h * rk.b_k_sum(eps_, 0)
                     
-            #denoised = x + (sigma_down / (sigma - sigma_down)) *  h * rk.b_k_sum(eps_, 0) 
             denoised = x_0 + ((sigma / (sigma - sigma_down)) *  h) * rk.b_k_sum(eps_, 0) 
             eps = x - denoised
             x = process_guides_poststep(x, denoised, eps, y0, y0_inv, mask, lgw_mask, lgw_mask_inv, guide_mode, latent_guide, latent_guide_inv, UNSAMPLE, extra_options)
@@ -351,7 +313,7 @@ def get_explicit_rk_step(rk, rk_type, x, y0, y0_inv, lgw, lgw_inv, mask, lgw_mas
         
     x = x_0 + h * rk.b_k_sum(eps_, 0)
     
-    denoised = x + (sigma / (sigma - sigma_down)) *  h * rk.b_k_sum(eps_, 0) 
+    denoised = x_0 + (sigma / (sigma - sigma_down)) *  h * rk.b_k_sum(eps_, 0) 
     eps = x - denoised
     x = process_guides_poststep(x, denoised, eps, y0, y0_inv, mask, lgw_mask, lgw_mask_inv, guide_mode, latent_guide, latent_guide_inv, UNSAMPLE, extra_options)
 
@@ -363,4 +325,39 @@ def get_explicit_rk_step(rk, rk_type, x, y0, y0_inv, lgw, lgw_inv, mask, lgw_mas
 
     return x, eps_, data_
 
+
+
+
+
+def sample_res_2m(model, x, sigmas, extra_args=None, callback=None, disable=None):
+    return sample_rk(model, x, sigmas, extra_args, callback, disable, noise_sampler_type="gaussian", noise_mode="linear", noise_seed=-1, rk_type="res_2m", eta=0.0, )
+def sample_res_2s(model, x, sigmas, extra_args=None, callback=None, disable=None):
+    return sample_rk(model, x, sigmas, extra_args, callback, disable, noise_sampler_type="gaussian", noise_mode="linear", noise_seed=-1, rk_type="res_2s", eta=0.0, )
+def sample_res_3s(model, x, sigmas, extra_args=None, callback=None, disable=None):
+    return sample_rk(model, x, sigmas, extra_args, callback, disable, noise_sampler_type="gaussian", noise_mode="linear", noise_seed=-1, rk_type="res_3s", eta=0.0, )
+def sample_res_5s(model, x, sigmas, extra_args=None, callback=None, disable=None):
+    return sample_rk(model, x, sigmas, extra_args, callback, disable, noise_sampler_type="gaussian", noise_mode="linear", noise_seed=-1, rk_type="res_5s", eta=0.0, )
+
+def sample_res_2m_sde(model, x, sigmas, extra_args=None, callback=None, disable=None):
+    return sample_rk(model, x, sigmas, extra_args, callback, disable, noise_sampler_type="gaussian", noise_mode="linear", noise_seed=-1, rk_type="res_2m", eta=0.5, )
+def sample_res_2s_sde(model, x, sigmas, extra_args=None, callback=None, disable=None):
+    return sample_rk(model, x, sigmas, extra_args, callback, disable, noise_sampler_type="gaussian", noise_mode="linear", noise_seed=-1, rk_type="res_2s", eta=0.5, )
+def sample_res_3s_sde(model, x, sigmas, extra_args=None, callback=None, disable=None):
+    return sample_rk(model, x, sigmas, extra_args, callback, disable, noise_sampler_type="gaussian", noise_mode="linear", noise_seed=-1, rk_type="res_3s", eta=0.5, )
+def sample_res_5s_sde(model, x, sigmas, extra_args=None, callback=None, disable=None):
+    return sample_rk(model, x, sigmas, extra_args, callback, disable, noise_sampler_type="gaussian", noise_mode="linear", noise_seed=-1, rk_type="res_5s", eta=0.5, )
+
+def sample_deis_2m(model, x, sigmas, extra_args=None, callback=None, disable=None):
+    return sample_rk(model, x, sigmas, extra_args, callback, disable, noise_sampler_type="gaussian", noise_mode="linear", noise_seed=-1, rk_type="deis_2m", eta=0.0, )
+def sample_deis_3m(model, x, sigmas, extra_args=None, callback=None, disable=None):
+    return sample_rk(model, x, sigmas, extra_args, callback, disable, noise_sampler_type="gaussian", noise_mode="linear", noise_seed=-1, rk_type="deis_3m", eta=0.0, )
+def sample_deis_4m(model, x, sigmas, extra_args=None, callback=None, disable=None):
+    return sample_rk(model, x, sigmas, extra_args, callback, disable, noise_sampler_type="gaussian", noise_mode="linear", noise_seed=-1, rk_type="deis_4m", eta=0.0, )
+
+def sample_deis_2m_sde(model, x, sigmas, extra_args=None, callback=None, disable=None):
+    return sample_rk(model, x, sigmas, extra_args, callback, disable, noise_sampler_type="gaussian", noise_mode="linear", noise_seed=-1, rk_type="deis_2m", eta=0.5, )
+def sample_deis_3m_sde(model, x, sigmas, extra_args=None, callback=None, disable=None):
+    return sample_rk(model, x, sigmas, extra_args, callback, disable, noise_sampler_type="gaussian", noise_mode="linear", noise_seed=-1, rk_type="deis_3m", eta=0.5, )
+def sample_deis_4m_sde(model, x, sigmas, extra_args=None, callback=None, disable=None):
+    return sample_rk(model, x, sigmas, extra_args, callback, disable, noise_sampler_type="gaussian", noise_mode="linear", noise_seed=-1, rk_type="deis_4m", eta=0.5, )
 

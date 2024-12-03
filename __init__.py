@@ -2,6 +2,7 @@ from . import legacy_sampler_rk
 from . import legacy_samplers
 from . import rk_sampler
 from . import samplers
+from . import samplers_extensions
 from . import samplers_tiled
 from . import loaders
 from . import sigmas
@@ -11,6 +12,7 @@ from . import conditioning
 from . import images
 from . import models
 from . import helper_sigma_preview_image_preproc
+from . import nodes_misc
 from .res4lyf import init, get_ext_dir
 
 import torch
@@ -74,36 +76,35 @@ extra_samplers = dict(reversed(extra_samplers.items()))
 
 NODE_CLASS_MAPPINGS = {
     "Legacy_ClownSampler": legacy_samplers.Legacy_SamplerRK,
+    "Legacy_SharkSampler": legacy_samplers.Legacy_SharkSampler,
     "Legacy_ClownsharKSampler": legacy_samplers.Legacy_ClownsharKSampler,
     "Legacy_ClownsharKSamplerGuides": legacy_samplers.Legacy_ClownsharKSamplerGuides,
     
-    
-    "ClownsharKSampler": samplers.ClownsharKSampler,
-    #"ClownSampler": samplers.ClownSampler,
-    "ClownsharKSamplerGuides": samplers.ClownsharKSamplerGuides,
-    
-    "ClownsharKSamplerOptions": samplers.ClownsharKSamplerOptions,
-    "ClownsharKSamplerOptions_SDE_Noise": samplers.ClownsharKSamplerOptions_SDE_Noise,
-    "ClownsharKSamplerAutomation": samplers.ClownsharKSamplerAutomation,
-
-
+    "ClownSampler": samplers.ClownSampler,
     "SharkSampler": samplers.SharkSampler,
+    "ClownsharKSampler": samplers.ClownsharKSampler,
+    "ClownsharKSamplerGuides": samplers_extensions.ClownsharKSamplerGuides,
+    
+    "ClownsharKSamplerOptions": samplers_extensions.ClownsharKSamplerOptions,
+    "ClownsharKSamplerOptions_SDE_Noise": samplers_extensions.ClownsharKSamplerOptions_SDE_Noise,
+    "ClownsharKSamplerAutomation": samplers_extensions.ClownsharKSamplerAutomation,
+
     "UltraSharkSampler": samplers.UltraSharkSampler,
     "UltraSharkSampler Tiled": samplers_tiled.UltraSharkSampler_Tiled,
 
-    "SamplerOptions_TimestepScaling": samplers.SamplerOptions_TimestepScaling,
-    "SamplerOptions_GarbageCollection": samplers.SamplerOptions_GarbageCollection,
-    "SD35L_TimestepPatcher": samplers.SD35L_TimestepPatcher,
+    "SamplerOptions_TimestepScaling": samplers_extensions.SamplerOptions_TimestepScaling,
+    "SamplerOptions_GarbageCollection": samplers_extensions.SamplerOptions_GarbageCollection,
+    "ModelTimestepPatcher": models.ModelTimestepPatcher,
     
-    "AdvancedNoise": samplers.AdvancedNoise,
+    "AdvancedNoise": latents.AdvancedNoise,
     
     "FluxLoader": loaders.FluxLoader,
     "SD35Loader": loaders.SD35Loader,
     
-    "TextBox1": samplers.TextBox1,
-    "TextBox3": samplers.TextBox3,
+    "TextBox1": nodes_misc.TextBox1,
+    "TextBox3": nodes_misc.TextBox3,
     
-    "CLIPTextEncodeFluxUnguided": samplers.CLIPTextEncodeFluxUnguided,
+    "CLIPTextEncodeFluxUnguided": conditioning.CLIPTextEncodeFluxUnguided,
 
     "ConditioningAverageScheduler": conditioning.ConditioningAverageScheduler,
     "ConditioningMultiply": conditioning.ConditioningMultiply,
@@ -111,7 +112,7 @@ NODE_CLASS_MAPPINGS = {
     "StableCascade_StageB_Conditioning64": conditioning.StableCascade_StageB_Conditioning64,
     "ConditioningZeroAndTruncate": conditioning.ConditioningZeroAndTruncate,
     "ConditioningTruncate": conditioning.ConditioningTruncate,
-    "StyleModelApplyAdvanced": samplers.StyleModelApplyAdvanced,
+    "StyleModelApplyAdvanced": conditioning.StyleModelApplyAdvanced,
 
     "ConditioningToBase64": conditioning.ConditioningToBase64,
     "Base64ToConditioning": conditioning.Base64ToConditioning,
@@ -122,7 +123,7 @@ NODE_CLASS_MAPPINGS = {
     
     "Latent Match Channelwise": latent_images.latent_channelwise_match,
 
-    "LatentNoised": samplers.LatentNoised,
+    "LatentNoised": latents.LatentNoised,
     "LatentNoiseList": latents.LatentNoiseList,
     "LatentBatch_channels": latents.LatentBatch_channels,
     "LatentBatch_channels_16": latents.LatentBatch_channels_16,

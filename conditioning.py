@@ -37,6 +37,29 @@ def multiply_nested_tensors(structure, scalar):
     else:
         return structure
 
+
+class CLIPTextEncodeFluxUnguided:
+    @classmethod
+    def INPUT_TYPES(s):
+        return {"required": {
+            "clip": ("CLIP", ),
+            "clip_l": ("STRING", {"multiline": True, "dynamicPrompts": True}),
+            "t5xxl": ("STRING", {"multiline": True, "dynamicPrompts": True}),
+            }}
+    RETURN_TYPES = ("CONDITIONING",)
+    FUNCTION = "encode"
+
+    CATEGORY = "advanced/conditioning/flux"
+
+    def encode(self, clip, clip_l, t5xxl, guidance):
+        tokens = clip.tokenize(clip_l)
+        tokens["t5xxl"] = clip.tokenize(t5xxl)["t5xxl"]
+
+        output = clip.encode_from_tokens(tokens, return_pooled=True, return_dict=True)
+        cond = output.pop("cond")
+        return ([[cond, output]], )
+
+
 class StyleModelApplyAdvanced: 
     @classmethod
     def INPUT_TYPES(s):

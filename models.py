@@ -11,8 +11,59 @@ import torch
 import folder_paths
 import os
 import json
+import math
 
 import comfy.model_management
+    
+    
+def time_snr_shift_exponential(alpha, t):
+    return math.exp(alpha) / (math.exp(alpha) + (1 / t - 1) ** 1.0)
+
+def time_snr_shift_linear(alpha, t):
+    if alpha == 1.0:
+        return t
+    return alpha * t / (1 + (alpha - 1) * t)
+
+
+class ModelTimestepPatcher:
+    # this is used to set the "shift" using either exponential scaling (default for SD3.5M and Flux) or linear scaling (default for SD3.5L and SD3 2B beta)
+    @classmethod
+    def INPUT_TYPES(s):
+        return {"required": { 
+                    "model": ("MODEL",),
+                    "scaling": (["exponential", "linear"], {"default": 'exponential'}), 
+                    "shift": ("FLOAT", {"default": 3.0, "min": -100.0, "max": 100.0, "step":0.01, "round": False}),
+                    
+                }
+               }
+    
+    RETURN_TYPES = ("MODEL",)
+    FUNCTION = "main"
+    CATEGORY = "SD35L"
+
+    def sigma_exponential(self, timestep):
+        return time_snr_shift_exponential(self.shift, timestep / self.multiplier)
+
+    def sigma_linear(self, timestep):
+        return time_snr_shift_linear(self.shift, timestep / self.multiplier)
+
+    def main(self, model, scaling, shift):
+        self.shift = shift
+        self.multiplier = 1000
+        timesteps = 1000 #this was 10000
+
+        s_range = torch.arange(1, timesteps + 1, 1).to(torch.float64)
+        if scaling == "exponential": 
+            ts = self.sigma_exponential((s_range / timesteps) * self.multiplier)
+        elif scaling == "linear": 
+            ts = self.sigma_linear((s_range / timesteps) * self.multiplier)
+
+        model.model.model_sampling.shift = self.shift
+        model.model.model_sampling.multiplier = self.multiplier
+        model.model.model_sampling.register_buffer('sigmas', ts)
+        
+        return (model,)
+    
     
 class UNetSave:
     def __init__(self):

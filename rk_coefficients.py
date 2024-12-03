@@ -5,6 +5,86 @@ import math
 from .extra_samplers_helpers import get_deis_coeff_list
 from .phi_functions import *
 
+
+
+RK_SAMPLER_NAMES = ["res_2m",
+                    "res_3m",
+                    "res_2s", 
+                    "res_3s",
+                    "res_5s",
+
+
+                    "deis_2m",
+                    "deis_3m", 
+                    "deis_4m",
+                    
+                    "ralston_2s",
+                    "ralston_3s",
+                    "ralston_4s", 
+                    
+                    "dpmpp_2m",
+                    "dpmpp_3m",
+                    "dpmpp_2s",
+                    "dpmpp_sde_2s",
+                    "dpmpp_3s",
+                    
+                    "midpoint_2s",
+                    "heun_2s", 
+                    "heun_3s", 
+                    
+                    "houwen-wray_3s",
+                    "kutta_3s", 
+                    "ssprk3_3s",
+                    
+                    "rk38_4s",
+                    "rk4_4s", 
+
+                    "dormand-prince_6s", 
+                    "dormand-prince_13s", 
+                    "bogacki-shampine_7s",
+
+                    "ddim",
+                    "euler",
+                    ]
+
+
+IRK_SAMPLER_NAMES = ["none",
+                    "gauss-legendre_2s",
+                    "gauss-legendre_3s", 
+                    "gauss-legendre_4s",
+                    "gauss-legendre_5s",
+                    
+                    "radau_ia_2s",
+                    "radau_ia_3s",
+                    "radau_iia_2s",
+                    "radau_iia_3s",
+                    
+                    "lobatto_iiia_2s",
+                    "lobatto_iiia_3s",
+                    "lobatto_iiib_2s",
+                    "lobatto_iiib_3s",
+                    "lobatto_iiic_2s",
+                    "lobatto_iiic_3s",
+                    "lobatto_iiic_star_2s",
+                    "lobatto_iiic_star_3s",
+                    "lobatto_iiid_2s",
+                    "lobatto_iiid_3s",
+                    
+                    "kraaijevanger_spijker_2s",
+                    "qin_zhang_2s",
+                    
+                    "pareschi_russo_2s",
+                    "pareschi_russo_alt_2s",
+                    
+                    "crouzeix_2s",
+                    "crouzeix_3s",
+                    
+                    "irk_exp_diag_2s",
+                    "use_explicit", 
+                    ]
+
+
+
 alpha_crouzeix = (2/(3**0.5)) * math.cos(math.pi / 18)
 
 rk_coeff = {

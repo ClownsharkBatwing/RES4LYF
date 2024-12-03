@@ -30,6 +30,12 @@ def latent_meancenter_channels(x):
     return  x - mean
 
 
+def initialize_or_scale(tensor, value, steps):
+    if tensor is None:
+        return torch.full((steps,), value)
+    else:
+        return value * tensor
+
 
 def normalize_latent(target, source=None, mean=True, std=True, set_mean=None, set_std=None, channelwise=True):
     def normalize_single_latent(single_target, single_source=None):
@@ -79,6 +85,112 @@ def normalize_latent(target, source=None, mean=True, std=True, set_mean=None, se
             return [normalize_single_latent(t) for t in target]
     else:
         return normalize_single_latent(target, source)
+
+
+
+
+class AdvancedNoise:
+    @classmethod
+    def INPUT_TYPES(s):
+        return {
+            "required":{
+                "alpha": ("FLOAT", {"default": 1.0, "min": -10000.0, "max": 10000.0, "step":0.1, "round": 0.01}),
+                "k": ("FLOAT", {"default": 1.0, "min": -10000.0, "max": 10000.0, "step":2.0, "round": 0.01}),
+                "noise_seed": ("INT", {"default": 0, "min": 0, "max": 0xffffffffffffffff}),
+                "noise_type": (NOISE_GENERATOR_NAMES, ),
+            },
+        }
+
+    RETURN_TYPES = ("NOISE",)
+    FUNCTION = "get_noise"
+    CATEGORY = "sampling/custom_sampling/noise"
+
+    def get_noise(self, noise_seed, noise_type, alpha, k):
+        return (Noise_RandomNoise(noise_seed, noise_type, alpha, k),)
+
+class Noise_RandomNoise:
+    def __init__(self, seed, noise_type, alpha, k):
+        self.seed = seed
+        self.noise_type = noise_type
+        self.alpha = alpha
+        self.k = k
+
+    def generate_noise(self, input_latent):
+        latent_image = input_latent["samples"]
+        batch_inds = input_latent["batch_index"] if "batch_index" in input_latent else None
+        return prepare_noise(latent_image, self.seed, self.noise_type, batch_inds, self.alpha, self.k)
+
+
+class LatentNoised:
+    @classmethod
+    def INPUT_TYPES(s):
+        return {"required":
+                    {
+                    "add_noise": ("BOOLEAN", {"default": True}),
+                    "noise_is_latent": ("BOOLEAN", {"default": False}),
+                    "noise_type": (NOISE_GENERATOR_NAMES, ),
+                    "alpha": ("FLOAT", {"default": 1.0, "min": -10000.0, "max": 10000.0, "step":0.1, "round": 0.01}),
+                    "k": ("FLOAT", {"default": 1.0, "min": -10000.0, "max": 10000.0, "step":2.0, "round": 0.01}),
+                    "noise_seed": ("INT", {"default": 0, "min": 0, "max": 0xffffffffffffffff}),
+                    "latent_image": ("LATENT", ),
+                    "noise_strength": ("FLOAT", {"default": 1.0, "min": -20.0, "max": 20.0, "step": 0.01, "round": 0.01}),
+                    "normalize": (["false", "true"], {"default": "false"}),
+                     },
+                "optional": 
+                    {
+                    "latent_noise": ("LATENT", ),
+                    "mask": ("MASK", ),
+                    }
+                }
+
+    RETURN_TYPES = ("LATENT",)
+    RETURN_NAMES = ("latent_noised",)
+
+    FUNCTION = "main"
+
+    CATEGORY = "sampling/custom_sampling"
+    
+    def main(self, add_noise, noise_is_latent, noise_type, noise_seed, alpha, k, latent_image, noise_strength, normalize, latent_noise=None, mask=None):
+            latent_out = latent_image.copy()
+            samples = latent_out["samples"].clone()
+
+            torch.manual_seed(noise_seed)
+
+            if not add_noise:
+                noise = torch.zeros(samples.size(), dtype=samples.dtype, layout=samples.layout, device="cpu")
+            elif latent_noise is None:
+                batch_inds = latent_out["batch_index"] if "batch_index" in latent_out else None
+                noise = prepare_noise(samples, noise_seed, noise_type, batch_inds, alpha, k)
+            else:
+                noise = latent_noise["samples"]
+
+            if normalize == "true":
+                latent_mean = samples.mean()
+                latent_std = samples.std()
+                noise = noise * latent_std + latent_mean
+
+            if noise_is_latent:
+                noise += samples.cpu()
+                noise.sub_(noise.mean()).div_(noise.std())
+            
+            noise = noise * noise_strength
+
+            if mask is not None:
+                mask = F.interpolate(mask.reshape((-1, 1, mask.shape[-2], mask.shape[-1])), 
+                                    size=(samples.shape[2], samples.shape[3]), 
+                                    mode="bilinear")
+                mask = mask.expand((-1, samples.shape[1], -1, -1)).to(samples.device)
+                if mask.shape[0] < samples.shape[0]:
+                    mask = mask.repeat((samples.shape[0] - 1) // mask.shape[0] + 1, 1, 1, 1)[:samples.shape[0]]
+                elif mask.shape[0] > samples.shape[0]:
+                    mask = mask[:samples.shape[0]]
+                
+                noise = mask * noise + (1 - mask) * torch.zeros_like(noise)
+
+            latent_out["samples"] = samples.cpu() + noise
+
+            return (latent_out,)
+
 
 
 
