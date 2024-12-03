@@ -67,8 +67,6 @@ const nodesWithCommonConfig = [
     "AdvancedNoise",
     "Legacy_ClownSampler",
     "ClownSampler",
-    "ClownSamplerLegacy",
-    "ClownSharKSampler",
     "ClownsharKSampler",
     "KSamplerSelectAdvanced",
     "LatentNoised",
