@@ -127,11 +127,19 @@ euler
 
 gauss-legendre_2/3/4/5s
 
-radau_iia_2/3s
+radau_(i/ii)a_2/3s
 
-lobatto_iiic_2/3s
+lobatto_iii(a/b/c/d/star)_2/3s
 
 ## Diagonally Implicit Samplers
+
+kraaijevanger_spijker_2s
+
+qin_zhang_2s
+
+pareschi_russo_2s
+
+pareschi_russo_alt_2s
 
 crouzeix_2/3s
 
