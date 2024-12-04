@@ -72,6 +72,7 @@ extra_samplers = {
     "rk": rk_sampler.sample_rk,
     "legacy_rk": legacy_sampler_rk.legacy_sample_rk,
 }
+
 extra_samplers = dict(reversed(extra_samplers.items()))
 
 NODE_CLASS_MAPPINGS = {

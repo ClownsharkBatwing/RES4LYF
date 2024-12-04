@@ -15,7 +15,7 @@ from .rk_method import RK_Method
 from .rk_guide_func import *
 
 from .latents import normalize_latent, initialize_or_scale
-from .helper import get_extra_options_kv
+from .helper import get_extra_options_kv, extra_options_flag
 from .sigmas import get_sigmas
 
 
@@ -142,6 +142,8 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
         model_options = extra_args.get("model_options", {}).copy()
         extra_args["model_options"] = comfy.model_patcher.set_model_options_post_cfg_function(model_options, post_cfg_function, disable_cfg1_optimization=True)  
 
+
+    denoised, eps = torch.zeros_like(x), torch.zeros_like(x)
     for step in trange(len(sigmas)-1, disable=disable):
         sigma, sigma_next = sigmas[step], sigmas[step+1]
         unsample_resample_scale = unsample_resample_scales[step] if unsample_resample_scales is not None else None
@@ -237,16 +239,31 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
             eps_ [0], data_ [0] = torch.zeros_like(eps_ [0]), torch.zeros_like(data_[0])
             eps_list = []
             
-            x_mid = x
-            for i in range(len(s_all)-1):
-                x_mid, eps_, data_ = get_explicit_rk_step(rk, rk_type, x_mid, y0, y0_inv, lgw[step], lgw_inv[step], mask, lgw_mask, lgw_mask_inv, step, s_all[i], s_all[i+1], eta, eta_var, s_noise, noise_mode, c2, c3, step+i, sigmas_and, x_, eps_, data_, unsample_resample_scale, guide_mode, latent_guide, latent_guide_inv, UNSAMPLE, extra_options, **extra_args)
-                eps_list.append(eps_[0])
-                eps_ [0], data_ [0] = torch.zeros_like(eps_ [0]), torch.zeros_like(data_[0])
-                
-            if torch.allclose(s_all[-1], sigma_down, atol=1e-8):
-                eps_down, data_down = rk(x_0, x_mid, sigma_down, h_irk, **extra_args)
-                eps_list.append(eps_down)
-                
+            if extra_options_flag("fast_implicit_guess",  extra_options):
+                if denoised.sum() == 0:
+                    if extra_options_flag("fast_implicit_guess_use_guide",  extra_options):
+                        data_s = y0
+                        eps_s = x_0 - data_s
+                    else:
+                        eps_s, data_s = rk(x_0, x_0, sigma, h, **extra_args)
+                else:
+                    eps_s, data_s = eps, denoised
+                for i in range(len(s_all)-1):
+                    eps_list.append(eps_s * s_all[i]/sigma)
+                if torch.allclose(s_all[-1], sigma_down, atol=1e-8):
+                    eps_list.append(eps_s * sigma_down/sigma)
+            else:
+                x_mid = x
+                for i in range(len(s_all)-1):
+                    x_mid, eps_, data_ = get_explicit_rk_step(rk, rk_type, x_mid, y0, y0_inv, lgw[step], lgw_inv[step], mask, lgw_mask, lgw_mask_inv, step, s_all[i], s_all[i+1], eta, eta_var, s_noise, noise_mode, c2, c3, step+i, sigmas_and, x_, eps_, data_, unsample_resample_scale, guide_mode, latent_guide, latent_guide_inv, UNSAMPLE, extra_options, **extra_args)
+                    eps_list.append(eps_[0])
+                    eps_ [0], data_ [0] = torch.zeros_like(eps_ [0]), torch.zeros_like(data_[0])
+                    
+                if torch.allclose(s_all[-1], sigma_down, atol=1e-8):
+                    eps_down, data_down = rk(x_0, x_mid, sigma_down, h, **extra_args) #should h_irk = h? going to change it for now.
+                    eps_list.append(eps_down)
+
+                 
             s_all = [s for s in s_all if s in s_irk_rk]
 
             eps_list = [eps_list[s_all.index(s)].clone() for s in s_irk_rk]

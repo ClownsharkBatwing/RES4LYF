@@ -7,7 +7,8 @@ from .phi_functions import *
 
 
 
-RK_SAMPLER_NAMES = ["res_2m",
+RK_SAMPLER_NAMES = ["none",
+                    "res_2m",
                     "res_3m",
                     "res_2s", 
                     "res_3s",
