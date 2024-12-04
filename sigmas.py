@@ -1190,10 +1190,15 @@ def get_sigmas(model, scheduler, steps, denoise): #adapted from comfyui
             return (torch.FloatTensor([]),)
         total_steps = int(steps/denoise)
 
+    #model_sampling = model.get_model_object("model_sampling")
+    if hasattr(model, "model"):
+        model_sampling = model.model.model_sampling
+    elif hasattr(model, "inner_model"):
+        model_sampling = model.inner_model.inner_model.model_sampling
     if scheduler == "beta57":
-        sigmas = comfy.samplers.beta_scheduler(model.get_model_object("model_sampling"), total_steps, alpha=0.5, beta=0.7)
+        sigmas = comfy.samplers.beta_scheduler(model_sampling, total_steps, alpha=0.5, beta=0.7)
     else:
-        sigmas = comfy.samplers.calculate_sigmas(model.get_model_object("model_sampling"), scheduler, total_steps).cpu()
+        sigmas = comfy.samplers.calculate_sigmas(model_sampling, scheduler, total_steps).cpu()
     
     sigmas = sigmas[-(steps + 1):]
     return sigmas

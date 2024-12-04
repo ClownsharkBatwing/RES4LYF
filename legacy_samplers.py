@@ -488,3 +488,189 @@ class Legacy_ClownsharKSamplerGuides:
         return (guides, )
 
 
+
+
+
+class Legacy_SharkSampler:
+    @classmethod
+    def INPUT_TYPES(s):
+        return {"required":
+                    {"model": ("MODEL",),
+                    "add_noise": ("BOOLEAN", {"default": True}),
+                    "noise_normalize": ("BOOLEAN", {"default": True}),
+                    "noise_stdev": ("FLOAT", {"default": 1.0, "min": -10000.0, "max": 10000.0, "step":0.01, "round": False, }),
+                    "noise_mean": ("FLOAT", {"default": 0.0, "min": -10000.0, "max": 10000.0, "step":0.01, "round": False, }),
+                    "noise_is_latent": ("BOOLEAN", {"default": False}),
+                    "noise_type": (NOISE_GENERATOR_NAMES, {"default": "gaussian"}),
+                    "alpha": ("FLOAT", {"default": 1.0, "min": -10000.0, "max": 10000.0, "step":0.1, "round": False, }),
+                    "k": ("FLOAT", {"default": 1.0, "min": -10000.0, "max": 10000.0, "step":2.0, "round": False, }),
+                    "noise_seed": ("INT", {"default": 0, "min": -1, "max": 0xffffffffffffffff}),
+                    "sampler_mode": (['standard', 'unsample', 'resample'],),
+                    #"scheduler": (comfy.samplers.SCHEDULER_NAMES, ),
+                    "scheduler": (comfy.samplers.SCHEDULER_NAMES + ["beta57"],),
+
+                    "steps": ("INT", {"default": 30, "min": 1, "max": 10000}),
+                    "denoise": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 10000, "step":0.01}),
+                    "cfg": ("FLOAT", {"default": 5.0, "min": 0.0, "max": 100.0, "step":0.5, "round": False, }),
+                    "truncate_conditioning": (['false', 'true', 'true_and_zero_neg'], ),
+                    
+                    "positive": ("CONDITIONING", ),
+                    "negative": ("CONDITIONING", ),
+                    "sampler": ("SAMPLER", ),
+                    "latent_image": ("LATENT", ),               
+                     },
+                "optional": 
+                    {
+                    "sigmas": ("SIGMAS", ),
+                    "latent_noise": ("LATENT", ),
+                    "latent_noise_match": ("LATENT",),
+                    }
+                }
+
+    RETURN_TYPES = ("LATENT","LATENT","LATENT","LATENT")
+    RETURN_NAMES = ("output", "denoised", "output_fp64", "denoised_fp64")
+
+    FUNCTION = "main"
+
+    CATEGORY = "sampling/custom_sampling"
+    
+    def main(self, model, add_noise, noise_stdev, noise_mean, noise_normalize, noise_is_latent, noise_type, noise_seed, cfg, truncate_conditioning, alpha, k, positive, negative, sampler,
+             latent_image, sampler_mode, scheduler, steps, denoise, sigmas=None, latent_noise=None, latent_noise_match=None,): 
+
+            latent = latent_image
+            latent_image_dtype = latent_image['samples'].dtype
+            
+            default_dtype = torch.float64
+            
+            if positive is None:
+                positive = [[
+                    torch.zeros((1, 154, 4096)),  # blah[0][0], a tensor of shape (1, 154, 4096)
+                    {'pooled_output': torch.zeros((1, 2048))}
+                    ]]
+            if negative is None:
+                negative = [[
+                    torch.zeros((1, 154, 4096)),  # blah[0][0], a tensor of shape (1, 154, 4096)
+                    {'pooled_output': torch.zeros((1, 2048))}
+                    ]]
+                
+            if denoise < 0:
+                sampler.extra_options['d_noise'] = -denoise
+                denoise = 1.0
+            if sigmas is not None:
+                sigmas = sigmas.clone().to(default_dtype)
+            else: 
+                sigmas = get_sigmas(model, scheduler, steps, denoise).to(default_dtype)
+                
+            #sigmas = sigmas.clone().to(torch.float64)
+        
+            if sampler_mode == "unsample": 
+                null = torch.tensor([0.0], device=sigmas.device, dtype=sigmas.dtype)
+                sigmas = torch.flip(sigmas, dims=[0])
+                sigmas = torch.cat([sigmas, null])
+            elif sampler_mode == "resample":
+                null = torch.tensor([0.0], device=sigmas.device, dtype=sigmas.dtype)
+                sigmas = torch.cat([null, sigmas])
+                sigmas = torch.cat([sigmas, null])
+                
+            if latent_image is not None:
+                x = latent_image["samples"].clone().to(default_dtype) 
+                #x = {"samples": x}
+                
+            if latent_noise is not None:
+                latent_noise["samples"] = latent_noise["samples"].clone().to(default_dtype)  
+            if latent_noise_match is not None:
+                latent_noise_match["samples"] = latent_noise_match["samples"].clone().to(default_dtype)
+
+            if truncate_conditioning == "true" or truncate_conditioning == "true_and_zero_neg":
+                if positive is not None:
+                    positive[0][0] = positive[0][0].clone().to(default_dtype)
+                    positive[0][1]["pooled_output"] = positive[0][1]["pooled_output"].clone().to(default_dtype)
+                c = []
+                for t in positive:
+                    d = t[1].copy()
+                    pooled_output = d.get("pooled_output", None)
+                    if pooled_output is not None:
+                        d["pooled_output"] = d["pooled_output"][:, :2048]
+                        n = [t[0][:, :154, :4096], d]
+                    c.append(n)
+                positive = c
+                
+                c = []
+                for t in negative:
+                    if negative is not None:
+                        negative[0][0] = negative[0][0].clone().to(default_dtype)
+                        negative[0][1]["pooled_output"] = negative[0][1]["pooled_output"].clone().to(default_dtype)
+                    d = t[1].copy()
+                    pooled_output = d.get("pooled_output", None)
+                    if pooled_output is not None:
+                        if truncate_conditioning == "true_and_zero_neg":
+                            d["pooled_output"] = torch.zeros((1,2048), dtype=t[0].dtype, device=t[0].device)
+                            n = [torch.zeros((1,154,4096), dtype=t[0].dtype, device=t[0].device), d]
+                        else:
+                            d["pooled_output"] = d["pooled_output"][:, :2048]
+                            n = [t[0][:, :154, :4096], d]
+                    c.append(n)
+                negative = c
+            
+            sigmin = model.model.model_sampling.sigma_min
+            sigmax = model.model.model_sampling.sigma_max
+
+            if noise_seed == -1:
+                seed = torch.initial_seed() + 1
+            else:
+                seed = noise_seed
+                torch.manual_seed(noise_seed)
+            
+            noise_sampler = NOISE_GENERATOR_CLASSES.get(noise_type)(x=x, seed=seed, sigma_min=sigmin, sigma_max=sigmax)
+            
+            if noise_type == "fractal":
+                noise_sampler.alpha = alpha
+                noise_sampler.k = k
+                noise_sampler.scale = 0.1
+        
+            if not add_noise:
+                noise = torch.zeros_like(x)
+            elif latent_noise is None:
+                noise = noise_sampler(sigma=sigmax, sigma_next=sigmin)
+            else:
+                noise = latent_noise["samples"]
+
+            if noise_is_latent: #add noise and latent together and normalize --> noise
+                noise += x.cpu()
+                noise.sub_(noise.mean()).div_(noise.std())
+
+            if noise_normalize:
+                noise.sub_(noise.mean()).div_(noise.std())
+            noise *= noise_stdev
+            noise = (noise - noise.mean()) + noise_mean
+            
+            if latent_noise_match:
+                for i in range(latent_noise_match["samples"].shape[1]):
+                    noise[0][i] = (noise[0][i] - noise[0][i].mean())
+                    noise[0][i] = (noise[0][i]) + latent_noise_match["samples"][0][i].mean()
+
+                
+            noise_mask = latent["noise_mask"] if "noise_mask" in latent else None
+
+            x0_output = {}
+
+            callback = latent_preview.prepare_callback(model, sigmas.shape[-1] - 1, x0_output)
+
+            disable_pbar = False
+ 
+            samples = comfy.sample.sample_custom(model, noise, cfg, sampler, sigmas, positive, negative, x, 
+                                                 noise_mask=noise_mask, callback=callback, disable_pbar=disable_pbar, seed=noise_seed)
+
+            out = latent.copy()
+            out["samples"] = samples
+            if "x0" in x0_output:
+                out_denoised = latent.copy()
+                out_denoised["samples"] = model.model.process_latent_out(x0_output["x0"].cpu())
+            else:
+                out_denoised = out
+                
+            out_orig_dtype = out['samples'].clone().to(latent_image_dtype)
+            out_denoised_orig_dtype = out_denoised['samples'].clone().to(latent_image_dtype)
+                
+            return ( {'samples': out_orig_dtype}, {'samples': out_denoised_orig_dtype}, out, out_denoised,)
+            

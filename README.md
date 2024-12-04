@@ -6,6 +6,12 @@ A particular emphasis of this project has been to facilitate modulating paramete
 
 Much of this work remains experimental and is subject to further changes.
 
+# ClownSampler
+![image](https://github.com/user-attachments/assets/f787ad74-0d95-4d8f-84b6-af4c4c1ac5e5)
+
+# SharkSampler
+![image](https://github.com/user-attachments/assets/299c9285-b298-4452-b0dd-48ae425ce30a)
+
 # ClownsharKSampler
 ![image](https://github.com/user-attachments/assets/430fb77a-7353-4b40-acb6-cbd33392f7fc)
 
