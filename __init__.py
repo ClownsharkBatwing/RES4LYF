@@ -203,18 +203,10 @@ NODE_CLASS_MAPPINGS = {
 
 if flags["test_samplers"]:
     NODE_CLASS_MAPPINGS.update({
-        "Sampler10th_World_Order": test_samplers.Sampler10th_World_Order,
+        "SamplerRK_Test": test_samplers.SamplerRK_Test,
     })
     extra_samplers.update({
-        "rk_testnew":  test_samplers.sample_rk_testnew,
-        "rk_rkexp_5s": test_samplers.sample_rk_rkexp_5s,
-        "rk_testnew_working_noisepred": test_samplers.sample_rk_testnew_working_noisepred,
-        "sample_rk_testnew2": test_samplers.sample_rk_testnew2,
-        "sample_rk_testnew_denoisepred": test_samplers.sample_rk_testnew_denoisepred,
-        "sample_rk_testnew3": test_samplers.sample_rk_testnew3,
-        "sample_rk_testnew4": test_samplers.sample_rk_testnew4,
-        "sample_rk_testnew_denoisepred_4th_order": test_samplers.sample_rk_testnew_denoisepred_4th_order,
-        "sample_rk_testnew_working_noisepred2": test_samplers.sample_rk_testnew_working_noisepred2,
+        "rk_test":  test_samplers.sample_rk_test,
     })
 
 WEB_DIRECTORY = "./web/js"
