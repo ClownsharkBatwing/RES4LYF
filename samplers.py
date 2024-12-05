@@ -90,7 +90,7 @@ class SharkSampler:
              positive=None, negative=None, sampler=None, sigmas=None, latent_noise=None, latent_noise_match=None,
              noise_stdev=1.0, noise_mean=0.0, noise_normalize=True, noise_is_latent=False, 
              d_noise=1.0, alpha_init=-1.0, k_init=1.0, cfgpp=0.0, noise_seed=-1,
-                    shift=3.0, base_shift=0.85, options=None, sde_noise=None,sde_noise_steps=1, shift_scaling="exponential",
+                    shift=3.0, base_shift=0.85, options=None, sde_noise=None,sde_noise_steps=1, shift_scaling="exponential", unsampler_type="linear",
                     extra_options="", 
                     ): 
 

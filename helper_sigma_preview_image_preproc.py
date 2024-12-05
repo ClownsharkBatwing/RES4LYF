@@ -248,10 +248,10 @@ class PrepForUnsampling:
 
     RETURN_TYPES = ("LATENT", "LATENT", "MASK", "LATENT", "INT", "INT",)
     RETURN_NAMES = ("latent_1", "latent_2", "mask", "empty_latent", "width", "height",)
-    FUNCTION = "execute"
+    FUNCTION = "main"
     CATEGORY = "essentials/image manipulation"
 
-    def execute(self, width, height, resize_to_input="false", image_1=None, image_2=None, mask=None, invert_mask=False, method="stretch", interpolation="lanczos", condition="always", multiple_of=0, keep_proportion=False, mask_channel="red", latent=None, latent_type="16_channels", vae=None):
+    def main(self, width, height, resize_to_input="false", image_1=None, image_2=None, mask=None, invert_mask=False, method="stretch", interpolation="lanczos", condition="always", multiple_of=0, keep_proportion=False, mask_channel="red", latent=None, latent_type="16_channels", vae=None):
         #NOTE: VAE encode with comyfui is *non-deterministic* in that each success encode will return slightly different latent images! The difference is visible after decoding.
         ratio = 8 # latent compression factor
 
