@@ -109,6 +109,7 @@ GUIDE_MODE_NAMES = ["unsample",
                     "mean", 
                     "std", 
                     "data",
+                    "none",
 ]
 
 
@@ -187,10 +188,10 @@ class ClownsharKSamplerAutomation:
     RETURN_TYPES = ("AUTOMATION",)
     RETURN_NAMES = ("automation",)
     CATEGORY = "sampling/custom_sampling/samplers"
+    
+    FUNCTION = "main"
 
-    def main(self, etas=None, s_noises=None, unsample_resample_scales=None,
-                    ):
-
+    def main(self, etas=None, s_noises=None, unsample_resample_scales=None,):
         automation = (etas, s_noises, unsample_resample_scales)
         return (automation, )
 

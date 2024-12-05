@@ -51,7 +51,7 @@ class CLIPTextEncodeFluxUnguided:
 
     CATEGORY = "advanced/conditioning/flux"
 
-    def encode(self, clip, clip_l, t5xxl, guidance):
+    def encode(self, clip, clip_l, t5xxl):
         tokens = clip.tokenize(clip_l)
         tokens["t5xxl"] = clip.tokenize(t5xxl)["t5xxl"]
 
