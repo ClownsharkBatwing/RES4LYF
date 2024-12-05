@@ -125,8 +125,8 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
     elif sigmas[0] < sigmas[1]:
         mask_inv = (1-mask)
     
-    x, y0, y0_inv = rk.init_guides(x, latent_guide, latent_guide_inv, mask, sigmas, UNSAMPLE)
-    x, y0, y0_inv = normalize_inputs(x, y0, y0_inv, guide_mode, extra_options)
+    x, y0_batch, y0_inv = rk.init_guides(x, latent_guide, latent_guide_inv, mask, sigmas, UNSAMPLE)
+    x, y0_batch, y0_inv = normalize_inputs(x, y0_batch, y0_inv, guide_mode, extra_options)
         
     if SDE_NOISE_EXTERNAL:
         sigma_up_total = torch.zeros_like(sigmas[0])
@@ -149,6 +149,11 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
         unsample_resample_scale = unsample_resample_scales[step] if unsample_resample_scales is not None else None
         eta = eta_var = etas[step] if etas is not None else eta
         s_noise = s_noises[step] if s_noises is not None else s_noise
+        
+        if y0_batch.shape[0] > 1:
+            y0 = y0_batch[step].unsqueeze(0)
+        else:
+            y0 = y0_batch
         
         if sigma_next == 0:
             rk, irk, rk_type, irk_type, eta, eta_var = prepare_step_to_sigma_zero(rk, irk, rk_type, irk_type, model, x, extra_options, alpha, k, noise_sampler_type)
