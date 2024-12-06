@@ -4,7 +4,7 @@ import comfy.model_patcher
 
 def get_alpha_ratio_from_sigma_up(sigma_up, sigma_next, eta, sigma_max=1.0):
     if sigma_up >= sigma_next and sigma_next > 0:
-      print("Maxximum VPSDE noise level exceeded: falling back to hard noise mode.")
+      print("Maximum VPSDE noise level exceeded: falling back to hard noise mode.")
       if eta >= 1:
         sigma_up = sigma_next * 0.9999 #avoid sqrt(neg_num) later 
       else:
@@ -123,7 +123,7 @@ def get_res4lyf_step_with_model(model, sigma, sigma_next, eta=0.0, eta_var=1.0, 
       su, sd, alpha_ratio = get_ancestral_step_EPS(sigma, sigma_next, eta)
   
   su = torch.nan_to_num(su, 0.0)
-  sd = torch.nan_to_num(sd, sigma_next)
+  sd = torch.nan_to_num(sd, float(sigma_next))
   alpha_ratio = torch.nan_to_num(alpha_ratio, 1.0)
   
   return su, sigma, sd, alpha_ratio

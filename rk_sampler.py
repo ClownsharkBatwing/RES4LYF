@@ -111,6 +111,9 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
         sigmas = sigmas_override.clone()
     sigmas = sigmas.clone() * d_noise
     
+    rk_euler = RK_Method.create(model, "euler", x.device)
+    rk_euler.init_noise_sampler(x, noise_seed+1000, noise_sampler_type, alpha=alpha, k=k)
+    
     rk = RK_Method.create(model, rk_type, x.device)
     rk.init_noise_sampler(x, noise_seed, noise_sampler_type, alpha=alpha, k=k)
 
@@ -164,6 +167,8 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
         
         c2, c3 = get_res4lyf_half_step3(sigma, sigma_down, c2, c3, t_fn=rk.t_fn, sigma_fn=rk.sigma_fn, t_fn_formula=t_fn_formula, sigma_fn_formula=sigma_fn_formula)
         
+        
+        rk_euler.set_coeff("euler", h, c1, c2, c3, step, sigmas, sigma, sigma_down)
         rk. set_coeff(rk_type, h, c1, c2, c3, step, sigmas, sigma, sigma_down)
         irk.set_coeff(irk_type, h_irk, c1, c2, c3, step, sigmas, sigma, sigma_down)
         
@@ -195,9 +200,19 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
 
 
         if implicit_steps == 0: 
+            x_0_tmp = x_0.clone()
             for row in range(rk.rows - rk.multistep_stages):
-                x_[row+1] = x_0 + h * rk.a_k_sum(eps_, row)     
+                if row > 0 and extra_options_flag("substep_eta", extra_options):
+                    substep_eta = float(get_extra_options_kv("substep_eta=", "0.5", extra_options))
+                    substep_noise_mode = get_extra_options_kv("substep_noise_mode=", "hard", extra_options)
+                    sub_sigma_up, sub_sigma, sub_sigma_down, sub_alpha_ratio = get_res4lyf_step_with_model(model, s_[row-1], s_[row], substep_eta, eta_var, substep_noise_mode, s_[row]-s_[row-1])
+                else:
+                    sub_sigma_up, sub_sigma, sub_sigma_down, sub_alpha_ratio = 0, s_[row], s_[row+1], 1
+                    substep_eta, substep_noise_mode = 0.0, "hard"
+
                 
+                x_[row+1] = x_0 + h * rk.a_k_sum(eps_, row)     
+
                 if guide_mode == "data":
                     denoised = x_0 + ((sigma / (sigma - sigma_down)) *  h) * rk.a_k_sum(eps_, row) 
                     eps = x_[row+1] - denoised
@@ -206,8 +221,10 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
                     else:
                         denoised_shifted = denoised   +   lgw_mask * (y0 - denoised)   +   lgw_mask_inv * (y0_inv - denoised)
                     x_[row+1] = denoised_shifted + eps
-                           
+                
+                x_[row+1] = rk.add_noise_post(x_[row+1], y0, lgw[step], sub_sigma_up, sub_sigma, s_[row], sub_sigma_down, sub_alpha_ratio, s_noise, substep_noise_mode, SDE_NOISE_EXTERNAL, sde_noise_t)    #y0, lgw, sigma_down are currently unused
                 eps_[row], data_[row] = rk(x_0, x_[row+1], s_[row], h, **extra_args)       #MODEL CALL
+    
                 eps_, x_ = process_guides_substep(x_0, x_, eps_, data_, row, y0, y0_inv, lgw[step], lgw_inv[step], lgw_mask, lgw_mask_inv, step, sigma, sigma_next, sigma_down, s_, unsample_resample_scale, rk, rk_type, guide_mode, latent_guide_inv, UNSAMPLE, extra_options)
             
             x = x_0 + h * rk.b_k_sum(eps_, 0)
