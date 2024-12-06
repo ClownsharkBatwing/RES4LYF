@@ -20,7 +20,7 @@ def time_snr_shift_RES4LYF(alpha, t):
         out = math.exp(alpha) / (math.exp(alpha) + (1 / t - 1) ** 1.0)
     else:
         out = original_time_snr_shift(alpha, t)
-    print(f"Using RES4LYF time_snr_shift: {using_RES4LYF_time_snr_shift}, alpha: {alpha}")
+    #print(f"Using RES4LYF time_snr_shift: {using_RES4LYF_time_snr_shift}, alpha: {alpha}")
     return out
     
 @PromptServer.instance.routes.post("/reslyf/settings")
