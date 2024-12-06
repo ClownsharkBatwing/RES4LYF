@@ -203,8 +203,8 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
             x_0_tmp = x_0.clone()
             for row in range(rk.rows - rk.multistep_stages):
                 if row > 0 and extra_options_flag("substep_eta", extra_options):
-                    substep_eta = float(get_extra_options_kv("substep_eta=", "0.5", extra_options))
-                    substep_noise_mode = get_extra_options_kv("substep_noise_mode=", "hard", extra_options)
+                    substep_eta = float(get_extra_options_kv("substep_eta", "0.5", extra_options))
+                    substep_noise_mode = get_extra_options_kv("substep_noise_mode", "hard", extra_options)
                     sub_sigma_up, sub_sigma, sub_sigma_down, sub_alpha_ratio = get_res4lyf_step_with_model(model, s_[row-1], s_[row], substep_eta, eta_var, substep_noise_mode, s_[row]-s_[row-1])
                 else:
                     sub_sigma_up, sub_sigma, sub_sigma_down, sub_alpha_ratio = 0, s_[row], s_[row+1], 1
