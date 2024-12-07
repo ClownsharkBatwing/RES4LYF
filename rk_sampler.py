@@ -76,7 +76,7 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
                   etas=None, s_noises=None, momentums=None, guides=None,
                   ):
     extra_args = {} if extra_args is None else extra_args
-    s_in = x.new_ones([x.shape[0]])
+    s_in, s_one = x.new_ones([x.shape[0]]), x.new_ones([1])
     default_dtype = torch.float64
     max_steps=10000
     
@@ -110,6 +110,9 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
     if sigmas_override is not None:
         sigmas = sigmas_override.clone()
     sigmas = sigmas.clone() * d_noise
+    
+    rk_euler = RK_Method.create(model, "euler", x.device)
+    rk_euler.init_noise_sampler(x, noise_seed+1000, noise_sampler_type, alpha=alpha, k=k)
     
     rk = RK_Method.create(model, rk_type, x.device)
     rk.init_noise_sampler(x, noise_seed, noise_sampler_type, alpha=alpha, k=k)
@@ -151,7 +154,7 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
         s_noise = s_noises[step] if s_noises is not None else s_noise
         
         if y0_batch.shape[0] > 1:
-            y0 = y0_batch[step].unsqueeze(0)
+            y0 = y0_batch[min(step, y0_batch.shape[0]-1)].unsqueeze(0)
         else:
             y0 = y0_batch
         
@@ -164,15 +167,17 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
         
         c2, c3 = get_res4lyf_half_step3(sigma, sigma_down, c2, c3, t_fn=rk.t_fn, sigma_fn=rk.sigma_fn, t_fn_formula=t_fn_formula, sigma_fn_formula=sigma_fn_formula)
         
+        
+        rk_euler.set_coeff("euler", h, c1, c2, c3, step, sigmas, sigma, sigma_down)
         rk. set_coeff(rk_type, h, c1, c2, c3, step, sigmas, sigma, sigma_down)
         irk.set_coeff(irk_type, h_irk, c1, c2, c3, step, sigmas, sigma, sigma_down)
         
         if step == 0:
             x_, data_, data_u, eps_ = (torch.zeros(max(rk.rows, irk.rows) + 2, *x.shape, dtype=x.dtype, device=x.device) for step in range(4))
         
-        s_       = [(  rk.sigma_fn( rk.t_fn(sigma) +     h*c_)) * s_in for c_ in   rk.c]
-        s_irk_rk = [(  rk.sigma_fn( rk.t_fn(sigma) +     h*c_)) * s_in for c_ in  irk.c]
-        s_irk    = [( irk.sigma_fn(irk.t_fn(sigma) + h_irk*c_)) * s_in for c_ in  irk.c]
+        s_       = [(  rk.sigma_fn( rk.t_fn(sigma) +     h*c_)) * s_one for c_ in   rk.c]
+        s_irk_rk = [(  rk.sigma_fn( rk.t_fn(sigma) +     h*c_)) * s_one for c_ in  irk.c]
+        s_irk    = [( irk.sigma_fn(irk.t_fn(sigma) + h_irk*c_)) * s_one for c_ in  irk.c]
 
         sde_noise_t = None
         if SDE_NOISE_EXTERNAL:
@@ -192,12 +197,30 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
             
         lgw_mask, lgw_mask_inv = prepare_weighted_masks(mask, mask_inv, lgw[step], lgw_inv[step], latent_guide, latent_guide_inv, LGW_MASK_RESCALE_MIN)        
 
-
+        substep_eta_start_step = int(get_extra_options_kv("substep_noise_start_step", "0", extra_options))
+        substep_eta_final_step = int(get_extra_options_kv("substep_noise_final_step", "-1", extra_options))
 
         if implicit_steps == 0: 
+            x_0_tmp = x_0.clone()
             for row in range(rk.rows - rk.multistep_stages):
-                x_[row+1] = x_0 + h * rk.a_k_sum(eps_, row)     
+                if row > 0 and step > substep_eta_start_step and extra_options_flag("substep_eta", extra_options):
+                    substep_eta = float(get_extra_options_kv("substep_eta", "0.5", extra_options))
+                    substep_noise_mode = get_extra_options_kv("substep_noise_mode", "hard", extra_options)
+                    sub_sigma_up, sub_sigma, sub_sigma_down, sub_alpha_ratio = get_res4lyf_step_with_model(model, s_[row-1], s_[row], substep_eta, eta_var, substep_noise_mode, s_[row]-s_[row-1])
+                else:
+                    sub_sigma_up, sub_sigma, sub_sigma_down, sub_alpha_ratio = 0, s_[row], s_[row+1], 1
+                    substep_eta, substep_noise_mode = 0.0, "hard"
                 
+                
+                if substep_eta_final_step < 0 and step == len(sigmas)-1+substep_eta_final_step:
+                    sub_sigma_up, sub_sigma, sub_sigma_down, sub_alpha_ratio = 0, s_[row], s_[row+1], 1
+                    substep_eta, substep_noise_mode = 0.0, "hard"
+                elif substep_eta_final_step > 0 and step > substep_eta_final_step:
+                    sub_sigma_up, sub_sigma, sub_sigma_down, sub_alpha_ratio = 0, s_[row], s_[row+1], 1
+                    substep_eta, substep_noise_mode = 0.0, "hard"
+                
+                x_[row+1] = x_0 + h * rk.a_k_sum(eps_, row)     
+
                 if guide_mode == "data":
                     denoised = x_0 + ((sigma / (sigma - sigma_down)) *  h) * rk.a_k_sum(eps_, row) 
                     eps = x_[row+1] - denoised
@@ -206,8 +229,16 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
                     else:
                         denoised_shifted = denoised   +   lgw_mask * (y0 - denoised)   +   lgw_mask_inv * (y0_inv - denoised)
                     x_[row+1] = denoised_shifted + eps
-                           
+                
+                x_[row+1] = rk.add_noise_post(x_[row+1], y0, lgw[step], sub_sigma_up, sub_sigma, s_[row], sub_sigma_down, sub_alpha_ratio, s_noise, substep_noise_mode, SDE_NOISE_EXTERNAL, sde_noise_t)    #y0, lgw, sigma_down are currently unused
                 eps_[row], data_[row] = rk(x_0, x_[row+1], s_[row], h, **extra_args)       #MODEL CALL
+  
+                if extra_options_flag("substep_noise_scaling", extra_options):
+                    #eps_[row] = eps_[row] * (s_[row+1]/s_[row]) * (s_[row]/sub_sigma_down)
+                    eps_[row] *= (s_[row+1]/sigma) * (sigma/sub_sigma_down)
+                if extra_options_flag("substep_sigma_ratio", extra_options):
+                    sigma_ratio = (sub_sigma_down - sigma) / (s_[row+1] - sigma)
+                    eps_[row] *= sigma_ratio
                 eps_, x_ = process_guides_substep(x_0, x_, eps_, data_, row, y0, y0_inv, lgw[step], lgw_inv[step], lgw_mask, lgw_mask_inv, step, sigma, sigma_next, sigma_down, s_, unsample_resample_scale, rk, rk_type, guide_mode, latent_guide_inv, UNSAMPLE, extra_options)
             
             x = x_0 + h * rk.b_k_sum(eps_, 0)

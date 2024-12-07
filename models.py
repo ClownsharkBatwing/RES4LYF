@@ -5,6 +5,8 @@ import comfy.sample
 import comfy.sampler_helpers
 import comfy.utils
 from comfy.cli_args import args
+from comfy_extras.nodes_model_advanced import ModelSamplingSD3, ModelSamplingFlux, ModelSamplingAuraFlow, ModelSamplingStableCascade
+
 
 import torch
 
@@ -24,8 +26,7 @@ def time_snr_shift_linear(alpha, t):
         return t
     return alpha * t / (1 + (alpha - 1) * t)
 
-
-class ModelTimestepPatcher:
+class ModelSamplingAdvanced:
     # this is used to set the "shift" using either exponential scaling (default for SD3.5M and Flux) or linear scaling (default for SD3.5L and SD3 2B beta)
     @classmethod
     def INPUT_TYPES(s):
@@ -33,24 +34,52 @@ class ModelTimestepPatcher:
                     "model": ("MODEL",),
                     "scaling": (["exponential", "linear"], {"default": 'exponential'}), 
                     "shift": ("FLOAT", {"default": 3.0, "min": -100.0, "max": 100.0, "step":0.01, "round": False}),
-                    
+                    #"base_shift": ("FLOAT", {"default": 3.0, "min": -100.0, "max": 100.0, "step":0.01, "round": False}),
                 }
                }
     
     RETURN_TYPES = ("MODEL",)
     FUNCTION = "main"
-    CATEGORY = "SD35L"
+    CATEGORY = "model_patches"
 
     def sigma_exponential(self, timestep):
-        return time_snr_shift_exponential(self.shift, timestep / self.multiplier)
+        return time_snr_shift_exponential(self.timestep_shift, timestep / self.multiplier)
 
     def sigma_linear(self, timestep):
-        return time_snr_shift_linear(self.shift, timestep / self.multiplier)
+        return time_snr_shift_linear(self.timestep_shift, timestep / self.multiplier)
 
     def main(self, model, scaling, shift):
-        self.shift = shift
+        m = model.clone()
+        
+        self.timestep_shift = shift
         self.multiplier = 1000
-        timesteps = 1000 #this was 10000
+        timesteps = 1000
+        
+        if isinstance(m.model.model_config, comfy.supported_models.Flux) or isinstance(m.model.model_config, comfy.supported_models.FluxSchnell):
+            self.multiplier = 1
+            timesteps = 10000
+            sampling_base = comfy.model_sampling.ModelSamplingFlux
+            sampling_type = comfy.model_sampling.CONST
+            
+        elif isinstance(m.model.model_config, comfy.supported_models.AuraFlow):
+            self.multiplier = 1
+            timesteps = 1000
+            sampling_base = comfy.model_sampling.ModelSamplingDiscreteFlow
+            sampling_type = comfy.model_sampling.CONST
+            
+        elif isinstance(m.model.model_config, comfy.supported_models.SD3):
+            self.multiplier = 1000
+            timesteps = 1000
+            sampling_base = comfy.model_sampling.ModelSamplingDiscreteFlow
+            sampling_type = comfy.model_sampling.CONST
+
+        class ModelSamplingAdvanced(sampling_base, sampling_type):
+            pass
+
+        m.object_patches['model_sampling'] = m.model.model_sampling = ModelSamplingAdvanced(m.model.model_config)
+
+        m.model.model_sampling.__dict__['shift'] = self.timestep_shift
+        m.model.model_sampling.__dict__['multiplier'] = self.multiplier
 
         s_range = torch.arange(1, timesteps + 1, 1).to(torch.float64)
         if scaling == "exponential": 
@@ -58,11 +87,85 @@ class ModelTimestepPatcher:
         elif scaling == "linear": 
             ts = self.sigma_linear((s_range / timesteps) * self.multiplier)
 
-        model.model.model_sampling.shift = self.shift
-        model.model.model_sampling.multiplier = self.multiplier
-        model.model.model_sampling.register_buffer('sigmas', ts)
+        m.model.model_sampling.register_buffer('sigmas', ts)
+        m.object_patches['model_sampling'].sigmas = m.model.model_sampling.sigmas
         
-        return (model,)
+        return (m,)
+
+class ModelSamplingAdvancedResolution:
+    # this is used to set the "shift" using either exponential scaling (default for SD3.5M and Flux) or linear scaling (default for SD3.5L and SD3 2B beta)
+    @classmethod
+    def INPUT_TYPES(s):
+        return {"required": { 
+                    "model": ("MODEL",),
+                    "scaling": (["exponential", "linear"], {"default": 'exponential'}), 
+                    "max_shift": ("FLOAT", {"default": 1.35, "min": -100.0, "max": 100.0, "step":0.01, "round": False}),
+                    "base_shift": ("FLOAT", {"default": 0.85, "min": -100.0, "max": 100.0, "step":0.01, "round": False}),
+                    "latent_image": ("LATENT",),
+                }
+               }
+    
+    RETURN_TYPES = ("MODEL",)
+    FUNCTION = "main"
+    CATEGORY = "model_shift"
+
+    def sigma_exponential(self, timestep):
+        return time_snr_shift_exponential(self.timestep_shift, timestep / self.multiplier)
+
+    def sigma_linear(self, timestep):
+        return time_snr_shift_linear(self.timestep_shift, timestep / self.multiplier)
+
+    def main(self, model, scaling, max_shift, base_shift, latent_image):
+        m = model.clone()
+        height, width = latent_image['samples'].shape[2:]
+        
+        x1 = 256
+        x2 = 4096
+        mm = (max_shift - base_shift) / (x2 - x1)
+        b = base_shift - mm * x1
+        shift = (width * height / (8 * 8 * 2 * 2)) * mm + b
+        
+        self.timestep_shift = shift
+        self.multiplier = 1000
+        timesteps = 1000
+        
+        if isinstance(m.model.model_config, comfy.supported_models.Flux) or isinstance(m.model.model_config, comfy.supported_models.FluxSchnell):
+            self.multiplier = 1
+            timesteps = 10000
+            sampling_base = comfy.model_sampling.ModelSamplingFlux
+            sampling_type = comfy.model_sampling.CONST
+
+            
+        elif isinstance(m.model.model_config, comfy.supported_models.AuraFlow):
+            self.multiplier = 1
+            timesteps = 1000
+            sampling_base = comfy.model_sampling.ModelSamplingDiscreteFlow
+            sampling_type = comfy.model_sampling.CONST
+            
+        elif isinstance(m.model.model_config, comfy.supported_models.SD3):
+            self.multiplier = 1000
+            timesteps = 1000
+            sampling_base = comfy.model_sampling.ModelSamplingDiscreteFlow
+            sampling_type = comfy.model_sampling.CONST
+
+        class ModelSamplingAdvanced(sampling_base, sampling_type):
+            pass
+
+        m.object_patches['model_sampling'] = m.model.model_sampling = ModelSamplingAdvanced(m.model.model_config)
+
+        m.model.model_sampling.__dict__['shift'] = self.timestep_shift
+        m.model.model_sampling.__dict__['multiplier'] = self.multiplier
+
+        s_range = torch.arange(1, timesteps + 1, 1).to(torch.float64)
+        if scaling == "exponential": 
+            ts = self.sigma_exponential((s_range / timesteps) * self.multiplier)
+        elif scaling == "linear": 
+            ts = self.sigma_linear((s_range / timesteps) * self.multiplier)
+
+        m.model.model_sampling.register_buffer('sigmas', ts)
+        m.object_patches['model_sampling'].sigmas = m.model.model_sampling.sigmas
+        
+        return (m,)
     
     
 class UNetSave:
