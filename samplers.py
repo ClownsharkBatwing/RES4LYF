@@ -2,7 +2,6 @@ from .noise_classes import *
 from .sigmas import get_sigmas
 from .rk_sampler import sample_rk
 from .rk_coefficients import RK_SAMPLER_NAMES, IRK_SAMPLER_NAMES
-from .models import ModelTimestepPatcher
 
 import comfy.samplers
 import comfy.sample
@@ -62,10 +61,9 @@ class SharkSampler:
                     "denoise": ("FLOAT", {"default": 1.0, "min": -10000, "max": 10000, "step":0.01}),
                     "denoise_alt": ("FLOAT", {"default": 1.0, "min": -10000, "max": 10000, "step":0.01}),
                     "cfg": ("FLOAT", {"default": 3.0, "min": -100.0, "max": 100.0, "step":0.1, "round": False, }),
-                    "shift": ("FLOAT", {"default": 1.35, "min": -1.0, "max": 100.0, "step":0.1, "round": False, }),
-                    "base_shift": ("FLOAT", {"default": 0.85, "min": -1.0, "max": 100.0, "step":0.1, "round": False, }),
-                    "shift_scaling": (["exponential", "linear"], {"default": "exponential"}),
-                    "extra_options": ("STRING", {"default": "", "multiline": True}),   
+                    #"shift": ("FLOAT", {"default": 1.35, "min": -1.0, "max": 100.0, "step":0.1, "round": False, }),
+                    #"base_shift": ("FLOAT", {"default": 0.85, "min": -1.0, "max": 100.0, "step":0.1, "round": False, }),
+                    #"shift_scaling": (["exponential", "linear"], {"default": "exponential"}),
                      },
                 "optional": 
                     {
@@ -75,6 +73,7 @@ class SharkSampler:
                     "sigmas": ("SIGMAS", ),
                     "latent_image": ("LATENT", ),     
                     "options": ("OPTIONS", ),   
+                    "extra_options": ("STRING", {"default": "", "multiline": True}),   
                     }
                 }
 
@@ -94,203 +93,207 @@ class SharkSampler:
                     extra_options="", 
                     ): 
 
-            default_dtype = torch.float64
-            max_steps = 10000
+            latent_image_batch = {"samples": latent_image['samples']}
+            out_samples, out_samples_fp64, out_denoised_samples, out_denoised_samples_fp64 = [], [], [], []
+            for batch_num in range(latent_image_batch['samples'].shape[0]):
+                latent_image['samples'] = latent_image_batch['samples'][batch_num].clone().unsqueeze(0)
+                default_dtype = torch.float64
+                max_steps = 10000
 
-            if noise_seed == -1:
-                seed = torch.initial_seed() + 1
-            else:
-                seed = noise_seed
-                torch.manual_seed(noise_seed)
-
-            if options is not None:
-                noise_stdev = options.get('noise_init_stdev', noise_stdev)
-                noise_mean = options.get('noise_init_mean', noise_mean)
-                noise_type_init = options.get('noise_type_init', noise_type_init)
-                d_noise = options.get('d_noise', d_noise)
-                alpha_init = options.get('alpha_init', alpha_init)
-                k_init = options.get('k_init', k_init)
-                unsampler_type = options.get('unsampler_type', unsampler_type)
-                sde_noise = options.get('sde_noise', sde_noise)
-                sde_noise_steps = options.get('sde_noise_steps', sde_noise_steps)
-
-            if shift >= 0:
-                if isinstance(model.model.model_config, comfy.supported_models.SD3):
-                    model = ModelSamplingSD3().patch(model, shift)[0] 
-                    model = ModelTimestepPatcher().main(model, shift_scaling, shift)[0]
-                    model.object_patches['model_sampling'].sigmas = model.model.model_sampling.sigmas
-                elif isinstance(model.model.model_config, comfy.supported_models.AuraFlow):
-                    model = ModelSamplingAuraFlow().patch_aura(model, shift)[0] 
-                    model = ModelTimestepPatcher().main(model, shift_scaling, shift)[0]
-                    model.object_patches['model_sampling'].sigmas = model.model.model_sampling.sigmas
-                elif isinstance(model.model.model_config, comfy.supported_models.Stable_Cascade_C):
-                    model = ModelSamplingStableCascade().patch(model, shift)[0] 
-            if shift >= 0 and base_shift >= 0:
-                if isinstance(model.model.model_config, comfy.supported_models.Flux) or isinstance(model.model.model_config, comfy.supported_models.FluxSchnell):
-                    model = ModelSamplingFlux().patch(model, shift, base_shift, latent_image['samples'].shape[3], latent_image['samples'].shape[2])[0] 
-                    model = ModelTimestepPatcher().main(model, shift_scaling, shift)[0]
-                    model.object_patches['model_sampling'].sigmas = model.model.model_sampling.sigmas
-
-            latent = latent_image
-            latent_image_dtype = latent_image['samples'].dtype
-
-            if positive is None:
-                positive = [[
-                    torch.zeros((1, 154, 4096)),
-                    {'pooled_output': torch.zeros((1, 2048))}
-                    ]]
-            
-            if negative is None:
-                negative = [[
-                    torch.zeros((1, 154, 4096)),
-                    {'pooled_output': torch.zeros((1, 2048))}
-                    ]]
-                
-            if denoise_alt < 0:
-                d_noise = denoise_alt = -denoise_alt
-            if options is not None:
-                d_noise = options.get('d_noise', d_noise)
-            
-            if sigmas is not None:
-                sigmas = sigmas.clone().to(default_dtype)
-            else: 
-                sigmas = get_sigmas(model, scheduler, steps, denoise).to(default_dtype)
-            sigmas *= denoise_alt
-
-            if sampler_mode.startswith("unsample"): 
-                null = torch.tensor([0.0], device=sigmas.device, dtype=sigmas.dtype)
-                sigmas = torch.flip(sigmas, dims=[0])
-                sigmas = torch.cat([sigmas, null])
-            elif sampler_mode.startswith("resample"):
-                null = torch.tensor([0.0], device=sigmas.device, dtype=sigmas.dtype)
-                sigmas = torch.cat([null, sigmas])
-                sigmas = torch.cat([sigmas, null])
-            
-            if sampler_mode.startswith("unsample_"):
-                unsampler_type = sampler_mode.split("_", 1)[1]
-            elif sampler_mode.startswith("resample_"):
-                unsampler_type = sampler_mode.split("_", 1)[1]
-            else:
-                unsampler_type = ""
-                
-            x = latent_image["samples"].clone().to(default_dtype) 
-            if latent_image is not None:
-                if "samples_fp64" in latent_image:
-                    if latent_image['samples'].shape == latent_image['samples_fp64'].shape:
-                        if torch.norm(latent_image['samples'] - latent_image['samples_fp64']) < 0.01:
-                            x = latent_image["samples_fp64"].clone()
-                
-            if latent_noise is not None:
-                latent_noise["samples"] = latent_noise["samples"].clone().to(default_dtype)  
-            if latent_noise_match is not None:
-                latent_noise_match["samples"] = latent_noise_match["samples"].clone().to(default_dtype)
-
-            truncate_conditioning = extra_options_flag("truncate_conditioning", extra_options)
-            if truncate_conditioning == "true" or truncate_conditioning == "true_and_zero_neg":
-                if positive is not None:
-                    positive[0][0] = positive[0][0].clone().to(default_dtype)
-                    positive[0][1]["pooled_output"] = positive[0][1]["pooled_output"].clone().to(default_dtype)
-                if negative is not None:
-                    negative[0][0] = negative[0][0].clone().to(default_dtype)
-                    negative[0][1]["pooled_output"] = negative[0][1]["pooled_output"].clone().to(default_dtype)
-                c = []
-                for t in positive:
-                    d = t[1].copy()
-                    pooled_output = d.get("pooled_output", None)
-                    if pooled_output is not None:default_dtype = torch.float64
-                for t in negative:
-                    d = t[1].copy()
-                    pooled_output = d.get("pooled_output", None)
-                    if pooled_output is not None:
-                        if truncate_conditioning == "true_and_zero_neg":
-                            d["pooled_output"] = torch.zeros((1,2048), dtype=t[0].dtype, device=t[0].device)
-                            n = [torch.zeros((1,154,4096), dtype=t[0].dtype, device=t[0].device), d]
-                        else:
-                            d["pooled_output"] = d["pooled_output"][:, :2048]
-                            n = [t[0][:, :154, :4096], d]
-                    c.append(n)
-                negative = c
-            
-            sigmin = model.model.model_sampling.sigma_min
-            sigmax = model.model.model_sampling.sigma_max
-
-            if sde_noise is None and sampler_mode.startswith("unsample"):
-                total_steps = len(sigmas)+1
-                sde_noise = []
-            else:
-                total_steps = 1
-
-            for total_steps_iter in range (sde_noise_steps):
-                    
-                if noise_type_init == "none":
-                    noise = torch.zeros_like(x)
-                elif latent_noise is None:
-                    noise_sampler_init = NOISE_GENERATOR_CLASSES_SIMPLE.get(noise_type_init)(x=x, seed=seed, sigma_min=sigmin, sigma_max=sigmax)
-                
-                    if noise_type_init == "fractal":
-                        noise_sampler_init.alpha = alpha_init
-                        noise_sampler_init.k = k_init
-                        noise_sampler_init.scale = 0.1
-                    noise = noise_sampler_init(sigma=sigmax, sigma_next=sigmin)
+                if noise_seed == -1:
+                    seed = torch.initial_seed() + 1 + batch_num
                 else:
-                    noise = latent_noise["samples"]
+                    seed = noise_seed + batch_num
+                    torch.manual_seed(noise_seed + batch_num)
 
-                if noise_is_latent: #add noise and latent together and normalize --> noise
-                    noise += x.cpu()
-                    noise.sub_(noise.mean()).div_(noise.std())
+                if options is not None:
+                    noise_stdev = options.get('noise_init_stdev', noise_stdev)
+                    noise_mean = options.get('noise_init_mean', noise_mean)
+                    noise_type_init = options.get('noise_type_init', noise_type_init)
+                    d_noise = options.get('d_noise', d_noise)
+                    alpha_init = options.get('alpha_init', alpha_init)
+                    k_init = options.get('k_init', k_init)
+                    unsampler_type = options.get('unsampler_type', unsampler_type)
+                    sde_noise = options.get('sde_noise', sde_noise)
+                    sde_noise_steps = options.get('sde_noise_steps', sde_noise_steps)
 
-                if noise_normalize and noise.std() > 0:
-                    noise.sub_(noise.mean()).div_(noise.std())
-                noise *= noise_stdev
-                noise = (noise - noise.mean()) + noise_mean
+                latent = latent_image
+                latent_image_dtype = latent_image['samples'].dtype
+
+                if positive is None:
+                    positive = [[
+                        torch.zeros((1, 154, 4096)),
+                        {'pooled_output': torch.zeros((1, 2048))}
+                        ]]
                 
-                if latent_noise_match:
-                    for i in range(latent_noise_match["samples"].shape[1]):
-                        noise[0][i] = (noise[0][i] - noise[0][i].mean())
-                        noise[0][i] = (noise[0][i]) + latent_noise_match["samples"][0][i].mean()
-
-                noise_mask = latent["noise_mask"] if "noise_mask" in latent else None
-
-                x0_output = {}
-
-                callback = latent_preview.prepare_callback(model, sigmas.shape[-1] - 1, x0_output)
-
-                disable_pbar = False
-                
-                if cfg < 0:
-                    cfgpp = -cfg
-                    cfg = 1.0
+                if negative is None:
+                    negative = [[
+                        torch.zeros((1, 154, 4096)),
+                        {'pooled_output': torch.zeros((1, 2048))}
+                        ]]
                     
-                if sde_noise is None:
+                if denoise_alt < 0:
+                    d_noise = denoise_alt = -denoise_alt
+                if options is not None:
+                    d_noise = options.get('d_noise', d_noise)
+                
+                if sigmas is not None:
+                    sigmas = sigmas.clone().to(default_dtype)
+                else: 
+                    sigmas = get_sigmas(model, scheduler, steps, denoise).to(default_dtype)
+                sigmas *= denoise_alt
+
+                if sampler_mode.startswith("unsample"): 
+                    null = torch.tensor([0.0], device=sigmas.device, dtype=sigmas.dtype)
+                    sigmas = torch.flip(sigmas, dims=[0])
+                    sigmas = torch.cat([sigmas, null])
+                elif sampler_mode.startswith("resample"):
+                    null = torch.tensor([0.0], device=sigmas.device, dtype=sigmas.dtype)
+                    sigmas = torch.cat([null, sigmas])
+                    sigmas = torch.cat([sigmas, null])
+                
+                if sampler_mode.startswith("unsample_"):
+                    unsampler_type = sampler_mode.split("_", 1)[1]
+                elif sampler_mode.startswith("resample_"):
+                    unsampler_type = sampler_mode.split("_", 1)[1]
+                else:
+                    unsampler_type = ""
+                    
+                x = latent_image["samples"].clone().to(default_dtype) 
+                if latent_image is not None:
+                    if "samples_fp64" in latent_image:
+                        if latent_image['samples'].shape == latent_image['samples_fp64'].shape:
+                            if torch.norm(latent_image['samples'] - latent_image['samples_fp64']) < 0.01:
+                                x = latent_image["samples_fp64"].clone()
+                    
+                if latent_noise is not None:
+                    latent_noise["samples"] = latent_noise["samples"].clone().to(default_dtype)  
+                if latent_noise_match is not None:
+                    latent_noise_match["samples"] = latent_noise_match["samples"].clone().to(default_dtype)
+
+                truncate_conditioning = extra_options_flag("truncate_conditioning", extra_options)
+                if truncate_conditioning == "true" or truncate_conditioning == "true_and_zero_neg":
+                    if positive is not None:
+                        positive[0][0] = positive[0][0].clone().to(default_dtype)
+                        positive[0][1]["pooled_output"] = positive[0][1]["pooled_output"].clone().to(default_dtype)
+                    if negative is not None:
+                        negative[0][0] = negative[0][0].clone().to(default_dtype)
+                        negative[0][1]["pooled_output"] = negative[0][1]["pooled_output"].clone().to(default_dtype)
+                    c = []
+                    for t in positive:
+                        d = t[1].copy()
+                        pooled_output = d.get("pooled_output", None)
+                        if pooled_output is not None:default_dtype = torch.float64
+                    for t in negative:
+                        d = t[1].copy()
+                        pooled_output = d.get("pooled_output", None)
+                        if pooled_output is not None:
+                            if truncate_conditioning == "true_and_zero_neg":
+                                d["pooled_output"] = torch.zeros((1,2048), dtype=t[0].dtype, device=t[0].device)
+                                n = [torch.zeros((1,154,4096), dtype=t[0].dtype, device=t[0].device), d]
+                            else:
+                                d["pooled_output"] = d["pooled_output"][:, :2048]
+                                n = [t[0][:, :154, :4096], d]
+                        c.append(n)
+                    negative = c
+                
+                sigmin = model.model.model_sampling.sigma_min
+                sigmax = model.model.model_sampling.sigma_max
+
+                if sde_noise is None and sampler_mode.startswith("unsample"):
+                    total_steps = len(sigmas)+1
                     sde_noise = []
                 else:
-                    sde_noise = copy.deepcopy(sde_noise)
-                    for i in range(len(sde_noise)):
-                        sde_noise[i] = sde_noise[i].to('cuda')
-                        for j in range(sde_noise[i].shape[1]):
-                            sde_noise[i][0][j] = ((sde_noise[i][0][j] - sde_noise[i][0][j].mean()) / sde_noise[i][0][j].std()) #.to('cuda')
+                    total_steps = 1
 
-                samples = comfy.sample.sample_custom(model, noise, cfg, sampler, sigmas, positive, negative, x.clone(), 
-                                                    noise_mask=noise_mask, callback=callback, disable_pbar=disable_pbar, seed=noise_seed)
+                for total_steps_iter in range (sde_noise_steps):
+                        
+                    if noise_type_init == "none":
+                        noise = torch.zeros_like(x)
+                    elif latent_noise is None:
+                        noise_sampler_init = NOISE_GENERATOR_CLASSES_SIMPLE.get(noise_type_init)(x=x, seed=seed, sigma_min=sigmin, sigma_max=sigmax)
+                    
+                        if noise_type_init == "fractal":
+                            noise_sampler_init.alpha = alpha_init
+                            noise_sampler_init.k = k_init
+                            noise_sampler_init.scale = 0.1
+                        noise = noise_sampler_init(sigma=sigmax, sigma_next=sigmin)
+                    else:
+                        noise = latent_noise["samples"]
 
-                out = latent.copy()
-                out["samples"] = samples
-                if "x0" in x0_output:
-                    out_denoised = latent.copy()
-                    out_denoised["samples"] = model.model.process_latent_out(x0_output["x0"].cpu())
-                else:
-                    out_denoised = out
-                
-                out["samples_fp64"] = out["samples"].clone()
-                out["samples"] = out["samples"].to(latent_image_dtype)
-                
-                out_denoised["samples_fp64"] = out_denoised["samples"].clone()
-                out_denoised["samples"] = out_denoised["samples"].to(latent_image_dtype)
-                
-                seed += 1
-                torch.manual_seed(seed)
-                if total_steps_iter > 1: 
-                    sde_noise.append(out["samples_fp64"])
+                    if noise_is_latent: #add noise and latent together and normalize --> noise
+                        noise += x.cpu()
+                        noise.sub_(noise.mean()).div_(noise.std())
+
+                    if noise_normalize and noise.std() > 0:
+                        noise.sub_(noise.mean()).div_(noise.std())
+                    noise *= noise_stdev
+                    noise = (noise - noise.mean()) + noise_mean
+                    
+                    if latent_noise_match:
+                        for i in range(latent_noise_match["samples"].shape[1]):
+                            noise[0][i] = (noise[0][i] - noise[0][i].mean())
+                            noise[0][i] = (noise[0][i]) + latent_noise_match["samples"][0][i].mean()
+
+                    noise_mask = latent["noise_mask"] if "noise_mask" in latent else None
+
+                    x0_output = {}
+
+
+                    
+                    if cfg < 0:
+                        cfgpp = -cfg
+                        cfg = 1.0
+                        
+                    if sde_noise is None:
+                        sde_noise = []
+                    else:
+                        sde_noise = copy.deepcopy(sde_noise)
+                        for i in range(len(sde_noise)):
+                            sde_noise[i] = sde_noise[i].to('cuda')
+                            for j in range(sde_noise[i].shape[1]):
+                                sde_noise[i][0][j] = ((sde_noise[i][0][j] - sde_noise[i][0][j].mean()) / sde_noise[i][0][j].std()) #.to('cuda')
+                                
+                    callback = latent_preview.prepare_callback(model, sigmas.shape[-1] - 1, x0_output)
+                    #disable_pbar = False
+                    disable_pbar = not comfy.utils.PROGRESS_BAR_ENABLED
+                    samples = comfy.sample.sample_custom(model, noise, cfg, sampler, sigmas, positive, negative, x.clone(), noise_mask=noise_mask, callback=callback, disable_pbar=disable_pbar, seed=noise_seed)
+
+                    out = latent.copy()
+                    out["samples"] = samples
+                    if "x0" in x0_output:
+                        out_denoised = latent.copy()
+                        out_denoised["samples"] = model.model.process_latent_out(x0_output["x0"].cpu())
+                    else:
+                        out_denoised = out
+                    
+                    out["samples_fp64"] = out["samples"].clone()
+                    out["samples"] = out["samples"].to(latent_image_dtype)
+                    
+                    out_denoised["samples_fp64"] = out_denoised["samples"].clone()
+                    out_denoised["samples"] = out_denoised["samples"].to(latent_image_dtype)
+                    
+                    out_samples.append(out["samples"])
+                    out_samples_fp64.append(out["samples_fp64"])
+                    
+                    out_denoised_samples.append(out_denoised["samples"])
+                    out_denoised_samples_fp64.append(out_denoised["samples_fp64"])
+                    
+                    seed += 1
+                    torch.manual_seed(seed)
+                    if total_steps_iter > 1: 
+                        sde_noise.append(out["samples_fp64"])
+                        
+            out_samples = [tensor.squeeze(0) for tensor in out_samples]
+            out_samples_fp64 = [tensor.squeeze(0) for tensor in out_samples_fp64]
+            out_denoised_samples = [tensor.squeeze(0) for tensor in out_denoised_samples]
+            out_denoised_samples_fp64 = [tensor.squeeze(0) for tensor in out_denoised_samples_fp64]
+
+            out['samples'] = torch.stack(out_samples, dim=0)
+            out['samples_fp64'] = torch.stack(out_samples_fp64, dim=0)
+            
+            out_denoised['samples'] = torch.stack(out_denoised_samples, dim=0)
+            out_denoised['samples_fp64'] = torch.stack(out_denoised_samples_fp64, dim=0)
 
             return ( out, out_denoised, sde_noise,)
 
@@ -313,13 +316,13 @@ class ClownSampler:
                     "sampler_name": (RK_SAMPLER_NAMES, {"default": "res_2m"}), 
                     "implicit_sampler_name": (IRK_SAMPLER_NAMES, {"default": "gauss-legendre_2s"}), 
                     "implicit_steps": ("INT", {"default": 0, "min": 0, "max": 10000}),
-                    "extra_options": ("STRING", {"default": "", "multiline": True}),   
                      },
                 "optional": 
                     {
                     "guides": ("GUIDES", ),     
                     "options": ("OPTIONS", ),   
                     "automation": ("AUTOMATION", ),
+                    "extra_options": ("STRING", {"default": "", "multiline": True}),   
                     }
                 }
 
@@ -462,9 +465,9 @@ class ClownsharKSampler:
                     "denoise": ("FLOAT", {"default": 1.0, "min": -10000, "max": 10000, "step":0.01}),
                     "denoise_alt": ("FLOAT", {"default": 1.0, "min": -10000, "max": 10000, "step":0.01}),
                     "cfg": ("FLOAT", {"default": 3.0, "min": -100.0, "max": 100.0, "step":0.1, "round": False, }),
-                    "shift": ("FLOAT", {"default": 1.35, "min": -1.0, "max": 100.0, "step":0.1, "round": False, }),
-                    "base_shift": ("FLOAT", {"default": 0.85, "min": -1.0, "max": 100.0, "step":0.1, "round": False, }),
-                    "shift_scaling": (["exponential", "linear"], {"default": "exponential"}),
+                    #"shift": ("FLOAT", {"default": 1.35, "min": -1.0, "max": 100.0, "step":0.1, "round": False, }),
+                    #"base_shift": ("FLOAT", {"default": 0.85, "min": -1.0, "max": 100.0, "step":0.1, "round": False, }),
+                    #"shift_scaling": (["exponential", "linear"], {"default": "exponential"}),
                     "extra_options": ("STRING", {"default": "", "multiline": True}),   
                      },
                 "optional": 

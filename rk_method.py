@@ -81,7 +81,7 @@ class RK_Method:
         s_in = x.new_ones([x.shape[0]])
         x0 = self.model(x, sigma * s_in, **extra_args)
         #return x0 ###################################THIS WORKS ONLY WITH THE MODEL SAMPLING PATCH
-        eps = (x - x0) / (sigma * s_in) 
+        eps = (x - x0) / (sigma * s_in).view(x.shape[0], 1, 1, 1)
         return eps, x0
     
     def model_denoised(self, x, sigma, **extra_args):
@@ -336,7 +336,7 @@ class RK_Method_Linear(RK_Method):
         if torch.all(denoised_u == 0):
             epsilon_u = torch.zeros_like(x_0)
         else:
-            epsilon_u  = (x_0 - denoised_u) / (sigma * s_in)
+            epsilon_u  = (x_0 - denoised_u) / (sigma * s_in).view(x.shape[0], 1, 1, 1)
             
         self.h_prev2 = self.h_prev
         self.h_prev = h

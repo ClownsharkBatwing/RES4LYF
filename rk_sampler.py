@@ -76,7 +76,7 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
                   etas=None, s_noises=None, momentums=None, guides=None,
                   ):
     extra_args = {} if extra_args is None else extra_args
-    s_in = x.new_ones([x.shape[0]])
+    s_in, s_one = x.new_ones([x.shape[0]]), x.new_ones([1])
     default_dtype = torch.float64
     max_steps=10000
     
@@ -154,7 +154,7 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
         s_noise = s_noises[step] if s_noises is not None else s_noise
         
         if y0_batch.shape[0] > 1:
-            y0 = y0_batch[step].unsqueeze(0)
+            y0 = y0_batch[min(step, y0_batch.shape[0]-1)].unsqueeze(0)
         else:
             y0 = y0_batch
         
@@ -175,9 +175,9 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
         if step == 0:
             x_, data_, data_u, eps_ = (torch.zeros(max(rk.rows, irk.rows) + 2, *x.shape, dtype=x.dtype, device=x.device) for step in range(4))
         
-        s_       = [(  rk.sigma_fn( rk.t_fn(sigma) +     h*c_)) * s_in for c_ in   rk.c]
-        s_irk_rk = [(  rk.sigma_fn( rk.t_fn(sigma) +     h*c_)) * s_in for c_ in  irk.c]
-        s_irk    = [( irk.sigma_fn(irk.t_fn(sigma) + h_irk*c_)) * s_in for c_ in  irk.c]
+        s_       = [(  rk.sigma_fn( rk.t_fn(sigma) +     h*c_)) * s_one for c_ in   rk.c]
+        s_irk_rk = [(  rk.sigma_fn( rk.t_fn(sigma) +     h*c_)) * s_one for c_ in  irk.c]
+        s_irk    = [( irk.sigma_fn(irk.t_fn(sigma) + h_irk*c_)) * s_one for c_ in  irk.c]
 
         sde_noise_t = None
         if SDE_NOISE_EXTERNAL:
