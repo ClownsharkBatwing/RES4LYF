@@ -197,12 +197,13 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
             
         lgw_mask, lgw_mask_inv = prepare_weighted_masks(mask, mask_inv, lgw[step], lgw_inv[step], latent_guide, latent_guide_inv, LGW_MASK_RESCALE_MIN)        
 
-
+        substep_eta_start_step = int(get_extra_options_kv("substep_noise_start_step", "0", extra_options))
+        substep_eta_final_step = int(get_extra_options_kv("substep_noise_final_step", "-1", extra_options))
 
         if implicit_steps == 0: 
             x_0_tmp = x_0.clone()
             for row in range(rk.rows - rk.multistep_stages):
-                if row > 0 and extra_options_flag("substep_eta", extra_options):
+                if row > 0 and step > substep_eta_start_step and extra_options_flag("substep_eta", extra_options):
                     substep_eta = float(get_extra_options_kv("substep_eta", "0.5", extra_options))
                     substep_noise_mode = get_extra_options_kv("substep_noise_mode", "hard", extra_options)
                     sub_sigma_up, sub_sigma, sub_sigma_down, sub_alpha_ratio = get_res4lyf_step_with_model(model, s_[row-1], s_[row], substep_eta, eta_var, substep_noise_mode, s_[row]-s_[row-1])
@@ -210,11 +211,11 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
                     sub_sigma_up, sub_sigma, sub_sigma_down, sub_alpha_ratio = 0, s_[row], s_[row+1], 1
                     substep_eta, substep_noise_mode = 0.0, "hard"
                 
-                substep_eta_final_step = int(get_extra_options_kv("substep_noise_final_step", "-1", extra_options))
+                
                 if substep_eta_final_step < 0 and step == len(sigmas)-1+substep_eta_final_step:
                     sub_sigma_up, sub_sigma, sub_sigma_down, sub_alpha_ratio = 0, s_[row], s_[row+1], 1
                     substep_eta, substep_noise_mode = 0.0, "hard"
-                elif step > substep_eta_final_step:
+                elif substep_eta_final_step > 0 and step > substep_eta_final_step:
                     sub_sigma_up, sub_sigma, sub_sigma_down, sub_alpha_ratio = 0, s_[row], s_[row+1], 1
                     substep_eta, substep_noise_mode = 0.0, "hard"
                 
