@@ -39,12 +39,12 @@ NOISE_MODE_NAMES = ["none",
                     "hard",
                     "lorentzian", 
                     "soft", 
+                    "soft-linear",
                     "softer",
+                    "sinusoidal",
                     "exp", 
-                    "chute",
                     "hard_var", 
                     ]
-
 
 
 
