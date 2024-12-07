@@ -92,6 +92,23 @@ def get_ancestral_step_RF_hard(sigma_next, eta, sigma_max=1.0):
     return sigma_up, sigma_down, alpha_ratio
 
 
+def get_ancestral_step_RF_chute(sigma, sigma_next, eta, sigma_max=1.0):
+    sigma_down = sigma_next + eta * (sigma_next - sigma)
+    if sigma_down < 0:
+      return torch.full_like(sigma, 0.), sigma_next, torch.full_like(sigma, 1.)
+    
+    alpha_ratio = (1 - sigma_next) / (1 - sigma_down)
+    sigma_up = torch.sqrt( sigma_next**2 - (alpha_ratio * sigma_down)**2)
+    
+    #alpha_ratio = sigma_next / sigma_down
+    
+    #sigma_up = torch.sqrt( (1-sigma)**2 - sigma**2 * (1-sigma_next)**2 / sigma_next**2)
+    
+    #sigma_up = torch.sqrt( (1-sigma_next)**2 - (alpha_ratio * (1-sigma_down))**2)
+    
+    return sigma_up, sigma_down, alpha_ratio
+  
+
 def get_res4lyf_step_with_model(model, sigma, sigma_next, eta=0.0, eta_var=1.0, noise_mode="hard", h=None):
   if isinstance(model.inner_model.inner_model.model_sampling, comfy.model_sampling.CONST):
     sigma_var = (-1 + torch.sqrt(1 + 4 * sigma)) / 2
@@ -108,6 +125,8 @@ def get_res4lyf_step_with_model(model, sigma, sigma_next, eta=0.0, eta_var=1.0, 
         su, sd, alpha_ratio = get_ancestral_step_RF_sqrd(sigma, sigma_next, eta)
       elif noise_mode == "exp": 
         su, sd, alpha_ratio = get_ancestral_step_RF_exp(sigma_next, eta, h)
+      elif noise_mode == "chute": 
+        su, sd, alpha_ratio = get_ancestral_step_RF_chute(sigma, sigma_next, eta, h)
       elif noise_mode == "lorentzian":
         su, sd, alpha_ratio = get_ancestral_step_RF_lorentzian(sigma, sigma_next, eta)
       else: #fall back to hard noise from hard_var

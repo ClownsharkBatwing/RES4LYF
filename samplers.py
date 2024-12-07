@@ -41,6 +41,7 @@ NOISE_MODE_NAMES = ["none",
                     "soft", 
                     "softer",
                     "exp", 
+                    "chute",
                     "hard_var", 
                     ]
 
