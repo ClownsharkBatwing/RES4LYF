@@ -95,7 +95,10 @@ NODE_CLASS_MAPPINGS = {
 
     "SamplerOptions_TimestepScaling": samplers_extensions.SamplerOptions_TimestepScaling,
     "SamplerOptions_GarbageCollection": samplers_extensions.SamplerOptions_GarbageCollection,
-    "ModelTimestepPatcher": models.ModelTimestepPatcher,
+    "ModelSamplingAdvanced": models.ModelSamplingAdvanced,
+    "ModelTimestepPatcher": models.ModelSamplingAdvanced,
+
+    "ModelSamplingAdvancedResolution": models.ModelSamplingAdvancedResolution,
     
     "AdvancedNoise": latents.AdvancedNoise,
     
