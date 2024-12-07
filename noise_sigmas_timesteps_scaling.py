@@ -96,7 +96,7 @@ def get_ancestral_step_RF_chute(sigma, sigma_next, eta, sigma_max=1.0):
     sigma_down = sigma_next + eta * (sigma_next - sigma)
     if sigma_down < 0:
       return torch.full_like(sigma, 0.), sigma_next, torch.full_like(sigma, 1.)
-    alpha_ratio, sigma_up, sigma_down = get_alpha_ratio_from_sigma_up(sigma_up, sigma_next, eta, sigma_max)
+    alpha_ratio, sigma_up, sigma_down = get_alpha_ratio_from_sigma_down(sigma_down, sigma_next, eta, sigma_max)
 
     return sigma_up, sigma_down, alpha_ratio
   
