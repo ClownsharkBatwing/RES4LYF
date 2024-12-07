@@ -62,9 +62,6 @@ class SharkSampler:
                     "denoise": ("FLOAT", {"default": 1.0, "min": -10000, "max": 10000, "step":0.01}),
                     "denoise_alt": ("FLOAT", {"default": 1.0, "min": -10000, "max": 10000, "step":0.01}),
                     "cfg": ("FLOAT", {"default": 3.0, "min": -100.0, "max": 100.0, "step":0.1, "round": False, }),
-                    #"shift": ("FLOAT", {"default": 1.35, "min": -1.0, "max": 100.0, "step":0.1, "round": False, }),
-                    #"base_shift": ("FLOAT", {"default": 0.85, "min": -1.0, "max": 100.0, "step":0.1, "round": False, }),
-                    #"shift_scaling": (["exponential", "linear"], {"default": "exponential"}),
                      },
                 "optional": 
                     {
@@ -466,9 +463,6 @@ class ClownsharKSampler:
                     "denoise": ("FLOAT", {"default": 1.0, "min": -10000, "max": 10000, "step":0.01}),
                     "denoise_alt": ("FLOAT", {"default": 1.0, "min": -10000, "max": 10000, "step":0.01}),
                     "cfg": ("FLOAT", {"default": 3.0, "min": -100.0, "max": 100.0, "step":0.1, "round": False, }),
-                    #"shift": ("FLOAT", {"default": 1.35, "min": -1.0, "max": 100.0, "step":0.1, "round": False, }),
-                    #"base_shift": ("FLOAT", {"default": 0.85, "min": -1.0, "max": 100.0, "step":0.1, "round": False, }),
-                    #"shift_scaling": (["exponential", "linear"], {"default": "exponential"}),
                     "extra_options": ("STRING", {"default": "", "multiline": True}),   
                      },
                 "optional": 
