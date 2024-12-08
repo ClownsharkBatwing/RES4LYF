@@ -5,7 +5,7 @@ import math
 from .extra_samplers_helpers import get_deis_coeff_list
 from .phi_functions import *
 
-
+from itertools import permutations
 
 RK_SAMPLER_NAMES = ["none",
                     "res_2m",
@@ -15,6 +15,7 @@ RK_SAMPLER_NAMES = ["none",
                     "res_5s",
                     "res_6s",
                     "res_8s",
+                    "res_10s",
 
 
                     "deis_2m",
@@ -94,6 +95,11 @@ IRK_SAMPLER_NAMES = ["none",
                     ]
 
 
+def prod_diff(cj, ck, cl=None):
+    if cl is None:
+        return cj * (cj - ck)
+    else:
+        return cj * (cj - ck) * (cj - cl)
 
 alpha_crouzeix = (2/(3**0.5)) * math.cos(math.pi / 18)
 
@@ -1064,11 +1070,65 @@ def get_rk_methods(rk_type, h, c1=0.0, c2=0.5, c3=1.0, h_prev=None, h_prev2=None
             for i in range(len(b)): 
                 b[i][0] =         φ(1)     - sum(b[i])
             
+            
+
+        case "res_10s":
+                
+            c1, c2, c3, c4, c5, c6, c7, c8, c9, c10 = 0, 1/2, 1/2, 1/3, 1/2,     1/3, 1/4, 3/10, 3/4, 1
+            ci = [c1, c2, c3, c4, c5, c6, c7, c8, c9, c10]
+            φ = Phi(h, ci, analytic_solution=True)
+            
+            a3_2 = (c3**2 / c2) * φ(2,3)
+            
+            a4_2 = (c4**2 / c2) * φ(2,4)
+                        
+            b8 =  (c9*c10*φ(2) - 2*(c9+c10)*φ(3) + 6*φ(4))   /   (c8 * (c8-c9) * (c8-c10))
+            b9 =  (c8*c10*φ(2) - 2*(c8+c10)*φ(3) + 6*φ(4))   /   (c9 * (c9-c8) * (c9-c10))
+            
+            b10 = (c8*c9*φ(2)  - 2*(c8+c9) *φ(3) + 6*φ(4))   /   (c10 * (c10-c8) * (c10-c9))
+            
+            a = [
+                    [0, 0, 0, 0, 0,      0, 0, 0, 0, 0],
+                    [0, 0, 0, 0, 0,      0, 0, 0, 0, 0],
+                    [0, a3_2, 0, 0, 0,      0, 0, 0, 0, 0],
+                    [0, a4_2, 0, 0, 0,      0, 0, 0, 0, 0],
+                    [0, 0, 0, 0, 0,      0, 0, 0, 0, 0],
+                    
+                    [0, 0, 0, 0, 0,      0, 0, 0, 0, 0],
+                    [0, 0, 0, 0, 0,      0, 0, 0, 0, 0],
+                    [0, 0, 0, 0, 0,      0, 0, 0, 0, 0],
+                    [0, 0, 0, 0, 0,      0, 0, 0, 0, 0],
+                    [0, 0, 0, 0, 0,      0, 0, 0, 0, 0],
+            ]
+            b = [
+                    [0, 0, 0, 0, 0,      0, 0, b8, b9, b10],
+            ]
+            
+            # a5_3, a5_4
+            # a6_3, a6_4
+            # a7_3, a7_4
+            for i in range(5, 8): # i=5,6,7   j,k ∈ {3, 4}, j != k
+                jk = [(3, 4), (4, 3)]
+                for j,k in jk:
+                    a[i-1][j-1] = (-ci[i-1]**2 * ci[k-1] * φ(2,i)    +   2*ci[i-1]**3 * φ(3,i))   /   (ci[j-1] * (ci[j-1] - ci[k-1]))
+                
+            for i in range(8, 11): # i=8,9,10   j,k,l ∈ {5, 6, 7}, j != k != l      [    (5, 6, 7), (5, 7, 6),    (6, 5, 7), (6, 7, 5),    (7, 5, 6), (7, 6, 5)]    6 total coeff
+                jkl = list(permutations([5, 6, 7], 3)) 
+                for j,k,l in jkl:
+                    a[i-1][j-1] = (ci[i-1]**2 * ci[k-1] * ci[l-1] * φ(2,i)   -   2*ci[i-1]**3 * (ci[k-1] + ci[l-1]) * φ(3,i)   +   6*ci[i-1]**4 * φ(4,i))    /    (ci[j-1] * (ci[j-1] - ci[k-1]) * (ci[j-1] - ci[l-1]))
+
+            for i in range(len(a)): 
+                a[i][0] = ci[i] * φ(1,i+1) - sum(a[i])
+            for i in range(len(b)): 
+                b[i][0] =         φ(1)     - sum(b[i])
+            
+            
+
 
         case "res_16s":
                 
-            c1, c2, c3, c4, c5, c6, c7, c8   = 
-            c9, c10, c11, c12, c13, c14, c15 = 
+            c1, c2, c3, c4, c5, c6, c7, c8   = 0, 0, 0, 0,     0, 0, 0, 0
+            c9, c10, c11, c12, c13, c14, c15 = 0, 0, 0, 0,     0, 0, 0, 0
             ci = [c1, c2, c3, c4, c5, c6, c7, c8]
             φ = Phi(h, ci, analytic_solution=True)
             
