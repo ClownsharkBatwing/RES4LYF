@@ -206,7 +206,7 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
                 if row > 0 and step > substep_eta_start_step and extra_options_flag("substep_eta", extra_options):
                     substep_eta = float(get_extra_options_kv("substep_eta", "0.5", extra_options))
                     substep_noise_mode = get_extra_options_kv("substep_noise_mode", "hard", extra_options)
-                    if not extra_options_flag("substep_noise_soft", extra_options):
+                    if extra_options_flag("substep_noise_rough", extra_options):
                         sub_sigma_up, sub_sigma, sub_sigma_down, sub_alpha_ratio = get_res4lyf_step_with_model(model, s_[row-1], s_[row], substep_eta, eta_var, substep_noise_mode, s_[row]-s_[row-1])
                     else:
                         sub_sigma_up, sub_sigma, sub_sigma_down, sub_alpha_ratio = get_res4lyf_step_with_model(model, s_[row], s_[row+1], substep_eta, eta_var, substep_noise_mode, s_[row+1]-s_[row])
@@ -239,7 +239,7 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
                 if extra_options_flag("substep_noise_scaling_alt", extra_options):
                     #eps_[row] = eps_[row] * (s_[row+1]/s_[row]) * (s_[row]/sub_sigma_down)
                     eps_[row] *= (s_[row+1]/sigma) * (sigma/sub_sigma_down)
-                if extra_options_flag("substep_noise_scaling", extra_options):
+                if extra_options_flag("substep_noise_scaling", extra_options) and sub_sigma_down > 0 and sigma_next > 0:
                     #eps_[row] = eps_[row] * (s_[row+1]/s_[row]) * (s_[row]/sub_sigma_down)
                     eps_[row] *= (s_[row+1]/sigma) * (sigma/sub_sigma_down)
                 if extra_options_flag("substep_sigma_ratio", extra_options):
