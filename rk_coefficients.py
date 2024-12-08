@@ -1043,7 +1043,7 @@ def get_rk_methods(rk_type, h, c1=0.0, c2=0.5, c3=1.0, h_prev=None, h_prev2=None
                     [b1,   0, 0, 0, 0, b6, b7, b8],
             ]
              
-            """a = [
+            a = [
                     [0,    0, 0, 0, 0, 0, 0, 0],
                     [0, 0, 0, 0, 0, 0, 0, 0],
                     
@@ -1063,7 +1063,7 @@ def get_rk_methods(rk_type, h, c1=0.0, c2=0.5, c3=1.0, h_prev=None, h_prev2=None
             for i in range(len(ci)): 
                 a[i][0] = ci[i] * φ(1,i+1) - sum(a[i])
             for i in range(len(b)): 
-                b[i][0] =         φ(1)     - sum(b[i])"""
+                b[i][0] =         φ(1)     - sum(b[i])
             
         case "irk_exp_diag_2s":
             lam = (1 - torch.exp(-c1 * h)) / h

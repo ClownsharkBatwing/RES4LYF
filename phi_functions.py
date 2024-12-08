@@ -84,4 +84,7 @@ class Phi:
             c = 1
         else:
             c = self.c[i-1]
+            if c == 0:
+                return 0
         return self.phi_f(j, -self.h * c)
+        
