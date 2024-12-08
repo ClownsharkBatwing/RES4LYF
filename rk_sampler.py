@@ -243,7 +243,7 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
                     #eps_[row] = eps_[row] * (s_[row+1]/s_[row]) * (s_[row]/sub_sigma_down)
                     substep_noise_scaling_ratio = (s_[row+1]/sigma) * (sigma/sub_sigma_down)
                     snsr = float(get_extra_options_kv("substep_noise_scaling", "1.0", extra_options))
-                    eps_[row] *= 1 + snsr*(snsr-1)
+                    eps_[row] *= 1 + snsr*(substep_noise_scaling_ratio-1)
                 if extra_options_flag("substep_sigma_ratio", extra_options):
                     sigma_ratio = (sub_sigma_down - sigma) / (s_[row+1] - sigma)
                     eps_[row] *= sigma_ratio
