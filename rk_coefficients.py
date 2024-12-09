@@ -12,14 +12,14 @@ RK_SAMPLER_NAMES = ["none",
                     "res_3m",
                     "res_2s", 
                     "res_3s",
+                    "res_4s_krogstad",
+                    "res_4s_strehmel_weiner",
                     "res_5s",
                     "res_6s",
                     "res_8s",
                     "res_10s",
                     "res_15s",
                     "res_16s",
-
-
 
                     "deis_2m",
                     "deis_3m", 
@@ -816,11 +816,8 @@ def get_rk_methods(rk_type, h, c1=0.0, c2=0.5, c3=1.0, h_prev=None, h_prev2=None
             ci = [0]
 
         case "res_2s":
-            a2_1 = c2 * phi(1, -h*c2)
-            b1 =        phi(1, -h) - phi(2, -h)/c2
-            b2 =        phi(2, -h)/c2
-
-            φ = Phi(h, [0, 1/2])
+            ci = [0, c2]
+            φ = Phi(h, ci)
             
             a2_1 = c2 * φ(1,2)
             b1 = φ(1) - φ(2)/c2
@@ -833,7 +830,8 @@ def get_rk_methods(rk_type, h, c1=0.0, c2=0.5, c3=1.0, h_prev=None, h_prev2=None
             b = [
                     [b1, b2],
             ]
-            ci = [0, c2]
+            
+            
             
         case "res_3s":
             gamma = calculate_gamma(c2, c3)
@@ -853,7 +851,72 @@ def get_rk_methods(rk_type, h, c1=0.0, c2=0.5, c3=1.0, h_prev=None, h_prev2=None
                     [b1, b2, b3],
             ]
             ci = [c1, c2, c3]
+            
+        case "res_4s_cox_matthews": # weak 4th order, Cox & Matthews; unresolved issue, see below
+            c1,c2,c3,c4 = 0, 1/2, 1/2, 1
+            ci = [c1,c2,c3,c4]
+            φ = Phi(h, ci)
+            
+            a2_1 = c2 * φ(1,2)
+            a3_2 = c3 * φ(1,3)
+            a4_1 = (1/2) * φ(1,3) * φ(0,3 - 1)   # This doesn't work, but it's in the paper: j=0 leads to taking a factorial of a negative with the remainder method, and doesn't work with the analytic solution either
+            
+            b1 = φ(1) - 3*φ(2) + 4*φ(3)
+            b2 = 2*φ(2) - 4*φ(3)
+            b3 = 2*φ(2) - 4*φ(3)
+            b4 = 4*φ(3) - φ(2)
 
+            a = [
+                    [0,    0,0,0],
+                    [a2_1, 0,0,0],
+                    [0, a3_2,0,0],
+                    [a4_1, 0,a4_3,0],
+            ]
+            b = [
+                    [b1, b2, b3, b4],
+            ]
+
+        case "res_4s_krogstad": # weak 4th order, Krogstad
+            c1,c2,c3,c4 = 0, 1/2, 1/2, 1
+            ci = [c1,c2,c3,c4]
+            φ = Phi(h, ci)
+            
+            a = [
+                    [0, 0,      0,        0],
+                    [0, 0,      0,        0],
+                    [0, φ(2,3), 0,        0],
+                    [0, 0,      2*φ(2,4), 0],
+            ]
+            b = [
+                    [0, 
+                     2*φ(2) - 4*φ(3),
+                     2*φ(2) - 4*φ(3),
+                     -φ(2)  + 4*φ(3)],
+            ]
+            
+            #a = [row + [0] * (len(ci) - len(row)) for row in a]
+            a, b = gen_first_col_exp(a,b,ci,φ)
+            
+        case "res_4s_strehmel_weiner": # weak 4th order, Strehmel & Weiner
+            c1,c2,c3,c4 = 0, 1/2, 1/2, 1
+            ci = [c1,c2,c3,c4]
+            φ = Phi(h, ci)
+            
+            a = [
+                    [0, 0,         0,        0],
+                    [0, 0,         0,        0],
+                    [0, c3*φ(2,3), 0,        0],
+                    [0, -2*φ(2,4), 4*φ(2,4), 0],
+            ]
+            b = [
+                    [0, 
+                     0,
+                     4*φ(2) - 8*φ(3), 
+                     -φ(2) +  4*φ(3)],
+            ]
+            
+            a, b = gen_first_col_exp(a,b,ci,φ)
+            
         case "dpmpp_2s":
             a2_1 =         c2   * phi(1, -h*c2)
             b1 = (1 - 1/(2*c2)) * phi(1, -h)
@@ -1321,6 +1384,13 @@ def get_rk_methods(rk_type, h, c1=0.0, c2=0.5, c3=1.0, h_prev=None, h_prev2=None
     return a, b, ci, multistep_stages, FSAL
 
 
+
+def gen_first_col_exp(a, b, c, φ):
+    for i in range(len(c)): 
+        a[i][0] = c[i] * φ(1,i+1) - sum(a[i])
+    for i in range(len(b)): 
+        b[i][0] =         φ(1)     - sum(b[i])
+    return a, b
 
 def rho(j, ci, ck, cl):
     if j == 2:
