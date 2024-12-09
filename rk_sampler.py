@@ -203,13 +203,14 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
         if implicit_steps == 0: 
             x_0_tmp = x_0.clone()
             for row in range(rk.rows - rk.multistep_stages):
-                if row > 0 and step > substep_eta_start_step and extra_options_flag("substep_eta", extra_options):
+                if row > 0 and step > substep_eta_start_step and extra_options_flag("substep_eta", extra_options) and s_[row+1] < s_[row]:
                     substep_eta = float(get_extra_options_kv("substep_eta", "0.5", extra_options))
                     substep_noise_mode = get_extra_options_kv("substep_noise_mode", "hard", extra_options)
                     if extra_options_flag("substep_noise_rough", extra_options):
                         sub_sigma_up, sub_sigma, sub_sigma_down, sub_alpha_ratio = get_res4lyf_step_with_model(model, s_[row-1], s_[row], substep_eta, eta_var, substep_noise_mode, s_[row]-s_[row-1])
                     else:
                         sub_sigma_up, sub_sigma, sub_sigma_down, sub_alpha_ratio = get_res4lyf_step_with_model(model, s_[row], s_[row+1], substep_eta, eta_var, substep_noise_mode, s_[row+1]-s_[row])
+
                 else:
                     sub_sigma_up, sub_sigma, sub_sigma_down, sub_alpha_ratio = 0, s_[row], s_[row+1], 1
                     substep_eta, substep_noise_mode = 0.0, "hard"
@@ -240,7 +241,6 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
                     #eps_[row] = eps_[row] * (s_[row+1]/s_[row]) * (s_[row]/sub_sigma_down)
                     eps_[row] *= (s_[row+1]/sigma) * (sigma/sub_sigma_down)
                 if extra_options_flag("substep_noise_scaling", extra_options) and sub_sigma_down > 0 and sigma_next > 0:
-                    #eps_[row] = eps_[row] * (s_[row+1]/s_[row]) * (s_[row]/sub_sigma_down)
                     substep_noise_scaling_ratio = (s_[row+1]/sigma) * (sigma/sub_sigma_down)
                     snsr = float(get_extra_options_kv("substep_noise_scaling", "1.0", extra_options))
                     eps_[row] *= 1 + snsr*(substep_noise_scaling_ratio-1)

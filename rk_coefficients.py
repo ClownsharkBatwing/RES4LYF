@@ -17,6 +17,8 @@ RK_SAMPLER_NAMES = ["none",
                     "res_8s",
                     "res_10s",
                     "res_15s",
+                    "res_16s",
+
 
 
                     "deis_2m",
@@ -94,15 +96,6 @@ IRK_SAMPLER_NAMES = ["none",
                     "irk_exp_diag_2s",
                     "use_explicit", 
                     ]
-
-
-def prod_diff(cj, ck, cl=None, cd=None):
-    if cl is None and cd is None:
-        return cj * (cj - ck)
-    if cd is None:
-        return cj * (cj - ck) * (cj - cl)
-    else:
-        return cj * (cj - ck) * (cj - cl) * (cj - cd)
 
 alpha_crouzeix = (2/(3**0.5)) * math.cos(math.pi / 18)
 
@@ -1131,6 +1124,7 @@ def get_rk_methods(rk_type, h, c1=0.0, c2=0.5, c3=1.0, h_prev=None, h_prev2=None
 
         case "res_15s":
                 
+            c1,c2,c3,c4,c5,c6,c7,c8,c9,c10,c11,c12,c13,c14,c15 = 0, 1/2, 1/2, 1/3, 1/2,    1/5, 1/4, 18/25, 1/3, 3/10,    1/6, 90/103, 1/3, 3/10, 1/5
             c1 = 0
             c2 = c3 = c5 = 1/2
             c4 = c9 = c13 = 1/3
@@ -1144,43 +1138,20 @@ def get_rk_methods(rk_type, h, c1=0.0, c2=0.5, c3=1.0, h_prev=None, h_prev2=None
             ci = [c1, c2, c3, c4, c5, c6, c7, c8, c9, c10, c11, c12, c13, c14, c15]
             φ = Phi(h, ci, analytic_solution=True)
             
-            a3_2 = (1/2) * φ(2,3)
+            a = [[0 for _ in range(15)] for _ in range(15)]
+            b = [[0 for _ in range(15)]]
 
-            a = [
-                    [0, 0, 0, 0,     0, 0, 0, 0,     0, 0, 0, 0,     0, 0, 0],
-                    [0, 0, 0, 0,     0, 0, 0, 0,     0, 0, 0, 0,     0, 0, 0],
-                    [0, 0, 0, 0,     0, 0, 0, 0,     0, 0, 0, 0,     0, 0, 0],
-                    [0, 0, 0, 0,     0, 0, 0, 0,     0, 0, 0, 0,     0, 0, 0],
-                    
-                    [0, 0, 0, 0,     0, 0, 0, 0,     0, 0, 0, 0,     0, 0, 0],
-                    [0, 0, 0, 0,     0, 0, 0, 0,     0, 0, 0, 0,     0, 0, 0],
-                    [0, 0, 0, 0,     0, 0, 0, 0,     0, 0, 0, 0,     0, 0, 0],
-                    [0, 0, 0, 0,     0, 0, 0, 0,     0, 0, 0, 0,     0, 0, 0],
-                    
-                    [0, 0, 0, 0,     0, 0, 0, 0,     0, 0, 0, 0,     0, 0, 0],
-                    [0, 0, 0, 0,     0, 0, 0, 0,     0, 0, 0, 0,     0, 0, 0],
-                    [0, 0, 0, 0,     0, 0, 0, 0,     0, 0, 0, 0,     0, 0, 0],
-                    [0, 0, 0, 0,     0, 0, 0, 0,     0, 0, 0, 0,     0, 0, 0],
-                    
-                    [0, 0, 0, 0,     0, 0, 0, 0,     0, 0, 0, 0,     0, 0, 0],
-                    [0, 0, 0, 0,     0, 0, 0, 0,     0, 0, 0, 0,     0, 0, 0],
-                    [0, 0, 0, 0,     0, 0, 0, 0,     0, 0, 0, 0,     0, 0, 0],
-            ]
-            b = [
-                    [0, 0, 0, 0,     0, 0, 0, 0,     0, 0, 0, 0,     0, 0, 0],
-            ]
-            
             for i in range(3, 5): # i=3,4     j=2
                 j=2
                 a[i-1][j-1] = (ci[i-1]**2 / ci[j-1]) * φ(j,i)
             
             
-            
             for i in range(5, 8): # i=5,6,7   j,k ∈ {3, 4}, j != k
-                jk = [(3, 4), (4, 3)]
                 jk = list(permutations([3, 4], 2)) 
                 for j,k in jk:
                     a[i-1][j-1] = (-ci[i-1]**2 * ci[k-1] * φ(2,i)    +   2*ci[i-1]**3 * φ(3,i))   /   prod_diff(ci[j-1], ci[k-1])
+
+                    
                     
                     
                     
@@ -1191,11 +1162,19 @@ def get_rk_methods(rk_type, h, c1=0.0, c2=0.5, c3=1.0, h_prev=None, h_prev2=None
 
 
 
+
+
+
+
             for i in range(12,16): # i=12,13,14,15
                 jkld = list(permutations([8,9,10,11], 4)) 
                 for j,k,l,d in jkld:
-                    numerator = -ci[i-1]**2 * ci[d-1]*ci[k-1]*ci[l-1] * φ(2,i)   +   2*ci[i-1]**3 * (ci[d-1]*ci[k-1] + ci[d-1]*ci[l-1] + ci[k-1]*ci[l-1]) * φ(3,i)   -   6*ci[i-1]**4 * (ci[d-1] + ci[k-1] + ci[l-1]) * φ(4,i)   +   24*ci[i-1]**5 * φ(5,i)
+                    numerator = -ci[i-1]**2  *  ci[d-1]*ci[k-1]*ci[l-1]  *  φ(2,i)     +     2*ci[i-1]**3  *  (ci[d-1]*ci[k-1] + ci[d-1]*ci[l-1] + ci[k-1]*ci[l-1])  *  φ(3,i)     -     6*ci[i-1]**4  *  (ci[d-1] + ci[k-1] + ci[l-1])  *  φ(4,i)     +     24*ci[i-1]**5  *  φ(5,i)
                     a[i-1][j-1] = numerator / prod_diff(ci[j-1], ci[k-1], ci[l-1], ci[d-1])
+                    
+                    
+                    
+                    
                     
                     
                     
@@ -1209,6 +1188,87 @@ def get_rk_methods(rk_type, h, c1=0.0, c2=0.5, c3=1.0, h_prev=None, h_prev2=None
                 a[i][0] = ci[i] * φ(1,i+1) - sum(a[i])
             for i in range(len(b)): 
                 b[i][0] =         φ(1)     - sum(b[i])
+            
+            
+            
+            
+            
+            
+            
+            
+            
+            
+
+
+        case "res_16s": # 6th order without weakened order conditions
+                
+            c1 = 0
+            c2 = c3 = c5 = c8 = c12 = 1/2
+            c4 = c11 = c15 = 1/3
+            c6 = c9 = c13 = 1/5
+            c7 = c10 = c14 = 1/4
+            c16 = 1
+            ci = [c1, c2, c3, c4, c5, c6, c7, c8, c9, c10, c11, c12, c13, c14, c15, c16]
+            φ = Phi(h, ci, analytic_solution=True)
+            
+            a3_2 = (1/2) * φ(2,3)
+
+            a = [[0 for _ in range(16)] for _ in range(16)]
+            b = [[0 for _ in range(16)]]
+
+            for i in range(3, 5): # i=3,4     j=2
+                j=2
+                a[i-1][j-1] = (ci[i-1]**2 / ci[j-1]) * φ(j,i)
+            
+            
+            for i in range(5, 8): # i=5,6,7   j,k ∈ {3, 4}, j != k
+                jk = list(permutations([3, 4], 2)) 
+                for j,k in jk:
+                    a[i-1][j-1] = (-ci[i-1]**2 * ci[k-1] * φ(2,i)    +   2*ci[i-1]**3 * φ(3,i))   /   prod_diff(ci[j-1], ci[k-1])
+
+                    
+                    
+                    
+                    
+            for i in range(8, 12): # i=8,9,10,11  j,k,l ∈ {5, 6, 7}, j != k != l      [    (5, 6, 7), (5, 7, 6),    (6, 5, 7), (6, 7, 5),    (7, 5, 6), (7, 6, 5)]    6 total coeff
+                jkl = list(permutations([5, 6, 7], 3)) 
+                for j,k,l in jkl:
+                    a[i-1][j-1] = (ci[i-1]**2 * ci[k-1] * ci[l-1] * φ(2,i)   -   2*ci[i-1]**3 * (ci[k-1] + ci[l-1]) * φ(3,i)   +   6*ci[i-1]**4 * φ(4,i))    /    (ci[j-1] * (ci[j-1] - ci[k-1]) * (ci[j-1] - ci[l-1]))
+
+
+
+
+
+
+
+            for i in range(12,17): # i=12,13,14,15,16
+                jkld = list(permutations([8,9,10,11], 4)) 
+                for j,k,l,d in jkld:
+                    numerator = -ci[i-1]**2  *  ci[d-1]*ci[k-1]*ci[l-1]  *  φ(2,i)     +     2*ci[i-1]**3  *  (ci[d-1]*ci[k-1] + ci[d-1]*ci[l-1] + ci[k-1]*ci[l-1])  *  φ(3,i)     -     6*ci[i-1]**4  *  (ci[d-1] + ci[k-1] + ci[l-1])  *  φ(4,i)     +     24*ci[i-1]**5  *  φ(5,i)
+                    a[i-1][j-1] = numerator / prod_diff(ci[j-1], ci[k-1], ci[l-1], ci[d-1])
+                    
+                    
+                    
+
+                
+            ijdkl = list(permutations([12,13,14,15,16], 5)) 
+            for i,j,d,k,l in ijdkl:
+                #numerator = -ci[j-1]*ci[k-1]*ci[l-1]*φ(2)   +   2*(ci[j-1]*ci[k-1]   +   ci[j-1]*ci[l-1]   +   ci[k-1]*ci[l-1])*φ(3)   -   6*(ci[j-1] + ci[k-1]   +   ci[l-1])*φ(4)   +   24*φ(5)
+                b[0][i-1] = theta(2, ci[d-1], ci[i-1], ci[k-1], ci[j-1], ci[l-1]) * φ(2)   +  theta(3, ci[d-1], ci[i-1], ci[k-1], ci[j-1], ci[l-1])*φ(3)   +   theta(4, ci[d-1], ci[i-1], ci[k-1], ci[j-1], ci[l-1])*φ(4)   +   theta(5, ci[d-1], ci[i-1], ci[k-1], ci[j-1], ci[l-1])*φ(5)    +    theta(6, ci[d-1], ci[i-1], ci[k-1], ci[j-1], ci[l-1]) * φ(6)
+                #b[0][i-1] = numerator / prod_diff(ci[i-1], ci[j-1], ci[k-1], ci[l-1])
+                    
+             
+            for i in range(len(a)): 
+                a[i][0] = ci[i] * φ(1,i+1) - sum(a[i])
+            for i in range(len(b)): 
+                b[i][0] =         φ(1)     - sum(b[i])
+            
+            
+            
+            
+            
+            
+            
             
             
         case "irk_exp_diag_2s":
@@ -1231,4 +1291,55 @@ def get_rk_methods(rk_type, h, c1=0.0, c2=0.5, c3=1.0, h_prev=None, h_prev2=None
     if rk_type.startswith("lob") == False:
         ci.append(1)
     return a, b, ci, multistep_stages, FSAL
+
+
+
+def rho(j, ci, ck, cl):
+    if j == 2:
+        numerator = ck*cl
+    if j == 3:
+        numerator = (-2 * (ck + cl))
+    if j == 4:
+        numerator = 6
+    return numerator / denominator(ci, ck, cl)
+    
+    
+def mu(j, cd, ci, ck, cl):
+    if j == 2:
+        numerator = -cd * ck * cl
+    if j == 3:
+        numerator = 2 * (cd * ck + cd * cl + ck * cl)
+    if j == 4:
+        numerator = -6 * (cd + ck + cl)
+    if j == 5:
+        numerator = 24
+    return numerator / denominator(ci, cd, ck, cl)
+
+def theta(j, cd, ci, ck, cj, cl):
+    if j == 2:
+        numerator = -cj * cd * ck * cl
+    if j == 3:
+        numerator = 2 * (cj * ck * cd + cj*ck*cl + ck*cd*cl + cd*cl*cj)
+    if j == 4:
+        numerator = -6*(cj*ck + cj*cd + cj*cl + ck*cd + ck*cl + cd*cl)
+    if j == 5:
+        numerator = 24 * (cj + ck + cl + cd)
+    if j == 6:
+        numerator = -120
+    return numerator / denominator(ci, cj, ck, cl, cd)
+
+
+def prod_diff(cj, ck, cl=None, cd=None, cblah=None):
+    if cl is None and cd is None:
+        return cj * (cj - ck)
+    if cd is None:
+        return cj * (cj - ck) * (cj - cl)
+    else:
+        return cj * (cj - ck) * (cj - cl) * (cj - cd)
+
+def denominator(ci, *args):
+    result = ci 
+    for arg in args:
+        result *= (ci - arg)
+    return result
 
