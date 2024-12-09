@@ -12,6 +12,9 @@ RK_SAMPLER_NAMES = ["none",
                     "res_3m",
                     "res_2s", 
                     "res_3s",
+                    "res_3s_cox_matthews",
+                    "res_3s_lie",
+                    "res_3s_strehmel_weiner",
                     "res_4s_krogstad",
                     "res_4s_strehmel_weiner",
                     "res_5s",
@@ -851,6 +854,60 @@ def get_rk_methods(rk_type, h, c1=0.0, c2=0.5, c3=1.0, h_prev=None, h_prev2=None
                     [b1, b2, b3],
             ]
             ci = [c1, c2, c3]
+            
+        case "res_3s_strehmel_weiner": # weak 4th order, Krogstad
+            ci = [0,c2,1]
+            φ = Phi(h, ci)
+            
+            a = [
+                    [0, 0, 0],
+                    [0, 0, 0],
+                    [0, (1/c2) * φ(2,3), 0],
+            ]
+            b = [
+                    [0, 
+                     0,
+                     φ(2)],
+            ]
+            
+            a, b = gen_first_col_exp(a,b,ci,φ)
+            
+            
+        case "res_3s_cox_matthews": # Cox & Matthews; known as ETD3RK
+            c2 = 1/2
+            ci = [0,c2,1]
+            φ = Phi(h, ci)
+            
+            a = [
+                    [0, 0, 0],
+                    [0, 0, 0],
+                    [0, (1/c2) * φ(1,3), 0],  # paper said 2 * φ(1,3), but this is the same and more consistent with res_3s_strehmel_weiner
+            ]
+            b = [
+                    [0, 
+                     -8*φ(3) + 4*φ(2),
+                     4*φ(3) - φ(2)],
+            ]
+            
+            a, b = gen_first_col_exp(a,b,ci,φ)
+            
+        case "res_3s_lie": # Lie; known as ETD2CF3
+            c1,c2,c3 = 0, 1/3, 2/3
+            ci = [c1,c2,c3]
+            φ = Phi(h, ci)
+            
+            a = [
+                    [0, 0, 0],
+                    [0, 0, 0],
+                    [0, (4/3)*φ(2,3), 0],  # paper said 2 * φ(1,3), but this is the same and more consistent with res_3s_strehmel_weiner
+            ]
+            b = [
+                    [0, 
+                     6*φ(2) - 18*φ(3),
+                     (-3/2)*φ(2) + 9*φ(3)],
+            ]
+            
+            a, b = gen_first_col_exp(a,b,ci,φ)
             
         case "res_4s_cox_matthews": # weak 4th order, Cox & Matthews; unresolved issue, see below
             c1,c2,c3,c4 = 0, 1/2, 1/2, 1
