@@ -267,3 +267,75 @@ def sd_save_checkpoint(output_path, model, clip=None, vae=None, clip_vision=None
 
     comfy.utils.save_torch_file(sd, output_path, metadata=metadata)
 
+
+
+
+
+
+class TorchCompileModelFluxAdvanced: #adapted from https://github.com/kijai/ComfyUI-KJNodes
+    def __init__(self):
+        self._compiled = False
+
+    @classmethod
+    def INPUT_TYPES(s):
+        return {"required": { 
+                    "model": ("MODEL",),
+                    "backend": (["inductor", "cudagraphs"],),
+                    "fullgraph": ("BOOLEAN", {"default": False, "tooltip": "Enable full graph mode"}),
+                    "mode": (["default", "max-autotune", "max-autotune-no-cudagraphs", "reduce-overhead"], {"default": "default"}),
+                    "double_blocks": ("STRING", {"default": "0-18", "multiline": True}),
+                    "single_blocks": ("STRING", {"default": "0-37", "multiline": True}),
+                    "dynamic": ("BOOLEAN", {"default": False, "tooltip": "Enable dynamic mode"}),
+                }}
+    RETURN_TYPES = ("MODEL",)
+    FUNCTION = "patch"
+
+    CATEGORY = "model_patches"
+    EXPERIMENTAL = True
+
+    def parse_blocks(self, blocks_str):
+        blocks = []
+        for part in blocks_str.split(','):
+            part = part.strip()
+            if '-' in part:
+                start, end = map(int, part.split('-'))
+                blocks.extend(range(start, end + 1))
+            else:
+                blocks.append(int(part))
+        return blocks
+
+    def patch(self, model, backend, mode, fullgraph, single_blocks, double_blocks, dynamic):
+        single_block_list = self.parse_blocks(single_blocks)
+        double_block_list = self.parse_blocks(double_blocks)
+        m = model.clone()
+        diffusion_model = m.get_model_object("diffusion_model")
+        
+        if not self._compiled:
+            try:
+                for i, block in enumerate(diffusion_model.double_blocks):
+                    if i in double_block_list:
+                        #print("Compiling double_block", i)
+                        m.add_object_patch(f"diffusion_model.double_blocks.{i}", torch.compile(block, mode=mode, dynamic=dynamic, fullgraph=fullgraph, backend=backend))
+                for i, block in enumerate(diffusion_model.single_blocks):
+                    if i in single_block_list:
+                        #print("Compiling single block", i)
+                        m.add_object_patch(f"diffusion_model.single_blocks.{i}", torch.compile(block, mode=mode, dynamic=dynamic, fullgraph=fullgraph, backend=backend))
+                self._compiled = True
+                compile_settings = {
+                    "backend": backend,
+                    "mode": mode,
+                    "fullgraph": fullgraph,
+                    "dynamic": dynamic,
+                }
+                setattr(m.model, "compile_settings", compile_settings)
+            except:
+                raise RuntimeError("Failed to compile model")
+        
+        return (m, )
+        # rest of the layers that are not patched
+        # diffusion_model.final_layer = torch.compile(diffusion_model.final_layer, mode=mode, fullgraph=fullgraph, backend=backend)
+        # diffusion_model.guidance_in = torch.compile(diffusion_model.guidance_in, mode=mode, fullgraph=fullgraph, backend=backend)
+        # diffusion_model.img_in = torch.compile(diffusion_model.img_in, mode=mode, fullgraph=fullgraph, backend=backend)
+        # diffusion_model.time_in = torch.compile(diffusion_model.time_in, mode=mode, fullgraph=fullgraph, backend=backend)
+        # diffusion_model.txt_in = torch.compile(diffusion_model.txt_in, mode=mode, fullgraph=fullgraph, backend=backend)
+        # diffusion_model.vector_in = torch.compile(diffusion_model.vector_in, mode=mode, fullgraph=fullgraph, backend=backend)

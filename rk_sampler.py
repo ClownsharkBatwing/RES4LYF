@@ -203,7 +203,7 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
         if implicit_steps == 0: 
             x_0_tmp = x_0.clone()
             for row in range(rk.rows - rk.multistep_stages):
-                if row > 0 and step > substep_eta_start_step and extra_options_flag("substep_eta", extra_options) and s_[row+1] < s_[row]:
+                if row > 0 and step > substep_eta_start_step and extra_options_flag("substep_eta", extra_options) and s_[row+1] <= s_[row]:
                     substep_eta = float(get_extra_options_kv("substep_eta", "0.5", extra_options))
                     substep_noise_mode = get_extra_options_kv("substep_noise_mode", "hard", extra_options)
                     if extra_options_flag("substep_noise_rough", extra_options):

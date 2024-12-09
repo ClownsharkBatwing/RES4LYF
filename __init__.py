@@ -97,6 +97,7 @@ NODE_CLASS_MAPPINGS = {
     "SamplerOptions_GarbageCollection": samplers_extensions.SamplerOptions_GarbageCollection,
     "ModelSamplingAdvanced": models.ModelSamplingAdvanced,
     "ModelTimestepPatcher": models.ModelSamplingAdvanced,
+    "TorchCompileModelFluxAdv": models.TorchCompileModelFluxAdvanced,
 
     "ModelSamplingAdvancedResolution": models.ModelSamplingAdvancedResolution,
     
@@ -107,6 +108,8 @@ NODE_CLASS_MAPPINGS = {
     
     "TextBox1": nodes_misc.TextBox1,
     "TextBox3": nodes_misc.TextBox3,
+    
+    
     
     "CLIPTextEncodeFluxUnguided": conditioning.CLIPTextEncodeFluxUnguided,
 

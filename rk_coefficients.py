@@ -1249,13 +1249,19 @@ def get_rk_methods(rk_type, h, c1=0.0, c2=0.5, c3=1.0, h_prev=None, h_prev2=None
                     
                     
                     
-
+            """ijdkl = list(permutations([12,13,14,15,16], 5)) 
+            for i,j,d,k,l in ijdkl:
+                #numerator = -ci[j-1]*ci[k-1]*ci[l-1]*φ(2)   +   2*(ci[j-1]*ci[k-1]   +   ci[j-1]*ci[l-1]   +   ci[k-1]*ci[l-1])*φ(3)   -   6*(ci[j-1] + ci[k-1]   +   ci[l-1])*φ(4)   +   24*φ(5)
+                b[0][i-1] = theta(2, ci[d-1], ci[i-1], ci[k-1], ci[j-1], ci[l-1]) * φ(2)   +  theta(3, ci[d-1], ci[i-1], ci[k-1], ci[j-1], ci[l-1])*φ(3)   +   theta(4, ci[d-1], ci[i-1], ci[k-1], ci[j-1], ci[l-1])*φ(4)   +   theta(5, ci[d-1], ci[i-1], ci[k-1], ci[j-1], ci[l-1])*φ(5)    +    theta(6, ci[d-1], ci[i-1], ci[k-1], ci[j-1], ci[l-1]) * φ(6)
+                #b[0][i-1] = numerator / prod_diff(ci[i-1], ci[j-1], ci[k-1], ci[l-1])"""
+                    
                 
             ijdkl = list(permutations([12,13,14,15,16], 5)) 
             for i,j,d,k,l in ijdkl:
                 #numerator = -ci[j-1]*ci[k-1]*ci[l-1]*φ(2)   +   2*(ci[j-1]*ci[k-1]   +   ci[j-1]*ci[l-1]   +   ci[k-1]*ci[l-1])*φ(3)   -   6*(ci[j-1] + ci[k-1]   +   ci[l-1])*φ(4)   +   24*φ(5)
-                b[0][i-1] = theta(2, ci[d-1], ci[i-1], ci[k-1], ci[j-1], ci[l-1]) * φ(2)   +  theta(3, ci[d-1], ci[i-1], ci[k-1], ci[j-1], ci[l-1])*φ(3)   +   theta(4, ci[d-1], ci[i-1], ci[k-1], ci[j-1], ci[l-1])*φ(4)   +   theta(5, ci[d-1], ci[i-1], ci[k-1], ci[j-1], ci[l-1])*φ(5)    +    theta(6, ci[d-1], ci[i-1], ci[k-1], ci[j-1], ci[l-1]) * φ(6)
-                #b[0][i-1] = numerator / prod_diff(ci[i-1], ci[j-1], ci[k-1], ci[l-1])
+                numerator = theta_numerator(2, ci[d-1], ci[i-1], ci[k-1], ci[j-1], ci[l-1]) * φ(2)   +  theta_numerator(3, ci[d-1], ci[i-1], ci[k-1], ci[j-1], ci[l-1])*φ(3)   +   theta_numerator(4, ci[d-1], ci[i-1], ci[k-1], ci[j-1], ci[l-1])*φ(4)   +   theta_numerator(5, ci[d-1], ci[i-1], ci[k-1], ci[j-1], ci[l-1])*φ(5)    +    theta_numerator(6, ci[d-1], ci[i-1], ci[k-1], ci[j-1], ci[l-1]) * φ(6)
+                #b[0][i-1] = numerator / (ci[i-1] *, ci[d-1], ci[j-1], ci[k-1], ci[l-1])
+                b[0][i-1] = numerator / denominator(ci[i-1], ci[d-1], ci[j-1], ci[k-1], ci[l-1])
                     
              
             for i in range(len(a)): 
@@ -1314,6 +1320,21 @@ def mu(j, cd, ci, ck, cl):
     if j == 5:
         numerator = 24
     return numerator / denominator(ci, cd, ck, cl)
+
+
+def theta_numerator(j, cd, ci, ck, cj, cl):
+    if j == 2:
+        numerator = -cj * cd * ck * cl
+    if j == 3:
+        numerator = 2 * (cj * ck * cd + cj*ck*cl + ck*cd*cl + cd*cl*cj)
+    if j == 4:
+        numerator = -6*(cj*ck + cj*cd + cj*cl + ck*cd + ck*cl + cd*cl)
+    if j == 5:
+        numerator = 24 * (cj + ck + cl + cd)
+    if j == 6:
+        numerator = -120
+    return numerator # / denominator(ci, cj, ck, cl, cd)
+
 
 def theta(j, cd, ci, ck, cj, cl):
     if j == 2:
