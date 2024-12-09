@@ -12,6 +12,7 @@ RK_SAMPLER_NAMES = ["none",
                     "res_3m",
                     "res_2s", 
                     "res_3s",
+                    "res_3s_alt",
                     "res_3s_cox_matthews",
                     "res_3s_lie",
                     "res_3s_strehmel_weiner",
@@ -854,6 +855,21 @@ def get_rk_methods(rk_type, h, c1=0.0, c2=0.5, c3=1.0, h_prev=None, h_prev2=None
                     [b1, b2, b3],
             ]
             ci = [c1, c2, c3]
+            
+        case "res_3s_alt":
+            c1,c2,c3 = 0, c2, 2/3
+            ci = [c1,c2,c3]
+            φ = Phi(h, ci)
+            
+            a = [
+                    [0, 0,                   0],
+                    [0, 0,                   0],
+                    [0, (4/(9*c2)) * φ(2,3), 0],
+            ]
+            b = [
+                    [0, 0, (1/c3)*φ(2)],
+            ]
+            
             
         case "res_3s_strehmel_weiner": # weak 4th order, Krogstad
             ci = [0,c2,1]
