@@ -870,6 +870,7 @@ def get_rk_methods(rk_type, h, c1=0.0, c2=0.5, c3=1.0, h_prev=None, h_prev2=None
                     [0, 0, (1/c3)*φ(2)],
             ]
             
+            a, b = gen_first_col_exp(a,b,ci,φ)
             
         case "res_3s_strehmel_weiner": # weak 4th order, Krogstad
             ci = [0,c2,1]
