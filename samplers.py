@@ -90,7 +90,10 @@ class SharkSampler:
                     shift=3.0, base_shift=0.85, options=None, sde_noise=None,sde_noise_steps=1, shift_scaling="exponential", unsampler_type="linear",
                     extra_options="", 
                     ): 
-            sampler.extra_options['extra_options'] += extra_options
+            if "extra_options" in sampler.extra_options:
+                extra_options += sampler.extra_options['extra_options']
+                sampler.extra_options['extra_options'] = extra_options
+                
             latent_image_batch = {"samples": latent_image['samples']}
             out_samples, out_samples_fp64, out_denoised_samples, out_denoised_samples_fp64 = [], [], [], []
             for batch_num in range(latent_image_batch['samples'].shape[0]):
