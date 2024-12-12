@@ -100,6 +100,7 @@ NODE_CLASS_MAPPINGS = {
     "TorchCompileModelFluxAdv": models.TorchCompileModelFluxAdvanced,
 
     "ModelSamplingAdvancedResolution": models.ModelSamplingAdvancedResolution,
+    "FluxGuidanceDisable": models.FluxGuidanceDisable,
     
     "AdvancedNoise": latents.AdvancedNoise,
     
@@ -120,6 +121,10 @@ NODE_CLASS_MAPPINGS = {
     "ConditioningZeroAndTruncate": conditioning.ConditioningZeroAndTruncate,
     "ConditioningTruncate": conditioning.ConditioningTruncate,
     "StyleModelApplyAdvanced": conditioning.StyleModelApplyAdvanced,
+    
+    "FluxRegionalPrompt": conditioning.FluxRegionalPrompt,
+    
+    "FluxRegionalConditioning": conditioning.FluxRegionalConditioning,
 
     "ConditioningToBase64": conditioning.ConditioningToBase64,
     "Base64ToConditioning": conditioning.Base64ToConditioning,
@@ -205,6 +210,8 @@ NODE_CLASS_MAPPINGS = {
     "PrepForUnsampling": helper_sigma_preview_image_preproc.PrepForUnsampling,
     
     "SigmasPreview": helper_sigma_preview_image_preproc.SigmasPreview,
+    
+    "ReFluxPatcher": models.ReFluxPatcher,
 }
 
 if flags["test_samplers"]:

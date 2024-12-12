@@ -18,6 +18,7 @@ from .noise_classes import *
 import comfy.model_patcher
 import comfy.supported_models
 
+import itertools 
 
 from .noise_sigmas_timesteps_scaling import get_res4lyf_step_with_model, get_res4lyf_half_step3
 from .rk_coefficients import *
@@ -58,6 +59,8 @@ class RK_Method:
         self.h_prev2 = None
         self.multistep_stages = 0
         
+        self.cfg_cw = 0
+        
         #self.UNSAMPLE = False
         
     @staticmethod
@@ -79,15 +82,18 @@ class RK_Method:
     
     def model_epsilon(self, x, sigma, **extra_args):
         s_in = x.new_ones([x.shape[0]])
-        x0 = self.model(x, sigma * s_in, **extra_args)
+        denoised = self.model(x, sigma * s_in, **extra_args)
+        denoised = self.calc_cfg_channelwise(denoised)
+
         #return x0 ###################################THIS WORKS ONLY WITH THE MODEL SAMPLING PATCH
-        eps = (x - x0) / (sigma * s_in).view(x.shape[0], 1, 1, 1)
-        return eps, x0
+        eps = (x - denoised) / (sigma * s_in).view(x.shape[0], 1, 1, 1)
+        return eps, denoised
     
     def model_denoised(self, x, sigma, **extra_args):
         s_in = x.new_ones([x.shape[0]])
-        x0 = self.model(x, sigma * s_in, **extra_args)
-        return x0
+        denoised = self.model(x, sigma * s_in, **extra_args)
+        denoised = self.calc_cfg_channelwise(denoised)
+        return denoised
     
     @staticmethod
     def phi(j, neg_h):
@@ -223,7 +229,7 @@ class RK_Method:
 
 
 
-    def init_cfgpp(self, model, x, cfgpp, extra_args):
+    def init_cfgpp(self, model, x, cfgpp=0.0, **extra_args):
         self.uncond = [torch.full_like(x, 0.0)]
         if cfgpp != 0.0:
             def post_cfg_function(args):
@@ -234,7 +240,32 @@ class RK_Method:
         #TODO: complete this method
         
 
+    def init_cfg_channelwise(self, x, cfg_cw=1.0, **extra_args):
+        self.uncond = [torch.full_like(x, 0.0)]
+        self.cfg_cw = cfg_cw
+        if cfg_cw != 1.0:
+            def post_cfg_function(args):
+                self.uncond[0] = args["uncond_denoised"]
+                return args["denoised"]
+            model_options = extra_args.get("model_options", {}).copy()
+            extra_args["model_options"] = comfy.model_patcher.set_model_options_post_cfg_function(model_options, post_cfg_function, disable_cfg1_optimization=True)
+        return extra_args
+            
+    def calc_cfg_channelwise(self, denoised):
+        if self.cfg_cw != 1.0:            
+            avg = 0
+            for b, c in itertools.product(range(denoised.shape[0]), range(denoised.shape[1])):
+                avg     += torch.norm(denoised[b][c] - self.uncond[0][b][c])
+            avg  /= denoised.shape[1]
+            
+            for b, c in itertools.product(range(denoised.shape[0]), range(denoised.shape[1])):
+                ratio     = torch.nan_to_num(torch.norm(denoised[b][c] - self.uncond[0][b][c])   /   avg,     0)
+                denoised_new = self.uncond[0] + ratio * self.cfg_cw * (denoised - self.uncond[0])
+            return denoised_new
+        else:
+            return denoised
 
+        
 
 class RK_Method_Exponential(RK_Method):
     def __init__(self, model, name="", method="explicit", device='cuda', dtype=torch.float64):
@@ -263,13 +294,13 @@ class RK_Method_Exponential(RK_Method):
         denoised = self.model_denoised(x, sigma, **extra_args)
         epsilon = denoised - x_0
         
-        if self.uncond == None:
-            self.uncond = torch.zeros_like(x)
-        denoised_u = self.uncond.clone()
+        """if self.uncond == None:
+            self.uncond = [torch.zeros_like(x)]
+        denoised_u = self.uncond[0].clone()
         if torch.all(denoised_u == 0):
-            epsilon_u = torch.zeros_like(x_0)
+            epsilon_u = [torch.zeros_like(x_0)]
         else:
-            epsilon_u = denoised_u - x_0
+            epsilon_u = denoised_u[0] - x_0"""
             
         self.h_prev2 = self.h_prev
         self.h_prev = h
@@ -330,13 +361,13 @@ class RK_Method_Linear(RK_Method):
         
         epsilon, denoised = self.model_epsilon(x, sigma, **extra_args)
         
-        if self.uncond == None:
-            self.uncond = torch.zeros_like(x)
-        denoised_u = self.uncond.clone()
-        if torch.all(denoised_u == 0):
-            epsilon_u = torch.zeros_like(x_0)
+        """if self.uncond == None:
+            self.uncond = [torch.zeros_like(x)]
+        denoised_u = self.uncond[0].clone()
+        if torch.all(denoised_u[0] == 0):
+            epsilon_u = [torch.zeros_like(x_0)]
         else:
-            epsilon_u  = (x_0 - denoised_u) / (sigma * s_in).view(x.shape[0], 1, 1, 1)
+            epsilon_u  = (x_0 - denoised_u[0]) / (sigma * s_in).view(x.shape[0], 1, 1, 1)"""
             
         self.h_prev2 = self.h_prev
         self.h_prev = h

@@ -73,7 +73,7 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
                   latent_guide=None, latent_guide_inv=None, latent_guide_weight=0.0, latent_guide_weight_inv=0.0, latent_guide_weights=None, latent_guide_weights_inv=None, guide_mode="blend", unsampler_type="linear",
                   GARBAGE_COLLECT=False, mask=None, mask_inv=None, LGW_MASK_RESCALE_MIN=True, sigmas_override=None, unsample_resample_scales=None,sde_noise=[],
                   extra_options="",
-                  etas=None, s_noises=None, momentums=None, guides=None,
+                  etas=None, s_noises=None, momentums=None, guides=None, cfg_cw = 1.0,
                   ):
     extra_args = {} if extra_args is None else extra_args
     s_in, s_one = x.new_ones([x.shape[0]]), x.new_ones([1])
@@ -145,6 +145,9 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
         model_options = extra_args.get("model_options", {}).copy()
         extra_args["model_options"] = comfy.model_patcher.set_model_options_post_cfg_function(model_options, post_cfg_function, disable_cfg1_optimization=True)  
 
+    if extra_options_flag("cfg_cw", extra_options):
+        cfg_cw = float(get_extra_options_kv("cfg_cw", "1.0", extra_options))
+    extra_args = rk.init_cfg_channelwise(x, cfg_cw, **extra_args)
 
     denoised, eps = torch.zeros_like(x), torch.zeros_like(x)
     for step in trange(len(sigmas)-1, disable=disable):
@@ -160,6 +163,9 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
         
         if sigma_next == 0:
             rk, irk, rk_type, irk_type, eta, eta_var = prepare_step_to_sigma_zero(rk, irk, rk_type, irk_type, model, x, extra_options, alpha, k, noise_sampler_type)
+        cfg_cw = float(get_extra_options_kv("cfg_cw", "1.0", extra_options))
+        extra_args = irk.init_cfg_channelwise(x, cfg_cw, **extra_args)
+        extra_args = rk.init_cfg_channelwise(x, cfg_cw, **extra_args)
 
         sigma_up, sigma, sigma_down, alpha_ratio = get_res4lyf_step_with_model(model, sigma, sigma_next, eta, eta_var, noise_mode, rk.h_fn(sigma_next,sigma) )
         h     =  rk.h_fn(sigma_down, sigma)
@@ -241,7 +247,10 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
                     #eps_[row] = eps_[row] * (s_[row+1]/s_[row]) * (s_[row]/sub_sigma_down)
                     eps_[row] *= (s_[row+1]/sigma) * (sigma/sub_sigma_down)
                 if extra_options_flag("substep_noise_scaling", extra_options) and sub_sigma_down > 0 and sigma_next > 0:
-                    substep_noise_scaling_ratio = (s_[row+1]/sigma) * (sigma/sub_sigma_down)
+                    if not extra_options_flag("substep_noise_rough", extra_options):
+                        substep_noise_scaling_ratio = (s_[row+1]/sigma) * (sigma/sub_sigma_down)
+                    else:
+                        substep_noise_scaling_ratio = (s_[row]/sigma) * (sigma/sub_sigma_down)
                     snsr = float(get_extra_options_kv("substep_noise_scaling", "1.0", extra_options))
                     eps_[row] *= 1 + snsr*(substep_noise_scaling_ratio-1)
                 if extra_options_flag("substep_sigma_ratio", extra_options):

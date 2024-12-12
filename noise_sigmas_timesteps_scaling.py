@@ -27,7 +27,7 @@ def get_alpha_ratio_from_sigma_down(sigma_down, sigma_next, eta, sigma_max=1.0):
     return alpha_ratio, sigma_up, sigma_down
   
   
-
+  
 def get_ancestral_step_RF_var(sigma, sigma_next, eta, sigma_max=1.0):
     dtype = sigma.dtype #calculate variance adjusted sigma up... sigma_up = sqrt(dt)
 
@@ -42,6 +42,8 @@ def get_ancestral_step_RF_var(sigma, sigma_next, eta, sigma_max=1.0):
     alpha_ratio = (1 - sigma_next).to(torch.float64) / (1 - sigma_down).to(torch.float64)
     
     return sigma_up.to(dtype),  sigma_down.to(dtype), alpha_ratio.to(dtype)
+  
+  
   
 def get_ancestral_step_RF_lorentzian(sigma, sigma_next, eta, sigma_max=1.0):
     dtype = sigma.dtype
@@ -67,7 +69,6 @@ def get_ancestral_step_RF_sinusoidal(sigma_next, eta, sigma_max=1.0):
     alpha_ratio, sigma_up, sigma_down = get_alpha_ratio_from_sigma_up(sigma_up, sigma_next, eta, sigma_max)
     return sigma_up, sigma_down, alpha_ratio
 
-
 def get_ancestral_step_RF_softer(sigma, sigma_next, eta, sigma_max=1.0):
     # math adapted from get_ancestral_step_EPS to work with RF
     sigma_down = sigma_next * torch.sqrt(1 - (eta**2 * (sigma**2 - sigma_next**2)) / sigma**2)
@@ -82,7 +83,6 @@ def get_ancestral_step_RF_soft(sigma, sigma_next, eta, sigma_max=1.0):
     alpha_ratio, sigma_up, sigma_down = get_alpha_ratio_from_sigma_down(sigma_down, sigma_next, eta, sigma_max)
     return sigma_up, sigma_down, alpha_ratio
 
-
 def get_ancestral_step_RF_soft_linear(sigma, sigma_next, eta, sigma_max=1.0):
     sigma_down = sigma_next + eta * (sigma_next - sigma)
     if sigma_down < 0:
@@ -91,7 +91,6 @@ def get_ancestral_step_RF_soft_linear(sigma, sigma_next, eta, sigma_max=1.0):
 
     return sigma_up, sigma_down, alpha_ratio
   
-
 def get_ancestral_step_RF_exp(sigma_next, eta, h=None, sigma_max=1.0): # TODO: fix black image issue with linear RK
     sigma_up = sigma_next * (1 - (-2*eta*h).exp())**0.5 
     alpha_ratio, sigma_up, sigma_down = get_alpha_ratio_from_sigma_up(sigma_up, sigma_next, eta, sigma_max)
@@ -149,6 +148,7 @@ def get_res4lyf_step_with_model(model, sigma, sigma_next, eta=0.0, eta_var=1.0, 
   alpha_ratio = torch.nan_to_num(alpha_ratio, 1.0)
   
   return su, sigma, sd, alpha_ratio
+
 
 
 def get_res4lyf_half_step3(sigma, sigma_next, c2=0.5, c3=1.0, t_fn=None, sigma_fn=None, t_fn_formula="", sigma_fn_formula="", ):

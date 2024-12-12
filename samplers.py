@@ -90,6 +90,18 @@ class SharkSampler:
                     shift=3.0, base_shift=0.85, options=None, sde_noise=None,sde_noise_steps=1, shift_scaling="exponential", unsampler_type="linear",
                     extra_options="", 
                     ): 
+        
+            model = model.clone()
+            if positive[0][1] is not None:
+                if "regional_conditioning" in positive[0][1]:
+                    model.set_model_patch(positive[0][1]['regional_conditioning'], 'regional_conditioning_positive')
+                if "regional_conditioning_mask" in positive[0][1]:
+                    model.set_model_patch(positive[0][1]['regional_conditioning_mask'], 'regional_conditioning_mask')
+                #model.model_options['transformer_options']['regional_conditioning_positive'] = [positive['regional_conditioning']]
+            #if "regional_conditioning" in negative:
+            #    model.set_model_patch(negative['regional_conditioning'], 'regional_conditioning_negative')
+            #    #model.model_options['transformer_options']['regional_conditioning_negative'] = [positive['regional_conditioning']]
+        
             if "extra_options" in sampler.extra_options:
                 extra_options += sampler.extra_options['extra_options']
                 sampler.extra_options['extra_options'] = extra_options
@@ -634,4 +646,3 @@ class UltraSharkSampler:
             return (out, out_denoised)
 
 
-    

@@ -424,3 +424,144 @@ class Base64ToConditioning:
         conditioning = pickle.loads(conditioning_pickle)
         return (conditioning,)
 
+
+
+
+
+
+
+
+class RegionalMask(torch.nn.Module):
+    def __init__(self, mask: torch.Tensor, start_percent: float, end_percent: float) -> None:
+        super().__init__()
+        self.register_buffer('mask', mask)
+        self.start_percent = start_percent
+        self.end_percent   = end_percent
+
+    def __call__(self, transformer_options, *args, **kwargs):
+        if self.start_percent <= 1 - transformer_options['sigmas'][0] < self.end_percent:
+            return self.mask
+        return None
+    
+    
+
+class RegionalConditioning(torch.nn.Module):
+    def __init__(self, region_cond: torch.Tensor, start_percent: float, end_percent: float) -> None:
+        super().__init__()
+        self.register_buffer('region_cond', region_cond)
+        self.start_percent = start_percent
+        self.end_percent   = end_percent
+
+    def __call__(self, transformer_options, *args,  **kwargs):
+        if self.start_percent <= 1 - transformer_options['sigmas'][0] < self.end_percent:
+            return self.region_cond
+        return None
+
+
+
+class FluxRegionalPrompt:
+    @classmethod
+    def INPUT_TYPES(s):
+        return {"required": { 
+            "cond": ("CONDITIONING",),
+            "mask": ("MASK",),
+        }, "optional": {
+            "conditioning_regional": ("CONDITIONING_REGIONAL",),
+        }}
+
+    RETURN_TYPES = ("CONDITIONING_REGIONAL",)
+    RETURN_NAMES = ("conditioning_regional",)
+    FUNCTION = "main"
+
+    CATEGORY = "conditioning"
+
+    def main(self, cond, mask, conditioning_regional=[]):
+        conditioning_regional = [*conditioning_regional]
+        conditioning_regional.append({'mask': mask, 'cond': cond[0][0]})
+        return (conditioning_regional,)
+
+
+
+class FluxRegionalConditioning:
+    @classmethod
+    def INPUT_TYPES(s):
+        return {"required": { 
+            "conditioning": ("CONDITIONING",),
+            "conditioning_regional": ("CONDITIONING_REGIONAL",),
+
+            "latent": ("LATENT",),
+            "start_percent": ("FLOAT", {"default": 0,   "min": 0.0, "max": 1.0, "step": 0.01, "round": 0.01}),
+            "end_percent":   ("FLOAT", {"default": 0.5, "min": 0.0, "max": 1.0, "step": 0.01, "round": 0.01}),
+        }, 
+            "optional": {
+        }}
+
+    RETURN_TYPES = ("CONDITIONING",)
+    RETURN_NAMES = ("conditioning",)
+    FUNCTION = "main"
+
+    CATEGORY = "conditioning"
+
+    def main(self, conditioning, conditioning_regional, latent, start_percent, end_percent):
+
+        latent = latent['samples']
+        b, c, h, w = latent.shape
+        h //=2
+        w //=2
+
+        img_len = h*w
+
+        cond_r = torch.cat([cond_reg['cond'] for cond_reg in conditioning_regional], dim=1)
+        text_len = 256 + cond_r.shape[1]  #becomes 512 usually?
+
+        regional_mask = torch.zeros((text_len + img_len, text_len + img_len), dtype=torch.bool)
+
+        self_attend_masks = torch.zeros((img_len, img_len), dtype=torch.bool)
+        union_masks       = torch.zeros((img_len, img_len), dtype=torch.bool)
+
+        conditioning_regional = [
+            { 
+                'mask': torch.ones((1,   h,    w), dtype=torch.float64),
+                'cond': torch.ones((1, 256, 4096), dtype=torch.float64)
+            },
+            *conditioning_regional
+        ]   # region_conds[0] is all 1's, [1] contains orig data:
+
+        current_seq_len = 0
+        for cond_reg_dict in conditioning_regional:
+            cond_reg =     cond_reg_dict['cond']
+            region_mask = 1 - cond_reg_dict['mask'][0]
+            region_mask = torch.nn.functional.interpolate(region_mask[None, None, :, :], (h, w), mode='nearest-exact').flatten().unsqueeze(1).repeat(1, cond_reg.size(1))
+            next_seq_len = current_seq_len + cond_reg.shape[1]
+
+            # txt attends to itself
+            regional_mask[current_seq_len:next_seq_len, current_seq_len:next_seq_len] = True
+
+            # txt attends to corresponding regional img
+            regional_mask[current_seq_len:next_seq_len, text_len:] = region_mask.transpose(-1, -2)
+
+            # regional img attends to corresponding txt
+            regional_mask[text_len:, current_seq_len:next_seq_len] = region_mask
+
+            # regional img attends to corresponding regional img
+            img_size_masks = region_mask[:, :1].repeat(1, img_len)
+            img_size_masks_transpose = img_size_masks.transpose(-1, -2)
+            self_attend_masks = torch.logical_or(self_attend_masks, torch.logical_and(img_size_masks, img_size_masks_transpose))
+
+            # update union
+            union_masks = torch.logical_or(union_masks, torch.logical_or(img_size_masks, img_size_masks_transpose))
+            
+            current_seq_len = next_seq_len
+
+        background_masks = torch.logical_not(union_masks)
+        background_and_self_attend_masks = torch.logical_or(background_masks, self_attend_masks)
+        regional_mask[text_len:, text_len:] = background_and_self_attend_masks
+
+        # Patch
+        regional_mask         = RegionalMask        (regional_mask,         start_percent, end_percent)
+        regional_conditioning = RegionalConditioning(cond_r, start_percent, end_percent)
+
+        conditioning[0][1]['regional_conditioning'] = regional_conditioning
+        conditioning[0][1]['regional_conditioning_mask'] = regional_mask
+
+        return (conditioning,)

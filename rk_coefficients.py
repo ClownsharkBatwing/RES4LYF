@@ -824,8 +824,8 @@ def get_rk_methods(rk_type, h, c1=0.0, c2=0.5, c3=1.0, h_prev=None, h_prev2=None
             φ = Phi(h, ci)
             
             a2_1 = c2 * φ(1,2)
-            b1 = φ(1) - φ(2)/c2
             b2 = φ(2)/c2
+            b1 = φ(1) - b2
 
             a = [
                     [0,0],
