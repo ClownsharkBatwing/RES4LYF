@@ -130,7 +130,11 @@ class ReFlux(Flux):
         patch_size = 2
         x = comfy.ldm.common_dit.pad_to_patch_size(x, (patch_size, patch_size))
         transformer_options['patch_size'] = patch_size
-
+        
+        transformer_options['unsample_resample_scale'] = timestep[0] / 1.5
+        if "unsample_resample_scale" in kwargs:
+            transformer_options['unsample_resample_scale']  = transformer_options.get('patches', {}).get('unsample_resample_scale', None)
+            
         h_len = ((h + (patch_size // 2)) // patch_size)
         w_len = ((w + (patch_size // 2)) // patch_size)
 

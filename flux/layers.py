@@ -177,7 +177,8 @@ class DoubleStreamBlock(nn.Module):
             mask_fn = lambda arg: None
         mask = mask_fn(transformer_options)
         
-        mask = None if random.random() > (timestep[0]/1.5) else mask
+        mask = None if random.random() > (transformer_options['unsample_resample_scale']) else mask
+        #mask = None if random.random() > (timestep[0]/1.5) else mask
        
         attn = attention(q, k, v, pe=pe, mask=mask)
 
@@ -247,7 +248,7 @@ class SingleStreamBlock(nn.Module):
             mask_fn = lambda arg: None
         mask = mask_fn(transformer_options)
         
-        mask = None if random.random() > (timestep[0]/1.5) else mask
+        mask = None if random.random() > (transformer_options['unsample_resample_scale']) else mask
 
         attn = attention(q, k, v, pe=pe, mask=mask)
         _, img_attn = attn[:, :256], attn[:, 256:]
