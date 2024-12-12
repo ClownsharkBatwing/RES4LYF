@@ -152,9 +152,10 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
     denoised, eps = torch.zeros_like(x), torch.zeros_like(x)
     for step in trange(len(sigmas)-1, disable=disable):
         sigma, sigma_next = sigmas[step], sigmas[step+1]
-        unsample_resample_scale = unsample_resample_scales[step] if unsample_resample_scales is not None else None
-        unsample_resample_scale = unsample_resample_scale.unsqueeze(0) if unsample_resample_scale.dim() == 0 else unsample_resample_scale
-        model.inner_model.model_options['transformer_options']['patches']['unsample_resample_scale'] = unsample_resample_scale
+        unsample_resample_scale = float(unsample_resample_scales[step]) if unsample_resample_scales is not None else None
+        #unsample_resample_scale = unsample_resample_scale.unsqueeze(0).clone() if unsample_resample_scale.dim() == 0 else unsample_resample_scale.clone()
+        #model.inner_model.model_options['transformer_options']['patches']['unsample_resample_scale'] = unsample_resample_scale
+        model.inner_model.model_options['unsample_resample_scale'] = unsample_resample_scale
         eta = eta_var = etas[step] if etas is not None else eta
         s_noise = s_noises[step] if s_noises is not None else s_noise
         
