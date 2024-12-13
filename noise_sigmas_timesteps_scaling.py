@@ -90,7 +90,7 @@ def get_ancestral_step_RF_soft_linear(sigma, sigma_next, eta, sigma_max=1.0):
     alpha_ratio, sigma_up, sigma_down = get_alpha_ratio_from_sigma_down(sigma_down, sigma_next, eta, sigma_max)
 
     return sigma_up, sigma_down, alpha_ratio
-  
+
 def get_ancestral_step_RF_exp(sigma_next, eta, h=None, sigma_max=1.0): # TODO: fix black image issue with linear RK
     sigma_up = sigma_next * (1 - (-2*eta*h).exp())**0.5 
     alpha_ratio, sigma_up, sigma_down = get_alpha_ratio_from_sigma_up(sigma_up, sigma_next, eta, sigma_max)

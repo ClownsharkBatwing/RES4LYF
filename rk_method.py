@@ -265,7 +265,7 @@ class RK_Method:
         else:
             return denoised
 
-        
+
 
 class RK_Method_Exponential(RK_Method):
     def __init__(self, model, name="", method="explicit", device='cuda', dtype=torch.float64):

@@ -32,7 +32,7 @@ class EmbedND(nn.Module):
 def timestep_embedding(t: Tensor, dim, max_period=10000, time_factor: float = 1000.0):
     """
     Create sinusoidal timestep embeddings.
-    :param t: a 1-D Tensor of N indices, one per batch element.
+    :param t: a 1-D Tensor of N indices, one per batch element. 
                       These may be fractional.
     :param dim: the dimension of the output.
     :param max_period: controls the minimum frequency of the embeddings.
@@ -99,7 +99,6 @@ class ModulationOut:
     scale: Tensor
     gate: Tensor
 
-
 class Modulation(nn.Module):
     def __init__(self, dim: int, double: bool, dtype=None, device=None, operations=None):
         super().__init__()
@@ -109,91 +108,78 @@ class Modulation(nn.Module):
 
     def forward(self, vec: Tensor) -> tuple:
         out = self.lin(nn.functional.silu(vec))[:, None, :].chunk(self.multiplier, dim=-1)
+        return (ModulationOut(*out[:3]),    ModulationOut(*out[3:]) if self.is_double else None,)
 
-        return (
-            ModulationOut(*out[:3]),
-            ModulationOut(*out[3:]) if self.is_double else None,
-        )
-
-import random
 
 class DoubleStreamBlock(nn.Module):
-    def __init__(self, hidden_size: int, num_heads: int, mlp_ratio: float, qkv_bias: bool = False, dtype=None, device=None, operations=None):
+    def __init__(self, hidden_size: int, num_heads: int, mlp_ratio: float, qkv_bias: bool = False, dtype=None, device=None, operations=None, idx=-1):
         super().__init__()
 
-        mlp_hidden_dim = int(hidden_size * mlp_ratio)
-        self.num_heads = num_heads
+        self.idx = idx
+
+        mlp_hidden_dim   = int(hidden_size * mlp_ratio)
+        self.num_heads   = num_heads
         self.hidden_size = hidden_size
+        
         self.img_mod = Modulation(hidden_size, double=True, dtype=dtype, device=device, operations=operations)
-        self.img_norm1 = operations.LayerNorm(hidden_size, elementwise_affine=False, eps=1e-6, dtype=dtype, device=device)
+        self.txt_mod = Modulation(hidden_size, double=True, dtype=dtype, device=device, operations=operations)
+
         self.img_attn = SelfAttention(dim=hidden_size, num_heads=num_heads, qkv_bias=qkv_bias, dtype=dtype, device=device, operations=operations)
+        self.txt_attn = SelfAttention(dim=hidden_size, num_heads=num_heads, qkv_bias=qkv_bias, dtype=dtype, device=device, operations=operations)
+
+        self.img_norm1 = operations.LayerNorm(hidden_size, elementwise_affine=False, eps=1e-6, dtype=dtype, device=device)
+        self.txt_norm1 = operations.LayerNorm(hidden_size, elementwise_affine=False, eps=1e-6, dtype=dtype, device=device)
 
         self.img_norm2 = operations.LayerNorm(hidden_size, elementwise_affine=False, eps=1e-6, dtype=dtype, device=device)
+        self.txt_norm2 = operations.LayerNorm(hidden_size, elementwise_affine=False, eps=1e-6, dtype=dtype, device=device)
+
         self.img_mlp = nn.Sequential(
             operations.Linear(hidden_size, mlp_hidden_dim, bias=True, dtype=dtype, device=device),
             nn.GELU(approximate="tanh"),
             operations.Linear(mlp_hidden_dim, hidden_size, bias=True, dtype=dtype, device=device),
         )
-
-        self.txt_mod = Modulation(hidden_size, double=True, dtype=dtype, device=device, operations=operations)
-        self.txt_norm1 = operations.LayerNorm(hidden_size, elementwise_affine=False, eps=1e-6, dtype=dtype, device=device)
-        self.txt_attn = SelfAttention(dim=hidden_size, num_heads=num_heads, qkv_bias=qkv_bias, dtype=dtype, device=device, operations=operations)
-
-        self.txt_norm2 = operations.LayerNorm(hidden_size, elementwise_affine=False, eps=1e-6, dtype=dtype, device=device)
         self.txt_mlp = nn.Sequential(
             operations.Linear(hidden_size, mlp_hidden_dim, bias=True, dtype=dtype, device=device),
             nn.GELU(approximate="tanh"),
             operations.Linear(mlp_hidden_dim, hidden_size, bias=True, dtype=dtype, device=device),
         )
+    
+    def img_attn_preproc(self, img, img_mod1):
+        img_modulated = self.img_norm1(img)
+        img_modulated = (1 + img_mod1.scale) * img_modulated + img_mod1.shift
+        img_qkv = self.img_attn.qkv(img_modulated)
+        img_q, img_k, img_v = rearrange(img_qkv, "B L (K H D) -> K B H L D", K=3, H=self.num_heads)
+        img_q, img_k = self.img_attn.norm(img_q, img_k, img_v)
+        return img_q, img_k, img_v
+    
+    def txt_attn_preproc(self, txt, txt_mod1):
+        txt_modulated = self.txt_norm1(txt)
+        txt_modulated = (1 + txt_mod1.scale) * txt_modulated + txt_mod1.shift
+        txt_qkv = self.txt_attn.qkv(txt_modulated)
+        txt_q, txt_k, txt_v = rearrange(txt_qkv, "B L (K H D) -> K B H L D", K=3, H=self.num_heads)
+        txt_q, txt_k = self.txt_attn.norm(txt_q, txt_k, txt_v)
+        return txt_q, txt_k, txt_v
+    
+    def forward(self, img: Tensor, txt: Tensor, vec: Tensor, pe: Tensor, timestep, transformer_options={}, mask=None): # vec 1,3072
 
-    
-    
-    def forward(self, img: Tensor, txt: Tensor, vec: Tensor, pe: Tensor, timestep, transformer_options={}):
         img_mod1, img_mod2 = self.img_mod(vec)
         txt_mod1, txt_mod2 = self.txt_mod(vec)
 
-        # prepare qkv from img, txt for attention
-        img_modulated = self.img_norm1(img)
-        txt_modulated = self.txt_norm1(txt)
-        
-        img_modulated = (1 + img_mod1.scale) * img_modulated + img_mod1.shift
-        txt_modulated = (1 + txt_mod1.scale) * txt_modulated + txt_mod1.shift
-        
-        img_qkv = self.img_attn.qkv(img_modulated)
-        txt_qkv = self.txt_attn.qkv(txt_modulated)
-        
-        img_q, img_k, img_v = rearrange(img_qkv, "B L (K H D) -> K B H L D", K=3, H=self.num_heads)
-        txt_q, txt_k, txt_v = rearrange(txt_qkv, "B L (K H D) -> K B H L D", K=3, H=self.num_heads)
-        
-        img_q, img_k = self.img_attn.norm(img_q, img_k, img_v)
-        txt_q, txt_k = self.txt_attn.norm(txt_q, txt_k, txt_v)
-        
+        img_q, img_k, img_v = self.img_attn_preproc(img, img_mod1)
+        txt_q, txt_k, txt_v = self.txt_attn_preproc(txt, txt_mod1)
+
         q, k, v = torch.cat((txt_q, img_q), dim=2), torch.cat((txt_k, img_k), dim=2), torch.cat((txt_v, img_v), dim=2)
-
-        #mask_fn = transformer_options.get('patches_replace', {}).get(f'double', {}).get(('mask_fn', self.idx), lambda arg: None) 
-        if "mask_fn" in transformer_options:
-            mask_fn = transformer_options['mask_fn']
-        else:
-            mask_fn = lambda arg: None
-        mask = mask_fn(transformer_options)
-        
-        mask = None if random.random() > (transformer_options['unsample_resample_scale']) else mask
-        #mask = None if random.random() > (timestep[0]/1.5) else mask
-       
         attn = attention(q, k, v, pe=pe, mask=mask)
-
-        txt_attn, img_attn = attn[:, : txt.shape[1]], attn[:, txt.shape[1] :]
-        txt_attn = txt_attn[0:1].repeat(img_attn.shape[0], 1, 1)
-
-        # calculate the img, txt blocks
-        img = img + img_mod1.gate * self.img_attn.proj(img_attn)
-        txt = txt + txt_mod1.gate * self.txt_attn.proj(txt_attn)
+        txt_attn = attn[:, : txt.shape[1]]                         # 1, 768,3072
+        img_attn = attn[:, txt.shape[1] :]  
         
-        img = img + img_mod2.gate * self.img_mlp((1 + img_mod2.scale) * self.img_norm2(img) + img_mod2.shift)
-        txt = txt + txt_mod2.gate * self.txt_mlp((1 + txt_mod2.scale) * self.txt_norm2(txt) + txt_mod2.shift)
+        img += img_mod1.gate * self.img_attn.proj(img_attn)
+        txt += txt_mod1.gate * self.txt_attn.proj(txt_attn)
+        
+        img += img_mod2.gate * self.img_mlp((1 + img_mod2.scale) * self.img_norm2(img) + img_mod2.shift)
+        txt += txt_mod2.gate * self.txt_mlp((1 + txt_mod2.scale) * self.txt_norm2(txt) + txt_mod2.shift)
         
         return img, txt
-
 
 
 class SingleStreamBlock(nn.Module):
@@ -201,23 +187,15 @@ class SingleStreamBlock(nn.Module):
     A DiT block with parallel linear layers as described in
     https://arxiv.org/abs/2302.05442 and adapted modulation interface.
     """
-    def __init__(
-        self,
-        hidden_size: int,
-        num_heads: int,
-        mlp_ratio: float = 4.0,
-        qk_scale: float = None,
-        dtype=None,
-        device=None,
-        operations=None
-    ):
+    def __init__(self, hidden_size: int,  num_heads: int, mlp_ratio: float = 4.0, qk_scale: float = None, dtype=None, device=None, operations=None, idx=-1):
         super().__init__()
-        self.hidden_dim = hidden_size
-        self.num_heads = num_heads
+        self.idx = idx
+        self.hidden_dim = hidden_size #3072
+        self.num_heads = num_heads    #24
         head_dim = hidden_size // num_heads
-        self.scale = qk_scale or head_dim**-0.5
+        self.scale = qk_scale or head_dim**-0.5   #0.08838834764831845
 
-        self.mlp_hidden_dim = int(hidden_size * mlp_ratio)
+        self.mlp_hidden_dim = int(hidden_size * mlp_ratio)    #12288 == 3072 * 4
         # qkv and mlp_in
         self.linear1 = operations.Linear(hidden_size, hidden_size * 3 + self.mlp_hidden_dim, dtype=dtype, device=device)
         # proj and mlp_out
@@ -225,38 +203,30 @@ class SingleStreamBlock(nn.Module):
 
         self.norm = QKNorm(head_dim, dtype=dtype, device=device, operations=operations)
 
-        self.hidden_size = hidden_size
+        self.hidden_size = hidden_size #3072
         self.pre_norm = operations.LayerNorm(hidden_size, elementwise_affine=False, eps=1e-6, dtype=dtype, device=device)
 
         self.mlp_act = nn.GELU(approximate="tanh")
         self.modulation = Modulation(hidden_size, double=False, dtype=dtype, device=device, operations=operations)
         
-        
-    
-    def forward(self, x: Tensor, vec: Tensor, pe: Tensor, timestep, transformer_options={}) -> Tensor:
-        mod, _ = self.modulation(vec)
-        x_mod = (1 + mod.scale) * self.pre_norm(x) + mod.shift
-        qkv, mlp = torch.split(self.linear1(x_mod), [3 * self.hidden_size, self.mlp_hidden_dim], dim=-1)
+    def img_attn(self, img, mod, pe, mask):
+        img_mod = (1 + mod.scale) * self.pre_norm(img) + mod.shift
+        qkv, mlp = torch.split(self.linear1(img_mod), [3 * self.hidden_size, self.mlp_hidden_dim], dim=-1)
 
         q, k, v = rearrange(qkv, "B L (K H D) -> K B H L D", K=3, H=self.num_heads)
         q, k = self.norm(q, k, v)
 
-        #mask_fn = transformer_options.get('patches_replace', {}).get(f'single', {}).get(('mask_fn', self.idx), lambda arg: None) 
-        if "mask_fn" in transformer_options:
-            mask_fn = transformer_options['mask_fn']
-        else:
-            mask_fn = lambda arg: None
-        mask = mask_fn(transformer_options)
-        
-        mask = None if random.random() > (transformer_options['unsample_resample_scale']) else mask
-
         attn = attention(q, k, v, pe=pe, mask=mask)
-        _, img_attn = attn[:, :256], attn[:, 256:]
-        attn[:, 256:] = img_attn
+        return attn, mlp
 
-        # compute activation in mlp stream, cat again and run second linear layer
+    # vec 1,3072    x 1,9984,3072
+    def forward(self, img: Tensor, vec: Tensor, pe: Tensor, timestep, transformer_options={}, mask=None) -> Tensor:   # x 1,9984,3072 if 2 reg embeds, 1,9472,3072 if none    # 9216x4096 = 16x1536x1536
+        mod, _ = self.modulation(vec)
+        attn, mlp = self.img_attn(img, mod, pe, mask)
         output = self.linear2(torch.cat((attn, self.mlp_act(mlp)), 2))
-        return x + mod.gate * output
+
+        img += mod.gate * output
+        return img
 
 
 

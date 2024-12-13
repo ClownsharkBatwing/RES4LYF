@@ -71,7 +71,7 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
               sigma_fn_formula="", t_fn_formula="",
                   eta=0.0, eta_var=0.0, s_noise=1., d_noise=1., alpha=-1.0, k=1.0, scale=0.1, c1=0.0, c2=0.5, c3=1.0,cfgpp=0.0, implicit_steps=0, reverse_weight=0.0,
                   latent_guide=None, latent_guide_inv=None, latent_guide_weight=0.0, latent_guide_weight_inv=0.0, latent_guide_weights=None, latent_guide_weights_inv=None, guide_mode="blend", unsampler_type="linear",
-                  GARBAGE_COLLECT=False, mask=None, mask_inv=None, LGW_MASK_RESCALE_MIN=True, sigmas_override=None, unsample_resample_scales=None,sde_noise=[],
+                  GARBAGE_COLLECT=False, mask=None, mask_inv=None, LGW_MASK_RESCALE_MIN=True, sigmas_override=None, unsample_resample_scales=None,regional_conditioning_weights=None, sde_noise=[],
                   extra_options="",
                   etas=None, s_noises=None, momentums=None, guides=None, cfg_cw = 1.0,
                   ):
@@ -155,7 +155,8 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
         unsample_resample_scale = float(unsample_resample_scales[step]) if unsample_resample_scales is not None else None
         #unsample_resample_scale = unsample_resample_scale.unsqueeze(0).clone() if unsample_resample_scale.dim() == 0 else unsample_resample_scale.clone()
         #model.inner_model.model_options['transformer_options']['patches']['unsample_resample_scale'] = unsample_resample_scale
-        model.inner_model.model_options['unsample_resample_scale'] = unsample_resample_scale
+        #model.inner_model.model_options['transformer_options']['unsample_resample_scale'] = unsample_resample_scale
+        model.inner_model.model_options['transformer_options']['regional_conditioning_weight'] = regional_conditioning_weights[step]
         eta = eta_var = etas[step] if etas is not None else eta
         s_noise = s_noises[step] if s_noises is not None else s_noise
         
@@ -176,7 +177,6 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
         
         c2, c3 = get_res4lyf_half_step3(sigma, sigma_down, c2, c3, t_fn=rk.t_fn, sigma_fn=rk.sigma_fn, t_fn_formula=t_fn_formula, sigma_fn_formula=sigma_fn_formula)
         
-        
         rk_euler.set_coeff("euler", h, c1, c2, c3, step, sigmas, sigma, sigma_down)
         rk. set_coeff(rk_type, h, c1, c2, c3, step, sigmas, sigma, sigma_down)
         irk.set_coeff(irk_type, h_irk, c1, c2, c3, step, sigmas, sigma, sigma_down)
@@ -187,7 +187,7 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
         s_       = [(  rk.sigma_fn( rk.t_fn(sigma) +     h*c_)) * s_one for c_ in   rk.c]
         s_irk_rk = [(  rk.sigma_fn( rk.t_fn(sigma) +     h*c_)) * s_one for c_ in  irk.c]
         s_irk    = [( irk.sigma_fn(irk.t_fn(sigma) + h_irk*c_)) * s_one for c_ in  irk.c]
-
+        
         sde_noise_t = None
         if SDE_NOISE_EXTERNAL:
             if step >= len(sde_noise):
