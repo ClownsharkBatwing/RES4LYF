@@ -463,21 +463,22 @@ class FluxRegionalPrompt:
     def INPUT_TYPES(s):
         return {"required": { 
             "cond": ("CONDITIONING",),
-            "mask": ("MASK",),
         }, "optional": {
-            "conditioning_regional": ("CONDITIONING_REGIONAL",),
+            "cond_regional": ("CONDITIONING_REGIONAL",),
+            "mask": ("MASK",),
         }}
 
-    RETURN_TYPES = ("CONDITIONING_REGIONAL",)
-    RETURN_NAMES = ("conditioning_regional",)
+    RETURN_TYPES = ("CONDITIONING_REGIONAL","MASK",)
+    RETURN_NAMES = ("cond_regional","mask_inv")
     FUNCTION = "main"
 
     CATEGORY = "conditioning"
 
-    def main(self, cond, mask, conditioning_regional=[]):
-        conditioning_regional = [*conditioning_regional]
-        conditioning_regional.append({'mask': mask, 'cond': cond[0][0]})
-        return (conditioning_regional,)
+    def main(self, cond, mask, cond_regional=[]):
+        cond_regional = [*cond_regional]
+        cond_regional.append({'mask': mask, 'cond': cond[0][0]})
+        mask_inv = 1-mask
+        return (cond_regional,mask_inv,)
 
 
 
