@@ -171,7 +171,7 @@ class ReFlux(Flux):
                 regional_conditioning_positive = transformer_options.get('patches', {}).get('regional_conditioning_positive', None)
                 regional_conditioning_positive = copy.deepcopy(regional_conditioning_positive)   
                 region_cond = regional_conditioning_positive[0](transformer_options)
-                context_tmp = torch.cat([context.clone(), region_cond.clone()], dim=1).to(torch.bfloat16)
+                context_tmp = torch.cat([context[i][None,...].clone(), region_cond.clone()], dim=1).to(torch.bfloat16)
                 
             txt_ids      = torch.zeros((bs, context_tmp.shape[1], 3), device=x.device, dtype=x.dtype)      # txt_ids        1, 256,3
             img_ids_orig = self._get_img_ids(x, bs, h_len, w_len, 0, h_len, 0, w_len)                  # img_ids_orig = 1,9216,3
@@ -186,7 +186,4 @@ class ReFlux(Flux):
                                         guidance    [i][None,...].clone(),
                                         control, transformer_options=transformer_options)  # context 1,256,4096   y 1,768
             out_list.append(out_tmp)
-            
-        out = torch.stack(out_list, dim=0).squeeze(dim=1)
-        
-        return rearrange(out, "b (h w) (c ph pw) -> b c (h ph) (w pw)", h=h_len, w=w_len, ph=2, pw=2)[:,:,:h,:w]
+            context
