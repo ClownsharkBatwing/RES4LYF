@@ -13,6 +13,7 @@ from copy import deepcopy
 
 from .helper import initialize_or_scale
 import torch.nn.functional as F
+import copy
 
 
 
@@ -434,12 +435,14 @@ class RegionalMask(torch.nn.Module):
     def __init__(self, mask: torch.Tensor, start_percent: float, end_percent: float) -> None:
         super().__init__()
         self.register_buffer('mask', mask)
+        #self.mask = mask.clone().to('cuda')
         self.start_percent = start_percent
         self.end_percent   = end_percent
 
-    def __call__(self, transformer_options, *args, **kwargs):
-        if self.start_percent <= 1 - transformer_options['sigmas'][0] < self.end_percent:
-            return self.mask
+    def __call__(self, transformer_options, dtype=torch.bfloat16, *args, **kwargs):
+        sigma = transformer_options['sigmas'][0]
+        if self.start_percent <= 1 - sigma < self.end_percent:
+            return self.mask.clone().to(sigma.device).to(dtype)
         return None
     
     
@@ -448,12 +451,14 @@ class RegionalConditioning(torch.nn.Module):
     def __init__(self, region_cond: torch.Tensor, start_percent: float, end_percent: float) -> None:
         super().__init__()
         self.register_buffer('region_cond', region_cond)
+        #self.region_cond = region_cond.clone().to('cuda')
         self.start_percent = start_percent
         self.end_percent   = end_percent
 
-    def __call__(self, transformer_options, *args,  **kwargs):
-        if self.start_percent <= 1 - transformer_options['sigmas'][0] < self.end_percent:
-            return self.region_cond
+    def __call__(self, transformer_options, dtype=torch.bfloat16, *args,  **kwargs):
+        sigma = transformer_options['sigmas'][0]
+        if self.start_percent <= 1 - sigma < self.end_percent:
+            return self.region_cond.clone().to(sigma.device).to(dtype)
         return None
 
 
@@ -514,9 +519,7 @@ class RegionalGenerateConditioningsAndMasks:
         for cond_reg_dict in conditioning_regional:
             cond_reg = cond_reg_dict['cond']
             region_mask = 1 - cond_reg_dict['mask'][0]
-            region_mask = torch.nn.functional.interpolate(
-                region_mask[None, None, :, :], (h, w), mode='nearest-exact'
-            ).flatten().unsqueeze(1).repeat(1, cond_reg.size(1))
+            region_mask = torch.nn.functional.interpolate(region_mask[None, None, :, :], (h, w), mode='nearest-exact').flatten().unsqueeze(1).repeat(1, cond_reg.size(1))
 
             cond_len_next = cond_len + cond_reg.shape[1]
             regional_mask[cond_len:cond_len_next, cond_len:cond_len_next] = True
@@ -525,19 +528,16 @@ class RegionalGenerateConditioningsAndMasks:
 
             img_size_masks = region_mask[:, :1].repeat(1, img_len)
             img_size_masks_transpose = img_size_masks.transpose(-1, -2)
-            self_attend_masks = torch.logical_or(
-                self_attend_masks, torch.logical_and(img_size_masks, img_size_masks_transpose)
-            )
-            union_masks = torch.logical_or(
-                union_masks, torch.logical_or(img_size_masks, img_size_masks_transpose)
-            )
+            self_attend_masks = torch.logical_or(self_attend_masks, torch.logical_and(img_size_masks, img_size_masks_transpose))
+            union_masks       = torch.logical_or(union_masks,       torch.logical_or (img_size_masks, img_size_masks_transpose))
+            
             cond_len = cond_len_next
 
         background_masks = torch.logical_not(union_masks)
         background_and_self_attend_masks = torch.logical_or(background_masks, self_attend_masks)
         regional_mask[text_len:, text_len:] = background_and_self_attend_masks
 
-        regional_mask = RegionalMask(regional_mask, self.start_percent, self.end_percent)
+        regional_mask         = RegionalMask(regional_mask,  self.start_percent, self.end_percent)
         regional_conditioning = RegionalConditioning(cond_r, self.start_percent, self.end_percent)
 
         return regional_conditioning, regional_mask
@@ -570,13 +570,8 @@ class FluxRegionalConditioning:
         weights = initialize_or_scale(weights, weight, max_steps).to(default_dtype)
         weights = F.pad(weights, (0, max_steps), value=0.0)
 
-        regional_generate_conditionings_and_masks_fn = RegionalGenerateConditioningsAndMasks(
-            conditioning_regional=conditioning_regional,
-            weight=weight,
-            start_percent=start_percent,
-            end_percent=end_percent,
-        )
+        regional_generate_conditionings_and_masks_fn = RegionalGenerateConditioningsAndMasks(conditioning_regional, weight, start_percent, end_percent)
 
         conditioning[0][1]['regional_generate_conditionings_and_masks_fn'] = regional_generate_conditionings_and_masks_fn
         conditioning[0][1]['regional_conditioning_weights'] = weights
-        return (conditioning,)
+        return (copy.deepcopy(conditioning),)

@@ -90,25 +90,22 @@ class SharkSampler:
                     shift=3.0, base_shift=0.85, options=None, sde_noise=None,sde_noise_steps=1, shift_scaling="exponential", unsampler_type="linear",
                     extra_options="", 
                     ): 
-        
+
             model = model.clone()
-            if positive[0][1] is not None:
-                """if "regional_conditioning" in positive[0][1]:
-                    model.set_model_patch(positive[0][1]['regional_conditioning'], 'regional_conditioning_positive')
-                if "regional_conditioning_mask" in positive[0][1]:
-                    model.set_model_patch(positive[0][1]['regional_conditioning_mask'], 'regional_conditioning_mask')"""
+            if positive[0][1] is not None: 
                 if "regional_conditioning_weights" in positive[0][1]:
                     sampler.extra_options['regional_conditioning_weights'] = positive[0][1]['regional_conditioning_weights']
                     regional_generate_conditionings_and_masks_fn = positive[0][1]['regional_generate_conditionings_and_masks_fn']
                     regional_conditioning, regional_mask = regional_generate_conditionings_and_masks_fn(latent_image['samples'])
+                    regional_conditioning = copy.deepcopy(regional_conditioning)
+                    regional_mask = copy.deepcopy(regional_mask)
                     model.set_model_patch(regional_conditioning, 'regional_conditioning_positive')
-                    model.set_model_patch(regional_mask, 'regional_conditioning_mask')
-                    
+                    model.set_model_patch(regional_mask,         'regional_conditioning_mask')
 
             if "extra_options" in sampler.extra_options:
                 extra_options += sampler.extra_options['extra_options']
                 sampler.extra_options['extra_options'] = extra_options
-                
+
             latent_image_batch = {"samples": latent_image['samples']}
             out_samples, out_samples_fp64, out_denoised_samples, out_denoised_samples_fp64 = [], [], [], []
             for batch_num in range(latent_image_batch['samples'].shape[0]):
@@ -123,15 +120,15 @@ class SharkSampler:
                     torch.manual_seed(noise_seed + batch_num)
 
                 if options is not None:
-                    noise_stdev = options.get('noise_init_stdev', noise_stdev)
-                    noise_mean = options.get('noise_init_mean', noise_mean)
-                    noise_type_init = options.get('noise_type_init', noise_type_init)
-                    d_noise = options.get('d_noise', d_noise)
-                    alpha_init = options.get('alpha_init', alpha_init)
-                    k_init = options.get('k_init', k_init)
-                    unsampler_type = options.get('unsampler_type', unsampler_type)
-                    sde_noise = options.get('sde_noise', sde_noise)
-                    sde_noise_steps = options.get('sde_noise_steps', sde_noise_steps)
+                    noise_stdev     = options.get('noise_init_stdev', noise_stdev)
+                    noise_mean      = options.get('noise_init_mean',  noise_mean)
+                    noise_type_init = options.get('noise_type_init',  noise_type_init)
+                    d_noise         = options.get('d_noise',          d_noise)
+                    alpha_init      = options.get('alpha_init',       alpha_init)
+                    k_init          = options.get('k_init',           k_init)
+                    unsampler_type  = options.get('unsampler_type',   unsampler_type)
+                    sde_noise       = options.get('sde_noise',        sde_noise)
+                    sde_noise_steps = options.get('sde_noise_steps',  sde_noise_steps)
 
                 latent = latent_image
                 latent_image_dtype = latent_image['samples'].dtype
@@ -141,18 +138,18 @@ class SharkSampler:
                         torch.zeros((1, 154, 4096)),
                         {'pooled_output': torch.zeros((1, 2048))}
                         ]]
-                
+
                 if negative is None:
                     negative = [[
                         torch.zeros((1, 154, 4096)),
                         {'pooled_output': torch.zeros((1, 2048))}
                         ]]
-                    
+
                 if denoise_alt < 0:
                     d_noise = denoise_alt = -denoise_alt
                 if options is not None:
                     d_noise = options.get('d_noise', d_noise)
-                
+
                 if sigmas is not None:
                     sigmas = sigmas.clone().to(default_dtype)
                 else: 
@@ -167,21 +164,21 @@ class SharkSampler:
                     null = torch.tensor([0.0], device=sigmas.device, dtype=sigmas.dtype)
                     sigmas = torch.cat([null, sigmas])
                     sigmas = torch.cat([sigmas, null])
-                
+
                 if sampler_mode.startswith("unsample_"):
                     unsampler_type = sampler_mode.split("_", 1)[1]
                 elif sampler_mode.startswith("resample_"):
                     unsampler_type = sampler_mode.split("_", 1)[1]
                 else:
                     unsampler_type = ""
-                    
+
                 x = latent_image["samples"].clone().to(default_dtype) 
                 if latent_image is not None:
                     if "samples_fp64" in latent_image:
                         if latent_image['samples'].shape == latent_image['samples_fp64'].shape:
                             if torch.norm(latent_image['samples'] - latent_image['samples_fp64']) < 0.01:
                                 x = latent_image["samples_fp64"].clone()
-                    
+
                 if latent_noise is not None:
                     latent_noise["samples"] = latent_noise["samples"].clone().to(default_dtype)  
                 if latent_noise_match is not None:
@@ -284,15 +281,15 @@ class SharkSampler:
                         out_denoised = out
                     
                     out["samples_fp64"] = out["samples"].clone()
-                    out["samples"] = out["samples"].to(latent_image_dtype)
+                    out["samples"]      = out["samples"].to(latent_image_dtype)
                     
                     out_denoised["samples_fp64"] = out_denoised["samples"].clone()
-                    out_denoised["samples"] = out_denoised["samples"].to(latent_image_dtype)
+                    out_denoised["samples"]      = out_denoised["samples"].to(latent_image_dtype)
                     
-                    out_samples.append(out["samples"])
+                    out_samples.     append(out["samples"])
                     out_samples_fp64.append(out["samples_fp64"])
                     
-                    out_denoised_samples.append(out_denoised["samples"])
+                    out_denoised_samples.     append(out_denoised["samples"])
                     out_denoised_samples_fp64.append(out_denoised["samples_fp64"])
                     
                     seed += 1
@@ -300,15 +297,15 @@ class SharkSampler:
                     if total_steps_iter > 1: 
                         sde_noise.append(out["samples_fp64"])
                         
-            out_samples = [tensor.squeeze(0) for tensor in out_samples]
-            out_samples_fp64 = [tensor.squeeze(0) for tensor in out_samples_fp64]
-            out_denoised_samples = [tensor.squeeze(0) for tensor in out_denoised_samples]
+            out_samples               = [tensor.squeeze(0) for tensor in out_samples]
+            out_samples_fp64          = [tensor.squeeze(0) for tensor in out_samples_fp64]
+            out_denoised_samples      = [tensor.squeeze(0) for tensor in out_denoised_samples]
             out_denoised_samples_fp64 = [tensor.squeeze(0) for tensor in out_denoised_samples_fp64]
 
-            out['samples'] = torch.stack(out_samples, dim=0)
+            out['samples']      = torch.stack(out_samples,     dim=0)
             out['samples_fp64'] = torch.stack(out_samples_fp64, dim=0)
             
-            out_denoised['samples'] = torch.stack(out_denoised_samples, dim=0)
+            out_denoised['samples']      = torch.stack(out_denoised_samples,     dim=0)
             out_denoised['samples_fp64'] = torch.stack(out_denoised_samples_fp64, dim=0)
 
             return ( out, out_denoised, sde_noise,)

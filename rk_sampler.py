@@ -157,9 +157,11 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
         #model.inner_model.model_options['transformer_options']['patches']['unsample_resample_scale'] = unsample_resample_scale
         #model.inner_model.model_options['transformer_options']['unsample_resample_scale'] = unsample_resample_scale
         if regional_conditioning_weights is not None:
-            model.inner_model.model_options['transformer_options']['regional_conditioning_weight'] = regional_conditioning_weights[step]
+            #model.inner_model.model_options['transformer_options']['patches']['regional_conditioning_weight'] = regional_conditioning_weights[step]
+            extra_args['model_options']['transformer_options']['regional_conditioning_weight'] = regional_conditioning_weights[step]
         else:
-            model.inner_model.model_options['transformer_options']['regional_conditioning_weight'] = 0.0
+            #model.inner_model.model_options['transformer_options']['patches']['regional_conditioning_weight'] = 0.0
+            extra_args['model_options']['transformer_options']['regional_conditioning_weight'] = 0.0
         eta = eta_var = etas[step] if etas is not None else eta
         s_noise = s_noises[step] if s_noises is not None else s_noise
         
@@ -340,7 +342,7 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
                 
                 
                 
-        callback({'x': x, 'i': step, 'sigma': sigma, 'sigma_next': sigma_next, 'denoised': data_[0]}) if callback is not None else None
+        callback({'x': x, 'i': step, 'sigma': sigma, 'sigma_next': sigma_next, 'denoised': data_[0].to(torch.float32)}) if callback is not None else None
 
         sde_noise_t = None
         if SDE_NOISE_EXTERNAL:
