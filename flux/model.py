@@ -99,8 +99,10 @@ class ReFlux(Flux):
         for i, block in enumerate(self.double_blocks):
             mask = None
             mask_obj = transformer_options.get('patches', {}).get('regional_conditioning_mask', None)
-            if mask_obj is not None and weight >= i/56:
-                mask = mask_obj[0](transformer_options)
+            threshold = i / 56
+            if mask_obj is not None and weight >= threshold:
+                mask = mask_obj[0](transformer_options, threshold)
+                #mask = (mask >= threshold).to(mask.dtype)
 
             img, txt = block(img=img, txt=txt, vec=vec, pe=pe, timestep=timesteps, transformer_options=transformer_options, mask=mask) #, mask=mask)
 
@@ -115,8 +117,11 @@ class ReFlux(Flux):
         for i, block in enumerate(self.single_blocks):
             mask = None
             mask_obj = transformer_options.get('patches', {}).get('regional_conditioning_mask', None)
-            if mask_obj is not None and weight >= (i+18)/56:
-                mask = mask_obj[0](transformer_options)
+            threshold = (1+18)/56
+            if mask_obj is not None and weight >= threshold:
+                mask = mask_obj[0](transformer_options, threshold)
+                #threshold = (i+18)/56
+                #mask = (mask >= threshold).to(mask.dtype)
             
             img = block(img, vec=vec, pe=pe, timestep=timesteps, transformer_options=transformer_options, mask=mask)
 

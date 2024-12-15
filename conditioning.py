@@ -432,17 +432,21 @@ class Base64ToConditioning:
 
 
 class RegionalMask(torch.nn.Module):
-    def __init__(self, mask: torch.Tensor, start_percent: float, end_percent: float) -> None:
+    def __init__(self, mask: torch.Tensor, start_percent: float, end_percent: float, mask_type: str) -> None:
         super().__init__()
         self.register_buffer('mask', mask)
         #self.mask = mask.clone().to('cuda')
         self.start_percent = start_percent
         self.end_percent   = end_percent
+        self.mask_type = mask_type
 
-    def __call__(self, transformer_options, dtype=torch.bfloat16, *args, **kwargs):
+    def __call__(self, transformer_options, threshold, dtype=torch.bfloat16, *args, **kwargs):
         sigma = transformer_options['sigmas'][0]
         if self.start_percent <= 1 - sigma < self.end_percent:
-            return self.mask.clone().to(sigma.device).to(dtype)
+            if self.mask_type == "gradient":
+                return self.mask.clone().to(sigma.device).to(dtype)
+            elif self.mask_type == "differential":
+                return self.mask.clone().to(sigma.device).to(dtype) >= threshold
         return None
     
     
@@ -488,11 +492,12 @@ class FluxRegionalPrompt:
 
 
 class RegionalGenerateConditioningsAndMasks:
-    def __init__(self, conditioning_regional, weight, start_percent, end_percent):
+    def __init__(self, conditioning_regional, weight, start_percent, end_percent, mask_type):
         self.conditioning_regional = conditioning_regional
         self.weight = weight
         self.start_percent = start_percent
         self.end_percent = end_percent
+        self.mask_type = mask_type
 
     def __call__(self, latent):
         b, c, h, w = latent.shape
@@ -542,7 +547,7 @@ class RegionalGenerateConditioningsAndMasks:
         #background_and_self_attend_masks = torch.logical_or(background_masks, self_attend_masks)
         regional_mask_full[text_len:, text_len:] = background_and_self_attend_masks
 
-        regional_mask_full         = RegionalMask(regional_mask_full,  self.start_percent, self.end_percent)
+        regional_mask_full         = RegionalMask(regional_mask_full,  self.start_percent, self.end_percent, self.mask_type)
         regional_conditioning = RegionalConditioning(cond_r, self.start_percent, self.end_percent)
 
         return regional_conditioning, regional_mask_full
@@ -555,12 +560,13 @@ class FluxRegionalConditioning:
         return {"required": { 
             "conditioning": ("CONDITIONING",),
             "conditioning_regional": ("CONDITIONING_REGIONAL",),
-            "weight": ("FLOAT", {"default": 1.0, "min": -10000.0, "max": 10000.0, "step": 0.01}),
+            "mask_weight": ("FLOAT", {"default": 1.0, "min": -10000.0, "max": 10000.0, "step": 0.01}),
             "start_percent": ("FLOAT", {"default": 0,   "min": 0.0, "max": 1.0, "step": 0.01}),
             "end_percent":   ("FLOAT", {"default": 0.5, "min": 0.0, "max": 1.0, "step": 0.01}),
+            "mask_type": (["gradient", "differential",],),
         }, 
             "optional": {
-                "weights": ("SIGMAS", ),
+                "mask_weights": ("SIGMAS", ),
         }}
 
     RETURN_TYPES = ("CONDITIONING",)
@@ -569,13 +575,14 @@ class FluxRegionalConditioning:
 
     CATEGORY = "conditioning"
 
-    def main(self, conditioning, conditioning_regional, weight,start_percent, end_percent, start_step=0, end_step=30,  weights=None,  latent=None):
+    def main(self, conditioning, conditioning_regional, mask_weight,start_percent, end_percent, start_step=0, end_step=30,  mask_weights=None, mask_type="differential", latent=None):
+        weight, weights = mask_weight, mask_weights
         default_dtype = torch.float64
         max_steps = 10000
         weights = initialize_or_scale(weights, weight, max_steps).to(default_dtype)
         weights = F.pad(weights, (0, max_steps), value=0.0)
 
-        regional_generate_conditionings_and_masks_fn = RegionalGenerateConditioningsAndMasks(conditioning_regional, weight, start_percent, end_percent)
+        regional_generate_conditionings_and_masks_fn = RegionalGenerateConditioningsAndMasks(conditioning_regional, weight, start_percent, end_percent, mask_type)
 
         conditioning[0][1]['regional_generate_conditionings_and_masks_fn'] = regional_generate_conditionings_and_masks_fn
         conditioning[0][1]['regional_conditioning_weights'] = weights
