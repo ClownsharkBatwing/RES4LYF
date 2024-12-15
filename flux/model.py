@@ -94,13 +94,15 @@ class ReFlux(Flux):
         ids = torch.cat((txt_ids, img_ids), dim=1)
         pe = self.pe_embedder(ids)
         
-        weight = transformer_options['regional_conditioning_weight'] if 'regional_conditioning_weight' in transformer_options else 0.0
+        weight = transformer_options['reg_cond_weight'] if 'reg_cond_weight' in transformer_options else 0.0
 
         for i, block in enumerate(self.double_blocks):
             mask = None
             mask_obj = transformer_options.get('patches', {}).get('regional_conditioning_mask', None)
-            if mask_obj is not None and weight >= i/56:
-                mask = mask_obj[0](transformer_options)
+            threshold = i / 56
+            if mask_obj is not None and weight >= threshold:
+                mask = mask_obj[0](transformer_options, threshold)
+                #mask = (mask >= threshold).to(mask.dtype)
 
             img, txt = block(img=img, txt=txt, vec=vec, pe=pe, timestep=timesteps, transformer_options=transformer_options, mask=mask) #, mask=mask)
 
@@ -115,8 +117,11 @@ class ReFlux(Flux):
         for i, block in enumerate(self.single_blocks):
             mask = None
             mask_obj = transformer_options.get('patches', {}).get('regional_conditioning_mask', None)
-            if mask_obj is not None and weight >= (i+18)/56:
-                mask = mask_obj[0](transformer_options)
+            threshold = (1+18)/56
+            if mask_obj is not None and weight >= threshold:
+                mask = mask_obj[0](transformer_options, threshold)
+                #threshold = (i+18)/56
+                #mask = (mask >= threshold).to(mask.dtype)
             
             img = block(img, vec=vec, pe=pe, timestep=timesteps, transformer_options=transformer_options, mask=mask)
 
@@ -139,81 +144,48 @@ class ReFlux(Flux):
         return img_ids
 
     def forward(self, x, timestep, context, y, guidance, control=None, transformer_options={}, **kwargs):
-        
-        if timestep.shape[0] > 1:
-            UNCOND = False
-        elif hasattr(self, "timestep") == False:
-            self.timestep = timestep
-            UNCOND = True
-        elif(self.timestep == timestep):
-            UNCOND = False
-        else:
-            UNCOND = True
-        
-        bs, c, h, w = x.shape
-        transformer_options['original_shape'] = x.shape
-        patch_size = 2
-        x = comfy.ldm.common_dit.pad_to_patch_size(x, (patch_size, patch_size))    # 1,16,192,192
-        transformer_options['patch_size'] = patch_size
-        
-        if 'regional_conditioning_weight' not in transformer_options:
-            transformer_options['regional_conditioning_weight'] = timestep[0] / 1.5
-            
-        h_len = ((h + (patch_size // 2)) // patch_size) # h_len 96
-        w_len = ((w + (patch_size // 2)) // patch_size) # w_len 96
 
-        img = rearrange(x, "b c (h ph) (w pw) -> b (h w) (c ph pw)", ph=patch_size, pw=patch_size) # img 1,9216,64
-
-        regional_conditioning_positive = transformer_options.get('patches', {}).get('regional_conditioning_positive', None)
-        regional_conditioning_positive = copy.deepcopy(regional_conditioning_positive)
-        
-        regional_conditioning_negative = transformer_options.get('patches', {}).get('regional_conditioning_negative', None)
-        regional_conditioning = regional_conditioning_positive
-        if regional_conditioning is not None:
-            region_cond = regional_conditioning[0](transformer_options)
-            if region_cond is not None:
-                if region_cond.shape[0] < context.shape[0]:
-
-                    pos = region_cond.clone()
-                    neg = context[0].repeat(1, region_cond.shape[1]//context.shape[1], 1)
-                    
-                    context_0 = context[0].clone()[None,...]
-                    context_1 = context[1].clone()[None,...]
-                    
-                    context_0_full = torch.cat([context_0, neg], dim=1)
-                    context_1_full = torch.cat([context_1, pos], dim=1)
-                    
-                    context = torch.cat([context_0_full, context_1_full], dim=0)
-                    
-                elif UNCOND:
-                    context  = context[0].repeat(1, 1 + region_cond.shape[1]//context.shape[1], 1)
-                    #context = torch.cat([context.clone(), region_cond.to(context.dtype)], dim=1)
-                elif UNCOND == False:
-                    context = torch.cat([context.clone(), region_cond], dim=1)
-                    
-                context = context.to(torch.bfloat16)
-
-        txt_ids      = torch.zeros((bs, context.shape[1], 3), device=x.device, dtype=x.dtype)      # txt_ids        1, 256,3
-        img_ids_orig = self._get_img_ids(x, bs, h_len, w_len, 0, h_len, 0, w_len)                  # img_ids_orig = 1,9216,3
-        
         out_list = []
-        for i in range(img.shape[0]):
-            out_tmp = self.forward_blocks(img         [i][None,...].clone(), 
-                                          img_ids_orig[i][None,...].clone(), 
-                                          context     [i][None,...].clone(),
-                                          txt_ids     [i][None,...].clone(), 
-                                          timestep    [i][None,...].clone(), 
-                                          y           [i][None,...].clone(),
-                                          guidance    [i][None,...].clone(),
-                                          control, transformer_options=transformer_options)  # context 1,256,4096   y 1,768
+        for i in range(len(transformer_options['cond_or_uncond'])):
+            UNCOND = transformer_options['cond_or_uncond'][i] == 1
+            
+            bs, c, h, w = x.shape
+            transformer_options['original_shape'] = x.shape
+            patch_size = 2
+            x = comfy.ldm.common_dit.pad_to_patch_size(x, (patch_size, patch_size))    # 1,16,192,192
+            transformer_options['patch_size'] = patch_size
+            
+            if 'regional_conditioning_weight' not in transformer_options:
+                transformer_options['regional_conditioning_weight'] = timestep[0] / 1.5
+                
+            h_len = ((h + (patch_size // 2)) // patch_size) # h_len 96
+            w_len = ((w + (patch_size // 2)) // patch_size) # w_len 96
+
+            img = rearrange(x, "b c (h ph) (w pw) -> b (h w) (c ph pw)", ph=patch_size, pw=patch_size) # img 1,9216,64
+
+            if UNCOND:
+                transformer_options['reg_cond_weight'] = -1
+                context_tmp = context[i][None,...].clone()
+            elif UNCOND == False:
+                transformer_options['reg_cond_weight'] = transformer_options['regional_conditioning_weight']
+                regional_conditioning_positive = transformer_options.get('patches', {}).get('regional_conditioning_positive', None)
+                regional_conditioning_positive = copy.deepcopy(regional_conditioning_positive)   
+                region_cond = regional_conditioning_positive[0](transformer_options)
+                context_tmp = torch.cat([context[i][None,...].clone(), region_cond.clone().to(torch.bfloat16)], dim=1)
+                
+            txt_ids      = torch.zeros((bs, context_tmp.shape[1], 3), device=x.device, dtype=x.dtype)      # txt_ids        1, 256,3
+            img_ids_orig = self._get_img_ids(x, bs, h_len, w_len, 0, h_len, 0, w_len)                  # img_ids_orig = 1,9216,3
+
+            out_tmp = self.forward_blocks(img       [i][None,...].clone(), 
+                                        img_ids_orig[i][None,...].clone(), 
+                                        context_tmp,
+                                        txt_ids     [i][None,...].clone(), 
+                                        timestep    [i][None,...].clone(), 
+                                        y           [i][None,...].clone(),
+                                        guidance    [i][None,...].clone(),
+                                        control, transformer_options=transformer_options)  # context 1,256,4096   y 1,768
             out_list.append(out_tmp)
-        
+            
         out = torch.stack(out_list, dim=0).squeeze(dim=1)
         
-        if timestep.shape[0] == 1:
-            if (self.timestep == timestep):
-                self.timestep = -1
-            else:
-                self.timestep = timestep
         return rearrange(out, "b (h w) (c ph pw) -> b c (h ph) (w pw)", h=h_len, w=w_len, ph=2, pw=2)[:,:,:h,:w]
-
