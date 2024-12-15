@@ -1,5 +1,5 @@
 import re
-
+import torch
 
 def get_extra_options_kv(key, default, extra_options):
 
