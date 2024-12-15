@@ -139,14 +139,8 @@ class ReFlux(Flux):
         return img_ids
 
     def forward(self, x, timestep, context, y, guidance, control=None, transformer_options={}, **kwargs):
-        
-        if transformer_options['cond_or_uncond'] == [1,0]:
-            UNCOND = False
-        elif transformer_options['cond_or_uncond'] == [1]:
-            UNCOND = True
-        elif transformer_options['cond_or_uncond'] == [0]:
-            UNCOND = False
-            
+
+        out_list = []
         for i in range(len(transformer_options['cond_or_uncond'])):
             UNCOND = transformer_options['cond_or_uncond'][i] == 1
             
@@ -172,12 +166,11 @@ class ReFlux(Flux):
                 regional_conditioning_positive = transformer_options.get('patches', {}).get('regional_conditioning_positive', None)
                 regional_conditioning_positive = copy.deepcopy(regional_conditioning_positive)   
                 region_cond = regional_conditioning_positive[0](transformer_options)
-                context_tmp = torch.cat([context[i][None,...].clone(), region_cond.clone()], dim=1).to(torch.bfloat16)
+                context_tmp = torch.cat([context[i][None,...].clone(), region_cond.clone().to(torch.bfloat16)], dim=1)
                 
             txt_ids      = torch.zeros((bs, context_tmp.shape[1], 3), device=x.device, dtype=x.dtype)      # txt_ids        1, 256,3
             img_ids_orig = self._get_img_ids(x, bs, h_len, w_len, 0, h_len, 0, w_len)                  # img_ids_orig = 1,9216,3
-            
-            out_list = []
+
             out_tmp = self.forward_blocks(img       [i][None,...].clone(), 
                                         img_ids_orig[i][None,...].clone(), 
                                         context_tmp,
