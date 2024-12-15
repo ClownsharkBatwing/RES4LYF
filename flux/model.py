@@ -94,7 +94,7 @@ class ReFlux(Flux):
         ids = torch.cat((txt_ids, img_ids), dim=1)
         pe = self.pe_embedder(ids)
         
-        weight = transformer_options['regional_conditioning_weight'] if 'regional_conditioning_weight' in transformer_options else 0.0
+        weight = transformer_options['reg_cond_weight'] if 'reg_cond_weight' in transformer_options else 0.0
 
         for i, block in enumerate(self.double_blocks):
             mask = None
@@ -165,9 +165,10 @@ class ReFlux(Flux):
             img = rearrange(x, "b c (h ph) (w pw) -> b (h w) (c ph pw)", ph=patch_size, pw=patch_size) # img 1,9216,64
 
             if UNCOND:
-                transformer_options['regional_conditioning_weight'] = -1
+                transformer_options['reg_cond_weight'] = -1
                 context_tmp = context[i][None,...].clone()
             elif UNCOND == False:
+                transformer_options['reg_cond_weight'] = transformer_options['regional_conditioning_weight']
                 regional_conditioning_positive = transformer_options.get('patches', {}).get('regional_conditioning_positive', None)
                 regional_conditioning_positive = copy.deepcopy(regional_conditioning_positive)   
                 region_cond = regional_conditioning_positive[0](transformer_options)
@@ -186,4 +187,7 @@ class ReFlux(Flux):
                                         guidance    [i][None,...].clone(),
                                         control, transformer_options=transformer_options)  # context 1,256,4096   y 1,768
             out_list.append(out_tmp)
-            context
+            
+        out = torch.stack(out_list, dim=0).squeeze(dim=1)
+        
+        return rearrange(out, "b (h w) (c ph pw) -> b c (h ph) (w pw)", h=h_len, w=w_len, ph=2, pw=2)[:,:,:h,:w]
