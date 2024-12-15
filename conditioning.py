@@ -522,8 +522,8 @@ class RegionalGenerateConditioningsAndMasks:
             region_mask = torch.nn.functional.interpolate(region_mask[None, None, :, :], (h, w), mode='nearest-exact').flatten().unsqueeze(1).repeat(1, cond_reg.size(1))
 
             cond_len_next = cond_len + cond_reg.shape[1]
-            regional_mask[cond_len:cond_len_next, cond_len:cond_len_next] = True
-            regional_mask[cond_len:cond_len_next, text_len:] = region_mask.transpose(-1, -2)
+            regional_mask[cond_len:cond_len_next, cond_len:cond_len_next] = True               # TXT 2 TXT
+            regional_mask[cond_len:cond_len_next, text_len:] = region_mask.transpose(-1, -2)   # TXT 2 regional IMG
             regional_mask[text_len:, cond_len:cond_len_next] = region_mask
 
             img_size_masks = region_mask[:, :1].repeat(1, img_len)
