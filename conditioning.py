@@ -503,14 +503,14 @@ class RegionalGenerateConditioningsAndMasks:
         cond_r = torch.cat([cond_reg['cond'] for cond_reg in self.conditioning_regional], dim=1)
         text_len = 256 + cond_r.shape[1]  # 256 = main prompt tokens... half of t5, comfy issue
 
-        regional_mask = torch.zeros((text_len + img_len, text_len + img_len), dtype=torch.bool)
-        self_attend_masks = torch.zeros((img_len, img_len), dtype=torch.bool)
-        union_masks = torch.zeros((img_len, img_len), dtype=torch.bool)
+        regional_mask_full = torch.zeros((text_len + img_len, text_len + img_len), dtype=torch.bfloat16)
+        self_attend_masks = torch.zeros((img_len, img_len), dtype=torch.bfloat16)
+        union_masks = torch.zeros((img_len, img_len), dtype=torch.bfloat16)
 
         conditioning_regional = [
             {
-                'mask': torch.ones((1, h, w), dtype=torch.float64),
-                'cond': torch.ones((1, 256, 4096), dtype=torch.float64),
+                'mask': torch.ones((1, h, w), dtype=torch.bfloat16),
+                'cond': torch.ones((1, 256, 4096), dtype=torch.bfloat16),
             },
             *self.conditioning_regional,
         ]
@@ -522,25 +522,30 @@ class RegionalGenerateConditioningsAndMasks:
             region_mask = torch.nn.functional.interpolate(region_mask[None, None, :, :], (h, w), mode='nearest-exact').flatten().unsqueeze(1).repeat(1, cond_reg.size(1))
 
             cond_len_next = cond_len + cond_reg.shape[1]
-            regional_mask[cond_len:cond_len_next, cond_len:cond_len_next] = True               # TXT 2 TXT
-            regional_mask[cond_len:cond_len_next, text_len:] = region_mask.transpose(-1, -2)   # TXT 2 regional IMG
-            regional_mask[text_len:, cond_len:cond_len_next] = region_mask
+            
+            regional_mask_full[cond_len:cond_len_next, cond_len:cond_len_next] = 1.0               #          TXT 2 TXT
+            regional_mask_full[cond_len:cond_len_next, text_len:] = region_mask.transpose(-1, -2)   #          TXT 2 regional IMG
+            regional_mask_full[text_len:, cond_len:cond_len_next] = region_mask                     # regional IMG 2 TXT
 
             img_size_masks = region_mask[:, :1].repeat(1, img_len)
             img_size_masks_transpose = img_size_masks.transpose(-1, -2)
-            self_attend_masks = torch.logical_or(self_attend_masks, torch.logical_and(img_size_masks, img_size_masks_transpose))
-            union_masks       = torch.logical_or(union_masks,       torch.logical_or (img_size_masks, img_size_masks_transpose))
+            self_attend_masks = torch.maximum(self_attend_masks, torch.minimum(img_size_masks, img_size_masks_transpose))
+            union_masks       = torch.maximum(union_masks,       torch.maximum(img_size_masks, img_size_masks_transpose))
+            #self_attend_masks = torch.logical_or(self_attend_masks, torch.logical_and(img_size_masks, img_size_masks_transpose))
+            #union_masks       = torch.logical_or(union_masks,       torch.logical_or (img_size_masks, img_size_masks_transpose))
             
             cond_len = cond_len_next
 
-        background_masks = torch.logical_not(union_masks)
-        background_and_self_attend_masks = torch.logical_or(background_masks, self_attend_masks)
-        regional_mask[text_len:, text_len:] = background_and_self_attend_masks
+        background_masks = 1-union_masks
+        background_and_self_attend_masks = torch.maximum(background_masks, self_attend_masks)
+        #background_masks = torch.logical_not(union_masks)
+        #background_and_self_attend_masks = torch.logical_or(background_masks, self_attend_masks)
+        regional_mask_full[text_len:, text_len:] = background_and_self_attend_masks
 
-        regional_mask         = RegionalMask(regional_mask,  self.start_percent, self.end_percent)
+        regional_mask_full         = RegionalMask(regional_mask_full,  self.start_percent, self.end_percent)
         regional_conditioning = RegionalConditioning(cond_r, self.start_percent, self.end_percent)
 
-        return regional_conditioning, regional_mask
+        return regional_conditioning, regional_mask_full
 
 
 
