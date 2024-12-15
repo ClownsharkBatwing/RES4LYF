@@ -17,7 +17,63 @@ import math
 
 import comfy.model_management
     
+from .flux.model  import ReFlux
+from .flux.layers import SingleStreamBlock, DoubleStreamBlock
+
+class ReFluxPatcher:
+    @classmethod
+    def INPUT_TYPES(s):
+        return {"required": { 
+            "model": ("MODEL",),
+           }
+        }
+    RETURN_TYPES = ("MODEL",)
+    RETURN_NAMES = ("model",)
+
+    CATEGORY = "model_patches"
+    FUNCTION = "main"
+
+    def main(self, model):
+        m = model.clone()
+        
+        m.model.diffusion_model.__class__ = ReFlux
+        
+        for i, block in enumerate(m.model.diffusion_model.double_blocks):
+            block.__class__ = DoubleStreamBlock
+            block.idx = i
+
+        for i, block in enumerate(m.model.diffusion_model.single_blocks):
+            block.__class__ = SingleStreamBlock
+            block.idx = i
+        
+        return (m,)
     
+    
+    
+class FluxGuidanceDisable:
+    @classmethod
+    def INPUT_TYPES(s):
+        return {"required": { 
+            "model": ("MODEL",),
+            "disable": ("BOOLEAN", {"default": True}),
+            }
+        }
+    RETURN_TYPES = ("MODEL",)
+    RETURN_NAMES = ("model",)
+
+    CATEGORY = "model_patches"
+    FUNCTION = "main"
+
+    def main(self, model, disable=True):
+        m = model.clone()
+        if disable:
+            m.model.diffusion_model.params.guidance_embed = False
+        else:
+            m.model.diffusion_model.params.guidance_embed = True
+        return (m,)
+
+
+
 def time_snr_shift_exponential(alpha, t):
     return math.exp(alpha) / (math.exp(alpha) + (1 / t - 1) ** 1.0)
 
@@ -35,7 +91,7 @@ class ModelSamplingAdvanced:
                     "scaling": (["exponential", "linear"], {"default": 'exponential'}), 
                     "shift": ("FLOAT", {"default": 3.0, "min": -100.0, "max": 100.0, "step":0.01, "round": False}),
                     #"base_shift": ("FLOAT", {"default": 3.0, "min": -100.0, "max": 100.0, "step":0.01, "round": False}),
-                }
+                    }
                }
     
     RETURN_TYPES = ("MODEL",)

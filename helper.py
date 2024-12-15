@@ -27,3 +27,12 @@ def safe_get_nested(d, keys, default=None):
 
 
 
+
+def initialize_or_scale(tensor, value, steps):
+    if tensor is None:
+        return torch.full((steps,), value)
+    else:
+        return value * tensor
+    
+    
+    

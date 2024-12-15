@@ -17,15 +17,9 @@ import torch.nn.functional as F
 import math
 import copy
 
-from .helper import get_extra_options_kv, extra_options_flag
+from .helper import initialize_or_scale, get_extra_options_kv, extra_options_flag
 
 
-def initialize_or_scale(tensor, value, steps):
-    if tensor is None:
-        return torch.full((steps,), value)
-    else:
-        return value * tensor
-    
 def move_to_same_device(*tensors):
     if not tensors:
         return tensors
