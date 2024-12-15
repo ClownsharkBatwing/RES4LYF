@@ -98,7 +98,12 @@ class SharkSampler:
             out_samples, out_samples_fp64, out_denoised_samples, out_denoised_samples_fp64 = [], [], [], []
             for batch_num in range(latent_image_batch['samples'].shape[0]):
                 latent_image['samples'] = latent_image_batch['samples'][batch_num].clone().unsqueeze(0)
-                default_dtype = torch.float64
+                
+                if extra_options_flag("use_fp32", extra_options) or extra_options_flag("use_float32", extra_options):
+                    default_dtype = torch.float32
+                else:
+                    default_dtype = torch.float64
+                
                 max_steps = 10000
 
                 if noise_seed == -1:
