@@ -120,6 +120,9 @@ class FluxLoader:
         except FileNotFoundError:
             ckpt_path = folder_paths.get_full_path_or_raise("diffusion_models", model_name)
 
+        if clip_name1 == ".use_ckpt_clip" and clip_name2_opt != ".none":
+            raise ValueError("Cannot specify both \".use_ckpt_clip\" and another clip")
+
         output_vae = True if vae_name == ".use_ckpt_vae" else False
         output_clip = True if clip_name1 == ".use_ckpt_clip" else False
         ckpt_out = comfy.sd.load_checkpoint_guess_config(ckpt_path, output_vae=output_vae, output_clip=output_clip, embedding_directory=folder_paths.get_folder_paths("embeddings"), model_options=model_options)
@@ -127,8 +130,6 @@ class FluxLoader:
         if clip_name1 == ".use_ckpt_clip":
             if (ckpt_out[1] is None):
                 raise ValueError("Model does not have a clip")
-            if clip_name2_opt != ".none":
-                raise ValueError("Cannot specify both \".use_ckpt_clip\" and another clip")
             clip = ckpt_out[1]
         else:    
             clip_paths = [folder_paths.get_full_path_or_raise("text_encoders", clip_name1)]
@@ -233,6 +234,9 @@ class SD35Loader:
         except FileNotFoundError:
             ckpt_path = folder_paths.get_full_path_or_raise("diffusion_models", model_name)
 
+        if clip_name1 == ".use_ckpt_clip" and (clip_name2_opt != ".none" or clip_name3_opt != ".none"):
+            raise ValueError("Cannot specify both \".use_ckpt_clip\" and another clip")
+
         output_vae = True if vae_name == ".use_ckpt_vae" else False
         output_clip = True if clip_name1 == ".use_ckpt_clip" else False
         ckpt_out = comfy.sd.load_checkpoint_guess_config(ckpt_path, output_vae=output_vae, output_clip=output_clip, embedding_directory=folder_paths.get_folder_paths("embeddings"), model_options=model_options)
@@ -240,8 +244,6 @@ class SD35Loader:
         if clip_name1 == ".use_ckpt_clip":
             if (ckpt_out[1] is None):
                 raise ValueError("Model does not have a clip")
-            if clip_name2_opt != ".none" or clip_name3_opt != ".none":
-                raise ValueError("Cannot specify both \".use_ckpt_clip\" and another clip")
             clip = ckpt_out[1]
         else:
             clip_paths = [folder_paths.get_full_path_or_raise("text_encoders", clip_name1)]
@@ -252,6 +254,8 @@ class SD35Loader:
             clip = comfy.sd.load_clip(ckpt_paths=clip_paths, embedding_directory=folder_paths.get_folder_paths("embeddings"), clip_type=comfy.sd.CLIPType.SD3)
 
         if vae_name == ".use_ckpt_vae":
+            if ckpt_out[2] is None:
+                raise ValueError("Model does not have a VAE")
             vae = ckpt_out[2]
         elif vae_name in ["taesd", "taesdxl", "taesd3", "taef1"]:
             sd = self.load_taesd(vae_name)

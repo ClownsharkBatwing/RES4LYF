@@ -125,12 +125,35 @@ class SharkSampler:
                     shift=3.0, base_shift=0.85, options=None, sde_noise=None,sde_noise_steps=1, shift_scaling="exponential", unsampler_type="linear",
                     extra_options="", 
                     ): 
-            sampler.extra_options['extra_options'] += extra_options
+        
+            model = model.clone()
+            if positive[0][1] is not None:
+                """if "regional_conditioning" in positive[0][1]:
+                    model.set_model_patch(positive[0][1]['regional_conditioning'], 'regional_conditioning_positive')
+                if "regional_conditioning_mask" in positive[0][1]:
+                    model.set_model_patch(positive[0][1]['regional_conditioning_mask'], 'regional_conditioning_mask')"""
+                if "regional_conditioning_weights" in positive[0][1]:
+                    sampler.extra_options['regional_conditioning_weights'] = positive[0][1]['regional_conditioning_weights']
+                    regional_generate_conditionings_and_masks_fn = positive[0][1]['regional_generate_conditionings_and_masks_fn']
+                    regional_conditioning, regional_mask = regional_generate_conditionings_and_masks_fn(latent_image['samples'])
+                    model.set_model_patch(regional_conditioning, 'regional_conditioning_positive')
+                    model.set_model_patch(regional_mask, 'regional_conditioning_mask')
+                    
+
+            if "extra_options" in sampler.extra_options:
+                extra_options += sampler.extra_options['extra_options']
+                sampler.extra_options['extra_options'] = extra_options
+                
             latent_image_batch = {"samples": latent_image['samples']}
             out_samples, out_samples_fp64, out_denoised_samples, out_denoised_samples_fp64 = [], [], [], []
             for batch_num in range(latent_image_batch['samples'].shape[0]):
                 latent_image['samples'] = latent_image_batch['samples'][batch_num].clone().unsqueeze(0)
-                default_dtype = torch.float64
+                
+                if extra_options_flag("use_fp32", extra_options) or extra_options_flag("use_float32", extra_options):
+                    default_dtype = torch.float32
+                else:
+                    default_dtype = torch.float64
+                
                 max_steps = 10000
 
                 if noise_seed == -1:
@@ -372,7 +395,7 @@ class ClownSampler:
                     t_fn_formula=None, sigma_fn_formula=None, implicit_steps=0,
                     latent_guide=None, latent_guide_inv=None, guide_mode="blend", latent_guide_weights=None, latent_guide_weights_inv=None, latent_guide_mask=None, latent_guide_mask_inv=None, rescale_floor=True, sigmas_override=None, unsampler_type="linear",
                     guides=None, options=None, sde_noise=None,sde_noise_steps=1, 
-                    extra_options="", automation=None, etas=None, s_noises=None,unsample_resample_scales=None, 
+                    extra_options="", automation=None, etas=None, s_noises=None,unsample_resample_scales=None, regional_conditioning_weights=None,
                     ): 
             if implicit_sampler_name == "none":
                 implicit_steps = 0 
@@ -468,7 +491,7 @@ class ClownSampler:
                                                             "latent_guide_weights": latent_guide_weights, "latent_guide_weights_inv": latent_guide_weights_inv, "guide_mode": guide_mode, "unsampler_type": unsampler_type,
                                                             "LGW_MASK_RESCALE_MIN": rescale_floor, "sigmas_override": sigmas_override, "sde_noise": sde_noise,
                                                             "extra_options": extra_options,
-                                                            "etas": etas, "s_noises": s_noises, "unsample_resample_scales": unsample_resample_scales,
+                                                            "etas": etas, "s_noises": s_noises, "unsample_resample_scales": unsample_resample_scales, "regional_conditioning_weights": regional_conditioning_weights,
                                                             "guides": guides,
                                                             })
 
@@ -527,7 +550,7 @@ class ClownsharKSampler:
                     t_fn_formula=None, sigma_fn_formula=None, implicit_steps=0,
                     latent_guide=None, latent_guide_inv=None, guide_mode="blend", latent_guide_weights=None, latent_guide_weights_inv=None, latent_guide_mask=None, latent_guide_mask_inv=None, rescale_floor=True, sigmas_override=None, unsampler_type="linear",
                     shift=3.0, base_shift=0.85, guides=None, options=None, sde_noise=None,sde_noise_steps=1, shift_scaling="exponential",
-                    extra_options="", automation=None, etas=None, s_noises=None,unsample_resample_scales=None, 
+                    extra_options="", automation=None, etas=None, s_noises=None,unsample_resample_scales=None, regional_conditioning_weights=None,
                     ): 
 
         noise_seed_sde = -1
@@ -538,7 +561,7 @@ class ClownsharKSampler:
                 t_fn_formula, sigma_fn_formula, implicit_steps,
                 latent_guide, latent_guide_inv, guide_mode, latent_guide_weights, latent_guide_weights_inv, latent_guide_mask, latent_guide_mask_inv, rescale_floor, sigmas_override, unsampler_type,
                 guides, options, sde_noise, sde_noise_steps, 
-                extra_options, automation, etas, s_noises, unsample_resample_scales)
+                extra_options, automation, etas, s_noises, unsample_resample_scales, regional_conditioning_weights)
             
         return SharkSampler().main(
             model, cfg, sampler_mode, scheduler, steps, denoise, denoise_alt,
@@ -666,4 +689,3 @@ class UltraSharkSampler:
             return (out, out_denoised)
 
 
-    

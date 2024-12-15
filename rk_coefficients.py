@@ -5,16 +5,25 @@ import math
 from .extra_samplers_helpers import get_deis_coeff_list
 from .phi_functions import *
 
-
+from itertools import permutations, combinations
 
 RK_SAMPLER_NAMES = ["none",
                     "res_2m",
                     "res_3m",
                     "res_2s", 
                     "res_3s",
+                    "res_3s_alt",
+                    "res_3s_cox_matthews",
+                    "res_3s_lie",
+                    "res_3s_strehmel_weiner",
+                    "res_4s_krogstad",
+                    "res_4s_strehmel_weiner",
                     "res_5s",
+                    "res_6s",
                     "res_8s",
-
+                    "res_10s",
+                    "res_15s",
+                    "res_16s",
 
                     "deis_2m",
                     "deis_3m", 
@@ -91,8 +100,6 @@ IRK_SAMPLER_NAMES = ["none",
                     "irk_exp_diag_2s",
                     "use_explicit", 
                     ]
-
-
 
 alpha_crouzeix = (2/(3**0.5)) * math.cos(math.pi / 18)
 
@@ -813,9 +820,12 @@ def get_rk_methods(rk_type, h, c1=0.0, c2=0.5, c3=1.0, h_prev=None, h_prev2=None
             ci = [0]
 
         case "res_2s":
-            a2_1 = c2 * phi(1, -h*c2)
-            b1 =        phi(1, -h) - phi(2, -h)/c2
-            b2 =        phi(2, -h)/c2
+            ci = [0, c2]
+            φ = Phi(h, ci)
+            
+            a2_1 = c2 * φ(1,2)
+            b2 = φ(2)/c2
+            b1 = φ(1) - b2
 
             a = [
                     [0,0],
@@ -824,7 +834,8 @@ def get_rk_methods(rk_type, h, c1=0.0, c2=0.5, c3=1.0, h_prev=None, h_prev2=None
             b = [
                     [b1, b2],
             ]
-            ci = [0, c2]
+            
+            
             
         case "res_3s":
             gamma = calculate_gamma(c2, c3)
@@ -844,7 +855,142 @@ def get_rk_methods(rk_type, h, c1=0.0, c2=0.5, c3=1.0, h_prev=None, h_prev2=None
                     [b1, b2, b3],
             ]
             ci = [c1, c2, c3]
+            
+        case "res_3s_alt":
+            c1,c2,c3 = 0, c2, 2/3
+            ci = [c1,c2,c3]
+            φ = Phi(h, ci)
+            
+            a = [
+                    [0, 0,                   0],
+                    [0, 0,                   0],
+                    [0, (4/(9*c2)) * φ(2,3), 0],
+            ]
+            b = [
+                    [0, 0, (1/c3)*φ(2)],
+            ]
+            
+            a, b = gen_first_col_exp(a,b,ci,φ)
+            
+        case "res_3s_strehmel_weiner": # weak 4th order, Krogstad
+            ci = [0,c2,1]
+            φ = Phi(h, ci)
+            
+            a = [
+                    [0, 0, 0],
+                    [0, 0, 0],
+                    [0, (1/c2) * φ(2,3), 0],
+            ]
+            b = [
+                    [0, 
+                     0,
+                     φ(2)],
+            ]
+            
+            a, b = gen_first_col_exp(a,b,ci,φ)
+            
+            
+        case "res_3s_cox_matthews": # Cox & Matthews; known as ETD3RK
+            c2 = 1/2
+            ci = [0,c2,1]
+            φ = Phi(h, ci)
+            
+            a = [
+                    [0, 0, 0],
+                    [0, 0, 0],
+                    [0, (1/c2) * φ(1,3), 0],  # paper said 2 * φ(1,3), but this is the same and more consistent with res_3s_strehmel_weiner
+            ]
+            b = [
+                    [0, 
+                     -8*φ(3) + 4*φ(2),
+                     4*φ(3) - φ(2)],
+            ]
+            
+            a, b = gen_first_col_exp(a,b,ci,φ)
+            
+        case "res_3s_lie": # Lie; known as ETD2CF3
+            c1,c2,c3 = 0, 1/3, 2/3
+            ci = [c1,c2,c3]
+            φ = Phi(h, ci)
+            
+            a = [
+                    [0, 0, 0],
+                    [0, 0, 0],
+                    [0, (4/3)*φ(2,3), 0],  # paper said 2 * φ(1,3), but this is the same and more consistent with res_3s_strehmel_weiner
+            ]
+            b = [
+                    [0, 
+                     6*φ(2) - 18*φ(3),
+                     (-3/2)*φ(2) + 9*φ(3)],
+            ]
+            
+            a, b = gen_first_col_exp(a,b,ci,φ)
+            
+        case "res_4s_cox_matthews": # weak 4th order, Cox & Matthews; unresolved issue, see below
+            c1,c2,c3,c4 = 0, 1/2, 1/2, 1
+            ci = [c1,c2,c3,c4]
+            φ = Phi(h, ci)
+            
+            a2_1 = c2 * φ(1,2)
+            a3_2 = c3 * φ(1,3)
+            a4_1 = (1/2) * φ(1,3) * φ(0,3 - 1)   # This doesn't work, but it's in the paper: j=0 leads to taking a factorial of a negative with the remainder method, and doesn't work with the analytic solution either
+            
+            b1 = φ(1) - 3*φ(2) + 4*φ(3)
+            b2 = 2*φ(2) - 4*φ(3)
+            b3 = 2*φ(2) - 4*φ(3)
+            b4 = 4*φ(3) - φ(2)
 
+            a = [
+                    [0,    0,0,0],
+                    [a2_1, 0,0,0],
+                    [0, a3_2,0,0],
+                    [a4_1, 0,a4_3,0],
+            ]
+            b = [
+                    [b1, b2, b3, b4],
+            ]
+
+        case "res_4s_krogstad": # weak 4th order, Krogstad
+            c1,c2,c3,c4 = 0, 1/2, 1/2, 1
+            ci = [c1,c2,c3,c4]
+            φ = Phi(h, ci)
+            
+            a = [
+                    [0, 0,      0,        0],
+                    [0, 0,      0,        0],
+                    [0, φ(2,3), 0,        0],
+                    [0, 0,      2*φ(2,4), 0],
+            ]
+            b = [
+                    [0, 
+                     2*φ(2) - 4*φ(3),
+                     2*φ(2) - 4*φ(3),
+                     -φ(2)  + 4*φ(3)],
+            ]
+            
+            #a = [row + [0] * (len(ci) - len(row)) for row in a]
+            a, b = gen_first_col_exp(a,b,ci,φ)
+            
+        case "res_4s_strehmel_weiner": # weak 4th order, Strehmel & Weiner
+            c1,c2,c3,c4 = 0, 1/2, 1/2, 1
+            ci = [c1,c2,c3,c4]
+            φ = Phi(h, ci)
+            
+            a = [
+                    [0, 0,         0,        0],
+                    [0, 0,         0,        0],
+                    [0, c3*φ(2,3), 0,        0],
+                    [0, -2*φ(2,4), 4*φ(2,4), 0],
+            ]
+            b = [
+                    [0, 
+                     0,
+                     4*φ(2) - 8*φ(3), 
+                     -φ(2) +  4*φ(3)],
+            ]
+            
+            a, b = gen_first_col_exp(a,b,ci,φ)
+            
         case "dpmpp_2s":
             a2_1 =         c2   * phi(1, -h*c2)
             b1 = (1 - 1/(2*c2)) * phi(1, -h)
@@ -892,26 +1038,29 @@ def get_rk_methods(rk_type, h, c1=0.0, c2=0.5, c3=1.0, h_prev=None, h_prev2=None
             ]
             ci = [0, c2, c3]
             
-        case "res_5s":
+        case "res_5s": #4th order
                 
-            c1, c2, c3, c4, c5 = 0., 0.5, 0.5, 1., 0.5
+            c1, c2, c3, c4, c5 = 0, 1/2, 1/2, 1, 1/2
             
-            a2_1 = 0.5 * phi(1, -h * c2)
+            a2_1 = c2 * phi(1, -h * c2)
             
-            a3_1 = 0.5 * phi(1, -h * c3) - phi(2, -h * c3)
             a3_2 = phi(2, -h * c3)
-            
-            a4_1 = phi(1, -h * c4) - 2 * phi(2, -h * c4)
+            a3_1 = c3 * phi(1, -h * c3) - a3_2
+            #a3_1 = c3 * phi(1, -h * c3) - phi(2, -h * c3)
+
             a4_2 = a4_3 = phi(2, -h * c4)
+            a4_1 = c4 * phi(1, -h * c4) - a4_2 - a4_3
+            #a4_1 = phi(1, -h * c4) - 2 * phi(2, -h * c4)
             
             a5_2 = a5_3 = 0.5 * phi(2, -h * c5) - phi(3, -h * c4) + 0.25 * phi(2, -h * c4) - 0.5 * phi(3, -h * c5)
             a5_4 = 0.25 * phi(2, -h * c5) - a5_2
-            a5_1 = 0.5 * phi(1, -h * c5) - 2 * a5_2 - a5_4
+            a5_1 = c5 * phi(1, -h * c5) - a5_2 - a5_3 - a5_4
                     
-            b1 = phi(1, -h) - 3 * phi(2, -h) + 4 * phi(3, -h)
             b2 = b3 = 0
             b4 = -phi(2, -h) + 4*phi(3, -h)
             b5 = 4 * phi(2, -h) - 8 * phi(3, -h)
+            #b1 = phi(1, -h) - 3 * phi(2, -h) + 4 * phi(3, -h)
+            b1 = phi(1,-h) - b2 - b3 - b4 - b5
 
             a = [
                     [0, 0, 0, 0, 0],
@@ -925,61 +1074,368 @@ def get_rk_methods(rk_type, h, c1=0.0, c2=0.5, c3=1.0, h_prev=None, h_prev2=None
             ]
             ci = [0., 0.5, 0.5, 1., 0.5]
             
+        case "res_6s": #4th order
+                
+            c1, c2, c3, c4, c5, c6 = 0, 1/2, 1/2, 1/3, 1/3, 5/6
+            ci = [c1, c2, c3, c4, c5, c6]
+            φ = Phi(h, ci)
             
+            a2_1 = c2 * φ(1,2)
             
+            a3_1 = 0
+            a3_2 = (c3**2 / c2) * φ(2,3)
             
+            a4_1 = 0
+            a4_2 = (c4**2 / c2) * φ(2,4)
+            a4_3 = (c4**2 * φ(2,4) - a4_2 * c2) / c3
+            
+            a5_1 = 0
+            a5_2 = 0 #zero
+            a5_3 = (-c4 * c5**2 * φ(2,5) + 2*c5**3 * φ(3,5))   /   (c3 * (c3 - c4))
+            a5_4 = (-c3 * c5**2 * φ(2,5) + 2*c5**3 * φ(3,5))   /   (c4 * (c4 - c3))
+            
+            a6_1 = 0
+            a6_2 = 0 #zero
+            a6_3 = (-c4 * c6**2 * φ(2,6) + 2*c6**3 * φ(3,6))   /   (c3 * (c3 - c4))
+            a6_4 = (-c3 * c6**2 * φ(2,6) + 2*c6**3 * φ(3,6))   /   (c4 * (c4 - c3))
+            a6_5 = (c6**2 * φ(2,6) - a6_3*c3 - a6_4*c4)   /   c5
+            #a6_5_alt = (2*c6**3 * φ(3,6) - a6_3*c3**2 - a6_4*c4**2)   /   c5**2
+                    
+            b1 = 0
+            b2 = 0
+            b3 = 0
+            b4 = 0
+            b5 = (-c6*φ(2) + 2*φ(3)) / (c5 * (c5 - c6))
+            b6 = (-c5*φ(2) + 2*φ(3)) / (c6 * (c6 - c5))
+
+            a = [
+                    [0, 0, 0, 0, 0, 0],
+                    [0, 0, 0, 0, 0, 0],
+                    [0, a3_2, 0, 0, 0, 0],
+                    [0, a4_2, a4_3, 0, 0, 0],
+                    [0, a5_2, a5_3, a5_4, 0, 0],
+                    [0, a6_2, a6_3, a6_4, a6_5, 0],
+            ]
+            b = [
+                    [0, b2, b3, b4, b5, b6],
+            ]
+             
+            for i in range(len(ci)): 
+                a[i][0] = ci[i] * φ(1,i+1) - sum(a[i])
+            for i in range(len(b)): 
+                b[i][0] =         φ(1)     - sum(b[i])
+
         case "res_8s":
                 
             c1, c2, c3, c4, c5, c6, c7, c8 = 0, 1/2, 1/2, 1/4,    1/2, 1/5, 2/3, 1
+            ci = [c1, c2, c3, c4, c5, c6, c7, c8]
+            φ = Phi(h, ci, analytic_solution=True)
             
-            a2_1 = c2 * phi(1, -h*c2)
+            a3_2 = (1/2) * φ(2,3)
             
-            a3_2 = 0.5 * phi(2, -h * c3)
-            
-            a4_3 = (1/8) * phi(2, -h * c4)
+            a4_3 = (1/8) * φ(2,4)
 
-            a5_3 = (-1/2) * phi(2, -h * c5) + 2 * phi(3, -h * c5)
-            a5_4 = 2 * phi(2, -h * c5) - 4 * phi(3, -h * c5)
+            a5_3 = (-1/2) * φ(2,5) + 2 * φ(3,5)
+            a5_4 =      2 * φ(2,5) - 4 * φ(3,5)
             
-            a6_4 = (8/25) * phi(2, -h * c6) - (32/125) * phi(3, -h * c6)
-            a6_5 = (2/25) * phi(2, -h * c6) - (1/2) * a6_4
+            a6_4 = (8/25) * φ(2,6) - (32/125) * φ(3,6)
+            a6_5 = (2/25) * φ(2,6) -  (1/2)   * a6_4
             
-            a7_4 = (-125/162) * a6_4
-            a7_5 = (125/1944) * a6_4 - (16/27) * phi(2, -h * c7) + (320/81) * phi(3, -h * c7)
-            a7_6 = (3125/3888) * a6_4 + (100/27) * phi(2, -h * c7) - (800/81) * phi(3, -h * c7)
+            a7_4 = (-125/162)  * a6_4
+            a7_5 =  (125/1944) * a6_4 -  (16/27) * φ(2,7) + (320/81) * φ(3,7)
+            a7_6 = (3125/3888) * a6_4 + (100/27) * φ(2,7) - (800/81) * φ(3,7)
             
-            ϕ = (5/32)*a6_4 - (1/28)*phi(2,-h*c6) + (36/175)*phi(2, -h*c7) - (48/25)*phi(3, -h*c7) + (6/175)*phi(4,-h*c6) + (192/35)*phi(4,-h*c7) + 6*phi(4, -h*c8)
+            Φ = (5/32)*a6_4 - (1/28)*φ(2,6) + (36/175)*φ(2,7) - (48/25)*φ(3,7) + (6/175)*φ(4,6) + (192/35)*φ(4,7) + 6*φ(4,8)
             
-            a8_5 = (208/3)*phi(3,-h*c8) - (16/3)*phi(2,-h*c8) - 40*ϕ
-            a8_6 = (-250/3)*phi(3,-h*c8) + (250/21)*phi(2, -h*c8) + (250/7)*ϕ
-            a8_7 = -27*phi(3, -h*c8) + (27/14)*phi(2,-h*c8) + (135/7)*ϕ
+            a8_5 =  (208/3)*φ(3,8) -  (16/3) *φ(2,8) -      40*Φ
+            a8_6 = (-250/3)*φ(3,8) + (250/21)*φ(2,8) + (250/7)*Φ
+            a8_7 =      -27*φ(3,8) +  (27/14)*φ(2,8) + (135/7)*Φ
             
-            b6 = (125/14)*phi(2,-h) - (625/14)*phi(3, -h) + (1125/14)*phi(4, -h)
-            b7 = (-27/14)*phi(2, -h) + (162/7)*phi(3, -h) - (405/7)*phi(4, -h)
-            b8 = (1/2)*phi(2, -h) - (13/2)*phi(3, -h) + (45/2)*phi(4, -h)
+            b6 = (125/14)*φ(2) - (625/14)*φ(3) + (1125/14)*φ(4)
+            b7 = (-27/14)*φ(2) + (162/7) *φ(3) -  (405/7) *φ(4)
+            b8 =   (1/2) *φ(2) -  (13/2) *φ(3) +   (45/2) *φ(4)
+            
+            a2_1 = c2*φ(1,2) 
+            a3_1 = c3*φ(1,3) - a3_2
+            a4_1 = c4*φ(1,4) - a4_3
+            a5_1 = c5*φ(1,5) - a5_3 - a5_4 
+            a6_1 = c6*φ(1,6) - a6_4 - a6_5
+            a7_1 = c7*φ(1,7) - a7_4 - a7_5 - a7_6
+            a8_1 = c8*φ(1,8) - a8_5 - a8_6 - a8_7 
+            b1   =    φ(1)   - b6 - b7 - b8
             
             a = [
                     [0,    0, 0, 0, 0, 0, 0, 0],
                     [a2_1, 0, 0, 0, 0, 0, 0, 0],
                     
-                    [0,    a3_2, 0, 0, 0, 0, 0, 0],
-                    [0,    0, a4_3, 0, 0, 0, 0, 0],
+                    [a3_1, a3_2, 0, 0, 0, 0, 0, 0],
+                    [a4_1, 0, a4_3, 0, 0, 0, 0, 0],
                     
-                    [0,    0, a5_3, a5_4, 0, 0, 0, 0],
-                    [0,    0, 0, a6_4, a6_5, 0, 0, 0],
+                    [a5_1, 0, a5_3, a5_4, 0, 0, 0, 0],
+                    [a6_1, 0, 0, a6_4, a6_5, 0, 0, 0],
                     
-                    [0,    0, 0, a7_4, a7_5, a7_6, 0,    0],
-                    [0,    0, 0, 0,    a8_5, a8_6, a8_7, 0],
+                    [a7_1 , 0, 0, a7_4, a7_5, a7_6, 0,    0],
+                    [a8_1 , 0, 0, 0,    a8_5, a8_6, a8_7, 0],
             ]
             b = [
-                    [0, 0, 0, 0, 0, b6, b7, b8],
+                    [b1,   0, 0, 0, 0, b6, b7, b8],
             ]
-            ci = [0, 1/2, 1/2, 1/4,    1/2, 1/5, 2/3, 1]
-            
-            
+             
+            a = [
+                    [0, 0, 0, 0, 0, 0, 0, 0],
+                    [0, 0, 0, 0, 0, 0, 0, 0],
+                    
+                    [0, a3_2, 0, 0, 0, 0, 0, 0],
+                    [0, 0, a4_3, 0, 0, 0, 0, 0],
+                    
+                    [0, 0, a5_3, a5_4, 0, 0, 0, 0],
+                    [0, 0, 0, a6_4, a6_5, 0, 0, 0],
+                    
+                    [0 , 0, 0, a7_4, a7_5, a7_6, 0,    0],
+                    [0 , 0, 0, 0,    a8_5, a8_6, a8_7, 0],
+            ]
+            b = [
+                    [0,   0, 0, 0, 0, b6, b7, b8],
+            ]
+             
+            for i in range(len(a)): 
+                a[i][0] = ci[i] * φ(1,i+1) - sum(a[i])
+            for i in range(len(b)): 
+                b[i][0] =         φ(1)     - sum(b[i])
             
             
 
+        case "res_10s":
+                
+            c1, c2, c3, c4, c5, c6, c7, c8, c9, c10 = 0, 1/2, 1/2, 1/3, 1/2,     1/3, 1/4, 3/10, 3/4, 1
+            ci = [c1, c2, c3, c4, c5, c6, c7, c8, c9, c10]
+            φ = Phi(h, ci, analytic_solution=True)
+            
+            a3_2 = (c3**2 / c2) * φ(2,3)
+            
+            a4_2 = (c4**2 / c2) * φ(2,4)
+                        
+            b8 =  (c9*c10*φ(2) - 2*(c9+c10)*φ(3) + 6*φ(4))   /   (c8 * (c8-c9) * (c8-c10))
+            b9 =  (c8*c10*φ(2) - 2*(c8+c10)*φ(3) + 6*φ(4))   /   (c9 * (c9-c8) * (c9-c10))
+            
+            b10 = (c8*c9*φ(2)  - 2*(c8+c9) *φ(3) + 6*φ(4))   /   (c10 * (c10-c8) * (c10-c9))
+            
+            a = [
+                    [0, 0, 0, 0, 0,      0, 0, 0, 0, 0],
+                    [0, 0, 0, 0, 0,      0, 0, 0, 0, 0],
+                    [0, a3_2, 0, 0, 0,      0, 0, 0, 0, 0],
+                    [0, a4_2, 0, 0, 0,      0, 0, 0, 0, 0],
+                    [0, 0, 0, 0, 0,      0, 0, 0, 0, 0],
+                    
+                    [0, 0, 0, 0, 0,      0, 0, 0, 0, 0],
+                    [0, 0, 0, 0, 0,      0, 0, 0, 0, 0],
+                    [0, 0, 0, 0, 0,      0, 0, 0, 0, 0],
+                    [0, 0, 0, 0, 0,      0, 0, 0, 0, 0],
+                    [0, 0, 0, 0, 0,      0, 0, 0, 0, 0],
+            ]
+            b = [
+                    [0, 0, 0, 0, 0,      0, 0, b8, b9, b10],
+            ]
+            
+            # a5_3, a5_4
+            # a6_3, a6_4
+            # a7_3, a7_4
+            for i in range(5, 8): # i=5,6,7   j,k ∈ {3, 4}, j != k
+                jk = [(3, 4), (4, 3)]
+                jk = list(permutations([3, 4], 2)) 
+                for j,k in jk:
+                    a[i-1][j-1] = (-ci[i-1]**2 * ci[k-1] * φ(2,i)    +   2*ci[i-1]**3 * φ(3,i))   /   (ci[j-1] * (ci[j-1] - ci[k-1]))
+                
+            for i in range(8, 11): # i=8,9,10   j,k,l ∈ {5, 6, 7}, j != k != l      [    (5, 6, 7), (5, 7, 6),    (6, 5, 7), (6, 7, 5),    (7, 5, 6), (7, 6, 5)]    6 total coeff
+                jkl = list(permutations([5, 6, 7], 3)) 
+                for j,k,l in jkl:
+                    a[i-1][j-1] = (ci[i-1]**2 * ci[k-1] * ci[l-1] * φ(2,i)   -   2*ci[i-1]**3 * (ci[k-1] + ci[l-1]) * φ(3,i)   +   6*ci[i-1]**4 * φ(4,i))    /    (ci[j-1] * (ci[j-1] - ci[k-1]) * (ci[j-1] - ci[l-1]))
+
+            for i in range(len(a)): 
+                a[i][0] = ci[i] * φ(1,i+1) - sum(a[i])
+            for i in range(len(b)): 
+                b[i][0] =         φ(1)     - sum(b[i])
+            
+            
+
+
+        case "res_15s":
+                
+            c1,c2,c3,c4,c5,c6,c7,c8,c9,c10,c11,c12,c13,c14,c15 = 0, 1/2, 1/2, 1/3, 1/2,    1/5, 1/4, 18/25, 1/3, 3/10,    1/6, 90/103, 1/3, 3/10, 1/5
+            c1 = 0
+            c2 = c3 = c5 = 1/2
+            c4 = c9 = c13 = 1/3
+            c6 = c15 = 1/5
+            c7 = 1/4
+            c8 = 18/25
+            c10 = c14 = 3/10
+            c11 = 1/6
+            c12 = 90/103
+            c15 = 1/5
+            ci = [c1, c2, c3, c4, c5, c6, c7, c8, c9, c10, c11, c12, c13, c14, c15]
+            φ = Phi(h, ci, analytic_solution=True)
+            
+            a = [[0 for _ in range(15)] for _ in range(15)]
+            b = [[0 for _ in range(15)]]
+
+            for i in range(3, 5): # i=3,4     j=2
+                j=2
+                a[i-1][j-1] = (ci[i-1]**2 / ci[j-1]) * φ(j,i)
+            
+            
+            for i in range(5, 8): # i=5,6,7   j,k ∈ {3, 4}, j != k
+                jk = list(permutations([3, 4], 2)) 
+                for j,k in jk:
+                    a[i-1][j-1] = (-ci[i-1]**2 * ci[k-1] * φ(2,i)    +   2*ci[i-1]**3 * φ(3,i))   /   prod_diff(ci[j-1], ci[k-1])
+
+            for i in range(8, 12): # i=8,9,10,11  j,k,l ∈ {5, 6, 7}, j != k != l      [    (5, 6, 7), (5, 7, 6),    (6, 5, 7), (6, 7, 5),    (7, 5, 6), (7, 6, 5)]    6 total coeff
+                jkl = list(permutations([5, 6, 7], 3)) 
+                for j,k,l in jkl:
+                    a[i-1][j-1] = (ci[i-1]**2 * ci[k-1] * ci[l-1] * φ(2,i)   -   2*ci[i-1]**3 * (ci[k-1] + ci[l-1]) * φ(3,i)   +   6*ci[i-1]**4 * φ(4,i))    /    (ci[j-1] * (ci[j-1] - ci[k-1]) * (ci[j-1] - ci[l-1]))
+
+            for i in range(12,16): # i=12,13,14,15
+                jkld = list(permutations([8,9,10,11], 4)) 
+                for j,k,l,d in jkld:
+                    numerator = -ci[i-1]**2  *  ci[d-1]*ci[k-1]*ci[l-1]  *  φ(2,i)     +     2*ci[i-1]**3  *  (ci[d-1]*ci[k-1] + ci[d-1]*ci[l-1] + ci[k-1]*ci[l-1])  *  φ(3,i)     -     6*ci[i-1]**4  *  (ci[d-1] + ci[k-1] + ci[l-1])  *  φ(4,i)     +     24*ci[i-1]**5  *  φ(5,i)
+                    a[i-1][j-1] = numerator / prod_diff(ci[j-1], ci[k-1], ci[l-1], ci[d-1])
+
+            """ijkl = list(permutations([12,13,14,15], 4)) 
+            for i,j,k,l in ijkl:
+                #numerator = -ci[j-1]*ci[k-1]*ci[l-1]*φ(2)   +   2*(ci[j-1]*ci[k-1]   +   ci[j-1]*ci[l-1]   +   ci[k-1]*ci[l-1])*φ(3)   -   6*(ci[j-1] + ci[k-1]   +   ci[l-1])*φ(4)   +   24*φ(5)
+                #b[0][i-1] = numerator / prod_diff(ci[i-1], ci[j-1], ci[k-1], ci[l-1])
+                for jjj in range (2, 6): # 2,3,4,5
+                    b[0][i-1] += mu_numerator(jjj, ci[j-1], ci[i-1], ci[k-1], ci[l-1]) * φ(jjj) 
+                b[0][i-1] /= prod_diff(ci[i-1], ci[j-1], ci[k-1], ci[l-1])"""
+                    
+            ijkl = list(permutations([12,13,14,15], 4)) 
+            for i,j,k,l in ijkl:
+                numerator = 0
+                for jjj in range(2, 6):  # 2, 3, 4, 5
+                    numerator += mu_numerator(jjj, ci[j-1], ci[i-1], ci[k-1], ci[l-1]) * φ(jjj)
+                #print(i,j,k,l)
+
+                b[0][i-1] = numerator / prod_diff(ci[i-1], ci[j-1], ci[k-1], ci[l-1])
+             
+             
+            ijkl = list(permutations([12, 13, 14, 15], 4))
+            selected_permutations = {} 
+            sign = 1  
+
+            for i in range(12, 16):
+                results = []
+                for j, k, l, d in ijkl:
+                    if i != j and i != k and i != l and i != d:
+                        numerator = 0
+                        for jjj in range(2, 6):  # 2, 3, 4, 5
+                            numerator += mu_numerator(jjj, ci[j-1], ci[i-1], ci[k-1], ci[l-1]) * φ(jjj)
+                        theta_value = numerator / prod_diff(ci[i-1], ci[j-1], ci[k-1], ci[l-1])
+                        results.append((theta_value, (i, j, k, l, d)))
+
+                results.sort(key=lambda x: abs(x[0]))
+
+                for theta_value, permutation in results:
+                    if sign == 1 and theta_value > 0:
+                        selected_permutations[i] = (theta_value, permutation)
+                        sign *= -1  
+                        break
+                    elif sign == -1 and theta_value < 0:  
+                        selected_permutations[i] = (theta_value, permutation)
+                        sign *= -1 
+                        break
+
+            for i in range(12, 16):
+                if i in selected_permutations:
+                    theta_value, (i, j, k, l, d) = selected_permutations[i]
+                    b[0][i-1] = theta_value  
+                    
+            for i in selected_permutations:
+                theta_value, permutation = selected_permutations[i]
+                print(f"i={i}")
+                print(f"  Selected Theta: {theta_value:.6f}, Permutation: {permutation}")
+             
+             
+             
+            for i in range(len(a)): 
+                a[i][0] = ci[i] * φ(1,i+1) - sum(a[i])
+            for i in range(len(b)): 
+                b[i][0] =         φ(1)     - sum(b[i])
+            
+            
+
+        case "res_16s": # 6th order without weakened order conditions
+                
+            c1 = 0
+            c2 = c3 = c5 = c8 = c12 = 1/2
+            c4 = c11 = c15 = 1/3
+            c6 = c9 = c13 = 1/5
+            c7 = c10 = c14 = 1/4
+            c16 = 1
+            ci = [c1, c2, c3, c4, c5, c6, c7, c8, c9, c10, c11, c12, c13, c14, c15, c16]
+            φ = Phi(h, ci, analytic_solution=True)
+            
+            a3_2 = (1/2) * φ(2,3)
+
+            a = [[0 for _ in range(16)] for _ in range(16)]
+            b = [[0 for _ in range(16)]]
+
+            for i in range(3, 5): # i=3,4     j=2
+                j=2
+                a[i-1][j-1] = (ci[i-1]**2 / ci[j-1]) * φ(j,i)
+            
+            for i in range(5, 8): # i=5,6,7   j,k ∈ {3, 4}, j != k
+                jk = list(permutations([3, 4], 2)) 
+                for j,k in jk:
+                    a[i-1][j-1] = (-ci[i-1]**2 * ci[k-1] * φ(2,i)    +   2*ci[i-1]**3 * φ(3,i))   /   prod_diff(ci[j-1], ci[k-1])
+                    
+            for i in range(8, 12): # i=8,9,10,11  j,k,l ∈ {5, 6, 7}, j != k != l      [    (5, 6, 7), (5, 7, 6),    (6, 5, 7), (6, 7, 5),    (7, 5, 6), (7, 6, 5)]    6 total coeff
+                jkl = list(permutations([5, 6, 7], 3)) 
+                for j,k,l in jkl:
+                    a[i-1][j-1] = (ci[i-1]**2 * ci[k-1] * ci[l-1] * φ(2,i)   -   2*ci[i-1]**3 * (ci[k-1] + ci[l-1]) * φ(3,i)   +   6*ci[i-1]**4 * φ(4,i))    /    (ci[j-1] * (ci[j-1] - ci[k-1]) * (ci[j-1] - ci[l-1]))
+
+            for i in range(12,17): # i=12,13,14,15,16
+                jkld = list(permutations([8,9,10,11], 4)) 
+                for j,k,l,d in jkld:
+                    numerator = -ci[i-1]**2  *  ci[d-1]*ci[k-1]*ci[l-1]  *  φ(2,i)     +     2*ci[i-1]**3  *  (ci[d-1]*ci[k-1] + ci[d-1]*ci[l-1] + ci[k-1]*ci[l-1])  *  φ(3,i)     -     6*ci[i-1]**4  *  (ci[d-1] + ci[k-1] + ci[l-1])  *  φ(4,i)     +     24*ci[i-1]**5  *  φ(5,i)
+                    a[i-1][j-1] = numerator / prod_diff(ci[j-1], ci[k-1], ci[l-1], ci[d-1])
+                     
+            """ijdkl = list(permutations([12,13,14,15,16], 5)) 
+            for i,j,d,k,l in ijdkl:
+                #numerator = -ci[j-1]*ci[k-1]*ci[l-1]*φ(2)   +   2*(ci[j-1]*ci[k-1]   +   ci[j-1]*ci[l-1]   +   ci[k-1]*ci[l-1])*φ(3)   -   6*(ci[j-1] + ci[k-1]   +   ci[l-1])*φ(4)   +   24*φ(5)
+                b[0][i-1] = theta(2, ci[d-1], ci[i-1], ci[k-1], ci[j-1], ci[l-1]) * φ(2)   +  theta(3, ci[d-1], ci[i-1], ci[k-1], ci[j-1], ci[l-1])*φ(3)   +   theta(4, ci[d-1], ci[i-1], ci[k-1], ci[j-1], ci[l-1])*φ(4)   +   theta(5, ci[d-1], ci[i-1], ci[k-1], ci[j-1], ci[l-1])*φ(5)    +    theta(6, ci[d-1], ci[i-1], ci[k-1], ci[j-1], ci[l-1]) * φ(6)
+                #b[0][i-1] = numerator / prod_diff(ci[i-1], ci[j-1], ci[k-1], ci[l-1])"""
+                    
+                
+            ijdkl = list(permutations([12,13,14,15,16], 5)) 
+            for i,j,d,k,l in ijdkl:
+                #numerator = -ci[j-1]*ci[k-1]*ci[l-1]*φ(2)   +   2*(ci[j-1]*ci[k-1]   +   ci[j-1]*ci[l-1]   +   ci[k-1]*ci[l-1])*φ(3)   -   6*(ci[j-1] + ci[k-1]   +   ci[l-1])*φ(4)   +   24*φ(5)
+                #numerator = theta_numerator(2, ci[d-1], ci[i-1], ci[k-1], ci[j-1], ci[l-1]) * φ(2)   +  theta_numerator(3, ci[d-1], ci[i-1], ci[k-1], ci[j-1], ci[l-1])*φ(3)   +   theta_numerator(4, ci[d-1], ci[i-1], ci[k-1], ci[j-1], ci[l-1])*φ(4)   +   theta_numerator(5, ci[d-1], ci[i-1], ci[k-1], ci[j-1], ci[l-1])*φ(5)    +    theta_numerator(6, ci[d-1], ci[i-1], ci[k-1], ci[j-1], ci[l-1]) * φ(6)
+                #b[0][i-1] = numerator / (ci[i-1] *, ci[d-1], ci[j-1], ci[k-1], ci[l-1])
+                #b[0][i-1] = numerator / denominator(ci[i-1], ci[d-1], ci[j-1], ci[k-1], ci[l-1])
+                b[0][i-1] = theta(2, ci[d-1], ci[i-1], ci[k-1], ci[j-1], ci[l-1]) * φ(2)   +  theta(3, ci[d-1], ci[i-1], ci[k-1], ci[j-1], ci[l-1])*φ(3)   +   theta(4, ci[d-1], ci[i-1], ci[k-1], ci[j-1], ci[l-1])*φ(4)   +   theta(5, ci[d-1], ci[i-1], ci[k-1], ci[j-1], ci[l-1])*φ(5)    +    theta(6, ci[d-1], ci[i-1], ci[k-1], ci[j-1], ci[l-1]) * φ(6)
+
+            
+            ijdkl = list(permutations([12,13,14,15,16], 5)) 
+            for i,j,d,k,l in ijdkl:
+                numerator = 0
+                for jjj in range(2, 7):  # 2, 3, 4, 5, 6
+                    numerator += theta_numerator(jjj, ci[d-1], ci[i-1], ci[k-1], ci[j-1], ci[l-1]) * φ(jjj)
+                #print(i,j,d,k,l)
+                b[0][i-1] = numerator / (ci[i-1] *   (ci[i-1] - ci[k-1])   *   (ci[i-1] - ci[j-1]   *   (ci[i-1] - ci[d-1])   *   (ci[i-1] - ci[l-1])))
+
+                
+            for i in range(len(a)): 
+                a[i][0] = ci[i] * φ(1,i+1) - sum(a[i])
+            for i in range(len(b)): 
+                b[i][0] =         φ(1)     - sum(b[i])
+            
+            
+            
+            
+            
+            
+            
+            
+            
         case "irk_exp_diag_2s":
             lam = (1 - torch.exp(-c1 * h)) / h
             a2_1 = ( torch.exp(c2*h) - torch.exp(c1*h))    /    (h * torch.exp(2*c1*h))
@@ -1000,4 +1456,105 @@ def get_rk_methods(rk_type, h, c1=0.0, c2=0.5, c3=1.0, h_prev=None, h_prev2=None
     if rk_type.startswith("lob") == False:
         ci.append(1)
     return a, b, ci, multistep_stages, FSAL
+
+
+
+def gen_first_col_exp(a, b, c, φ):
+    for i in range(len(c)): 
+        a[i][0] = c[i] * φ(1,i+1) - sum(a[i])
+    for i in range(len(b)): 
+        b[i][0] =         φ(1)     - sum(b[i])
+    return a, b
+
+def rho(j, ci, ck, cl):
+    if j == 2:
+        numerator = ck*cl
+    if j == 3:
+        numerator = (-2 * (ck + cl))
+    if j == 4:
+        numerator = 6
+    return numerator / denominator(ci, ck, cl)
+    
+    
+def mu(j, cd, ci, ck, cl):
+    if j == 2:
+        numerator = -cd * ck * cl
+    if j == 3:
+        numerator = 2 * (cd * ck + cd * cl + ck * cl)
+    if j == 4:
+        numerator = -6 * (cd + ck + cl)
+    if j == 5:
+        numerator = 24
+    return numerator / denominator(ci, cd, ck, cl)
+
+def mu_numerator(j, cd, ci, ck, cl):
+    if j == 2:
+        numerator = -cd * ck * cl
+    if j == 3:
+        numerator = 2 * (cd * ck + cd * cl + ck * cl)
+    if j == 4:
+        numerator = -6 * (cd + ck + cl)
+    if j == 5:
+        numerator = 24
+    return numerator #/ denominator(ci, cd, ck, cl)
+
+
+
+def theta_numerator(j, cd, ci, ck, cj, cl):
+    if j == 2:
+        numerator = -cj * cd * ck * cl
+    if j == 3:
+        numerator = 2 * (cj * ck * cd + cj*ck*cl + ck*cd*cl + cd*cl*cj)
+    if j == 4:
+        numerator = -6*(cj*ck + cj*cd + cj*cl + ck*cd + ck*cl + cd*cl)
+    if j == 5:
+        numerator = 24 * (cj + ck + cl + cd)
+    if j == 6:
+        numerator = -120
+    return numerator # / denominator(ci, cj, ck, cl, cd)
+
+
+def theta(j, cd, ci, ck, cj, cl):
+    if j == 2:
+        numerator = -cj * cd * ck * cl
+    if j == 3:
+        numerator = 2 * (cj * ck * cd + cj*ck*cl + ck*cd*cl + cd*cl*cj)
+    if j == 4:
+        numerator = -6*(cj*ck + cj*cd + cj*cl + ck*cd + ck*cl + cd*cl)
+    if j == 5:
+        numerator = 24 * (cj + ck + cl + cd)
+    if j == 6:
+        numerator = -120
+    return numerator / ( ci * (ci - cj) * (ci - ck) * (ci - cl) * (ci - cd))
+    return numerator / denominator(ci, cj, ck, cl, cd)
+
+
+def prod_diff(cj, ck, cl=None, cd=None, cblah=None):
+    if cl is None and cd is None:
+        return cj * (cj - ck)
+    if cd is None:
+        return cj * (cj - ck) * (cj - cl)
+    else:
+        return cj * (cj - ck) * (cj - cl) * (cj - cd)
+
+def denominator(ci, *args):
+    result = ci 
+    for arg in args:
+        result *= (ci - arg)
+    return result
+
+
+
+def check_condition_4_2(nodes):
+
+    c12, c13, c14, c15 = nodes
+
+    term_1 = (1 / 5) * (c12 + c13 + c14 + c15)
+    term_2 = (1 / 4) * (c12 * c13 + c12 * c14 + c12 * c15 + c13 * c14 + c13 * c15 + c14 * c15)
+    term_3 = (1 / 3) * (c12 * c13 * c14 + c12 * c13 * c15 + c12 * c14 * c15 + c13 * c14 * c15)
+    term_4 = (1 / 2) * (c12 * c13 * c14 * c15)
+
+    result = term_1 - term_2 + term_3 - term_4
+
+    return abs(result - (1 / 6)) < 1e-6  
 

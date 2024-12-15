@@ -98,8 +98,10 @@ NODE_CLASS_MAPPINGS = {
     "SamplerOptions_GarbageCollection": samplers_extensions.SamplerOptions_GarbageCollection,
     "ModelSamplingAdvanced": models.ModelSamplingAdvanced,
     "ModelTimestepPatcher": models.ModelSamplingAdvanced,
+    "TorchCompileModelFluxAdv": models.TorchCompileModelFluxAdvanced,
 
     "ModelSamplingAdvancedResolution": models.ModelSamplingAdvancedResolution,
+    "FluxGuidanceDisable": models.FluxGuidanceDisable,
     
     "AdvancedNoise": latents.AdvancedNoise,
     
@@ -108,6 +110,8 @@ NODE_CLASS_MAPPINGS = {
     
     "TextBox1": nodes_misc.TextBox1,
     "TextBox3": nodes_misc.TextBox3,
+    
+    
     
     "CLIPTextEncodeFluxUnguided": conditioning.CLIPTextEncodeFluxUnguided,
 
@@ -118,6 +122,10 @@ NODE_CLASS_MAPPINGS = {
     "ConditioningZeroAndTruncate": conditioning.ConditioningZeroAndTruncate,
     "ConditioningTruncate": conditioning.ConditioningTruncate,
     "StyleModelApplyAdvanced": conditioning.StyleModelApplyAdvanced,
+    
+    "FluxRegionalPrompt": conditioning.FluxRegionalPrompt,
+    
+    "FluxRegionalConditioning": conditioning.FluxRegionalConditioning,
 
     "ConditioningToBase64": conditioning.ConditioningToBase64,
     "Base64ToConditioning": conditioning.Base64ToConditioning,
@@ -203,6 +211,8 @@ NODE_CLASS_MAPPINGS = {
     "PrepForUnsampling": helper_sigma_preview_image_preproc.PrepForUnsampling,
     
     "SigmasPreview": helper_sigma_preview_image_preproc.SigmasPreview,
+    
+    "ReFluxPatcher": models.ReFluxPatcher,
 }
 
 if flags["test_samplers"]:

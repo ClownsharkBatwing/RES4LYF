@@ -11,11 +11,10 @@ import functools
 from .noise_classes import precision_tool
 from copy import deepcopy
 
-def initialize_or_scale(tensor, value, steps):
-    if tensor is None:
-        return torch.full((steps,), value)
-    else:
-        return value * tensor
+from .helper import initialize_or_scale
+import torch.nn.functional as F
+
+
 
 def conditioning_set_values(conditioning, values={}):
     c = []
@@ -424,3 +423,160 @@ class Base64ToConditioning:
         conditioning = pickle.loads(conditioning_pickle)
         return (conditioning,)
 
+
+
+
+
+
+
+
+class RegionalMask(torch.nn.Module):
+    def __init__(self, mask: torch.Tensor, start_percent: float, end_percent: float) -> None:
+        super().__init__()
+        self.register_buffer('mask', mask)
+        self.start_percent = start_percent
+        self.end_percent   = end_percent
+
+    def __call__(self, transformer_options, *args, **kwargs):
+        if self.start_percent <= 1 - transformer_options['sigmas'][0] < self.end_percent:
+            return self.mask
+        return None
+    
+    
+
+class RegionalConditioning(torch.nn.Module):
+    def __init__(self, region_cond: torch.Tensor, start_percent: float, end_percent: float) -> None:
+        super().__init__()
+        self.register_buffer('region_cond', region_cond)
+        self.start_percent = start_percent
+        self.end_percent   = end_percent
+
+    def __call__(self, transformer_options, *args,  **kwargs):
+        if self.start_percent <= 1 - transformer_options['sigmas'][0] < self.end_percent:
+            return self.region_cond
+        return None
+
+
+
+class FluxRegionalPrompt:
+    @classmethod
+    def INPUT_TYPES(s):
+        return {"required": { 
+            "cond": ("CONDITIONING",),
+        }, "optional": {
+            "cond_regional": ("CONDITIONING_REGIONAL",),
+            "mask": ("MASK",),
+        }}
+
+    RETURN_TYPES = ("CONDITIONING_REGIONAL","MASK",)
+    RETURN_NAMES = ("cond_regional","mask_inv")
+    FUNCTION = "main"
+
+    CATEGORY = "conditioning"
+
+    def main(self, cond, mask, cond_regional=[]):
+        cond_regional = [*cond_regional]
+        cond_regional.append({'mask': mask, 'cond': cond[0][0]})
+        mask_inv = 1-mask
+        return (cond_regional,mask_inv,)
+
+
+
+class RegionalGenerateConditioningsAndMasks:
+    def __init__(self, conditioning_regional, weight, start_percent, end_percent):
+        self.conditioning_regional = conditioning_regional
+        self.weight = weight
+        self.start_percent = start_percent
+        self.end_percent = end_percent
+
+    def __call__(self, latent):
+        b, c, h, w = latent.shape
+        h //= 2  # 16x16 PE
+        w //= 2
+        img_len = h * w
+
+        cond_r = torch.cat([cond_reg['cond'] for cond_reg in self.conditioning_regional], dim=1)
+        text_len = 256 + cond_r.shape[1]  # 256 = main prompt tokens... half of t5, comfy issue
+
+        regional_mask = torch.zeros((text_len + img_len, text_len + img_len), dtype=torch.bool)
+        self_attend_masks = torch.zeros((img_len, img_len), dtype=torch.bool)
+        union_masks = torch.zeros((img_len, img_len), dtype=torch.bool)
+
+        conditioning_regional = [
+            {
+                'mask': torch.ones((1, h, w), dtype=torch.float64),
+                'cond': torch.ones((1, 256, 4096), dtype=torch.float64),
+            },
+            *self.conditioning_regional,
+        ]
+
+        cond_len = 0
+        for cond_reg_dict in conditioning_regional:
+            cond_reg = cond_reg_dict['cond']
+            region_mask = 1 - cond_reg_dict['mask'][0]
+            region_mask = torch.nn.functional.interpolate(
+                region_mask[None, None, :, :], (h, w), mode='nearest-exact'
+            ).flatten().unsqueeze(1).repeat(1, cond_reg.size(1))
+
+            cond_len_next = cond_len + cond_reg.shape[1]
+            regional_mask[cond_len:cond_len_next, cond_len:cond_len_next] = True
+            regional_mask[cond_len:cond_len_next, text_len:] = region_mask.transpose(-1, -2)
+            regional_mask[text_len:, cond_len:cond_len_next] = region_mask
+
+            img_size_masks = region_mask[:, :1].repeat(1, img_len)
+            img_size_masks_transpose = img_size_masks.transpose(-1, -2)
+            self_attend_masks = torch.logical_or(
+                self_attend_masks, torch.logical_and(img_size_masks, img_size_masks_transpose)
+            )
+            union_masks = torch.logical_or(
+                union_masks, torch.logical_or(img_size_masks, img_size_masks_transpose)
+            )
+            cond_len = cond_len_next
+
+        background_masks = torch.logical_not(union_masks)
+        background_and_self_attend_masks = torch.logical_or(background_masks, self_attend_masks)
+        regional_mask[text_len:, text_len:] = background_and_self_attend_masks
+
+        regional_mask = RegionalMask(regional_mask, self.start_percent, self.end_percent)
+        regional_conditioning = RegionalConditioning(cond_r, self.start_percent, self.end_percent)
+
+        return regional_conditioning, regional_mask
+
+
+
+class FluxRegionalConditioning:
+    @classmethod
+    def INPUT_TYPES(s):
+        return {"required": { 
+            "conditioning": ("CONDITIONING",),
+            "conditioning_regional": ("CONDITIONING_REGIONAL",),
+            "weight": ("FLOAT", {"default": 1.0, "min": -10000.0, "max": 10000.0, "step": 0.01}),
+            "start_percent": ("FLOAT", {"default": 0,   "min": 0.0, "max": 1.0, "step": 0.01}),
+            "end_percent":   ("FLOAT", {"default": 0.5, "min": 0.0, "max": 1.0, "step": 0.01}),
+        }, 
+            "optional": {
+                "weights": ("SIGMAS", ),
+        }}
+
+    RETURN_TYPES = ("CONDITIONING",)
+    RETURN_NAMES = ("conditioning",)
+    FUNCTION = "main"
+
+    CATEGORY = "conditioning"
+
+    def main(self, conditioning, conditioning_regional, weight,start_percent, end_percent, start_step=0, end_step=30,  weights=None,  latent=None):
+        default_dtype = torch.float64
+        max_steps = 10000
+        weights = initialize_or_scale(weights, weight, max_steps).to(default_dtype)
+        weights = F.pad(weights, (0, max_steps), value=0.0)
+
+        regional_generate_conditionings_and_masks_fn = RegionalGenerateConditioningsAndMasks(
+            conditioning_regional=conditioning_regional,
+            weight=weight,
+            start_percent=start_percent,
+            end_percent=end_percent,
+        )
+
+        conditioning[0][1]['regional_generate_conditionings_and_masks_fn'] = regional_generate_conditionings_and_masks_fn
+        conditioning[0][1]['regional_conditioning_weights'] = weights
+        return (conditioning,)
