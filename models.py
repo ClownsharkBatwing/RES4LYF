@@ -39,7 +39,7 @@ class ReFluxPatcher:
     FUNCTION = "main"
 
     def main(self, model, enable=True):
-        m = model.clone()
+        m = model #.clone()
         
         if enable:
             m.model.diffusion_model.__class__ = ReFlux
