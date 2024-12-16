@@ -37,6 +37,7 @@ class ReFluxPatcher:
         m = model.clone()
         
         m.model.diffusion_model.__class__ = ReFlux
+        m.model.diffusion_model.threshold_inv = False
         
         for i, block in enumerate(m.model.diffusion_model.double_blocks):
             block.__class__ = DoubleStreamBlock
