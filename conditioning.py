@@ -579,7 +579,6 @@ class FluxRegionalConditioning:
     @classmethod
     def INPUT_TYPES(s):
         return {"required": { 
-            "conditioning_regional": ("CONDITIONING_REGIONAL",),
             "mask_weight": ("FLOAT", {"default": 1.0, "min": -10000.0, "max": 10000.0, "step": 0.01}),
             "start_percent": ("FLOAT", {"default": 0,   "min": 0.0, "max": 1.0, "step": 0.01}),
             "end_percent":   ("FLOAT", {"default": 0.5, "min": 0.0, "max": 1.0, "step": 0.01}),
@@ -587,6 +586,7 @@ class FluxRegionalConditioning:
         }, 
             "optional": {
                 "conditioning": ("CONDITIONING",),
+                "conditioning_regional": ("CONDITIONING_REGIONAL",),
                 "mask_weights": ("SIGMAS", ),
         }}
 

@@ -133,17 +133,30 @@ class SharkSampler:
                 latent = latent_image
                 latent_image_dtype = latent_image['samples'].dtype
 
-                if positive is None:
-                    positive = [[
-                        torch.zeros((1, 154, 4096)),
-                        {'pooled_output': torch.zeros((1, 2048))}
-                        ]]
+                if isinstance(model.model.model_config, comfy.supported_models.Flux) or isinstance(model.model.model_config, comfy.supported_models.FluxSchnell):
+                    if positive is None:
+                        positive = [[
+                            torch.zeros((1, 256, 4096)),
+                            {'pooled_output': torch.zeros((1, 768))}
+                            ]]
 
-                if negative is None:
-                    negative = [[
-                        torch.zeros((1, 154, 4096)),
-                        {'pooled_output': torch.zeros((1, 2048))}
-                        ]]
+                    if negative is None:
+                        negative = [[
+                            torch.zeros((1, 256, 4096)),
+                            {'pooled_output': torch.zeros((1, 768))}
+                            ]]
+                else:
+                    if positive is None:
+                        positive = [[
+                            torch.zeros((1, 154, 4096)),
+                            {'pooled_output': torch.zeros((1, 2048))}
+                            ]]
+
+                    if negative is None:
+                        negative = [[
+                            torch.zeros((1, 154, 4096)),
+                            {'pooled_output': torch.zeros((1, 2048))}
+                            ]]
 
                 if denoise_alt < 0:
                     d_noise = denoise_alt = -denoise_alt
