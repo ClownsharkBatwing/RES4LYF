@@ -42,6 +42,7 @@ class ReFlux(Flux):
         super().__init__()
         self.dtype = dtype
         self.timestep = -1.0
+        self.threshold_inv = False
         params = FluxParams(**kwargs)
         
         self.params = params #self.params FluxParams(in_channels=16, out_channels=16, vec_in_dim=768, context_in_dim=4096, hidden_size=3072, mlp_ratio=4.0, num_heads=24, depth=19, depth_single_blocks=38, axes_dim=[16, 56, 56], theta=10000, patch_size=2, qkv_bias=True, guidance_embed=False)
@@ -101,7 +102,9 @@ class ReFlux(Flux):
             mask_obj = transformer_options.get('patches', {}).get('regional_conditioning_mask', None)
             threshold = i / 56
             if mask_obj is not None and weight >= threshold:
-                mask = mask_obj[0](transformer_options, threshold)
+                #if self.threshold_inv:
+                #    threshold = 1 - threshold
+                mask = mask_obj[0](transformer_options, threshold) #, self.threshold_inv)
                 #mask = (mask >= threshold).to(mask.dtype)
 
             img, txt = block(img=img, txt=txt, vec=vec, pe=pe, timestep=timesteps, transformer_options=transformer_options, mask=mask) #, mask=mask)
@@ -119,7 +122,9 @@ class ReFlux(Flux):
             mask_obj = transformer_options.get('patches', {}).get('regional_conditioning_mask', None)
             threshold = (1+18)/56
             if mask_obj is not None and weight >= threshold:
-                mask = mask_obj[0](transformer_options, threshold)
+                #if self.threshold_inv:
+                #    threshold = 1 - threshold
+                mask = mask_obj[0](transformer_options, threshold) #, self.threshold_inv)
                 #threshold = (i+18)/56
                 #mask = (mask >= threshold).to(mask.dtype)
             
@@ -149,6 +154,9 @@ class ReFlux(Flux):
         for i in range(len(transformer_options['cond_or_uncond'])):
             UNCOND = transformer_options['cond_or_uncond'][i] == 1
             
+            #if UNCOND == False:
+            #    self.threshold_inv = False if self.threshold_inv == True else True
+            
             bs, c, h, w = x.shape
             transformer_options['original_shape'] = x.shape
             patch_size = 2
@@ -169,9 +177,13 @@ class ReFlux(Flux):
             elif UNCOND == False:
                 transformer_options['reg_cond_weight'] = transformer_options['regional_conditioning_weight']
                 regional_conditioning_positive = transformer_options.get('patches', {}).get('regional_conditioning_positive', None)
-                regional_conditioning_positive = copy.deepcopy(regional_conditioning_positive)   
-                region_cond = regional_conditioning_positive[0](transformer_options)
-                context_tmp = torch.cat([context[i][None,...].clone(), region_cond.clone().to(torch.bfloat16)], dim=1)
+                context_tmp = regional_conditioning_positive[0].concat_cond(context[i][None,...], transformer_options)
+                
+                #regional_conditioning_positive = copy.deepcopy(regional_conditioning_positive)   
+                
+                #region_cond = regional_conditioning_positive[0](transformer_options)
+                #context_tmp = torch.cat([context[i][None,...].clone(), region_cond.clone().to(torch.bfloat16)], dim=1)
+                #context_tmp = region_cond.clone().to(torch.bfloat16)
                 
             txt_ids      = torch.zeros((bs, context_tmp.shape[1], 3), device=x.device, dtype=x.dtype)      # txt_ids        1, 256,3
             img_ids_orig = self._get_img_ids(x, bs, h_len, w_len, 0, h_len, 0, w_len)                  # img_ids_orig = 1,9216,3
