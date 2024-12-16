@@ -96,16 +96,27 @@ class ReFlux(Flux):
         pe = self.pe_embedder(ids)
         
         weight = transformer_options['reg_cond_weight'] if 'reg_cond_weight' in transformer_options else 0.0
+        threshold_factor_double = transformer_options['reg_cond_diff_threshold_factor_double'] if 'reg_cond_diff_threshold_factor_double' in transformer_options else 1.0
+        threshold_factor_single = transformer_options['reg_cond_diff_threshold_factor_single'] if 'reg_cond_diff_threshold_factor_single' in transformer_options else 0.5
+        
+        threshold_factor_double_absolute = transformer_options['reg_cond_diff_threshold_factor_double_absolute'] if 'reg_cond_diff_threshold_factor_double_absolute' in transformer_options else -1
+        threshold_factor_single_absolute = transformer_options['reg_cond_diff_threshold_factor_single_absolute'] if 'reg_cond_diff_threshold_factor_single_absolute' in transformer_options else -1
 
         for i, block in enumerate(self.double_blocks):
             mask = None
             mask_obj = transformer_options.get('patches', {}).get('regional_conditioning_mask', None)
-            threshold = i / 56
+            threshold = i / 57
             if mask_obj is not None and weight >= threshold:
                 #if self.threshold_inv:
                 #    threshold = 1 - threshold
-                mask = mask_obj[0](transformer_options, threshold) #, self.threshold_inv)
+                #threshold = (56-i)/57
+                if threshold_factor_double_absolute < 0:
+                    mask_threshold = threshold * threshold_factor_double
+                else: 
+                    mask_threshold = threshold_factor_double_absolute
+                mask = mask_obj[0](transformer_options, mask_threshold) #, self.threshold_inv)
                 #mask = (mask >= threshold).to(mask.dtype)
+            #print("i = ", i, threshold, weight)
 
             img, txt = block(img=img, txt=txt, vec=vec, pe=pe, timestep=timesteps, transformer_options=transformer_options, mask=mask) #, mask=mask)
 
@@ -120,13 +131,19 @@ class ReFlux(Flux):
         for i, block in enumerate(self.single_blocks):
             mask = None
             mask_obj = transformer_options.get('patches', {}).get('regional_conditioning_mask', None)
-            threshold = (1+18)/56
+            threshold = (i+18)/57
             if mask_obj is not None and weight >= threshold:
                 #if self.threshold_inv:
                 #    threshold = 1 - threshold
-                mask = mask_obj[0](transformer_options, threshold) #, self.threshold_inv)
+                #threshold = (56-(i+18))/57
+                if threshold_factor_single_absolute < 0:
+                    mask_threshold = threshold * threshold_factor_single
+                else: 
+                    mask_threshold = threshold_factor_single_absolute
+                mask = mask_obj[0](transformer_options, mask_threshold) #, self.threshold_inv)
                 #threshold = (i+18)/56
                 #mask = (mask >= threshold).to(mask.dtype)
+            #print("i2 = ", i, threshold, weight)
             
             img = block(img, vec=vec, pe=pe, timestep=timesteps, transformer_options=transformer_options, mask=mask)
 

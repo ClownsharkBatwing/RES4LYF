@@ -145,6 +145,10 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
         model_options = extra_args.get("model_options", {}).copy()
         extra_args["model_options"] = comfy.model_patcher.set_model_options_post_cfg_function(model_options, post_cfg_function, disable_cfg1_optimization=True)  
 
+    extra_args['model_options']['transformer_options']['reg_cond_diff_threshold_factor_double'] = float(get_extra_options_kv("reg_cond_diff_threshold_factor_double", "0.5", extra_options))
+    extra_args['model_options']['transformer_options']['reg_cond_diff_threshold_factor_single'] = float(get_extra_options_kv("reg_cond_diff_threshold_factor_single", "0.5", extra_options))
+    extra_args['model_options']['transformer_options']['reg_cond_diff_threshold_factor_double_absolute'] = float(get_extra_options_kv("reg_cond_diff_threshold_factor_double_absolute", "-1", extra_options))
+    extra_args['model_options']['transformer_options']['reg_cond_diff_threshold_factor_single_absolute'] = float(get_extra_options_kv("reg_cond_diff_threshold_factor_single_absolute", "-1", extra_options))
     if extra_options_flag("cfg_cw", extra_options):
         cfg_cw = float(get_extra_options_kv("cfg_cw", "1.0", extra_options))
     extra_args = rk.init_cfg_channelwise(x, cfg_cw, **extra_args)
@@ -162,6 +166,7 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
         else:
             #model.inner_model.model_options['transformer_options']['patches']['regional_conditioning_weight'] = 0.0
             extra_args['model_options']['transformer_options']['regional_conditioning_weight'] = 0.0
+        
         eta = eta_var = etas[step] if etas is not None else eta
         s_noise = s_noises[step] if s_noises is not None else s_noise
         
