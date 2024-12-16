@@ -103,6 +103,7 @@ class SharkSampler:
                     model.set_model_patch(regional_mask,         'regional_conditioning_mask')
 
             if "extra_options" in sampler.extra_options:
+                extra_options += " "
                 extra_options += sampler.extra_options['extra_options']
                 sampler.extra_options['extra_options'] = extra_options
 

@@ -446,7 +446,7 @@ class RegionalMask(torch.nn.Module):
             if self.mask_type == "gradient":
                 return self.mask.clone().to(sigma.device).to(dtype)
             elif self.mask_type == "differential":
-                return self.mask.clone().to(sigma.device) >= threshold
+                return self.mask.clone().to(sigma.device) > threshold
                 if threshold_inv==False:
                     mask_tmp = self.mask.to(dtype).clone().to(sigma.device) >= threshold
                     return mask_tmp
