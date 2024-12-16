@@ -154,8 +154,8 @@ class ReFlux(Flux):
         for i in range(len(transformer_options['cond_or_uncond'])):
             UNCOND = transformer_options['cond_or_uncond'][i] == 1
             
-            if UNCOND == False:
-                self.threshold_inv = False if self.threshold_inv == True else True
+            #if UNCOND == False:
+            #    self.threshold_inv = False if self.threshold_inv == True else True
             
             bs, c, h, w = x.shape
             transformer_options['original_shape'] = x.shape
