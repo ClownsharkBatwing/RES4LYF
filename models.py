@@ -18,13 +18,18 @@ import math
 import comfy.model_management
     
 from .flux.model  import ReFlux
-from .flux.layers import SingleStreamBlock, DoubleStreamBlock
+from .flux.layers import SingleStreamBlock as ReSingleStreamBlock, DoubleStreamBlock as ReDoubleStreamBlock
+
+from comfy.ldm.flux.model import Flux
+from comfy.ldm.flux.layers import SingleStreamBlock, DoubleStreamBlock
+
 
 class ReFluxPatcher:
     @classmethod
     def INPUT_TYPES(s):
         return {"required": { 
             "model": ("MODEL",),
+            "enable": ("BOOLEAN", {"default": True}),
            }
         }
     RETURN_TYPES = ("MODEL",)
@@ -33,19 +38,30 @@ class ReFluxPatcher:
     CATEGORY = "model_patches"
     FUNCTION = "main"
 
-    def main(self, model):
-        m = model.clone()
+    def main(self, model, enable=True):
+        m = model #.clone()
         
-        m.model.diffusion_model.__class__ = ReFlux
-        m.model.diffusion_model.threshold_inv = False
-        
-        for i, block in enumerate(m.model.diffusion_model.double_blocks):
-            block.__class__ = DoubleStreamBlock
-            block.idx = i
+        if enable:
+            m.model.diffusion_model.__class__ = ReFlux
+            m.model.diffusion_model.threshold_inv = False
+            
+            for i, block in enumerate(m.model.diffusion_model.double_blocks):
+                block.__class__ = ReDoubleStreamBlock
+                block.idx = i
 
-        for i, block in enumerate(m.model.diffusion_model.single_blocks):
-            block.__class__ = SingleStreamBlock
-            block.idx = i
+            for i, block in enumerate(m.model.diffusion_model.single_blocks):
+                block.__class__ = ReSingleStreamBlock
+                block.idx = i
+        else:
+            m.model.diffusion_model.__class__ = Flux
+            
+            for i, block in enumerate(m.model.diffusion_model.double_blocks):
+                block.__class__ = DoubleStreamBlock
+                block.idx = i
+
+            for i, block in enumerate(m.model.diffusion_model.single_blocks):
+                block.__class__ = SingleStreamBlock
+                block.idx = i
         
         return (m,)
     
