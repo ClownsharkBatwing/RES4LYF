@@ -95,6 +95,7 @@ class SharkSampler:
             if positive[0][1] is not None: 
                 if "regional_conditioning_weights" in positive[0][1]:
                     sampler.extra_options['regional_conditioning_weights'] = positive[0][1]['regional_conditioning_weights']
+                    sampler.extra_options['regional_conditioning_floors']  = positive[0][1]['regional_conditioning_floors']
                     regional_generate_conditionings_and_masks_fn = positive[0][1]['regional_generate_conditionings_and_masks_fn']
                     regional_conditioning, regional_mask = regional_generate_conditionings_and_masks_fn(latent_image['samples'])
                     regional_conditioning = copy.deepcopy(regional_conditioning)

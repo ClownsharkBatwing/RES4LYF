@@ -73,7 +73,7 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
                   latent_guide=None, latent_guide_inv=None, latent_guide_weight=0.0, latent_guide_weight_inv=0.0, latent_guide_weights=None, latent_guide_weights_inv=None, guide_mode="blend", unsampler_type="linear",
                   GARBAGE_COLLECT=False, mask=None, mask_inv=None, LGW_MASK_RESCALE_MIN=True, sigmas_override=None, unsample_resample_scales=None,regional_conditioning_weights=None, sde_noise=[],
                   extra_options="",
-                  etas=None, s_noises=None, momentums=None, guides=None, cfg_cw = 1.0,
+                  etas=None, s_noises=None, momentums=None, guides=None, cfg_cw = 1.0,regional_conditioning_floors=None,
                   ):
     extra_args = {} if extra_args is None else extra_args
     s_in, s_one = x.new_ones([x.shape[0]]), x.new_ones([1])
@@ -155,6 +155,7 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
         unsample_resample_scale = float(unsample_resample_scales[step]) if unsample_resample_scales is not None else None
         if regional_conditioning_weights is not None:
             extra_args['model_options']['transformer_options']['regional_conditioning_weight'] = regional_conditioning_weights[step]
+            extra_args['model_options']['transformer_options']['regional_conditioning_floor'] = regional_conditioning_floors[step]
         else:
             extra_args['model_options']['transformer_options']['regional_conditioning_weight'] = 0.0
         
