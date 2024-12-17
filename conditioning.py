@@ -445,12 +445,16 @@ class RegionalMask(torch.nn.Module):
         self.img_len = img_len
         self.text_len = text_len
 
-    def __call__(self, transformer_options, dtype=torch.bfloat16, *args, **kwargs):
+    def __call__(self, transformer_options, weight=0, dtype=torch.bfloat16, *args, **kwargs):
         sigma = transformer_options['sigmas'][0]
         if self.start_percent <= 1 - sigma < self.end_percent:
             if self.mask_type == "gradient":
-                return self.mask.clone().to(sigma.device).to(torch.bool)
-                return self.mask.clone().to(sigma.device).to(dtype)
+                mask = self.mask.clone().to(sigma.device)
+                mask[self.text_len:,self.text_len:] = mask[self.text_len:,self.text_len:] > 1-weight
+                #mask[self.text_len:,self.text_len:] = torch.clamp(mask[self.text_len:,self.text_len:], min=1-weight)
+
+                return mask.to(torch.bool)
+
 
         return None
     
