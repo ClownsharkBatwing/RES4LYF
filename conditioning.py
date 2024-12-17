@@ -449,6 +449,7 @@ class RegionalMask(torch.nn.Module):
         sigma = transformer_options['sigmas'][0]
         if self.start_percent <= 1 - sigma < self.end_percent:
             if self.mask_type == "gradient":
+                return self.mask.clone().to(sigma.device).to(torch.bool)
                 return self.mask.clone().to(sigma.device).to(dtype)
 
         return None

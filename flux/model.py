@@ -100,7 +100,7 @@ class ReFlux(Flux):
         for i, block in enumerate(self.double_blocks):
             mask = None
             mask_obj = transformer_options.get('patches', {}).get('regional_conditioning_mask', None)
-            if mask_obj is not None and weight > 0:
+            if mask_obj is not None and weight >= 0:
                 mask = mask_obj[0](transformer_options)
                 text_len = mask_obj[0].text_len
                 mask[text_len:,text_len:] = torch.clamp(mask[text_len:,text_len:], min=1-weight.to(mask.device))
@@ -118,7 +118,7 @@ class ReFlux(Flux):
         for i, block in enumerate(self.single_blocks):
             mask = None
             mask_obj = transformer_options.get('patches', {}).get('regional_conditioning_mask', None)
-            if mask_obj is not None and weight > 0:
+            if mask_obj is not None and weight >= 0:
                 mask = mask_obj[0](transformer_options)
                 text_len = mask_obj[0].text_len
                 mask[text_len:,text_len:] = torch.clamp(mask[text_len:,text_len:], min=1-weight.to(mask.device))
