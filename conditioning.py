@@ -450,6 +450,7 @@ class RegionalMask(torch.nn.Module):
         if self.start_percent <= 1 - sigma < self.end_percent:
             if self.mask_type == "gradient":
                 #mask = self.gen_mask(weight)
+                return self.mask.clone().to(sigma.device) * weight
                 return self.mask.clone().to(sigma.device).to(torch.bool)
             
                 mask = self.mask.clone().to(sigma.device)
@@ -502,9 +503,9 @@ class RegionalMask(torch.nn.Module):
 
             curr_len = prev_len + cond_reg.shape[1]
             
-            all_attn_mask[prev_len:curr_len, prev_len:curr_len] = 1.0                             # self             TXT 2 TXT
-            all_attn_mask[prev_len:curr_len, text_len:        ] = txt2img_mask #img2txt_mask.transpose(-1, -2)   # cross            TXT 2 regional IMG
-            all_attn_mask[text_len:        , prev_len:curr_len] = img2txt_mask                     # cross   regional IMG 2 TXT
+            all_attn_mask[prev_len:curr_len, prev_len:curr_len] = 1.0           # self             TXT 2 TXT
+            all_attn_mask[prev_len:curr_len, text_len:        ] = txt2img_mask  # cross            TXT 2 regional IMG
+            all_attn_mask[text_len:        , prev_len:curr_len] = img2txt_mask  # cross   regional IMG 2 TXT
             
             self_attn_mask     = fp_or(self_attn_mask    , fp_and(  img2txt_mask_sq,   txt2img_mask_sq))
             self_attn_mask_bkg = fp_or(self_attn_mask_bkg, fp_and(1-img2txt_mask_sq, 1-txt2img_mask_sq))
@@ -644,6 +645,7 @@ class FluxRegionalConditioning:
     def INPUT_TYPES(s):
         return {"required": { 
             "mask_weight": ("FLOAT", {"default": 1.0, "min": -10000.0, "max": 10000.0, "step": 0.01}),
+            "self_attn_floor": ("FLOAT", {"default": 0.0, "min": -10000.0, "max": 10000.0, "step": 0.01}),
             "start_percent": ("FLOAT", {"default": 0,   "min": 0.0, "max": 1.0, "step": 0.01}),
             "end_percent":   ("FLOAT", {"default": 0.5, "min": 0.0, "max": 1.0, "step": 0.01}),
             "mask_type": (["gradient"], {"default": "gradient"}),
@@ -652,6 +654,8 @@ class FluxRegionalConditioning:
                 "conditioning": ("CONDITIONING",),
                 "conditioning_regional": ("CONDITIONING_REGIONAL",),
                 "mask_weights": ("SIGMAS", ),
+                "self_attn_floors": ("SIGMAS", ),
+
         }}
 
     RETURN_TYPES = ("CONDITIONING",)
@@ -660,12 +664,16 @@ class FluxRegionalConditioning:
 
     CATEGORY = "conditioning"
 
-    def main(self, conditioning_regional, mask_weight,start_percent, end_percent, start_step=0, end_step=30, conditioning=None, mask_weights=None, mask_type="differential", latent=None):
+    def main(self, conditioning_regional, mask_weight,start_percent, end_percent, start_step=0, end_step=30, conditioning=None, mask_weights=None, self_attn_floors=None, self_attn_floor=0, mask_type="differential", latent=None):
         weight, weights = mask_weight, mask_weights
+        floor, floors = self_attn_floor, self_attn_floors
         default_dtype = torch.float64
         max_steps = 10000
         weights = initialize_or_scale(weights, weight, max_steps).to(default_dtype)
         weights = F.pad(weights, (0, max_steps), value=0.0)
+        
+        floors = initialize_or_scale(floors, floor, max_steps).to(default_dtype)
+        floors = F.pad(floors, (0, max_steps), value=0.0)
 
         regional_generate_conditionings_and_masks_fn = RegionalGenerateConditioningsAndMasks(conditioning, conditioning_regional, weight, start_percent, end_percent, mask_type)
 
@@ -681,4 +689,5 @@ class FluxRegionalConditioning:
 
         conditioning[0][1]['regional_generate_conditionings_and_masks_fn'] = regional_generate_conditionings_and_masks_fn
         conditioning[0][1]['regional_conditioning_weights'] = weights
+        conditioning[0][1]['regional_conditioning_floors'] = floors
         return (copy.deepcopy(conditioning),)
