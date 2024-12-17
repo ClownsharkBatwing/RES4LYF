@@ -101,9 +101,10 @@ class ReFlux(Flux):
             mask = None
             mask_obj = transformer_options.get('patches', {}).get('regional_conditioning_mask', None)
             if mask_obj is not None and weight >= 0:
-                mask = mask_obj[0](transformer_options)
+                mask = mask_obj[0](transformer_options, weight.item())
+                """mask = mask_obj[0](transformer_options)
                 text_len = mask_obj[0].text_len
-                mask[text_len:,text_len:] = torch.clamp(mask[text_len:,text_len:], min=1-weight.to(mask.device))
+                mask[text_len:,text_len:] = torch.clamp(mask[text_len:,text_len:], min=1-weight.to(mask.device))"""
                 
             img, txt = block(img=img, txt=txt, vec=vec, pe=pe, timestep=timesteps, transformer_options=transformer_options, mask=mask) #, mask=mask)
 
@@ -119,9 +120,10 @@ class ReFlux(Flux):
             mask = None
             mask_obj = transformer_options.get('patches', {}).get('regional_conditioning_mask', None)
             if mask_obj is not None and weight >= 0:
-                mask = mask_obj[0](transformer_options)
+                mask = mask_obj[0](transformer_options, weight.item())
+                """mask = mask_obj[0](transformer_options)
                 text_len = mask_obj[0].text_len
-                mask[text_len:,text_len:] = torch.clamp(mask[text_len:,text_len:], min=1-weight.to(mask.device))
+                mask[text_len:,text_len:] = torch.clamp(mask[text_len:,text_len:], min=1-weight.to(mask.device))"""
                 
             img = block(img, vec=vec, pe=pe, timestep=timesteps, transformer_options=transformer_options, mask=mask)
 
