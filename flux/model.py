@@ -96,16 +96,27 @@ class ReFlux(Flux):
         pe = self.pe_embedder(ids)
         
         weight = transformer_options['reg_cond_weight'] if 'reg_cond_weight' in transformer_options else 0.0
+        mask_orig, mask_self = None, None
+        mask_obj = transformer_options.get('patches', {}).get('regional_conditioning_mask', None)
+        if mask_obj is not None and weight >= 0:
+            mask_orig = mask_obj[0](transformer_options, weight.item())
+            mask_self = mask_orig.clone()
+            mask_self[mask_obj[0].text_len:,   mask_obj[0].text_len:] = True
+
 
         for i, block in enumerate(self.double_blocks):
-            mask = None
+            """mask = None
             mask_obj = transformer_options.get('patches', {}).get('regional_conditioning_mask', None)
             if mask_obj is not None and weight >= 0:
                 mask = mask_obj[0](transformer_options, weight.item())
-                """mask = mask_obj[0](transformer_options)
+                mask = mask_obj[0](transformer_options)
                 text_len = mask_obj[0].text_len
                 mask[text_len:,text_len:] = torch.clamp(mask[text_len:,text_len:], min=1-weight.to(mask.device))"""
                 
+            if weight > i/57:
+                mask = mask_orig
+            else:
+                mask = mask_self
             img, txt = block(img=img, txt=txt, vec=vec, pe=pe, timestep=timesteps, transformer_options=transformer_options, mask=mask) #, mask=mask)
 
             if control is not None: # Controlnet
@@ -117,14 +128,17 @@ class ReFlux(Flux):
 
         img = torch.cat((txt, img), 1)   #first 256 is txt embed
         for i, block in enumerate(self.single_blocks):
-            mask = None
+            """mask = None
             mask_obj = transformer_options.get('patches', {}).get('regional_conditioning_mask', None)
             if mask_obj is not None and weight >= 0:
                 mask = mask_obj[0](transformer_options, weight.item())
-                """mask = mask_obj[0](transformer_options)
+                mask = mask_obj[0](transformer_options)
                 text_len = mask_obj[0].text_len
                 mask[text_len:,text_len:] = torch.clamp(mask[text_len:,text_len:], min=1-weight.to(mask.device))"""
-                
+            if weight > (i+18)/57:
+                mask = mask_orig
+            else:
+                mask = mask_self
             img = block(img, vec=vec, pe=pe, timestep=timesteps, transformer_options=transformer_options, mask=mask)
 
             if control is not None: # Controlnet
