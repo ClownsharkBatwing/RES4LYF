@@ -11,7 +11,7 @@ import comfy.supported_models
 
 # Documentation: Self-documenting code
 # Instructions for use: Obvious
-# Expected results: No errors
+# Expected results: Fork desync
 # adapted from https://github.com/comfyanonymous/ComfyUI/blob/master/nodes.py
 
 class BaseModelLoader:
