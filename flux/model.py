@@ -103,10 +103,7 @@ class ReFlux(Flux):
             mask_orig = mask_obj[0](transformer_options, weight.item())
             mask_self = mask_orig.clone()
             mask_self[mask_obj[0].text_len:,   mask_obj[0].text_len:] = mask_self.max()
-            
-            #mask_self[mask_self != 0] = -float('inf')
-            #mask_self[mask_self != 0] = 1000.
-            #mask_orig[mask_orig != 0] = 1000.
+
         mask = None
         mask_obj = transformer_options.get('patches', {}).get('regional_conditioning_mask', None)
         if mask_obj is not None and weight >= 0:
@@ -115,19 +112,7 @@ class ReFlux(Flux):
             mask[text_len:,text_len:] = torch.clamp(mask[text_len:,text_len:], min=floor.to(mask.device))
 
         for i, block in enumerate(self.double_blocks):
-            """if weight > i/57:
-                mask = mask_orig
-            else:
-                mask = mask_self"""
-            
-            """mask = None
-            mask_obj = transformer_options.get('patches', {}).get('regional_conditioning_mask', None)
-            if mask_obj is not None and weight >= 0:
-                mask = mask_obj[0](transformer_options, weight.item())
-                mask = mask_obj[0](transformer_options)
-                text_len = mask_obj[0].text_len
-                mask[text_len:,text_len:] = torch.clamp(mask[text_len:,text_len:], min=1-weight.to(mask.device))"""
-                
+
             img, txt = block(img=img, txt=txt, vec=vec, pe=pe, timestep=timesteps, transformer_options=transformer_options, mask=mask) #, mask=mask)
 
             if control is not None: # Controlnet
@@ -139,17 +124,6 @@ class ReFlux(Flux):
 
         img = torch.cat((txt, img), 1)   #first 256 is txt embed
         for i, block in enumerate(self.single_blocks):
-            """if weight > (i+18)/57:
-                mask = mask_orig
-            else:
-                mask = mask_self"""
-            """mask = None
-            mask_obj = transformer_options.get('patches', {}).get('regional_conditioning_mask', None)
-            if mask_obj is not None and weight >= 0:
-                mask = mask_obj[0](transformer_options, weight.item())
-                mask = mask_obj[0](transformer_options)
-                text_len = mask_obj[0].text_len
-                mask[text_len:,text_len:] = torch.clamp(mask[text_len:,text_len:], min=1-weight.to(mask.device))"""
 
             img = block(img, vec=vec, pe=pe, timestep=timesteps, transformer_options=transformer_options, mask=mask)
 
@@ -176,10 +150,7 @@ class ReFlux(Flux):
         out_list = []
         for i in range(len(transformer_options['cond_or_uncond'])):
             UNCOND = transformer_options['cond_or_uncond'][i] == 1
-            
-            #if UNCOND == False:
-            #    self.threshold_inv = False if self.threshold_inv == True else True
-            
+
             bs, c, h, w = x.shape
             transformer_options['original_shape'] = x.shape
             patch_size = 2
@@ -202,12 +173,6 @@ class ReFlux(Flux):
                 transformer_options['reg_cond_floor'] = transformer_options['regional_conditioning_floor']
                 regional_conditioning_positive = transformer_options.get('patches', {}).get('regional_conditioning_positive', None)
                 context_tmp = regional_conditioning_positive[0].concat_cond(context[i][None,...], transformer_options)
-                
-                #regional_conditioning_positive = copy.deepcopy(regional_conditioning_positive)   
-                
-                #region_cond = regional_conditioning_positive[0](transformer_options)
-                #context_tmp = torch.cat([context[i][None,...].clone(), region_cond.clone().to(torch.bfloat16)], dim=1)
-                #context_tmp = region_cond.clone().to(torch.bfloat16)
                 
             txt_ids      = torch.zeros((bs, context_tmp.shape[1], 3), device=x.device, dtype=x.dtype)      # txt_ids        1, 256,3
             img_ids_orig = self._get_img_ids(x, bs, h_len, w_len, 0, h_len, 0, w_len)                  # img_ids_orig = 1,9216,3
