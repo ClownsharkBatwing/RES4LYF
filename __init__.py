@@ -217,9 +217,13 @@ NODE_CLASS_MAPPINGS = {
 if flags["test_samplers"]:
     NODE_CLASS_MAPPINGS.update({
         "SamplerRK_Test": test_samplers.SamplerRK_Test,
+        "Zampler_Test": test_samplers.Zampler_Test,
     })
     extra_samplers.update({
         "rk_test":  test_samplers.sample_rk_test,
+        "zample": test_samplers.sample_zsample,
+        "zample_paper": test_samplers.sample_zample_paper,
+        "zample_inversion": test_samplers.sample_zample_inversion,
     })
 
 WEB_DIRECTORY = "./web/js"

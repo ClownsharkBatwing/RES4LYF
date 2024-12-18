@@ -489,10 +489,11 @@ class RegionalMask(torch.nn.Module):
             cond_reg         = cond_reg_dict['cond']
             region_mask_ = 1 - cond_reg_dict['mask'][0]
             
-            if prev_len == 0:
+            region_mask_sq = cond_reg_dict['mask'][0].to(torch.bfloat16)
+            """if prev_len == 0:
                 region_mask_sq = ((1 - cond_reg_dict['mask'][0]) > weight).to(torch.bfloat16)
             else:
-                region_mask_sq =  1 - (cond_reg_dict['mask'][0] >= weight).to(torch.bfloat16)
+                region_mask_sq =  1 - (cond_reg_dict['mask'][0] >= weight).to(torch.bfloat16)"""
             
             img2txt_mask = torch.nn.functional.interpolate(region_mask_sq[None, None, :, :], (h, w), mode='nearest-exact').flatten().unsqueeze(1).repeat(1, cond_reg.size(1))
             txt2img_mask = img2txt_mask.transpose(-1, -2)
@@ -503,12 +504,15 @@ class RegionalMask(torch.nn.Module):
 
             curr_len = prev_len + cond_reg.shape[1]
             
-            all_attn_mask[prev_len:curr_len, prev_len:curr_len] = 1.0           # self             TXT 2 TXT
+            all_attn_mask[prev_len:curr_len, prev_len:curr_len] = 0.0           # self             TXT 2 TXT
             all_attn_mask[prev_len:curr_len, text_len:        ] = txt2img_mask  # cross            TXT 2 regional IMG
             all_attn_mask[text_len:        , prev_len:curr_len] = img2txt_mask  # cross   regional IMG 2 TXT
             
+            #all_attn_mask[text_len:, text_len:] = fp_or(all_attn_mask[text_len:, text_len:]    , fp_and(  img2txt_mask_sq,   txt2img_mask_sq))
+            
             self_attn_mask     = fp_or(self_attn_mask    , fp_and(  img2txt_mask_sq,   txt2img_mask_sq))
-            self_attn_mask_bkg = fp_or(self_attn_mask_bkg, fp_and(1-img2txt_mask_sq, 1-txt2img_mask_sq))
+            self_attn_mask_bkg = fp_or(self_attn_mask_bkg, fp_and(img2txt_mask_sq.max()-img2txt_mask_sq, txt2img_mask_sq.max()-txt2img_mask_sq))
+            #self_attn_mask_bkg = fp_or(self_attn_mask_bkg, fp_and(1-img2txt_mask_sq, 1-txt2img_mask_sq))
             
             prev_len = curr_len
 
