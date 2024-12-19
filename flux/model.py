@@ -96,7 +96,7 @@ class ReFlux(Flux):
         pe = self.pe_embedder(ids)
         
         weight = transformer_options['reg_cond_weight'] if 'reg_cond_weight' in transformer_options else 0.0
-        floor  = transformer_options['reg_cond_floor'] if 'reg_cond_floor' in transformer_options else 0.0
+        floor  = transformer_options['reg_cond_floor']  if 'reg_cond_floor'  in transformer_options else 0.0
         mask_orig, mask_self = None, None
         mask_obj = transformer_options.get('patches', {}).get('regional_conditioning_mask', None)
         if mask_obj is not None and weight >= 0:
@@ -113,7 +113,7 @@ class ReFlux(Flux):
 
         for i, block in enumerate(self.double_blocks):
 
-            img, txt = block(img=img, txt=txt, vec=vec, pe=pe, timestep=timesteps, transformer_options=transformer_options, mask=mask) #, mask=mask)
+            img, txt = block(img=img, txt=txt, vec=vec, pe=pe, timestep=timesteps, transformer_options=transformer_options, mask=mask, weight=weight) #, mask=mask)
 
             if control is not None: # Controlnet
                 control_i = control.get("input")
@@ -125,7 +125,7 @@ class ReFlux(Flux):
         img = torch.cat((txt, img), 1)   #first 256 is txt embed
         for i, block in enumerate(self.single_blocks):
 
-            img = block(img, vec=vec, pe=pe, timestep=timesteps, transformer_options=transformer_options, mask=mask)
+            img = block(img, vec=vec, pe=pe, timestep=timesteps, transformer_options=transformer_options, mask=mask, weight=weight)
 
             if control is not None: # Controlnet
                 control_o = control.get("output")
@@ -157,8 +157,8 @@ class ReFlux(Flux):
             x = comfy.ldm.common_dit.pad_to_patch_size(x, (patch_size, patch_size))    # 1,16,192,192
             transformer_options['patch_size'] = patch_size
             
-            if 'regional_conditioning_weight' not in transformer_options:
-                transformer_options['regional_conditioning_weight'] = timestep[0] / 1.5
+            #if 'regional_conditioning_weight' not in transformer_options:    # this breaks the graph
+            #    transformer_options['regional_conditioning_weight'] = timestep[0] / 1.5
                 
             h_len = ((h + (patch_size // 2)) // patch_size) # h_len 96
             w_len = ((w + (patch_size // 2)) // patch_size) # w_len 96

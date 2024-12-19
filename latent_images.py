@@ -51,7 +51,7 @@ class latent_channelwise_match:
 
     RETURN_TYPES = ("LATENT",)
     RETURN_NAMES = ("latent_matched",)
-    CATEGORY = "sampling/custom_sampling/"
+    CATEGORY = "RES4LYF/latents"
 
     FUNCTION = "main"
 

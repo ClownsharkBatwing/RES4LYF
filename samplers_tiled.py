@@ -530,7 +530,7 @@ class UltraSharkSampler_Tiled: #this is for use with https://github.com/Clownsha
     RETURN_TYPES = ("LATENT",)
     FUNCTION = "sample"
 
-    CATEGORY = "sampling"
+    CATEGORY = "RES4LYF/samplers/ultracascade"
     DESCRIPTION = "For use with UltraCascade."
 
     def sample(self, model, noise_seed, add_noise, noise_is_latent, noise_type, alpha, k, tile_width, tile_height, tiling_strategy, cfg, positive, negative, latent_image, latent_noise=None, sampler=None, sigmas=None, guide=None,

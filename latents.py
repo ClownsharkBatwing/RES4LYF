@@ -103,7 +103,7 @@ class AdvancedNoise:
 
     RETURN_TYPES = ("NOISE",)
     FUNCTION = "get_noise"
-    CATEGORY = "sampling/custom_sampling/noise"
+    CATEGORY = "RES4LYF/noise"
 
     def get_noise(self, noise_seed, noise_type, alpha, k):
         return (Noise_RandomNoise(noise_seed, noise_type, alpha, k),)
@@ -148,7 +148,7 @@ class LatentNoised:
 
     FUNCTION = "main"
 
-    CATEGORY = "sampling/custom_sampling"
+    CATEGORY = "RES4LYF/noise"
     
     def main(self, add_noise, noise_is_latent, noise_type, noise_seed, alpha, k, latent_image, noise_strength, normalize, latent_noise=None, mask=None):
             latent_out = latent_image.copy()
@@ -210,7 +210,7 @@ class set_precision:
 
     RETURN_TYPES = ("LATENT",)
     RETURN_NAMES = ("passthrough",)
-    CATEGORY = "sampling/custom_sampling/"
+    CATEGORY = "RES4LYF/precision"
 
     FUNCTION = "main"
 
@@ -251,7 +251,7 @@ class set_precision_universal:
 
     RETURN_TYPES = ("CONDITIONING", "CONDITIONING", "SIGMAS", "LATENT",)
     RETURN_NAMES = ("cond_pos","cond_neg","sigmas","latent_image",)
-    CATEGORY = "sampling/custom_sampling/"
+    CATEGORY = "RES4LYF/precision"
 
     FUNCTION = "main"
 
@@ -305,7 +305,7 @@ class set_precision_advanced:
 
     RETURN_TYPES = ("LATENT","LATENT","LATENT","LATENT","LATENT",)
     RETURN_NAMES = ("PASSTHROUGH","LATENT_CAST_TO_GLOBAL","LATENT_16","LATENT_32","LATENT_64",)
-    CATEGORY = "sampling/custom_sampling/"
+    CATEGORY = "RES4LYF/precision"
 
     FUNCTION = "main"
 
@@ -352,7 +352,7 @@ class latent_to_cuda:
 
     RETURN_TYPES = ("LATENT",)
     RETURN_NAMES = ("passthrough",)
-    CATEGORY = "sampling/custom_sampling/"
+    CATEGORY = "RES4LYF/latents"
 
     FUNCTION = "main"
 
@@ -378,7 +378,7 @@ class latent_batch:
 
     RETURN_TYPES = ("LATENT",)
     RETURN_NAMES = ("latent_batch",)
-    CATEGORY = "sampling/custom_sampling/"
+    CATEGORY = "RES4LYF/latents"
 
     FUNCTION = "main"
 
@@ -439,8 +439,8 @@ class LatentPhaseMagnitude:
 
     RETURN_TYPES = ("LATENT",)
     FUNCTION = "main"
-    CATEGORY = "sampling/custom_sampling/samplers"
-
+    CATEGORY = "RES4LYF/latents"
+    
     @staticmethod
     def latent_repeat(latent, batch_size):
         b, c, h, w = latent.shape
@@ -592,7 +592,7 @@ class LatentPhaseMagnitudeMultiply:
 
     RETURN_TYPES = ("LATENT",)
     FUNCTION = "main"
-    CATEGORY = "sampling/custom_sampling/samplers"
+    CATEGORY = "RES4LYF/latents"
 
     @staticmethod
     def latent_repeat(latent, batch_size):
@@ -708,8 +708,8 @@ class LatentPhaseMagnitudeOffset:
 
     RETURN_TYPES = ("LATENT",)
     FUNCTION = "main"
-    CATEGORY = "sampling/custom_sampling/samplers"
-
+    CATEGORY = "RES4LYF/latents"
+    
     @staticmethod
     def latent_repeat(latent, batch_size):
         b, c, h, w = latent.shape
@@ -824,8 +824,8 @@ class LatentPhaseMagnitudePower:
 
     RETURN_TYPES = ("LATENT",)
     FUNCTION = "main"
-    CATEGORY = "sampling/custom_sampling/samplers"
-
+    CATEGORY = "RES4LYF/latents"
+    
     @staticmethod
     def latent_repeat(latent, batch_size):
         b, c, h, w = latent.shape
@@ -921,8 +921,8 @@ class StableCascade_StageC_VAEEncode_Exact:
     RETURN_NAMES = ("stage_c",)
     FUNCTION = "generate"
 
-    CATEGORY = "latent/stable_cascade"
-
+    CATEGORY = "RES4LYF/vae"
+    
     def generate(self, image, vae, width, height):
         out_width = (width) * vae.downscale_ratio #downscale_ratio = 32
         out_height = (height) * vae.downscale_ratio
@@ -952,7 +952,7 @@ class StableCascade_StageC_VAEEncode_Exact_Tiled:
     RETURN_NAMES = ("stage_c",)
     FUNCTION = "generate"
 
-    CATEGORY = "latent/stable_cascade"
+    CATEGORY = "RES4LYF/vae"
 
     def generate(self, image, vae, tile_size, overlap):
         img_width = image.shape[-2]
@@ -1037,7 +1037,7 @@ class EmptyLatentImageCustom:
     RETURN_TYPES = ("LATENT",)
     FUNCTION = "generate"
 
-    CATEGORY = "latent"
+    CATEGORY = "RES4LYF/latents"
 
     def generate(self, width, height, batch_size, channels, mode, compression, precision):
         c = int(channels)
@@ -1077,7 +1077,7 @@ class EmptyLatentImage64:
     RETURN_TYPES = ("LATENT",)
     FUNCTION = "generate"
 
-    CATEGORY = "latent"
+    CATEGORY = "RES4LYF/latents"
 
     def generate(self, width, height, batch_size=1):
         latent = torch.zeros([batch_size, 4, height // 8, width // 8], dtype=torch.float64, device=self.device)
@@ -1120,7 +1120,7 @@ class LatentNoiseBatch_perlin:
         }
     RETURN_TYPES = ("LATENT",)
     FUNCTION = "create_noisy_latents_perlin"
-    CATEGORY = "latent/noise"
+    CATEGORY = "RES4LYF/noise"
 
     # found at https://gist.github.com/vadimkantorov/ac1b097753f217c5c11bc2ff396e0a57
     # which was ported from https://github.com/pvigier/perlin-numpy/blob/master/perlin2d.py
@@ -1204,7 +1204,7 @@ class LatentNoiseBatch_gaussian_channels:
     RETURN_TYPES = ("LATENT",)
     FUNCTION = "main"
 
-    CATEGORY = "sampling/custom_sampling/samplers"
+    CATEGORY = "RES4LYF/noise"
 
     """    @staticmethod
     def gaussian_noise_channels_like(x, mean=0.0, mean_luminosity = -0.1, mean_cyan_red = 0.0, mean_lime_purple=0.0, mean_pattern_structure=0.0, std_dev=1.0, seed=42):
@@ -1283,7 +1283,7 @@ class LatentNoiseBatch_gaussian:
     RETURN_TYPES = ("LATENT",)
     FUNCTION = "main"
 
-    CATEGORY = "sampling/custom_sampling/samplers"
+    CATEGORY = "RES4LYF/noise"
 
     def main(self, latent, mean, std, steps, seed, means=None, stds=None, steps_=None):
         if steps_ is not None:
@@ -1324,7 +1324,7 @@ class LatentNoiseBatch_fractal:
     RETURN_TYPES = ("LATENT",)
     FUNCTION = "main"
 
-    CATEGORY = "sampling/custom_sampling/samplers"
+    CATEGORY = "RES4LYF/noise"
 
     def main(self, latent, alpha, k_flip, steps, seed=42, alphas=None, ks=None, sigmas_=None, steps_=None):
         if steps_ is not None:
@@ -1365,8 +1365,8 @@ class LatentNoiseList:
     RETURN_TYPES = ("LATENT",)
     OUTPUT_IS_LIST = (True,)
     FUNCTION = "main"
-
-    CATEGORY = "sampling/custom_sampling/samplers"
+    
+    CATEGORY = "RES4LYF/noise"
 
     def main(self, seed, latent, alpha, k_flip, steps, alphas=None, ks=None):
         alphas = initialize_or_scale(alphas, alpha, steps)
@@ -1412,7 +1412,7 @@ class LatentBatch_channels:
     RETURN_TYPES = ("LATENT",)
     FUNCTION = "main"
 
-    CATEGORY = "sampling/custom_sampling/samplers"
+    CATEGORY = "RES4LYF/latents"
     
     @staticmethod
     def latent_channels_multiply(x, luminosity = -0.1, cyan_red = 0.0, lime_purple=0.0, pattern_structure=0.0):
@@ -1518,7 +1518,7 @@ class LatentBatch_channels_16:
     RETURN_TYPES = ("LATENT",)
     FUNCTION = "main"
 
-    CATEGORY = "sampling/custom_sampling/samplers"
+    CATEGORY = "RES4LYF/latents"
     
     @staticmethod
     def latent_channels_multiply(x, chan_1 = 0.0, chan_2 = 0.0, chan_3 = 0.0, chan_4 = 0.0, chan_5 = 0.0, chan_6 = 0.0, chan_7 = 0.0, chan_8 = 0.0, chan_9 = 0.0, chan_10 = 0.0, chan_11 = 0.0, chan_12 = 0.0, chan_13 = 0.0, chan_14 = 0.0, chan_15 = 0.0, chan_16 = 0.0):
@@ -1637,7 +1637,7 @@ class latent_normalize_channels:
 
     RETURN_TYPES = ("LATENT",)
     RETURN_NAMES = ("passthrough",)
-    CATEGORY = "sampling/custom_sampling/"
+    CATEGORY = "RES4LYF/latents"
 
     FUNCTION = "main"
 

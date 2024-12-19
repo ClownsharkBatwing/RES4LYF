@@ -151,7 +151,7 @@ class Film_Grain: # Rewrite of the WAS Film Grain node, much improved speed and 
     RETURN_TYPES = ("IMAGE",)
     FUNCTION = "main"
 
-    CATEGORY = "image/filter"
+    CATEGORY = "RES4LYF/images"
 
     def main(self, image, density, intensity, highlights, supersample_factor, repeats=1):
         image = image.repeat(repeats, 1, 1, 1)
@@ -218,7 +218,7 @@ class Frequency_Separation_Hard_Light:
     RETURN_NAMES = ("high_pass", "original", "low_pass",)
     FUNCTION = "main"
 
-    CATEGORY = "image/channels"
+    CATEGORY = "RES4LYF/images"
 
     def main(self, high_pass=None, original=None, low_pass=None):
 
@@ -250,7 +250,7 @@ class Frequency_Separation_Hard_Light_LAB:
     RETURN_NAMES = ("high_pass", "original", "low_pass",)
     FUNCTION = "main"
 
-    CATEGORY = "image/channels"
+    CATEGORY = "RES4LYF/images"
 
     def main(self, high_pass=None, original=None, low_pass=None):
 
@@ -301,7 +301,7 @@ class Image_Channels_LAB:
     RETURN_NAMES = ("RGB","L","A","B",)
     FUNCTION = "main"
 
-    CATEGORY = "image/channels"
+    CATEGORY = "RES4LYF/images"
 
     def main(self, RGB=None, L=None, A=None, B=None):
 
@@ -335,7 +335,7 @@ class Frequency_Separation_Vivid_Light:
     RETURN_NAMES = ("high_pass", "original", "low_pass",)
     FUNCTION = "main"
 
-    CATEGORY = "image/channels"
+    CATEGORY = "RES4LYF/images"
 
     def main(self, high_pass=None, original=None, low_pass=None):
 
@@ -367,7 +367,7 @@ class Frequency_Separation_Linear_Light:
     RETURN_NAMES = ("high_pass", "original", "low_pass",)
     FUNCTION = "main"
 
-    CATEGORY = "image/channels"
+    CATEGORY = "RES4LYF/images"
 
     def main(self, high_pass=None, original=None, low_pass=None):
 
@@ -400,7 +400,7 @@ class Frequency_Separation_FFT:
     RETURN_NAMES = ("high_pass", "original", "low_pass",)
     FUNCTION = "main"
 
-    CATEGORY = "image/channels"
+    CATEGORY = "RES4LYF/images"
 
     def main(self, high_pass=None, original=None, low_pass=None, cutoff=5.0, sigma=5.0):
 
@@ -432,7 +432,7 @@ class ImageMedianBlur:
 
     RETURN_TYPES = ("IMAGE",)
     FUNCTION = "main"
-    CATEGORY = "image/filter"
+    CATEGORY = "RES4LYF/images"
 
     def main(self, images, size):
         size -= 1
@@ -482,7 +482,7 @@ class FastSmudgeBlur:
 
     RETURN_TYPES = ("IMAGE",)
     FUNCTION = "main"
-    CATEGORY = "image/filter"
+    CATEGORY = "RES4LYF/images"
 
     def main(self, images, kernel_size):
         img = images.clone().detach().to('cuda').float()
@@ -521,7 +521,7 @@ class Image_Pair_Split:
 
     FUNCTION = "main"
 
-    CATEGORY = "image/batch"
+    CATEGORY = "RES4LYF/images"
 
     def main(self, img_pair):
         img_0, img_1 = img_pair.chunk(2, dim=0)
@@ -551,7 +551,7 @@ class Image_Crop_Location_Exact:
     RETURN_TYPES = ("IMAGE", "CROP_DATA")
     FUNCTION = "main"
 
-    CATEGORY = "image/transform"
+    CATEGORY = "RES4LYF/images"
 
     def main(self, image, x=0, y=0, width=256, height=256, edge="original"):
         if image.dim() != 4:

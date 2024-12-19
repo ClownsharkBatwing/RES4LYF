@@ -173,13 +173,12 @@ class FluxLoader(BaseModelLoader):
     RETURN_TYPES = ("MODEL", "CLIP", "VAE", "CLIP_VISION", "STYLE_MODEL")
     RETURN_NAMES = ("model", "clip", "vae", "clip_vision", "style_model")
     FUNCTION = "main"
-    CATEGORY = "advanced/loaders"
+    CATEGORY = "RES4LYF/loaders"
 
     def main(self, model_name, weight_dtype, clip_name1, clip_name2_opt, vae_name, 
              clip_vision_name, style_model_name):
         model_options = self.process_weight_dtype(weight_dtype)
 
-        # Early clip validation
         if clip_name1 == ".use_ckpt_clip" and clip_name2_opt != ".none":
             raise ValueError("Cannot specify both \".use_ckpt_clip\" and another clip")
         
@@ -187,7 +186,6 @@ class FluxLoader(BaseModelLoader):
         output_clip = clip_name1 == ".use_ckpt_clip"
         ckpt_out = self.load_checkpoint(model_name, output_vae, output_clip, model_options)
 
-        # Handle CLIP
         if clip_name1 == ".use_ckpt_clip":
             if ckpt_out[1] is None:
                 raise ValueError("Model does not have a clip")
@@ -200,15 +198,12 @@ class FluxLoader(BaseModelLoader):
                                     embedding_directory=folder_paths.get_folder_paths("embeddings"),
                                     clip_type=comfy.sd.CLIPType.FLUX)
 
-        # Handle CLIP Vision
         clip_vision = None if clip_vision_name == ".none" else \
             comfy.clip_vision.load(folder_paths.get_full_path_or_raise("clip_vision", clip_vision_name))
 
-        # Handle Style Model
         style_model = None if style_model_name == ".none" else \
             comfy.sd.load_style_model(folder_paths.get_full_path_or_raise("style_models", style_model_name))
 
-        # Handle VAE
         vae = self.load_vae(vae_name, ckpt_out)
         
         return (ckpt_out[0], clip, vae, clip_vision, style_model)
@@ -228,8 +223,8 @@ class SD35Loader(BaseModelLoader):
     RETURN_TYPES = ("MODEL", "CLIP", "VAE")
     RETURN_NAMES = ("model", "clip", "vae")
     FUNCTION = "main"
-    CATEGORY = "advanced/loaders"
-
+    CATEGORY = "RES4LYF/loaders"
+    
     def main(self, model_name, weight_dtype, clip_name1, clip_name2_opt, clip_name3_opt, vae_name):
         model_options = self.process_weight_dtype(weight_dtype)
         
@@ -240,7 +235,6 @@ class SD35Loader(BaseModelLoader):
         output_clip = clip_name1 == ".use_ckpt_clip"
         ckpt_out = self.load_checkpoint(model_name, output_vae, output_clip, model_options)
 
-        # Handle CLIP
         if clip_name1 == ".use_ckpt_clip":
             if ckpt_out[1] is None:
                 raise ValueError("Model does not have a clip")
@@ -254,7 +248,6 @@ class SD35Loader(BaseModelLoader):
                                     embedding_directory=folder_paths.get_folder_paths("embeddings"),
                                     clip_type=comfy.sd.CLIPType.SD3)
 
-        # Handle VAE
         vae = self.load_vae(vae_name, ckpt_out)
 
         return (ckpt_out[0], clip, vae)

@@ -224,6 +224,7 @@ if flags["test_samplers"]:
         "zample": test_samplers.sample_zsample,
         "zample_paper": test_samplers.sample_zample_paper,
         "zample_inversion": test_samplers.sample_zample_inversion,
+        "sample_zample_edit": test_samplers.sample_zample_edit,
     })
 
 WEB_DIRECTORY = "./web/js"

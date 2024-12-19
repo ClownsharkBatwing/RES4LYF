@@ -80,7 +80,7 @@ class SharkSampler:
 
     FUNCTION = "main"
 
-    CATEGORY = "sampling/custom_sampling"
+    CATEGORY = "RES4LYF/samplers"
     
     def main(self, model, cfg, sampler_mode, scheduler, steps, denoise=1.0, denoise_alt=1.0,
              noise_type_init="gaussian", latent_image=None, 
@@ -359,7 +359,7 @@ class ClownSampler:
 
     FUNCTION = "main"
 
-    CATEGORY = "sampling/custom_sampling"
+    CATEGORY = "RES4LYF/samplers"
     
     def main(self, 
              noise_type_sde="brownian", noise_mode_sde="hard",
@@ -512,7 +512,7 @@ class ClownsharKSampler:
 
     FUNCTION = "main"
 
-    CATEGORY = "sampling/custom_sampling"
+    CATEGORY = "RES4LYF/samplers"
     
     def main(self, model, cfg, sampler_mode, scheduler, steps, denoise=1.0, denoise_alt=1.0,
              noise_type_init="gaussian", noise_type_sde="brownian", noise_mode_sde="hard", latent_image=None, 
@@ -582,7 +582,7 @@ class UltraSharkSampler:
 
     FUNCTION = "main"
 
-    CATEGORY = "sampling/custom_sampling"
+    CATEGORY = "RES4LYF/samplers/ultracascade"
     DESCRIPTION = "For use with Stable Cascade and UltraCascade."
     
     def main(self, model, add_noise, noise_is_latent, noise_type, noise_seed, cfg, alpha, k, positive, negative, sampler, 

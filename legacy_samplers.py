@@ -148,7 +148,7 @@ class Legacy_ClownsharKSampler:
 
     FUNCTION = "main"
 
-    CATEGORY = "sampling/custom_sampling"
+    CATEGORY = "RES4LYF/legacy/samplers"
     
     def main(self, model, cfg, truncate_conditioning, sampler_mode, scheduler, steps, denoise=1.0, denoise_alt=1.0,
              noise_type_init="gaussian", noise_type_sde="brownian", noise_mode_sde="hard", latent_image=None, 
@@ -415,7 +415,7 @@ class Legacy_SamplerRK:
                     
                }
     RETURN_TYPES = ("SAMPLER",)
-    CATEGORY = "sampling/custom_sampling/samplers"
+    CATEGORY = "RES4LYF/legacy/samplers"
 
     FUNCTION = "get_sampler"
 
@@ -462,7 +462,7 @@ class Legacy_ClownsharKSamplerGuides:
                     }  
                }
     RETURN_TYPES = ("GUIDES",)
-    CATEGORY = "sampling/custom_sampling/samplers"
+    CATEGORY = "RES4LYF/legacy/samplers"
 
     FUNCTION = "get_sampler"
 
@@ -532,8 +532,8 @@ class Legacy_SharkSampler:
 
     FUNCTION = "main"
 
-    CATEGORY = "sampling/custom_sampling"
-    
+    CATEGORY = "RES4LYF/legacy/samplers"
+        
     def main(self, model, add_noise, noise_stdev, noise_mean, noise_normalize, noise_is_latent, noise_type, noise_seed, cfg, truncate_conditioning, alpha, k, positive, negative, sampler,
              latent_image, sampler_mode, scheduler, steps, denoise, sigmas=None, latent_noise=None, latent_noise_match=None,): 
 
