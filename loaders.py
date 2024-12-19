@@ -117,14 +117,32 @@ class BaseModelLoader:
             ckpt_path = folder_paths.get_full_path_or_raise("checkpoints", model_name)
         except FileNotFoundError:
             ckpt_path = folder_paths.get_full_path_or_raise("diffusion_models", model_name)
-            
-        return comfy.sd.load_checkpoint_guess_config(
-            ckpt_path, 
-            output_vae=output_vae,
-            output_clip=output_clip,
-            embedding_directory=folder_paths.get_folder_paths("embeddings"),
-            model_options=model_options
-        )
+
+        out = None
+
+        try:
+            out = comfy.sd.load_checkpoint_guess_config(
+                ckpt_path, 
+                output_vae=output_vae,
+                output_clip=output_clip,
+                embedding_directory=folder_paths.get_folder_paths("embeddings"),
+                model_options=model_options
+            )
+        except RuntimeError as e:
+            if "ERROR: Could not detect model type of:" in str(e):
+                error_msg = ""
+                if output_vae is True:
+                    error_msg += "Model/Checkpoint file does not contain a VAE\n"
+                if output_clip is True:
+                    error_msg += "Model/Checkpoint file does not contain a CLIP\n"
+                if error_msg != "":
+                    raise ValueError(error_msg)
+                else:               
+                    out = (comfy.sd.load_diffusion_model(ckpt_path, model_options),)
+            else:
+                raise e
+        
+        return out
 
     def load_vae(self, vae_name, ckpt_out):
         if vae_name == ".use_ckpt_vae":
