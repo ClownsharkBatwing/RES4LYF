@@ -9,11 +9,11 @@ const originalGetNodeTypesCategories = typeof LiteGraph.getNodeTypesCategories =
 
 // Override the getNodeTypesCategories method if it exists
 if (originalGetNodeTypesCategories) {
-    if (TOP_CLOWNDOG == false) {
-        return originalGetNodeTypesCategories.call(this, filter);
-    }
-
     LiteGraph.getNodeTypesCategories = function(filter) {
+        if (TOP_CLOWNDOG == false) {
+            return originalGetNodeTypesCategories.call(this, filter);
+        }
+        
         try {
             // Get the original categories
             const categories = originalGetNodeTypesCategories.call(this, filter);
