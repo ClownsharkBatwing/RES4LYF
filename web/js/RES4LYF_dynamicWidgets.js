@@ -3,6 +3,39 @@ import { app } from "../../scripts/app.js";
 let ENABLE_WIDGET_HIDING = false; 
 let RESDEBUG = false;
 let ENABLE_UPDATED_TIMESTEP_SCALING = true;
+let TOP_CLOWNDOG = true;
+
+const originalGetNodeTypesCategories = typeof LiteGraph.getNodeTypesCategories === 'function' ? LiteGraph.getNodeTypesCategories : null;
+
+// Override the getNodeTypesCategories method if it exists
+if (originalGetNodeTypesCategories) {
+    if (TOP_CLOWNDOG == false) {
+        return originalGetNodeTypesCategories.call(this, filter);
+    }
+
+    LiteGraph.getNodeTypesCategories = function(filter) {
+        try {
+            // Get the original categories
+            const categories = originalGetNodeTypesCategories.call(this, filter);
+            
+            categories.sort((a, b) => {
+                const isARes4Lyf = a.startsWith("RES4LYF");
+                const isBRes4Lyf = b.startsWith("RES4LYF");
+                if (isARes4Lyf && !isBRes4Lyf) return -1;
+                if (!isARes4Lyf && isBRes4Lyf) return 1;
+
+                // Do the other auto sorting if enabled
+                if (LiteGraph.auto_sort_node_types) {
+                    return a.localeCompare(b);
+                }
+                return 0;
+            });
+            return categories;
+        } catch (error) {
+            return originalGetNodeTypesCategories.call(this, filter);
+        }
+    };
+}
 
 function resDebugLog(...args) {
     if (RESDEBUG) {
@@ -294,15 +327,32 @@ function setupDynamicWidgets(node, dependentWidgetsConfig) {
 }
 
 app.registerExtension({
+    name: "Comfy.RES4LYF.DynamicWidgets",
+
     async setup(app) {
+        app.ui.settings.addSetting({
+            id: "RES4LYF.topClownDog",
+            name: "RES4LYF: Top ClownDog",
+            defaultValue: true,
+            type: "boolean",
+            options: [
+                { value: true, text: "On" },
+                { value: false, text: "Off" },
+            ],
+            onChange: (value) => {
+                TOP_CLOWNDOG = value;
+                resDebugLog(`Top ClownDog ${value ? "enabled" : "disabled"}`);
+            },
+        });
+
         app.ui.settings.addSetting({
             id: "RES4LYF.enableDynamicWidgets",
             name: "RES4LYF: Enable dynamic widget hiding",
             defaultValue: false,
             type: "boolean",
-            options: (value) => [
-                { value: true, text: "On", selected: value === true },
-                { value: false, text: "Off", selected: value === false },
+            options: [
+                { value: true, text: "On" },
+                { value: false, text: "Off" },
             ],
             onChange: (value) => {
                 ENABLE_WIDGET_HIDING = value;
@@ -326,12 +376,12 @@ app.registerExtension({
     
         app.ui.settings.addSetting({
             id: "RES4LYF.enableDebugLogs",
-            name: "RES4LYF: Enable debug logging",
+            name: "RES4LYF: Enable JS debug logging",
             defaultValue: false,
             type: "boolean",
-            options: (value) => [
-                { value: true, text: "On", selected: value === true },
-                { value: false, text: "Off", selected: value === false },
+            options: [
+                { value: true, text: "On" },
+                { value: false, text: "Off" },
             ],
             onChange: (value) => {
                 RESDEBUG = value;
@@ -341,12 +391,12 @@ app.registerExtension({
 
         app.ui.settings.addSetting({
             id: "RES4LYF.enableUpdatedTimestepScaling",
-            name: "RES4LYF: Enable \"improved\" timestep scaling",
+            name: "RES4LYF: Enable \"improved\" timestep scaling for SD3.5",
             defaultValue: true,
             type: "boolean",
-            options: (value) => [
-                { value: true, text: "On", selected: value === true },
-                { value: false, text: "Off", selected: value === false },
+            options: [
+                { value: true, text: "On" },
+                { value: false, text: "Off" },
             ],
             onChange: (value) => {
                 // Send to backend
