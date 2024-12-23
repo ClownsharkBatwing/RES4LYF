@@ -13,13 +13,7 @@ import comfy.supported_models
 import latent_preview
 import torch
 import torch.nn.functional as F
-
-import math
-import copy
-
-from .helper import get_extra_options_kv, extra_options_flag
-
-from .legacy_sampler_rk import legacy_sample_rk
+from .helper import get_res4lyf_scheduler_list
 
 def initialize_or_scale(tensor, value, steps):
     if tensor is None:
@@ -122,7 +116,7 @@ class Legacy_ClownsharKSampler:
                                                "lobatto_iiic_3s",
                                                "lobatto_iiic_2s",
                                                ], {"default": "default"}), 
-                    "scheduler": (comfy.samplers.SCHEDULER_NAMES + ["beta57"], {"default": "beta57"},),
+                    "scheduler": (get_res4lyf_scheduler_list(), {"default": "beta57"},),
                     "steps": ("INT", {"default": 30, "min": 1, "max": 10000}),
                     "implicit_steps": ("INT", {"default": 0, "min": 0, "max": 10000}),
                     "denoise": ("FLOAT", {"default": 1.0, "min": -10000, "max": 10000, "step":0.01}),
@@ -448,7 +442,7 @@ class Legacy_ClownsharKSamplerGuides:
         return {"required":
                     {"guide_mode": (["hard_light", "mean_std", "mean", "std", "blend"], {"default": 'blend', "tooltip": "The mode used."}),
                      "latent_guide_weight": ("FLOAT", {"default": 0.0, "min": -100.0, "max": 100.0, "step":0.01, "round": False}),
-                    "scheduler": (["constant"] + comfy.samplers.SCHEDULER_NAMES + ["beta57"], {"default": "beta57"},),
+                    "scheduler": (["constant"] + get_res4lyf_scheduler_list(), {"default": "beta57"},),
                     "steps": ("INT", {"default": 30, "min": 1, "max": 10000}),
                     "denoise": ("FLOAT", {"default": 1.0, "min": -100.0, "max": 100.0, "step":0.01, "round": False}),
                      "rescale_floor": ("BOOLEAN", {"default": False, "tooltip": "If true, latent_guide_weight(s) primarily affect the masked areas. If false, they control the unmasked areas."}),
@@ -507,7 +501,7 @@ class Legacy_SharkSampler:
                     "noise_seed": ("INT", {"default": 0, "min": -1, "max": 0xffffffffffffffff}),
                     "sampler_mode": (['standard', 'unsample', 'resample'],),
                     #"scheduler": (comfy.samplers.SCHEDULER_NAMES, ),
-                    "scheduler": (comfy.samplers.SCHEDULER_NAMES + ["beta57"],),
+                    "scheduler": (get_res4lyf_scheduler_list(),),
 
                     "steps": ("INT", {"default": 30, "min": 1, "max": 10000}),
                     "denoise": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 10000, "step":0.01}),

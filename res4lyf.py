@@ -8,6 +8,7 @@ import inspect
 import aiohttp
 import math
 import comfy.model_sampling
+import comfy.samplers
 from aiohttp import web
 from server import PromptServer
 from tqdm import tqdm
@@ -61,6 +62,15 @@ async def log_message(request):
             return web.Response(status=400, text="No log text provided")
     except Exception as e:
         return web.Response(status=500, text=str(e))
+    
+original_calculate_sigmas = comfy.samplers.calculate_sigmas
+
+def calculate_sigmas_RES4LYF(model_sampling, scheduler_name, steps):
+    if scheduler_name == "beta57":
+        sigmas = comfy.samplers.beta_scheduler(model_sampling, steps, alpha=0.5, beta=0.7)
+    else:
+        return original_calculate_sigmas(model_sampling, scheduler_name, steps)
+    return sigmas
 
 def init(check_imports=None):
     log("RES4LYF Init")
@@ -71,6 +81,13 @@ def init(check_imports=None):
 
     # monkey patch comfy.model_sampling.time_snr_shift with custom implementation
     comfy.model_sampling.time_snr_shift = time_snr_shift_RES4LYF
+
+    # monkey patch comfy.samplers.calculate_sigmas with custom implementation
+    comfy.samplers.calculate_sigmas = calculate_sigmas_RES4LYF
+    if "beta57" not in comfy.samplers.SCHEDULER_NAMES:
+        comfy.samplers.SCHEDULER_NAMES = comfy.samplers.SCHEDULER_NAMES + ["beta57"]
+    if "beta57" not in comfy.samplers.KSampler.SCHEDULERS:
+        comfy.samplers.KSampler.SCHEDULERS = comfy.samplers.KSampler.SCHEDULERS + ["beta57"]
 
     # if check_imports is not None:
     #     import importlib.util
