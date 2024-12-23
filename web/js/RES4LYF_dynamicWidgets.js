@@ -3,9 +3,39 @@ import { app } from "../../scripts/app.js";
 let ENABLE_WIDGET_HIDING = false; 
 let RESDEBUG = false;
 let ENABLE_UPDATED_TIMESTEP_SCALING = true;
-let DEFAULT_WIDGET_STATES = {};
+let TOP_CLOWNDOG = true;
 
-const widgetToggleStates = new Map(); // Stores user-set toggle states for widgets
+const originalGetNodeTypesCategories = typeof LiteGraph.getNodeTypesCategories === 'function' ? LiteGraph.getNodeTypesCategories : null;
+
+// Override the getNodeTypesCategories method if it exists
+if (originalGetNodeTypesCategories) {
+    LiteGraph.getNodeTypesCategories = function(filter) {
+        if (TOP_CLOWNDOG == false) {
+            return originalGetNodeTypesCategories.call(this, filter);
+        }
+        
+        try {
+            // Get the original categories
+            const categories = originalGetNodeTypesCategories.call(this, filter);
+            
+            categories.sort((a, b) => {
+                const isARes4Lyf = a.startsWith("RES4LYF");
+                const isBRes4Lyf = b.startsWith("RES4LYF");
+                if (isARes4Lyf && !isBRes4Lyf) return -1;
+                if (!isARes4Lyf && isBRes4Lyf) return 1;
+
+                // Do the other auto sorting if enabled
+                if (LiteGraph.auto_sort_node_types) {
+                    return a.localeCompare(b);
+                }
+                return 0;
+            });
+            return categories;
+        } catch (error) {
+            return originalGetNodeTypesCategories.call(this, filter);
+        }
+    };
+}
 
 function resDebugLog(...args) {
     if (RESDEBUG) {
@@ -362,40 +392,22 @@ function setupDynamicWidgets(node, dependentWidgetsConfig) {
 }
 
 app.registerExtension({
-    async setup(app) {
-        // Add settings for each toggleable widget
-        Object.entries(TOGGLEABLE_WIDGETS).forEach(([widgetName, config]) => {
-            app.ui.settings.addSetting({
-                id: config.settingId,
-                name: config.settingName,
-                defaultValue: config.defaultValue,
-                type: "boolean",
-                options: (value) => [
-                    { value: true, text: "Hidden", selected: value === true },
-                    { value: false, text: "Shown", selected: value === false },
-                ],
-                onChange: (value) => {
-                    DEFAULT_WIDGET_STATES[widgetName] = value;
-                    resDebugLog(`Default state for ${widgetName} set to ${value ? "hidden" : "shown"}`);
-                    
-                    // Update all existing nodes
-                    for (const node of app.graph._nodes) {
-                        if (nodeConfigs[node.comfyClass]) {
-                            const widget = node.widgets.find(w => w.name === widgetName);
-                            if (widget) {
-                                // Only update if user hasn't set a specific state for this instance
-                                const stateKey = `${node.id}_${widgetName}`;
-                                if (!widgetToggleStates.has(stateKey)) {
-                                    toggleWidget(node, widget, !value);
-                                }
-                            }
-                        }
-                    }
-                },
-            });
+    name: "Comfy.RES4LYF.DynamicWidgets",
 
-            // Initialize default state
-            DEFAULT_WIDGET_STATES[widgetName] = config.defaultValue;
+    async setup(app) {
+        app.ui.settings.addSetting({
+            id: "RES4LYF.topClownDog",
+            name: "RES4LYF: Top ClownDog",
+            defaultValue: true,
+            type: "boolean",
+            options: [
+                { value: true, text: "On" },
+                { value: false, text: "Off" },
+            ],
+            onChange: (value) => {
+                TOP_CLOWNDOG = value;
+                resDebugLog(`Top ClownDog ${value ? "enabled" : "disabled"}`);
+            },
         });
 
         app.ui.settings.addSetting({
@@ -403,9 +415,9 @@ app.registerExtension({
             name: "RES4LYF: Enable dynamic widget hiding",
             defaultValue: false,
             type: "boolean",
-            options: (value) => [
-                { value: true, text: "On", selected: value === true },
-                { value: false, text: "Off", selected: value === false },
+            options: [
+                { value: true, text: "On" },
+                { value: false, text: "Off" },
             ],
             onChange: (value) => {
                 ENABLE_WIDGET_HIDING = value;
@@ -429,12 +441,12 @@ app.registerExtension({
     
         app.ui.settings.addSetting({
             id: "RES4LYF.enableDebugLogs",
-            name: "RES4LYF: Enable debug logging",
+            name: "RES4LYF: Enable JS debug logging",
             defaultValue: false,
             type: "boolean",
-            options: (value) => [
-                { value: true, text: "On", selected: value === true },
-                { value: false, text: "Off", selected: value === false },
+            options: [
+                { value: true, text: "On" },
+                { value: false, text: "Off" },
             ],
             onChange: (value) => {
                 RESDEBUG = value;
@@ -444,12 +456,12 @@ app.registerExtension({
 
         app.ui.settings.addSetting({
             id: "RES4LYF.enableUpdatedTimestepScaling",
-            name: "RES4LYF: Enable \"improved\" timestep scaling",
+            name: "RES4LYF: Enable \"improved\" timestep scaling for SD3.5",
             defaultValue: true,
             type: "boolean",
-            options: (value) => [
-                { value: true, text: "On", selected: value === true },
-                { value: false, text: "Off", selected: value === false },
+            options: [
+                { value: true, text: "On" },
+                { value: false, text: "Off" },
             ],
             onChange: (value) => {
                 // Send to backend

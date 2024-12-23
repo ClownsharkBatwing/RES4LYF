@@ -160,7 +160,7 @@ class DoubleStreamBlock(nn.Module):
         txt_q, txt_k = self.txt_attn.norm(txt_q, txt_k, txt_v)
         return txt_q, txt_k, txt_v
     
-    def forward(self, img: Tensor, txt: Tensor, vec: Tensor, pe: Tensor, timestep, transformer_options={}, mask=None): # vec 1,3072
+    def forward(self, img: Tensor, txt: Tensor, vec: Tensor, pe: Tensor, timestep, transformer_options={}, mask=None, weight=1): # vec 1,3072
 
         img_mod1, img_mod2 = self.img_mod(vec)
         txt_mod1, txt_mod2 = self.txt_mod(vec)
@@ -169,6 +169,14 @@ class DoubleStreamBlock(nn.Module):
         txt_q, txt_k, txt_v = self.txt_attn_preproc(txt, txt_mod1)
 
         q, k, v = torch.cat((txt_q, img_q), dim=2), torch.cat((txt_k, img_k), dim=2), torch.cat((txt_v, img_v), dim=2)
+        
+        """if mask is None:
+            attn = attention(q, k, v, pe=pe)
+        else:
+            attn_false = attention(q, k, v, pe=pe)
+            attn = attention(q, k, v, pe=pe, mask=mask.to(torch.bool))
+            attn = attn_false + weight * (attn - attn_false)"""
+        
         attn = attention(q, k, v, pe=pe, mask=mask)
         txt_attn = attn[:, : txt.shape[1]]                         # 1, 768,3072
         img_attn = attn[:, txt.shape[1] :]  
@@ -180,6 +188,7 @@ class DoubleStreamBlock(nn.Module):
         txt += txt_mod2.gate * self.txt_mlp((1 + txt_mod2.scale) * self.txt_norm2(txt) + txt_mod2.shift)
         
         return img, txt
+
 
 
 class SingleStreamBlock(nn.Module):
@@ -209,20 +218,27 @@ class SingleStreamBlock(nn.Module):
         self.mlp_act = nn.GELU(approximate="tanh")
         self.modulation = Modulation(hidden_size, double=False, dtype=dtype, device=device, operations=operations)
         
-    def img_attn(self, img, mod, pe, mask):
+    def img_attn(self, img, mod, pe, mask, weight):
         img_mod = (1 + mod.scale) * self.pre_norm(img) + mod.shift
         qkv, mlp = torch.split(self.linear1(img_mod), [3 * self.hidden_size, self.mlp_hidden_dim], dim=-1)
 
         q, k, v = rearrange(qkv, "B L (K H D) -> K B H L D", K=3, H=self.num_heads)
         q, k = self.norm(q, k, v)
 
+        """if mask is None:
+            attn = attention(q, k, v, pe=pe)
+        else:
+            attn_false = attention(q, k, v, pe=pe)
+            attn = attention(q, k, v, pe=pe, mask=mask.to(torch.bool))
+            attn = attn_false + weight * (attn - attn_false)"""
+
         attn = attention(q, k, v, pe=pe, mask=mask)
         return attn, mlp
 
     # vec 1,3072    x 1,9984,3072
-    def forward(self, img: Tensor, vec: Tensor, pe: Tensor, timestep, transformer_options={}, mask=None) -> Tensor:   # x 1,9984,3072 if 2 reg embeds, 1,9472,3072 if none    # 9216x4096 = 16x1536x1536
+    def forward(self, img: Tensor, vec: Tensor, pe: Tensor, timestep, transformer_options={}, mask=None, weight=1) -> Tensor:   # x 1,9984,3072 if 2 reg embeds, 1,9472,3072 if none    # 9216x4096 = 16x1536x1536
         mod, _ = self.modulation(vec)
-        attn, mlp = self.img_attn(img, mod, pe, mask)
+        attn, mlp = self.img_attn(img, mod, pe, mask, weight)
         output = self.linear2(torch.cat((attn, self.mlp_act(mlp)), 2))
 
         img += mod.gate * output

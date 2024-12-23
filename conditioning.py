@@ -13,6 +13,7 @@ from copy import deepcopy
 
 from .helper import initialize_or_scale
 import torch.nn.functional as F
+import copy
 
 
 
@@ -48,7 +49,7 @@ class CLIPTextEncodeFluxUnguided:
     RETURN_TYPES = ("CONDITIONING",)
     FUNCTION = "encode"
 
-    CATEGORY = "advanced/conditioning/flux"
+    CATEGORY = "RES4LYF/conditioning"
 
     def encode(self, clip, clip_l, t5xxl):
         tokens = clip.tokenize(clip_l)
@@ -69,7 +70,7 @@ class StyleModelApplyAdvanced:
                              }}
     RETURN_TYPES = ("CONDITIONING",)
     FUNCTION = "main"
-    CATEGORY = "advanced/conditioning"
+    CATEGORY = "RES4LYF/conditioning"
     DESCRIPTION = "Use with Flux Redux."
 
     def main(self, clip_vision_output, style_model, conditioning, strength=1.0):
@@ -90,7 +91,7 @@ class ConditioningZeroAndTruncate:
     RETURN_TYPES = ("CONDITIONING",)
     FUNCTION = "zero_out"
 
-    CATEGORY = "advanced/conditioning"
+    CATEGORY = "RES4LYF/conditioning"
     DESCRIPTION = "Use for negative conditioning with SD3.5. ConditioningZeroOut does not truncate the embedding, \
                    which results in severe degradation of image quality with SD3.5 when the token limit is exceeded."
 
@@ -114,7 +115,7 @@ class ConditioningZeroAndTruncate2:
     RETURN_TYPES = ("CONDITIONING",)
     FUNCTION = "zero_out"
 
-    CATEGORY = "advanced/conditioning"
+    CATEGORY = "RES4LYF/conditioning"
     DESCRIPTION = "Use for negative conditioning with SD3.5. ConditioningZeroOut does not truncate the embedding, \
                    which results in severe degradation of image quality with SD3.5 when the token limit is exceeded."
 
@@ -137,7 +138,7 @@ class ConditioningTruncate:
     RETURN_TYPES = ("CONDITIONING",)
     FUNCTION = "zero_out"
 
-    CATEGORY = "advanced/conditioning"
+    CATEGORY = "RES4LYF/conditioning"
     DESCRIPTION = "Use for positive conditioning with SD3.5. Tokens beyond 77 result in degradation of image quality."
 
     def zero_out(self, conditioning):
@@ -161,7 +162,7 @@ class ConditioningMultiply:
     RETURN_TYPES = ("CONDITIONING",)
     FUNCTION = "main"
 
-    CATEGORY = "conditioning"
+    CATEGORY = "RES4LYF/conditioning"
 
     def main(self, conditioning, multiplier):
         c = multiply_nested_tensors(conditioning, multiplier)
@@ -176,7 +177,7 @@ class ConditioningCombine:
     RETURN_TYPES = ("CONDITIONING",)
     FUNCTION = "combine"
 
-    CATEGORY = "conditioning"
+    CATEGORY = "RES4LYF/conditioning"
 
     def combine(self, conditioning_1, conditioning_2):
         import pdb; pdb.set_trace()
@@ -193,7 +194,7 @@ class ConditioningAverage :
     RETURN_TYPES = ("CONDITIONING",)
     FUNCTION = "addWeighted"
 
-    CATEGORY = "conditioning"
+    CATEGORY = "RES4LYF/conditioning"
 
     def addWeighted(self, conditioning_to, conditioning_from, conditioning_to_strength):
         import pdb; pdb.set_trace()
@@ -233,7 +234,7 @@ class ConditioningSetTimestepRange:
     RETURN_TYPES = ("CONDITIONING",)
     FUNCTION = "set_range"
 
-    CATEGORY = "advanced/conditioning"
+    CATEGORY = "RES4LYF/conditioning"
 
     def set_range(self, conditioning, start, end):
         import pdb; pdb.set_trace()
@@ -255,7 +256,7 @@ class ConditioningAverageScheduler: # don't think this is implemented correctly.
     RETURN_TYPES = ("CONDITIONING",)
     FUNCTION = "main"
 
-    CATEGORY = "conditioning"
+    CATEGORY = "RES4LYF/conditioning"
 
     @staticmethod
     def addWeighted(conditioning_to, conditioning_from, conditioning_to_strength): #this function borrowed from comfyui
@@ -314,7 +315,7 @@ class StableCascade_StageB_Conditioning64:
 
     FUNCTION = "set_prior"
 
-    CATEGORY = "conditioning/stable_cascade"
+    CATEGORY = "RES4LYF/conditioning"
 
     @precision_tool.cast_tensor
     def set_prior(self, conditioning, stage_c):
@@ -346,7 +347,7 @@ class Conditioning_Recast64:
 
     FUNCTION = "main"
 
-    CATEGORY = "conditioning/"
+    CATEGORY = "RES4LYF/precision"
 
     @precision_tool.cast_tensor
     def main(self, cond_0, cond_1 = None):
@@ -378,7 +379,7 @@ class ConditioningToBase64:
     OUTPUT_NODE = True
     OUTPUT_IS_LIST = (True,)
 
-    CATEGORY = "conditioning"
+    CATEGORY = "RES4LYF/utilities"
 
     def notify(self, unique_id=None, extra_pnginfo=None, conditioning=None):
         conditioning_pickle = pickle.dumps(conditioning)
@@ -416,7 +417,7 @@ class Base64ToConditioning:
     RETURN_NAMES = ("conditioning",)
     FUNCTION = "main"
 
-    CATEGORY = "conditioning"
+    CATEGORY = "RES4LYF/utilities"
 
     def main(self, data):
         conditioning_pickle = base64.b64decode(data)
@@ -431,29 +432,110 @@ class Base64ToConditioning:
 
 
 class RegionalMask(torch.nn.Module):
-    def __init__(self, mask: torch.Tensor, start_percent: float, end_percent: float) -> None:
+    def __init__(self, mask: torch.Tensor, conditioning: torch.Tensor, conditioning_regional: torch.Tensor, latent:torch.Tensor, start_percent: float, end_percent: float, mask_type: str, img_len: int, text_len: int) -> None:
         super().__init__()
-        self.register_buffer('mask', mask)
+        #self.register_buffer('mask', mask)
+        self.mask = mask.clone().to('cuda')
+        self.conditioning = copy.deepcopy(conditioning)
+        self.conditioning_regional = copy.deepcopy(conditioning_regional)
+        self.latent = latent.clone()
+        self.start_percent = start_percent
+        self.end_percent   = end_percent
+        self.mask_type = mask_type
+        self.img_len = img_len
+        self.text_len = text_len
+
+    def __call__(self, transformer_options, weight=0, dtype=torch.bfloat16, *args, **kwargs):
+        sigma = transformer_options['sigmas'][0]
+        if self.start_percent <= 1 - sigma < self.end_percent:
+            if self.mask_type == "gradient":
+                #mask = self.gen_mask(weight)
+                return self.mask.clone().to(sigma.device) * weight
+
+
+    """def gen_mask(self, weight):             #FOR REGENERATION OF SELF-ATTN MASK
+        b, c, h, w = self.latent.shape
+        h //= 2  # 16x16 PE
+        w //= 2
+        img_len = h * w
+
+        cond_r = torch.cat([cond_reg['cond'] for cond_reg in self.conditioning_regional], dim=1)
+        
+        if self.conditioning is not None:
+            text_len = 256 + cond_r.shape[1]  # 256 = main prompt tokens... half of t5, comfy issue
+            conditioning_regional = [
+                {
+                    'mask': torch.ones((1,   h,    w), dtype=torch.bfloat16),
+                    'cond': torch.ones((1, 256, 4096), dtype=torch.bfloat16),
+                },
+                *self.conditioning_regional,
+            ]
+        else:
+            text_len = cond_r.shape[1]  # 256 = main prompt tokens... half of t5, comfy issue
+            conditioning_regional = self.conditioning_regional
+        
+        all_attn_mask       = torch.zeros((text_len+img_len, text_len+img_len), dtype=torch.bfloat16)
+        self_attn_mask     = torch.zeros((          img_len,          img_len), dtype=torch.bfloat16)
+        self_attn_mask_bkg = torch.zeros((          img_len,          img_len), dtype=torch.bfloat16)
+        
+        prev_len = 0
+        for cond_reg_dict in conditioning_regional:         #FOR REGENERATION OF SELF-ATTN MASK
+            cond_reg         = cond_reg_dict['cond']
+            region_mask_ = 1 - cond_reg_dict['mask'][0]
+            
+            region_mask_sq = cond_reg_dict['mask'][0].to(torch.bfloat16)
+
+            
+            img2txt_mask = torch.nn.functional.interpolate(region_mask_sq[None, None, :, :], (h, w), mode='nearest-exact').flatten().unsqueeze(1).repeat(1, cond_reg.size(1))
+            txt2img_mask = img2txt_mask.transpose(-1, -2)
+            
+            img2txt_mask_sq = torch.nn.functional.interpolate(region_mask_sq[None, None, :, :], (h, w), mode='nearest-exact').flatten().unsqueeze(1).repeat(1, self.img_len)
+            #img2txt_mask_sq = img2txt_mask[:, :1].repeat(1, img_len)
+            txt2img_mask_sq = img2txt_mask_sq.transpose(-1, -2)
+
+            curr_len = prev_len + cond_reg.shape[1]         #FOR REGENERATION OF SELF-ATTN MASK
+            
+            all_attn_mask[prev_len:curr_len, prev_len:curr_len] = 1.0           # self             TXT 2 TXT
+            all_attn_mask[prev_len:curr_len, text_len:        ] = txt2img_mask  # cross            TXT 2 regional IMG
+            all_attn_mask[text_len:        , prev_len:curr_len] = img2txt_mask  # cross   regional IMG 2 TXT
+            
+            #all_attn_mask[text_len:, text_len:] = fp_or(all_attn_mask[text_len:, text_len:]    , fp_and(  img2txt_mask_sq,   txt2img_mask_sq))
+            
+            self_attn_mask     = fp_or(self_attn_mask    , fp_and(                      img2txt_mask_sq,                       txt2img_mask_sq))
+            self_attn_mask_bkg = fp_or(self_attn_mask_bkg, fp_and(img2txt_mask_sq.max()-img2txt_mask_sq, txt2img_mask_sq.max()-txt2img_mask_sq))
+            #self_attn_mask_bkg = fp_or(self_attn_mask_bkg, fp_and(1-img2txt_mask_sq, 1-txt2img_mask_sq))
+            
+            prev_len = curr_len
+
+        all_attn_mask[text_len:, text_len:] = fp_or(self_attn_mask, self_attn_mask_bkg) #combine foreground/background self-attn
+
+        return all_attn_mask
+    """
+    
+    
+class RegionalConditioning(torch.nn.Module):
+    def __init__(self, conditioning: torch.Tensor, region_cond: torch.Tensor, start_percent: float, end_percent: float) -> None:
+        super().__init__()
+        #self.register_buffer('region_cond', region_cond)
+        self.conditioning = conditioning
+        self.region_cond = region_cond.clone().to('cuda')
         self.start_percent = start_percent
         self.end_percent   = end_percent
 
-    def __call__(self, transformer_options, *args, **kwargs):
-        if self.start_percent <= 1 - transformer_options['sigmas'][0] < self.end_percent:
-            return self.mask
+    def __call__(self, transformer_options, dtype=torch.bfloat16, *args,  **kwargs):
+        sigma = transformer_options['sigmas'][0]
+        if self.start_percent <= 1 - sigma < self.end_percent:
+            return self.region_cond.clone().to(sigma.device).to(dtype)
         return None
     
-    
-
-class RegionalConditioning(torch.nn.Module):
-    def __init__(self, region_cond: torch.Tensor, start_percent: float, end_percent: float) -> None:
-        super().__init__()
-        self.register_buffer('region_cond', region_cond)
-        self.start_percent = start_percent
-        self.end_percent   = end_percent
-
-    def __call__(self, transformer_options, *args,  **kwargs):
-        if self.start_percent <= 1 - transformer_options['sigmas'][0] < self.end_percent:
-            return self.region_cond
+    def concat_cond(self, context, transformer_options, dtype=torch.bfloat16, *args,  **kwargs):
+        sigma = transformer_options['sigmas'][0]
+        if self.start_percent <= 1 - sigma < self.end_percent:
+            region_cond = self.region_cond.clone().to(sigma.device).to(dtype)
+            if self.conditioning is None:
+                return self.region_cond.clone().to(sigma.device).to(dtype)
+            else:
+                return torch.cat([context, region_cond.clone().to(torch.bfloat16)], dim=1)
         return None
 
 
@@ -472,7 +554,7 @@ class FluxRegionalPrompt:
     RETURN_NAMES = ("cond_regional","mask_inv")
     FUNCTION = "main"
 
-    CATEGORY = "conditioning"
+    CATEGORY = "RES4LYF/conditioning"
 
     def main(self, cond, mask, cond_regional=[]):
         cond_regional = [*cond_regional]
@@ -480,14 +562,23 @@ class FluxRegionalPrompt:
         mask_inv = 1-mask
         return (cond_regional,mask_inv,)
 
+def fp_not(tensor):
+    return 1 - tensor
 
+def fp_or(tensor1, tensor2):
+    return torch.maximum(tensor1, tensor2)
+
+def fp_and(tensor1, tensor2):
+    return torch.minimum(tensor1, tensor2)
 
 class RegionalGenerateConditioningsAndMasks:
-    def __init__(self, conditioning_regional, weight, start_percent, end_percent):
+    def __init__(self, conditioning, conditioning_regional, weight, start_percent, end_percent, mask_type):
+        self.conditioning          = conditioning
         self.conditioning_regional = conditioning_regional
-        self.weight = weight
-        self.start_percent = start_percent
-        self.end_percent = end_percent
+        self.weight                = weight
+        self.start_percent         = start_percent
+        self.end_percent           = end_percent
+        self.mask_type             = mask_type
 
     def __call__(self, latent):
         b, c, h, w = latent.shape
@@ -496,87 +587,102 @@ class RegionalGenerateConditioningsAndMasks:
         img_len = h * w
 
         cond_r = torch.cat([cond_reg['cond'] for cond_reg in self.conditioning_regional], dim=1)
-        text_len = 256 + cond_r.shape[1]  # 256 = main prompt tokens... half of t5, comfy issue
-
-        regional_mask = torch.zeros((text_len + img_len, text_len + img_len), dtype=torch.bool)
-        self_attend_masks = torch.zeros((img_len, img_len), dtype=torch.bool)
-        union_masks = torch.zeros((img_len, img_len), dtype=torch.bool)
-
-        conditioning_regional = [
-            {
-                'mask': torch.ones((1, h, w), dtype=torch.float64),
-                'cond': torch.ones((1, 256, 4096), dtype=torch.float64),
-            },
-            *self.conditioning_regional,
-        ]
-
-        cond_len = 0
+        
+        if self.conditioning is not None:
+            text_len = 256 + cond_r.shape[1]  # 256 = main prompt tokens... half of t5, comfy issue
+            conditioning_regional = [
+                {
+                    'mask': torch.ones((1,   h,    w), dtype=torch.bfloat16),
+                    'cond': torch.ones((1, 256, 4096), dtype=torch.bfloat16),
+                },
+                *self.conditioning_regional,
+            ]
+        else:
+            text_len = cond_r.shape[1]  # 256 = main prompt tokens... half of t5, comfy issue
+            conditioning_regional = self.conditioning_regional
+        
+        all_attn_mask      = torch.zeros((text_len+img_len, text_len+img_len), dtype=torch.bfloat16)
+        self_attn_mask     = torch.zeros((         img_len,          img_len), dtype=torch.bfloat16)
+        self_attn_mask_bkg = torch.zeros((         img_len,          img_len), dtype=torch.bfloat16)
+        
+        prev_len = 0
         for cond_reg_dict in conditioning_regional:
-            cond_reg = cond_reg_dict['cond']
-            region_mask = 1 - cond_reg_dict['mask'][0]
-            region_mask = torch.nn.functional.interpolate(
-                region_mask[None, None, :, :], (h, w), mode='nearest-exact'
-            ).flatten().unsqueeze(1).repeat(1, cond_reg.size(1))
+            cond_reg    = cond_reg_dict['cond']
+            region_mask = cond_reg_dict['mask'][0]
+            
+            img2txt_mask    = torch.nn.functional.interpolate(region_mask[None, None, :, :], (h, w), mode='nearest-exact').flatten().unsqueeze(1).repeat(1, cond_reg.size(1))
+            txt2img_mask    = img2txt_mask   .transpose(-1, -2)
+            
+            img2txt_mask_sq = torch.nn.functional.interpolate(region_mask[None, None, :, :], (h, w), mode='nearest-exact').flatten().unsqueeze(1).repeat(1, img_len)
+            txt2img_mask_sq = img2txt_mask_sq.transpose(-1, -2)
 
-            cond_len_next = cond_len + cond_reg.shape[1]
-            regional_mask[cond_len:cond_len_next, cond_len:cond_len_next] = True
-            regional_mask[cond_len:cond_len_next, text_len:] = region_mask.transpose(-1, -2)
-            regional_mask[text_len:, cond_len:cond_len_next] = region_mask
+            curr_len = prev_len + cond_reg.shape[1]
+            
+            all_attn_mask[prev_len:curr_len, prev_len:curr_len] = 1.0           # self             TXT 2 TXT
+            all_attn_mask[prev_len:curr_len, text_len:        ] = txt2img_mask  # cross            TXT 2 regional IMG
+            all_attn_mask[text_len:        , prev_len:curr_len] = img2txt_mask  # cross   regional IMG 2 TXT
+            
+            self_attn_mask     = fp_or(self_attn_mask    , fp_and(                      img2txt_mask_sq,                       txt2img_mask_sq))
+            self_attn_mask_bkg = fp_or(self_attn_mask_bkg, fp_and(img2txt_mask_sq.max()-img2txt_mask_sq, txt2img_mask_sq.max()-txt2img_mask_sq))
+            
+            prev_len = curr_len
 
-            img_size_masks = region_mask[:, :1].repeat(1, img_len)
-            img_size_masks_transpose = img_size_masks.transpose(-1, -2)
-            self_attend_masks = torch.logical_or(
-                self_attend_masks, torch.logical_and(img_size_masks, img_size_masks_transpose)
-            )
-            union_masks = torch.logical_or(
-                union_masks, torch.logical_or(img_size_masks, img_size_masks_transpose)
-            )
-            cond_len = cond_len_next
+        all_attn_mask[text_len:, text_len:] = fp_or(self_attn_mask, self_attn_mask_bkg) #combine foreground/background self-attn
 
-        background_masks = torch.logical_not(union_masks)
-        background_and_self_attend_masks = torch.logical_or(background_masks, self_attend_masks)
-        regional_mask[text_len:, text_len:] = background_and_self_attend_masks
+        all_attn_mask         = RegionalMask(all_attn_mask, self.conditioning, self.conditioning_regional, latent, self.start_percent, self.end_percent, self.mask_type, img_len, text_len)
+        regional_conditioning = RegionalConditioning(self.conditioning, cond_r, self.start_percent, self.end_percent)
 
-        regional_mask = RegionalMask(regional_mask, self.start_percent, self.end_percent)
-        regional_conditioning = RegionalConditioning(cond_r, self.start_percent, self.end_percent)
-
-        return regional_conditioning, regional_mask
-
+        return regional_conditioning, all_attn_mask
 
 
 class FluxRegionalConditioning:
     @classmethod
     def INPUT_TYPES(s):
         return {"required": { 
-            "conditioning": ("CONDITIONING",),
-            "conditioning_regional": ("CONDITIONING_REGIONAL",),
-            "weight": ("FLOAT", {"default": 1.0, "min": -10000.0, "max": 10000.0, "step": 0.01}),
+            "mask_weight": ("FLOAT", {"default": 1.0, "min": -10000.0, "max": 10000.0, "step": 0.01}),
+            "self_attn_floor": ("FLOAT", {"default": 0.0, "min": -10000.0, "max": 10000.0, "step": 0.01}),
             "start_percent": ("FLOAT", {"default": 0,   "min": 0.0, "max": 1.0, "step": 0.01}),
             "end_percent":   ("FLOAT", {"default": 0.5, "min": 0.0, "max": 1.0, "step": 0.01}),
+            "mask_type": (["gradient"], {"default": "gradient"}),
         }, 
             "optional": {
-                "weights": ("SIGMAS", ),
+                "conditioning": ("CONDITIONING",),
+                "conditioning_regional": ("CONDITIONING_REGIONAL",),
+                "mask_weights": ("SIGMAS", ),
+                "self_attn_floors": ("SIGMAS", ),
+
         }}
 
     RETURN_TYPES = ("CONDITIONING",)
     RETURN_NAMES = ("conditioning",)
     FUNCTION = "main"
 
-    CATEGORY = "conditioning"
+    CATEGORY = "RES4LYF/conditioning"
 
-    def main(self, conditioning, conditioning_regional, weight,start_percent, end_percent, start_step=0, end_step=30,  weights=None,  latent=None):
+    def main(self, conditioning_regional, mask_weight,start_percent, end_percent, start_step=0, end_step=30, conditioning=None, mask_weights=None, self_attn_floors=None, self_attn_floor=0, mask_type="differential", latent=None):
+        weight, weights = mask_weight, mask_weights
+        floor, floors = self_attn_floor, self_attn_floors
         default_dtype = torch.float64
         max_steps = 10000
         weights = initialize_or_scale(weights, weight, max_steps).to(default_dtype)
         weights = F.pad(weights, (0, max_steps), value=0.0)
+        
+        floors = initialize_or_scale(floors, floor, max_steps).to(default_dtype)
+        floors = F.pad(floors, (0, max_steps), value=0.0)
 
-        regional_generate_conditionings_and_masks_fn = RegionalGenerateConditioningsAndMasks(
-            conditioning_regional=conditioning_regional,
-            weight=weight,
-            start_percent=start_percent,
-            end_percent=end_percent,
-        )
+        regional_generate_conditionings_and_masks_fn = RegionalGenerateConditioningsAndMasks(conditioning, conditioning_regional, weight, start_percent, end_percent, mask_type)
+
+        if conditioning is None:
+            conditioning = [
+                                [
+                                    torch.zeros_like(conditioning_regional[0]['cond']),
+                                    {'pooled_output':
+                                        torch.zeros((1,768), dtype=conditioning_regional[0]['cond'].dtype, device=conditioning_regional[0]['cond'].device),
+                                    }
+                                ],
+            ]
 
         conditioning[0][1]['regional_generate_conditionings_and_masks_fn'] = regional_generate_conditionings_and_masks_fn
         conditioning[0][1]['regional_conditioning_weights'] = weights
-        return (conditioning,)
+        conditioning[0][1]['regional_conditioning_floors'] = floors
+        return (copy.deepcopy(conditioning),)

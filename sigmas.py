@@ -30,7 +30,7 @@ class set_precision_sigmas:
 
     RETURN_TYPES = ("SIGMAS",)
     RETURN_NAMES = ("passthrough",)
-    CATEGORY = "sampling/custom_sampling/"
+    CATEGORY = "RES4LYF/precision"
 
     FUNCTION = "main"
 
@@ -127,7 +127,7 @@ class sigmas_interpolate:
     FUNCTION = "main"
     RETURN_TYPES = ("SIGMAS","SIGMAS",)
     RETURN_NAMES = ("sigmas_0", "sigmas_1")
-    CATEGORY = "sampling/custom_sampling/sigmas"
+    CATEGORY = "RES4LYF/sigmas"
     
 
 
@@ -271,7 +271,7 @@ class sigmas_noise_inversion:
     FUNCTION = "main"
     RETURN_TYPES = ("SIGMAS","SIGMAS",)
     RETURN_NAMES = ("sigmas_fwd","sigmas_rev",)
-    CATEGORY = "sampling/custom_sampling/sigmas"
+    CATEGORY = "RES4LYF/sigmas"
     DESCRIPTION = "For use with unsampling. Connect sigmas_fwd to the unsampling (first) node, and sigmas_rev to the sampling (second) node."
     
     def main(self, sigmas):
@@ -304,7 +304,7 @@ class sigmas_variance_floor:
 
     FUNCTION = "main"
     RETURN_TYPES = ("SIGMAS",)
-    CATEGORY = "sampling/custom_sampling/sigmas"
+    CATEGORY = "RES4LYF/sigmas"
     
     DESCRIPTION = ("Process a sigma schedule so that any steps that are too large for variance-locked SDE sampling are replaced with the maximum permissible value."
         "Will be very difficult to approach sigma = 0 due to the nature of the math, as steps become very small much below approximately sigma = 0.15 to 0.2.")
@@ -336,7 +336,7 @@ class sigmas_from_text:
     FUNCTION = "main"
     RETURN_TYPES = ("SIGMAS",)
     RETURN_NAMES = ("sigmas",)
-    CATEGORY = "sampling/custom_sampling/sigmas"
+    CATEGORY = "RES4LYF/sigmas"
     
     def main(self, text):
         text_list = [float(val) for val in text.replace(",", " ").split()]
@@ -363,7 +363,7 @@ class sigmas_concatenate:
 
     FUNCTION = "main"
     RETURN_TYPES = ("SIGMAS",)
-    CATEGORY = "sampling/custom_sampling/sigmas"
+    CATEGORY = "RES4LYF/sigmas"
     
     def main(self, sigmas_1, sigmas_2):
         return (torch.cat((sigmas_1, sigmas_2)),)
@@ -383,7 +383,7 @@ class sigmas_truncate:
 
     FUNCTION = "main"
     RETURN_TYPES = ("SIGMAS",)
-    CATEGORY = "sampling/custom_sampling/sigmas"
+    CATEGORY = "RES4LYF/sigmas"
     
     def main(self, sigmas, sigmas_until):
         return (sigmas[:sigmas_until],)
@@ -403,7 +403,7 @@ class sigmas_start:
 
     FUNCTION = "main"
     RETURN_TYPES = ("SIGMAS",)
-    CATEGORY = "sampling/custom_sampling/sigmas"
+    CATEGORY = "RES4LYF/sigmas"
     
     def main(self, sigmas, sigmas_until):
         return (sigmas[sigmas_until:],)
@@ -424,7 +424,7 @@ class sigmas_split:
 
     FUNCTION = "main"
     RETURN_TYPES = ("SIGMAS",)
-    CATEGORY = "sampling/custom_sampling/sigmas"
+    CATEGORY = "RES4LYF/sigmas"
     
     def main(self, sigmas, sigmas_start, sigmas_end):
         return (sigmas[sigmas_start:sigmas_end],)
@@ -447,7 +447,7 @@ class sigmas_pad:
 
     FUNCTION = "main"
     RETURN_TYPES = ("SIGMAS",)
-    CATEGORY = "sampling/custom_sampling/sigmas"
+    CATEGORY = "RES4LYF/sigmas"
     
     def main(self, sigmas, value):
         return (torch.cat((sigmas, torch.tensor([value], dtype=sigmas.dtype))),)
@@ -466,7 +466,7 @@ class sigmas_unpad:
 
     FUNCTION = "main"
     RETURN_TYPES = ("SIGMAS",)
-    CATEGORY = "sampling/custom_sampling/sigmas"
+    CATEGORY = "RES4LYF/sigmas"
     
     def main(self, sigmas):
         return (sigmas[:-1],)
@@ -488,7 +488,7 @@ class sigmas_set_floor:
     RETURN_TYPES = ("SIGMAS",)
     FUNCTION = "set_floor"
 
-    CATEGORY = "sampling/custom_sampling/sigmas"
+    CATEGORY = "RES4LYF/sigmas"
 
     def set_floor(self, sigmas, floor, new_floor):
         sigmas[sigmas <= floor] = new_floor
@@ -510,7 +510,7 @@ class sigmas_delete_below_floor:
     RETURN_TYPES = ("SIGMAS",)
     FUNCTION = "delete_below_floor"
 
-    CATEGORY = "sampling/custom_sampling/sigmas"
+    CATEGORY = "RES4LYF/sigmas"
 
     def delete_below_floor(self, sigmas, floor):
         return (sigmas[sigmas >= floor],)    
@@ -531,7 +531,7 @@ class sigmas_delete_value:
     RETURN_TYPES = ("SIGMAS",)
     FUNCTION = "delete_value"
 
-    CATEGORY = "sampling/custom_sampling/sigmas"
+    CATEGORY = "RES4LYF/sigmas"
 
     def delete_value(self, sigmas, value):
         return (sigmas[sigmas != value],) 
@@ -551,7 +551,7 @@ class sigmas_delete_consecutive_duplicates:
     RETURN_TYPES = ("SIGMAS",)
     FUNCTION = "delete_consecutive_duplicates"
 
-    CATEGORY = "sampling/custom_sampling/sigmas"
+    CATEGORY = "RES4LYF/sigmas"
 
     def delete_consecutive_duplicates(self, sigmas_1):
         mask = sigmas_1[:-1] != sigmas_1[1:]
@@ -574,7 +574,7 @@ class sigmas_cleanup:
     RETURN_TYPES = ("SIGMAS",)
     FUNCTION = "cleanup"
 
-    CATEGORY = "sampling/custom_sampling/sigmas"
+    CATEGORY = "RES4LYF/sigmas"
 
     def cleanup(self, sigmas, sigmin):
         sigmas_culled = sigmas[sigmas >= sigmin]
@@ -602,7 +602,7 @@ class sigmas_mult:
 
     FUNCTION = "main"
     RETURN_TYPES = ("SIGMAS",)
-    CATEGORY = "sampling/custom_sampling/sigmas"
+    CATEGORY = "RES4LYF/sigmas"
     
     def main(self, sigmas, multiplier, sigmas2=None):
         if sigmas2 is not None:
@@ -625,7 +625,7 @@ class sigmas_modulus:
 
     FUNCTION = "main"
     RETURN_TYPES = ("SIGMAS",)
-    CATEGORY = "sampling/custom_sampling/sigmas"
+    CATEGORY = "RES4LYF/sigmas"
     
     def main(self, sigmas, divisor):
         return (sigmas % divisor,)
@@ -645,7 +645,7 @@ class sigmas_quotient:
 
     FUNCTION = "main"
     RETURN_TYPES = ("SIGMAS",)
-    CATEGORY = "sampling/custom_sampling/sigmas"
+    CATEGORY = "RES4LYF/sigmas"
     
     def main(self, sigmas, divisor):
         return (sigmas // divisor,)
@@ -665,7 +665,7 @@ class sigmas_add:
 
     FUNCTION = "main"
     RETURN_TYPES = ("SIGMAS",)
-    CATEGORY = "sampling/custom_sampling/sigmas"
+    CATEGORY = "RES4LYF/sigmas"
     
     def main(self, sigmas, addend):
         return (sigmas + addend,)
@@ -685,7 +685,7 @@ class sigmas_power:
 
     FUNCTION = "main"
     RETURN_TYPES = ("SIGMAS",)
-    CATEGORY = "sampling/custom_sampling/sigmas"
+    CATEGORY = "RES4LYF/sigmas"
     
     def main(self, sigmas, power):
         return (sigmas ** power,)
@@ -704,7 +704,7 @@ class sigmas_abs:
 
     FUNCTION = "main"
     RETURN_TYPES = ("SIGMAS",)
-    CATEGORY = "sampling/custom_sampling/sigmas"
+    CATEGORY = "RES4LYF/sigmas"
     
     def main(self, sigmas):
         return (abs(sigmas),)
@@ -724,7 +724,7 @@ class sigmas2_mult:
 
     FUNCTION = "main"
     RETURN_TYPES = ("SIGMAS",)
-    CATEGORY = "sampling/custom_sampling/sigmas"
+    CATEGORY = "RES4LYF/sigmas"
     
     def main(self, sigmas_1, sigmas_2):
         return (sigmas_1 * sigmas_2,)
@@ -744,7 +744,7 @@ class sigmas2_add:
 
     FUNCTION = "main"
     RETURN_TYPES = ("SIGMAS",)
-    CATEGORY = "sampling/custom_sampling/sigmas"
+    CATEGORY = "RES4LYF/sigmas"
     
     def main(self, sigmas_1, sigmas_2):
         return (sigmas_1 + sigmas_2,)
@@ -766,7 +766,7 @@ class sigmas_rescale:
     FUNCTION = "main"
     RETURN_TYPES = ("SIGMAS",)
     RETURN_NAMES = ("sigmas_rescaled",)
-    CATEGORY = "sampling/custom_sampling/sigmas"
+    CATEGORY = "RES4LYF/sigmas"
     DESCRIPTION = ("Can be used to set denoise. Results are generally better than with the approach used by KSampler and most nodes with denoise values "
                    "(which slice the sigmas schedule according to step count, not the noise level). Will also flip the sigma schedule if the start and end values are reversed." 
                    )
@@ -804,7 +804,7 @@ class sigmas_math1:
         }
     FUNCTION = "main"
     RETURN_TYPES = ("SIGMAS",)
-    CATEGORY = "sampling/custom_sampling/sigmas"
+    CATEGORY = "RES4LYF/sigmas"
     def main(self, start=0, stop=0, trim=0, a=None, b=None, c=None, x=1.0, y=1.0, z=1.0, f1="s", rescale=False, min1=1.0, max1=1.0):
         if stop == 0:
             t_lens = [len(tensor) for tensor in [a, b, c] if tensor is not None]
@@ -873,7 +873,7 @@ class sigmas_math3:
         }
     FUNCTION = "main"
     RETURN_TYPES = ("SIGMAS","SIGMAS","SIGMAS")
-    CATEGORY = "sampling/custom_sampling/sigmas"
+    CATEGORY = "RES4LYF/sigmas"
     def main(self, start=0, stop=0, trim=0, a=None, b=None, c=None, x=1.0, y=1.0, z=1.0, f1="s", f2="s", f3="s", rescale1=False, rescale2=False, rescale3=False, min1=1.0, max1=1.0, min2=1.0, max2=1.0, min3=1.0, max3=1.0):
         if stop == 0:
             t_lens = [len(tensor) for tensor in [a, b, c] if tensor is not None]
@@ -939,7 +939,7 @@ class sigmas_iteration_karras:
     FUNCTION = "main"
     RETURN_TYPES = ("SIGMAS","SIGMAS")
     RETURN_NAMES = ("momentums","sigmas")
-    CATEGORY = "sampling/custom_sampling/sigmas"
+    CATEGORY = "RES4LYF/schedulers"
     
     def main(self, steps_up, steps_down, rho_up, rho_down, s_min_start, s_max, s_min_end, sigmas=None, momentums=None):
         s_up = get_sigmas_karras(steps_up, s_min_start, s_max, rho_up)
@@ -987,7 +987,7 @@ class sigmas_iteration_polyexp:
     FUNCTION = "main"
     RETURN_TYPES = ("SIGMAS","SIGMAS")
     RETURN_NAMES = ("momentums","sigmas")
-    CATEGORY = "sampling/custom_sampling/sigmas"
+    CATEGORY = "RES4LYF/schedulers"
     
     def main(self, steps_up, steps_down, rho_up, rho_down, s_min_start, s_max, s_min_end, sigmas=None, momentums=None):
         s_up = get_sigmas_polyexponential(steps_up, s_min_start, s_max, rho_up)
@@ -1030,7 +1030,7 @@ class tan_scheduler:
 
     FUNCTION = "main"
     RETURN_TYPES = ("SIGMAS",)
-    CATEGORY = "sampling/custom_sampling/schedulers"
+    CATEGORY = "RES4LYF/schedulers"
     
     def main(self, steps, slope, offset, start, end, sgm, pad):
         smax = ((2/pi)*atan(-slope*(0-offset))+1)/2
@@ -1076,7 +1076,7 @@ class tan_scheduler_2stage:
     FUNCTION = "main"
     RETURN_TYPES = ("SIGMAS",)
     RETURN_NAMES = ("sigmas",)
-    CATEGORY = "sampling/custom_sampling/schedulers"
+    CATEGORY = "RES4LYF/schedulers"
 
     def get_tan_sigmas(self, steps, slope, pivot, start, end):
         smax = ((2/pi)*atan(-slope*(0-pivot))+1)/2
@@ -1128,7 +1128,7 @@ class tan_scheduler_2stage_simple:
     FUNCTION = "main"
     RETURN_TYPES = ("SIGMAS",)
     RETURN_NAMES = ("sigmas",)
-    CATEGORY = "sampling/custom_sampling/schedulers"
+    CATEGORY = "RES4LYF/schedulers"
 
     def get_tan_sigmas(self, steps, slope, pivot, start, end):
         smax = ((2/pi)*atan(-slope*(0-pivot))+1)/2
