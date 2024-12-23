@@ -47,7 +47,7 @@ def calculate_sigmas_RES4LYF(model_sampling, scheduler_name, steps):
     else:
         return original_calculate_sigmas(model_sampling, scheduler_name, steps)
     return sigmas
-    
+
 def init(check_imports=None):
     log("Init")
 
@@ -56,22 +56,11 @@ def init(check_imports=None):
 
     # monkey patch comfy.samplers.calculate_sigmas with custom implementation
     comfy.samplers.calculate_sigmas = calculate_sigmas_RES4LYF
-    comfy.samplers.SCHEDULER_NAMES = comfy.samplers.SCHEDULER_NAMES + ["beta57"]
-    comfy.samplers.KSampler.SCHEDULERS = comfy.samplers.KSampler.SCHEDULERS + ["beta57"]
+    if "beta57" not in comfy.samplers.SCHEDULER_NAMES:
+        comfy.samplers.SCHEDULER_NAMES = comfy.samplers.SCHEDULER_NAMES + ["beta57"]
+    if "beta57" not in comfy.samplers.KSampler.SCHEDULERS:
+        comfy.samplers.KSampler.SCHEDULERS = comfy.samplers.KSampler.SCHEDULERS + ["beta57"]
     return True
-
-    # if check_imports is not None:
-    #     import importlib.util
-    #     for imp in check_imports:
-    #         spec = importlib.util.find_spec(imp)
-    #         if spec is None:
-    #             log(f"{imp} is required, please check requirements are installed.",
-    #                 type="ERROR", always=True)
-    #             return False
-
-    # install_js()
-    # return True
-
 
 config = None
 

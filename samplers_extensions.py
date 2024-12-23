@@ -17,7 +17,7 @@ import torch.nn.functional as F
 import math
 import copy
 
-from .helper import initialize_or_scale, get_extra_options_kv, extra_options_flag
+from .helper import initialize_or_scale, get_res4lyf_scheduler_list, get_extra_options_kv, extra_options_flag
 
 
 def move_to_same_device(*tensors):
@@ -116,8 +116,8 @@ class ClownsharKSamplerGuides:
                      "guide_weight_bkg": ("FLOAT", {"default": 0.75, "min": -100.0, "max": 100.0, "step":0.01, "round": False, "tooltip": "Set the strength of the guide_bkg."}),
                      "guide_weight_scale": ("FLOAT", {"default": 1.0, "min": -100.0, "max": 100.0, "step":0.01, "round": False, "tooltip": "Another way to control guide_weight strength. It works like the denoise control for sigmas schedules. Can be used together with guide_weight."}),
                      "guide_weight_bkg_scale": ("FLOAT", {"default": 1.0, "min": -100.0, "max": 100.0, "step":0.01, "round": False, "tooltip": "Another way to control guide_weight strength. It works like the denoise control for sigmas schedules. Can be used together with guide_weight_bkg."}),
-                    "guide_weight_scheduler": (["constant"] + comfy.samplers.SCHEDULER_NAMES + ["beta57"], {"default": "beta57"},),
-                    "guide_weight_scheduler_bkg": (["constant"] + comfy.samplers.SCHEDULER_NAMES + ["beta57"], {"default": "beta57"},),
+                    "guide_weight_scheduler": (["constant"] + get_res4lyf_scheduler_list(), {"default": "beta57"},),
+                    "guide_weight_scheduler_bkg": (["constant"] + get_res4lyf_scheduler_list(), {"default": "beta57"},),
                     "guide_end_step": ("INT", {"default": 15, "min": 1, "max": 10000}),
                     "guide_bkg_end_step": ("INT", {"default": 15, "min": 1, "max": 10000}),
                     },
