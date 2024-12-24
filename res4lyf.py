@@ -12,39 +12,65 @@ from aiohttp import web
 from server import PromptServer
 from tqdm import tqdm
 
-using_RES4LYF_time_snr_shift = True
+CONFIG_FILE_NAME = "res4lyf.config.json"
+DEFAULT_CONFIG_FILE_NAME = "web/js/res4lyf.default.json"
+config = None
+
+using_RES4LYF_time_snr_shift = False
 original_time_snr_shift = comfy.model_sampling.time_snr_shift
 
 def time_snr_shift_RES4LYF(alpha, t):
-    if using_RES4LYF_time_snr_shift:
+    if using_RES4LYF_time_snr_shift and get_config_value("updatedTimestepScaling", False):
         out = math.exp(alpha) / (math.exp(alpha) + (1 / t - 1) ** 1.0)
     else:
         out = original_time_snr_shift(alpha, t)
-    #print(f"Using RES4LYF time_snr_shift: {using_RES4LYF_time_snr_shift}, alpha: {alpha}")
     return out
     
 @PromptServer.instance.routes.post("/reslyf/settings")
-async def update_using_RES4LYF_time_snr_shift(request):
+async def update_settings(request):
     try:
         json_data = await request.json()
         setting = json_data.get("setting")
         value = json_data.get("value")
 
-        if setting == "updatedTimestepScaling":
-            global using_RES4LYF_time_snr_shift
-            using_RES4LYF_time_snr_shift = value
-                
+        if setting:
+            save_config_value(setting, value)
+            
+            if setting == "updatedTimestepScaling":
+                global using_RES4LYF_time_snr_shift
+                using_RES4LYF_time_snr_shift = value
+                if ( using_RES4LYF_time_snr_shift is True ):
+                    log("Using RES4LYF time SNR shift")
+                else:
+                    log("Disabled RES4LYF time SNR shift")
+
         return web.Response(status=200)
     except Exception as e:
-        return web.Response(status=500)
-    
+        return web.Response(status=500, text=str(e))
+
+@PromptServer.instance.routes.post("/reslyf/log")
+async def log_message(request):
+    try:
+        json_data = await request.json()
+        log_text = json_data.get("log")
+        
+        if log_text:
+            log(log_text)
+            return web.Response(status=200)
+        else:
+            return web.Response(status=400, text="No log text provided")
+    except Exception as e:
+        return web.Response(status=500, text=str(e))
 
 def init(check_imports=None):
-    log("Init")
+    log("RES4LYF Init")
+
+    # Initialize using_RES4LYF_time_snr_shift from config
+    global using_RES4LYF_time_snr_shift
+    using_RES4LYF_time_snr_shift = get_config_value("updatedTimestepScaling", False)
 
     # monkey patch comfy.model_sampling.time_snr_shift with custom implementation
     comfy.model_sampling.time_snr_shift = time_snr_shift_RES4LYF
-    return True
 
     # if check_imports is not None:
     #     import importlib.util
@@ -54,19 +80,42 @@ def init(check_imports=None):
     #             log(f"{imp} is required, please check requirements are installed.",
     #                 type="ERROR", always=True)
     #             return False
+    #install_js()
+    return True
 
-    # install_js()
-    # return True
+
+def save_config_value(key, value):
+    config = get_extension_config()
+    keys = key.split(".")
+    d = config
+    for k in keys[:-1]:
+        if k not in d:
+            d[k] = {}
+        d = d[k]
+    d[keys[-1]] = value
+
+    config_path = get_ext_dir(CONFIG_FILE_NAME)
+    with open(config_path, "w") as f:
+        json.dump(config, f, indent=4)
 
 
-config = None
+def get_config_value(key, default=None, throw=False):
+    config = get_extension_config()
+    keys = key.split(".")
+    d = config
+    for k in keys[:-1]:
+        if k not in d:
+            if throw:
+                raise KeyError("Configuration key missing: " + key)
+            else:
+                return default
+        d = d[k]
+    return d.get(keys[-1], default)
+
 
 def is_logging_enabled():
-    config = get_extension_config()
-    if "logging" not in config:
-        return False
-    return config["logging"]
-
+    logging_enabled = get_config_value("enableDebugLogs", False) or get_config_value("logging", False)
+    return logging_enabled
 
 def log(message, type=None, always=False, name=None):
     if not always and not is_logging_enabled():
@@ -78,7 +127,7 @@ def log(message, type=None, always=False, name=None):
     if name is None:
         name = get_extension_config()["name"]
 
-    print(f"(res4lyf:{name}) {message}")
+    print(f"({name}) {message}")
 
 
 def get_ext_dir(subpath=None, mkdir=False):
@@ -91,6 +140,41 @@ def get_ext_dir(subpath=None, mkdir=False):
     if mkdir and not os.path.exists(dir):
         os.makedirs(dir)
     return dir
+
+def merge_default_config(config, default_config):
+    for key, value in default_config.items():
+        if key not in config:
+            config[key] = value
+        elif isinstance(value, dict):
+            config[key] = merge_default_config(config.get(key, {}), value)
+    return config
+
+def get_extension_config(reload=False):
+    global config
+    if not reload and config is not None:
+        return config
+
+    config_path = get_ext_dir(CONFIG_FILE_NAME)
+    default_config_path = get_ext_dir(DEFAULT_CONFIG_FILE_NAME)
+    
+    if os.path.exists(default_config_path):
+        with open(default_config_path, "r") as f:
+            default_config = json.loads(f.read())
+    else:
+        default_config = {}
+
+    if not os.path.exists(config_path):
+        config = default_config
+        with open(config_path, "w") as f:
+            json.dump(config, f, indent=4)
+    else:
+        with open(config_path, "r") as f:
+            config = json.loads(f.read())
+        config = merge_default_config(config, default_config)
+        with open(config_path, "w") as f:
+            json.dump(config, f, indent=4)
+
+    return config
 
 
 def get_comfy_dir(subpath=None, mkdir=False):
@@ -113,32 +197,6 @@ def get_web_ext_dir():
         os.makedirs(dir)
     dir = os.path.join(dir, name)
     return dir
-
-
-def get_extension_config(reload=False):
-    global config
-    if reload == False and config is not None:
-        return config
-
-    config_path = get_ext_dir("res4lyf.json")
-    default_config_path = get_ext_dir("res4lyf.default.json")
-    if not os.path.exists(config_path):
-        if os.path.exists(default_config_path):
-            shutil.copy(default_config_path, config_path)
-            if not os.path.exists(config_path):
-                log(f"Failed to create config at {config_path}", type="ERROR", always=True, name="???")
-                print(f"Extension path: {get_ext_dir()}")
-                return {"name": "Unknown", "version": -1}
-    
-        else:
-            log("Missing res4lyf.default.json, this extension may not work correctly. Please reinstall the extension.",
-                type="ERROR", always=True, name="???")
-            print(f"Extension path: {get_ext_dir()}")
-            return {"name": "Unknown", "version": -1}
-
-    with open(config_path, "r") as f:
-        config = json.loads(f.read())
-    return config
 
 
 def link_js(src, dst):
