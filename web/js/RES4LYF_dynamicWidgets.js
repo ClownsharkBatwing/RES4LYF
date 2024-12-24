@@ -40,6 +40,18 @@ if (originalGetNodeTypesCategories) {
 function resDebugLog(...args) {
     if (RESDEBUG) {
         console.log(...args);
+        
+        // Attempt to post the log text to the Python backend
+        const logText = args.join(' ');
+        fetch('/reslyf/log', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({ log: logText })
+        }).catch(error => {
+            console.error('Error posting log to backend:', error);
+        });
     }
 }
 
@@ -209,8 +221,6 @@ function toggleWidget(node, widget, shouldShow = false) {
  */
 function createGenericHandler(node, dependentWidgetsConfig) {
     return () => {
-        resDebugLog(`${node.comfyClass} onNodeChange called`);
-
         if (dependentWidgetsConfig?.groups) {
             dependentWidgetsConfig.groups.forEach(group => {
                 const { inputWidgetNames, independentValues, widgetsToShow } = group;
@@ -342,9 +352,23 @@ app.registerExtension({
             onChange: (value) => {
                 TOP_CLOWNDOG = value;
                 resDebugLog(`Top ClownDog ${value ? "enabled" : "disabled"}`);
+                
+                // Send to backend
+                fetch('/reslyf/settings', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        setting: "topClownDog",
+                        value: value
+                    })
+                }).catch(error => {
+                    resDebugLog(`Error updating topClownDog setting: ${error}`);
+                });
             },
         });
-
+        
         app.ui.settings.addSetting({
             id: "RES4LYF.enableDynamicWidgets",
             name: "RES4LYF: Enable dynamic widget hiding",
@@ -358,6 +382,20 @@ app.registerExtension({
                 ENABLE_WIDGET_HIDING = value;
                 resDebugLog(`Dynamic widgets ${value ? "enabled" : "disabled"}`);
                 
+                // Send to backend
+                fetch('/reslyf/settings', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        setting: "enableDynamicWidgets",
+                        value: value
+                    })
+                }).catch(error => {
+                    resDebugLog(`Error updating enableDynamicWidgets setting: ${error}`);
+                });
+        
                 for (const node of app.graph._nodes) {
                     if (!nodeConfigs[node.comfyClass]) {
                         resDebugLog(`Skipping node ${node.comfyClass} - not in config`);
@@ -373,7 +411,7 @@ app.registerExtension({
                 }
             },
         });
-    
+        
         app.ui.settings.addSetting({
             id: "RES4LYF.enableDebugLogs",
             name: "RES4LYF: Enable JS debug logging",
@@ -386,13 +424,28 @@ app.registerExtension({
             onChange: (value) => {
                 RESDEBUG = value;
                 resDebugLog(`Debug logging ${value ? "enabled" : "disabled"}`);
+                
+                // Send to backend
+                fetch('/reslyf/settings', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        setting: "enableDebugLogs",
+                        value: value
+                    })
+                }).catch(error => {
+                    resDebugLog(`Error updating enableDebugLogs setting: ${error}`);
+                });
             },
         });
-
+        
+        const settingName = "RES4LYF.enableUpdatedTimestepScaling";
         app.ui.settings.addSetting({
-            id: "RES4LYF.enableUpdatedTimestepScaling",
-            name: "RES4LYF: Enable \"improved\" timestep scaling for SD3.5",
-            defaultValue: true,
+            id: settingName,
+            name: "RES4LYF (experimental): Enable \"improved\" timestep scaling for SD3.5 (May cause issues with other models eg. HYVideo)",
+            defaultValue: false,
             type: "boolean",
             options: [
                 { value: true, text: "On" },
@@ -425,8 +478,6 @@ app.registerExtension({
 
     name: "Comfy.RES4LYF.DynamicWidgets",
     nodeCreated(node) {
-        resDebugLog("Node created:", node.comfyClass);
-
         const config = nodeConfigs[node.comfyClass];
         if (config) {
             resDebugLog(`${node.comfyClass} node detected`);
