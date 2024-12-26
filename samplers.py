@@ -90,7 +90,7 @@ class SharkSampler:
                     shift=3.0, base_shift=0.85, options=None, sde_noise=None,sde_noise_steps=1, shift_scaling="exponential", unsampler_type="linear",
                     extra_options="", 
                     ): 
-
+            
             model = model.clone()
             if positive[0][1] is not None: 
                 if "regional_conditioning_weights" in positive[0][1]:
@@ -390,7 +390,6 @@ class ClownSampler:
                 d_noise = options.get('d_noise', d_noise)
                 alpha_sde = options.get('alpha_sde', alpha_sde)
                 k_sde = options.get('k_sde', k_sde)
-                noise_seed_sde = options.get('noise_seed_sde', noise_seed_sde)
                 c1 = options.get('c1', c1)
                 c2 = options.get('c2', c2)
                 c3 = options.get('c3', c3)
@@ -469,7 +468,7 @@ class ClownSampler:
 
             return (sampler, )
 
-                    
+
 
 
 
@@ -574,6 +573,8 @@ class UltraSharkSampler:
                 "latent_noise": ("LATENT", ),
                 "guide": ("LATENT",),
                 "guide_weights": ("SIGMAS",),
+                #"style": ("CONDITIONING", ),
+                #"img_style": ("CONDITIONING", ),
             }
         }
 
@@ -586,12 +587,12 @@ class UltraSharkSampler:
     DESCRIPTION = "For use with Stable Cascade and UltraCascade."
     
     def main(self, model, add_noise, noise_is_latent, noise_type, noise_seed, cfg, alpha, k, positive, negative, sampler, 
-               sigmas, guide_type, guide_weight, latent_image, latent_noise=None, guide=None, guide_weights=None): 
+               sigmas, guide_type, guide_weight, latent_image, latent_noise=None, guide=None, guide_weights=None, style=None, img_style=None): 
 
             if model.model.model_config.unet_config.get('stable_cascade_stage') == 'up':
                 model = model.clone()
                 x_lr = guide['samples'] if guide is not None else None
-                guide_weights = initialize_or_scale(guide_weights, guide_weight, 10000)("FLOAT", {"default": 1.0, "min": -10000, "max": 10000, "step":0.01}),
+                guide_weights = initialize_or_scale(guide_weights, guide_weight, 10000)#("FLOAT", {"default": 1.0, "min": -10000, "max": 10000, "step":0.01}),
                 #model.model.diffusion_model.set_guide_weights(guide_weights=guide_weights)
                 #model.model.diffusion_model.set_guide_type(guide_type=guide_type)
                 #model.model.diffusion_model.set_x_lr(x_lr=x_lr)
@@ -621,6 +622,17 @@ class UltraSharkSampler:
                     c_neg.append([torch.zeros_like(t[0]), d_neg])
                 positive = c_pos
                 negative = c_neg
+                
+            if style is not None:
+                model.set_model_patch(style, 'style_cond')
+            if img_style is not None:
+                model.set_model_patch(img_style,'img_style_cond')
+        
+        
+            # 1, 768      clip_style[0][0][1]['unclip_conditioning'][0]['clip_vision_output'].image_embeds.shape
+            # 1, 1280     clip_style[0][0][1]['pooled_output'].shape 
+            # 1, 77, 1280 clip_style[0][0][0].shape
+        
         
             latent = latent_image
             latent_image = latent["samples"]

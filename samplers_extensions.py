@@ -47,7 +47,7 @@ class SamplerOptions_TimestepScaling:
     RETURN_NAMES = ("sampler",)
     FUNCTION = "set_sampler_extra_options"
     
-    CATEGORY = "sampling/custom_sampling/samplers"
+    CATEGORY = "RES4LYF/sampler_extensions"
     DESCRIPTION = "Patches ClownSampler's t_fn and sigma_fn (sigma <-> timestep) formulas to allow picking Runge-Kutta Ci values (midpoints) with different scaling."
 
     def set_sampler_extra_options(self, sampler, t_fn_formula=None, sigma_fn_formula=None, ):
@@ -78,7 +78,7 @@ class SamplerOptions_GarbageCollection:
     RETURN_NAMES = ("sampler",)
     FUNCTION = "set_sampler_extra_options"
     
-    CATEGORY = "sampling/custom_sampling/samplers"
+    CATEGORY = "RES4LYF/sampler_extensions"
     DESCRIPTION = "Patches ClownSampler's to use garbage collection after every step. This can help with OOM issues during inference for large models like Flux. The tradeoff is slower sampling."
 
     def set_sampler_extra_options(self, sampler, garbage_collection):
@@ -106,6 +106,158 @@ GUIDE_MODE_NAMES = ["unsample",
                     "none",
 ]
 
+from .conditioning import FluxRegionalPrompt, FluxRegionalConditioning
+from .models import ReFluxPatcher
+
+class ClownInpaint: ##################################################################################################################################
+    @classmethod
+    def INPUT_TYPES(s):
+        return {"required":
+                    {#"guide_mode": (GUIDE_MODE_NAMES, {"default": 'epsilon', "tooltip": "Recommended: epsilon or mean/mean_std with sampler_mode = standard, and unsample/resample with sampler_mode = unsample/resample. Epsilon_dynamic_mean, etc. are only used with two latent inputs and a mask. Blend/hard_light/mean/mean_std etc. require low strengths, start with 0.01-0.02."}),
+                     "guide_weight":               ("FLOAT", {"default": 0.10, "min": -100.0, "max": 100.0, "step":0.01, "round": False, "tooltip": "Set the strength of the guide."}),
+                     "guide_weight_bkg":           ("FLOAT", {"default": 1.00, "min": -100.0, "max": 100.0, "step":0.01, "round": False, "tooltip": "Set the strength of the guide_bkg."}),
+                    "guide_weight_scheduler":     (["constant"] + comfy.samplers.SCHEDULER_NAMES + ["beta57"], {"default": "beta57"},),
+                    "guide_weight_scheduler_bkg": (["constant"] + comfy.samplers.SCHEDULER_NAMES + ["beta57"], {"default": "constant"},),
+                    "guide_end_step":              ("INT", {"default": 15, "min": 1, "max": 10000}),
+                    "guide_bkg_end_step":          ("INT", {"default": 10000, "min": 1, "max": 10000}),
+                    },
+                    "optional": 
+                    {
+                        "model":             ("MODEL", ),
+                        "positive_inpaint":  ("CONDITIONING", ),
+                        "positive_bkg":      ("CONDITIONING", ),
+                        "negative":          ("CONDITIONING", ),
+                        "latent_image":      ("LATENT", ),
+                        "mask":              ("MASK", ),
+                        "guide_weights":     ("SIGMAS", ),
+                        "guide_weights_bkg": ("SIGMAS", ),
+                    }  
+               }
+    RETURN_TYPES = ("MODEL","CONDITIONING","CONDITIONING","LATENT","GUIDES",)
+    RETURN_NAMES = ("model","positive"    ,"negative"    ,"latent","guides",)
+    CATEGORY = "RES4LYF/sampler_extensions"
+
+    FUNCTION = "main"
+
+    def main(self, guide_weight_scheduler="constant", guide_weight_scheduler_bkg="constant", guide_end_step=10000, guide_bkg_end_step=30, guide_weight_scale=1.0, guide_weight_bkg_scale=1.0, guide=None, guide_bkg=None, guide_weight=1.0, guide_weight_bkg=1.0, 
+                    guide_mode="epsilon", guide_weights=None, guide_weights_bkg=None, guide_mask_bkg=None,
+                    model=None, positive_inpaint=None, positive_bkg=None, negative=None, latent_image=None, mask=None, 
+                    ):
+        default_dtype = torch.float64
+        guide = latent_image
+        guide_bkg = {'samples': latent_image['samples'].clone()}
+        
+        max_steps = 10000
+        
+        denoise, denoise_bkg = guide_weight_scale, guide_weight_bkg_scale
+        
+        if guide_mode.startswith("epsilon_") and guide_bkg == None:
+            print("Warning: need two latent inputs for guide_mode=",guide_mode," to work. Falling back to epsilon.")
+            guide_mode = "epsilon"
+        
+        if guide_weight_scheduler == "constant": 
+            guide_weights = initialize_or_scale(None, guide_weight, guide_end_step).to(default_dtype)
+            guide_weights = F.pad(guide_weights, (0, max_steps), value=0.0)
+        
+        if guide_weight_scheduler_bkg == "constant": 
+            guide_weights_bkg = initialize_or_scale(None, guide_weight_bkg, guide_bkg_end_step).to(default_dtype)
+            guide_weights_bkg = F.pad(guide_weights_bkg, (0, max_steps), value=0.0)
+            
+        guides = (guide_mode, guide_weight, guide_weight_bkg, guide_weights, guide_weights_bkg, guide, guide_bkg, mask, guide_mask_bkg,
+                  guide_weight_scheduler, guide_weight_scheduler_bkg, guide_end_step, guide_bkg_end_step, denoise, denoise_bkg)
+        
+        latent = {'samples': torch.zeros_like(latent_image['samples'])}
+        if (positive_inpaint is None) and (positive_bkg is None):
+            positive = None
+        else:
+            if positive_bkg is None:
+                if positive_bkg is None:
+                    positive_bkg = [[
+                        torch.zeros((1, 256, 4096)),
+                        {'pooled_output': torch.zeros((1, 768))}
+                        ]]
+            cond_regional, mask_inv     = FluxRegionalPrompt().main(cond=positive_inpaint,                              mask=mask)
+            cond_regional, mask_inv_inv = FluxRegionalPrompt().main(cond=positive_bkg    , cond_regional=cond_regional, mask=mask_inv)
+            
+            positive, = FluxRegionalConditioning().main(conditioning_regional=cond_regional, self_attn_floor=0.0)
+            
+        model, = ReFluxPatcher().main(model, enable=True)
+        
+        return (model, positive, negative, latent, guides, )
+    
+    
+class ClownInpaintSimple: ##################################################################################################################################
+    @classmethod
+    def INPUT_TYPES(s):
+        return {"required":
+                    {#"guide_mode": (GUIDE_MODE_NAMES, {"default": 'epsilon', "tooltip": "Recommended: epsilon or mean/mean_std with sampler_mode = standard, and unsample/resample with sampler_mode = unsample/resample. Epsilon_dynamic_mean, etc. are only used with two latent inputs and a mask. Blend/hard_light/mean/mean_std etc. require low strengths, start with 0.01-0.02."}),
+                     "guide_weight":               ("FLOAT", {"default": 0.10, "min": -100.0, "max": 100.0, "step":0.01, "round": False, "tooltip": "Set the strength of the guide."}),
+                    "guide_weight_scheduler":     (["constant"] + comfy.samplers.SCHEDULER_NAMES + ["beta57"], {"default": "beta57"},),
+                    "guide_end_step":              ("INT", {"default": 15, "min": 1, "max": 10000}),
+                    },
+                    "optional": 
+                    {
+                        "model":             ("MODEL", ),
+                        "positive_inpaint":  ("CONDITIONING", ),
+                        "negative":          ("CONDITIONING", ),
+                        "latent_image":      ("LATENT", ),
+                        "mask":              ("MASK", ),
+                    }
+               }
+    RETURN_TYPES = ("MODEL","CONDITIONING","CONDITIONING","LATENT","GUIDES",)
+    RETURN_NAMES = ("model","positive"    ,"negative"    ,"latent","guides",)
+    CATEGORY = "RES4LYF/sampler_extensions"
+
+    FUNCTION = "main"
+
+    def main(self, guide_weight_scheduler="constant", guide_weight_scheduler_bkg="constant", guide_end_step=10000, guide_bkg_end_step=30, guide_weight_scale=1.0, guide_weight_bkg_scale=1.0, guide=None, guide_bkg=None, guide_weight=1.0, guide_weight_bkg=1.0, 
+                    guide_mode="epsilon", guide_weights=None, guide_weights_bkg=None, guide_mask_bkg=None,
+                    model=None, positive_inpaint=None, positive_bkg=None, negative=None, latent_image=None, mask=None, 
+                    ):
+        default_dtype = torch.float64
+        guide = latent_image
+        guide_bkg = {'samples': latent_image['samples'].clone()}
+        
+        max_steps = 10000
+        
+        denoise, denoise_bkg = guide_weight_scale, guide_weight_bkg_scale
+        
+        if guide_mode.startswith("epsilon_") and guide_bkg == None:
+            print("Warning: need two latent inputs for guide_mode=",guide_mode," to work. Falling back to epsilon.")
+            guide_mode = "epsilon"
+        
+        if guide_weight_scheduler == "constant": 
+            guide_weights = initialize_or_scale(None, guide_weight, guide_end_step).to(default_dtype)
+            guide_weights = F.pad(guide_weights, (0, max_steps), value=0.0)
+        
+        if guide_weight_scheduler_bkg == "constant": 
+            guide_weights_bkg = initialize_or_scale(None, guide_weight_bkg, guide_bkg_end_step).to(default_dtype)
+            guide_weights_bkg = F.pad(guide_weights_bkg, (0, max_steps), value=0.0)
+            
+        guides = (guide_mode, guide_weight, guide_weight_bkg, guide_weights, guide_weights_bkg, guide, guide_bkg, mask, guide_mask_bkg,
+                  guide_weight_scheduler, guide_weight_scheduler_bkg, guide_end_step, guide_bkg_end_step, denoise, denoise_bkg)
+        
+        latent = {'samples': torch.zeros_like(latent_image['samples'])}
+        if (positive_inpaint is None) and (positive_bkg is None):
+            positive = None
+        else:
+            if positive_bkg is None:
+                if positive_bkg is None:
+                    positive_bkg = [[
+                        torch.zeros((1, 256, 4096)),
+                        {'pooled_output': torch.zeros((1, 768))}
+                        ]]
+            cond_regional, mask_inv     = FluxRegionalPrompt().main(cond=positive_inpaint,                              mask=mask)
+            cond_regional, mask_inv_inv = FluxRegionalPrompt().main(cond=positive_bkg    , cond_regional=cond_regional, mask=mask_inv)
+            
+            positive, = FluxRegionalConditioning().main(conditioning_regional=cond_regional, self_attn_floor=1.0)
+            
+        model, = ReFluxPatcher().main(model, enable=True)
+        
+        return (model, positive, negative, latent, guides, )
+    
+
+##################################################################################################################################
 
 class ClownsharKSamplerGuides:
     @classmethod
@@ -133,7 +285,7 @@ class ClownsharKSamplerGuides:
                }
     RETURN_TYPES = ("GUIDES",)
     RETURN_NAMES = ("guides",)
-    CATEGORY = "sampling/custom_sampling/samplers"
+    CATEGORY = "RES4LYF/sampler_extensions"
 
     FUNCTION = "main"
 
@@ -181,7 +333,7 @@ class ClownsharKSamplerAutomation:
                }
     RETURN_TYPES = ("AUTOMATION",)
     RETURN_NAMES = ("automation",)
-    CATEGORY = "sampling/custom_sampling/samplers"
+    CATEGORY = "RES4LYF/sampler_extensions"
     
     FUNCTION = "main"
 
@@ -223,7 +375,7 @@ class ClownsharKSamplerOptions:
     
     RETURN_TYPES = ("OPTIONS",)
     RETURN_NAMES = ("options",)
-    CATEGORY = "sampling/custom_sampling/samplers"
+    CATEGORY = "RES4LYF/sampler_extensions"
 
     FUNCTION = "main"
 
@@ -274,7 +426,7 @@ class ClownsharKSamplerOptions_SDE_Noise:
     
     RETURN_TYPES = ("OPTIONS",)
     RETURN_NAMES = ("options",)
-    CATEGORY = "sampling/custom_sampling/samplers"
+    CATEGORY = "RES4LYF/sampler_extensions"
 
     FUNCTION = "main"
 

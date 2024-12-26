@@ -148,6 +148,9 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
     if extra_options_flag("cfg_cw", extra_options):
         cfg_cw = float(get_extra_options_kv("cfg_cw", "1.0", extra_options))
     extra_args = rk.init_cfg_channelwise(x, cfg_cw, **extra_args)
+    
+    cossim_iterations = int(get_extra_options_kv("noise_cossim_iterations", "1", extra_options))
+    COSSIM_MAX = "True" == get_extra_options_kv("noise_cossim_max", "False", extra_options)
 
     denoised, eps = torch.zeros_like(x), torch.zeros_like(x)
     for step in trange(len(sigmas)-1, disable=disable):
@@ -196,6 +199,7 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
                 SDE_NOISE_EXTERNAL=False
             else:
                 sde_noise_t = sde_noise[step]
+        x_prenoise = x.clone()
         x_[0] = rk.add_noise_pre(x, y0, lgw[step], sigma_up, sigma, sigma_next, sigma_down, alpha_ratio, s_noise, noise_mode, SDE_NOISE_EXTERNAL, sde_noise_t) #y0, lgw, sigma_down are currently unused
         
         x_0 = x_[0].clone()
@@ -245,7 +249,19 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
                         denoised_shifted = denoised   +   lgw_mask * (y0 - denoised)   +   lgw_mask_inv * (y0_inv - denoised)
                     x_[row+1] = denoised_shifted + eps
                 
-                x_[row+1] = rk.add_noise_post(x_[row+1], y0, lgw[step], sub_sigma_up, sub_sigma, s_[row], sub_sigma_down, sub_alpha_ratio, s_noise, substep_noise_mode, SDE_NOISE_EXTERNAL, sde_noise_t)    #y0, lgw, sigma_down are currently unused
+                #x_[row+1] = rk.add_noise_post(x_[row+1], y0, lgw[step], sub_sigma_up, sub_sigma, s_[row], sub_sigma_down, sub_alpha_ratio, s_noise, substep_noise_mode, SDE_NOISE_EXTERNAL, sde_noise_t)    #y0, lgw, sigma_down are currently unused
+                
+                x_tmp, cossim_tmp = [], []
+                for i in range(cossim_iterations):
+                    x_tmp.append(rk.add_noise_post(x_[row+1], y0, lgw[step], sub_sigma_up, sub_sigma, s_[row], sub_sigma_down, sub_alpha_ratio, s_noise, substep_noise_mode, SDE_NOISE_EXTERNAL, sde_noise_t)    )#y0, lgw, sigma_down are currently unused
+                    cossim_tmp.append(get_cosine_similarity(x_prenoise, x_tmp[i]))
+                for i in range(len(x_tmp)):
+                    if COSSIM_MAX and (cossim_tmp[i] == max(cossim_tmp)):
+                        x_[row+1] = x_tmp[i]
+                        break
+                    elif cossim_tmp[i] == min(cossim_tmp):
+                        x_[row+1] = x_tmp[i]
+                        break
                 eps_[row], data_[row] = rk(x_0, x_[row+1], s_[row], h, **extra_args)       #MODEL CALL
   
                 if extra_options_flag("substep_noise_scaling_alt", extra_options):
@@ -321,7 +337,7 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
                     eps_down, data_down = rk(x_0, x_mid, sigma_down, h, **extra_args) #should h_irk = h? going to change it for now.
                     eps_list.append(eps_down)
 
-                 
+
             s_all = [s for s in s_all if s in s_irk_rk]
 
             eps_list = [eps_list[s_all.index(s)].clone() for s in s_irk_rk]
@@ -337,9 +353,15 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
                 eps = x - denoised
                 x = process_guides_poststep(x, denoised, eps, y0, y0_inv, mask, lgw_mask, lgw_mask_inv, guide_mode, latent_guide, latent_guide_inv, UNSAMPLE, extra_options)
                 
-                
-                
-        callback({'x': x, 'i': step, 'sigma': sigma, 'sigma_next': sigma_next, 'denoised': data_[0].to(torch.float32)}) if callback is not None else None
+        if extra_options_flag("eps_preview", extra_options) == False:
+            callback({'x': x, 'i': step, 'sigma': sigma, 'sigma_next': sigma_next, 'denoised': data_[0]}) if callback is not None else None
+        elif latent_guide is not None:
+            callback({'x': x, 'i': step, 'sigma': sigma, 'sigma_next': sigma_next, 'denoised': eps_[0]}) if callback is not None else None
+            #callback({'x': x, 'i': step, 'sigma': sigma, 'sigma_next': sigma_next, 'denoised': ((x_0 - y0) / sigma).to(torch.float32)}) if callback is not None else None
+        else:
+            callback({'x': x, 'i': step, 'sigma': sigma, 'sigma_next': sigma_next, 'denoised': ((x_0 - data_[0]) / sigma).to(torch.float32)}) if callback is not None else None
+            #callback({'x': x, 'i': step, 'sigma': sigma, 'sigma_next': sigma_next, 'denoised': eps_[0].to(torch.float32)}) if callback is not None else None
+        #callback({'x': x, 'i': step, 'sigma': sigma, 'sigma_next': sigma_next, 'denoised': data_[0].to(torch.float32)}) if callback is not None else None
 
         sde_noise_t = None
         if SDE_NOISE_EXTERNAL:
@@ -347,7 +369,18 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
                 SDE_NOISE_EXTERNAL=False
             else:
                 sde_noise_t = sde_noise[step]
-        x = rk.add_noise_post(x, y0, lgw[step], sigma_up, sigma, sigma_next, sigma_down, alpha_ratio, s_noise, noise_mode, SDE_NOISE_EXTERNAL, sde_noise_t)    #y0, lgw, sigma_down are currently unused
+                
+        x_tmp, cossim_tmp = [], []
+        for i in range(cossim_iterations):
+            x_tmp.append(rk.add_noise_post(x, y0, lgw[step], sigma_up, sigma, sigma_next, sigma_down, alpha_ratio, s_noise, noise_mode, SDE_NOISE_EXTERNAL, sde_noise_t)    )#y0, lgw, sigma_down are currently unused
+            cossim_tmp.append(get_cosine_similarity(x_prenoise, x_tmp[i]))
+        for i in range(len(x_tmp)):
+            if COSSIM_MAX and (cossim_tmp[i] == max(cossim_tmp)):
+                x = x_tmp[i]
+                break
+            elif cossim_tmp[i] == min(cossim_tmp):
+                x = x_tmp[i]
+                break
         
         for ms in range(rk.multistep_stages):
             eps_ [rk.multistep_stages - ms] = eps_ [rk.multistep_stages - ms - 1]
@@ -357,7 +390,8 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
         
     return x
 
-
+def get_cosine_similarity(a, b):
+    return (a * b).sum() / (torch.norm(a) * torch.norm(b))
 
 def get_explicit_rk_step(rk, rk_type, x, y0, y0_inv, lgw, lgw_inv, mask, lgw_mask, lgw_mask_inv, step, sigma, sigma_next, eta, eta_var, s_noise, noise_mode, c2, c3, stepcount, sigmas, x_, eps_, data_, unsample_resample_scale, guide_mode, latent_guide, latent_guide_inv, UNSAMPLE, extra_options, **extra_args):
     extra_args = {} if extra_args is None else extra_args

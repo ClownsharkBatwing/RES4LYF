@@ -86,6 +86,10 @@ NODE_CLASS_MAPPINGS = {
     "ClownsharKSampler": samplers.ClownsharKSampler,
     "ClownsharKSamplerGuides": samplers_extensions.ClownsharKSamplerGuides,
     
+    "ClownInpaint": samplers_extensions.ClownInpaint,
+    "ClownInpaintSimple": samplers_extensions.ClownInpaintSimple,
+
+    
     "ClownsharKSamplerOptions": samplers_extensions.ClownsharKSamplerOptions,
     "ClownsharKSamplerOptions_SDE_Noise": samplers_extensions.ClownsharKSamplerOptions_SDE_Noise,
     "ClownsharKSamplerAutomation": samplers_extensions.ClownsharKSamplerAutomation,
@@ -116,6 +120,7 @@ NODE_CLASS_MAPPINGS = {
 
     "ConditioningAverageScheduler": conditioning.ConditioningAverageScheduler,
     "ConditioningMultiply": conditioning.ConditioningMultiply,
+    "ConditioningAdd": conditioning.ConditioningAdd,
     "Conditioning Recast FP64": conditioning.Conditioning_Recast64,
     "StableCascade_StageB_Conditioning64": conditioning.StableCascade_StageB_Conditioning64,
     "ConditioningZeroAndTruncate": conditioning.ConditioningZeroAndTruncate,
@@ -218,6 +223,7 @@ if flags["test_samplers"]:
     NODE_CLASS_MAPPINGS.update({
         "SamplerRK_Test": test_samplers.SamplerRK_Test,
         "Zampler_Test": test_samplers.Zampler_Test,
+        "UltraSharkSamplerRBTest": test_samplers.UltraSharkSamplerRBTest,
     })
     extra_samplers.update({
         "rk_test":  test_samplers.sample_rk_test,
