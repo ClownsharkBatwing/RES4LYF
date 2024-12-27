@@ -60,8 +60,7 @@ class RK_Method:
         self.multistep_stages = 0
         
         self.cfg_cw = 0
-        
-        #self.UNSAMPLE = False
+
         
     @staticmethod
     def is_exponential(rk_type):
@@ -124,7 +123,7 @@ class RK_Method:
             return x
         
     def add_noise_post(self, x, y0, lgw, sigma_up, sigma, sigma_next, sigma_down, alpha_ratio, s_noise, noise_mode, SDE_NOISE_EXTERNAL=False, sde_noise_t=None):
-        if isinstance(self.model_sampling, comfy.model_sampling.CONST) == True  or (isinstance(self.model_sampling, comfy.model_sampling.CONST) == False and noise_mode != "hard"):
+        if isinstance(self.model_sampling, comfy.model_sampling.CONST) == True   or   (isinstance(self.model_sampling, comfy.model_sampling.CONST) == False and noise_mode != "hard"):
             return self.add_noise(x, y0, lgw, sigma_up, sigma, sigma_next, sigma_down, alpha_ratio, s_noise, SDE_NOISE_EXTERNAL, sde_noise_t)
         else:
             return x
@@ -153,7 +152,7 @@ class RK_Method:
         return ks, ks_u, ys, ys_inv
     
     def prepare_sigmas(self, sigmas):
-        if sigmas[0] == 0.0:      #remove padding used to avoid need for model patch with noise inversion
+        if sigmas[0] == 0.0:      #remove padding used to prevent comfy from adding noise to the latent (for unsampling, etc.)
             UNSAMPLE = True
             sigmas = sigmas[1:-1]
         else: 
@@ -168,7 +167,7 @@ class RK_Method:
     def set_coeff(self, rk_type, h, c1=0.0, c2=0.5, c3=1.0, stepcount=0, sigmas=None, sigma=None, sigma_down=None):
         if rk_type == "default": 
             return
-        #if self.a is None or self.dynamic_method == True:
+
         sigma = sigmas[stepcount]
         sigma_next = sigmas[stepcount+1]
         

@@ -628,11 +628,9 @@ class UltraSharkSampler:
             if img_style is not None:
                 model.set_model_patch(img_style,'img_style_cond')
         
-        
             # 1, 768      clip_style[0][0][1]['unclip_conditioning'][0]['clip_vision_output'].image_embeds.shape
             # 1, 1280     clip_style[0][0][1]['pooled_output'].shape 
             # 1, 77, 1280 clip_style[0][0][0].shape
-        
         
             latent = latent_image
             latent_image = latent["samples"]
