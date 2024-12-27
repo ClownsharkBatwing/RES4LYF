@@ -18,7 +18,8 @@ from .latents import normalize_latent, initialize_or_scale
 from .helper import get_extra_options_kv, extra_options_flag
 from .sigmas import get_sigmas
 
-
+def get_cosine_similarity(a, b):
+    return (a * b).sum() / (torch.norm(a) * torch.norm(b))
 
 def normalize_inputs(x, y0, y0_inv, guide_mode,  extra_options):
     
@@ -262,15 +263,15 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
                     eps_tmp  = eps_prev      if  eps_[row].sum() == 0 else eps_[row]
                     data_tmp = denoised_prev if data_[row].sum() == 0 else data_[row]
                     if   NOISE_COSSIM_SOURCE == "eps":
-                        cossim_tmp.append(F.cosine_similarity(eps_tmp, noise_tmp))
+                        cossim_tmp.append(get_cosine_similarity(eps_tmp, noise_tmp))
                     elif NOISE_COSSIM_SOURCE == "data":
-                        cossim_tmp.append(F.cosine_similarity(data_tmp, noise_tmp))
+                        cossim_tmp.append(get_cosine_similarity(data_tmp, noise_tmp))
                     elif NOISE_COSSIM_SOURCE == "latent":
-                        cossim_tmp.append(F.cosine_similarity(x_[row+1], noise_tmp))
+                        cossim_tmp.append(get_cosine_similarity(x_[row+1], noise_tmp))
                     elif NOISE_COSSIM_SOURCE == "x":
-                        cossim_tmp.append(F.cosine_similarity(x_[row+1], x_tmp[i]))
+                        cossim_tmp.append(get_cosine_similarity(x_[row+1], x_tmp[i]))
                     elif NOISE_COSSIM_SOURCE == "x_data":
-                        cossim_tmp.append(F.cosine_similarity(data_tmp, x_tmp[i]))
+                        cossim_tmp.append(get_cosine_similarity(data_tmp, x_tmp[i]))
                     #cossim_tmp.append(get_cosine_similarity(x_prenoise, x_tmp[i]))
                 for i in range(len(x_tmp)):
                     if   (NOISE_COSSIM_MODE == "forward") and (cossim_tmp[i] == max(cossim_tmp)):
@@ -394,17 +395,17 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
             noise_tmp = x_tmp[i] - x
             noise_tmp = (noise_tmp - noise_tmp.mean()) / noise_tmp.std()
             if   NOISE_COSSIM_SOURCE == "eps":
-                cossim_tmp.append(F.cosine_similarity(eps, noise_tmp))
+                cossim_tmp.append(get_cosine_similarity(eps, noise_tmp))
             elif NOISE_COSSIM_SOURCE == "data":
-                cossim_tmp.append(F.cosine_similarity(denoised, noise_tmp))
+                cossim_tmp.append(get_cosine_similarity(denoised, noise_tmp))
             elif NOISE_COSSIM_SOURCE == "latent":
-                cossim_tmp.append(F.cosine_similarity(x_prenoise, noise_tmp))
+                cossim_tmp.append(get_cosine_similarity(x_prenoise, noise_tmp))
             elif NOISE_COSSIM_SOURCE == "x_prenoise":
-                cossim_tmp.append(F.cosine_similarity(x_prenoise, x_tmp[i]))
+                cossim_tmp.append(get_cosine_similarity(x_prenoise, x_tmp[i]))
             elif NOISE_COSSIM_SOURCE == "x":
-                cossim_tmp.append(F.cosine_similarity(x, x_tmp[i]))
+                cossim_tmp.append(get_cosine_similarity(x, x_tmp[i]))
             elif NOISE_COSSIM_SOURCE == "x_data":
-                cossim_tmp.append(F.cosine_similarity(denoised, x_tmp[i]))
+                cossim_tmp.append(get_cosine_similarity(denoised, x_tmp[i]))
         for i in range(len(x_tmp)):
             if   (NOISE_COSSIM_MODE == "forward") and (cossim_tmp[i] == max(cossim_tmp)):
                 x = x_tmp[i]
