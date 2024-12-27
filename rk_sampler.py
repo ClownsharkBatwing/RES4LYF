@@ -272,6 +272,8 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
                         cossim_tmp.append(get_cosine_similarity(x_[row+1], x_tmp[i]))
                     elif NOISE_COSSIM_SOURCE == "x_data":
                         cossim_tmp.append(get_cosine_similarity(data_tmp, x_tmp[i]))
+                    elif NOISE_COSSIM_SOURCE == "guide":
+                        cossim_tmp.append(get_cosine_similarity(y0, x_tmp[i]))
                     #cossim_tmp.append(get_cosine_similarity(x_prenoise, x_tmp[i]))
                 for i in range(len(x_tmp)):
                     if   (NOISE_COSSIM_MODE == "forward") and (cossim_tmp[i] == max(cossim_tmp)):
@@ -406,6 +408,8 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
                 cossim_tmp.append(get_cosine_similarity(x, x_tmp[i]))
             elif NOISE_COSSIM_SOURCE == "x_data":
                 cossim_tmp.append(get_cosine_similarity(denoised, x_tmp[i]))
+            elif NOISE_COSSIM_SOURCE == "guide":
+                cossim_tmp.append(get_cosine_similarity(y0, x_tmp[i]))
         for i in range(len(x_tmp)):
             if   (NOISE_COSSIM_MODE == "forward") and (cossim_tmp[i] == max(cossim_tmp)):
                 x = x_tmp[i]
