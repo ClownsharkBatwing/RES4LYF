@@ -649,11 +649,12 @@ def get_rk_methods_coeff(rk_type, h, c1, c2, c3, h_prev=None, h_prev2=None, step
 
 
 @torch.no_grad()
-def legacy_sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, noise_sampler=None, noise_sampler_type="brownian", noise_mode="hard", noise_seed=-1, rk_type="res_2m", implicit_sampler_name="default",
-              sigma_fn_formula="", t_fn_formula="",
-                  eta=0.0, eta_var=0.0, s_noise=1., d_noise=1., alpha=-1.0, k=1.0, scale=0.1, c1=0.0, c2=0.5, c3=1.0, MULTISTEP=False, cfgpp=0.0, implicit_steps=0, reverse_weight=0.0, exp_mode=False,
-                  latent_guide=None, latent_guide_inv=None, latent_guide_weight=0.0, latent_guide_weights=None, guide_mode="blend",
-                  GARBAGE_COLLECT=False, mask=None, LGW_MASK_RESCALE_MIN=True, sigmas_override=None, t_is=None,
+def legacy_sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, noise_sampler=None,
+                    noise_sampler_type="brownian", noise_mode="hard", noise_seed=-1, rk_type="res_2m", implicit_sampler_name="default",
+                    sigma_fn_formula="", t_fn_formula="", eta=0.0, eta_var=0.0, s_noise=1., d_noise=1.,
+                    alpha=-1.0, k=1.0, scale=0.1, c1=0.0, c2=0.5, c3=1.0, MULTISTEP=False, cfgpp=0.0, implicit_steps=0, reverse_weight=0.0, exp_mode=False,
+                    latent_guide=None, latent_guide_inv=None, latent_guide_weight=0.0, latent_guide_weights=None, guide_mode="blend",
+                    GARBAGE_COLLECT=False, mask=None, LGW_MASK_RESCALE_MIN=True, sigmas_override=None, frame_weights=None, t_is=None,
                   ):
     extra_args = {} if extra_args is None else extra_args
     
@@ -678,17 +679,37 @@ def legacy_sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=N
         mask = mask.to(x.dtype).to(x.device)
         
     y0, y0_inv = torch.zeros_like(x), torch.zeros_like(x)
+
+    batch_size = x.shape[2]
+    if frame_weights is not None:
+        if frame_weights.shape[0] > batch_size:
+            frame_weights = frame_weights[:batch_size]
+        elif frame_weights.shape[0] < batch_size:
+            padding_size = batch_size - frame_weights.shape[0]
+            frame_weights = torch.cat([frame_weights, torch.ones(padding_size, device=frame_weights.device, dtype=frame_weights.dtype)])
+        frame_weights_apply = frame_weights.view(1, 1, batch_size, 1, 1)
+        frame_weights_apply = frame_weights_apply.to(x.dtype).to(x.device)
+    else:
+        frame_weights_apply = torch.ones(1, 1, batch_size, 1, 1).to(x.dtype).to(x.device)
+
     if latent_guide is not None:
+        latent_guide_samples = model.inner_model.inner_model.process_latent_in(latent_guide['samples']).clone().to(x.device)
+        if latent_guide_samples.shape[2] != batch_size:
+            latent_guide_samples = latent_guide_samples.repeat(1, 1, batch_size // latent_guide_samples.shape[2], 1, 1)
         if sigmas[0] > sigmas[1]:
-            y0 = latent_guide = model.inner_model.inner_model.process_latent_in(latent_guide['samples']).clone().to(x.device)
+            y0 = latent_guide = latent_guide_samples * frame_weights_apply
         else:
-            x = model.inner_model.inner_model.process_latent_in(latent_guide['samples']).clone().to(x.device)
+            x = mask * x + (1-mask) * latent_guide_samples * frame_weights_apply
 
     if latent_guide_inv is not None:
+        latent_guide_inv_samples = model.inner_model.inner_model.process_latent_in(latent_guide_inv['samples']).clone().to(x.device)
+        if latent_guide_inv_samples.shape[2] != batch_size:
+            latent_guide_inv_samples = latent_guide_inv_samples.repeat(1, 1, batch_size // latent_guide_inv_samples.shape[2], 1, 1)
         if sigmas[0] > sigmas[1]:
-            y0_inv = latent_guide_inv = model.inner_model.inner_model.process_latent_in(latent_guide_inv['samples']).clone().to(x.device)
+            y0_inv = latent_guide_inv = latent_guide_inv_samples * frame_weights_apply
         elif UNSAMPLE and mask is not None:
-            x = mask * x + (1-mask) * model.inner_model.inner_model.process_latent_in(latent_guide_inv['samples']).clone().to(x.device)
+            x = mask * x + (1-mask) * latent_guide_inv_samples * frame_weights_apply
+
 
     uncond = [torch.full_like(x, 0.0)]
     if cfgpp != 0.0:

@@ -177,10 +177,10 @@ class RK_Method:
         self.multistep_stages = multistep_stages
         
         self.a = torch.tensor(a, dtype=h.dtype, device=h.device)
-        self.a = self.a.view(*self.a.shape, 1, 1, 1, 1)
+        self.a = self.a.view(*self.a.shape, 1, 1, 1, 1, 1)
         
         self.b = torch.tensor(b, dtype=h.dtype, device=h.device)
-        self.b = self.b.view(*self.b.shape, 1, 1, 1, 1)
+        self.b = self.b.view(*self.b.shape, 1, 1, 1, 1, 1)
         
         self.c = torch.tensor(ci, dtype=h.dtype, device=h.device)
         self.rows = self.a.shape[0]
@@ -188,36 +188,65 @@ class RK_Method:
             
     def a_k_sum(self, k, row):
         if len(k.shape) == 4:
-            ks = k * self.a[row].sum(dim=0)
-        ks = (k[0:self.cols] * self.a[row]).sum(dim=0)
+            a_coeff = self.a[row].squeeze(-1)
+            ks = k * a_coeff.sum(dim=0)
+        elif len(k.shape) == 5:
+            a_coeff = self.a[row].squeeze(-1)
+            ks = (k[0:self.cols] * a_coeff).sum(dim=0)
+        elif len(k.shape) == 6:
+            a_coeff = self.a[row]
+            ks = (k[0:self.cols] * a_coeff).sum(dim=0)
+        else:
+            raise ValueError(f"Unexpected k shape: {k.shape}")
         return ks
     
     def b_k_sum(self, k, row):
         if len(k.shape) == 4:
-            ks = k * self.b[row].sum(dim=0)
-        ks = (k[0:self.cols] * self.b[row]).sum(dim=0)
+            b_coeff = self.b[row].squeeze(-1)
+            ks = k * b_coeff.sum(dim=0)
+        elif len(k.shape) == 5:
+            b_coeff = self.b[row].squeeze(-1)
+            ks = (k[0:self.cols] * b_coeff).sum(dim=0)
+        elif len(k.shape) == 6:
+            b_coeff = self.b[row]
+            ks = (k[0:self.cols] * b_coeff).sum(dim=0)
+        else:
+            raise ValueError(f"Unexpected k shape: {k.shape}")
         return ks
 
 
 
-    def init_guides(self, x, latent_guide, latent_guide_inv, mask, sigmas, UNSAMPLE):
+    def init_guides(self, x, latent_guide, latent_guide_inv, mask, sigmas, UNSAMPLE, frame_weights):
         y0, y0_inv = torch.zeros_like(x), torch.zeros_like(x)
-        
+
+        if (x.dim() == 5):
+            frame_batch_size = x.shape[2]
+            if frame_weights.shape[0] > frame_batch_size:
+                frame_weights = frame_weights[:frame_batch_size]
+            elif frame_weights.shape[0] < frame_batch_size:
+                padding_size = frame_batch_size - frame_weights.shape[0]
+                frame_weights = torch.cat([frame_weights, torch.ones(padding_size, device=frame_weights.device, dtype=frame_weights.dtype)])
+            frame_weights_apply = frame_weights.view(1, 1, frame_batch_size, 1, 1).clone().to(x.dtype).to(x.device)
+        else:
+            frame_weights_apply = torch.tensor(1.0, device=x.device, dtype=x.dtype)
+
         if latent_guide is not None:
+            latent_guide_samples = self.model.inner_model.inner_model.process_latent_in(latent_guide['samples']).clone().to(x.device)
             if sigmas[0] > sigmas[1]:
-                y0 = latent_guide = self.model.inner_model.inner_model.process_latent_in(latent_guide['samples']).clone().to(x.device)
+                y0 = latent_guide = latent_guide_samples * frame_weights_apply
             elif UNSAMPLE and mask is not None:
-                x = (1-mask) * x + mask * self.model.inner_model.inner_model.process_latent_in(latent_guide['samples']).clone().to(x.device)
+                x = (1-mask) * x + mask * latent_guide_samples * frame_weights_apply
             else:
-                x = self.model.inner_model.inner_model.process_latent_in(latent_guide['samples']).clone().to(x.device)
+                x = latent_guide_samples * frame_weights_apply
 
         if latent_guide_inv is not None:
+            latent_guide_inv_samples = self.model.inner_model.inner_model.process_latent_in(latent_guide_inv['samples']).clone().to(x.device)
             if sigmas[0] > sigmas[1]:
-                y0_inv = latent_guide_inv = self.model.inner_model.inner_model.process_latent_in(latent_guide_inv['samples']).clone().to(x.device)
+                y0_inv = latent_guide_inv = latent_guide_inv_samples * frame_weights_apply
             elif UNSAMPLE and mask is not None:
-                x = mask * x + (1-mask) * self.model.inner_model.inner_model.process_latent_in(latent_guide_inv['samples']).clone().to(x.device)
+                x = mask * x + (1-mask) * latent_guide_inv_samples * frame_weights_apply
             else:
-                x = self.model.inner_model.inner_model.process_latent_in(latent_guide_inv['samples']).clone().to(x.device)   #THIS COULD LEAD TO WEIRD BEHAVIOR! OVERWRITING X WITH LG_INV AFTER SETTING TO LG above!
+                x = latent_guide_samples * frame_weights_apply   #THIS COULD LEAD TO WEIRD BEHAVIOR! OVERWRITING X WITH LG_INV AFTER SETTING TO LG above!
                 
         if UNSAMPLE and sigmas[0] < sigmas[1]: #sigma_next > sigma:
             y0 = self.noise_sampler(sigma=self.sigma_max, sigma_next=self.sigma_min)
