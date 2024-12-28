@@ -524,7 +524,7 @@ class ClownsharKSampler:
                     extra_options="", automation=None, etas=None, s_noises=None,unsample_resample_scales=None, regional_conditioning_weights=None,
                     ): 
 
-        noise_seed_sde = -1
+        noise_seed_sde = noise_seed + 1
 
         sampler = ClownSampler().main(
                 noise_type_sde, noise_mode_sde,
