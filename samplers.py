@@ -111,7 +111,8 @@ class SharkSampler:
             latent_image_batch = {"samples": latent_image['samples']}
             out_samples, out_samples_fp64, out_denoised_samples, out_denoised_samples_fp64 = [], [], [], []
             for batch_num in range(latent_image_batch['samples'].shape[0]):
-                latent_image['samples'] = latent_image_batch['samples'][batch_num].clone().unsqueeze(0)
+                latent_unbatch = copy.deepcopy(latent_image)
+                latent_unbatch['samples'] = latent_image_batch['samples'][batch_num].clone().unsqueeze(0)
                 default_dtype = torch.float64
                 max_steps = 10000
 
@@ -132,8 +133,7 @@ class SharkSampler:
                     sde_noise       = options.get('sde_noise',        sde_noise)
                     sde_noise_steps = options.get('sde_noise_steps',  sde_noise_steps)
 
-                latent = latent_image
-                latent_image_dtype = latent_image['samples'].dtype
+                latent_image_dtype = latent_unbatch['samples'].dtype
 
                 if isinstance(model.model.model_config, comfy.supported_models.Flux) or isinstance(model.model.model_config, comfy.supported_models.FluxSchnell):
                     if positive is None:
@@ -187,17 +187,17 @@ class SharkSampler:
                 else:
                     unsampler_type = ""
 
-                x = latent_image["samples"].clone().to(default_dtype) 
-                if latent_image is not None:
-                    if "samples_fp64" in latent_image:
-                        if latent_image['samples'].shape == latent_image['samples_fp64'].shape:
-                            if torch.norm(latent_image['samples'] - latent_image['samples_fp64']) < 0.01:
-                                x = latent_image["samples_fp64"].clone()
+                x = latent_unbatch["samples"].clone().to(default_dtype) 
+                if latent_unbatch is not None:
+                    if "samples_fp64" in latent_unbatch:
+                        if latent_unbatch['samples'].shape == latent_unbatch['samples_fp64'].shape:
+                            if torch.norm(latent_unbatch['samples'] - latent_unbatch['samples_fp64']) < 0.01:
+                                x = latent_unbatch["samples_fp64"].clone()
 
                 if latent_noise is not None:
-                    latent_noise["samples"] = latent_noise["samples"].clone().to(default_dtype)  
+                    latent_noise_samples = latent_noise["samples"].clone().to(default_dtype)  
                 if latent_noise_match is not None:
-                    latent_noise_match["samples"] = latent_noise_match["samples"].clone().to(default_dtype)
+                    latent_noise_match_samples = latent_noise_match["samples"].clone().to(default_dtype)
 
                 truncate_conditioning = extra_options_flag("truncate_conditioning", extra_options)
                 if truncate_conditioning == "true" or truncate_conditioning == "true_and_zero_neg":
@@ -247,7 +247,7 @@ class SharkSampler:
                             noise_sampler_init.scale = 0.1
                         noise = noise_sampler_init(sigma=sigmax, sigma_next=sigmin)
                     else:
-                        noise = latent_noise["samples"]
+                        noise = latent_noise_samples
 
                     if noise_is_latent: #add noise and latent together and normalize --> noise
                         noise += x.cpu()
@@ -258,12 +258,12 @@ class SharkSampler:
                     noise *= noise_stdev
                     noise = (noise - noise.mean()) + noise_mean
                     
-                    if latent_noise_match:
-                        for i in range(latent_noise_match["samples"].shape[1]):
+                    if latent_noise_match is not None:
+                        for i in range(latent_noise_match_samples.shape[1]):
                             noise[0][i] = (noise[0][i] - noise[0][i].mean())
-                            noise[0][i] = (noise[0][i]) + latent_noise_match["samples"][0][i].mean()
+                            noise[0][i] = (noise[0][i]) + latent_noise_match_samples[0][i].mean()
 
-                    noise_mask = latent["noise_mask"] if "noise_mask" in latent else None
+                    noise_mask = latent_unbatch["noise_mask"] if "noise_mask" in latent_unbatch else None
 
                     x0_output = {}
 
@@ -287,10 +287,10 @@ class SharkSampler:
                     disable_pbar = not comfy.utils.PROGRESS_BAR_ENABLED
                     samples = comfy.sample.sample_custom(model, noise, cfg, sampler, sigmas, positive, negative, x.clone(), noise_mask=noise_mask, callback=callback, disable_pbar=disable_pbar, seed=noise_seed)
 
-                    out = latent.copy()
+                    out = latent_unbatch.copy()
                     out["samples"] = samples
                     if "x0" in x0_output:
-                        out_denoised = latent.copy()
+                        out_denoised = latent_unbatch.copy()
                         out_denoised["samples"] = model.model.process_latent_out(x0_output["x0"].cpu())
                     else:
                         out_denoised = out
