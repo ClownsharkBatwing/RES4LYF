@@ -152,9 +152,12 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
     extra_args = rk.init_cfg_channelwise(x, cfg_cw, **extra_args)
     
     noise_cossim_iterations = int(get_extra_options_kv("noise_cossim_iterations", "1", extra_options))
+    noise_substep_cossim_iterations = int(get_extra_options_kv("noise_substep_cossim_iterations", "1", extra_options))
     NOISE_COSSIM_MODE       =     get_extra_options_kv("noise_cossim_mode", "orthogonal", extra_options)
-    NOISE_COSSIM_SOURCE     =     get_extra_options_kv("noise_cossim_source", "eps", extra_options)
-    SUBSTEP_SKIP_LAST       =     get_extra_options_kv("substep_skip_last", "false", extra_options) == "true"
+    NOISE_COSSIM_SOURCE     =     get_extra_options_kv("noise_cossim_source", "data", extra_options)
+    NOISE_SUBSTEP_COSSIM_MODE       =     get_extra_options_kv("noise_substep_cossim_mode", "orthogonal", extra_options)
+    NOISE_SUBSTEP_COSSIM_SOURCE     =     get_extra_options_kv("noise_substep_cossim_source", "data", extra_options)
+    SUBSTEP_SKIP_LAST       =     get_extra_options_kv("substep_skip_last", "false", extra_options) == "true" 
 
     denoised_prev, eps_prev = torch.zeros_like(x), torch.zeros_like(x)
     denoised,      eps      = torch.zeros_like(x), torch.zeros_like(x)
@@ -258,39 +261,42 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
                 #F.cosine_similarity()
                 if (SUBSTEP_SKIP_LAST == False) or (row < rk.rows - rk.multistep_stages - 1):
                     x_tmp, cossim_tmp = [], []
-                    for i in range(noise_cossim_iterations):
+                    for i in range(noise_substep_cossim_iterations):
                         x_tmp.append(rk.add_noise_post(x_[row+1], y0, lgw[step], sub_sigma_up, sub_sigma, s_[row], sub_sigma_down, sub_alpha_ratio, s_noise, substep_noise_mode, SDE_NOISE_EXTERNAL, sde_noise_t)    )#y0, lgw, sigma_down are currently unused
                         noise_tmp = x_tmp[i] - x_[row+1]
                         noise_tmp = (noise_tmp - noise_tmp.mean()) / noise_tmp.std()
                         eps_tmp  = eps_prev      if  eps_[row].sum() == 0 else eps_[row]
                         data_tmp = denoised_prev if data_[row].sum() == 0 else data_[row]
-                        if   NOISE_COSSIM_SOURCE == "eps":
+                        if   NOISE_SUBSTEP_COSSIM_SOURCE == "eps":
                             cossim_tmp.append(get_cosine_similarity(eps_tmp, noise_tmp))
-                        elif NOISE_COSSIM_SOURCE == "data":
+                        elif NOISE_SUBSTEP_COSSIM_SOURCE == "data":
                             cossim_tmp.append(get_cosine_similarity(data_tmp, noise_tmp))
-                        elif NOISE_COSSIM_SOURCE == "latent":
+                        elif NOISE_SUBSTEP_COSSIM_SOURCE == "latent":
                             cossim_tmp.append(get_cosine_similarity(x_[row+1], noise_tmp))
-                        elif NOISE_COSSIM_SOURCE == "x_prenoise":
+                        elif NOISE_SUBSTEP_COSSIM_SOURCE == "x_prenoise":
                             cossim_tmp.append(get_cosine_similarity(x_prenoise, x_tmp[i]))
-                        elif NOISE_COSSIM_SOURCE == "x":
+                        elif NOISE_SUBSTEP_COSSIM_SOURCE == "x":
                             cossim_tmp.append(get_cosine_similarity(x_[row+1], x_tmp[i]))
-                        elif NOISE_COSSIM_SOURCE == "x_data":
+                        elif NOISE_SUBSTEP_COSSIM_SOURCE == "x_data":
                             cossim_tmp.append(get_cosine_similarity(data_tmp, x_tmp[i]))
-                        elif NOISE_COSSIM_SOURCE == "mom":
+                        elif NOISE_SUBSTEP_COSSIM_SOURCE == "mom":
                             cossim_tmp.append(get_cosine_similarity(data_tmp, x_[row+1] + s_[row]*noise_tmp))
-                        elif NOISE_COSSIM_SOURCE == "guide":
+                        elif NOISE_SUBSTEP_COSSIM_SOURCE == "guide":
                             cossim_tmp.append(get_cosine_similarity(y0, x_tmp[i]))
-                        elif NOISE_COSSIM_SOURCE == "guide_inv":
+                        elif NOISE_SUBSTEP_COSSIM_SOURCE == "guide_inv":
                             cossim_tmp.append(get_cosine_similarity(y0_inv, x_tmp[i]))
+                        elif NOISE_SUBSTEP_COSSIM_SOURCE == "none":
+                            cossim_tmp.append(get_cosine_similarity(x_tmp[i]), x_tmp[i])
+                            break
                         #cossim_tmp.append(get_cosine_similarity(x_prenoise, x_tmp[i]))
                     for i in range(len(x_tmp)):
-                        if   (NOISE_COSSIM_MODE == "forward") and (cossim_tmp[i] == max(cossim_tmp)):
+                        if   (NOISE_SUBSTEP_COSSIM_MODE == "forward") and (cossim_tmp[i] == max(cossim_tmp)):
                             x_[row+1] = x_tmp[i]
                             break
-                        elif (NOISE_COSSIM_MODE == "reverse") and (cossim_tmp[i] == min(cossim_tmp)):
+                        elif (NOISE_SUBSTEP_COSSIM_MODE == "reverse") and (cossim_tmp[i] == min(cossim_tmp)):
                             x_[row+1] = x_tmp[i]
                             break
-                        elif (NOISE_COSSIM_MODE == "orthogonal") and (abs(cossim_tmp[i]) == min(abs(val) for val in cossim_tmp)):
+                        elif (NOISE_SUBSTEP_COSSIM_MODE == "orthogonal") and (abs(cossim_tmp[i]) == min(abs(val) for val in cossim_tmp)):
                             x_[row+1] = x_tmp[i]
                             break
                 eps_[row], data_[row] = rk(x_0, x_[row+1], s_[row], h, **extra_args)       #MODEL CALL
