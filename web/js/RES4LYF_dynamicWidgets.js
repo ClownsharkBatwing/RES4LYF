@@ -107,30 +107,33 @@ const commonDependentWidgets = {
 const nodesWithCommonConfig = [
     "AdvancedNoise",
     "ClownSampler",
-    "ClownSamplerLegacy",
-    "KSamplerSelectAdvanced",
-    "LatentNoised",
-    "SamplerCorona",
-    "SamplerDEIS_SDE",
-    "SamplerDPMPP_2M_SDE_Advanced",
-    "SamplerDPMPP_2S_Ancestral_Advanced",
-    "SamplerDPMPP_3M_SDE_Advanced",
-    "SamplerDPMPP_DualSDE_Advanced",
-    "SamplerDPMPP_SDE_Advanced",
-    "SamplerDPMPP_SDE_CFG++_Advanced",
-    "SamplerEulerAncestral_Advanced",
-    "SamplerNoiseInversion",
-    "SamplerRES_Implicit",
-    "SamplerRES3_Implicit_Automation",
-    "SamplerRK",
-    "SamplerRK_Test",
+    "ClownsharKSampler",
+    "Legacy_ClownSampler",
+    "Legacy_SharkSampler",
+    "Legacy_ClownsharKSampler",
     "SharkSampler",
     "UltraSharkSampler",
-    "UltraSharkSampler Tiled"
+    "UltraSharkSampler Tiled",
 ];
 
 // 2. Optional Input Dependencies - These are unique configurations for specific nodes
-nodeConfigs["ClownSampler"] = createNodeConfig("ClownSampler", {
+nodeConfigs["ClownsharKSamplerGuides"] = createNodeConfig("ClownsharKSamplerGuides", {
+    optionalInputWidgets: {
+        // Define groups of widgets that should be shown/hidden based on input connections
+        groups: [
+            {
+                inputs: ["guide",],   // Show widgets if ANY of these inputs are connected
+                widgets: ["guide_weight", "guide_weight_bkg", "guide_weight_scale", "guide_weight_scheduler", "guide_end_step"]  // Widgets to show/hide
+            },
+            {
+                inputs: ["guide_bkg"],
+                widgets: ["guide_weight_bkg", "guide_weight_bkg_scale", "guide_weight_scheduler_bkg", "guide_bkg_end_step"]
+            }
+        ]
+    }
+});
+
+nodeConfigs["Legacy_ClownSampler"] = createNodeConfig("Legacy_ClownSampler", {
     optionalInputWidgets: {
         // Define groups of widgets that should be shown/hidden based on input connections
         groups: [
@@ -146,16 +149,22 @@ nodeConfigs["ClownSampler"] = createNodeConfig("ClownSampler", {
     }
 });
 
-nodeConfigs["SamplerRK"] = createNodeConfig("SamplerRK", {
+nodeConfigs["Legacy_ClownsharKSampler"] = createNodeConfig("Legacy_ClownsharKSampler", {
     optionalInputWidgets: {
+        // Define groups of widgets that should be shown/hidden based on input connections
         groups: [
             {
-                inputs: ["latent_guide", "latent_guide_inv"],
-                widgets: ["latent_guide_weight", "guide_mode"]
+                inputs: ["latent_guide", "latent_guide_inv"],   // Show widgets if ANY of these inputs are connected
+                widgets: ["latent_guide_weight", "guide_mode"]  // Widgets to show/hide
+            },
+            {
+                inputs: ["latent_guide_mask"],
+                widgets: ["rescale_floor"]
             }
         ]
     }
 });
+
 
 // Function to create node configurations
 function createNodeConfig(nodeName, uniqueConfig = {}) {
@@ -183,8 +192,6 @@ nodesWithCommonConfig.forEach(nodeName => {
  */
 function toggleWidget(node, widget, shouldShow = false) {
     if (!widget) return;
-
-    resDebugLog(`Toggling widget ${widget.name} in ${node.comfyClass}: shouldShow=${shouldShow}, ENABLE_WIDGET_HIDING=${ENABLE_WIDGET_HIDING}`);
     
     if (!origProps[widget.name]) {
         origProps[widget.name] = { 
@@ -245,7 +252,6 @@ function createGenericHandler(node, dependentWidgetsConfig) {
  * @param {array} dependentWidgets - Array of relevant widget names
  */
 function setupDynamicWidgets(node, dependentWidgetsConfig) {
-    resDebugLog("Setting up dynamic widgets for", node.comfyClass);
     const onNodeChange = createGenericHandler(node, dependentWidgetsConfig);
 
     onNodeChange();
