@@ -102,6 +102,10 @@ class SharkSampler:
                     regional_mask = copy.deepcopy(regional_mask)
                     model.set_model_patch(regional_conditioning, 'regional_conditioning_positive')
                     model.set_model_patch(regional_mask,         'regional_conditioning_mask')
+                    
+            if "noise_seed_sde" in sampler.extra_options:
+                if sampler.extra_options['noise_seed_sde'] == -1 and noise_seed != -1:
+                    sampler.extra_options['noise_seed_sde'] = noise_seed + 1
 
             if "extra_options" in sampler.extra_options:
                 extra_options += " "

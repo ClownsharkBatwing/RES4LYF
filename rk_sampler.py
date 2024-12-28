@@ -272,6 +272,11 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
                         data_tmp = denoised_prev if data_[row].sum() == 0 else data_[row]
                         if   NOISE_SUBSTEP_COSSIM_SOURCE == "eps":
                             cossim_tmp.append(get_cosine_similarity(eps_tmp, noise_tmp))
+                        if   NOISE_SUBSTEP_COSSIM_SOURCE == "eps_ch":
+                            cossim_total = torch.zeros_like(eps_tmp[0][0][0][0])
+                            for ch in range(eps_tmp.shape[1]):
+                                cossim_total += get_cosine_similarity(eps_tmp[0][ch], noise_tmp[0][ch])
+                            cossim_tmp.append(cossim_total)
                         elif NOISE_SUBSTEP_COSSIM_SOURCE == "data":
                             cossim_tmp.append(get_cosine_similarity(data_tmp, noise_tmp))
                         elif NOISE_SUBSTEP_COSSIM_SOURCE == "latent":
@@ -418,6 +423,11 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
             noise_tmp = (noise_tmp - noise_tmp.mean()) / noise_tmp.std()
             if   NOISE_COSSIM_SOURCE == "eps":
                 cossim_tmp.append(get_cosine_similarity(eps, noise_tmp))
+            if   NOISE_SUBSTEP_COSSIM_SOURCE == "eps_ch":
+                cossim_total = torch.zeros_like(eps_tmp[0][0][0][0])
+                for ch in range(eps_tmp.shape[1]):
+                    cossim_total += get_cosine_similarity(eps_tmp[0][ch], noise_tmp[0][ch])
+                cossim_tmp.append(cossim_total)
             elif NOISE_COSSIM_SOURCE == "data":
                 cossim_tmp.append(get_cosine_similarity(denoised, noise_tmp))
             elif NOISE_COSSIM_SOURCE == "latent":
