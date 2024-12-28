@@ -164,6 +164,7 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
 
     denoised_prev, eps_prev = torch.zeros_like(x), torch.zeros_like(x)
     denoised,      eps      = torch.zeros_like(x), torch.zeros_like(x)
+    x_init = x.clone()
     
     for step in trange(len(sigmas)-1, disable=disable):
         sigma, sigma_next = sigmas[step], sigmas[step+1]
@@ -269,6 +270,8 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
                         noise_tmp = x_tmp[i] - x_[row+1]
                         noise_tmp = (noise_tmp - noise_tmp.mean()) / noise_tmp.std()
                         eps_tmp  = eps_prev      if  eps_[row].sum() == 0 else eps_[row]
+                        eps_tmp = (eps_tmp - eps_tmp.mean()) / eps_tmp.std()
+                        
                         data_tmp = denoised_prev if data_[row].sum() == 0 else data_[row]
                         if   NOISE_SUBSTEP_COSSIM_SOURCE == "eps":
                             cossim_tmp.append(get_cosine_similarity(eps_tmp, noise_tmp))
@@ -282,11 +285,13 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
                             cossim_tmp.append(get_cosine_similarity(x_[row+1], x_tmp[i]))
                         elif NOISE_SUBSTEP_COSSIM_SOURCE == "x_data":
                             cossim_tmp.append(get_cosine_similarity(data_tmp, x_tmp[i]))
+                        elif NOISE_SUBSTEP_COSSIM_SOURCE == "x_init_vs_noise":
+                            cossim_tmp.append(get_cosine_similarity(x_init, noise_tmp))
                         elif NOISE_SUBSTEP_COSSIM_SOURCE == "mom":
                             cossim_tmp.append(get_cosine_similarity(data_tmp, x_[row+1] + s_[row]*noise_tmp))
                         elif NOISE_SUBSTEP_COSSIM_SOURCE == "guide":
                             cossim_tmp.append(get_cosine_similarity(y0, x_tmp[i]))
-                        elif NOISE_SUBSTEP_COSSIM_SOURCE == "guide_inv":
+                        elif NOISE_SUBSTEP_COSSIM_SOURCE == "guide_bkg":
                             cossim_tmp.append(get_cosine_similarity(y0_inv, x_tmp[i]))
                         elif NOISE_SUBSTEP_COSSIM_SOURCE == "none":
                             cossim_tmp.append(get_cosine_similarity(x_tmp[i]), x_tmp[i])
@@ -426,11 +431,13 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
                 cossim_tmp.append(get_cosine_similarity(x, x_tmp[i]))
             elif NOISE_COSSIM_SOURCE == "x_data":
                 cossim_tmp.append(get_cosine_similarity(denoised, x_tmp[i]))
+            elif NOISE_COSSIM_SOURCE == "x_init_vs_noise":
+                cossim_tmp.append(get_cosine_similarity(x_init, noise_tmp))
             elif NOISE_COSSIM_SOURCE == "mom":
                 cossim_tmp.append(get_cosine_similarity(denoised, x + sigma_next*noise_tmp))
             elif NOISE_COSSIM_SOURCE == "guide":
                 cossim_tmp.append(get_cosine_similarity(y0, x_tmp[i]))
-            elif NOISE_COSSIM_SOURCE == "guide_inv":
+            elif NOISE_COSSIM_SOURCE == "guide_bkg":
                 cossim_tmp.append(get_cosine_similarity(y0_inv, x_tmp[i]))
         for i in range(len(x_tmp)):
             if   (NOISE_COSSIM_MODE == "forward") and (cossim_tmp[i] == max(cossim_tmp)):
@@ -502,34 +509,34 @@ def get_explicit_rk_step(rk, rk_type, x, y0, y0_inv, lgw, lgw_inv, mask, lgw_mas
 
 
 def sample_res_2m(model, x, sigmas, extra_args=None, callback=None, disable=None):
-    return sample_rk(model, x, sigmas, extra_args, callback, disable, noise_sampler_type="gaussian", noise_mode="linear", noise_seed=-1, rk_type="res_2m", eta=0.0, )
+    return sample_rk(model, x, sigmas, extra_args, callback, disable, noise_sampler_type="gaussian", noise_mode="hard", noise_seed=-1, rk_type="res_2m", eta=0.0, )
 def sample_res_2s(model, x, sigmas, extra_args=None, callback=None, disable=None):
-    return sample_rk(model, x, sigmas, extra_args, callback, disable, noise_sampler_type="gaussian", noise_mode="linear", noise_seed=-1, rk_type="res_2s", eta=0.0, )
+    return sample_rk(model, x, sigmas, extra_args, callback, disable, noise_sampler_type="gaussian", noise_mode="hard", noise_seed=-1, rk_type="res_2s", eta=0.0, )
 def sample_res_3s(model, x, sigmas, extra_args=None, callback=None, disable=None):
-    return sample_rk(model, x, sigmas, extra_args, callback, disable, noise_sampler_type="gaussian", noise_mode="linear", noise_seed=-1, rk_type="res_3s", eta=0.0, )
+    return sample_rk(model, x, sigmas, extra_args, callback, disable, noise_sampler_type="gaussian", noise_mode="hard", noise_seed=-1, rk_type="res_3s", eta=0.0, )
 def sample_res_5s(model, x, sigmas, extra_args=None, callback=None, disable=None):
-    return sample_rk(model, x, sigmas, extra_args, callback, disable, noise_sampler_type="gaussian", noise_mode="linear", noise_seed=-1, rk_type="res_5s", eta=0.0, )
+    return sample_rk(model, x, sigmas, extra_args, callback, disable, noise_sampler_type="gaussian", noise_mode="hard", noise_seed=-1, rk_type="res_5s", eta=0.0, )
 
 def sample_res_2m_sde(model, x, sigmas, extra_args=None, callback=None, disable=None):
-    return sample_rk(model, x, sigmas, extra_args, callback, disable, noise_sampler_type="gaussian", noise_mode="linear", noise_seed=-1, rk_type="res_2m", eta=0.5, )
+    return sample_rk(model, x, sigmas, extra_args, callback, disable, noise_sampler_type="gaussian", noise_mode="hard", noise_seed=-1, rk_type="res_2m", eta=0.5, )
 def sample_res_2s_sde(model, x, sigmas, extra_args=None, callback=None, disable=None):
-    return sample_rk(model, x, sigmas, extra_args, callback, disable, noise_sampler_type="gaussian", noise_mode="linear", noise_seed=-1, rk_type="res_2s", eta=0.5, )
+    return sample_rk(model, x, sigmas, extra_args, callback, disable, noise_sampler_type="gaussian", noise_mode="hard", noise_seed=-1, rk_type="res_2s", eta=0.5, )
 def sample_res_3s_sde(model, x, sigmas, extra_args=None, callback=None, disable=None):
-    return sample_rk(model, x, sigmas, extra_args, callback, disable, noise_sampler_type="gaussian", noise_mode="linear", noise_seed=-1, rk_type="res_3s", eta=0.5, )
+    return sample_rk(model, x, sigmas, extra_args, callback, disable, noise_sampler_type="gaussian", noise_mode="hard", noise_seed=-1, rk_type="res_3s", eta=0.5, )
 def sample_res_5s_sde(model, x, sigmas, extra_args=None, callback=None, disable=None):
-    return sample_rk(model, x, sigmas, extra_args, callback, disable, noise_sampler_type="gaussian", noise_mode="linear", noise_seed=-1, rk_type="res_5s", eta=0.5, )
+    return sample_rk(model, x, sigmas, extra_args, callback, disable, noise_sampler_type="gaussian", noise_mode="hard", noise_seed=-1, rk_type="res_5s", eta=0.5, )
 
 def sample_deis_2m(model, x, sigmas, extra_args=None, callback=None, disable=None):
-    return sample_rk(model, x, sigmas, extra_args, callback, disable, noise_sampler_type="gaussian", noise_mode="linear", noise_seed=-1, rk_type="deis_2m", eta=0.0, )
+    return sample_rk(model, x, sigmas, extra_args, callback, disable, noise_sampler_type="gaussian", noise_mode="hard", noise_seed=-1, rk_type="deis_2m", eta=0.0, )
 def sample_deis_3m(model, x, sigmas, extra_args=None, callback=None, disable=None):
-    return sample_rk(model, x, sigmas, extra_args, callback, disable, noise_sampler_type="gaussian", noise_mode="linear", noise_seed=-1, rk_type="deis_3m", eta=0.0, )
+    return sample_rk(model, x, sigmas, extra_args, callback, disable, noise_sampler_type="gaussian", noise_mode="hard", noise_seed=-1, rk_type="deis_3m", eta=0.0, )
 def sample_deis_4m(model, x, sigmas, extra_args=None, callback=None, disable=None):
-    return sample_rk(model, x, sigmas, extra_args, callback, disable, noise_sampler_type="gaussian", noise_mode="linear", noise_seed=-1, rk_type="deis_4m", eta=0.0, )
+    return sample_rk(model, x, sigmas, extra_args, callback, disable, noise_sampler_type="gaussian", noise_mode="hard", noise_seed=-1, rk_type="deis_4m", eta=0.0, )
 
 def sample_deis_2m_sde(model, x, sigmas, extra_args=None, callback=None, disable=None):
-    return sample_rk(model, x, sigmas, extra_args, callback, disable, noise_sampler_type="gaussian", noise_mode="linear", noise_seed=-1, rk_type="deis_2m", eta=0.5, )
+    return sample_rk(model, x, sigmas, extra_args, callback, disable, noise_sampler_type="gaussian", noise_mode="hard", noise_seed=-1, rk_type="deis_2m", eta=0.5, )
 def sample_deis_3m_sde(model, x, sigmas, extra_args=None, callback=None, disable=None):
-    return sample_rk(model, x, sigmas, extra_args, callback, disable, noise_sampler_type="gaussian", noise_mode="linear", noise_seed=-1, rk_type="deis_3m", eta=0.5, )
+    return sample_rk(model, x, sigmas, extra_args, callback, disable, noise_sampler_type="gaussian", noise_mode="hard", noise_seed=-1, rk_type="deis_3m", eta=0.5, )
 def sample_deis_4m_sde(model, x, sigmas, extra_args=None, callback=None, disable=None):
-    return sample_rk(model, x, sigmas, extra_args, callback, disable, noise_sampler_type="gaussian", noise_mode="linear", noise_seed=-1, rk_type="deis_4m", eta=0.5, )
+    return sample_rk(model, x, sigmas, extra_args, callback, disable, noise_sampler_type="gaussian", noise_mode="hard", noise_seed=-1, rk_type="deis_4m", eta=0.5, )
 
