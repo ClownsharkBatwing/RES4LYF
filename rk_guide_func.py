@@ -3,10 +3,12 @@ import torch.nn.functional as F
 import torchvision.transforms as T
 import re
 
+from einops import rearrange
+
 from .noise_classes import *
 from .latents import hard_light_blend, normalize_latent
 from .rk_method import RK_Method
-from .helper import get_extra_options_kv, extra_options_flag
+from .helper import get_extra_options_kv, extra_options_flag, get_cosine_similarity
 
 
 import itertools
@@ -276,4 +278,39 @@ def process_guides_poststep(x, denoised, eps, y0, y0_inv, mask, lgw_mask, lgw_ma
     if extra_options_flag("poststep_x_std", extra_options):
         x = normalize_latent(x, x_orig, mean=False, channelwise=False)
     return x
+
+
+@torch.no_grad
+def noise_cossim_guide_tiled(x_list, guide, cossim_mode="forward", tile_size=2):
+    #tiles = F.unfold(x, kernel_size=tile_size, stride=tile_size)
+    guide_tiled = rearrange(guide, "b c (h t1) (w t2) -> b (t1 t2) c h w", t1=tile_size, t2=tile_size)
+    
+    cossim_tmp, x_tiled_list = [], []
+    x_tiled_out = torch.zeros_like(guide_tiled)
+    
+    for i in range (len(x_list)):
+        x_tiled     = rearrange(x_list[i],     "b c (h t1) (w t2) -> b (t1 t2) c h w", t1=tile_size, t2=tile_size)
+        x_tiled_list.append(x_tiled)
+        
+    for j in range(guide_tiled.shape[1]):
+        cossim_tmp = []
+        for i in range(len(x_tiled_list)):
+            cossim_tmp.append(get_cosine_similarity(x_tiled_list[i][0][j], guide_tiled[0][j]))
+        for i in range(len(x_tiled_list)):
+            if cossim_tmp[i] == max(cossim_tmp):
+                x_tiled_out[0][j] = x_tiled_list[i][0][j]
+    
+    """for i in range(len(x_list)):
+        x_tiled     = rearrange(x_list[i],     "b c (h t1) (w t2) -> b (t1 t2) c h w", t1=tile_size, t2=tile_size)
+        for j in range(x_tiled.shape[1]):
+            cossim_tmp.append(get_cosine_similarity(x_tiled[0][j], guide_tiled[0][j]))
+    
+        for j in range(x)
+    """
+    
+    
+    x_detiled = rearrange(x_tiled_out, "b (t1 t2) c h w -> b c (h t1) (w t2)", t1=tile_size, t2=tile_size)
+    
+    return x_detiled
+
 

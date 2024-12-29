@@ -236,8 +236,8 @@ class RK_Method:
                 return args["denoised"]
             model_options = extra_args.get("model_options", {}).copy()
             extra_args["model_options"] = comfy.model_patcher.set_model_options_post_cfg_function(model_options, post_cfg_function, disable_cfg1_optimization=True)
+        return extra_args
         #TODO: complete this method
-        
 
     def init_cfg_channelwise(self, x, cfg_cw=1.0, **extra_args):
         self.uncond = [torch.full_like(x, 0.0)]
