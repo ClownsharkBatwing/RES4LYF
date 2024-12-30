@@ -363,10 +363,17 @@ def noise_cossim_eps_tiled(x_list, eps, noise_list, cossim_mode="forward", tile_
 
 
         
-    for j in range(eps_tiled.shape[1]):
-        cossim_tmp = []
-        for i in range(len(x_tiled_list)):
-            cossim_tmp.append(get_cosine_similarity(noise_tiled_list[i][0][j], eps_tiled[0][j]))
+    for j in range(eps_tiled.shape[1]): #iterate over tiles (j)
+        #cossim_tmp = []
+        noise_tiled_stack = torch.stack([noise_tiled_list[i][0][j] for i in range(len(x_tiled_list))])
+        noise_tiled_flat = noise_tiled_stack.view(noise_tiled_stack.size(0), -1)  # [30, 16 * 8 * 8]
+        eps_tiled_flat = eps_tiled[0][j].view(1, -1)  # [1, 16 * 8 * 8]
+
+        # Compute cosine similarity for all tiles at once
+        cossim_tmp = F.cosine_similarity(noise_tiled_flat, eps_tiled_flat.expand_as(noise_tiled_flat), dim=1)
+        
+        #for i in range(len(x_tiled_list)): # ONE TILE: iterate over 30 versions of the noise, vs 1 of eps_tiled
+        #    cossim_tmp.append(get_cosine_similarity(noise_tiled_list[i][0][j], eps_tiled[0][j]))
         for i in range(len(x_tiled_list)):
             if   (cossim_mode == "forward") and (cossim_tmp[i] == max(cossim_tmp)):
                 x_tiled_out[0][j] = x_tiled_list[i][0][j]
