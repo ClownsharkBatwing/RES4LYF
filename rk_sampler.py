@@ -158,6 +158,8 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
     NOISE_SUBSTEP_COSSIM_MODE       =     get_extra_options_kv("noise_substep_cossim_mode", "orthogonal", extra_options)
     NOISE_SUBSTEP_COSSIM_SOURCE     =     get_extra_options_kv("noise_substep_cossim_source", "data", extra_options)
     SUBSTEP_SKIP_LAST       =     get_extra_options_kv("substep_skip_last", "false", extra_options) == "true" 
+    noise_cossim_tile_size = int(get_extra_options_kv("noise_cossim_tile_size", "2", extra_options))
+    noise_substep_cossim_tile_size = int(get_extra_options_kv("noise_substep_cossim_tile_size", "2", extra_options))
 
     denoised_prev, eps_prev = torch.zeros_like(x), torch.zeros_like(x)
     denoised,      eps      = torch.zeros_like(x), torch.zeros_like(x)
@@ -302,9 +304,9 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
                             break
                         #cossim_tmp.append(get_cosine_similarity(x_prenoise, x_tmp[i]))
                     if NOISE_SUBSTEP_COSSIM_SOURCE == "guide_tiled":
-                        x = noise_cossim_guide_tiled(x_tmp, y0, cossim_mode=NOISE_SUBSTEP_COSSIM_MODE, tile_size=int(get_extra_options_kv("noise_substep_cossim_tile", "2", extra_options)))
+                        x = noise_cossim_guide_tiled(x_tmp, y0, cossim_mode=NOISE_SUBSTEP_COSSIM_MODE, tile_size=noise_substep_cossim_tile_size)
                     elif NOISE_SUBSTEP_COSSIM_SOURCE == "guide_bkg_tiled":
-                        x = noise_cossim_guide_tiled(x_tmp, y0_inv, cossim_mode=NOISE_SUBSTEP_COSSIM_MODE, tile_size=int(get_extra_options_kv("noise_substep_cossim_tile", "2", extra_options)))
+                        x = noise_cossim_guide_tiled(x_tmp, y0_inv, cossim_mode=NOISE_SUBSTEP_COSSIM_MODE, tile_size=noise_substep_cossim_tile_size)
                     else:
                         for i in range(len(x_tmp)):
                             if   (NOISE_SUBSTEP_COSSIM_MODE == "forward") and (cossim_tmp[i] == max(cossim_tmp)):
@@ -432,6 +434,8 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
             if step > int(get_extra_options_kv("noise_cossim_end_step", "10000", extra_options)):
                 NOISE_COSSIM_SOURCE = get_extra_options_kv("noise_cossim_takeover_source", "eps", extra_options)
                 NOISE_COSSIM_MODE   = get_extra_options_kv("noise_cossim_takeover_mode", "forward", extra_options)
+                NOISE_COSSIM_MODE   = get_extra_options_kv("noise_cossim_takeover_mode", "forward", extra_options)
+                noise_cossim_tile_size   = int(get_extra_options_kv("noise_cossim_takeover_tile", str(noise_cossim_tile_size), extra_options))
                 noise_cossim_iterations   = int(get_extra_options_kv("noise_cossim_takeover_iterations", str(noise_cossim_iterations), extra_options))
                 #noise_cossim_iterations = 1
             x_tmp.append(rk.add_noise_post(x, y0, lgw[step], sigma_up, sigma, sigma_next, sigma_down, alpha_ratio, s_noise, noise_mode, SDE_NOISE_EXTERNAL, sde_noise_t)    )#y0, lgw, sigma_down are currently unused
@@ -464,9 +468,9 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
                 cossim_tmp.append(get_cosine_similarity(y0_inv, x_tmp[i]))
                 
         if NOISE_COSSIM_SOURCE == "guide_tiled":
-            x = noise_cossim_guide_tiled(x_tmp, y0, cossim_mode=NOISE_COSSIM_MODE, tile_size=int(get_extra_options_kv("noise_cossim_tile", "2", extra_options)))
+            x = noise_cossim_guide_tiled(x_tmp, y0, cossim_mode=NOISE_COSSIM_MODE, tile_size=noise_cossim_tile_size)
         elif NOISE_COSSIM_SOURCE == "guide_bkg_tiled":
-            x = noise_cossim_guide_tiled(x_tmp, y0_inv, cossim_mode=NOISE_COSSIM_MODE, tile_size=int(get_extra_options_kv("noise_cossim_tile", "2", extra_options)))
+            x = noise_cossim_guide_tiled(x_tmp, y0_inv, cossim_mode=NOISE_COSSIM_MODE, tile_size=noise_cossim_tile_size)
         else:
             for i in range(len(x_tmp)):
                 if   (NOISE_COSSIM_MODE == "forward") and (cossim_tmp[i] == max(cossim_tmp)):
