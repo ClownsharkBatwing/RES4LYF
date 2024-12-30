@@ -158,8 +158,8 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
     NOISE_SUBSTEP_COSSIM_MODE       =     get_extra_options_kv("noise_substep_cossim_mode", "orthogonal", extra_options)
     NOISE_SUBSTEP_COSSIM_SOURCE     =     get_extra_options_kv("noise_substep_cossim_source", "data", extra_options)
     SUBSTEP_SKIP_LAST       =     get_extra_options_kv("substep_skip_last", "false", extra_options) == "true" 
-    noise_cossim_tile_size = int(get_extra_options_kv("noise_cossim_tile_size", "2", extra_options))
-    noise_substep_cossim_tile_size = int(get_extra_options_kv("noise_substep_cossim_tile_size", "2", extra_options))
+    noise_cossim_tile_size = int(get_extra_options_kv("noise_cossim_tile", "2", extra_options))
+    noise_substep_cossim_tile_size = int(get_extra_options_kv("noise_substep_cossim_tile", "2", extra_options))
 
     denoised_prev, eps_prev = torch.zeros_like(x), torch.zeros_like(x)
     denoised,      eps      = torch.zeros_like(x), torch.zeros_like(x)
@@ -433,7 +433,6 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
         for i in range(noise_cossim_iterations):
             if step > int(get_extra_options_kv("noise_cossim_end_step", "10000", extra_options)):
                 NOISE_COSSIM_SOURCE = get_extra_options_kv("noise_cossim_takeover_source", "eps", extra_options)
-                NOISE_COSSIM_MODE   = get_extra_options_kv("noise_cossim_takeover_mode", "forward", extra_options)
                 NOISE_COSSIM_MODE   = get_extra_options_kv("noise_cossim_takeover_mode", "forward", extra_options)
                 noise_cossim_tile_size   = int(get_extra_options_kv("noise_cossim_takeover_tile", str(noise_cossim_tile_size), extra_options))
                 noise_cossim_iterations   = int(get_extra_options_kv("noise_cossim_takeover_iterations", str(noise_cossim_iterations), extra_options))
