@@ -344,6 +344,8 @@ def noise_cossim_eps_tiled(x_list, eps, noise_list, cossim_mode="forward", tile_
             elif (cossim_mode == "orthogonal") and (abs(cossim_tmp[i]) == min(abs(val) for val in cossim_tmp)):
                 x_tiled_out[0][j] = x_tiled_list[i][0][j]
     
+    if x_tiled_out.sum() == 0:
+        x_tiled_out = x_tiled_list[0]
     x_detiled = rearrange(x_tiled_out, "b (t1 t2) c h w -> b c (h t1) (w t2)", t1=tile_size, t2=tile_size)
     
     return x_detiled
