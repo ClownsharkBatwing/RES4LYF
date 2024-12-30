@@ -45,7 +45,7 @@ def prepare_weighted_masks(mask, mask_inv, lgw_, lgw_inv_, latent_guide, latent_
     return lgw_mask, lgw_mask_inv
 
 
-def get_guide_epsilon(x_0, x_, y0, y0_inv, s_, row, rk_type, b=None, c=None):
+def get_guide_epsilon_substep(x_0, x_, y0, y0_inv, s_, row, rk_type, b=None, c=None):
     s_in = x_0.new_ones([x_0.shape[0]])
     
     if b is not None and c is not None:  
@@ -63,6 +63,26 @@ def get_guide_epsilon(x_0, x_, y0, y0_inv, s_, row, rk_type, b=None, c=None):
         eps_row_inv = (x_[row+1][index] - y0_inv[index]) / (s_[row] * s_in)
     
     return eps_row, eps_row_inv
+
+def get_guide_epsilon(x_0, x_, y0, sigma, rk_type, b=None, c=None):
+    s_in = x_0.new_ones([x_0.shape[0]])
+    
+    if b is not None and c is not None:  
+        index = (b, c)
+    elif b is not None: 
+        index = (b,)
+    else: 
+        index = ()
+
+    if RK_Method.is_exponential(rk_type):
+        eps     = y0    [index] - x_0[index]
+        #eps_inv = y0_inv[index] - x_0[index]
+    else:
+        eps     = (x_[index] - y0    [index]) / (sigma * s_in)
+        #eps_inv = (x_[index] - y0_inv[index]) / (sigma * s_in)
+    
+    return eps#, eps_inv
+
 
 
 
@@ -102,7 +122,7 @@ def process_guides_substep(x_0, x_, eps_, data_, row, y0, y0_inv, lgw, lgw_inv, 
         if sigma > sigma_next:
                 
             if extra_options_flag("disable_lgw_scaling", extra_options):
-                eps_row, eps_row_inv = get_guide_epsilon(x_0, x_, y0, y0_inv, s_, row, rk_type)
+                eps_row, eps_row_inv = get_guide_epsilon_substep(x_0, x_, y0, y0_inv, s_, row, rk_type)
                 eps_[row] = eps_[row]      +     lgw_mask * (eps_row - eps_[row])    +    lgw_mask_inv * (eps_row_inv - eps_[row])
                      
             tol_value = float(get_extra_options_kv("tol", "-1.0", extra_options))
@@ -120,7 +140,7 @@ def process_guides_substep(x_0, x_, eps_, data_, row, y0, y0_inv, lgw, lgw_inv, 
                     lgw_mask_clamp = torch.clamp(lgw_mask, max=lgw_tmp)
                     lgw_mask_clamp_inv = torch.clamp(lgw_mask_inv, max=lgw_tmp_inv)
                     
-                    eps_row, eps_row_inv = get_guide_epsilon(x_0, x_, y0, y0_inv, s_, row, rk_type, b, c)
+                    eps_row, eps_row_inv = get_guide_epsilon_substep(x_0, x_, y0, y0_inv, s_, row, rk_type, b, c)
                     eps_[row][b][c] = eps_[row][b][c] + lgw_mask_clamp[b][c] * (eps_row - eps_[row][b][c]) + lgw_mask_clamp_inv[b][c] * (eps_row_inv - eps_[row][b][c])
                     
             elif (lgw > 0 or lgw_inv > 0):
@@ -135,7 +155,7 @@ def process_guides_substep(x_0, x_, eps_, data_, row, y0, y0_inv, lgw, lgw_inv, 
                     ratio     = torch.nan_to_num(torch.norm(data_[row][b][c] - y0    [b][c])   /   avg,     0)
                     ratio_inv = torch.nan_to_num(torch.norm(data_[row][b][c] - y0_inv[b][c])   /   avg_inv, 0)
                     
-                    eps_row, eps_row_inv = get_guide_epsilon(x_0, x_, y0, y0_inv, s_, row, rk_type, b, c)
+                    eps_row, eps_row_inv = get_guide_epsilon_substep(x_0, x_, y0, y0_inv, s_, row, rk_type, b, c)
                     eps_[row][b][c] = eps_[row][b][c]      +     ratio * lgw_mask[b][c] * (eps_row - eps_[row][b][c])    +    ratio_inv * lgw_mask_inv[b][c] * (eps_row_inv - eps_[row][b][c])
 
     elif (UNSAMPLE or guide_mode in {"resample", "unsample"}) and (lgw > 0 or lgw_inv > 0):
@@ -317,7 +337,7 @@ def noise_cossim_guide_tiled(x_list, guide, cossim_mode="forward", tile_size=2):
 
 
 @torch.no_grad
-def noise_cossim_eps_tiled(x_list, eps, noise_list, cossim_mode="forward", tile_size=2):
+def noise_cossim_eps_tiled(x_list, eps, noise_list, cossim_mode="forward", tile_size=2, step=0):
     #tiles = F.unfold(x, kernel_size=tile_size, stride=tile_size)
     eps_tiled = rearrange(eps, "b c (h t1) (w t2) -> b (t1 t2) c h w", t1=tile_size, t2=tile_size)
     
@@ -336,6 +356,56 @@ def noise_cossim_eps_tiled(x_list, eps, noise_list, cossim_mode="forward", tile_
         cossim_tmp = []
         for i in range(len(x_tiled_list)):
             cossim_tmp.append(get_cosine_similarity(noise_tiled_list[i][0][j], eps_tiled[0][j]))
+        for i in range(len(x_tiled_list)):
+            if   (cossim_mode == "forward") and (cossim_tmp[i] == max(cossim_tmp)):
+                x_tiled_out[0][j] = x_tiled_list[i][0][j]
+            elif (cossim_mode == "reverse") and (cossim_tmp[i] == min(cossim_tmp)):
+                x_tiled_out[0][j] = x_tiled_list[i][0][j]
+            elif (cossim_mode == "orthogonal") and (abs(cossim_tmp[i]) == min(abs(val) for val in cossim_tmp)):
+                x_tiled_out[0][j] = x_tiled_list[i][0][j]
+            elif (cossim_mode == "forward_reverse"): # and (abs(cossim_tmp[i]) == min(abs(val) for val in cossim_tmp)):
+                if   (step % 2 == 0) and (cossim_tmp[i] == max(cossim_tmp)):
+                    x_tiled_out[0][j] = x_tiled_list[i][0][j]
+                elif (step % 2 == 1) and (cossim_tmp[i] == min(cossim_tmp)):
+                    x_tiled_out[0][j] = x_tiled_list[i][0][j]
+    
+    if x_tiled_out.sum() == 0:
+        x_tiled_out = x_tiled_list[0]
+    x_detiled = rearrange(x_tiled_out, "b (t1 t2) c h w -> b c (h t1) (w t2)", t1=tile_size, t2=tile_size)
+    
+    return x_detiled
+
+
+@torch.no_grad
+def noise_cossim_guide_eps_tiled(x_0, x_list, y0, noise_list, cossim_mode="forward", tile_size=2, sigma=None, rk_type=None):
+    #tiles = F.unfold(x, kernel_size=tile_size, stride=tile_size)
+    y0_tiled = rearrange(y0, "b c (h t1) (w t2) -> b (t1 t2) c h w", t1=tile_size, t2=tile_size)
+    
+    cossim_tmp, x_tiled_list, noise_tiled_list, eps_guide_tiled_list = [], [], [], []
+    x_tiled_out = torch.zeros_like(y0_tiled)
+    
+    x_0_tiled     = rearrange(x_0,     "b c (h t1) (w t2) -> b (t1 t2) c h w", t1=tile_size, t2=tile_size)
+    
+    for i in range (len(x_list)):
+        x_tiled     = rearrange(x_list[i],     "b c (h t1) (w t2) -> b (t1 t2) c h w", t1=tile_size, t2=tile_size)
+        x_tiled_list.append(x_tiled)
+        
+    for i in range (len(noise_list)):
+        noise_tiled     = rearrange(noise_list[i],     "b c (h t1) (w t2) -> b (t1 t2) c h w", t1=tile_size, t2=tile_size)
+        noise_tiled_list.append(noise_tiled)
+        
+    for i in range (len(x_list)):
+        #eps_guide = get_guide_epsilon(x_0, x_list[i], y0, sigma, rk_type)
+        eps_guide = x_list[i] - y0
+        eps_guide_tiled     = rearrange(eps_guide,     "b c (h t1) (w t2) -> b (t1 t2) c h w", t1=tile_size, t2=tile_size)
+        eps_guide_tiled_list.append(eps_guide_tiled)
+        
+        
+        
+    for j in range(x_tiled.shape[1]):
+        cossim_tmp = []
+        for i in range(len(x_tiled_list)):
+            cossim_tmp.append(get_cosine_similarity(noise_tiled_list[i][0][j], eps_guide_tiled_list[i][0][j]))
         for i in range(len(x_tiled_list)):
             if   (cossim_mode == "forward") and (cossim_tmp[i] == max(cossim_tmp)):
                 x_tiled_out[0][j] = x_tiled_list[i][0][j]
