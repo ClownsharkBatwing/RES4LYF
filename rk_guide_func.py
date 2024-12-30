@@ -315,3 +315,37 @@ def noise_cossim_guide_tiled(x_list, guide, cossim_mode="forward", tile_size=2):
     return x_detiled
 
 
+
+@torch.no_grad
+def noise_cossim_eps_tiled(x_list, eps, noise_list, cossim_mode="forward", tile_size=2):
+    #tiles = F.unfold(x, kernel_size=tile_size, stride=tile_size)
+    eps_tiled = rearrange(eps, "b c (h t1) (w t2) -> b (t1 t2) c h w", t1=tile_size, t2=tile_size)
+    
+    cossim_tmp, x_tiled_list, noise_tiled_list = [], [], []
+    x_tiled_out = torch.zeros_like(eps_tiled)
+    
+    for i in range (len(x_list)):
+        x_tiled     = rearrange(x_list[i],     "b c (h t1) (w t2) -> b (t1 t2) c h w", t1=tile_size, t2=tile_size)
+        x_tiled_list.append(x_tiled)
+        
+    for i in range (len(noise_list)):
+        noise_tiled     = rearrange(noise_list[i],     "b c (h t1) (w t2) -> b (t1 t2) c h w", t1=tile_size, t2=tile_size)
+        noise_tiled_list.append(noise_tiled)
+        
+    for j in range(x_tiled.shape[1]):
+        cossim_tmp = []
+        for i in range(len(x_tiled_list)):
+            cossim_tmp.append(get_cosine_similarity(noise_tiled_list[i][0][j], eps_tiled[0][j]))
+        for i in range(len(x_tiled_list)):
+            if   (cossim_mode == "forward") and (cossim_tmp[i] == max(cossim_tmp)):
+                x_tiled_out[0][j] = x_tiled_list[i][0][j]
+            elif (cossim_mode == "reverse") and (cossim_tmp[i] == min(cossim_tmp)):
+                x_tiled_out[0][j] = x_tiled_list[i][0][j]
+            elif (cossim_mode == "orthogonal") and (abs(cossim_tmp[i]) == min(abs(val) for val in cossim_tmp)):
+                x_tiled_out[0][j] = x_tiled_list[i][0][j]
+    
+    x_detiled = rearrange(x_tiled_out, "b (t1 t2) c h w -> b c (h t1) (w t2)", t1=tile_size, t2=tile_size)
+    
+    return x_detiled
+
+

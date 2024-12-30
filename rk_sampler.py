@@ -429,7 +429,7 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
             else:
                 sde_noise_t = sde_noise[step]
                 
-        x_tmp, cossim_tmp = [], []
+        x_tmp, cossim_tmp, noise_tmp_list = [], [], []
         for i in range(noise_cossim_iterations):
             if step > int(get_extra_options_kv("noise_cossim_end_step", "10000", extra_options)):
                 NOISE_COSSIM_SOURCE = get_extra_options_kv("noise_cossim_takeover_source", "eps", extra_options)
@@ -440,6 +440,8 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
             x_tmp.append(rk.add_noise_post(x, y0, lgw[step], sigma_up, sigma, sigma_next, sigma_down, alpha_ratio, s_noise, noise_mode, SDE_NOISE_EXTERNAL, sde_noise_t)    )#y0, lgw, sigma_down are currently unused
             noise_tmp = x_tmp[i] - x
             noise_tmp = (noise_tmp - noise_tmp.mean()) / noise_tmp.std()
+            if   NOISE_COSSIM_SOURCE == "eps_tiled":
+                noise_tmp_list.append(noise_tmp)
             if   NOISE_COSSIM_SOURCE == "eps":
                 cossim_tmp.append(get_cosine_similarity(eps, noise_tmp))
             if   NOISE_COSSIM_SOURCE == "eps_ch":
@@ -468,6 +470,8 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
                 
         if step < int(get_extra_options_kv("noise_cossim_start_step", "0", extra_options)):
             x = x_tmp[0]
+        elif (NOISE_COSSIM_SOURCE == "eps_tiled"):
+            x = noise_cossim_eps_tiled(x_tmp, eps, noise_tmp_list, cossim_mode=NOISE_COSSIM_MODE, tile_size=noise_cossim_tile_size)
         elif (NOISE_COSSIM_SOURCE == "guide_tiled"):
             x = noise_cossim_guide_tiled(x_tmp, y0, cossim_mode=NOISE_COSSIM_MODE, tile_size=noise_cossim_tile_size)
         elif (NOISE_COSSIM_SOURCE == "guide_bkg_tiled"):
