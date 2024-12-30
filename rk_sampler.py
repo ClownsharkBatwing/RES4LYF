@@ -265,7 +265,7 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
                 
                 #x_[row+1] = rk.add_noise_post(x_[row+1], y0, lgw[step], sub_sigma_up, sub_sigma, s_[row], sub_sigma_down, sub_alpha_ratio, s_noise, substep_noise_mode, SDE_NOISE_EXTERNAL, sde_noise_t)    #y0, lgw, sigma_down are currently unused
                 #F.cosine_similarity()
-                if (SUBSTEP_SKIP_LAST == False) or (row < rk.rows - rk.multistep_stages - 1):
+                if (sub_sigma_up > 0) and ((SUBSTEP_SKIP_LAST == False) or (row < rk.rows - rk.multistep_stages - 1)):
                     x_tmp, cossim_tmp, noise_tmp_list = [], [], []
                     if step > int(get_extra_options_kv("noise_substep_cossim_end_step", "10000", extra_options)):
                         noise_substep_cossim_iterations = 1
@@ -437,69 +437,72 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
             else:
                 sde_noise_t = sde_noise[step]
                 
-        x_tmp, cossim_tmp, noise_tmp_list = [], [], []
-        for i in range(noise_cossim_iterations):
-            if step > int(get_extra_options_kv("noise_cossim_end_step", "10000", extra_options)):
-                NOISE_COSSIM_SOURCE = get_extra_options_kv("noise_cossim_takeover_source", "eps", extra_options)
-                NOISE_COSSIM_MODE   = get_extra_options_kv("noise_cossim_takeover_mode", "forward", extra_options)
-                noise_cossim_tile_size   = int(get_extra_options_kv("noise_cossim_takeover_tile", str(noise_cossim_tile_size), extra_options))
-                noise_cossim_iterations   = int(get_extra_options_kv("noise_cossim_takeover_iterations", str(noise_cossim_iterations), extra_options))
-                #noise_cossim_iterations = 1
-            x_tmp.append(rk.add_noise_post(x, y0, lgw[step], sigma_up, sigma, sigma_next, sigma_down, alpha_ratio, s_noise, noise_mode, SDE_NOISE_EXTERNAL, sde_noise_t)    )#y0, lgw, sigma_down are currently unused
-            noise_tmp = x_tmp[i] - x
-            noise_tmp = (noise_tmp - noise_tmp.mean()) / noise_tmp.std()
-            if   NOISE_COSSIM_SOURCE in ("eps_tiled", "guide_epsilon_tiled"):
-                noise_tmp_list.append(noise_tmp)
-            if   NOISE_COSSIM_SOURCE == "eps":
-                cossim_tmp.append(get_cosine_similarity(eps, noise_tmp))
-            if   NOISE_COSSIM_SOURCE == "eps_ch":
-                cossim_total = torch.zeros_like(eps_tmp[0][0][0][0])
-                for ch in range(eps_tmp.shape[1]):
-                    cossim_total += get_cosine_similarity(eps_tmp[0][ch], noise_tmp[0][ch])
-                cossim_tmp.append(cossim_total)
-            elif NOISE_COSSIM_SOURCE == "data":
-                cossim_tmp.append(get_cosine_similarity(denoised, noise_tmp))
-            elif NOISE_COSSIM_SOURCE == "latent":
-                cossim_tmp.append(get_cosine_similarity(x_prenoise, noise_tmp))
-            elif NOISE_COSSIM_SOURCE == "x_prenoise":
-                cossim_tmp.append(get_cosine_similarity(x_prenoise, x_tmp[i]))
-            elif NOISE_COSSIM_SOURCE == "x":
-                cossim_tmp.append(get_cosine_similarity(x, x_tmp[i]))
-            elif NOISE_COSSIM_SOURCE == "x_data":
-                cossim_tmp.append(get_cosine_similarity(denoised, x_tmp[i]))
-            elif NOISE_COSSIM_SOURCE == "x_init_vs_noise":
-                cossim_tmp.append(get_cosine_similarity(x_init, noise_tmp))
-            elif NOISE_COSSIM_SOURCE == "mom":
-                cossim_tmp.append(get_cosine_similarity(denoised, x + sigma_next*noise_tmp))
-            elif NOISE_COSSIM_SOURCE == "guide":
-                cossim_tmp.append(get_cosine_similarity(y0, x_tmp[i]))
-            elif NOISE_COSSIM_SOURCE == "guide_bkg":
-                cossim_tmp.append(get_cosine_similarity(y0_inv, x_tmp[i]))
                 
-        if step < int(get_extra_options_kv("noise_cossim_start_step", "0", extra_options)):
-            x = x_tmp[0]
-        elif (NOISE_COSSIM_SOURCE == "eps_tiled"):
-            x = noise_cossim_eps_tiled(x_tmp, eps, noise_tmp_list, cossim_mode=NOISE_COSSIM_MODE, tile_size=noise_cossim_tile_size, step=step)
-        elif (NOISE_COSSIM_SOURCE == "guide_epsilon_tiled"):
-            x = noise_cossim_guide_eps_tiled(x_0, x_tmp, y0, noise_tmp_list, cossim_mode=NOISE_COSSIM_MODE, tile_size=noise_cossim_tile_size, sigma=sigma, rk_type=rk_type)
-        elif (NOISE_COSSIM_SOURCE == "guide_tiled"):
-            x = noise_cossim_guide_tiled(x_tmp, y0, cossim_mode=NOISE_COSSIM_MODE, tile_size=noise_cossim_tile_size)
-        elif (NOISE_COSSIM_SOURCE == "guide_bkg_tiled"):
-            x = noise_cossim_guide_tiled(x_tmp, y0_inv, cossim_mode=NOISE_COSSIM_MODE, tile_size=noise_cossim_tile_size)
-        else:
-            for i in range(len(x_tmp)):
-                if   (NOISE_COSSIM_MODE == "forward") and (cossim_tmp[i] == max(cossim_tmp)):
-                    x = x_tmp[i]
-                    break
-                elif (NOISE_COSSIM_MODE == "reverse") and (cossim_tmp[i] == min(cossim_tmp)):
-                    x = x_tmp[i]
-                    break
-                elif (NOISE_COSSIM_MODE == "orthogonal") and (abs(cossim_tmp[i]) == min(abs(val) for val in cossim_tmp)):
-                    x = x_tmp[i]
-                    break
-                elif (NOISE_COSSIM_MODE != "forward") and (NOISE_COSSIM_MODE != "reverse") and (NOISE_COSSIM_MODE != "orthogonal"):
-                    x = x_tmp[0]
-                    break
+                
+        if sigma_up > 0:
+            x_tmp, cossim_tmp, noise_tmp_list = [], [], []
+            for i in range(noise_cossim_iterations):
+                if step > int(get_extra_options_kv("noise_cossim_end_step", "10000", extra_options)):
+                    NOISE_COSSIM_SOURCE = get_extra_options_kv("noise_cossim_takeover_source", "eps", extra_options)
+                    NOISE_COSSIM_MODE   = get_extra_options_kv("noise_cossim_takeover_mode", "forward", extra_options)
+                    noise_cossim_tile_size   = int(get_extra_options_kv("noise_cossim_takeover_tile", str(noise_cossim_tile_size), extra_options))
+                    noise_cossim_iterations   = int(get_extra_options_kv("noise_cossim_takeover_iterations", str(noise_cossim_iterations), extra_options))
+                    #noise_cossim_iterations = 1
+                x_tmp.append(rk.add_noise_post(x, y0, lgw[step], sigma_up, sigma, sigma_next, sigma_down, alpha_ratio, s_noise, noise_mode, SDE_NOISE_EXTERNAL, sde_noise_t)    )#y0, lgw, sigma_down are currently unused
+                noise_tmp = x_tmp[i] - x
+                noise_tmp = (noise_tmp - noise_tmp.mean()) / noise_tmp.std()
+                if   NOISE_COSSIM_SOURCE in ("eps_tiled", "guide_epsilon_tiled"):
+                    noise_tmp_list.append(noise_tmp)
+                if   NOISE_COSSIM_SOURCE == "eps":
+                    cossim_tmp.append(get_cosine_similarity(eps, noise_tmp))
+                if   NOISE_COSSIM_SOURCE == "eps_ch":
+                    cossim_total = torch.zeros_like(eps_tmp[0][0][0][0])
+                    for ch in range(eps_tmp.shape[1]):
+                        cossim_total += get_cosine_similarity(eps_tmp[0][ch], noise_tmp[0][ch])
+                    cossim_tmp.append(cossim_total)
+                elif NOISE_COSSIM_SOURCE == "data":
+                    cossim_tmp.append(get_cosine_similarity(denoised, noise_tmp))
+                elif NOISE_COSSIM_SOURCE == "latent":
+                    cossim_tmp.append(get_cosine_similarity(x_prenoise, noise_tmp))
+                elif NOISE_COSSIM_SOURCE == "x_prenoise":
+                    cossim_tmp.append(get_cosine_similarity(x_prenoise, x_tmp[i]))
+                elif NOISE_COSSIM_SOURCE == "x":
+                    cossim_tmp.append(get_cosine_similarity(x, x_tmp[i]))
+                elif NOISE_COSSIM_SOURCE == "x_data":
+                    cossim_tmp.append(get_cosine_similarity(denoised, x_tmp[i]))
+                elif NOISE_COSSIM_SOURCE == "x_init_vs_noise":
+                    cossim_tmp.append(get_cosine_similarity(x_init, noise_tmp))
+                elif NOISE_COSSIM_SOURCE == "mom":
+                    cossim_tmp.append(get_cosine_similarity(denoised, x + sigma_next*noise_tmp))
+                elif NOISE_COSSIM_SOURCE == "guide":
+                    cossim_tmp.append(get_cosine_similarity(y0, x_tmp[i]))
+                elif NOISE_COSSIM_SOURCE == "guide_bkg":
+                    cossim_tmp.append(get_cosine_similarity(y0_inv, x_tmp[i]))
+                    
+            if step < int(get_extra_options_kv("noise_cossim_start_step", "0", extra_options)):
+                x = x_tmp[0]
+            elif (NOISE_COSSIM_SOURCE == "eps_tiled"):
+                x = noise_cossim_eps_tiled(x_tmp, eps, noise_tmp_list, cossim_mode=NOISE_COSSIM_MODE, tile_size=noise_cossim_tile_size, step=step)
+            elif (NOISE_COSSIM_SOURCE == "guide_epsilon_tiled"):
+                x = noise_cossim_guide_eps_tiled(x_0, x_tmp, y0, noise_tmp_list, cossim_mode=NOISE_COSSIM_MODE, tile_size=noise_cossim_tile_size, sigma=sigma, rk_type=rk_type)
+            elif (NOISE_COSSIM_SOURCE == "guide_tiled"):
+                x = noise_cossim_guide_tiled(x_tmp, y0, cossim_mode=NOISE_COSSIM_MODE, tile_size=noise_cossim_tile_size)
+            elif (NOISE_COSSIM_SOURCE == "guide_bkg_tiled"):
+                x = noise_cossim_guide_tiled(x_tmp, y0_inv, cossim_mode=NOISE_COSSIM_MODE, tile_size=noise_cossim_tile_size)
+            else:
+                for i in range(len(x_tmp)):
+                    if   (NOISE_COSSIM_MODE == "forward") and (cossim_tmp[i] == max(cossim_tmp)):
+                        x = x_tmp[i]
+                        break
+                    elif (NOISE_COSSIM_MODE == "reverse") and (cossim_tmp[i] == min(cossim_tmp)):
+                        x = x_tmp[i]
+                        break
+                    elif (NOISE_COSSIM_MODE == "orthogonal") and (abs(cossim_tmp[i]) == min(abs(val) for val in cossim_tmp)):
+                        x = x_tmp[i]
+                        break
+                    elif (NOISE_COSSIM_MODE != "forward") and (NOISE_COSSIM_MODE != "reverse") and (NOISE_COSSIM_MODE != "orthogonal"):
+                        x = x_tmp[0]
+                        break
 
 
 
