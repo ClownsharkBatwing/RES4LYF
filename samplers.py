@@ -112,6 +112,10 @@ class SharkSampler:
                 extra_options += sampler.extra_options['extra_options']
                 sampler.extra_options['extra_options'] = extra_options
 
+            batch_size = int(get_extra_options_kv("batch_size", "1", extra_options))
+            if batch_size > 1:
+                latent_image['samples'] = latent_image['samples'].repeat(batch_size, 1, 1, 1) 
+            
             latent_image_batch = {"samples": latent_image['samples']}
             out_samples, out_samples_fp64, out_denoised_samples, out_denoised_samples_fp64 = [], [], [], []
             for batch_num in range(latent_image_batch['samples'].shape[0]):

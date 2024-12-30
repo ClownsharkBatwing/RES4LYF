@@ -316,7 +316,7 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
                             elif (NOISE_SUBSTEP_COSSIM_MODE == "orthogonal") and (abs(cossim_tmp[i]) == min(abs(val) for val in cossim_tmp)):
                                 x_[row+1] = x_tmp[i]
                                 break
-                            else:
+                            elif (NOISE_SUBSTEP_COSSIM_MODE != "forward") and (NOISE_SUBSTEP_COSSIM_MODE != "reverse") and (NOISE_SUBSTEP_COSSIM_MODE != "orthogonal"):
                                 x_[row+1] = x_tmp[0]
                                 break
                             
@@ -430,13 +430,16 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
         x_tmp, cossim_tmp = [], []
         for i in range(noise_cossim_iterations):
             if step > int(get_extra_options_kv("noise_cossim_end_step", "10000", extra_options)):
-                noise_cossim_iterations = 1
+                NOISE_COSSIM_SOURCE = get_extra_options_kv("noise_cossim_takeover_source", "eps", extra_options)
+                NOISE_COSSIM_MODE   = get_extra_options_kv("noise_cossim_takeover_mode", "forward", extra_options)
+                noise_cossim_iterations   = int(get_extra_options_kv("noise_cossim_takeover_iterations", str(noise_cossim_iterations), extra_options))
+                #noise_cossim_iterations = 1
             x_tmp.append(rk.add_noise_post(x, y0, lgw[step], sigma_up, sigma, sigma_next, sigma_down, alpha_ratio, s_noise, noise_mode, SDE_NOISE_EXTERNAL, sde_noise_t)    )#y0, lgw, sigma_down are currently unused
             noise_tmp = x_tmp[i] - x
             noise_tmp = (noise_tmp - noise_tmp.mean()) / noise_tmp.std()
             if   NOISE_COSSIM_SOURCE == "eps":
                 cossim_tmp.append(get_cosine_similarity(eps, noise_tmp))
-            if   NOISE_SUBSTEP_COSSIM_SOURCE == "eps_ch":
+            if   NOISE_COSSIM_SOURCE == "eps_ch":
                 cossim_total = torch.zeros_like(eps_tmp[0][0][0][0])
                 for ch in range(eps_tmp.shape[1]):
                     cossim_total += get_cosine_similarity(eps_tmp[0][ch], noise_tmp[0][ch])
@@ -475,7 +478,7 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
                 elif (NOISE_COSSIM_MODE == "orthogonal") and (abs(cossim_tmp[i]) == min(abs(val) for val in cossim_tmp)):
                     x = x_tmp[i]
                     break
-                else:
+                elif (NOISE_COSSIM_MODE != "forward") and (NOISE_COSSIM_MODE != "reverse") and (NOISE_COSSIM_MODE != "orthogonal"):
                     x = x_tmp[0]
                     break
 

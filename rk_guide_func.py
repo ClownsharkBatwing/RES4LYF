@@ -232,7 +232,7 @@ def process_guides_poststep(x, denoised, eps, y0, y0_inv, mask, lgw_mask, lgw_ma
         x = denoised_shifted + eps
     
     
-    if UNSAMPLE == False and (latent_guide is not None or latent_guide_inv is not None) and guide_mode in ("hard_light", "blend", "mean_std", "mean", "std"):
+    if UNSAMPLE == False and (latent_guide is not None or latent_guide_inv is not None) and guide_mode in ("hard_light", "blend", "mean_std", "mean", "mean_tiled", "std"):
         if guide_mode == "hard_light":
             d_shift, d_shift_inv = hard_light_blend(y0, denoised), hard_light_blend(y0_inv, denoised)
         elif guide_mode == "blend":
@@ -243,8 +243,18 @@ def process_guides_poststep(x, denoised, eps, y0, y0_inv, mask, lgw_mask, lgw_ma
             d_shift, d_shift_inv = normalize_latent([denoised, denoised], [y0, y0_inv], std=False)
         elif guide_mode == "std":
             d_shift, d_shift_inv = normalize_latent([denoised, denoised], [y0, y0_inv], mean=False)
+        elif guide_mode == "mean_tiled":
+            mean_tile_size = int(get_extra_options_kv("mean_tile", "8", extra_options))
+            y0_tiled       = rearrange(y0,       "b c (h t1) (w t2) -> (t1 t2) b c h w", t1=mean_tile_size, t2=mean_tile_size)
+            y0_inv_tiled   = rearrange(y0_inv,   "b c (h t1) (w t2) -> (t1 t2) b c h w", t1=mean_tile_size, t2=mean_tile_size)
+            denoised_tiled = rearrange(denoised, "b c (h t1) (w t2) -> (t1 t2) b c h w", t1=mean_tile_size, t2=mean_tile_size)
+            d_shift_tiled, d_shift_inv_tiled = torch.zeros_like(y0_tiled), torch.zeros_like(y0_tiled)
+            for i in range(y0_tiled.shape[0]):
+                d_shift_tiled[i], d_shift_inv_tiled[i] = normalize_latent([denoised_tiled[i], denoised_tiled[i]], [y0_tiled[i], y0_inv_tiled[i]], std=False)
+            d_shift     = rearrange(d_shift_tiled,     "(t1 t2) b c h w -> b c (h t1) (w t2)", t1=mean_tile_size, t2=mean_tile_size)
+            d_shift_inv = rearrange(d_shift_inv_tiled, "(t1 t2) b c h w -> b c (h t1) (w t2)", t1=mean_tile_size, t2=mean_tile_size)
 
-        if guide_mode in ("hard_light", "blend", "mean_std", "mean", "std"):
+        if guide_mode in ("hard_light", "blend", "mean_std", "mean", "mean_tiled", "std"):
             if latent_guide_inv is None:
                 denoised_shifted = denoised   +   lgw_mask * (d_shift - denoised)
             else:
@@ -299,15 +309,6 @@ def noise_cossim_guide_tiled(x_list, guide, cossim_mode="forward", tile_size=2):
         for i in range(len(x_tiled_list)):
             if cossim_tmp[i] == max(cossim_tmp):
                 x_tiled_out[0][j] = x_tiled_list[i][0][j]
-    
-    """for i in range(len(x_list)):
-        x_tiled     = rearrange(x_list[i],     "b c (h t1) (w t2) -> b (t1 t2) c h w", t1=tile_size, t2=tile_size)
-        for j in range(x_tiled.shape[1]):
-            cossim_tmp.append(get_cosine_similarity(x_tiled[0][j], guide_tiled[0][j]))
-    
-        for j in range(x)
-    """
-    
     
     x_detiled = rearrange(x_tiled_out, "b (t1 t2) c h w -> b c (h t1) (w t2)", t1=tile_size, t2=tile_size)
     
