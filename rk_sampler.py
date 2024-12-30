@@ -466,9 +466,11 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
             elif NOISE_COSSIM_SOURCE == "guide_bkg":
                 cossim_tmp.append(get_cosine_similarity(y0_inv, x_tmp[i]))
                 
-        if NOISE_COSSIM_SOURCE == "guide_tiled":
+        if step < int(get_extra_options_kv("noise_cossim_start_step", "0", extra_options)):
+            x = x_tmp[0]
+        elif (NOISE_COSSIM_SOURCE == "guide_tiled"):
             x = noise_cossim_guide_tiled(x_tmp, y0, cossim_mode=NOISE_COSSIM_MODE, tile_size=noise_cossim_tile_size)
-        elif NOISE_COSSIM_SOURCE == "guide_bkg_tiled":
+        elif (NOISE_COSSIM_SOURCE == "guide_bkg_tiled"):
             x = noise_cossim_guide_tiled(x_tmp, y0_inv, cossim_mode=NOISE_COSSIM_MODE, tile_size=noise_cossim_tile_size)
         else:
             for i in range(len(x_tmp)):
