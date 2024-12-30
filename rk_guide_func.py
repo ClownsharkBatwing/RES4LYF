@@ -344,15 +344,26 @@ def noise_cossim_eps_tiled(x_list, eps, noise_list, cossim_mode="forward", tile_
     cossim_tmp, x_tiled_list, noise_tiled_list = [], [], []
     x_tiled_out = torch.zeros_like(eps_tiled)
     
-    for i in range (len(x_list)):
+    """for i in range (len(x_list)):
         x_tiled     = rearrange(x_list[i],     "b c (h t1) (w t2) -> b (t1 t2) c h w", t1=tile_size, t2=tile_size)
         x_tiled_list.append(x_tiled)
         
     for i in range (len(noise_list)):
         noise_tiled     = rearrange(noise_list[i],     "b c (h t1) (w t2) -> b (t1 t2) c h w", t1=tile_size, t2=tile_size)
-        noise_tiled_list.append(noise_tiled)
+        noise_tiled_list.append(noise_tiled)"""
         
-    for j in range(x_tiled.shape[1]):
+    x_tiled_list = [
+        rearrange(x, "b c (h t1) (w t2) -> b (t1 t2) c h w", t1=tile_size, t2=tile_size)
+        for x in x_list
+    ]
+    noise_tiled_list = [
+        rearrange(noise, "b c (h t1) (w t2) -> b (t1 t2) c h w", t1=tile_size, t2=tile_size)
+        for noise in noise_list
+    ]
+
+
+        
+    for j in range(eps_tiled.shape[1]):
         cossim_tmp = []
         for i in range(len(x_tiled_list)):
             cossim_tmp.append(get_cosine_similarity(noise_tiled_list[i][0][j], eps_tiled[0][j]))
@@ -365,6 +376,11 @@ def noise_cossim_eps_tiled(x_list, eps, noise_list, cossim_mode="forward", tile_
                 x_tiled_out[0][j] = x_tiled_list[i][0][j]
             elif (cossim_mode == "forward_reverse"): # and (abs(cossim_tmp[i]) == min(abs(val) for val in cossim_tmp)):
                 if   (step % 2 == 0) and (cossim_tmp[i] == max(cossim_tmp)):
+                    x_tiled_out[0][j] = x_tiled_list[i][0][j]
+                elif (step % 2 == 1) and (cossim_tmp[i] == min(cossim_tmp)):
+                    x_tiled_out[0][j] = x_tiled_list[i][0][j]
+            elif (cossim_mode == "orthogonal_reverse"): # and (abs(cossim_tmp[i]) == min(abs(val) for val in cossim_tmp)):
+                if   (step % 2 == 0) and (abs(cossim_tmp[i]) == min(abs(val) for val in cossim_tmp)):
                     x_tiled_out[0][j] = x_tiled_list[i][0][j]
                 elif (step % 2 == 1) and (cossim_tmp[i] == min(cossim_tmp)):
                     x_tiled_out[0][j] = x_tiled_list[i][0][j]
