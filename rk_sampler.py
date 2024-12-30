@@ -262,6 +262,8 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
                 #F.cosine_similarity()
                 if (SUBSTEP_SKIP_LAST == False) or (row < rk.rows - rk.multistep_stages - 1):
                     x_tmp, cossim_tmp = [], []
+                    if step > int(get_extra_options_kv("noise_substep_cossim_end_step", "10000", extra_options)):
+                        noise_substep_cossim_iterations = 1
                     for i in range(noise_substep_cossim_iterations):
                         x_tmp.append(rk.add_noise_post(x_[row+1], y0, lgw[step], sub_sigma_up, sub_sigma, s_[row], sub_sigma_down, sub_alpha_ratio, s_noise, substep_noise_mode, SDE_NOISE_EXTERNAL, sde_noise_t)    )#y0, lgw, sigma_down are currently unused
                         noise_tmp = x_tmp[i] - x_[row+1]
@@ -314,6 +316,10 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
                             elif (NOISE_SUBSTEP_COSSIM_MODE == "orthogonal") and (abs(cossim_tmp[i]) == min(abs(val) for val in cossim_tmp)):
                                 x_[row+1] = x_tmp[i]
                                 break
+                            else:
+                                x_[row+1] = x_tmp[0]
+                                break
+                            
                 eps_[row], data_[row] = rk(x_0, x_[row+1], s_[row], h, **extra_args)       #MODEL CALL
                 
                 if (SUBSTEP_SKIP_LAST == False) or (row < rk.rows - rk.multistep_stages - 1):
@@ -423,6 +429,8 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
                 
         x_tmp, cossim_tmp = [], []
         for i in range(noise_cossim_iterations):
+            if step > int(get_extra_options_kv("noise_cossim_end_step", "10000", extra_options)):
+                noise_cossim_iterations = 1
             x_tmp.append(rk.add_noise_post(x, y0, lgw[step], sigma_up, sigma, sigma_next, sigma_down, alpha_ratio, s_noise, noise_mode, SDE_NOISE_EXTERNAL, sde_noise_t)    )#y0, lgw, sigma_down are currently unused
             noise_tmp = x_tmp[i] - x
             noise_tmp = (noise_tmp - noise_tmp.mean()) / noise_tmp.std()
@@ -466,6 +474,9 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
                     break
                 elif (NOISE_COSSIM_MODE == "orthogonal") and (abs(cossim_tmp[i]) == min(abs(val) for val in cossim_tmp)):
                     x = x_tmp[i]
+                    break
+                else:
+                    x = x_tmp[0]
                     break
 
 
