@@ -364,8 +364,18 @@ def noise_cossim_eps_tiled(x_list, eps, noise_list, cossim_mode="forward", tile_
             indices = cossim_tmp_all.argmax(dim=0)
         else:
             indices = cossim_tmp_all.argmin(dim=0)
+    elif cossim_mode == "reverse_forward":
+        if step % 2 == 1:
+            indices = cossim_tmp_all.argmax(dim=0)
+        else:
+            indices = cossim_tmp_all.argmin(dim=0)
     elif cossim_mode == "orthogonal_reverse":
         if step % 2 == 0:
+            indices = torch.abs(cossim_tmp_all).argmin(dim=0)
+        else:
+            indices = cossim_tmp_all.argmin(dim=0)
+    elif cossim_mode == "reverse_orthogonal":
+        if step % 2 == 1:
             indices = torch.abs(cossim_tmp_all).argmin(dim=0)
         else:
             indices = cossim_tmp_all.argmin(dim=0)
