@@ -680,15 +680,16 @@ def legacy_sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=N
     y0, y0_inv = torch.zeros_like(x), torch.zeros_like(x)
     if latent_guide is not None:
         if sigmas[0] > sigmas[1]:
-            y0 = latent_guide = model.inner_model.inner_model.process_latent_in(latent_guide['samples']).clone().to(x.device)
+            y0 = latent_guide = latent_guide_samples * frame_weights_apply
         else:
-            x = model.inner_model.inner_model.process_latent_in(latent_guide['samples']).clone().to(x.device)
+            x = mask * x + (1-mask) * latent_guide_samples * frame_weights_apply
 
     if latent_guide_inv is not None:
         if sigmas[0] > sigmas[1]:
-            y0_inv = latent_guide_inv = model.inner_model.inner_model.process_latent_in(latent_guide_inv['samples']).clone().to(x.device)
+            y0_inv = latent_guide_inv = latent_guide_inv_samples * frame_weights_apply
         elif UNSAMPLE and mask is not None:
-            x = mask * x + (1-mask) * model.inner_model.inner_model.process_latent_in(latent_guide_inv['samples']).clone().to(x.device)
+            x = mask * x + (1-mask) * latent_guide_inv_samples * frame_weights_apply
+
 
     uncond = [torch.full_like(x, 0.0)]
     if cfgpp != 0.0:

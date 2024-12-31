@@ -46,7 +46,8 @@ class CLIPTextEncodeFluxUnguided:
             "clip_l": ("STRING", {"multiline": True, "dynamicPrompts": True}),
             "t5xxl": ("STRING", {"multiline": True, "dynamicPrompts": True}),
             }}
-    RETURN_TYPES = ("CONDITIONING",)
+    RETURN_NAMES = ("conditioning", "clip_l_end", "t5xxl_end",)
+    RETURN_TYPES = ("CONDITIONING","INT","INT",)
     FUNCTION = "encode"
 
     CATEGORY = "RES4LYF/conditioning"
@@ -55,9 +56,23 @@ class CLIPTextEncodeFluxUnguided:
         tokens = clip.tokenize(clip_l)
         tokens["t5xxl"] = clip.tokenize(t5xxl)["t5xxl"]
 
+        clip_l_end=0
+        for i in range(len(tokens['l'][0])):
+            if tokens['l'][0][i][0] == 49407:
+                clip_l_end=i
+                break
+        t5xxl_end=0
+        for i in range(len(tokens['l'][0])):
+            if tokens['t5xxl'][0][i][0] == 1:
+                t5xxl_end=i
+                break
+
         output = clip.encode_from_tokens(tokens, return_pooled=True, return_dict=True)
         cond = output.pop("cond")
-        return ([[cond, output]], )
+        conditioning = [[cond, output]]
+        conditioning[0][1]['clip_l_end'] = clip_l_end
+        conditioning[0][1]['t5xxl_end'] = t5xxl_end
+        return (conditioning, clip_l_end, t5xxl_end,)
 
 
 class StyleModelApplyAdvanced: 
@@ -167,6 +182,28 @@ class ConditioningMultiply:
     def main(self, conditioning, multiplier):
         c = multiply_nested_tensors(conditioning, multiplier)
         return (c,)
+
+
+
+class ConditioningAdd:
+    @classmethod
+    def INPUT_TYPES(s):
+        return {"required": {"conditioning_1": ("CONDITIONING", ), 
+                             "conditioning_2": ("CONDITIONING", ), 
+                              "multiplier": ("FLOAT", {"default": 1.0, "min": -1000000000.0, "max": 1000000000.0, "step": 0.01})
+                             }}
+    RETURN_TYPES = ("CONDITIONING",)
+    FUNCTION = "main"
+
+    CATEGORY = "RES4LYF/conditioning"
+
+    def main(self, conditioning_1, conditioning_2, multiplier):
+        
+        conditioning_1[0][0] += multiplier * conditioning_2[0][0]
+        conditioning_1[0][1]['pooled_output'] += multiplier * conditioning_2[0][1]['pooled_output'] 
+        
+        return (conditioning_1,)
+
 
 
 
@@ -642,7 +679,7 @@ class FluxRegionalConditioning:
             "mask_weight": ("FLOAT", {"default": 1.0, "min": -10000.0, "max": 10000.0, "step": 0.01}),
             "self_attn_floor": ("FLOAT", {"default": 0.0, "min": -10000.0, "max": 10000.0, "step": 0.01}),
             "start_percent": ("FLOAT", {"default": 0,   "min": 0.0, "max": 1.0, "step": 0.01}),
-            "end_percent":   ("FLOAT", {"default": 0.5, "min": 0.0, "max": 1.0, "step": 0.01}),
+            "end_percent":   ("FLOAT", {"default": 1.0, "min": 0.0, "max": 1.0, "step": 0.01}),
             "mask_type": (["gradient"], {"default": "gradient"}),
         }, 
             "optional": {
@@ -659,7 +696,7 @@ class FluxRegionalConditioning:
 
     CATEGORY = "RES4LYF/conditioning"
 
-    def main(self, conditioning_regional, mask_weight,start_percent, end_percent, start_step=0, end_step=30, conditioning=None, mask_weights=None, self_attn_floors=None, self_attn_floor=0, mask_type="differential", latent=None):
+    def main(self, conditioning_regional, mask_weight=1.0, start_percent=0.0, end_percent=1.0, start_step=0, end_step=10000, conditioning=None, mask_weights=None, self_attn_floors=None, self_attn_floor=0.0, mask_type="gradient", latent=None):
         weight, weights = mask_weight, mask_weights
         floor, floors = self_attn_floor, self_attn_floors
         default_dtype = torch.float64

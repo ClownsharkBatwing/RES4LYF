@@ -40,6 +40,18 @@ if (originalGetNodeTypesCategories) {
 function resDebugLog(...args) {
     if (RESDEBUG) {
         console.log(...args);
+        
+        // Attempt to post the log text to the Python backend
+        const logText = args.join(' ');
+        fetch('/reslyf/log', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({ log: logText })
+        }).catch(error => {
+            console.error('Error posting log to backend:', error);
+        });
     }
 }
 
@@ -98,29 +110,32 @@ const nodesWithCommonConfig = [
     "Legacy_ClownSampler",
     "ClownSampler",
     "ClownsharKSampler",
-    "KSamplerSelectAdvanced",
-    "LatentNoised",
-    "SamplerCorona",
-    "SamplerDEIS_SDE",
-    "SamplerDPMPP_2M_SDE_Advanced",
-    "SamplerDPMPP_2S_Ancestral_Advanced",
-    "SamplerDPMPP_3M_SDE_Advanced",
-    "SamplerDPMPP_DualSDE_Advanced",
-    "SamplerDPMPP_SDE_Advanced",
-    "SamplerDPMPP_SDE_CFG++_Advanced",
-    "SamplerEulerAncestral_Advanced",
-    "SamplerNoiseInversion",
-    "SamplerRES_Implicit",
-    "SamplerRES3_Implicit_Automation",
-    "SamplerRK",
-    "SamplerRK_Test",
+    "Legacy_ClownSampler",
+    "Legacy_SharkSampler",
+    "Legacy_ClownsharKSampler",
     "SharkSampler",
     "UltraSharkSampler",
-    "UltraSharkSampler Tiled"
+    "UltraSharkSampler Tiled",
 ];
 
 // 2. Optional Input Dependencies - These are unique configurations for specific nodes
-nodeConfigs["ClownSampler"] = createNodeConfig("ClownSampler", {
+nodeConfigs["ClownsharKSamplerGuides"] = createNodeConfig("ClownsharKSamplerGuides", {
+    optionalInputWidgets: {
+        // Define groups of widgets that should be shown/hidden based on input connections
+        groups: [
+            {
+                inputs: ["guide",],   // Show widgets if ANY of these inputs are connected
+                widgets: ["guide_weight", "guide_weight_bkg", "guide_weight_scale", "guide_weight_scheduler", "guide_end_step"]  // Widgets to show/hide
+            },
+            {
+                inputs: ["guide_bkg"],
+                widgets: ["guide_weight_bkg", "guide_weight_bkg_scale", "guide_weight_scheduler_bkg", "guide_bkg_end_step"]
+            }
+        ]
+    }
+});
+
+nodeConfigs["Legacy_ClownSampler"] = createNodeConfig("Legacy_ClownSampler", {
     optionalInputWidgets: {
         // Define groups of widgets that should be shown/hidden based on input connections
         groups: [
@@ -152,12 +167,17 @@ nodeConfigs["Legacy_ClownSampler"] = createNodeConfig("Legacy_ClownSampler", {
     }
 });
 
-nodeConfigs["SamplerRK"] = createNodeConfig("SamplerRK", {
+nodeConfigs["Legacy_ClownsharKSampler"] = createNodeConfig("Legacy_ClownsharKSampler", {
     optionalInputWidgets: {
+        // Define groups of widgets that should be shown/hidden based on input connections
         groups: [
             {
-                inputs: ["latent_guide", "latent_guide_inv"],
-                widgets: ["latent_guide_weight", "guide_mode"]
+                inputs: ["latent_guide", "latent_guide_inv"],   // Show widgets if ANY of these inputs are connected
+                widgets: ["latent_guide_weight", "guide_mode"]  // Widgets to show/hide
+            },
+            {
+                inputs: ["latent_guide_mask"],
+                widgets: ["rescale_floor"]
             }
         ]
     }
@@ -176,6 +196,7 @@ const TOGGLEABLE_WIDGETS = {
         defaultValue: false
     },
 };
+
 
 // Function to create node configurations
 function createNodeConfig(nodeName, uniqueConfig = {}) {
@@ -203,8 +224,6 @@ nodesWithCommonConfig.forEach(nodeName => {
  */
 function toggleWidget(node, widget, shouldShow = false) {
     if (!widget) return;
-
-    resDebugLog(`Toggling widget ${widget.name} in ${node.comfyClass}: shouldShow=${shouldShow}, ENABLE_WIDGET_HIDING=${ENABLE_WIDGET_HIDING}`);
     
     if (!origProps[widget.name]) {
         origProps[widget.name] = { 
@@ -241,8 +260,6 @@ function toggleWidget(node, widget, shouldShow = false) {
  */
 function createGenericHandler(node, dependentWidgetsConfig) {
     return () => {
-        resDebugLog(`${node.comfyClass} onNodeChange called`);
-
         if (dependentWidgetsConfig?.groups) {
             dependentWidgetsConfig.groups.forEach(group => {
                 const { inputWidgetNames, independentValues, widgetsToShow } = group;
@@ -267,7 +284,6 @@ function createGenericHandler(node, dependentWidgetsConfig) {
  * @param {array} dependentWidgets - Array of relevant widget names
  */
 function setupDynamicWidgets(node, dependentWidgetsConfig) {
-    resDebugLog("Setting up dynamic widgets for", node.comfyClass);
 
     // Initialize toggleable widgets with their default states
     Object.keys(TOGGLEABLE_WIDGETS).forEach(widgetName => {
@@ -407,9 +423,23 @@ app.registerExtension({
             onChange: (value) => {
                 TOP_CLOWNDOG = value;
                 resDebugLog(`Top ClownDog ${value ? "enabled" : "disabled"}`);
+                
+                // Send to backend
+                fetch('/reslyf/settings', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        setting: "topClownDog",
+                        value: value
+                    })
+                }).catch(error => {
+                    resDebugLog(`Error updating topClownDog setting: ${error}`);
+                });
             },
         });
-
+        
         app.ui.settings.addSetting({
             id: "RES4LYF.enableDynamicWidgets",
             name: "RES4LYF: Enable dynamic widget hiding",
@@ -423,6 +453,20 @@ app.registerExtension({
                 ENABLE_WIDGET_HIDING = value;
                 resDebugLog(`Dynamic widgets ${value ? "enabled" : "disabled"}`);
                 
+                // Send to backend
+                fetch('/reslyf/settings', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        setting: "enableDynamicWidgets",
+                        value: value
+                    })
+                }).catch(error => {
+                    resDebugLog(`Error updating enableDynamicWidgets setting: ${error}`);
+                });
+        
                 for (const node of app.graph._nodes) {
                     if (!nodeConfigs[node.comfyClass]) {
                         resDebugLog(`Skipping node ${node.comfyClass} - not in config`);
@@ -438,7 +482,7 @@ app.registerExtension({
                 }
             },
         });
-    
+        
         app.ui.settings.addSetting({
             id: "RES4LYF.enableDebugLogs",
             name: "RES4LYF: Enable JS debug logging",
@@ -451,13 +495,28 @@ app.registerExtension({
             onChange: (value) => {
                 RESDEBUG = value;
                 resDebugLog(`Debug logging ${value ? "enabled" : "disabled"}`);
+                
+                // Send to backend
+                fetch('/reslyf/settings', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        setting: "enableDebugLogs",
+                        value: value
+                    })
+                }).catch(error => {
+                    resDebugLog(`Error updating enableDebugLogs setting: ${error}`);
+                });
             },
         });
-
+        
+        const settingName = "RES4LYF.enableUpdatedTimestepScaling";
         app.ui.settings.addSetting({
-            id: "RES4LYF.enableUpdatedTimestepScaling",
-            name: "RES4LYF: Enable \"improved\" timestep scaling for SD3.5",
-            defaultValue: true,
+            id: settingName,
+            name: "RES4LYF (experimental): Enable \"improved\" timestep scaling for SD3.5 (May cause issues with other models eg. HYVideo)",
+            defaultValue: false,
             type: "boolean",
             options: [
                 { value: true, text: "On" },
@@ -490,8 +549,6 @@ app.registerExtension({
 
     name: "Comfy.RES4LYF.DynamicWidgets",
     nodeCreated(node) {
-        resDebugLog("Node created:", node.comfyClass);
-
         const config = nodeConfigs[node.comfyClass];
         if (config) {
             resDebugLog(`${node.comfyClass} node detected`);

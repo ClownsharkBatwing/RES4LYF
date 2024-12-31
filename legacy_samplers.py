@@ -405,6 +405,7 @@ class Legacy_SamplerRK:
                         "latent_guide_mask": ("MASK", ),
                         "latent_guide_weights": ("SIGMAS", ),
                         "sigmas_override": ("SIGMAS", ),
+                        "frame_weights": ("SIGMAS", ),
                     }  
                     
                }
@@ -413,9 +414,11 @@ class Legacy_SamplerRK:
 
     FUNCTION = "get_sampler"
 
-    def get_sampler(self, eta=0.25, eta_var=0.0, d_noise=1.0, s_noise=1.0, alpha=-1.0, k=1.0, cfgpp=0.0, multistep=False, noise_sampler_type="brownian", noise_mode="hard", noise_seed=-1, rk_type="dormand-prince", 
+    def get_sampler(self, eta=0.25, eta_var=0.0, d_noise=1.0, s_noise=1.0, alpha=-1.0, k=1.0, cfgpp=0.0,
+                    multistep=False, noise_sampler_type="brownian", noise_mode="hard", noise_seed=-1, rk_type="dormand-prince", 
                     exp_mode=False, t_fn_formula=None, sigma_fn_formula=None, implicit_steps=0,
-                    latent_guide=None, latent_guide_inv=None, latent_guide_weight=0.0, guide_mode="hard_light", latent_guide_weights=None, latent_guide_mask=None, rescale_floor=True, sigmas_override=None,
+                    latent_guide=None, latent_guide_inv=None, latent_guide_weight=0.0, guide_mode="hard_light",
+                    latent_guide_weights=None, latent_guide_mask=None, rescale_floor=True, sigmas_override=None, frame_weights=None,
                     ):
         sampler_name = "legacy_rk"
 
@@ -424,13 +427,15 @@ class Legacy_SamplerRK:
 
         steps = 10000
         latent_guide_weights = initialize_or_scale(latent_guide_weights, latent_guide_weight, steps)
-            
         latent_guide_weights = F.pad(latent_guide_weights, (0, 10000), value=0.0)
+        frame_weights = initialize_or_scale(frame_weights, 1.0, steps)
+        frame_weights = F.pad(frame_weights, (0, 10000), value=0.0)
 
-        sampler = comfy.samplers.ksampler(sampler_name, {"eta": eta, "eta_var": eta_var, "s_noise": s_noise, "d_noise": d_noise, "alpha": alpha, "k": k, "cfgpp": cfgpp, "MULTISTEP": multistep, "noise_sampler_type": noise_sampler_type, "noise_mode": noise_mode, "noise_seed": noise_seed, "rk_type": rk_type, 
+        sampler = comfy.samplers.ksampler(sampler_name, {"eta": eta, "eta_var": eta_var, "s_noise": s_noise, "d_noise": d_noise, "alpha": alpha, "k": k, "cfgpp": cfgpp,
+                                                         "MULTISTEP": multistep, "noise_sampler_type": noise_sampler_type, "noise_mode": noise_mode, "noise_seed": noise_seed, "rk_type": rk_type, 
                                                          "exp_mode": exp_mode, "t_fn_formula": t_fn_formula, "sigma_fn_formula": sigma_fn_formula, "implicit_steps": implicit_steps,
                                                          "latent_guide": latent_guide, "latent_guide_inv": latent_guide_inv, "mask": latent_guide_mask, "latent_guide_weight": latent_guide_weight, "latent_guide_weights": latent_guide_weights, "guide_mode": guide_mode,
-                                                         "LGW_MASK_RESCALE_MIN": rescale_floor, "sigmas_override": sigmas_override})
+                                                         "LGW_MASK_RESCALE_MIN": rescale_floor, "sigmas_override": sigmas_override, "frame_weights": frame_weights})
         return (sampler, )
 
 
@@ -511,7 +516,7 @@ class Legacy_SharkSampler:
                     "positive": ("CONDITIONING", ),
                     "negative": ("CONDITIONING", ),
                     "sampler": ("SAMPLER", ),
-                    "latent_image": ("LATENT", ),               
+                    "latent_image": ("LATENT", ),
                      },
                 "optional": 
                     {

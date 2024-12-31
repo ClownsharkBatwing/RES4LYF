@@ -85,10 +85,14 @@ NODE_CLASS_MAPPINGS = {
     "SharkSampler": samplers.SharkSampler,
     "ClownsharKSampler": samplers.ClownsharKSampler,
     "ClownsharKSamplerGuides": samplers_extensions.ClownsharKSamplerGuides,
-    #"ClownGuide": samplers.ClownsharKSamplerGuide_Single,
+    
+    "ClownInpaint": samplers_extensions.ClownInpaint,
+    "ClownInpaintSimple": samplers_extensions.ClownInpaintSimple,
+
     
     "ClownsharKSamplerOptions": samplers_extensions.ClownsharKSamplerOptions,
     "ClownsharKSamplerOptions_SDE_Noise": samplers_extensions.ClownsharKSamplerOptions_SDE_Noise,
+    "ClownsharkSamplerOptions_FrameWeights": samplers_extensions.ClownsharKSamplerOptions_FrameWeights,
     "ClownsharKSamplerAutomation": samplers_extensions.ClownsharKSamplerAutomation,
 
     "UltraSharkSampler": samplers.UltraSharkSampler,
@@ -117,6 +121,7 @@ NODE_CLASS_MAPPINGS = {
 
     "ConditioningAverageScheduler": conditioning.ConditioningAverageScheduler,
     "ConditioningMultiply": conditioning.ConditioningMultiply,
+    "ConditioningAdd": conditioning.ConditioningAdd,
     "Conditioning Recast FP64": conditioning.Conditioning_Recast64,
     "StableCascade_StageB_Conditioning64": conditioning.StableCascade_StageB_Conditioning64,
     "ConditioningZeroAndTruncate": conditioning.ConditioningZeroAndTruncate,
@@ -219,9 +224,11 @@ if flags["test_samplers"]:
     NODE_CLASS_MAPPINGS.update({
         "SamplerRK_Test": test_samplers.SamplerRK_Test,
         "Zampler_Test": test_samplers.Zampler_Test,
+        "UltraSharkSamplerRBTest": test_samplers.UltraSharkSamplerRBTest,
     })
     extra_samplers.update({
         "rk_test":  test_samplers.sample_rk_test,
+        "rk_sphere":  test_samplers.sample_rk_sphere,
         "zample": test_samplers.sample_zsample,
         "zample_paper": test_samplers.sample_zample_paper,
         "zample_inversion": test_samplers.sample_zample_inversion,

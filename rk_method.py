@@ -60,8 +60,7 @@ class RK_Method:
         self.multistep_stages = 0
         
         self.cfg_cw = 0
-        
-        #self.UNSAMPLE = False
+
         
     @staticmethod
     def is_exponential(rk_type):
@@ -124,7 +123,7 @@ class RK_Method:
             return x
         
     def add_noise_post(self, x, y0, lgw, sigma_up, sigma, sigma_next, sigma_down, alpha_ratio, s_noise, noise_mode, SDE_NOISE_EXTERNAL=False, sde_noise_t=None):
-        if isinstance(self.model_sampling, comfy.model_sampling.CONST) == True  or (isinstance(self.model_sampling, comfy.model_sampling.CONST) == False and noise_mode != "hard"):
+        if isinstance(self.model_sampling, comfy.model_sampling.CONST) == True   or   (isinstance(self.model_sampling, comfy.model_sampling.CONST) == False and noise_mode != "hard"):
             return self.add_noise(x, y0, lgw, sigma_up, sigma, sigma_next, sigma_down, alpha_ratio, s_noise, SDE_NOISE_EXTERNAL, sde_noise_t)
         else:
             return x
@@ -153,7 +152,7 @@ class RK_Method:
         return ks, ks_u, ys, ys_inv
     
     def prepare_sigmas(self, sigmas):
-        if sigmas[0] == 0.0:      #remove padding used to avoid need for model patch with noise inversion
+        if sigmas[0] == 0.0:      #remove padding used to prevent comfy from adding noise to the latent (for unsampling, etc.)
             UNSAMPLE = True
             sigmas = sigmas[1:-1]
         else: 
@@ -168,7 +167,7 @@ class RK_Method:
     def set_coeff(self, rk_type, h, c1=0.0, c2=0.5, c3=1.0, stepcount=0, sigmas=None, sigma=None, sigma_down=None):
         if rk_type == "default": 
             return
-        #if self.a is None or self.dynamic_method == True:
+
         sigma = sigmas[stepcount]
         sigma_next = sigmas[stepcount+1]
         
@@ -177,10 +176,10 @@ class RK_Method:
         self.multistep_stages = multistep_stages
         
         self.a = torch.tensor(a, dtype=h.dtype, device=h.device)
-        self.a = self.a.view(*self.a.shape, 1, 1, 1, 1)
+        self.a = self.a.view(*self.a.shape, 1, 1, 1, 1, 1)
         
         self.b = torch.tensor(b, dtype=h.dtype, device=h.device)
-        self.b = self.b.view(*self.b.shape, 1, 1, 1, 1)
+        self.b = self.b.view(*self.b.shape, 1, 1, 1, 1, 1)
         
         self.c = torch.tensor(ci, dtype=h.dtype, device=h.device)
         self.rows = self.a.shape[0]
@@ -188,36 +187,83 @@ class RK_Method:
             
     def a_k_sum(self, k, row):
         if len(k.shape) == 4:
-            ks = k * self.a[row].sum(dim=0)
-        ks = (k[0:self.cols] * self.a[row]).sum(dim=0)
+            a_coeff = self.a[row].squeeze(-1)
+            ks = k * a_coeff.sum(dim=0)
+        elif len(k.shape) == 5:
+            a_coeff = self.a[row].squeeze(-1)
+            ks = (k[0:self.cols] * a_coeff).sum(dim=0)
+        elif len(k.shape) == 6:
+            a_coeff = self.a[row]
+            ks = (k[0:self.cols] * a_coeff).sum(dim=0)
+        else:
+            raise ValueError(f"Unexpected k shape: {k.shape}")
         return ks
     
     def b_k_sum(self, k, row):
         if len(k.shape) == 4:
-            ks = k * self.b[row].sum(dim=0)
-        ks = (k[0:self.cols] * self.b[row]).sum(dim=0)
+            b_coeff = self.b[row].squeeze(-1)
+            ks = k * b_coeff.sum(dim=0)
+        elif len(k.shape) == 5:
+            b_coeff = self.b[row].squeeze(-1)
+            ks = (k[0:self.cols] * b_coeff).sum(dim=0)
+        elif len(k.shape) == 6:
+            b_coeff = self.b[row]
+            ks = (k[0:self.cols] * b_coeff).sum(dim=0)
+        else:
+            raise ValueError(f"Unexpected k shape: {k.shape}")
         return ks
 
+    # def get_frame_weights(self, x, sigmas, frame_weights):
+    #     if frame_weights is not None:
+    #         frame_weights_ = frame_weights.clone()
+    #         if x.dim() != 5:
+    #             raise ValueError("frame_weights is only supported for 5D latent (video latents)")
+    #         frame_batch_size = x.shape[2]
+    #         if frame_weights_.shape[0] > frame_batch_size:
+    #             frame_weights_ = frame_weights_[:frame_batch_size]
+    #         elif frame_weights_.shape[0] < frame_batch_size:
+    #             padding_size = frame_batch_size - frame_weights_.shape[0]
+    #             last_value = frame_weights_[-1]
+    #             padding = last_value.repeat(padding_size)
+    #             frame_weights_ = torch.cat([frame_weights_, padding])
+    #         frame_weights_ = frame_weights_.view(1, 1, frame_batch_size, 1, 1)
+    #         frame_weights_ = frame_weights_.to(x.dtype).to(x.device)
+    #     else:
+    #         frame_weights_ = torch.ones_like(x)
 
+    #     return frame_weights_
 
-    def init_guides(self, x, latent_guide, latent_guide_inv, mask, sigmas, UNSAMPLE):
+    def init_guides(self, x, latent_guide, latent_guide_inv, mask, sigmas, UNSAMPLE, frame_weights):
         y0, y0_inv = torch.zeros_like(x), torch.zeros_like(x)
-        
+
+        if (x.dim() == 5):
+            frame_batch_size = x.shape[2]
+            if frame_weights.shape[0] > frame_batch_size:
+                frame_weights = frame_weights[:frame_batch_size]
+            elif frame_weights.shape[0] < frame_batch_size:
+                padding_size = frame_batch_size - frame_weights.shape[0]
+                frame_weights = torch.cat([frame_weights, torch.ones(padding_size, device=frame_weights.device, dtype=frame_weights.dtype)])
+            frame_weights_apply = frame_weights.view(1, 1, frame_batch_size, 1, 1).clone().to(x.dtype).to(x.device)
+        else:
+            frame_weights_apply = torch.tensor(1.0, device=x.device, dtype=x.dtype)
+
         if latent_guide is not None:
+            latent_guide_samples = self.model.inner_model.inner_model.process_latent_in(latent_guide['samples']).clone().to(x.device)
             if sigmas[0] > sigmas[1]:
-                y0 = latent_guide = self.model.inner_model.inner_model.process_latent_in(latent_guide['samples']).clone().to(x.device)
+                y0 = latent_guide = latent_guide_samples * frame_weights_apply
             elif UNSAMPLE and mask is not None:
-                x = (1-mask) * x + mask * self.model.inner_model.inner_model.process_latent_in(latent_guide['samples']).clone().to(x.device)
+                x = (1-mask) * x + mask * latent_guide_samples * frame_weights_apply
             else:
-                x = self.model.inner_model.inner_model.process_latent_in(latent_guide['samples']).clone().to(x.device)
+                x = latent_guide_samples * frame_weights_apply
 
         if latent_guide_inv is not None:
+            latent_guide_inv_samples = self.model.inner_model.inner_model.process_latent_in(latent_guide_inv['samples']).clone().to(x.device)
             if sigmas[0] > sigmas[1]:
-                y0_inv = latent_guide_inv = self.model.inner_model.inner_model.process_latent_in(latent_guide_inv['samples']).clone().to(x.device)
+                y0_inv = latent_guide_inv = latent_guide_inv_samples * frame_weights_apply
             elif UNSAMPLE and mask is not None:
-                x = mask * x + (1-mask) * self.model.inner_model.inner_model.process_latent_in(latent_guide_inv['samples']).clone().to(x.device)
+                x = mask * x + (1-mask) * latent_guide_inv_samples * frame_weights_apply
             else:
-                x = self.model.inner_model.inner_model.process_latent_in(latent_guide_inv['samples']).clone().to(x.device)   #THIS COULD LEAD TO WEIRD BEHAVIOR! OVERWRITING X WITH LG_INV AFTER SETTING TO LG above!
+                x = latent_guide_samples * frame_weights_apply   #THIS COULD LEAD TO WEIRD BEHAVIOR! OVERWRITING X WITH LG_INV AFTER SETTING TO LG above!
                 
         if UNSAMPLE and sigmas[0] < sigmas[1]: #sigma_next > sigma:
             y0 = self.noise_sampler(sigma=self.sigma_max, sigma_next=self.sigma_min)
@@ -229,7 +275,7 @@ class RK_Method:
 
 
 
-    def init_cfgpp(self, model, x, cfgpp=0.0, **extra_args):
+    def init_cfgpp(self, x, cfgpp=0.0, **extra_args):
         self.uncond = [torch.full_like(x, 0.0)]
         if cfgpp != 0.0:
             def post_cfg_function(args):
@@ -237,8 +283,8 @@ class RK_Method:
                 return args["denoised"]
             model_options = extra_args.get("model_options", {}).copy()
             extra_args["model_options"] = comfy.model_patcher.set_model_options_post_cfg_function(model_options, post_cfg_function, disable_cfg1_optimization=True)
+        return extra_args
         #TODO: complete this method
-        
 
     def init_cfg_channelwise(self, x, cfg_cw=1.0, **extra_args):
         self.uncond = [torch.full_like(x, 0.0)]

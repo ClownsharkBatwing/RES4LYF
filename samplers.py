@@ -123,7 +123,7 @@ class SharkSampler:
                     shift=3.0, base_shift=0.85, options=None, sde_noise=None,sde_noise_steps=1, shift_scaling="exponential", unsampler_type="linear",
                     extra_options="", 
                     ): 
-
+            
             model = model.clone()
             if positive[0][1] is not None: 
                 if "regional_conditioning_weights" in positive[0][1]:
@@ -135,16 +135,25 @@ class SharkSampler:
                     regional_mask = copy.deepcopy(regional_mask)
                     model.set_model_patch(regional_conditioning, 'regional_conditioning_positive')
                     model.set_model_patch(regional_mask,         'regional_conditioning_mask')
+                    
+            if "noise_seed_sde" in sampler.extra_options:
+                if sampler.extra_options['noise_seed_sde'] == -1 and noise_seed != -1:
+                    sampler.extra_options['noise_seed_sde'] = noise_seed + 1
 
             if "extra_options" in sampler.extra_options:
                 extra_options += " "
                 extra_options += sampler.extra_options['extra_options']
                 sampler.extra_options['extra_options'] = extra_options
 
+            batch_size = int(get_extra_options_kv("batch_size", "1", extra_options))
+            if batch_size > 1:
+                latent_image['samples'] = latent_image['samples'].repeat(batch_size, 1, 1, 1) 
+            
             latent_image_batch = {"samples": latent_image['samples']}
             out_samples, out_samples_fp64, out_denoised_samples, out_denoised_samples_fp64 = [], [], [], []
             for batch_num in range(latent_image_batch['samples'].shape[0]):
-                latent_image['samples'] = latent_image_batch['samples'][batch_num].clone().unsqueeze(0)
+                latent_unbatch = copy.deepcopy(latent_image)
+                latent_unbatch['samples'] = latent_image_batch['samples'][batch_num].clone().unsqueeze(0)
                 
                 if extra_options_flag("use_fp32", extra_options) or extra_options_flag("use_float32", extra_options):
                     default_dtype = torch.float32
@@ -170,8 +179,7 @@ class SharkSampler:
                     sde_noise       = options.get('sde_noise',        sde_noise)
                     sde_noise_steps = options.get('sde_noise_steps',  sde_noise_steps)
 
-                latent = latent_image
-                latent_image_dtype = latent_image['samples'].dtype
+                latent_image_dtype = latent_unbatch['samples'].dtype
 
                 if isinstance(model.model.model_config, comfy.supported_models.Flux) or isinstance(model.model.model_config, comfy.supported_models.FluxSchnell):
                     if positive is None:
@@ -225,17 +233,17 @@ class SharkSampler:
                 else:
                     unsampler_type = ""
 
-                x = latent_image["samples"].clone().to(default_dtype) 
-                if latent_image is not None:
-                    if "samples_fp64" in latent_image:
-                        if latent_image['samples'].shape == latent_image['samples_fp64'].shape:
-                            if torch.norm(latent_image['samples'] - latent_image['samples_fp64']) < 0.01:
-                                x = latent_image["samples_fp64"].clone()
+                x = latent_unbatch["samples"].clone().to(default_dtype) 
+                if latent_unbatch is not None:
+                    if "samples_fp64" in latent_unbatch:
+                        if latent_unbatch['samples'].shape == latent_unbatch['samples_fp64'].shape:
+                            if torch.norm(latent_unbatch['samples'] - latent_unbatch['samples_fp64']) < 0.01:
+                                x = latent_unbatch["samples_fp64"].clone()
 
                 if latent_noise is not None:
-                    latent_noise["samples"] = latent_noise["samples"].clone().to(default_dtype)  
+                    latent_noise_samples = latent_noise["samples"].clone().to(default_dtype)  
                 if latent_noise_match is not None:
-                    latent_noise_match["samples"] = latent_noise_match["samples"].clone().to(default_dtype)
+                    latent_noise_match_samples = latent_noise_match["samples"].clone().to(default_dtype)
 
                 truncate_conditioning = extra_options_flag("truncate_conditioning", extra_options)
                 if truncate_conditioning == "true" or truncate_conditioning == "true_and_zero_neg":
@@ -285,7 +293,7 @@ class SharkSampler:
                             noise_sampler_init.scale = 0.1
                         noise = noise_sampler_init(sigma=sigmax, sigma_next=sigmin)
                     else:
-                        noise = latent_noise["samples"]
+                        noise = latent_noise_samples
 
                     if noise_is_latent: #add noise and latent together and normalize --> noise
                         noise += x.cpu()
@@ -296,12 +304,12 @@ class SharkSampler:
                     noise *= noise_stdev
                     noise = (noise - noise.mean()) + noise_mean
                     
-                    if latent_noise_match:
-                        for i in range(latent_noise_match["samples"].shape[1]):
+                    if latent_noise_match is not None:
+                        for i in range(latent_noise_match_samples.shape[1]):
                             noise[0][i] = (noise[0][i] - noise[0][i].mean())
-                            noise[0][i] = (noise[0][i]) + latent_noise_match["samples"][0][i].mean()
+                            noise[0][i] = (noise[0][i]) + latent_noise_match_samples[0][i].mean()
 
-                    noise_mask = latent["noise_mask"] if "noise_mask" in latent else None
+                    noise_mask = latent_unbatch["noise_mask"] if "noise_mask" in latent_unbatch else None
 
                     x0_output = {}
 
@@ -325,10 +333,10 @@ class SharkSampler:
                     disable_pbar = not comfy.utils.PROGRESS_BAR_ENABLED
                     samples = comfy.sample.sample_custom(model, noise, cfg, sampler, sigmas, positive, negative, x.clone(), noise_mask=noise_mask, callback=callback, disable_pbar=disable_pbar, seed=noise_seed)
 
-                    out = latent.copy()
+                    out = latent_unbatch.copy()
                     out["samples"] = samples
                     if "x0" in x0_output:
-                        out_denoised = latent.copy()
+                        out_denoised = latent_unbatch.copy()
                         out_denoised["samples"] = model.model.process_latent_out(x0_output["x0"].cpu())
                     else:
                         out_denoised = out
@@ -405,7 +413,7 @@ class ClownSampler:
                     t_fn_formula=None, sigma_fn_formula=None, implicit_steps=0,
                     latent_guide=None, latent_guide_inv=None, guide_mode="blend", latent_guide_weights=None, latent_guide_weights_inv=None, latent_guide_mask=None, latent_guide_mask_inv=None, rescale_floor=True, sigmas_override=None, unsampler_type="linear",
                     guides=None, options=None, sde_noise=None,sde_noise_steps=1, 
-                    extra_options="", automation=None, etas=None, s_noises=None,unsample_resample_scales=None, regional_conditioning_weights=None,
+                    extra_options="", automation=None, etas=None, s_noises=None,unsample_resample_scales=None, regional_conditioning_weights=None, frame_weights=None,
                     ): 
             if implicit_sampler_name == "none":
                 implicit_steps = 0 
@@ -428,14 +436,13 @@ class ClownSampler:
                 d_noise = options.get('d_noise', d_noise)
                 alpha_sde = options.get('alpha_sde', alpha_sde)
                 k_sde = options.get('k_sde', k_sde)
-                noise_seed_sde = options.get('noise_seed_sde', noise_seed_sde)
                 c1 = options.get('c1', c1)
                 c2 = options.get('c2', c2)
                 c3 = options.get('c3', c3)
                 t_fn_formula = options.get('t_fn_formula', t_fn_formula)
                 sigma_fn_formula = options.get('sigma_fn_formula', sigma_fn_formula)
                 unsampler_type = options.get('unsampler_type', unsampler_type)
-                
+                frame_weights = options.get('frame_weights', frame_weights)
                 sde_noise = options.get('sde_noise', sde_noise)
                 sde_noise_steps = options.get('sde_noise_steps', sde_noise_steps)
 
@@ -502,12 +509,12 @@ class ClownSampler:
                                                             "LGW_MASK_RESCALE_MIN": rescale_floor, "sigmas_override": sigmas_override, "sde_noise": sde_noise,
                                                             "extra_options": extra_options,
                                                             "etas": etas, "s_noises": s_noises, "unsample_resample_scales": unsample_resample_scales, "regional_conditioning_weights": regional_conditioning_weights,
-                                                            "guides": guides,
+                                                            "guides": guides, "frame_weights": frame_weights,
                                                             })
 
             return (sampler, )
 
-                    
+
 
 
 
@@ -563,7 +570,7 @@ class ClownsharKSampler:
                     extra_options="", automation=None, etas=None, s_noises=None,unsample_resample_scales=None, regional_conditioning_weights=None,
                     ): 
 
-        noise_seed_sde = -1
+        noise_seed_sde = noise_seed + 1
 
         sampler = ClownSampler().main(
                 noise_type_sde, noise_mode_sde,
@@ -612,6 +619,8 @@ class UltraSharkSampler:
                 "latent_noise": ("LATENT", ),
                 "guide": ("LATENT",),
                 "guide_weights": ("SIGMAS",),
+                #"style": ("CONDITIONING", ),
+                #"img_style": ("CONDITIONING", ),
             }
         }
 
@@ -624,12 +633,12 @@ class UltraSharkSampler:
     DESCRIPTION = "For use with Stable Cascade and UltraCascade."
     
     def main(self, model, add_noise, noise_is_latent, noise_type, noise_seed, cfg, alpha, k, positive, negative, sampler, 
-               sigmas, guide_type, guide_weight, latent_image, latent_noise=None, guide=None, guide_weights=None): 
+               sigmas, guide_type, guide_weight, latent_image, latent_noise=None, guide=None, guide_weights=None, style=None, img_style=None): 
 
             if model.model.model_config.unet_config.get('stable_cascade_stage') == 'up':
                 model = model.clone()
                 x_lr = guide['samples'] if guide is not None else None
-                guide_weights = initialize_or_scale(guide_weights, guide_weight, 10000)("FLOAT", {"default": 1.0, "min": -10000, "max": 10000, "step":0.01}),
+                guide_weights = initialize_or_scale(guide_weights, guide_weight, 10000)#("FLOAT", {"default": 1.0, "min": -10000, "max": 10000, "step":0.01}),
                 #model.model.diffusion_model.set_guide_weights(guide_weights=guide_weights)
                 #model.model.diffusion_model.set_guide_type(guide_type=guide_type)
                 #model.model.diffusion_model.set_x_lr(x_lr=x_lr)
@@ -659,6 +668,15 @@ class UltraSharkSampler:
                     c_neg.append([torch.zeros_like(t[0]), d_neg])
                 positive = c_pos
                 negative = c_neg
+                
+            if style is not None:
+                model.set_model_patch(style, 'style_cond')
+            if img_style is not None:
+                model.set_model_patch(img_style,'img_style_cond')
+        
+            # 1, 768      clip_style[0][0][1]['unclip_conditioning'][0]['clip_vision_output'].image_embeds.shape
+            # 1, 1280     clip_style[0][0][1]['pooled_output'].shape 
+            # 1, 77, 1280 clip_style[0][0][0].shape
         
             latent = latent_image
             latent_image = latent["samples"]
