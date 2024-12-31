@@ -310,8 +310,10 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
                         #cossim_tmp.append(get_cosine_similarity(x_prenoise, x_tmp[i]))
                     if (NOISE_SUBSTEP_COSSIM_SOURCE == "eps_tiled"):
                         x_[row+1] = noise_cossim_eps_tiled(x_tmp, eps_tmp, noise_tmp_list, cossim_mode=NOISE_SUBSTEP_COSSIM_MODE, tile_size=noise_substep_cossim_tile_size, step=row)
+                    elif (NOISE_SUBSTEP_COSSIM_SOURCE == "guide_epsilon_tiled"):
+                        x_[row+1] = noise_cossim_guide_eps_tiled(x_0, x_tmp, y0, noise_tmp_list, cossim_mode=NOISE_SUBSTEP_COSSIM_MODE, tile_size=noise_cossim_tile_size, step=row, sigma=s_[row], rk_type=rk_type)
                     elif NOISE_SUBSTEP_COSSIM_SOURCE == "guide_tiled":
-                        x_[row+1] = noise_cossim_guide_tiled(x_tmp, y0, cossim_mode=NOISE_SUBSTEP_COSSIM_MODE, tile_size=noise_substep_cossim_tile_size)
+                        x_[row+1] = noise_cossim_guide_tiled(x_tmp, y0, cossim_mode=NOISE_SUBSTEP_COSSIM_MODE, tile_size=noise_substep_cossim_tile_size, step=row)
                     elif NOISE_SUBSTEP_COSSIM_SOURCE == "guide_bkg_tiled":
                         x_[row+1] = noise_cossim_guide_tiled(x_tmp, y0_inv, cossim_mode=NOISE_SUBSTEP_COSSIM_MODE, tile_size=noise_substep_cossim_tile_size)
                     else:
@@ -484,9 +486,9 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
             elif (NOISE_COSSIM_SOURCE == "eps_tiled"):
                 x = noise_cossim_eps_tiled(x_tmp, eps, noise_tmp_list, cossim_mode=NOISE_COSSIM_MODE, tile_size=noise_cossim_tile_size, step=step)
             elif (NOISE_COSSIM_SOURCE == "guide_epsilon_tiled"):
-                x = noise_cossim_guide_eps_tiled(x_0, x_tmp, y0, noise_tmp_list, cossim_mode=NOISE_COSSIM_MODE, tile_size=noise_cossim_tile_size, sigma=sigma, rk_type=rk_type)
+                x = noise_cossim_guide_eps_tiled(x_0, x_tmp, y0, noise_tmp_list, cossim_mode=NOISE_COSSIM_MODE, tile_size=noise_cossim_tile_size, step=step, sigma=sigma, rk_type=rk_type)
             elif (NOISE_COSSIM_SOURCE == "guide_tiled"):
-                x = noise_cossim_guide_tiled(x_tmp, y0, cossim_mode=NOISE_COSSIM_MODE, tile_size=noise_cossim_tile_size)
+                x = noise_cossim_guide_tiled(x_tmp, y0, cossim_mode=NOISE_COSSIM_MODE, tile_size=noise_cossim_tile_size, step=step)
             elif (NOISE_COSSIM_SOURCE == "guide_bkg_tiled"):
                 x = noise_cossim_guide_tiled(x_tmp, y0_inv, cossim_mode=NOISE_COSSIM_MODE, tile_size=noise_cossim_tile_size)
             else:

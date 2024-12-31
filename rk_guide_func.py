@@ -310,8 +310,64 @@ def process_guides_poststep(x, denoised, eps, y0, y0_inv, mask, lgw_mask, lgw_ma
     return x
 
 
+
+
 @torch.no_grad
-def noise_cossim_guide_tiled(x_list, guide, cossim_mode="forward", tile_size=2):
+def noise_cossim_guide_tiled(x_list, guide, cossim_mode="forward", tile_size=2, step=0):
+
+    guide_tiled = rearrange(guide, "b c (h t1) (w t2) -> b (t1 t2) c h w", t1=tile_size, t2=tile_size)
+
+    x_tiled_list = [
+        rearrange(x, "b c (h t1) (w t2) -> b (t1 t2) c h w", t1=tile_size, t2=tile_size)
+        for x in x_list
+    ]
+    x_tiled_stack = torch.stack([x_tiled[0] for x_tiled in x_tiled_list])  # [n_x, n_tiles, c, h, w]
+
+    guide_flat = guide_tiled[0].view(guide_tiled.shape[1], -1).unsqueeze(0)  # [1, n_tiles, c*h*w]
+    x_flat = x_tiled_stack.view(x_tiled_stack.size(0), x_tiled_stack.size(1), -1)  # [n_x, n_tiles, c*h*w]
+
+    cossim_tmp_all = F.cosine_similarity(x_flat, guide_flat, dim=-1)  # [n_x, n_tiles]
+
+    if cossim_mode == "forward":
+        indices = cossim_tmp_all.argmax(dim=0) 
+    elif cossim_mode == "reverse":
+        indices = cossim_tmp_all.argmin(dim=0) 
+    elif cossim_mode == "orthogonal":
+        indices = torch.abs(cossim_tmp_all).argmin(dim=0) 
+    elif cossim_mode == "forward_reverse":
+        if step % 2 == 0:
+            indices = cossim_tmp_all.argmax(dim=0)
+        else:
+            indices = cossim_tmp_all.argmin(dim=0)
+    elif cossim_mode == "reverse_forward":
+        if step % 2 == 1:
+            indices = cossim_tmp_all.argmax(dim=0)
+        else:
+            indices = cossim_tmp_all.argmin(dim=0)
+    elif cossim_mode == "orthogonal_reverse":
+        if step % 2 == 0:
+            indices = torch.abs(cossim_tmp_all).argmin(dim=0)
+        else:
+            indices = cossim_tmp_all.argmin(dim=0)
+    elif cossim_mode == "reverse_orthogonal":
+        if step % 2 == 1:
+            indices = torch.abs(cossim_tmp_all).argmin(dim=0)
+        else:
+            indices = cossim_tmp_all.argmin(dim=0)
+    else:
+        target_value = float(cossim_mode)
+        indices = torch.abs(cossim_tmp_all - target_value).argmin(dim=0)  
+
+    x_tiled_out = x_tiled_stack[indices, torch.arange(indices.size(0))]  # [n_tiles, c, h, w]
+
+    x_tiled_out = x_tiled_out.unsqueeze(0) 
+    x_detiled = rearrange(x_tiled_out, "b (t1 t2) c h w -> b c (h t1) (w t2)", t1=tile_size, t2=tile_size)
+
+    return x_detiled
+
+
+@torch.no_grad
+def noise_cossim_guide_tiled_works(x_list, guide, cossim_mode="forward", tile_size=2):
     #tiles = F.unfold(x, kernel_size=tile_size, stride=tile_size)
     guide_tiled = rearrange(guide, "b c (h t1) (w t2) -> b (t1 t2) c h w", t1=tile_size, t2=tile_size)
     
@@ -443,11 +499,73 @@ def noise_cossim_eps_tiled_works(x_list, eps, noise_list, cossim_mode="forward",
     return x_detiled
 
 
+@torch.no_grad
+def noise_cossim_guide_eps_tiled(x_0, x_list, y0, noise_list, cossim_mode="forward", tile_size=2, step=0, sigma=None, rk_type=None):
+
+    y0_tiled = rearrange(y0, "b c (h t1) (w t2) -> b (t1 t2) c h w", t1=tile_size, t2=tile_size)
+    x_0_tiled = rearrange(x_0, "b c (h t1) (w t2) -> b (t1 t2) c h w", t1=tile_size, t2=tile_size)
+
+    x_tiled_stack = torch.stack([
+        rearrange(x, "b c (h t1) (w t2) -> b (t1 t2) c h w", t1=tile_size, t2=tile_size)[0]
+        for x in x_list
+    ])  # [n_x, n_tiles, c, h, w]
+
+    noise_tiled_stack = torch.stack([
+        rearrange(noise, "b c (h t1) (w t2) -> b (t1 t2) c h w", t1=tile_size, t2=tile_size)[0]
+        for noise in noise_list
+    ])  # [n_x, n_tiles, c, h, w]
+
+    eps_guide_stack = torch.stack([
+        rearrange(x - y0, "b c (h t1) (w t2) -> b (t1 t2) c h w", t1=tile_size, t2=tile_size)[0]
+        for x in x_list
+    ])  # [n_x, n_tiles, c, h, w]
+
+    noise_flat = noise_tiled_stack.view(noise_tiled_stack.size(0), noise_tiled_stack.size(1), -1)  # [n_x, n_tiles, c*h*w]
+    eps_guide_flat = eps_guide_stack.view(eps_guide_stack.size(0), eps_guide_stack.size(1), -1)  # [n_x, n_tiles, c*h*w]
+
+    cossim_tmp_all = F.cosine_similarity(noise_flat, eps_guide_flat, dim=-1)  # [n_x, n_tiles]
+
+    if cossim_mode == "forward":
+        indices = cossim_tmp_all.argmax(dim=0) 
+    elif cossim_mode == "reverse":
+        indices = cossim_tmp_all.argmin(dim=0) 
+    elif cossim_mode == "orthogonal":
+        indices = torch.abs(cossim_tmp_all).argmin(dim=0) 
+    elif cossim_mode == "forward_reverse":
+        if step % 2 == 0:
+            indices = cossim_tmp_all.argmax(dim=0)
+        else:
+            indices = cossim_tmp_all.argmin(dim=0)
+    elif cossim_mode == "reverse_forward":
+        if step % 2 == 1:
+            indices = cossim_tmp_all.argmax(dim=0)
+        else:
+            indices = cossim_tmp_all.argmin(dim=0)
+    elif cossim_mode == "orthogonal_reverse":
+        if step % 2 == 0:
+            indices = torch.abs(cossim_tmp_all).argmin(dim=0)
+        else:
+            indices = cossim_tmp_all.argmin(dim=0)
+    elif cossim_mode == "reverse_orthogonal":
+        if step % 2 == 1:
+            indices = torch.abs(cossim_tmp_all).argmin(dim=0)
+        else:
+            indices = cossim_tmp_all.argmin(dim=0)
+    else:
+        target_value = float(cossim_mode)
+        indices = torch.abs(cossim_tmp_all - target_value).argmin(dim=0)  
+
+    x_tiled_out = x_tiled_stack[indices, torch.arange(indices.size(0))]  # [n_tiles, c, h, w]
+
+    x_tiled_out = x_tiled_out.unsqueeze(0)  
+    x_detiled = rearrange(x_tiled_out, "b (t1 t2) c h w -> b c (h t1) (w t2)", t1=tile_size, t2=tile_size)
+
+    return x_detiled
 
 
 
 @torch.no_grad
-def noise_cossim_guide_eps_tiled(x_0, x_list, y0, noise_list, cossim_mode="forward", tile_size=2, sigma=None, rk_type=None):
+def noise_cossim_guide_eps_tiled_works(x_0, x_list, y0, noise_list, cossim_mode="forward", tile_size=2, sigma=None, rk_type=None):
     #tiles = F.unfold(x, kernel_size=tile_size, stride=tile_size)
     y0_tiled = rearrange(y0, "b c (h t1) (w t2) -> b (t1 t2) c h w", t1=tile_size, t2=tile_size)
     
