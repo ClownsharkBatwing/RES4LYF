@@ -228,7 +228,7 @@ class RK_Method:
 
 
 
-    def init_cfgpp(self, model, x, cfgpp=0.0, **extra_args):
+    def init_cfgpp(self, x, cfgpp=0.0, **extra_args):
         self.uncond = [torch.full_like(x, 0.0)]
         if cfgpp != 0.0:
             def post_cfg_function(args):

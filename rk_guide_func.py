@@ -502,28 +502,32 @@ def noise_cossim_eps_tiled_works(x_list, eps, noise_list, cossim_mode="forward",
 @torch.no_grad
 def noise_cossim_guide_eps_tiled(x_0, x_list, y0, noise_list, cossim_mode="forward", tile_size=2, step=0, sigma=None, rk_type=None):
 
-    y0_tiled = rearrange(y0, "b c (h t1) (w t2) -> b (t1 t2) c h w", t1=tile_size, t2=tile_size)
-    x_0_tiled = rearrange(x_0, "b c (h t1) (w t2) -> b (t1 t2) c h w", t1=tile_size, t2=tile_size)
+    #y0_tiled = rearrange(y0, "b c (h t1) (w t2) -> b (t1 t2) c h w", t1=tile_size, t2=tile_size)
+    #x_0_tiled = rearrange(x_0, "b c (h t1) (w t2) -> b (t1 t2) c h w", t1=tile_size, t2=tile_size)
 
     x_tiled_stack = torch.stack([
         rearrange(x, "b c (h t1) (w t2) -> b (t1 t2) c h w", t1=tile_size, t2=tile_size)[0]
         for x in x_list
     ])  # [n_x, n_tiles, c, h, w]
+    eps_guide_stack = torch.stack([
+        rearrange(x - y0, "b c (h t1) (w t2) -> b (t1 t2) c h w", t1=tile_size, t2=tile_size)[0]
+        for x in x_list
+    ])  # [n_x, n_tiles, c, h, w]
+    del x_list
 
     noise_tiled_stack = torch.stack([
         rearrange(noise, "b c (h t1) (w t2) -> b (t1 t2) c h w", t1=tile_size, t2=tile_size)[0]
         for noise in noise_list
     ])  # [n_x, n_tiles, c, h, w]
+    del noise_list
 
-    eps_guide_stack = torch.stack([
-        rearrange(x - y0, "b c (h t1) (w t2) -> b (t1 t2) c h w", t1=tile_size, t2=tile_size)[0]
-        for x in x_list
-    ])  # [n_x, n_tiles, c, h, w]
+
 
     noise_flat = noise_tiled_stack.view(noise_tiled_stack.size(0), noise_tiled_stack.size(1), -1)  # [n_x, n_tiles, c*h*w]
     eps_guide_flat = eps_guide_stack.view(eps_guide_stack.size(0), eps_guide_stack.size(1), -1)  # [n_x, n_tiles, c*h*w]
 
     cossim_tmp_all = F.cosine_similarity(noise_flat, eps_guide_flat, dim=-1)  # [n_x, n_tiles]
+    del noise_tiled_stack, noise_flat, eps_guide_stack, eps_guide_flat
 
     if cossim_mode == "forward":
         indices = cossim_tmp_all.argmax(dim=0) 
@@ -556,6 +560,7 @@ def noise_cossim_guide_eps_tiled(x_0, x_list, y0, noise_list, cossim_mode="forwa
         indices = torch.abs(cossim_tmp_all - target_value).argmin(dim=0)  
 
     x_tiled_out = x_tiled_stack[indices, torch.arange(indices.size(0))]  # [n_tiles, c, h, w]
+    del x_tiled_stack
 
     x_tiled_out = x_tiled_out.unsqueeze(0)  
     x_detiled = rearrange(x_tiled_out, "b (t1 t2) c h w -> b c (h t1) (w t2)", t1=tile_size, t2=tile_size)
