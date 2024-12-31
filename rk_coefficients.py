@@ -6,6 +6,7 @@ from .extra_samplers_helpers import get_deis_coeff_list
 from .phi_functions import *
 
 from itertools import permutations, combinations
+import random
 
 RK_SAMPLER_NAMES = ["none",
                     "res_2m",
@@ -729,6 +730,13 @@ def get_rk_methods(rk_type, h, c1=0.0, c2=0.5, c3=1.0, h_prev=None, h_prev2=None
     FSAL = False
     multistep_stages = 0
     
+    if c1 == -1:
+        c1 = random.uniform(0, 1)
+    if c2 == -1:
+        c2 = random.uniform(0, 1)
+    if c3 == -1:
+        c3 = random.uniform(0, 1)
+        
     if rk_type[:4] == "deis": 
         order = int(rk_type[-2])
         if stepcount < order:
