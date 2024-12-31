@@ -380,7 +380,10 @@ def noise_cossim_eps_tiled(x_list, eps, noise_list, cossim_mode="forward", tile_
         else:
             indices = cossim_tmp_all.argmin(dim=0)
     else:
-        raise ValueError(f"Unknown cossim_mode: {cossim_mode}")
+        target_value = float(cossim_mode)
+        indices = torch.abs(cossim_tmp_all - target_value).argmin(dim=0)
+    #else:
+    #    raise ValueError(f"Unknown cossim_mode: {cossim_mode}")
 
     x_tiled_stack = torch.stack([x_tiled[0] for x_tiled in x_tiled_list])  # [n_x, n_tiles, c, h, w]
     x_tiled_out = x_tiled_stack[indices, torch.arange(indices.size(0))]  # [n_tiles, c, h, w]
