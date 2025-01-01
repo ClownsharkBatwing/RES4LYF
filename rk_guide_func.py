@@ -543,3 +543,85 @@ def noise_cossim_guide_eps_tiled(x_0, x_list, y0, noise_list, cossim_mode="forwa
 
     return x_detiled
 
+
+
+
+def get_orthogonal_noise_single(x):
+    noise = torch.randn_like(x)
+    
+    x_flat     = x.    view(x.    size(0), -1)  # to (b, c*h*w)
+    noise_flat = noise.view(noise.size(0), -1)  # to (b, c*h*w)
+
+    x_norm = x_flat / x_flat.norm(dim=1, keepdim=True)  # norm batches
+    
+    proj_noise_on_x_flat = (torch.sum(noise_flat * x_norm, dim=1, keepdim=True) * x_norm)
+    noise_perp_flat = noise_flat - proj_noise_on_x_flat
+    
+    noise_perp = noise_perp_flat.view_as(x)
+    noise_perp /= noise_perp.std()
+    
+    return noise_perp
+
+
+def get_orthogonal_noise_multi(x, *refs):
+    noise = torch.randn_like(x)
+    
+    refs_flat = [ref.view(ref.size(0), -1) for ref in refs]  
+    noise_flat = noise.view(noise.size(0), -1) 
+
+    for ref_flat in refs_flat:
+        ref_norm = ref_flat / ref_flat.norm(dim=1, keepdim=True)  
+        proj_noise_on_ref = (torch.sum(noise_flat * ref_norm, dim=1, keepdim=True) * ref_norm)
+        noise_flat = noise_flat - proj_noise_on_ref  
+
+    noise_perp = noise_flat.view_as(x)
+    noise_perp /= noise_perp.std()
+
+    return noise_perp
+
+def get_orthogonal_noise_dumb(*refs):
+    noise = torch.randn_like(refs[0])
+    
+    refs_flat = [ref.view(ref.size(0), -1) for ref in refs]  
+    noise_flat = noise.view(noise.size(0), -1) 
+
+    for ref_flat in refs_flat:
+        ref_norm = ref_flat / ref_flat.norm(dim=1, keepdim=True)  
+        proj_noise_on_ref = (torch.sum(noise_flat * ref_norm, dim=1, keepdim=True) * ref_norm)
+        noise_flat = noise_flat - proj_noise_on_ref 
+
+    noise_perp = noise_flat.view_as(refs[0])
+    noise_perp /= noise_perp.std()
+
+    return noise_perp
+
+#def gram_schmidt_orthogonalize(noise, *refs):
+def get_orthogonal_noise(*refs):
+    noise = torch.randn_like(refs[0])
+    
+    refs_flat = [ref.view(ref.size(0), -1).clone() for ref in refs]
+    noise_flat = noise.view(noise.size(0), -1)
+    
+    for i, ref_flat in enumerate(refs_flat):
+        for j in range(i):  
+            ref_flat -= torch.sum(ref_flat * refs_flat[j], dim=1, keepdim=True) * refs_flat[j]
+        ref_flat /= ref_flat.norm(dim=1, keepdim=True)
+        noise_flat -= torch.sum(noise_flat * ref_flat, dim=1, keepdim=True) * ref_flat
+    
+    noise_perp = noise_flat.view_as(noise)
+    return noise_perp
+
+
+
+"""def get_orthogonal_noise(*refs):
+    noise = torch.randn_like(refs[0])
+    refs_flat = [ref.view(ref.size(0), -1) for ref in refs]
+    noise_flat = noise.view(noise.size(0), -1)
+    for i, ref_flat in enumerate(refs_flat):
+        for j in range(i):  
+            ref_flat -= torch.sum(ref_flat * refs_flat[j], dim=1, keepdim=True) * refs_flat[j]
+        ref_flat /= ref_flat.norm(dim=1, keepdim=True)
+        noise_flat -= torch.sum(noise_flat * ref_flat, dim=1, keepdim=True) * ref_flat
+    noise_perp = noise_flat.view_as(noise)
+    return noise_perp
+"""
