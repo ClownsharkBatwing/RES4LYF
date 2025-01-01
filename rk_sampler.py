@@ -331,31 +331,40 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
                     if (NOISE_SUBSTEP_COSSIM_SOURCE == "eps_tiled"):
                         x_[row+1] = noise_cossim_eps_tiled(x_tmp, eps_tmp, noise_tmp_list, cossim_mode=NOISE_SUBSTEP_COSSIM_MODE, tile_size=noise_substep_cossim_tile_size, step=row)
                     elif (NOISE_SUBSTEP_COSSIM_SOURCE == "eps_orthogonal"):
-                        noise = get_orthogonal_noise(eps_[row])
+                        noise = rk.noise_sampler(sigma=s_[row], sigma_next=s_[row+1])
+                        noise = get_orthogonal_noise_from(noise, eps_[row])
                         x_[row+1] = sub_alpha_ratio * x_[row+1] + sub_sigma_up * noise
                     elif (NOISE_SUBSTEP_COSSIM_SOURCE == "data_orthogonal"):
-                        noise = get_orthogonal_noise(data_[row])
+                        noise = rk.noise_sampler(sigma=s_[row], sigma_next=s_[row+1])
+                        noise = get_orthogonal_noise_from(noise, data_[row])
                         x_[row+1] = sub_alpha_ratio * x_[row+1] + sub_sigma_up * noise
                     elif (NOISE_SUBSTEP_COSSIM_SOURCE == "eps_data_orthogonal"):
-                        noise = get_orthogonal_noise(eps_[row], data_[row])
+                        noise = rk.noise_sampler(sigma=s_[row], sigma_next=s_[row+1])
+                        noise = get_orthogonal_noise_from(noise, eps_[row], data_[row])
                         x_[row+1] = sub_alpha_ratio * x_[row+1] + sub_sigma_up * noise
                     elif (NOISE_SUBSTEP_COSSIM_SOURCE == "xinit_orthogonal"):
-                        noise = get_orthogonal_noise(x_init)
+                        noise = rk.noise_sampler(sigma=s_[row], sigma_next=s_[row+1])
+                        noise = get_orthogonal_noise_from(noise, x_init)
                         x_[row+1] = sub_alpha_ratio * x_[row+1] + sub_sigma_up * noise
                     elif (NOISE_SUBSTEP_COSSIM_SOURCE == "x_orthogonal"):
-                        noise = get_orthogonal_noise(x_[row+1])
+                        noise = rk.noise_sampler(sigma=s_[row], sigma_next=s_[row+1])
+                        noise = get_orthogonal_noise_from(noise, x_[row+1])
                         x_[row+1] = sub_alpha_ratio * x_[row+1] + sub_sigma_up * noise
                     elif (NOISE_SUBSTEP_COSSIM_SOURCE == "x_data_orthogonal"):
-                        noise = get_orthogonal_noise(x_[row+1], data_[row])
+                        noise = rk.noise_sampler(sigma=s_[row], sigma_next=s_[row+1])
+                        noise = get_orthogonal_noise_from(noise, x_[row+1], data_[row])
                         x_[row+1] = sub_alpha_ratio * x_[row+1] + sub_sigma_up * noise
                     elif (NOISE_SUBSTEP_COSSIM_SOURCE == "x_eps_orthogonal"):
-                        noise = get_orthogonal_noise(x_[row+1], eps_[row])
+                        noise = rk.noise_sampler(sigma=s_[row], sigma_next=s_[row+1])
+                        noise = get_orthogonal_noise_from(noise, x_[row+1], eps_[row])
                         x_[row+1] = sub_alpha_ratio * x_[row+1] + sub_sigma_up * noise
                     elif (NOISE_SUBSTEP_COSSIM_SOURCE == "x_eps_data_orthogonal"):
-                        noise = get_orthogonal_noise(x_[row+1], eps_[row], data_[row])
+                        noise = rk.noise_sampler(sigma=s_[row], sigma_next=s_[row+1])
+                        noise = get_orthogonal_noise_from(noise, x_[row+1], eps_[row], data_[row])
                         x_[row+1] = sub_alpha_ratio * x_[row+1] + sub_sigma_up * noise
                     elif (NOISE_SUBSTEP_COSSIM_SOURCE == "x_eps_data_xinit_orthogonal"):
-                        noise = get_orthogonal_noise(x_[row+1], eps_[row], data_[row], x_init)
+                        noise = rk.noise_sampler(sigma=s_[row], sigma_next=s_[row+1])
+                        noise = get_orthogonal_noise_from(noise, x_[row+1], eps_[row], data_[row], x_init)
                         x_[row+1] = sub_alpha_ratio * x_[row+1] + sub_sigma_up * noise
                         
                         
@@ -548,31 +557,40 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
                 x = noise_cossim_guide_eps_tiled(x_0, x_tmp, uncond[0], noise_tmp_list, cossim_mode=NOISE_COSSIM_MODE, tile_size=noise_cossim_tile_size, step=step, sigma=sigma, rk_type=rk_type)
                 
             elif (NOISE_COSSIM_SOURCE == "eps_orthogonal"):
-                noise = get_orthogonal_noise(eps)
+                noise = rk.noise_sampler(sigma=sigma, sigma_next=sigma_next)
+                noise = get_orthogonal_noise_from(noise, eps)
                 x = alpha_ratio * x + sigma_up * noise
             elif (NOISE_COSSIM_SOURCE == "data_orthogonal"):
-                noise = get_orthogonal_noise(denoised)
+                noise = rk.noise_sampler(sigma=sigma, sigma_next=sigma_next)
+                noise = get_orthogonal_noise_from(noise, denoised)
                 x = alpha_ratio * x + sigma_up * noise
             elif (NOISE_COSSIM_SOURCE == "eps_data_orthogonal"):
-                noise = get_orthogonal_noise(eps, denoised)
+                noise = rk.noise_sampler(sigma=sigma, sigma_next=sigma_next)
+                noise = get_orthogonal_noise_from(noise, eps, denoised)
                 x = alpha_ratio * x + sigma_up * noise
             elif (NOISE_COSSIM_SOURCE == "x_orthogonal"):
-                noise = get_orthogonal_noise(x)
+                noise = rk.noise_sampler(sigma=sigma, sigma_next=sigma_next)
+                noise = get_orthogonal_noise_from(noise, x)
                 x = alpha_ratio * x + sigma_up * noise
             elif (NOISE_COSSIM_SOURCE == "xinit_orthogonal"):
-                noise = get_orthogonal_noise(x_init)
+                noise = rk.noise_sampler(sigma=sigma, sigma_next=sigma_next)
+                noise = get_orthogonal_noise_from(noise, x_init)
                 x = alpha_ratio * x + sigma_up * noise
             elif (NOISE_COSSIM_SOURCE == "x_data_orthogonal"):
-                noise = get_orthogonal_noise(x, denoised)
+                noise = rk.noise_sampler(sigma=sigma, sigma_next=sigma_next)
+                noise = get_orthogonal_noise_from(noise, x, denoised)
                 x = alpha_ratio * x + sigma_up * noise
             elif (NOISE_COSSIM_SOURCE == "x_eps_orthogonal"):
-                noise = get_orthogonal_noise(x, eps)
+                noise = rk.noise_sampler(sigma=sigma, sigma_next=sigma_next)
+                noise = get_orthogonal_noise_from(noise, x, eps)
                 x = alpha_ratio * x + sigma_up * noise
             elif (NOISE_COSSIM_SOURCE == "x_eps_data_orthogonal"):
-                noise = get_orthogonal_noise(x, eps, denoised)
+                noise = rk.noise_sampler(sigma=sigma, sigma_next=sigma_next)
+                noise = get_orthogonal_noise_from(noise, x, eps, denoised)
                 x = alpha_ratio * x + sigma_up * noise
             elif (NOISE_COSSIM_SOURCE == "x_eps_data_xinit_orthogonal"):
-                noise = get_orthogonal_noise(x, eps, denoised, x_init)
+                noise = rk.noise_sampler(sigma=sigma, sigma_next=sigma_next)
+                noise = get_orthogonal_noise_from(noise, x, eps, denoised, x_init)
                 x = alpha_ratio * x + sigma_up * noise
                 
             elif (NOISE_COSSIM_SOURCE == "eps_tiled"):

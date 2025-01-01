@@ -612,6 +612,39 @@ def get_orthogonal_noise(*refs):
     return noise_perp
 
 
+def get_orthogonal_noise(*refs):
+    noise = torch.randn_like(refs[0])
+    
+    refs_flat = [ref.view(ref.size(0), -1).clone() for ref in refs]
+    noise_flat = noise.view(noise.size(0), -1)
+    
+    for i, ref_flat in enumerate(refs_flat):
+        for j in range(i):  
+            ref_flat -= torch.sum(ref_flat * refs_flat[j], dim=1, keepdim=True) * refs_flat[j]
+        ref_flat /= ref_flat.norm(dim=1, keepdim=True)
+        noise_flat -= torch.sum(noise_flat * ref_flat, dim=1, keepdim=True) * ref_flat
+    
+    noise_perp = noise_flat.view_as(noise)
+    return noise_perp
+
+
+def get_orthogonal_noise_from(noise, *refs):
+    noise = torch.randn_like(refs[0])
+    
+    refs_flat = [ref.view(ref.size(0), -1).clone() for ref in refs]
+    noise_flat = noise.view(noise.size(0), -1)
+    
+    for i, ref_flat in enumerate(refs_flat):
+        for j in range(i):  
+            ref_flat -= torch.sum(ref_flat * refs_flat[j], dim=1, keepdim=True) * refs_flat[j]
+        ref_flat /= ref_flat.norm(dim=1, keepdim=True)
+        noise_flat -= torch.sum(noise_flat * ref_flat, dim=1, keepdim=True) * ref_flat
+    
+    noise_perp = noise_flat.view_as(noise)
+    return noise_perp
+
+
+
 
 """def get_orthogonal_noise(*refs):
     noise = torch.randn_like(refs[0])
