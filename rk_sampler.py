@@ -290,9 +290,11 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
                     for i in range(noise_substep_cossim_iterations):
                         x_tmp.append(rk.add_noise_post(x_[row+1], y0, lgw[step], sub_sigma_up, sub_sigma, s_[row], sub_sigma_down, sub_alpha_ratio, s_noise, substep_noise_mode, SDE_NOISE_EXTERNAL, sde_noise_t)    )#y0, lgw, sigma_down are currently unused
                         noise_tmp = x_tmp[i] - x_[row+1]
-                        noise_tmp = (noise_tmp - noise_tmp.mean()) / noise_tmp.std()
+                        if extra_options_flag("noise_substep_noise_zscore_norm", extra_options):
+                            noise_tmp = (noise_tmp - noise_tmp.mean()) / noise_tmp.std()
                         eps_tmp  = eps_prev      if  eps_[row].sum() == 0 else eps_[row]
-                        eps_tmp = (eps_tmp - eps_tmp.mean()) / eps_tmp.std()
+                        if extra_options_flag("noise_substep_eps_zscore_norm", extra_options):
+                            eps_tmp = (eps_tmp - eps_tmp.mean()) / eps_tmp.std()
                         
                         data_tmp = denoised_prev if data_[row].sum() == 0 else data_[row]
                         if   NOISE_SUBSTEP_COSSIM_SOURCE in ("eps_tiled", "guide_epsilon_tiled", "guide_bkg_epsilon_tiled"):
@@ -477,7 +479,10 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
                     #noise_cossim_iterations = 1
                 x_tmp.append(rk.add_noise_post(x, y0, lgw[step], sigma_up, sigma, sigma_next, sigma_down, alpha_ratio, s_noise, noise_mode, SDE_NOISE_EXTERNAL, sde_noise_t)    )#y0, lgw, sigma_down are currently unused
                 noise_tmp = x_tmp[i] - x
-                noise_tmp = (noise_tmp - noise_tmp.mean()) / noise_tmp.std()
+                if extra_options_flag("noise_noise_zscore_norm", extra_options):
+                    noise_tmp = (noise_tmp - noise_tmp.mean()) / noise_tmp.std()
+                if extra_options_flag("noise_eps_zscore_norm", extra_options):
+                    eps = (eps - eps.mean()) / eps.std()
                 if   NOISE_COSSIM_SOURCE in ("eps_tiled", "guide_epsilon_tiled", "guide_bkg_epsilon_tiled", "iig_tiled"):
                     noise_tmp_list.append(noise_tmp)
                 if   NOISE_COSSIM_SOURCE == "eps":
