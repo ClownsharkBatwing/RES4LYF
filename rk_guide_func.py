@@ -158,11 +158,13 @@ def get_guide_epsilon_substep(x_0, x_, y0, y0_inv, s_, row, rk_type, b=None, c=N
         index = ()
 
     if RK_Method.is_exponential(rk_type):
+        # Calculate full-strength epsilon values
         eps_row     = y0    [index] - x_0[index]
-        eps_row_inv = y0_inv[index] - x_0[index]
+        eps_row_inv = y0_inv[index] - x_0[index] if y0_inv is not None else None
     else:
+        # Calculate full-strength epsilon values
         eps_row     = (x_[row+1][index] - y0    [index]) / (s_[row] * s_in)
-        eps_row_inv = (x_[row+1][index] - y0_inv[index]) / (s_[row] * s_in)
+        eps_row_inv = (x_[row+1][index] - y0_inv[index]) / (s_[row] * s_in) if y0_inv is not None else None
     
     return eps_row, eps_row_inv
 
@@ -189,7 +191,7 @@ def get_guide_epsilon(x_0, x_, y0, sigma, rk_type, b=None, c=None):
 
 
 @torch.no_grad()
-def process_guides_substep(x_0, x_, eps_, data_, row, y0, y0_inv, lgw, lgw_inv, lgw_mask, lgw_mask_inv, step, sigma, sigma_next, sigma_down, s_, unsample_resample_scale, rk, rk_type, guide_mode, latent_guide, latent_guide_inv, UNSAMPLE, extra_options):
+def process_guides_substep(x_0, x_, eps_, data_, row, y0, y0_inv, lgw, lgw_inv, lgw_mask, lgw_mask_inv, step, sigma, sigma_next, sigma_down, s_, unsample_resample_scale, rk, rk_type, guide_mode, latent_guide, latent_guide_inv, UNSAMPLE, extra_options, frame_weights=None):
     
     if UNSAMPLE and RK_Method.is_exponential(rk_type):
         if not (extra_options_flag("disable_power_unsample", extra_options) or extra_options_flag("disable_power_resample", extra_options)):
@@ -227,21 +229,34 @@ def process_guides_substep(x_0, x_, eps_, data_, row, y0, y0_inv, lgw, lgw_inv, 
 
     elif "epsilon" in guide_mode:
         if sigma > sigma_next:
-            # Get hybrid-specific parameters (all default to values that reproduce epsilon mode)
+            # Get hybrid-specific parameters
             hybrid_stats_weight = float(get_extra_options_kv("hybrid_stats_weight", "0.0", extra_options))
             hybrid_temporal_smooth = float(get_extra_options_kv("hybrid_temporal_smooth", "0.0", extra_options))
             hybrid_noise_normalize = float(get_extra_options_kv("hybrid_noise_normalize", "0.0", extra_options))
+
+            # Modify the lgw masks with frame weights before any guidance
+            lgw_mask_frames = lgw_mask.clone()
+            lgw_mask_inv_frames = lgw_mask_inv.clone() if lgw_mask_inv is not None else None
             
-            # Start with original epsilon mode weight calculations
+            for f in range(lgw_mask_frames.shape[2]):  # Iterate over frames dimension
+                frame_weight = frame_weights[f] if frame_weights is not None else 1.0
+                lgw_mask_frames[..., f:f+1, :, :] *= frame_weight
+                if lgw_mask_inv_frames is not None:
+                    lgw_mask_inv_frames[..., f:f+1, :, :] *= frame_weight
+            
+            # Now proceed with either disabled or enabled lgw scaling using modified masks
             if extra_options_flag("disable_lgw_scaling", extra_options):
                 eps_row, eps_row_inv = get_guide_epsilon_substep(x_0, x_, y0, y0_inv, s_, row, rk_type)
-                eps_[row] = eps_[row]      +     lgw_mask * (eps_row - eps_[row])    +    lgw_mask_inv * (eps_row_inv - eps_[row])
+                eps_[row] = eps_[row] + lgw_mask_frames * (eps_row - eps_[row])
+                if eps_row_inv is not None and lgw_mask_inv_frames is not None:
+                    eps_[row] = eps_[row] + lgw_mask_inv_frames * (eps_row_inv - eps_[row])
             
             eps_guided = eps_[row].clone()
-                     
+                    
             tol_value = float(get_extra_options_kv("tol", "-1.0", extra_options))
                 
             if tol_value >= 0 and (lgw > 0 or lgw_inv > 0):           
+                # Use lgw_mask_frames and lgw_mask_inv_frames in the L2 norm calculations
                 for b, c in itertools.product(range(x_0.shape[0]), range(x_0.shape[1])):
                     current_diff     = torch.norm(data_[row][b][c] - y0    [b][c])
                     current_diff_inv = torch.norm(data_[row][b][c] - y0_inv[b][c])
@@ -252,8 +267,8 @@ def process_guides_substep(x_0, x_, eps_, data_, row, y0, y0_inv, lgw, lgw_inv, 
                     lgw_tmp     = min(lgw    , lgw_scaled)
                     lgw_tmp_inv = min(lgw_inv, lgw_scaled_inv)
 
-                    lgw_mask_clamp = torch.clamp(lgw_mask, max=lgw_tmp)
-                    lgw_mask_clamp_inv = torch.clamp(lgw_mask_inv, max=lgw_tmp_inv)
+                    lgw_mask_clamp = torch.clamp(lgw_mask_frames, max=lgw_tmp)
+                    lgw_mask_clamp_inv = torch.clamp(lgw_mask_inv_frames, max=lgw_tmp_inv)
                     
                     eps_row, eps_row_inv = get_guide_epsilon_substep(x_0, x_, y0, y0_inv, s_, row, rk_type, b, c)
                     eps_guided[b][c] = eps_[row][b][c] + lgw_mask_clamp[b][c] * (eps_row - eps_[row][b][c]) + lgw_mask_clamp_inv[b][c] * (eps_row_inv - eps_[row][b][c])
@@ -271,7 +286,7 @@ def process_guides_substep(x_0, x_, eps_, data_, row, y0, y0_inv, lgw, lgw_inv, 
                     ratio_inv = torch.nan_to_num(torch.norm(data_[row][b][c] - y0_inv[b][c])   /   avg_inv, 0)
                     
                     eps_row, eps_row_inv = get_guide_epsilon_substep(x_0, x_, y0, y0_inv, s_, row, rk_type, b, c)
-                    eps_guided[b][c] = eps_[row][b][c]      +     ratio * lgw_mask[b][c] * (eps_row - eps_[row][b][c])    +    ratio_inv * lgw_mask_inv[b][c] * (eps_row_inv - eps_[row][b][c])
+                    eps_guided[b][c] = eps_[row][b][c]      +     ratio * lgw_mask_frames[b][c] * (eps_row - eps_[row][b][c])    +    ratio_inv * lgw_mask_inv_frames[b][c] * (eps_row_inv - eps_[row][b][c])
 
             # If hybrid mode is active (stats_weight > 0), apply statistical matching
             if guide_mode == "hybrid_epsilon" and hybrid_stats_weight > 0:

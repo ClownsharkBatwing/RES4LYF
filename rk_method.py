@@ -236,7 +236,7 @@ class RK_Method:
     def init_guides(self, x, latent_guide, latent_guide_inv, mask, sigmas, UNSAMPLE, frame_weights):
         y0, y0_inv = torch.zeros_like(x), torch.zeros_like(x)
 
-        if (x.dim() == 5):
+        if (x.dim() == 5) and (frame_weights is not None):
             frame_batch_size = x.shape[2]
             if frame_weights.shape[0] > frame_batch_size:
                 frame_weights = frame_weights[:frame_batch_size]

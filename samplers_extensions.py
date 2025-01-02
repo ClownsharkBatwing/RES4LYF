@@ -104,6 +104,8 @@ GUIDE_MODE_NAMES = ["unsample",
                     "mean_tiled",
                     "std", 
                     "data",
+                    "hybrid_data",
+                    "hybrid_epsilon",
                     "none",
 ]
 
