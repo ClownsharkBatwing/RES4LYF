@@ -12,6 +12,7 @@ from .helper import get_extra_options_kv, extra_options_flag, get_cosine_similar
 
 import itertools
 
+
 def prepare_mask(x, mask, LGW_MASK_RESCALE_MIN):
     if mask is None:
         mask = torch.ones_like(x)
@@ -135,7 +136,10 @@ def process_guides_substep(x_0, x_, eps_, data_, row, y0, y0_inv, lgw, lgw_inv, 
             y0_inv = y_inv_shift
 
     lgw_mask_cur = lgw_mask.clone()
-    lgw_mask_inv_cur = lgw_mask_inv.clone() if lgw_mask_inv is not None else None
+    if lgw_mask_inv is not None:
+        lgw_mask_inv_cur = lgw_mask_inv.clone()
+    else:
+        lgw_mask_inv_cur = 1-lgw_mask_cur
     
     # Apply frame weights only if we have video frames
     if frame_weights is not None and x_0.dim() == 5:
@@ -145,7 +149,7 @@ def process_guides_substep(x_0, x_, eps_, data_, row, y0, y0_inv, lgw, lgw_inv, 
             if lgw_mask_inv_cur is not None:
                 lgw_mask_inv_cur[..., f:f+1, :, :] *= frame_weight
 
-    if guide_mode == "data":
+    if "data" in guide_mode:
         y0_tmp = y0
         if latent_guide_inv is not None:
             y0_tmp = (1-lgw_mask_cur) * data_[row] + lgw_mask_cur * y0
@@ -228,6 +232,7 @@ def process_guides_substep(x_0, x_, eps_, data_, row, y0, y0_inv, lgw, lgw_inv, 
                 
         if extra_options_flag("disable_lgw_scaling", extra_options):
             eps_[row] = eps_[row] + lgw_mask_cur * (cvf - eps_[row]) + lgw_mask_inv_cur * (cvf_inv - eps_[row])
+            
         else:
             avg, avg_inv = 0, 0
             for b, c in itertools.product(range(x_0.shape[0]), range(x_0.shape[1])):
@@ -408,31 +413,6 @@ def noise_cossim_guide_tiled(x_list, guide, cossim_mode="forward", tile_size=2, 
 
 
 @torch.no_grad
-def noise_cossim_guide_tiled_works(x_list, guide, cossim_mode="forward", tile_size=2):
-    #tiles = F.unfold(x, kernel_size=tile_size, stride=tile_size)
-    guide_tiled = rearrange(guide, "b c (h t1) (w t2) -> b (t1 t2) c h w", t1=tile_size, t2=tile_size)
-    
-    cossim_tmp, x_tiled_list = [], []
-    x_tiled_out = torch.zeros_like(guide_tiled)
-    
-    for i in range (len(x_list)):
-        x_tiled     = rearrange(x_list[i],     "b c (h t1) (w t2) -> b (t1 t2) c h w", t1=tile_size, t2=tile_size)
-        x_tiled_list.append(x_tiled)
-        
-    for j in range(guide_tiled.shape[1]):
-        cossim_tmp = []
-        for i in range(len(x_tiled_list)):
-            cossim_tmp.append(get_cosine_similarity(x_tiled_list[i][0][j], guide_tiled[0][j]))
-        for i in range(len(x_tiled_list)):
-            if cossim_tmp[i] == max(cossim_tmp):
-                x_tiled_out[0][j] = x_tiled_list[i][0][j]
-    
-    x_detiled = rearrange(x_tiled_out, "b (t1 t2) c h w -> b c (h t1) (w t2)", t1=tile_size, t2=tile_size)
-    
-    return x_detiled
-
-
-@torch.no_grad
 def noise_cossim_eps_tiled(x_list, eps, noise_list, cossim_mode="forward", tile_size=2, step=0):
 
     eps_tiled = rearrange(eps, "b c (h t1) (w t2) -> b (t1 t2) c h w", t1=tile_size, t2=tile_size)
@@ -456,6 +436,32 @@ def noise_cossim_eps_tiled(x_list, eps, noise_list, cossim_mode="forward", tile_
         indices = cossim_tmp_all.argmin(dim=0) 
     elif cossim_mode == "orthogonal":
         indices = torch.abs(cossim_tmp_all).argmin(dim=0) 
+    elif cossim_mode == "orthogonal_pos":
+        positive_mask = cossim_tmp_all > 0
+        positive_tmp = torch.where(positive_mask, cossim_tmp_all, torch.full_like(cossim_tmp_all, float('inf')))
+        indices = positive_tmp.argmin(dim=0)
+    elif cossim_mode == "orthogonal_neg":
+        negative_mask = cossim_tmp_all < 0
+        negative_tmp = torch.where(negative_mask, cossim_tmp_all, torch.full_like(cossim_tmp_all, float('-inf')))
+        indices = negative_tmp.argmax(dim=0)
+    elif cossim_mode == "orthogonal_posneg":
+        if step % 2 == 0:
+            positive_mask = cossim_tmp_all > 0
+            positive_tmp = torch.where(positive_mask, cossim_tmp_all, torch.full_like(cossim_tmp_all, float('inf')))
+            indices = positive_tmp.argmin(dim=0)
+        else:
+            negative_mask = cossim_tmp_all < 0
+            negative_tmp = torch.where(negative_mask, cossim_tmp_all, torch.full_like(cossim_tmp_all, float('-inf')))
+            indices = negative_tmp.argmax(dim=0)
+    elif cossim_mode == "orthogonal_negpos":
+        if step % 2 == 1:
+            positive_mask = cossim_tmp_all > 0
+            positive_tmp = torch.where(positive_mask, cossim_tmp_all, torch.full_like(cossim_tmp_all, float('inf')))
+            indices = positive_tmp.argmin(dim=0)
+        else:
+            negative_mask = cossim_tmp_all < 0
+            negative_tmp = torch.where(negative_mask, cossim_tmp_all, torch.full_like(cossim_tmp_all, float('-inf')))
+            indices = negative_tmp.argmax(dim=0)
     elif cossim_mode == "forward_reverse":
         if step % 2 == 0:
             indices = cossim_tmp_all.argmax(dim=0)
@@ -492,55 +498,6 @@ def noise_cossim_eps_tiled(x_list, eps, noise_list, cossim_mode="forward", tile_
 
 
 @torch.no_grad
-def noise_cossim_eps_tiled_works(x_list, eps, noise_list, cossim_mode="forward", tile_size=2, step=0):
-
-    eps_tiled = rearrange(eps, "b c (h t1) (w t2) -> b (t1 t2) c h w", t1=tile_size, t2=tile_size)
-    
-    x_tiled_list, noise_tiled_list = [], []
-    x_tiled_out = torch.zeros_like(eps_tiled)
-
-    x_tiled_list = [
-        rearrange(x, "b c (h t1) (w t2) -> b (t1 t2) c h w", t1=tile_size, t2=tile_size)
-        for x in x_list
-    ]
-    noise_tiled_list = [
-        rearrange(noise, "b c (h t1) (w t2) -> b (t1 t2) c h w", t1=tile_size, t2=tile_size)
-        for noise in noise_list
-    ]
-
-    noise_tiled_stack2 = torch.stack([noise_tiled_list[i][0] for i in range(len(x_tiled_list))])
-    thing1 = noise_tiled_stack2.view(*noise_tiled_stack2.shape[:-3],-1)
-    eps_expanded = eps_tiled[0].view(*eps_tiled.shape[:-3],-1).expand_as(thing1)
-    cossim_tmp_all = F.cosine_similarity(thing1, eps_expanded, dim=-1)
-        
-    for j in range(eps_tiled.shape[1]): #iterate over tiles (j)
-
-        for i in range(len(x_tiled_list)):
-            if   (cossim_mode == "forward") and (cossim_tmp_all[i][j] == max(cossim_tmp_all[:,j])):
-                x_tiled_out[0][j] = x_tiled_list[i][0][j]
-            elif (cossim_mode == "reverse") and (cossim_tmp_all[i][j] == min(cossim_tmp_all[:,j])):
-                x_tiled_out[0][j] = x_tiled_list[i][0][j]
-            elif (cossim_mode == "orthogonal") and (abs(cossim_tmp_all[i][j]) == min(abs(val) for val in cossim_tmp_all[:,j])):
-                x_tiled_out[0][j] = x_tiled_list[i][0][j]
-            elif (cossim_mode == "forward_reverse"): # and (abs(cossim_tmp[i]) == min(abs(val) for val in cossim_tmp)):
-                if   (step % 2 == 0) and (cossim_tmp_all[i][j] == max(cossim_tmp_all[:,j])):
-                    x_tiled_out[0][j] = x_tiled_list[i][0][j]
-                elif (step % 2 == 1) and (cossim_tmp_all[i][j] == min(cossim_tmp_all[:,j])):
-                    x_tiled_out[0][j] = x_tiled_list[i][0][j]
-            elif (cossim_mode == "orthogonal_reverse"): # and (abs(cossim_tmp[i]) == min(abs(val) for val in cossim_tmp)):
-                if   (step % 2 == 0) and (abs(cossim_tmp_all[i][j]) == min(abs(val) for val in cossim_tmp_all[:,j])):
-                    x_tiled_out[0][j] = x_tiled_list[i][0][j]
-                elif (step % 2 == 1) and (cossim_tmp_all[i][j] == min(cossim_tmp_all[:,j])):
-                    x_tiled_out[0][j] = x_tiled_list[i][0][j]
-    
-    if x_tiled_out.sum() == 0:
-        x_tiled_out = x_tiled_list[0]
-    x_detiled = rearrange(x_tiled_out, "b (t1 t2) c h w -> b c (h t1) (w t2)", t1=tile_size, t2=tile_size)
-    
-    return x_detiled
-
-
-@torch.no_grad
 def noise_cossim_guide_eps_tiled(x_0, x_list, y0, noise_list, cossim_mode="forward", tile_size=2, step=0, sigma=None, rk_type=None):
 
     #y0_tiled = rearrange(y0, "b c (h t1) (w t2) -> b (t1 t2) c h w", t1=tile_size, t2=tile_size)
@@ -562,8 +519,6 @@ def noise_cossim_guide_eps_tiled(x_0, x_list, y0, noise_list, cossim_mode="forwa
     ])  # [n_x, n_tiles, c, h, w]
     del noise_list
 
-
-
     noise_flat = noise_tiled_stack.view(noise_tiled_stack.size(0), noise_tiled_stack.size(1), -1)  # [n_x, n_tiles, c*h*w]
     eps_guide_flat = eps_guide_stack.view(eps_guide_stack.size(0), eps_guide_stack.size(1), -1)  # [n_x, n_tiles, c*h*w]
 
@@ -576,6 +531,32 @@ def noise_cossim_guide_eps_tiled(x_0, x_list, y0, noise_list, cossim_mode="forwa
         indices = cossim_tmp_all.argmin(dim=0) 
     elif cossim_mode == "orthogonal":
         indices = torch.abs(cossim_tmp_all).argmin(dim=0) 
+    elif cossim_mode == "orthogonal_pos":
+        positive_mask = cossim_tmp_all > 0
+        positive_tmp = torch.where(positive_mask, cossim_tmp_all, torch.full_like(cossim_tmp_all, float('inf')))
+        indices = positive_tmp.argmin(dim=0)
+    elif cossim_mode == "orthogonal_neg":
+        negative_mask = cossim_tmp_all < 0
+        negative_tmp = torch.where(negative_mask, cossim_tmp_all, torch.full_like(cossim_tmp_all, float('-inf')))
+        indices = negative_tmp.argmax(dim=0)
+    elif cossim_mode == "orthogonal_posneg":
+        if step % 2 == 0:
+            positive_mask = cossim_tmp_all > 0
+            positive_tmp = torch.where(positive_mask, cossim_tmp_all, torch.full_like(cossim_tmp_all, float('inf')))
+            indices = positive_tmp.argmin(dim=0)
+        else:
+            negative_mask = cossim_tmp_all < 0
+            negative_tmp = torch.where(negative_mask, cossim_tmp_all, torch.full_like(cossim_tmp_all, float('-inf')))
+            indices = negative_tmp.argmax(dim=0)
+    elif cossim_mode == "orthogonal_negpos":
+        if step % 2 == 1:
+            positive_mask = cossim_tmp_all > 0
+            positive_tmp = torch.where(positive_mask, cossim_tmp_all, torch.full_like(cossim_tmp_all, float('inf')))
+            indices = positive_tmp.argmin(dim=0)
+        else:
+            negative_mask = cossim_tmp_all < 0
+            negative_tmp = torch.where(negative_mask, cossim_tmp_all, torch.full_like(cossim_tmp_all, float('-inf')))
+            indices = negative_tmp.argmax(dim=0)
     elif cossim_mode == "forward_reverse":
         if step % 2 == 0:
             indices = cossim_tmp_all.argmax(dim=0)
@@ -610,48 +591,116 @@ def noise_cossim_guide_eps_tiled(x_0, x_list, y0, noise_list, cossim_mode="forwa
 
 
 
-@torch.no_grad
-def noise_cossim_guide_eps_tiled_works(x_0, x_list, y0, noise_list, cossim_mode="forward", tile_size=2, sigma=None, rk_type=None):
-    #tiles = F.unfold(x, kernel_size=tile_size, stride=tile_size)
-    y0_tiled = rearrange(y0, "b c (h t1) (w t2) -> b (t1 t2) c h w", t1=tile_size, t2=tile_size)
+
+def get_orthogonal_noise_single(x):
+    noise = torch.randn_like(x)
     
-    cossim_tmp, x_tiled_list, noise_tiled_list, eps_guide_tiled_list = [], [], [], []
-    x_tiled_out = torch.zeros_like(y0_tiled)
+    x_flat     = x.    view(x.    size(0), -1)  # to (b, c*h*w)
+    noise_flat = noise.view(noise.size(0), -1)  # to (b, c*h*w)
+
+    x_norm = x_flat / x_flat.norm(dim=1, keepdim=True)  # norm batches
     
-    x_0_tiled     = rearrange(x_0,     "b c (h t1) (w t2) -> b (t1 t2) c h w", t1=tile_size, t2=tile_size)
+    proj_noise_on_x_flat = (torch.sum(noise_flat * x_norm, dim=1, keepdim=True) * x_norm)
+    noise_perp_flat = noise_flat - proj_noise_on_x_flat
     
-    for i in range (len(x_list)):
-        x_tiled     = rearrange(x_list[i],     "b c (h t1) (w t2) -> b (t1 t2) c h w", t1=tile_size, t2=tile_size)
-        x_tiled_list.append(x_tiled)
-        
-    for i in range (len(noise_list)):
-        noise_tiled     = rearrange(noise_list[i],     "b c (h t1) (w t2) -> b (t1 t2) c h w", t1=tile_size, t2=tile_size)
-        noise_tiled_list.append(noise_tiled)
-        
-    for i in range (len(x_list)):
-        #eps_guide = get_guide_epsilon(x_0, x_list[i], y0, sigma, rk_type)
-        eps_guide = x_list[i] - y0
-        eps_guide_tiled     = rearrange(eps_guide,     "b c (h t1) (w t2) -> b (t1 t2) c h w", t1=tile_size, t2=tile_size)
-        eps_guide_tiled_list.append(eps_guide_tiled)
-        
-        
-        
-    for j in range(x_tiled.shape[1]):
-        cossim_tmp = []
-        for i in range(len(x_tiled_list)):
-            cossim_tmp.append(get_cosine_similarity(noise_tiled_list[i][0][j], eps_guide_tiled_list[i][0][j]))
-        for i in range(len(x_tiled_list)):
-            if   (cossim_mode == "forward") and (cossim_tmp[i] == max(cossim_tmp)):
-                x_tiled_out[0][j] = x_tiled_list[i][0][j]
-            elif (cossim_mode == "reverse") and (cossim_tmp[i] == min(cossim_tmp)):
-                x_tiled_out[0][j] = x_tiled_list[i][0][j]
-            elif (cossim_mode == "orthogonal") and (abs(cossim_tmp[i]) == min(abs(val) for val in cossim_tmp)):
-                x_tiled_out[0][j] = x_tiled_list[i][0][j]
+    noise_perp = noise_perp_flat.view_as(x)
+    noise_perp /= noise_perp.std()
     
-    if x_tiled_out.sum() == 0:
-        x_tiled_out = x_tiled_list[0]
-    x_detiled = rearrange(x_tiled_out, "b (t1 t2) c h w -> b c (h t1) (w t2)", t1=tile_size, t2=tile_size)
-    
-    return x_detiled
+    return noise_perp
 
 
+def get_orthogonal_noise_multi(x, *refs):
+    noise = torch.randn_like(x)
+    
+    refs_flat = [ref.view(ref.size(0), -1) for ref in refs]  
+    noise_flat = noise.view(noise.size(0), -1) 
+
+    for ref_flat in refs_flat:
+        ref_norm = ref_flat / ref_flat.norm(dim=1, keepdim=True)  
+        proj_noise_on_ref = (torch.sum(noise_flat * ref_norm, dim=1, keepdim=True) * ref_norm)
+        noise_flat = noise_flat - proj_noise_on_ref  
+
+    noise_perp = noise_flat.view_as(x)
+    noise_perp /= noise_perp.std()
+
+    return noise_perp
+
+def get_orthogonal_noise_dumb(*refs):
+    noise = torch.randn_like(refs[0])
+    
+    refs_flat = [ref.view(ref.size(0), -1) for ref in refs]  
+    noise_flat = noise.view(noise.size(0), -1) 
+
+    for ref_flat in refs_flat:
+        ref_norm = ref_flat / ref_flat.norm(dim=1, keepdim=True)  
+        proj_noise_on_ref = (torch.sum(noise_flat * ref_norm, dim=1, keepdim=True) * ref_norm)
+        noise_flat = noise_flat - proj_noise_on_ref 
+
+    noise_perp = noise_flat.view_as(refs[0])
+    noise_perp /= noise_perp.std()
+
+    return noise_perp
+
+#def gram_schmidt_orthogonalize(noise, *refs):
+def get_orthogonal_noise(*refs):
+    noise = torch.randn_like(refs[0])
+    
+    refs_flat = [ref.view(ref.size(0), -1).clone() for ref in refs]
+    noise_flat = noise.view(noise.size(0), -1)
+    
+    for i, ref_flat in enumerate(refs_flat):
+        for j in range(i):  
+            ref_flat -= torch.sum(ref_flat * refs_flat[j], dim=1, keepdim=True) * refs_flat[j]
+        ref_flat /= ref_flat.norm(dim=1, keepdim=True)
+        noise_flat -= torch.sum(noise_flat * ref_flat, dim=1, keepdim=True) * ref_flat
+    
+    noise_perp = noise_flat.view_as(noise)
+    return noise_perp
+
+
+def get_orthogonal_noise(*refs):
+    noise = torch.randn_like(refs[0])
+    
+    refs_flat = [ref.view(ref.size(0), -1).clone() for ref in refs]
+    noise_flat = noise.view(noise.size(0), -1)
+    
+    for i, ref_flat in enumerate(refs_flat):
+        for j in range(i):  
+            ref_flat -= torch.sum(ref_flat * refs_flat[j], dim=1, keepdim=True) * refs_flat[j]
+        ref_flat /= ref_flat.norm(dim=1, keepdim=True)
+        noise_flat -= torch.sum(noise_flat * ref_flat, dim=1, keepdim=True) * ref_flat
+    
+    noise_perp = noise_flat.view_as(noise)
+    return noise_perp
+
+
+def get_orthogonal_noise_from(noise, *refs):
+    noise = torch.randn_like(refs[0])
+    
+    refs_flat = [ref.view(ref.size(0), -1).clone() for ref in refs]
+    noise_flat = noise.view(noise.size(0), -1)
+    
+    for i, ref_flat in enumerate(refs_flat):
+        for j in range(i):  
+            ref_flat -= torch.sum(ref_flat * refs_flat[j], dim=1, keepdim=True) * refs_flat[j]
+        ref_flat /= ref_flat.norm(dim=1, keepdim=True)
+        noise_flat -= torch.sum(noise_flat * ref_flat, dim=1, keepdim=True) * ref_flat
+    
+    noise_perp = noise_flat.view_as(noise)
+    return noise_perp
+
+
+
+
+"""def get_orthogonal_noise(*refs):
+    noise = torch.randn_like(refs[0])
+    refs_flat = [ref.view(ref.size(0), -1) for ref in refs]
+    noise_flat = noise.view(noise.size(0), -1)
+    for i, ref_flat in enumerate(refs_flat):
+        for j in range(i):  
+            ref_flat -= torch.sum(ref_flat * refs_flat[j], dim=1, keepdim=True) * refs_flat[j]
+        ref_flat /= ref_flat.norm(dim=1, keepdim=True)
+        noise_flat -= torch.sum(noise_flat * ref_flat, dim=1, keepdim=True) * ref_flat
+    noise_perp = noise_flat.view_as(noise)
+    return noise_perp
+"""

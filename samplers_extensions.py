@@ -119,8 +119,8 @@ class ClownInpaint: ############################################################
                     {#"guide_mode": (GUIDE_MODE_NAMES, {"default": 'epsilon', "tooltip": "Recommended: epsilon or mean/mean_std with sampler_mode = standard, and unsample/resample with sampler_mode = unsample/resample. Epsilon_dynamic_mean, etc. are only used with two latent inputs and a mask. Blend/hard_light/mean/mean_std etc. require low strengths, start with 0.01-0.02."}),
                      "guide_weight":               ("FLOAT", {"default": 0.10, "min": -100.0, "max": 100.0, "step":0.01, "round": False, "tooltip": "Set the strength of the guide."}),
                      "guide_weight_bkg":           ("FLOAT", {"default": 1.00, "min": -100.0, "max": 100.0, "step":0.01, "round": False, "tooltip": "Set the strength of the guide_bkg."}),
-                    "guide_weight_scheduler":     (["constant"] + comfy.samplers.SCHEDULER_NAMES + ["beta57"], {"default": "beta57"},),
-                    "guide_weight_scheduler_bkg": (["constant"] + comfy.samplers.SCHEDULER_NAMES + ["beta57"], {"default": "constant"},),
+                    "guide_weight_scheduler":     (["constant"] + get_res4lyf_scheduler_list(), {"default": "beta57"},),
+                    "guide_weight_scheduler_bkg": (["constant"] + get_res4lyf_scheduler_list() + ["beta57"], {"default": "constant"},),
                     "guide_end_step":              ("INT", {"default": 15, "min": 1, "max": 10000}),
                     "guide_bkg_end_step":          ("INT", {"default": 10000, "min": 1, "max": 10000}),
                     },
@@ -195,7 +195,7 @@ class ClownInpaintSimple: ######################################################
         return {"required":
                     {#"guide_mode": (GUIDE_MODE_NAMES, {"default": 'epsilon', "tooltip": "Recommended: epsilon or mean/mean_std with sampler_mode = standard, and unsample/resample with sampler_mode = unsample/resample. Epsilon_dynamic_mean, etc. are only used with two latent inputs and a mask. Blend/hard_light/mean/mean_std etc. require low strengths, start with 0.01-0.02."}),
                      "guide_weight":               ("FLOAT", {"default": 0.10, "min": -100.0, "max": 100.0, "step":0.01, "round": False, "tooltip": "Set the strength of the guide."}),
-                    "guide_weight_scheduler":     (["constant"] + comfy.samplers.SCHEDULER_NAMES + ["beta57"], {"default": "beta57"},),
+                    "guide_weight_scheduler":     (["constant"] + get_res4lyf_scheduler_list(), {"default": "beta57"},),
                     "guide_end_step":              ("INT", {"default": 15, "min": 1, "max": 10000}),
                     },
                     "optional": 
