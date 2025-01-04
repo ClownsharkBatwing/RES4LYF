@@ -10,112 +10,7 @@ from .latents import hard_light_blend, normalize_latent
 from .rk_method import RK_Method
 from .helper import get_extra_options_kv, extra_options_flag, get_cosine_similarity
 
-
 import itertools
-
-def apply_guided_denoising(denoised, y0, y0_inv, lgw_mask, lgw_mask_inv, guide_mode, extra_options=None):
-    """
-    Applies guided denoising for data-based modes, with optional hybrid features.
-    Handles 'data' and 'hybrid_data' modes only.
-    
-    Returns denoised predictions with guidance applied.
-    """
-    if extra_options is None:
-        extra_options = ""
-        
-    if guide_mode == "data":
-        # Standard data mode spatial guidance
-        if y0_inv is None:
-            denoised_shifted = (1-lgw_mask) * denoised + lgw_mask * y0
-        else:
-            denoised_shifted = (1-lgw_mask) * denoised + lgw_mask * y0
-            denoised_shifted = (1-lgw_mask_inv) * denoised_shifted + lgw_mask_inv * y0_inv
-            
-    elif guide_mode == "hybrid_data":
-        # Get hybrid parameters
-        hybrid_spatial_weight = float(get_extra_options_kv("hybrid_spatial_weight", "1.0", extra_options))
-        hybrid_stats_weight = float(get_extra_options_kv("hybrid_stats_weight", "0.3", extra_options))
-        hybrid_mean_weight = float(get_extra_options_kv("hybrid_mean_weight", "1.0", extra_options))
-        hybrid_std_weight = float(get_extra_options_kv("hybrid_std_weight", "0.7", extra_options))
-        hybrid_temporal_smooth = float(get_extra_options_kv("hybrid_temporal_smooth", "0.2", extra_options))
-        hybrid_clamp_mult = float(get_extra_options_kv("hybrid_clamp_mult", "1.5", extra_options))
-
-        # First apply spatial guidance with controllable strength
-        spatial_mask = lgw_mask * hybrid_spatial_weight
-        denoised_shifted = (1-spatial_mask) * denoised + spatial_mask * y0
-        if y0_inv is not None:
-            spatial_mask_inv = lgw_mask_inv * hybrid_spatial_weight
-            denoised_shifted = (1-spatial_mask_inv) * denoised_shifted + spatial_mask_inv * y0_inv
-
-        # Apply statistical matching if enabled
-        if hybrid_stats_weight > 0:
-            data_shifted = denoised_shifted.clone()
-            
-            # Calculate guide statistics
-            guide_stats = {
-                'mean': torch.tensor([y0[0][c].mean() for c in range(y0.shape[1])],
-                                   device=denoised.device, dtype=denoised.dtype),
-                'std': torch.tensor([y0[0][c].std() for c in range(y0.shape[1])],
-                                  device=denoised.device, dtype=denoised.dtype)
-            }
-
-            # Apply per-channel statistical matching
-            for b, c in itertools.product(range(denoised.shape[0]), range(denoised.shape[1])):
-                curr_mean = data_shifted[b][c].mean()
-                curr_std = data_shifted[b][c].std()
-                
-                stats_weight = lgw_mask[b][c].mean() * hybrid_stats_weight
-
-                # Apply mean matching
-                if hybrid_mean_weight > 0:
-                    mean_weight = stats_weight * hybrid_mean_weight
-                    target_mean = guide_stats['mean'][c] * mean_weight + curr_mean * (1 - mean_weight)
-                    data_shifted[b][c] = data_shifted[b][c] - curr_mean + target_mean
-
-                # Apply std matching
-                if hybrid_std_weight > 0:
-                    std_weight = stats_weight * hybrid_std_weight
-                    target_std = guide_stats['std'][c] * std_weight + curr_std * (1 - std_weight)
-                    
-                    centered = data_shifted[b][c] - data_shifted[b][c].mean()
-                    scale_factor = target_std / (curr_std + 1e-6)
-                    scale_factor = torch.clamp(scale_factor, 
-                                             min=1/hybrid_clamp_mult,
-                                             max=hybrid_clamp_mult)
-                    data_shifted[b][c] = centered * scale_factor + data_shifted[b][c].mean()
-
-            # Apply temporal smoothing if we have video frames
-            if hybrid_temporal_smooth > 0 and data_shifted.dim() == 5:
-                kernel_size = 5
-                padding = kernel_size // 2
-                temporal_kernel = torch.tensor(
-                    [0.1, 0.2, 0.4, 0.2, 0.1],
-                    device=denoised.device, dtype=denoised.dtype
-                ) * hybrid_temporal_smooth
-                temporal_kernel[kernel_size//2] += (1 - hybrid_temporal_smooth)
-                temporal_kernel = temporal_kernel / temporal_kernel.sum()
-                
-                # Reshape for conv1d
-                b, c, f, h, w = data_shifted.shape
-                data_flat = data_shifted.permute(0, 1, 3, 4, 2).reshape(-1, f)
-                
-                # Apply smoothing
-                data_smooth = F.conv1d(
-                    data_flat.unsqueeze(1),
-                    temporal_kernel.view(1, 1, -1),
-                    padding=padding
-                ).squeeze(1)
-                
-                # Reshape back
-                data_shifted = data_smooth.view(b, c, h, w, f).permute(0, 1, 4, 2, 3)
-
-            # Final blend between spatial and statistical guidance
-            denoised_shifted = denoised_shifted + spatial_mask * (data_shifted - denoised_shifted)
-    
-    else:
-        denoised_shifted = denoised
-        
-    return denoised_shifted
 
 def prepare_mask(x, mask, LGW_MASK_RESCALE_MIN):
     if mask is None:
@@ -146,6 +41,32 @@ def prepare_weighted_masks(mask, mask_inv, lgw_, lgw_inv_, latent_guide, latent_
             lgw_mask_inv = torch.zeros_like(mask)
     return lgw_mask, lgw_mask_inv
 
+def apply_temporal_smoothing(tensor, temporal_smoothing):
+    if temporal_smoothing <= 0 or tensor.dim() != 5:
+        return tensor
+        
+    kernel_size = 5
+    padding = kernel_size // 2
+    temporal_kernel = torch.tensor(
+        [0.1, 0.2, 0.4, 0.2, 0.1],
+        device=tensor.device, dtype=tensor.dtype
+    ) * temporal_smoothing
+    temporal_kernel[kernel_size//2] += (1 - temporal_smoothing)
+    temporal_kernel = temporal_kernel / temporal_kernel.sum()
+    
+    # Reshape for conv1d
+    b, c, f, h, w = tensor.shape
+    data_flat = tensor.permute(0, 1, 3, 4, 2).reshape(-1, f)
+    
+    # Apply smoothing
+    data_smooth = F.conv1d(
+        data_flat.unsqueeze(1),
+        temporal_kernel.view(1, 1, -1),
+        padding=padding
+    ).squeeze(1)
+    
+    # Reshape back
+    return data_smooth.view(b, c, h, w, f).permute(0, 1, 4, 2, 3)
 
 def get_guide_epsilon_substep(x_0, x_, y0, y0_inv, s_, row, rk_type, b=None, c=None):
     s_in = x_0.new_ones([x_0.shape[0]])
@@ -188,10 +109,8 @@ def get_guide_epsilon(x_0, x_, y0, sigma, rk_type, b=None, c=None):
     return eps#, eps_inv
 
 
-
-
 @torch.no_grad()
-def process_guides_substep(x_0, x_, eps_, data_, row, y0, y0_inv, lgw, lgw_inv, lgw_mask, lgw_mask_inv, step, sigma, sigma_next, sigma_down, s_, unsample_resample_scale, rk, rk_type, guide_mode, latent_guide, latent_guide_inv, UNSAMPLE, extra_options, frame_weights=None):
+def process_guides_substep(x_0, x_, eps_, data_, row, y0, y0_inv, lgw, lgw_inv, lgw_mask, lgw_mask_inv, step, sigma, sigma_next, sigma_down, s_, unsample_resample_scale, rk, rk_type, guide_mode, latent_guide_inv, UNSAMPLE, extra_options, frame_weights=None):
     
     if UNSAMPLE and RK_Method.is_exponential(rk_type):
         if not (extra_options_flag("disable_power_unsample", extra_options) or extra_options_flag("disable_power_resample", extra_options)):
@@ -215,48 +134,37 @@ def process_guides_substep(x_0, x_, eps_, data_, row, y0, y0_inv, lgw, lgw_inv, 
         if extra_options_flag("dynamic_guides_inv", extra_options):
             y0_inv = y_inv_shift
 
+    lgw_mask_cur = lgw_mask.clone()
+    lgw_mask_inv_cur = lgw_mask_inv.clone() if lgw_mask_inv is not None else None
+    
+    # Apply frame weights only if we have video frames
+    if frame_weights is not None and x_0.dim() == 5:
+        for f in range(lgw_mask_cur.shape[2]):
+            frame_weight = frame_weights[f]
+            lgw_mask_cur[..., f:f+1, :, :] *= frame_weight
+            if lgw_mask_inv_cur is not None:
+                lgw_mask_inv_cur[..., f:f+1, :, :] *= frame_weight
+
     if guide_mode == "data":
         y0_tmp = y0
         if latent_guide_inv is not None:
-            y0_tmp = (1-lgw_mask) * data_[row] + lgw_mask * y0
-            y0_tmp = (1-lgw_mask_inv) * y0_tmp + lgw_mask_inv * y0_inv
-        x_[row+1] = y0_tmp + eps_[row]
-
-    elif guide_mode == "hybrid_data":
-        y0_tmp = apply_guided_denoising(data_[row], y0, y0_inv, lgw_mask, lgw_mask_inv, 
-                                      guide_mode, extra_options=extra_options)
+            y0_tmp = (1-lgw_mask_cur) * data_[row] + lgw_mask_cur * y0
+            y0_tmp = (1-lgw_mask_inv_cur) * y0_tmp + lgw_mask_inv_cur * y0_inv
         x_[row+1] = y0_tmp + eps_[row]
 
     elif "epsilon" in guide_mode:
         if sigma > sigma_next:
-            # Get hybrid-specific parameters
-            hybrid_stats_weight = float(get_extra_options_kv("hybrid_stats_weight", "0.0", extra_options))
-            hybrid_temporal_smooth = float(get_extra_options_kv("hybrid_temporal_smooth", "0.0", extra_options))
-            hybrid_noise_normalize = float(get_extra_options_kv("hybrid_noise_normalize", "0.0", extra_options))
-
-            # Modify the lgw masks with frame weights before any guidance
-            lgw_mask_frames = lgw_mask.clone()
-            lgw_mask_inv_frames = lgw_mask_inv.clone() if lgw_mask_inv is not None else None
-            
-            for f in range(lgw_mask_frames.shape[2]):  # Iterate over frames dimension
-                frame_weight = frame_weights[f] if frame_weights is not None else 1.0
-                lgw_mask_frames[..., f:f+1, :, :] *= frame_weight
-                if lgw_mask_inv_frames is not None:
-                    lgw_mask_inv_frames[..., f:f+1, :, :] *= frame_weight
-            
-            # Now proceed with either disabled or enabled lgw scaling using modified masks
+            # Basic epsilon guidance
             if extra_options_flag("disable_lgw_scaling", extra_options):
                 eps_row, eps_row_inv = get_guide_epsilon_substep(x_0, x_, y0, y0_inv, s_, row, rk_type)
-                eps_[row] = eps_[row] + lgw_mask_frames * (eps_row - eps_[row])
-                if eps_row_inv is not None and lgw_mask_inv_frames is not None:
-                    eps_[row] = eps_[row] + lgw_mask_inv_frames * (eps_row_inv - eps_[row])
+                eps_[row] = eps_[row] + lgw_mask_cur * (eps_row - eps_[row])
+                if eps_row_inv is not None and lgw_mask_inv_cur is not None:
+                    eps_[row] = eps_[row] + lgw_mask_inv_cur * (eps_row_inv - eps_[row])
             
             eps_guided = eps_[row].clone()
                     
             tol_value = float(get_extra_options_kv("tol", "-1.0", extra_options))
-                
-            if tol_value >= 0 and (lgw > 0 or lgw_inv > 0):           
-                # Use lgw_mask_frames and lgw_mask_inv_frames in the L2 norm calculations
+            if tol_value >= 0 and (lgw > 0 or lgw_inv > 0):
                 for b, c in itertools.product(range(x_0.shape[0]), range(x_0.shape[1])):
                     current_diff     = torch.norm(data_[row][b][c] - y0    [b][c])
                     current_diff_inv = torch.norm(data_[row][b][c] - y0_inv[b][c])
@@ -267,8 +175,8 @@ def process_guides_substep(x_0, x_, eps_, data_, row, y0, y0_inv, lgw, lgw_inv, 
                     lgw_tmp     = min(lgw    , lgw_scaled)
                     lgw_tmp_inv = min(lgw_inv, lgw_scaled_inv)
 
-                    lgw_mask_clamp = torch.clamp(lgw_mask_frames, max=lgw_tmp)
-                    lgw_mask_clamp_inv = torch.clamp(lgw_mask_inv_frames, max=lgw_tmp_inv)
+                    lgw_mask_clamp = torch.clamp(lgw_mask_cur, max=lgw_tmp)
+                    lgw_mask_clamp_inv = torch.clamp(lgw_mask_inv_cur, max=lgw_tmp_inv)
                     
                     eps_row, eps_row_inv = get_guide_epsilon_substep(x_0, x_, y0, y0_inv, s_, row, rk_type, b, c)
                     eps_guided[b][c] = eps_[row][b][c] + lgw_mask_clamp[b][c] * (eps_row - eps_[row][b][c]) + lgw_mask_clamp_inv[b][c] * (eps_row_inv - eps_[row][b][c])
@@ -286,77 +194,15 @@ def process_guides_substep(x_0, x_, eps_, data_, row, y0, y0_inv, lgw, lgw_inv, 
                     ratio_inv = torch.nan_to_num(torch.norm(data_[row][b][c] - y0_inv[b][c])   /   avg_inv, 0)
                     
                     eps_row, eps_row_inv = get_guide_epsilon_substep(x_0, x_, y0, y0_inv, s_, row, rk_type, b, c)
-                    eps_guided[b][c] = eps_[row][b][c]      +     ratio * lgw_mask_frames[b][c] * (eps_row - eps_[row][b][c])    +    ratio_inv * lgw_mask_inv_frames[b][c] * (eps_row_inv - eps_[row][b][c])
+                    eps_guided[b][c] = eps_[row][b][c] + ratio * lgw_mask_cur[b][c] * (eps_row - eps_[row][b][c]) + ratio_inv * lgw_mask_inv_cur[b][c] * (eps_row_inv - eps_[row][b][c])
 
-            # If hybrid mode is active (stats_weight > 0), apply statistical matching
-            if guide_mode == "hybrid_epsilon" and hybrid_stats_weight > 0:
-                eps_shifted = eps_guided.clone()
-                
-                # Calculate target noise statistics
-                noise_stats = {
-                    'mean': torch.tensor([eps_guided[0][c].mean() for c in range(eps_guided.shape[1])],
-                                       device=eps_guided.device, dtype=eps_guided.dtype),
-                    'std': torch.tensor([eps_guided[0][c].std() for c in range(eps_guided.shape[1])],
-                                      device=eps_guided.device, dtype=eps_guided.dtype)
-                }
-                
-                # Apply noise normalization if enabled
-                if hybrid_noise_normalize > 0:
-                    noise_mean_target = float(get_extra_options_kv("hybrid_noise_mean_target", "0.0", extra_options))
-                    noise_std_target = float(get_extra_options_kv("hybrid_noise_std_target", "1.0", extra_options))
-                    
-                    for c in range(eps_guided.shape[1]):
-                        noise_stats['mean'][c] = (1 - hybrid_noise_normalize) * noise_stats['mean'][c] + \
-                                               hybrid_noise_normalize * noise_mean_target
-                        noise_stats['std'][c] = (1 - hybrid_noise_normalize) * noise_stats['std'][c] + \
-                                              hybrid_noise_normalize * noise_std_target
-                
-                # Apply per-channel statistical matching
-                for b, c in itertools.product(range(eps_guided.shape[0]), range(eps_guided.shape[1])):
-                    curr_mean = eps_shifted[b][c].mean()
-                    curr_std = eps_shifted[b][c].std()
-                    
-                    # Center the noise
-                    centered = eps_shifted[b][c] - curr_mean
-                    
-                    # Scale to target statistics
-                    target_std = noise_stats['std'][c]
-                    scale_factor = target_std / (curr_std + 1e-6)
-                    eps_shifted[b][c] = centered * scale_factor + noise_stats['mean'][c]
-                
-                # Apply temporal smoothing if enabled and we have video frames
-                if hybrid_temporal_smooth > 0 and eps_shifted.dim() == 5:
-                    kernel_size = 5
-                    padding = kernel_size // 2
-                    temporal_kernel = torch.tensor(
-                        [0.1, 0.2, 0.4, 0.2, 0.1],
-                        device=eps_shifted.device, dtype=eps_shifted.dtype
-                    ) * hybrid_temporal_smooth
-                    temporal_kernel[kernel_size//2] += (1 - hybrid_temporal_smooth)
-                    temporal_kernel = temporal_kernel / temporal_kernel.sum()
-                    
-                    # Reshape for conv1d
-                    b, c, f, h, w = eps_shifted.shape
-                    data_flat = eps_shifted.permute(0, 1, 3, 4, 2).reshape(-1, f)
-                    
-                    # Apply smoothing
-                    data_smooth = F.conv1d(
-                        data_flat.unsqueeze(1),
-                        temporal_kernel.view(1, 1, -1),
-                        padding=padding
-                    ).squeeze(1)
-                    
-                    # Reshape back
-                    eps_shifted = data_smooth.view(b, c, h, w, f).permute(0, 1, 4, 2, 3)
-                
-                # Blend statistical matching results back with original guided epsilon
-                eps_guided = eps_guided + lgw_mask * hybrid_stats_weight * (eps_shifted - eps_guided)
+            temporal_smoothing = float(get_extra_options_kv("temporal_smoothing", "0.0", extra_options))
+            if temporal_smoothing > 0:
+                eps_guided = apply_temporal_smoothing(eps_guided, temporal_smoothing)
             
-            # Update epsilon values
             eps_[row] = eps_guided
 
     elif (UNSAMPLE or guide_mode in {"resample", "unsample"}) and (lgw > 0 or lgw_inv > 0):
-            
         cvf = rk.get_epsilon(x_0, x_[row+1], y0, sigma, s_[row], sigma_down, unsample_resample_scale, extra_options)
         if UNSAMPLE and sigma > sigma_next and latent_guide_inv is not None:
             cvf_inv = rk.get_epsilon(x_0, x_[row+1], y0_inv, sigma, s_[row], sigma_down, unsample_resample_scale, extra_options)      
@@ -375,28 +221,26 @@ def process_guides_substep(x_0, x_, eps_, data_, row, y0, y0_inv, lgw, lgw_inv, 
                 lgw_tmp     = min(lgw    , lgw_scaled)
                 lgw_tmp_inv = min(lgw_inv, lgw_scaled_inv)
 
-                lgw_mask_clamp = torch.clamp(lgw_mask, max=lgw_tmp)
-                lgw_mask_clamp_inv = torch.clamp(lgw_mask_inv, max=lgw_tmp_inv)
+                lgw_mask_clamp      = torch.clamp(lgw_mask_cur, max=lgw_tmp)
+                lgw_mask_clamp_inv  = torch.clamp(lgw_mask_inv_cur, max=lgw_tmp_inv)
 
                 eps_[row][b][c] = eps_[row][b][c] + lgw_mask_clamp[b][c] * (cvf[b][c] - eps_[row][b][c]) + lgw_mask_clamp_inv[b][c] * (cvf_inv[b][c] - eps_[row][b][c])
                 
-        elif extra_options_flag("disable_lgw_scaling", extra_options):
-            eps_[row] = eps_[row] + lgw_mask * (cvf - eps_[row]) + lgw_mask_inv * (cvf_inv - eps_[row])
-            
+        if extra_options_flag("disable_lgw_scaling", extra_options):
+            eps_[row] = eps_[row] + lgw_mask_cur * (cvf - eps_[row]) + lgw_mask_inv_cur * (cvf_inv - eps_[row])
         else:
             avg, avg_inv = 0, 0
             for b, c in itertools.product(range(x_0.shape[0]), range(x_0.shape[1])):
-                avg     += torch.norm(lgw_mask[b][c]     * data_[row][b][c]   -   lgw_mask[b][c]     * y0[b][c])
-                avg_inv += torch.norm(lgw_mask_inv[b][c] * data_[row][b][c]   -   lgw_mask_inv[b][c] * y0_inv[b][c])
+                avg     += torch.norm(lgw_mask_cur[b][c]     * data_[row][b][c] - lgw_mask_cur[b][c]     * y0[b][c])
+                avg_inv += torch.norm(lgw_mask_inv_cur[b][c] * data_[row][b][c] - lgw_mask_inv_cur[b][c] * y0_inv[b][c])
             avg     /= x_0.shape[1]
             avg_inv /= x_0.shape[1]
             
             for b, c in itertools.product(range(x_0.shape[0]), range(x_0.shape[1])):
-                ratio     = torch.nan_to_num(torch.norm(lgw_mask[b][c]     * data_[row][b][c] - lgw_mask[b][c]     * y0    [b][c])   /   avg,     0)
-                ratio_inv = torch.nan_to_num(torch.norm(lgw_mask_inv[b][c] * data_[row][b][c] - lgw_mask_inv[b][c] * y0_inv[b][c])   /   avg_inv, 0)
-                         
-                eps_[row][b][c] = eps_[row][b][c]      +     ratio * lgw_mask[b][c] * (cvf[b][c] - eps_[row][b][c])    +    ratio_inv * lgw_mask_inv[b][c] * (cvf_inv[b][c] - eps_[row][b][c])
-                
+                ratio     = torch.nan_to_num(torch.norm(lgw_mask_cur[b][c]     * data_[row][b][c] - lgw_mask_cur[b][c]     * y0    [b][c])   /   avg,     0)
+                ratio_inv = torch.nan_to_num(torch.norm(lgw_mask_inv_cur[b][c] * data_[row][b][c] - lgw_mask_inv_cur[b][c] * y0_inv[b][c])   /   avg_inv, 0)
+                eps_[row][b][c] = eps_[row][b][c] + ratio * lgw_mask_cur[b][c] * (cvf[b][c] - eps_[row][b][c]) + ratio_inv * lgw_mask_inv_cur[b][c] * (cvf_inv[b][c] - eps_[row][b][c])
+
     if extra_options_flag("substep_eps_ch_mean_std", extra_options):
         eps_[row] = normalize_latent(eps_[row], eps_orig[row])
     if extra_options_flag("substep_eps_ch_mean", extra_options):

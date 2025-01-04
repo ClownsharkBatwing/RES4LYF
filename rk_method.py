@@ -213,57 +213,26 @@ class RK_Method:
             raise ValueError(f"Unexpected k shape: {k.shape}")
         return ks
 
-    # def get_frame_weights(self, x, sigmas, frame_weights):
-    #     if frame_weights is not None:
-    #         frame_weights_ = frame_weights.clone()
-    #         if x.dim() != 5:
-    #             raise ValueError("frame_weights is only supported for 5D latent (video latents)")
-    #         frame_batch_size = x.shape[2]
-    #         if frame_weights_.shape[0] > frame_batch_size:
-    #             frame_weights_ = frame_weights_[:frame_batch_size]
-    #         elif frame_weights_.shape[0] < frame_batch_size:
-    #             padding_size = frame_batch_size - frame_weights_.shape[0]
-    #             last_value = frame_weights_[-1]
-    #             padding = last_value.repeat(padding_size)
-    #             frame_weights_ = torch.cat([frame_weights_, padding])
-    #         frame_weights_ = frame_weights_.view(1, 1, frame_batch_size, 1, 1)
-    #         frame_weights_ = frame_weights_.to(x.dtype).to(x.device)
-    #     else:
-    #         frame_weights_ = torch.ones_like(x)
-
-    #     return frame_weights_
-
-    def init_guides(self, x, latent_guide, latent_guide_inv, mask, sigmas, UNSAMPLE, frame_weights):
+    def init_guides(self, x, latent_guide, latent_guide_inv, mask, sigmas, UNSAMPLE):
         y0, y0_inv = torch.zeros_like(x), torch.zeros_like(x)
-
-        if (x.dim() == 5) and (frame_weights is not None):
-            frame_batch_size = x.shape[2]
-            if frame_weights.shape[0] > frame_batch_size:
-                frame_weights = frame_weights[:frame_batch_size]
-            elif frame_weights.shape[0] < frame_batch_size:
-                padding_size = frame_batch_size - frame_weights.shape[0]
-                frame_weights = torch.cat([frame_weights, torch.ones(padding_size, device=frame_weights.device, dtype=frame_weights.dtype)])
-            frame_weights_apply = frame_weights.view(1, 1, frame_batch_size, 1, 1).clone().to(x.dtype).to(x.device)
-        else:
-            frame_weights_apply = torch.tensor(1.0, device=x.device, dtype=x.dtype)
 
         if latent_guide is not None:
             latent_guide_samples = self.model.inner_model.inner_model.process_latent_in(latent_guide['samples']).clone().to(x.device)
             if sigmas[0] > sigmas[1]:
-                y0 = latent_guide = latent_guide_samples * frame_weights_apply
+                y0 = latent_guide = latent_guide_samples
             elif UNSAMPLE and mask is not None:
-                x = (1-mask) * x + mask * latent_guide_samples * frame_weights_apply
+                x = (1-mask) * x + mask * latent_guide_samples
             else:
-                x = latent_guide_samples * frame_weights_apply
+                x = latent_guide_samples
 
         if latent_guide_inv is not None:
             latent_guide_inv_samples = self.model.inner_model.inner_model.process_latent_in(latent_guide_inv['samples']).clone().to(x.device)
             if sigmas[0] > sigmas[1]:
-                y0_inv = latent_guide_inv = latent_guide_inv_samples * frame_weights_apply
+                y0_inv = latent_guide_inv = latent_guide_inv_samples
             elif UNSAMPLE and mask is not None:
-                x = mask * x + (1-mask) * latent_guide_inv_samples * frame_weights_apply
+                x = mask * x + (1-mask) * latent_guide_inv_samples
             else:
-                x = latent_guide_samples * frame_weights_apply   #THIS COULD LEAD TO WEIRD BEHAVIOR! OVERWRITING X WITH LG_INV AFTER SETTING TO LG above!
+                x = latent_guide_samples  #THIS COULD LEAD TO WEIRD BEHAVIOR! OVERWRITING X WITH LG_INV AFTER SETTING TO LG above!
                 
         if UNSAMPLE and sigmas[0] < sigmas[1]: #sigma_next > sigma:
             y0 = self.noise_sampler(sigma=self.sigma_max, sigma_next=self.sigma_min)
