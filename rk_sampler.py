@@ -18,7 +18,7 @@ from .latents import normalize_latent, initialize_or_scale, latent_normalize_cha
 from .helper import get_extra_options_kv, extra_options_flag
 from .sigmas import get_sigmas
 
-
+PRINT_DEBUG=True
 
 def get_cosine_similarity(a, b):
     return F.cosine_similarity(a.flatten(), b.flatten(), dim=0)
@@ -231,9 +231,11 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
                 
                 sub_sigma_up, sub_sigma, sub_sigma_down, sub_alpha_ratio = 0, s_[row], s_[row+1], 1
                 if row > 0 and step > substep_eta_start_step and s_[row+1] <= s_[row]:
-                    sub_sigma_up, sub_sigma, sub_sigma_down, sub_alpha_ratio = get_res4lyf_step_with_model(model, s_[row-1], s_[row], substep_eta, eta_var, substep_noise_mode, s_[row]-s_[row-1])
+                    #sub_sigma_up, sub_sigma, sub_sigma_down, sub_alpha_ratio = get_res4lyf_step_with_model(model, s_[row-1], s_[row], substep_eta, eta_var, substep_noise_mode, s_[row]-s_[row-1]) #rough
+                    sub_sigma_up, sub_sigma, sub_sigma_down, sub_alpha_ratio = get_res4lyf_step_with_model(model, s_[row], s_[row+1], substep_eta, eta_var, substep_noise_mode, s_[row+1]-s_[row])
                 elif row > 0:
-                    sub_sigma_up, sub_sigma, sub_sigma_down, sub_alpha_ratio = 0, s_[row-1], s_[row], 1
+                    #sub_sigma_up, sub_sigma, sub_sigma_down, sub_alpha_ratio = 0, s_[row-1], s_[row], 1
+                    sub_sigma_up, sub_sigma, sub_sigma_down, sub_alpha_ratio = 0, s_[row], s_[row+1], 1
 
                 if (substep_eta_final_step < 0 and step == len(sigmas)-1+substep_eta_final_step)   or   (substep_eta_final_step > 0 and step > substep_eta_final_step):
                     sub_sigma_up, sub_sigma, sub_sigma_down, sub_alpha_ratio = 0, s_[row], s_[row+1], 1
@@ -277,7 +279,8 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
                 #y0_norm = latent_normalize_channels(y0) #torch.norm(y0, dim=-3)
                 data_norm = data_[0] - data_[0].mean(dim=(2, 3), keepdim=True)
                 y0_norm = y0 - y0.mean(dim=(2, 3), keepdim=True)
-                #print(get_cosine_similarity(data_norm, y0_norm))
+                if PRINT_DEBUG:
+                    print(get_cosine_similarity(data_norm, y0_norm).item())
                 if cossim_cutoff > get_cosine_similarity(data_norm, y0_norm):
                     eps_, x_ = process_guides_substep(x_0, x_, eps_, data_, row, y0, y0_inv, lgw[step], lgw_inv[step], lgw_mask, lgw_mask_inv, step, sigma, sigma_next, sigma_down, s_, unsample_resample_scale, rk, rk_type, guide_mode, latent_guide_inv, UNSAMPLE, extra_options)
             
@@ -387,8 +390,8 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
             else:
                 x = rk.add_noise_post(x, sigma_up, sigma, sigma_next, alpha_ratio, s_noise, noise_mode, SDE_NOISE_EXTERNAL, sde_noise_t)
 
-
-        #print("Data vs. y0 cossim score: ", get_cosine_similarity(data_[0], y0))
+        if PRINT_DEBUG:
+            print("Data vs. y0 cossim score: ", get_cosine_similarity(data_[0].item(), y0).item())
 
         for ms in range(rk.multistep_stages):
             eps_ [rk.multistep_stages - ms] = eps_ [rk.multistep_stages - ms - 1]
@@ -396,7 +399,8 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
         eps_ [0] = torch.zeros_like(eps_ [0])
         data_[0] = torch.zeros_like(data_[0])
         
-        #print("Denoised vs. y0 cossim score: ", get_cosine_similarity(denoised, y0))
+        if PRINT_DEBUG:
+            print("Denoised vs. y0 cossim score: ", get_cosine_similarity(denoised, y0).item())
         denoised_prev = denoised
         eps_prev = eps
         
