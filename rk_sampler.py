@@ -381,7 +381,7 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
                 x = rk.add_noise_post(x, sigma_up, sigma, sigma_next, alpha_ratio, s_noise, noise_mode, SDE_NOISE_EXTERNAL, sde_noise_t)
 
 
-        print("Data vs. y0 cossim score: ", get_cosine_similarity(data_[0], y0))
+        #print("Data vs. y0 cossim score: ", get_cosine_similarity(data_[0], y0))
 
         for ms in range(rk.multistep_stages):
             eps_ [rk.multistep_stages - ms] = eps_ [rk.multistep_stages - ms - 1]
@@ -389,7 +389,7 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
         eps_ [0] = torch.zeros_like(eps_ [0])
         data_[0] = torch.zeros_like(data_[0])
         
-        print("Denoised vs. y0 cossim score: ", get_cosine_similarity(denoised, y0))
+        #print("Denoised vs. y0 cossim score: ", get_cosine_similarity(denoised, y0))
         denoised_prev = denoised
         eps_prev = eps
         
