@@ -270,7 +270,9 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
                     substep_noise_scaling_ratio = (s_[row]/sigma) * (sigma/sub_sigma_down)
                     eps_[row] *= 1 + substep_noise_scaling*(substep_noise_scaling_ratio-1)
 
-                eps_, x_ = process_guides_substep(x_0, x_, eps_, data_, row, y0, y0_inv, lgw[step], lgw_inv[step], lgw_mask, lgw_mask_inv, step, sigma, sigma_next, sigma_down, s_, unsample_resample_scale, rk, rk_type, guide_mode, latent_guide_inv, UNSAMPLE, extra_options)
+                cossim_cutoff = float(get_extra_options_kv("epsilon_cossim_cutoff", "1.0", extra_options))
+                if cossim_cutoff > get_cosine_similarity(data_[0], y0):
+                    eps_, x_ = process_guides_substep(x_0, x_, eps_, data_, row, y0, y0_inv, lgw[step], lgw_inv[step], lgw_mask, lgw_mask_inv, step, sigma, sigma_next, sigma_down, s_, unsample_resample_scale, rk, rk_type, guide_mode, latent_guide_inv, UNSAMPLE, extra_options)
             
             x = x_0 + h * rk.b_k_sum(eps_, 0)
                     
@@ -379,6 +381,7 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
                 x = rk.add_noise_post(x, sigma_up, sigma, sigma_next, alpha_ratio, s_noise, noise_mode, SDE_NOISE_EXTERNAL, sde_noise_t)
 
 
+        print("Data vs. y0 cossim score: ", get_cosine_similarity(data_[0], y0))
 
         for ms in range(rk.multistep_stages):
             eps_ [rk.multistep_stages - ms] = eps_ [rk.multistep_stages - ms - 1]
@@ -386,6 +389,7 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
         eps_ [0] = torch.zeros_like(eps_ [0])
         data_[0] = torch.zeros_like(data_[0])
         
+        print("Denoised vs. y0 cossim score: ", get_cosine_similarity(denoised, y0))
         denoised_prev = denoised
         eps_prev = eps
         
