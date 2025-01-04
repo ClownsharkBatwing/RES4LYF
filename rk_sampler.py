@@ -77,7 +77,7 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
                   latent_guide=None, latent_guide_inv=None, latent_guide_weight=0.0, latent_guide_weight_inv=0.0, latent_guide_weights=None, latent_guide_weights_inv=None, guide_mode="blend", unsampler_type="linear",
                   GARBAGE_COLLECT=False, mask=None, mask_inv=None, LGW_MASK_RESCALE_MIN=True, sigmas_override=None, unsample_resample_scales=None,regional_conditioning_weights=None, sde_noise=[],
                   extra_options="",
-                  etas=None, s_noises=None, momentums=None, guides=None, cfg_cw = 1.0,regional_conditioning_floors=None, frame_weights=None
+                  etas=None, s_noises=None, momentums=None, guides=None, cfg_cw = 1.0,regional_conditioning_floors=None, frame_weights=None,
                   ):
     extra_args = {} if extra_args is None else extra_args
     s_in, s_one = x.new_ones([x.shape[0]]), x.new_ones([1])
@@ -112,8 +112,9 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
     else:
         lgw_inv = torch.full_like(sigmas, 0.)
 
-    frame_weights = initialize_or_scale(frame_weights, 1.0, max_steps).to(default_dtype)
-    frame_weights = F.pad(frame_weights, (0, max_steps), value=0.0)
+    if frame_weights is not None:
+        frame_weights = initialize_or_scale(frame_weights, 1.0, max_steps).to(default_dtype)
+        frame_weights = F.pad(frame_weights, (0, max_steps), value=0.0)
     
     if sigmas_override is not None:
         sigmas = sigmas_override.clone()
@@ -275,18 +276,28 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
                 
                 x_[row+1] = x_0 + h * rk.a_k_sum(eps_, row)     
 
+                lgw_mask_cur = lgw_mask.clone()
+                lgw_mask_inv_cur = lgw_mask_inv.clone() if lgw_mask_inv is not None else None
+
                 if guide_mode == "data":
                     denoised = x_0 + ((sigma / (sigma - sigma_down)) *  h) * rk.a_k_sum(eps_, row) 
                     eps = x_[row+1] - denoised
+                    if frame_weights is not None and x_0.dim() == 5:
+                        for f in range(lgw_mask_cur.shape[2]):
+                            frame_weight = frame_weights[f]
+                            lgw_mask_cur[..., f:f+1, :, :] *= frame_weight
+                            if lgw_mask_inv_cur is not None:
+                                lgw_mask_inv_cur[..., f:f+1, :, :] *= frame_weight
+
                     if latent_guide_inv is None:
-                        denoised_shifted = denoised   +   lgw_mask * (y0 - denoised) 
+                        denoised_shifted = denoised   +   lgw_mask_cur * (y0 - denoised) 
                     else:
-                        denoised_shifted = denoised   +   lgw_mask * (y0 - denoised)   +   lgw_mask_inv * (y0_inv - denoised)
+                        denoised_shifted = denoised   +   lgw_mask_cur * (y0 - denoised)   +   lgw_mask_inv_cur * (y0_inv - denoised)
                    
                     temporal_smoothing = float(get_extra_options_kv("temporal_smoothing", "0.0", extra_options))
                     if temporal_smoothing > 0:
                         denoised_tmp = apply_temporal_smoothing(denoised_shifted, temporal_smoothing)
-                        denoised_shifted = denoised_shifted + lgw_mask * (denoised_tmp - denoised_shifted)
+                        denoised_shifted = denoised_shifted + lgw_mask_cur * (denoised_tmp - denoised_shifted)
 
                     x_[row+1] = denoised_shifted + eps
                 
