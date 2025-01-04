@@ -292,11 +292,23 @@ def process_guides_poststep(x, denoised, eps, y0, y0_inv, mask, lgw_mask, lgw_ma
         x = denoised_shifted + eps
     
     
-    if UNSAMPLE == False and (latent_guide is not None or latent_guide_inv is not None) and guide_mode in ("hard_light", "blend", "mean_std", "mean", "mean_tiled", "std"):
+    if UNSAMPLE == False and (latent_guide is not None or latent_guide_inv is not None) and guide_mode in ("hard_light", "blend", "blend_proj", "mean_std", "mean", "mean_tiled", "std"):
         if guide_mode == "hard_light":
             d_shift, d_shift_inv = hard_light_blend(y0, denoised), hard_light_blend(y0_inv, denoised)
         elif guide_mode == "blend":
             d_shift, d_shift_inv = y0, y0_inv
+            
+        elif guide_mode == "blend_proj":
+            d_shift     = get_collinear(denoised, y0) 
+            d_shift_inv = get_collinear(denoised, y0_inv) 
+                            
+            denoised_ortho    = get_orthogonal(denoised, d_shift)
+            denoised_ortho_inv    = get_orthogonal(denoised, d_shift_inv)          #WILL NEED TO BE UPDATED FOR A DENOSIED_INV HACK
+                            
+            #denoised_ortho    = get_orthogonal(denoised, y0)
+            #denoised_ortho_inv    = get_orthogonal(denoised, y0_inv)          #WILL NEED TO BE UPDATED FOR A DENOSIED_INV HACK
+            
+            
         elif guide_mode == "mean_std":
             d_shift, d_shift_inv = normalize_latent([denoised, denoised], [y0, y0_inv])
         elif guide_mode == "mean":
@@ -313,6 +325,14 @@ def process_guides_poststep(x, denoised, eps, y0, y0_inv, mask, lgw_mask, lgw_ma
                 d_shift_tiled[i], d_shift_inv_tiled[i] = normalize_latent([denoised_tiled[i], denoised_tiled[i]], [y0_tiled[i], y0_inv_tiled[i]], std=False)
             d_shift     = rearrange(d_shift_tiled,     "(t1 t2) b c h w -> b c (h t1) (w t2)", t1=mean_tile_size, t2=mean_tile_size)
             d_shift_inv = rearrange(d_shift_inv_tiled, "(t1 t2) b c h w -> b c (h t1) (w t2)", t1=mean_tile_size, t2=mean_tile_size)
+
+        if guide_mode in ("blend_proj", ):
+            if latent_guide_inv is None:
+                denoised_shifted = denoised   +   lgw_mask * (d_shift - denoised_ortho) * torch.norm(denoised) / torch.norm(d_shift) 
+            else:
+                denoised_shifted = denoised   +   lgw_mask * (d_shift - denoised_ortho)   +   lgw_mask_inv * (d_shift_inv - denoised_ortho_inv)
+            denoised_shifted = denoised_shifted * torch.norm(denoised) / torch.norm(denoised_shifted) 
+            x = denoised_shifted + eps
 
         if guide_mode in ("hard_light", "blend", "mean_std", "mean", "mean_tiled", "std"):
             if latent_guide_inv is None:
@@ -792,7 +812,7 @@ def get_orthogonal_noise_from_channelwise(*refs, max_iter=500, max_score=1e-15):
     b,c,h,w = noise.shape
     
     for i in range(max_iter):
-        noise_tmp = gram_schmidt_channels(noise_tmp, *refs)
+        noise_tmp = gram_schmidt_channels_optimized(noise_tmp, *refs)
         
         cossim_scores = []
         for ref in refs:
