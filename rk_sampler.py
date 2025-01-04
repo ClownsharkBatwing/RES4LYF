@@ -77,7 +77,7 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
                   latent_guide=None, latent_guide_inv=None, latent_guide_weight=0.0, latent_guide_weight_inv=0.0, latent_guide_weights=None, latent_guide_weights_inv=None, guide_mode="blend", unsampler_type="linear",
                   GARBAGE_COLLECT=False, mask=None, mask_inv=None, LGW_MASK_RESCALE_MIN=True, sigmas_override=None, unsample_resample_scales=None,regional_conditioning_weights=None, sde_noise=[],
                   extra_options="",
-                  etas=None, s_noises=None, momentums=None, guides=None, cfg_cw = 1.0,regional_conditioning_floors=None,
+                  etas=None, s_noises=None, momentums=None, guides=None, cfg_cw = 1.0,regional_conditioning_floors=None, frame_weights=None
                   ):
     extra_args = {} if extra_args is None else extra_args
     s_in, s_one = x.new_ones([x.shape[0]]), x.new_ones([1])
@@ -111,6 +111,9 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
         lgw_inv = latent_guide_weights_inv.to(x.device)
     else:
         lgw_inv = torch.full_like(sigmas, 0.)
+
+    frame_weights = initialize_or_scale(frame_weights, 1.0, max_steps).to(default_dtype)
+    frame_weights = F.pad(frame_weights, (0, max_steps), value=0.0)
     
     if sigmas_override is not None:
         sigmas = sigmas_override.clone()
@@ -133,7 +136,7 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
     elif sigmas[0] < sigmas[1]:
         mask_inv = (1-mask)
     
-    x, y0_batch, y0_inv = rk.init_guides(x, latent_guide, latent_guide_inv, mask, sigmas, UNSAMPLE)
+    x, y0_batch, y0_inv = rk.init_guides(x, latent_guide, latent_guide_inv, mask, sigmas, UNSAMPLE, frame_weights)
     x, y0_batch, y0_inv = normalize_inputs(x, y0_batch, y0_inv, guide_mode, extra_options)
         
     if SDE_NOISE_EXTERNAL:
@@ -279,6 +282,12 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
                         denoised_shifted = denoised   +   lgw_mask * (y0 - denoised) 
                     else:
                         denoised_shifted = denoised   +   lgw_mask * (y0 - denoised)   +   lgw_mask_inv * (y0_inv - denoised)
+                   
+                    temporal_smoothing = float(get_extra_options_kv("temporal_smoothing", "0.0", extra_options))
+                    if temporal_smoothing > 0:
+                        denoised_tmp = apply_temporal_smoothing(denoised_shifted, temporal_smoothing)
+                        denoised_shifted = denoised_shifted + lgw_mask * (denoised_tmp - denoised_shifted)
+
                     x_[row+1] = denoised_shifted + eps
                 
                 #x_[row+1] = rk.add_noise_post(x_[row+1], y0, lgw[step], sub_sigma_up, sub_sigma, s_[row], sub_sigma_down, sub_alpha_ratio, s_noise, substep_noise_mode, SDE_NOISE_EXTERNAL, sde_noise_t)    #y0, lgw, sigma_down are currently unused
@@ -438,7 +447,7 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
                 for diag_iter in range(implicit_steps+1):
                     x_[row+1] = x_0 + h_irk * irk.a_k_sum(eps_, row)
                     eps_[row], data_[row] = irk(x_0, x_[row+1], s_irk[row], h_irk, **extra_args)       #MODEL CALL
-                    eps_, x_ = process_guides_substep(x_0, x_, eps_, data_, row, y0, y0_inv, lgw[step], lgw_inv[step], lgw_mask, lgw_mask_inv, step, sigma, sigma_next, sigma_down, s_irk, unsample_resample_scale, irk, irk_type, guide_mode, latent_guide_inv, UNSAMPLE, extra_options)
+                    eps_, x_ = process_guides_substep(x_0, x_, eps_, data_, row, y0, y0_inv, lgw[step], lgw_inv[step], lgw_mask, lgw_mask_inv, step, sigma, sigma_next, sigma_down, s_irk, unsample_resample_scale, irk, irk_type, guide_mode, latent_guide_inv, UNSAMPLE, extra_options, frame_weights)
                     
             x = x_0 + h_irk * irk.b_k_sum(eps_, 0) 
             
@@ -473,6 +482,7 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
             else:
                 x_mid = x
                 for i in range(len(s_all)-1):
+                    extra_args["frame_weights"] = frame_weights
                     x_mid, eps_, data_ = get_explicit_rk_step(rk, rk_type, x_mid, y0, y0_inv, lgw[step], lgw_inv[step], mask, lgw_mask, lgw_mask_inv, step, s_all[i], s_all[i+1], eta, eta_var, s_noise, noise_mode, c2, c3, step+i, sigmas_and, x_, eps_, data_, unsample_resample_scale, guide_mode, latent_guide, latent_guide_inv, UNSAMPLE, extra_options, **extra_args)
                     eps_list.append(eps_[0])
                     eps_ [0], data_ [0] = torch.zeros_like(eps_ [0]), torch.zeros_like(data_[0])
@@ -491,7 +501,7 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
                 for row in range(irk.rows):
                     x_[row+1] = x_0 + h_irk * irk.a_k_sum(eps2_, row)
                     eps2_[row], data_[row] = irk(x_0, x_[row+1], s_irk[row], h_irk, **extra_args)
-                    eps2_, x_ = process_guides_substep(x_0, x_, eps2_, data_, row, y0, y0_inv, lgw[step], lgw_inv[step], lgw_mask, lgw_mask_inv, step, sigma, sigma_next, sigma_down, s_irk, unsample_resample_scale, irk, irk_type, guide_mode, latent_guide_inv, UNSAMPLE, extra_options)
+                    eps2_, x_ = process_guides_substep(x_0, x_, eps2_, data_, row, y0, y0_inv, lgw[step], lgw_inv[step], lgw_mask, lgw_mask_inv, step, sigma, sigma_next, sigma_down, s_irk, unsample_resample_scale, irk, irk_type, guide_mode, latent_guide_inv, UNSAMPLE, extra_options, frame_weights)
                 x = x_0 + h_irk * irk.b_k_sum(eps2_, 0)
                 denoised = x_0 + (sigma / (sigma - sigma_down)) *  h_irk * irk.b_k_sum(eps2_, 0) 
                 eps = x - denoised
@@ -651,6 +661,7 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
 
 def get_explicit_rk_step(rk, rk_type, x, y0, y0_inv, lgw, lgw_inv, mask, lgw_mask, lgw_mask_inv, step, sigma, sigma_next, eta, eta_var, s_noise, noise_mode, c2, c3, stepcount, sigmas, x_, eps_, data_, unsample_resample_scale, guide_mode, latent_guide, latent_guide_inv, UNSAMPLE, extra_options, **extra_args):
     extra_args = {} if extra_args is None else extra_args
+    frame_weights = extra_args.get("frame_weights", None)
     s_in = x.new_ones([x.shape[0]])
     
     eta = get_extra_options_kv("implicit_substep_eta", eta, extra_options)
@@ -676,7 +687,7 @@ def get_explicit_rk_step(rk, rk_type, x, y0, y0_inv, lgw, lgw_inv, mask, lgw_mas
         x_[row+1] = x_0 + h * rk.a_k_sum(eps_, row)
         eps_[row], data_[row] = rk(x_0, x_[row+1], s_[row], h, **extra_args)
         
-        eps_, x_ = process_guides_substep(x_0, x_, eps_, data_, row, y0, y0_inv, lgw, lgw_inv, lgw_mask, lgw_mask_inv, step, sigma, sigma_next, sigma_down, s_, unsample_resample_scale, rk, rk_type, guide_mode, latent_guide_inv, UNSAMPLE, extra_options)
+        eps_, x_ = process_guides_substep(x_0, x_, eps_, data_, row, y0, y0_inv, lgw, lgw_inv, lgw_mask, lgw_mask_inv, step, sigma, sigma_next, sigma_down, s_, unsample_resample_scale, rk, rk_type, guide_mode, latent_guide_inv, UNSAMPLE, extra_options, frame_weights)
         
     x = x_0 + h * rk.b_k_sum(eps_, 0)
     
