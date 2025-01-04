@@ -527,7 +527,7 @@ class ClownsharKSampler:
              noise_stdev=1.0, noise_mean=0.0, noise_normalize=True, noise_is_latent=False, 
              eta=0.25, eta_var=0.0, d_noise=1.0, s_noise=1.0, alpha_init=-1.0, k_init=1.0, alpha_sde=-1.0, k_sde=1.0, cfgpp=0.0, c1=0.0, c2=0.5, c3=1.0, noise_seed=-1, sampler_name="res_2m", implicit_sampler_name="default",
                     t_fn_formula=None, sigma_fn_formula=None, implicit_steps=0,
-                    latent_guide=None, latent_guide_inv=None, guide_mode="blend", latent_guide_weights=None, latent_guide_weights_inv=None, latent_guide_mask=None, latent_guide_mask_inv=None, rescale_floor=True, sigmas_override=None,
+                    latent_guide=None, latent_guide_inv=None, guide_mode="blend", latent_guide_weights=None, latent_guide_weights_inv=None, latent_guide_mask=None, latent_guide_mask_inv=None, rescale_floor=True, sigmas_override=None, unsampler_type="linear",
                     shift=3.0, base_shift=0.85, guides=None, options=None, sde_noise=None,sde_noise_steps=1, shift_scaling="exponential",
                     extra_options="", automation=None, etas=None, s_noises=None,unsample_resample_scales=None, regional_conditioning_weights=None,
                     ): 
@@ -538,7 +538,7 @@ class ClownsharKSampler:
                 noise_type_sde, noise_mode_sde,
                 eta, eta_var, d_noise, s_noise, alpha_sde, k_sde, cfgpp, c1, c2, c3, noise_seed_sde, sampler_name, implicit_sampler_name,
                 t_fn_formula, sigma_fn_formula, implicit_steps,
-                latent_guide, latent_guide_inv, guide_mode, latent_guide_weights, latent_guide_weights_inv, latent_guide_mask, latent_guide_mask_inv, rescale_floor, sigmas_override,
+                latent_guide, latent_guide_inv, guide_mode, latent_guide_weights, latent_guide_weights_inv, latent_guide_mask, latent_guide_mask_inv, rescale_floor, sigmas_override, unsampler_type,
                 guides, options, sde_noise, sde_noise_steps, 
                 extra_options, automation, etas, s_noises, unsample_resample_scales, regional_conditioning_weights)
             
