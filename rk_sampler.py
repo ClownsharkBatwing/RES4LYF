@@ -18,8 +18,7 @@ from .latents import normalize_latent, initialize_or_scale
 from .helper import get_extra_options_kv, extra_options_flag
 from .sigmas import get_sigmas
 
-def get_cosine_similarity_manual(a, b):
-    return (a * b).sum() / (torch.norm(a) * torch.norm(b))
+
 
 def get_cosine_similarity(a, b):
     return F.cosine_similarity(a.flatten(), b.flatten(), dim=0)
@@ -48,13 +47,14 @@ def normalize_inputs(x, y0, y0_inv, guide_mode,  extra_options):
 
 
 
-def prepare_step_to_sigma_zero(rk, irk, rk_type, irk_type, model, x, extra_options, alpha, k, noise_sampler_type):
+def prepare_step_to_sigma_zero(rk, irk, rk_type, irk_type, model, x, extra_options, alpha, k, noise_sampler_type, cfg_cw=1.0, **extra_args):
     rk_type_final_step = f"ralston_{rk_type[-2:]}" if rk_type[-2:] in {"2s", "3s"} else "ralston_3s"
     rk_type_final_step = f"deis_2m" if rk_type[-2:] in {"2m", "3m", "4m"} else rk_type_final_step
     rk_type_final_step = f"euler" if rk_type in {"ddim"} else rk_type_final_step
     rk_type_final_step = get_extra_options_kv("rk_type_final_step", rk_type_final_step, extra_options)
     rk = RK_Method.create(model, rk_type_final_step, x.device)
     rk.init_noise_sampler(x, torch.initial_seed() + 1, noise_sampler_type, alpha=alpha, k=k)
+    extra_args =  rk.init_cfg_channelwise(x, cfg_cw, **extra_args)
 
     if any(element >= 1 for element in irk.c):
         irk_type_final_step = f"gauss-legendre_{rk_type[-2:]}" if rk_type[-2:] in {"2s", "3s", "4s", "5s"} else "gauss-legendre_2s"
@@ -62,24 +62,50 @@ def prepare_step_to_sigma_zero(rk, irk, rk_type, irk_type, model, x, extra_optio
         irk_type_final_step = get_extra_options_kv("irk_type_final_step", irk_type_final_step, extra_options)
         irk = RK_Method.create(model, irk_type_final_step, x.device)
         irk.init_noise_sampler(x, torch.initial_seed() + 100, noise_sampler_type, alpha=alpha, k=k)
+        extra_args =  irk.init_cfg_channelwise(x, cfg_cw, **extra_args)
     else:
         irk_type_final_step = irk_type
 
     eta, eta_var = 0, 0
-    return rk, irk, rk_type_final_step, irk_type_final_step, eta, eta_var
+    return rk, irk, rk_type_final_step, irk_type_final_step, eta, eta_var, extra_args
 
 
 
 @torch.no_grad()
-def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, noise_sampler=None, noise_sampler_type="gaussian", noise_mode="hard", noise_seed=-1, rk_type="res_2m", implicit_sampler_name="use_explicit",
+def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, noise_sampler_type="gaussian", noise_mode="hard", noise_seed=-1, rk_type="res_2m", implicit_sampler_name="use_explicit",
               sigma_fn_formula="", t_fn_formula="",
                   eta=0.0, eta_var=0.0, s_noise=1., d_noise=1., alpha=-1.0, k=1.0, scale=0.1, c1=0.0, c2=0.5, c3=1.0,cfgpp=0.0, implicit_steps=0, reverse_weight=0.0,
-                  latent_guide=None, latent_guide_inv=None, latent_guide_weight=0.0, latent_guide_weight_inv=0.0, latent_guide_weights=None, latent_guide_weights_inv=None, guide_mode="blend", unsampler_type="linear",
+                  latent_guide=None, latent_guide_inv=None, latent_guide_weight=0.0, latent_guide_weight_inv=0.0, latent_guide_weights=None, latent_guide_weights_inv=None, guide_mode="blend", 
                   GARBAGE_COLLECT=False, mask=None, mask_inv=None, LGW_MASK_RESCALE_MIN=True, sigmas_override=None, unsample_resample_scales=None,regional_conditioning_weights=None, sde_noise=[],
                   extra_options="",
                   etas=None, s_noises=None, momentums=None, guides=None, cfg_cw = 1.0,regional_conditioning_floors=None,
                   ):
     extra_args = {} if extra_args is None else extra_args
+    
+    noise_cossim_iterations         = int(get_extra_options_kv("noise_cossim_iterations",         "1",          extra_options))
+    noise_substep_cossim_iterations = int(get_extra_options_kv("noise_substep_cossim_iterations", "1",          extra_options))
+    NOISE_COSSIM_MODE               =     get_extra_options_kv("noise_cossim_mode",               "orthogonal", extra_options)
+    NOISE_COSSIM_SOURCE             =     get_extra_options_kv("noise_cossim_source",             "data",       extra_options)
+    NOISE_SUBSTEP_COSSIM_MODE       =     get_extra_options_kv("noise_substep_cossim_mode",       "orthogonal", extra_options)
+    NOISE_SUBSTEP_COSSIM_SOURCE     =     get_extra_options_kv("noise_substep_cossim_source",     "data",       extra_options)
+    SUBSTEP_SKIP_LAST               =     get_extra_options_kv("substep_skip_last",               "false",      extra_options) == "true" 
+    noise_cossim_tile_size          = int(get_extra_options_kv("noise_cossim_tile",               "2",          extra_options))
+    noise_substep_cossim_tile_size  = int(get_extra_options_kv("noise_substep_cossim_tile",       "2",          extra_options))
+    
+    substep_eta           = float(get_extra_options_kv("substep_eta",           "0.5",  extra_options))
+    substep_noise_scaling = float(get_extra_options_kv("substep_noise_scaling", "1.0",  extra_options))
+    substep_noise_mode    =       get_extra_options_kv("substep_noise_mode",    "hard", extra_options)
+    
+    substep_eta_start_step = int(get_extra_options_kv("substep_noise_start_step",  "0", extra_options))
+    substep_eta_final_step = int(get_extra_options_kv("substep_noise_final_step", "-1", extra_options))
+    
+    noise_substep_cossim_max_iter  =   int(get_extra_options_kv("noise_substep_cossim_max_iter",  "50",   extra_options))
+    noise_cossim_max_iter          =   int(get_extra_options_kv("noise_cossim_max_iter",          "50",   extra_options))
+    noise_substep_cossim_max_score = float(get_extra_options_kv("noise_substep_cossim_max_score", "1e-7", extra_options))
+    noise_cossim_max_score         = float(get_extra_options_kv("noise_cossim_max_score",         "1e-7", extra_options))
+    
+    cfg_cw = float(get_extra_options_kv("cfg_cw", "1.0", extra_options))
+    
     s_in, s_one = x.new_ones([x.shape[0]]), x.new_ones([1])
     default_dtype = torch.float64
     max_steps=10000
@@ -103,28 +129,26 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
     latent_guide_weights     = F.pad(latent_guide_weights,     (0, max_steps), value=0.0)
     latent_guide_weights_inv = F.pad(latent_guide_weights_inv, (0, max_steps), value=0.0)
     
+    lgw, lgw_inv = [torch.full_like(sigmas, 0.) for _ in range(2)]
     if latent_guide_weights is not None:
         lgw = latent_guide_weights.to(x.device)
-    else:
-        lgw = torch.full_like(sigmas, 0.)
     if latent_guide_weights_inv is not None:
         lgw_inv = latent_guide_weights_inv.to(x.device)
-    else:
-        lgw_inv = torch.full_like(sigmas, 0.)
     
     if sigmas_override is not None:
         sigmas = sigmas_override.clone()
     sigmas = sigmas.clone() * d_noise
     
-    rk_euler = RK_Method.create(model, "euler", x.device)
-    rk_euler.init_noise_sampler(x, noise_seed+1000, noise_sampler_type, alpha=alpha, k=k)
-    
-    rk = RK_Method.create(model, rk_type, x.device)
-    rk.init_noise_sampler(x, noise_seed, noise_sampler_type, alpha=alpha, k=k)
-
     irk_type = implicit_sampler_name if implicit_sampler_name != "use_explicit" else rk_type
-    irk = RK_Method.create(model, irk_type, x.device)
+
+    rk       = RK_Method.create(model,  rk_type, x.device)
+    irk      = RK_Method.create(model, irk_type, x.device)
+
+    rk. init_noise_sampler(x, noise_seed,     noise_sampler_type, alpha=alpha, k=k)
     irk.init_noise_sampler(x, noise_seed+100, noise_sampler_type, alpha=alpha, k=k)
+    
+    extra_args = irk.init_cfg_channelwise(x, cfg_cw, **extra_args)
+    extra_args =  rk.init_cfg_channelwise(x, cfg_cw, **extra_args)
 
     sigmas, UNSAMPLE = rk.prepare_sigmas(sigmas)
     mask, LGW_MASK_RESCALE_MIN = prepare_mask(x, mask, LGW_MASK_RESCALE_MIN)
@@ -142,48 +166,8 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
             sigma_up_total += sigmas[i+1]
         eta = eta / sigma_up_total
 
-    uncond = [torch.full_like(x, 0.0)]
-    cfgpp = float(get_extra_options_kv("cfgpp", "0.0", extra_options))
-    if cfgpp != 0.0:
-        def post_cfg_function(args):
-            uncond[0] = args["uncond_denoised"]
-            return args["denoised"]
-        model_options = extra_args.get("model_options", {}).copy()
-        extra_args["model_options"] = comfy.model_patcher.set_model_options_post_cfg_function(model_options, post_cfg_function, disable_cfg1_optimization=True)  
-
-    if extra_options_flag("cfg_cw", extra_options):
-        cfg_cw = float(get_extra_options_kv("cfg_cw", "1.0", extra_options))
-    extra_args = rk.init_cfg_channelwise(x, cfg_cw, **extra_args)
-    
-    """if extra_options_flag("cfgpp", extra_options):
-        cfgpp = float(get_extra_options_kv("cfgpp", "1.0", extra_options))
-    extra_args = rk.init_cfgpp(x, cfgpp, **extra_args)"""
-    
-    """if extra_options_flag("iig", extra_options):
-        iig = float(get_extra_options_kv("iig", "1.0", extra_options))
-    extra_args = rk.init_cfgpp(x, iig, **extra_args)"""
-    
-    noise_cossim_iterations = int(get_extra_options_kv("noise_cossim_iterations", "1", extra_options))
-    noise_substep_cossim_iterations = int(get_extra_options_kv("noise_substep_cossim_iterations", "1", extra_options))
-    NOISE_COSSIM_MODE       =     get_extra_options_kv("noise_cossim_mode", "orthogonal", extra_options)
-    NOISE_COSSIM_SOURCE     =     get_extra_options_kv("noise_cossim_source", "data", extra_options)
-    NOISE_SUBSTEP_COSSIM_MODE       =     get_extra_options_kv("noise_substep_cossim_mode", "orthogonal", extra_options)
-    NOISE_SUBSTEP_COSSIM_SOURCE     =     get_extra_options_kv("noise_substep_cossim_source", "data", extra_options)
-    SUBSTEP_SKIP_LAST       =     get_extra_options_kv("substep_skip_last", "false", extra_options) == "true" 
-    noise_cossim_tile_size = int(get_extra_options_kv("noise_cossim_tile", "2", extra_options))
-    noise_substep_cossim_tile_size = int(get_extra_options_kv("noise_substep_cossim_tile", "2", extra_options))
-
-    if NOISE_COSSIM_SOURCE in ("iig", "iig_tiled"):
-        uncond = [torch.full_like(x, 0.0)]
-        def post_cfg_function(args):
-            uncond[0] = args["uncond_denoised"]
-            return args["denoised"]
-        model_options = extra_args.get("model_options", {}).copy()
-        extra_args["model_options"] = comfy.model_patcher.set_model_options_post_cfg_function(model_options, post_cfg_function, disable_cfg1_optimization=True)
-    
-
-    denoised_prev, eps_prev = torch.zeros_like(x), torch.zeros_like(x)
-    denoised,      eps      = torch.zeros_like(x), torch.zeros_like(x)
+    denoised, denoised_prev, eps, eps_prev = [torch.zeros_like(x) for _ in range(4)]
+    prev_noises = []
     x_init = x.clone()
     
     for step in trange(len(sigmas)-1, disable=disable):
@@ -198,16 +182,12 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
         eta = eta_var = etas[step] if etas is not None else eta
         s_noise = s_noises[step] if s_noises is not None else s_noise
         
+        y0 = y0_batch
         if y0_batch.shape[0] > 1:
-            y0 = y0_batch[min(step, y0_batch.shape[0]-1)].unsqueeze(0)
-        else:
-            y0 = y0_batch
+            y0 = y0_batch[min(step, y0_batch.shape[0]-1)].unsqueeze(0)            
         
         if sigma_next == 0:
-            rk, irk, rk_type, irk_type, eta, eta_var = prepare_step_to_sigma_zero(rk, irk, rk_type, irk_type, model, x, extra_options, alpha, k, noise_sampler_type)
-        cfg_cw = float(get_extra_options_kv("cfg_cw", "1.0", extra_options))
-        extra_args = irk.init_cfg_channelwise(x, cfg_cw, **extra_args)
-        extra_args = rk.init_cfg_channelwise(x, cfg_cw, **extra_args)
+            rk, irk, rk_type, irk_type, eta, eta_var, extra_args = prepare_step_to_sigma_zero(rk, irk, rk_type, irk_type, model, x, extra_options, alpha, k, noise_sampler_type, cfg_cw=cfg_cw, **extra_args)
 
         sigma_up, sigma, sigma_down, alpha_ratio = get_res4lyf_step_with_model(model, sigma, sigma_next, eta, eta_var, noise_mode, rk.h_fn(sigma_next,sigma) )
         h     =  rk.h_fn(sigma_down, sigma)
@@ -215,8 +195,7 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
         
         c2, c3 = get_res4lyf_half_step3(sigma, sigma_down, c2, c3, t_fn=rk.t_fn, sigma_fn=rk.sigma_fn, t_fn_formula=t_fn_formula, sigma_fn_formula=sigma_fn_formula)
         
-        rk_euler.set_coeff("euler", h, c1, c2, c3, step, sigmas, sigma, sigma_down)
-        rk. set_coeff(rk_type, h, c1, c2, c3, step, sigmas, sigma, sigma_down)
+        rk. set_coeff(rk_type,  h,     c1, c2, c3, step, sigmas, sigma, sigma_down)
         irk.set_coeff(irk_type, h_irk, c1, c2, c3, step, sigmas, sigma, sigma_down)
         
         if step == 0:
@@ -233,7 +212,7 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
             else:
                 sde_noise_t = sde_noise[step]
         x_prenoise = x.clone()
-        x_[0] = rk.add_noise_pre(x, y0, lgw[step], sigma_up, sigma, sigma_next, sigma_down, alpha_ratio, s_noise, noise_mode, SDE_NOISE_EXTERNAL, sde_noise_t) #y0, lgw, sigma_down are currently unused
+        x_[0] = rk.add_noise_pre(x, sigma_up, sigma, sigma_next, alpha_ratio, s_noise, noise_mode, SDE_NOISE_EXTERNAL, sde_noise_t) #y0, lgw, sigma_down are currently unused
         
         x_0 = x_[0].clone()
         
@@ -245,30 +224,17 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
                 
         lgw_mask, lgw_mask_inv = prepare_weighted_masks(mask, mask_inv, lgw[step], lgw_inv[step], latent_guide, latent_guide_inv, LGW_MASK_RESCALE_MIN)        
 
-        substep_eta_start_step = int(get_extra_options_kv("substep_noise_start_step", "0", extra_options))
-        substep_eta_final_step = int(get_extra_options_kv("substep_noise_final_step", "-1", extra_options))
+
 
         if implicit_steps == 0: 
-            x_0_tmp = x_0.clone()
             for row in range(rk.rows - rk.multistep_stages):
-                if row > 0 and step > substep_eta_start_step and extra_options_flag("substep_eta", extra_options) and s_[row+1] <= s_[row]:
-                    substep_eta = float(get_extra_options_kv("substep_eta", "0.5", extra_options))
-                    substep_noise_mode = get_extra_options_kv("substep_noise_mode", "hard", extra_options)
-                    if extra_options_flag("substep_noise_rough", extra_options):
-                        sub_sigma_up, sub_sigma, sub_sigma_down, sub_alpha_ratio = get_res4lyf_step_with_model(model, s_[row-1], s_[row], substep_eta, eta_var, substep_noise_mode, s_[row]-s_[row-1])
-                    else:
-                        sub_sigma_up, sub_sigma, sub_sigma_down, sub_alpha_ratio = get_res4lyf_step_with_model(model, s_[row], s_[row+1], substep_eta, eta_var, substep_noise_mode, s_[row+1]-s_[row])
-
-                else:
-                    sub_sigma_up, sub_sigma, sub_sigma_down, sub_alpha_ratio = 0, s_[row], s_[row+1], 1
-                    substep_eta, substep_noise_mode = 0.0, "hard"
                 
-                if substep_eta_final_step < 0 and step == len(sigmas)-1+substep_eta_final_step:
+                sub_sigma_up, sub_sigma, sub_sigma_down, sub_alpha_ratio = 0, s_[row], s_[row+1], 1
+                if row > 0 and step > substep_eta_start_step and s_[row+1] <= s_[row]:
+                    sub_sigma_up, sub_sigma, sub_sigma_down, sub_alpha_ratio = get_res4lyf_step_with_model(model, s_[row-1], s_[row], substep_eta, eta_var, substep_noise_mode, s_[row]-s_[row-1])
+
+                if (substep_eta_final_step < 0 and step == len(sigmas)-1+substep_eta_final_step)   or   (substep_eta_final_step > 0 and step > substep_eta_final_step):
                     sub_sigma_up, sub_sigma, sub_sigma_down, sub_alpha_ratio = 0, s_[row], s_[row+1], 1
-                    substep_eta, substep_noise_mode = 0.0, "hard"
-                elif substep_eta_final_step > 0 and step > substep_eta_final_step:
-                    sub_sigma_up, sub_sigma, sub_sigma_down, sub_alpha_ratio = 0, s_[row], s_[row+1], 1
-                    substep_eta, substep_noise_mode = 0.0, "hard"
                 
                 x_[row+1] = x_0 + h * rk.a_k_sum(eps_, row)     
 
@@ -281,146 +247,29 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
                         denoised_shifted = denoised   +   lgw_mask * (y0 - denoised)   +   lgw_mask_inv * (y0_inv - denoised)
                     x_[row+1] = denoised_shifted + eps
                 
-                #x_[row+1] = rk.add_noise_post(x_[row+1], y0, lgw[step], sub_sigma_up, sub_sigma, s_[row], sub_sigma_down, sub_alpha_ratio, s_noise, substep_noise_mode, SDE_NOISE_EXTERNAL, sde_noise_t)    #y0, lgw, sigma_down are currently unused
-                #F.cosine_similarity()
-                if (sub_sigma_up > 0) and ((SUBSTEP_SKIP_LAST == False) or (row < rk.rows - rk.multistep_stages - 1)):
-                    x_tmp, cossim_tmp, noise_tmp_list = [], [], []
-                    if step > int(get_extra_options_kv("noise_substep_cossim_end_step", "10000", extra_options)):
-                        noise_substep_cossim_iterations = 1
-                    for i in range(noise_substep_cossim_iterations):
-                        x_tmp.append(rk.add_noise_post(x_[row+1], y0, lgw[step], sub_sigma_up, sub_sigma, s_[row], sub_sigma_down, sub_alpha_ratio, s_noise, substep_noise_mode, SDE_NOISE_EXTERNAL, sde_noise_t)    )#y0, lgw, sigma_down are currently unused
-                        noise_tmp = x_tmp[i] - x_[row+1]
-                        if extra_options_flag("noise_substep_noise_zscore_norm", extra_options):
-                            noise_tmp = (noise_tmp - noise_tmp.mean()) / noise_tmp.std()
-                        eps_tmp  = eps_prev      if  eps_[row].sum() == 0 else eps_[row]
-                        if extra_options_flag("noise_substep_eps_zscore_norm", extra_options):
-                            eps_tmp = (eps_tmp - eps_tmp.mean()) / eps_tmp.std()
-                        
-                        data_tmp = denoised_prev if data_[row].sum() == 0 else data_[row]
-                        if   NOISE_SUBSTEP_COSSIM_SOURCE in ("eps_tiled", "guide_epsilon_tiled", "guide_bkg_epsilon_tiled"):
-                            noise_tmp_list.append(noise_tmp)
-                        if   NOISE_SUBSTEP_COSSIM_SOURCE == "eps":
-                            cossim_tmp.append(get_cosine_similarity(eps_tmp, noise_tmp))
-                        if   NOISE_SUBSTEP_COSSIM_SOURCE == "eps_ch":
-                            cossim_total = torch.zeros_like(eps_tmp[0][0][0][0])
-                            for ch in range(eps_tmp.shape[1]):
-                                cossim_total += get_cosine_similarity(eps_tmp[0][ch], noise_tmp[0][ch])
-                            cossim_tmp.append(cossim_total)
-                        elif NOISE_SUBSTEP_COSSIM_SOURCE == "data":
-                            cossim_tmp.append(get_cosine_similarity(data_tmp, noise_tmp))
-                        elif NOISE_SUBSTEP_COSSIM_SOURCE == "latent":
-                            cossim_tmp.append(get_cosine_similarity(x_[row+1], noise_tmp))
-                        elif NOISE_SUBSTEP_COSSIM_SOURCE == "x_prenoise":
-                            cossim_tmp.append(get_cosine_similarity(x_prenoise, x_tmp[i]))
-                        elif NOISE_SUBSTEP_COSSIM_SOURCE == "x":
-                            cossim_tmp.append(get_cosine_similarity(x_[row+1], x_tmp[i]))
-                        elif NOISE_SUBSTEP_COSSIM_SOURCE == "x_data":
-                            cossim_tmp.append(get_cosine_similarity(data_tmp, x_tmp[i]))
-                        elif NOISE_SUBSTEP_COSSIM_SOURCE == "x_init_vs_noise":
-                            cossim_tmp.append(get_cosine_similarity(x_init, noise_tmp))
-                        elif NOISE_SUBSTEP_COSSIM_SOURCE == "mom":
-                            cossim_tmp.append(get_cosine_similarity(data_tmp, x_[row+1] + s_[row]*noise_tmp))
-                        elif NOISE_SUBSTEP_COSSIM_SOURCE == "guide":
-                            cossim_tmp.append(get_cosine_similarity(y0, x_tmp[i]))
-                        elif NOISE_SUBSTEP_COSSIM_SOURCE == "guide_bkg":
-                            cossim_tmp.append(get_cosine_similarity(y0_inv, x_tmp[i]))
-                        elif NOISE_SUBSTEP_COSSIM_SOURCE == "none":
-                            cossim_tmp.append(get_cosine_similarity(x_tmp[i]), x_tmp[i])
-                            break
-                        #cossim_tmp.append(get_cosine_similarity(x_prenoise, x_tmp[i]))
-                    if (NOISE_SUBSTEP_COSSIM_SOURCE == "eps_tiled"):
-                        x_[row+1] = noise_cossim_eps_tiled(x_tmp, eps_tmp, noise_tmp_list, cossim_mode=NOISE_SUBSTEP_COSSIM_MODE, tile_size=noise_substep_cossim_tile_size, step=row)
-                    elif (NOISE_SUBSTEP_COSSIM_SOURCE == "eps_orthogonal"):
-                        noise = rk.noise_sampler(sigma=s_[row], sigma_next=s_[row+1])
-                        noise = get_orthogonal_noise_from(noise, eps_[row])
-                        x_[row+1] = sub_alpha_ratio * x_[row+1] + sub_sigma_up * noise
-                    elif (NOISE_SUBSTEP_COSSIM_SOURCE == "data_orthogonal"):
-                        noise = rk.noise_sampler(sigma=s_[row], sigma_next=s_[row+1])
-                        noise = get_orthogonal_noise_from(noise, data_[row])
-                        x_[row+1] = sub_alpha_ratio * x_[row+1] + sub_sigma_up * noise
-                    elif (NOISE_SUBSTEP_COSSIM_SOURCE == "eps_data_orthogonal"):
-                        noise = rk.noise_sampler(sigma=s_[row], sigma_next=s_[row+1])
-                        noise = get_orthogonal_noise_from(noise, eps_[row], data_[row])
-                        x_[row+1] = sub_alpha_ratio * x_[row+1] + sub_sigma_up * noise
-                    elif (NOISE_SUBSTEP_COSSIM_SOURCE == "xinit_orthogonal"):
-                        noise = rk.noise_sampler(sigma=s_[row], sigma_next=s_[row+1])
-                        noise = get_orthogonal_noise_from(noise, x_init)
-                        x_[row+1] = sub_alpha_ratio * x_[row+1] + sub_sigma_up * noise
-                    elif (NOISE_SUBSTEP_COSSIM_SOURCE == "x_orthogonal"):
-                        noise = rk.noise_sampler(sigma=s_[row], sigma_next=s_[row+1])
-                        noise = get_orthogonal_noise_from(noise, x_[row+1])
-                        x_[row+1] = sub_alpha_ratio * x_[row+1] + sub_sigma_up * noise
-                    elif (NOISE_SUBSTEP_COSSIM_SOURCE == "x_data_orthogonal"):
-                        noise = rk.noise_sampler(sigma=s_[row], sigma_next=s_[row+1])
-                        noise = get_orthogonal_noise_from(noise, x_[row+1], data_[row])
-                        x_[row+1] = sub_alpha_ratio * x_[row+1] + sub_sigma_up * noise
-                    elif (NOISE_SUBSTEP_COSSIM_SOURCE == "x_eps_orthogonal"):
-                        noise = rk.noise_sampler(sigma=s_[row], sigma_next=s_[row+1])
-                        noise = get_orthogonal_noise_from(noise, x_[row+1], eps_[row])
-                        x_[row+1] = sub_alpha_ratio * x_[row+1] + sub_sigma_up * noise
-                    elif (NOISE_SUBSTEP_COSSIM_SOURCE == "x_eps_guide_orthogonal"):
-                        noise = rk.noise_sampler(sigma=s_[row], sigma_next=s_[row+1])
-                        noise = get_orthogonal_noise_from(noise, x_[row+1], eps_[row], y0)
-                        x_[row+1] = sub_alpha_ratio * x_[row+1] + sub_sigma_up * noise
-                    elif (NOISE_SUBSTEP_COSSIM_SOURCE == "x_eps_guide_bkg_orthogonal"):
-                        noise = rk.noise_sampler(sigma=s_[row], sigma_next=s_[row+1])
-                        noise = get_orthogonal_noise_from(noise, x_[row+1], eps_[row], y0_inv)
-                        x_[row+1] = sub_alpha_ratio * x_[row+1] + sub_sigma_up * noise
-                    elif (NOISE_SUBSTEP_COSSIM_SOURCE == "x_eps_data_orthogonal"):
-                        noise = rk.noise_sampler(sigma=s_[row], sigma_next=s_[row+1])
-                        noise = get_orthogonal_noise_from(noise, x_[row+1], eps_[row], data_[row])
-                        x_[row+1] = sub_alpha_ratio * x_[row+1] + sub_sigma_up * noise
-                    elif (NOISE_SUBSTEP_COSSIM_SOURCE == "x_eps_data_xinit_orthogonal"):
-                        noise = rk.noise_sampler(sigma=s_[row], sigma_next=s_[row+1])
-                        noise = get_orthogonal_noise_from(noise, x_[row+1], eps_[row], data_[row], x_init)
-                        x_[row+1] = sub_alpha_ratio * x_[row+1] + sub_sigma_up * noise
-                        
-                        
-                    elif (NOISE_SUBSTEP_COSSIM_SOURCE == "guide_epsilon_tiled"):
-                        x_[row+1] = noise_cossim_guide_eps_tiled(x_0, x_tmp, y0, noise_tmp_list, cossim_mode=NOISE_SUBSTEP_COSSIM_MODE, tile_size=noise_cossim_tile_size, step=row, sigma=s_[row], rk_type=rk_type)
-                    elif (NOISE_SUBSTEP_COSSIM_SOURCE == "guide_bkg_epsilon_tiled"):
-                        x_[row+1] = noise_cossim_guide_eps_tiled(x_0, x_tmp, y0_inv, noise_tmp_list, cossim_mode=NOISE_SUBSTEP_COSSIM_MODE, tile_size=noise_cossim_tile_size, step=row, sigma=s_[row], rk_type=rk_type)
-                    elif NOISE_SUBSTEP_COSSIM_SOURCE == "guide_tiled":
-                        x_[row+1] = noise_cossim_guide_tiled(x_tmp, y0, cossim_mode=NOISE_SUBSTEP_COSSIM_MODE, tile_size=noise_substep_cossim_tile_size, step=row)
-                    elif NOISE_SUBSTEP_COSSIM_SOURCE == "guide_bkg_tiled":
-                        x_[row+1] = noise_cossim_guide_tiled(x_tmp, y0_inv, cossim_mode=NOISE_SUBSTEP_COSSIM_MODE, tile_size=noise_substep_cossim_tile_size)
+                if (row > 0) and (sub_sigma_up > 0) and ((SUBSTEP_SKIP_LAST == False) or (row < rk.rows - rk.multistep_stages - 1)):
+                    data_tmp = denoised_prev if data_[row].sum() == 0 else data_[row]
+                    eps_tmp  = eps_prev      if  eps_[row].sum() == 0 else eps_ [row]
+                    Osde = NoiseStepHandlerOSDE(x_[row+1], eps_tmp, data_tmp, x_init, y0, y0_inv)
+                    if Osde.check_cossim_source(NOISE_SUBSTEP_COSSIM_SOURCE):
+                        noise = rk.noise_sampler(sigma=s_[row-1], sigma_next=s_[row])    #should be s_[row-1]
+                        noise_osde = Osde.get_ortho_noise(noise, prev_noises, max_iter=noise_substep_cossim_max_iter, max_score=noise_substep_cossim_max_score, NOISE_COSSIM_SOURCE=NOISE_SUBSTEP_COSSIM_SOURCE)
+                        x_[row+1] = sub_alpha_ratio * x_[row+1] + sub_sigma_up * noise_osde * s_noise
+                    elif extra_options_flag("noise_substep_cossim", extra_options):
+                        x_[row+1] = handle_tiled_etc_noise_steps(x_0, x_[row+1], x_prenoise, x_init, eps_tmp, data_tmp, y0, y0_inv, row, 
+                            rk_type, rk, sub_sigma_up, s_[row-1], s_[row], sub_alpha_ratio, s_noise, substep_noise_mode, SDE_NOISE_EXTERNAL, sde_noise_t,
+                            NOISE_SUBSTEP_COSSIM_SOURCE, NOISE_SUBSTEP_COSSIM_MODE, noise_substep_cossim_tile_size, noise_substep_cossim_iterations,
+                            extra_options)
                     else:
-                        for i in range(len(x_tmp)):
-                            if   (NOISE_SUBSTEP_COSSIM_MODE == "forward") and (cossim_tmp[i] == max(cossim_tmp)):
-                                x_[row+1] = x_tmp[i]
-                                break
-                            elif (NOISE_SUBSTEP_COSSIM_MODE == "reverse") and (cossim_tmp[i] == min(cossim_tmp)):
-                                x_[row+1] = x_tmp[i]
-                                break
-                            elif (NOISE_SUBSTEP_COSSIM_MODE == "orthogonal") and (abs(cossim_tmp[i]) == min(abs(val) for val in cossim_tmp)):
-                                x_[row+1] = x_tmp[i]
-                                break
-                            elif (NOISE_SUBSTEP_COSSIM_MODE != "forward") and (NOISE_SUBSTEP_COSSIM_MODE != "reverse") and (NOISE_SUBSTEP_COSSIM_MODE != "orthogonal"):
-                                x_[row+1] = x_tmp[0]
-                                break
-                            
-                            
+                        x_[row+1] = rk.add_noise_post(x_[row+1], sub_sigma_up, sub_sigma, s_[row], sub_alpha_ratio, s_noise, substep_noise_mode, SDE_NOISE_EXTERNAL, sde_noise_t)
+
+    
                 eps_[row], data_[row] = rk(x_0, x_[row+1], s_[row], h, **extra_args)       #MODEL CALL
                 
-                if cfgpp != 0.0:
-                    eps_u_exp = data_[row] - x_0
-                    eps_u = (x_[row+1] - uncond[0]) / s_[row]
-                    eps_[row] = (eps_[row] + (s_[row+1] * eps_u) - x_[row+1]) / (s_[row+1] - s_[row]) # if this works at all, it's for linear RK only
-                
-                if (SUBSTEP_SKIP_LAST == False) or (row < rk.rows - rk.multistep_stages - 1):
-                    if extra_options_flag("substep_noise_scaling_alt", extra_options):
-                        #eps_[row] = eps_[row] * (s_[row+1]/s_[row]) * (s_[row]/sub_sigma_down)
-                        eps_[row] *= (s_[row+1]/sigma) * (sigma/sub_sigma_down)
-                    if extra_options_flag("substep_noise_scaling", extra_options) and sub_sigma_down > 0 and sigma_next > 0:
-                        if not extra_options_flag("substep_noise_rough", extra_options):
-                            substep_noise_scaling_ratio = (s_[row+1]/sigma) * (sigma/sub_sigma_down)
-                        else:
-                            substep_noise_scaling_ratio = (s_[row]/sigma) * (sigma/sub_sigma_down)
-                        snsr = float(get_extra_options_kv("substep_noise_scaling", "1.0", extra_options))
-                        eps_[row] *= 1 + snsr*(substep_noise_scaling_ratio-1)
-                    if extra_options_flag("substep_sigma_ratio", extra_options):
-                        sigma_ratio = (sub_sigma_down - sigma) / (s_[row+1] - sigma)
-                        eps_[row] *= sigma_ratio
+                if ((SUBSTEP_SKIP_LAST == False) or (row < rk.rows - rk.multistep_stages - 1))   and   row > 0   and   (sub_sigma_down > 0): # and sigma_next > 0:
+                    substep_noise_scaling_ratio = (s_[row]/sigma) * (sigma/sub_sigma_down)
+                    eps_[row] *= 1 + substep_noise_scaling*(substep_noise_scaling_ratio-1)
+
                 eps_, x_ = process_guides_substep(x_0, x_, eps_, data_, row, y0, y0_inv, lgw[step], lgw_inv[step], lgw_mask, lgw_mask_inv, step, sigma, sigma_next, sigma_down, s_, unsample_resample_scale, rk, rk_type, guide_mode, latent_guide_inv, UNSAMPLE, extra_options)
             
             x = x_0 + h * rk.b_k_sum(eps_, 0)
@@ -454,7 +303,8 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
             s_all = torch.sort(torch.stack(s2, dim=0).squeeze(dim=1).unique(), descending=True)[0]
             sigmas_and = torch.cat( (sigmas[0:step], s_all), dim=0)
             
-            eps_ [0], data_ [0] = torch.zeros_like(eps_ [0]), torch.zeros_like(data_[0])
+            data_[0].zero_()
+            eps_ [0].zero_()
             eps_list = []
             
             if extra_options_flag("fast_implicit_guess",  extra_options):
@@ -475,12 +325,12 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
                 for i in range(len(s_all)-1):
                     x_mid, eps_, data_ = get_explicit_rk_step(rk, rk_type, x_mid, y0, y0_inv, lgw[step], lgw_inv[step], mask, lgw_mask, lgw_mask_inv, step, s_all[i], s_all[i+1], eta, eta_var, s_noise, noise_mode, c2, c3, step+i, sigmas_and, x_, eps_, data_, unsample_resample_scale, guide_mode, latent_guide, latent_guide_inv, UNSAMPLE, extra_options, **extra_args)
                     eps_list.append(eps_[0])
-                    eps_ [0], data_ [0] = torch.zeros_like(eps_ [0]), torch.zeros_like(data_[0])
+                    data_[0].zero_()
+                    eps_ [0].zero_()
                     
                 if torch.allclose(s_all[-1], sigma_down, atol=1e-8):
                     eps_down, data_down = rk(x_0, x_mid, sigma_down, h, **extra_args) #should h_irk = h? going to change it for now.
                     eps_list.append(eps_down)
-
 
             s_all = [s for s in s_all if s in s_irk_rk]
 
@@ -496,7 +346,9 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
                 denoised = x_0 + (sigma / (sigma - sigma_down)) *  h_irk * irk.b_k_sum(eps2_, 0) 
                 eps = x - denoised
                 x = process_guides_poststep(x, denoised, eps, y0, y0_inv, mask, lgw_mask, lgw_mask_inv, guide_mode, latent_guide, latent_guide_inv, UNSAMPLE, extra_options)
-                
+
+
+
         if extra_options_flag("eps_preview", extra_options) == False:
             callback({'x': x, 'i': step, 'sigma': sigma, 'sigma_next': sigma_next, 'denoised': data_[0].to(torch.float32)}) if callback is not None else None
         elif latent_guide is not None:
@@ -512,127 +364,19 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
             else:
                 sde_noise_t = sde_noise[step]
                 
-                
-                
         if sigma_up > 0:
-            x_tmp, cossim_tmp, noise_tmp_list = [], [], []
-            for i in range(noise_cossim_iterations):
-                if step > int(get_extra_options_kv("noise_cossim_end_step", "10000", extra_options)):
-                    NOISE_COSSIM_SOURCE = get_extra_options_kv("noise_cossim_takeover_source", "eps", extra_options)
-                    NOISE_COSSIM_MODE   = get_extra_options_kv("noise_cossim_takeover_mode", "forward", extra_options)
-                    noise_cossim_tile_size   = int(get_extra_options_kv("noise_cossim_takeover_tile", str(noise_cossim_tile_size), extra_options))
-                    noise_cossim_iterations   = int(get_extra_options_kv("noise_cossim_takeover_iterations", str(noise_cossim_iterations), extra_options))
-                    #noise_cossim_iterations = 1
-                x_tmp.append(rk.add_noise_post(x, y0, lgw[step], sigma_up, sigma, sigma_next, sigma_down, alpha_ratio, s_noise, noise_mode, SDE_NOISE_EXTERNAL, sde_noise_t)    )#y0, lgw, sigma_down are currently unused
-                noise_tmp = x_tmp[i] - x
-                if extra_options_flag("noise_noise_zscore_norm", extra_options):
-                    noise_tmp = (noise_tmp - noise_tmp.mean()) / noise_tmp.std()
-                if extra_options_flag("noise_eps_zscore_norm", extra_options):
-                    eps = (eps - eps.mean()) / eps.std()
-                if   NOISE_COSSIM_SOURCE in ("eps_tiled", "guide_epsilon_tiled", "guide_bkg_epsilon_tiled", "iig_tiled"):
-                    noise_tmp_list.append(noise_tmp)
-                if   NOISE_COSSIM_SOURCE == "eps":
-                    cossim_tmp.append(get_cosine_similarity(eps, noise_tmp))
-                if   NOISE_COSSIM_SOURCE == "eps_ch":
-                    cossim_total = torch.zeros_like(eps_tmp[0][0][0][0])
-                    for ch in range(eps_tmp.shape[1]):
-                        cossim_total += get_cosine_similarity(eps_tmp[0][ch], noise_tmp[0][ch])
-                    cossim_tmp.append(cossim_total)
-                elif NOISE_COSSIM_SOURCE == "data":
-                    cossim_tmp.append(get_cosine_similarity(denoised, noise_tmp))
-                elif NOISE_COSSIM_SOURCE == "latent":
-                    cossim_tmp.append(get_cosine_similarity(x_prenoise, noise_tmp))
-                elif NOISE_COSSIM_SOURCE == "x_prenoise":
-                    cossim_tmp.append(get_cosine_similarity(x_prenoise, x_tmp[i]))
-                elif NOISE_COSSIM_SOURCE == "x":
-                    cossim_tmp.append(get_cosine_similarity(x, x_tmp[i]))
-                elif NOISE_COSSIM_SOURCE == "x_data":
-                    cossim_tmp.append(get_cosine_similarity(denoised, x_tmp[i]))
-                elif NOISE_COSSIM_SOURCE == "x_init_vs_noise":
-                    cossim_tmp.append(get_cosine_similarity(x_init, noise_tmp))
-                elif NOISE_COSSIM_SOURCE == "mom":
-                    cossim_tmp.append(get_cosine_similarity(denoised, x + sigma_next*noise_tmp))
-                elif NOISE_COSSIM_SOURCE == "guide":
-                    cossim_tmp.append(get_cosine_similarity(y0, x_tmp[i]))
-                elif NOISE_COSSIM_SOURCE == "guide_bkg":
-                    cossim_tmp.append(get_cosine_similarity(y0_inv, x_tmp[i]))
-                    
-            if step < int(get_extra_options_kv("noise_cossim_start_step", "0", extra_options)):
-                x = x_tmp[0]
-            elif (NOISE_COSSIM_SOURCE == "iig_tiled"):
-                #eps_uncond = x - uncond[0]
-                #x = noise_cossim_iig_tiled(x_tmp, eps_uncond, noise_tmp_list, cossim_mode=NOISE_COSSIM_MODE, tile_size=noise_cossim_tile_size, step=step)
-                x = noise_cossim_guide_eps_tiled(x_0, x_tmp, uncond[0], noise_tmp_list, cossim_mode=NOISE_COSSIM_MODE, tile_size=noise_cossim_tile_size, step=step, sigma=sigma, rk_type=rk_type)
-                
-            elif (NOISE_COSSIM_SOURCE == "eps_orthogonal"):
+            Osde = NoiseStepHandlerOSDE(x, eps, denoised, x_init, y0, y0_inv)
+            if Osde.check_cossim_source(NOISE_COSSIM_SOURCE):
                 noise = rk.noise_sampler(sigma=sigma, sigma_next=sigma_next)
-                noise = get_orthogonal_noise_from(noise, eps)
-                x = alpha_ratio * x + sigma_up * noise
-            elif (NOISE_COSSIM_SOURCE == "data_orthogonal"):
-                noise = rk.noise_sampler(sigma=sigma, sigma_next=sigma_next)
-                noise = get_orthogonal_noise_from(noise, denoised)
-                x = alpha_ratio * x + sigma_up * noise
-            elif (NOISE_COSSIM_SOURCE == "eps_data_orthogonal"):
-                noise = rk.noise_sampler(sigma=sigma, sigma_next=sigma_next)
-                noise = get_orthogonal_noise_from(noise, eps, denoised)
-                x = alpha_ratio * x + sigma_up * noise
-            elif (NOISE_COSSIM_SOURCE == "x_orthogonal"):
-                noise = rk.noise_sampler(sigma=sigma, sigma_next=sigma_next)
-                noise = get_orthogonal_noise_from(noise, x)
-                x = alpha_ratio * x + sigma_up * noise
-            elif (NOISE_COSSIM_SOURCE == "xinit_orthogonal"):
-                noise = rk.noise_sampler(sigma=sigma, sigma_next=sigma_next)
-                noise = get_orthogonal_noise_from(noise, x_init)
-                x = alpha_ratio * x + sigma_up * noise
-            elif (NOISE_COSSIM_SOURCE == "x_data_orthogonal"):
-                noise = rk.noise_sampler(sigma=sigma, sigma_next=sigma_next)
-                noise = get_orthogonal_noise_from(noise, x, denoised)
-                x = alpha_ratio * x + sigma_up * noise
-            elif (NOISE_COSSIM_SOURCE == "x_eps_orthogonal"):
-                noise = rk.noise_sampler(sigma=sigma, sigma_next=sigma_next)
-                noise = get_orthogonal_noise_from(noise, x, eps)
-                x = alpha_ratio * x + sigma_up * noise
-            elif (NOISE_COSSIM_SOURCE == "x_eps_guide_orthogonal"):
-                noise = rk.noise_sampler(sigma=sigma, sigma_next=sigma_next)
-                noise = get_orthogonal_noise_from(noise, x, eps, y0)
-                x = alpha_ratio * x + sigma_up * noise
-            elif (NOISE_COSSIM_SOURCE == "x_eps_guide_bkg_orthogonal"):
-                noise = rk.noise_sampler(sigma=sigma, sigma_next=sigma_next)
-                noise = get_orthogonal_noise_from(noise, x, eps, y0_inv)
-                x = alpha_ratio * x + sigma_up * noise
-            elif (NOISE_COSSIM_SOURCE == "x_eps_data_orthogonal"):
-                noise = rk.noise_sampler(sigma=sigma, sigma_next=sigma_next)
-                noise = get_orthogonal_noise_from(noise, x, eps, denoised)
-                x = alpha_ratio * x + sigma_up * noise
-            elif (NOISE_COSSIM_SOURCE == "x_eps_data_xinit_orthogonal"):
-                noise = rk.noise_sampler(sigma=sigma, sigma_next=sigma_next)
-                noise = get_orthogonal_noise_from(noise, x, eps, denoised, x_init)
-                x = alpha_ratio * x + sigma_up * noise
-                
-            elif (NOISE_COSSIM_SOURCE == "eps_tiled"):
-                x = noise_cossim_eps_tiled(x_tmp, eps, noise_tmp_list, cossim_mode=NOISE_COSSIM_MODE, tile_size=noise_cossim_tile_size, step=step)
-            elif (NOISE_COSSIM_SOURCE == "guide_epsilon_tiled"):
-                x = noise_cossim_guide_eps_tiled(x_0, x_tmp, y0, noise_tmp_list, cossim_mode=NOISE_COSSIM_MODE, tile_size=noise_cossim_tile_size, step=step, sigma=sigma, rk_type=rk_type)
-            elif (NOISE_COSSIM_SOURCE == "guide_bkg_epsilon_tiled"):
-                x = noise_cossim_guide_eps_tiled(x_0, x_tmp, y0_inv, noise_tmp_list, cossim_mode=NOISE_COSSIM_MODE, tile_size=noise_cossim_tile_size, step=step, sigma=sigma, rk_type=rk_type)
-            elif (NOISE_COSSIM_SOURCE == "guide_tiled"):
-                x = noise_cossim_guide_tiled(x_tmp, y0, cossim_mode=NOISE_COSSIM_MODE, tile_size=noise_cossim_tile_size, step=step)
-            elif (NOISE_COSSIM_SOURCE == "guide_bkg_tiled"):
-                x = noise_cossim_guide_tiled(x_tmp, y0_inv, cossim_mode=NOISE_COSSIM_MODE, tile_size=noise_cossim_tile_size)
+                noise_osde = Osde.get_ortho_noise(noise, prev_noises, max_iter=noise_cossim_max_iter, max_score=noise_cossim_max_score, NOISE_COSSIM_SOURCE=NOISE_COSSIM_SOURCE)
+                x = alpha_ratio * x + sigma_up * noise_osde * s_noise
+            elif extra_options_flag("noise_cossim", extra_options):
+                x = handle_tiled_etc_noise_steps(x_0, x, x_prenoise, x_init, eps, denoised, y0, y0_inv, step, 
+                                 rk_type, rk, sigma_up, sigma, sigma_next, alpha_ratio, s_noise, noise_mode, SDE_NOISE_EXTERNAL, sde_noise_t,
+                                 NOISE_COSSIM_SOURCE, NOISE_COSSIM_MODE, noise_cossim_tile_size, noise_cossim_iterations,
+                                 extra_options)
             else:
-                for i in range(len(x_tmp)):
-                    if   (NOISE_COSSIM_MODE == "forward") and (cossim_tmp[i] == max(cossim_tmp)):
-                        x = x_tmp[i]
-                        break
-                    elif (NOISE_COSSIM_MODE == "reverse") and (cossim_tmp[i] == min(cossim_tmp)):
-                        x = x_tmp[i]
-                        break
-                    elif (NOISE_COSSIM_MODE == "orthogonal") and (abs(cossim_tmp[i]) == min(abs(val) for val in cossim_tmp)):
-                        x = x_tmp[i]
-                        break
-                    elif (NOISE_COSSIM_MODE != "forward") and (NOISE_COSSIM_MODE != "reverse") and (NOISE_COSSIM_MODE != "orthogonal"):
-                        x = x_tmp[0]
-                        break
+                x = rk.add_noise_post(x, sigma_up, sigma, sigma_next, alpha_ratio, s_noise, noise_mode, SDE_NOISE_EXTERNAL, sde_noise_t)
 
 
 
@@ -662,7 +406,7 @@ def get_explicit_rk_step(rk, rk_type, x, y0, y0_inv, lgw, lgw_inv, mask, lgw_mas
     rk.set_coeff(rk_type, h, c2=c2, c3=c3, stepcount=stepcount, sigmas=sigmas, sigma_down=sigma_down)
 
     s_ = [(sigma + h * c_) * s_in for c_ in rk.c]
-    x_[0] = rk.add_noise_pre(x, y0, lgw, sigma_up, sigma, sigma_next, sigma_down, alpha_ratio, s_noise, noise_mode)
+    x_[0] = rk.add_noise_pre(x, sigma_up, sigma, sigma_next, alpha_ratio, s_noise, noise_mode)
     
     x_0 = x_[0].clone()
     
@@ -684,7 +428,7 @@ def get_explicit_rk_step(rk, rk_type, x, y0, y0_inv, lgw, lgw_inv, mask, lgw_mas
     eps = x - denoised
     x = process_guides_poststep(x, denoised, eps, y0, y0_inv, mask, lgw_mask, lgw_mask_inv, guide_mode, latent_guide, latent_guide_inv, UNSAMPLE, extra_options)
 
-    x = rk.add_noise_post(x, y0, lgw, sigma_up, sigma, sigma_next, sigma_down, alpha_ratio, s_noise, noise_mode)
+    x = rk.add_noise_post(x, sigma_up, sigma, sigma_next, alpha_ratio, s_noise, noise_mode)
 
     for ms in range(rk.multistep_stages):
         eps_ [rk.multistep_stages - ms] = eps_ [rk.multistep_stages - ms - 1]

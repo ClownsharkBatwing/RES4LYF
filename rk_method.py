@@ -116,19 +116,19 @@ class RK_Method:
         else:
             self.noise_sampler = NOISE_GENERATOR_CLASSES_SIMPLE.get(noise_sampler_type)(x=x, seed=seed, sigma_min=self.sigma_min, sigma_max=self.sigma_max)
             
-    def add_noise_pre(self, x, y0, lgw, sigma_up, sigma, sigma_next, sigma_down, alpha_ratio, s_noise, noise_mode, SDE_NOISE_EXTERNAL=False, sde_noise_t=None):
+    def add_noise_pre(self, x, sigma_up, sigma, sigma_next, alpha_ratio, s_noise, noise_mode, SDE_NOISE_EXTERNAL=False, sde_noise_t=None):
         if isinstance(self.model_sampling, comfy.model_sampling.CONST) == False and noise_mode == "hard":
-            return self.add_noise(x, y0, lgw, sigma_up, sigma, sigma_next, sigma_down, alpha_ratio, s_noise, SDE_NOISE_EXTERNAL, sde_noise_t)
+            return self.add_noise(x, sigma_up, sigma, sigma_next, alpha_ratio, s_noise, SDE_NOISE_EXTERNAL, sde_noise_t)
         else:
             return x
         
-    def add_noise_post(self, x, y0, lgw, sigma_up, sigma, sigma_next, sigma_down, alpha_ratio, s_noise, noise_mode, SDE_NOISE_EXTERNAL=False, sde_noise_t=None):
+    def add_noise_post(self, x, sigma_up, sigma, sigma_next, alpha_ratio, s_noise, noise_mode, SDE_NOISE_EXTERNAL=False, sde_noise_t=None):
         if isinstance(self.model_sampling, comfy.model_sampling.CONST) == True   or   (isinstance(self.model_sampling, comfy.model_sampling.CONST) == False and noise_mode != "hard"):
-            return self.add_noise(x, y0, lgw, sigma_up, sigma, sigma_next, sigma_down, alpha_ratio, s_noise, SDE_NOISE_EXTERNAL, sde_noise_t)
+            return self.add_noise(x, sigma_up, sigma, sigma_next, alpha_ratio, s_noise, SDE_NOISE_EXTERNAL, sde_noise_t)
         else:
             return x
     
-    def add_noise(self, x, y0, lgw, sigma_up, sigma, sigma_next, sigma_down, alpha_ratio, s_noise, SDE_NOISE_EXTERNAL, sde_noise_t):
+    def add_noise(self, x, sigma_up, sigma, sigma_next, alpha_ratio, s_noise, SDE_NOISE_EXTERNAL, sde_noise_t):
 
         if sigma_next > 0.0:
             noise = self.noise_sampler(sigma=sigma, sigma_next=sigma_next)
