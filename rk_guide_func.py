@@ -19,8 +19,11 @@ def prepare_mask(x, mask, LGW_MASK_RESCALE_MIN):
         LGW_MASK_RESCALE_MIN = False
     else:
         mask = mask.unsqueeze(1)
-        mask = mask.repeat(1, x.shape[1], 1, 1) 
-        mask = F.interpolate(mask, size=(x.shape[2], x.shape[3]), mode='bilinear', align_corners=False)
+        mask = mask.repeat(1, x.shape[1], 1, 1)
+        mask = F.interpolate(mask, size=(x.shape[-2], x.shape[-1]), mode='bilinear', align_corners=False)
+        if x.dim()==5:
+            mask = mask.unsqueeze(2)
+            mask = mask.repeat(1, 1, x.shape[2], 1, 1)
         mask = mask.to(x.dtype).to(x.device)
     return mask, LGW_MASK_RESCALE_MIN
     
@@ -134,10 +137,7 @@ def process_guides_substep(x_0, x_, eps_, data_, row, y0, y0_inv, lgw, lgw_inv, 
             y0_inv = y_inv_shift
 
     lgw_mask_cur = lgw_mask.clone()
-    if lgw_mask_inv is not None:
-        lgw_mask_inv_cur = lgw_mask_inv.clone()
-    else:
-        lgw_mask_inv_cur = 1-lgw_mask_cur
+    lgw_mask_inv_cur = lgw_mask_inv.clone() if lgw_mask_inv is not None else None
     
     # Apply frame weights only if we have video frames
     if frame_weights is not None and x_0.dim() == 5:
