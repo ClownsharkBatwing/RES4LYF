@@ -754,9 +754,9 @@ def gram_schmidt_normless(A, *refs):
 def gram_schmidt_channels(A, *refs):
 
     for ref in refs:
-        for c in range(A.shape[-3]):
-            projection = get_collinear_2D(A[0][c], ref[0][c]) 
-            A[0][c] = A[0][c] - projection
+        for c_ in range(A.shape[1]):
+            projection = get_collinear_2D(A[0][c_], ref[0][c_]) 
+            A[0][c_] = A[0][c_] - projection
         A = (A - A.mean()) / A.std()
     return A
 
@@ -800,11 +800,14 @@ def get_orthogonal(x, y):
 
 
 def gram_schmidt_channels_optimized(A, *refs):
-    b, c, h, w = A.shape
+    if (A.dim() == 4):
+        b, c, h, w = A.shape
+    elif (A.dim() == 5):
+        b, c, t, h, w = A.shape
 
     # Flatten spatial dimensions
     A_flat = A.view(b, c, -1)  # Shape: (b, c, h*w)
-    
+
     for ref in refs:
         ref_flat = ref.view(b, c, -1).clone()  # Shape: (b, c, h*w)
 
@@ -824,7 +827,10 @@ def gram_schmidt_channels_per_channel(A, *refs):
     """
     Orthogonalize A with respect to refs for each channel independently.
     """
-    b, c, h, w = A.shape
+    if (A.dim() == 4):
+        b, c, h, w = A.shape
+    elif (A.dim() == 5):
+        b, c, t, h, w = A.shape
 
     # Process each channel independently
     for ref in refs:
@@ -848,15 +854,18 @@ def gram_schmidt_channels_per_channel(A, *refs):
 def get_orthogonal_noise_from_channelwise(*refs, max_iter=500, max_score=1e-15):
     noise, *refs = refs
     noise_tmp = noise.clone()
-    b,c,h,w = noise.shape
+    if (noise.dim() == 4):
+        b,c,h,w = noise.shape
+    elif (noise.dim() == 5):
+        b,c,t,h,w = noise.shape
     
     for i in range(max_iter):
         noise_tmp = gram_schmidt_channels_optimized(noise_tmp, *refs)
         
         cossim_scores = []
         for ref in refs:
-            for c in range(noise.shape[-3]):
-                cossim_scores.append(get_cosine_similarity(noise_tmp[0][c], ref[0][c]).abs())
+            for c_ in range(c):
+                cossim_scores.append(get_cosine_similarity(noise_tmp[0][c_], ref[0][c_]).abs())
             cossim_scores.append(get_cosine_similarity(noise_tmp[0], ref[0]).abs())
             
         if max(cossim_scores) < max_score:
@@ -875,13 +884,13 @@ def get_orthogonal_noise_from_channelwise_SLOWBUTWORKS(*refs, max_iter=500, max_
         cossim_scores = []
         
         for ref in refs:
-            for c in range(noise.shape[-3]):
-                noise_tmp[0][c] = get_orthogonal_mean_noise_from_single(noise_tmp[0][c], ref[0][c])
+            for c_ in range(noise.shape[1]):
+                noise_tmp[0][c] = get_orthogonal_mean_noise_from_single(noise_tmp[0][c_], ref[0][c_])
             #noise_tmp /= noise_tmp.std()
         noise_tmp = (noise_tmp - noise_tmp.mean()) / noise_tmp.std()
         for ref in refs:
-            for c in range(noise.shape[-3]):
-                cossim_scores.append(get_cosine_similarity(noise_tmp[0][c], ref[0][c]).abs())
+            for c_ in range(noise.shape[1]):
+                cossim_scores.append(get_cosine_similarity(noise_tmp[0][c_], ref[0][c_]).abs())
             cossim_scores.append(get_cosine_similarity(noise_tmp[0], ref[0]).abs())
             
         if max(cossim_scores) < max_score:
@@ -936,13 +945,13 @@ def get_orthogonal_noise_from_channelwise_FAST_ISH_MOSTRECENT(*refs, max_iter=50
         cossim_scores = []
         
         for ref in refs_flat:
-            for c in range(noise.shape[-3]):
-                noise_tmp[0][c] = get_orthogonal_mean_noise_from_precalc(noise_tmp[0][c], ref[0][c])
+            for c_ in range(c):
+                noise_tmp[0][c] = get_orthogonal_mean_noise_from_precalc(noise_tmp[0][c_], ref[0][c_])
         #noise_tmp /= noise_tmp.std()
         noise_tmp = (noise_tmp - noise_tmp.mean()) / noise_tmp.std()
         for ref in refs:
-            for c in range(noise.shape[-3]):
-                cossim_scores.append(get_cosine_similarity(noise_tmp[0][c], ref[0][c]).abs())
+            for c_ in range(c):
+                cossim_scores.append(get_cosine_similarity(noise_tmp[0][c_], ref[0][c_]).abs())
             cossim_scores.append(get_cosine_similarity(noise_tmp[0], ref[0]).abs())
             
         if max(cossim_scores) < max_score:
@@ -960,7 +969,11 @@ def get_orthogonal_noise_from_channelwise_FAST_ISH_MOSTRECENT(*refs, max_iter=50
 def get_orthogonal_noise_from_channelwise_batchwise(*refs, max_iter=100, max_score=1e-10):
     noise, *refs = refs 
     
-    b, c, h, w = noise.shape
+    if (noise.dim() == 4):
+        b, c, h, w = noise.shape
+    elif (noise.dim() == 5):
+        b, c, t, h, w = noise.shape
+
     for iter in range(max_iter):
         refs_flat = [ref.clone().view(b, c, -1) for ref in refs]  
         noise_flat = noise.clone().view(b, c, -1)
@@ -972,7 +985,10 @@ def get_orthogonal_noise_from_channelwise_batchwise(*refs, max_iter=100, max_sco
             noise_flat -= torch.sum(noise_flat * ref_flat, dim=-1, keepdim=True) * ref_flat
 
         noise_perp_flat = noise_flat 
-        noise_perp = noise_perp_flat.view(b, c, h, w) 
+        if (noise.dim() == 4):
+            noise_perp = noise_perp_flat.view(b, c, h, w) 
+        elif (noise.dim() == 5):
+            noise_perp = noise_perp_flat.view(b, c, t, h, w)
 
         #refs_flat = [ref.view(ref.size(0), -1).clone() for ref in refs]
         #noise_flat = noise.clone().view(noise.size(0), -1)
@@ -1013,8 +1029,11 @@ def get_orthogonal_noise_from_channelwise_batchwise(*refs, max_iter=100, max_sco
 
 def get_orthogonal_noise_from_channelwise_works(*refs, max_iter=100, max_score=1e-10):
     noise, *refs = refs 
-    
-    b, c, h, w = noise.shape
+    if (noise.dim() == 4):
+        b, c, h, w = noise.shape
+    elif (noise.dim() == 5):
+        b, c, t, h, w = noise.shape
+
     for iter in range(max_iter):
         refs_flat = [ref.clone().view(b, c, -1) for ref in refs]  
         noise_flat = noise.clone().view(b, c, -1)
@@ -1025,8 +1044,11 @@ def get_orthogonal_noise_from_channelwise_works(*refs, max_iter=100, max_score=1
             ref_flat /= ref_flat.norm(dim=-1, keepdim=True)
             noise_flat -= torch.sum(noise_flat * ref_flat, dim=-1, keepdim=True) * ref_flat
 
-        noise_perp_flat = noise_flat 
-        noise_perp = noise_perp_flat.view(b, c, h, w) 
+        noise_perp_flat = noise_flat
+        if (noise.dim() == 4):
+            noise_perp = noise_perp_flat.view(b, c, h, w) 
+        elif (noise.dim() == 5):
+            noise_perp = noise_perp_flat.view(b, c, t, h, w)
 
         cossim_score = 0
         for i, ref in enumerate(refs):
@@ -1048,7 +1070,10 @@ def get_orthogonal_noise_from_channelwise_works(*refs, max_iter=100, max_score=1
 def get_orthogonal_noise_from_channelwise_fast_version(*refs, max_iter=500, max_score=1e-15):
     noise, *refs = refs 
     
-    b, c, h, w = noise.shape
+    if (noise.dim() == 4):
+        b, c, h, w = noise.shape
+    elif (noise.dim() == 5):
+        b, c, t, h, w = noise.shape
     noise_flat = noise.view(b, c, -1)
     
     refs_flat = []
@@ -1064,7 +1089,10 @@ def get_orthogonal_noise_from_channelwise_fast_version(*refs, max_iter=500, max_
             noise_flat -= torch.sum(noise_flat * ref_flat, dim=-1, keepdim=True) * ref_flat
         
         noise_perp_flat = noise_flat
-        noise_perp = noise_perp_flat.view(b, c, h, w) 
+        if (noise.dim() == 4):
+            noise_perp = noise_perp_flat.view(b, c, h, w) 
+        elif (noise.dim() == 5):
+            noise_perp = noise_perp_flat.view(b, c, t, h, w)
 
         cossim_score = 0
         for ref in refs:
@@ -1085,7 +1113,10 @@ def get_orthogonal_noise_from_channelwise_fast_version(*refs, max_iter=500, max_
 def get_orthogonal_noise_from_channelwise_suspect_but_was_using_this(*refs, max_iter=500, max_score=1e-15):
     noise, *refs = refs 
     
-    b, c, h, w = noise.shape
+    if (noise.dim() == 4):
+        b, c, h, w = noise.shape
+    elif (noise.dim() == 5):
+        b, c, t, h, w = noise.shape
     noise_flat = noise.view(b, c, -1)
     
     refs_flat = []
@@ -1101,7 +1132,10 @@ def get_orthogonal_noise_from_channelwise_suspect_but_was_using_this(*refs, max_
             noise_flat -= torch.sum(noise_flat * ref_flat, dim=-1, keepdim=True) * ref_flat
         
         noise_perp_flat = noise_flat
-        noise_perp = noise_perp_flat.view(b, c, h, w) 
+        if (noise.dim() == 4):
+            noise_perp = noise_perp_flat.view(b, c, h, w) 
+        elif (noise.dim() == 5):
+            noise_perp = noise_perp_flat.view(b, c, t, h, w)
 
         cossim_score = 0
         for ref in refs:
