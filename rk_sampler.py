@@ -17,7 +17,8 @@ from .rk_guide_func import *
 from .latents import normalize_latent, initialize_or_scale, latent_normalize_channels
 from .helper import get_extra_options_kv, extra_options_flag
 from .sigmas import get_sigmas
-from .res4lyf import log
+
+PRINT_DEBUG=False
 
 def get_cosine_similarity(a, b):
     if a.dim() == 5 and b.dim() == 5 and b.shape[2] == 1:
@@ -304,9 +305,9 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
                 dims = tuple(range(2, data_[0].ndim)) # dimensions 2 and above
                 data_norm = data_[0] - data_[0].mean(dim=dims, keepdim=True)
                 y0_norm = y0 - y0.mean(dim=dims, keepdim=True)
-                log(f"cosine similarity: {get_cosine_similarity(data_norm, y0_norm).item()}")
+                if PRINT_DEBUG:
+                    print(get_cosine_similarity(data_norm, y0_norm).item())
                 if cossim_cutoff > get_cosine_similarity(data_norm, y0_norm):
-                    log("running substep")
                     eps_, x_ = process_guides_substep(x_0, x_, eps_, data_, row, y0, y0_inv, lgw[step], lgw_inv[step], lgw_mask, lgw_mask_inv, step, sigma, sigma_next,
                                                       sigma_down, s_, unsample_resample_scale, rk, rk_type, guide_mode, latent_guide_inv, UNSAMPLE, extra_options, frame_weights)
             
@@ -442,7 +443,8 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
             else:
                 x = rk.add_noise_post(x, sigma_up, sigma, sigma_next, alpha_ratio, s_noise, noise_mode, SDE_NOISE_EXTERNAL, sde_noise_t)
 
-        log("Data vs. y0 cossim score: ", get_cosine_similarity(data_[0], y0).item())
+        if PRINT_DEBUG:
+            print("Data vs. y0 cossim score: ", get_cosine_similarity(data_[0], y0).item())
 
         for ms in range(rk.multistep_stages):
             eps_ [rk.multistep_stages - ms] = eps_ [rk.multistep_stages - ms - 1]
@@ -450,7 +452,8 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
         eps_ [0] = torch.zeros_like(eps_ [0])
         data_[0] = torch.zeros_like(data_[0])
         
-        log("Denoised vs. y0 cossim score: ", get_cosine_similarity(denoised, y0).item())
+        if PRINT_DEBUG:
+            print("Denoised vs. y0 cossim score: ", get_cosine_similarity(denoised, y0).item())
         denoised_prev = denoised
         eps_prev = eps
         
