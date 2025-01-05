@@ -173,7 +173,7 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
     elif sigmas[0] < sigmas[1]:
         mask_inv = (1-mask)
     
-    x, y0_batch, y0_inv = rk.init_guides(x, latent_guide, latent_guide_inv, mask, sigmas, UNSAMPLE, frame_weights)
+    x, y0_batch, y0_inv = rk.init_guides(x, latent_guide, latent_guide_inv, mask, sigmas, UNSAMPLE)
     x, y0_batch, y0_inv = normalize_inputs(x, y0_batch, y0_inv, guide_mode, extra_options)
         
     if SDE_NOISE_EXTERNAL:
