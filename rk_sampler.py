@@ -18,7 +18,7 @@ from .latents import normalize_latent, initialize_or_scale, latent_normalize_cha
 from .helper import get_extra_options_kv, extra_options_flag
 from .sigmas import get_sigmas
 
-PRINT_DEBUG=True
+PRINT_DEBUG=False
 
 def get_cosine_similarity(a, b):
     return F.cosine_similarity(a.flatten(), b.flatten(), dim=0)
