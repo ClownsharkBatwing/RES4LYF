@@ -10,7 +10,9 @@ from .latents import hard_light_blend, normalize_latent
 from .rk_method import RK_Method
 from .helper import get_extra_options_kv, extra_options_flag, get_cosine_similarity
 
+
 import itertools
+
 
 
 def prepare_mask(x, mask, LGW_MASK_RESCALE_MIN):
@@ -113,6 +115,8 @@ def get_guide_epsilon(x_0, x_, y0, sigma, rk_type, b=None, c=None):
     return eps#, eps_inv
 
 
+
+
 @torch.no_grad()
 def process_guides_substep(x_0, x_, eps_, data_, row, y0, y0_inv, lgw, lgw_inv, lgw_mask, lgw_mask_inv, step, sigma, sigma_next, sigma_down, s_, unsample_resample_scale, rk, rk_type, guide_mode, latent_guide_inv, UNSAMPLE, extra_options, frame_weights=None):
     
@@ -157,9 +161,9 @@ def process_guides_substep(x_0, x_, eps_, data_, row, y0, y0_inv, lgw, lgw_inv, 
     elif "epsilon" in guide_mode:
         if sigma > sigma_next:
             eps_guided = eps_[row].clone()
-                    
+                
             tol_value = float(get_extra_options_kv("tol", "-1.0", extra_options))
-            if tol_value >= 0 and (lgw > 0 or lgw_inv > 0):
+            if tol_value >= 0 and (lgw > 0 or lgw_inv > 0):           
                 for b, c in itertools.product(range(x_0.shape[0]), range(x_0.shape[1])):
                     current_diff     = torch.norm(data_[row][b][c] - y0    [b][c])
                     current_diff_inv = torch.norm(data_[row][b][c] - y0_inv[b][c])
@@ -190,7 +194,10 @@ def process_guides_substep(x_0, x_, eps_, data_, row, y0, y0_inv, lgw, lgw_inv, 
                 eps_row_ortho_inv = get_orthogonal(eps_[row], eps_row_inv)
 
                 eps_next_row = eps_[row]    +    lgw_mask_fw * (eps_row - eps_row_ortho)   +    lgw_mask_inv_fw * (eps_row_inv - eps_row_ortho_inv)
-                eps_guided = torch.norm(eps_[row]) / torch.norm(eps_next_row)    *    eps_next_row
+                if (extra_options_flag("epsilon_old_norm", extra_options)):
+                    eps_[row] = torch.norm(eps_[row]) / torch.norm(eps_next_row)    *    eps_next_row
+                else:
+                    eps_guided = eps_next_row
                 
             elif extra_options_flag("epsilon_proj_test_scalesplit", extra_options) and (lgw > 0 or lgw_inv > 0):
                 avg, avg_inv = 0, 0
@@ -239,8 +246,9 @@ def process_guides_substep(x_0, x_, eps_, data_, row, y0, y0_inv, lgw, lgw_inv, 
                 eps_guided = apply_temporal_smoothing(eps_guided, temporal_smoothing)
             
             eps_[row] = eps_guided
-
+            
     elif (UNSAMPLE or guide_mode in {"resample", "unsample"}) and (lgw > 0 or lgw_inv > 0):
+            
         cvf = rk.get_epsilon(x_0, x_[row+1], y0, sigma, s_[row], sigma_down, unsample_resample_scale, extra_options)
         if UNSAMPLE and sigma > sigma_next and latent_guide_inv is not None:
             cvf_inv = rk.get_epsilon(x_0, x_[row+1], y0_inv, sigma, s_[row], sigma_down, unsample_resample_scale, extra_options)      
@@ -264,7 +272,7 @@ def process_guides_substep(x_0, x_, eps_, data_, row, y0, y0_inv, lgw, lgw_inv, 
 
                 eps_[row][b][c] = eps_[row][b][c] + lgw_mask_clamp[b][c] * (cvf[b][c] - eps_[row][b][c]) + lgw_mask_clamp_inv[b][c] * (cvf_inv[b][c] - eps_[row][b][c])
                 
-        if extra_options_flag("disable_lgw_scaling", extra_options):
+        elif extra_options_flag("disable_lgw_scaling", extra_options):
             eps_[row] = eps_[row] + lgw_mask_fw * (cvf - eps_[row]) + lgw_mask_inv_fw * (cvf_inv - eps_[row])
             
         else:
@@ -887,7 +895,7 @@ def get_orthogonal_noise_from_channelwise_SLOWBUTWORKS(*refs, max_iter=500, max_
         
         for ref in refs:
             for c_ in range(noise.shape[1]):
-                noise_tmp[0][c] = get_orthogonal_mean_noise_from_single(noise_tmp[0][c_], ref[0][c_])
+                noise_tmp[0][c_] = get_orthogonal_mean_noise_from_single(noise_tmp[0][c_], ref[0][c_])
             #noise_tmp /= noise_tmp.std()
         noise_tmp = (noise_tmp - noise_tmp.mean()) / noise_tmp.std()
         for ref in refs:
