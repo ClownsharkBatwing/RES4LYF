@@ -18,16 +18,16 @@ def initialize_or_scale(tensor, value, steps):
         return value * tensor
     
 def latent_normalize_channels(x):
-    mean = x.mean(dim=(2, 3), keepdim=True)
-    std  = x.std (dim=(2, 3), keepdim=True)
+    mean = x.mean(dim=(-2, -1), keepdim=True)
+    std  = x.std (dim=(-2, -1), keepdim=True)
     return  (x - mean) / std
 
 def latent_stdize_channels(x):
-    std  = x.std (dim=(2, 3), keepdim=True)
+    std  = x.std (dim=(-2, -1), keepdim=True)
     return  x / std
 
 def latent_meancenter_channels(x):
-    mean = x.mean(dim=(2, 3), keepdim=True)
+    mean = x.mean(dim=(-2, -1), keepdim=True)
     return  x - mean
 
 
