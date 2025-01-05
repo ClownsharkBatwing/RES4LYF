@@ -154,7 +154,8 @@ def process_guides_substep(x_0, x_, eps_, data_, row, y0, y0_inv, lgw, lgw_inv, 
                 eps_row_ortho_inv = get_orthogonal(eps_[row], eps_row_inv)
 
                 eps_next_row = eps_[row]    +    lgw_mask * (eps_row - eps_row_ortho)   +    lgw_mask_inv * (eps_row_inv - eps_row_ortho_inv)
-                eps_[row] = torch.norm(eps_[row]) / torch.norm(eps_next_row)    *    eps_next_row
+                #eps_[row] = torch.norm(eps_[row]) / torch.norm(eps_next_row)    *    eps_next_row
+                eps_[row] = eps_next_row
                 
             elif extra_options_flag("epsilon_proj_test_scalesplit", extra_options) and (lgw > 0 or lgw_inv > 0):
                 avg, avg_inv = 0, 0

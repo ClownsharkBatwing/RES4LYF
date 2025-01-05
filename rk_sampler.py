@@ -18,7 +18,7 @@ from .latents import normalize_latent, initialize_or_scale, latent_normalize_cha
 from .helper import get_extra_options_kv, extra_options_flag
 from .sigmas import get_sigmas
 
-PRINT_DEBUG=False
+PRINT_DEBUG=True
 
 def get_cosine_similarity(a, b):
     return F.cosine_similarity(a.flatten(), b.flatten(), dim=0)
@@ -96,7 +96,7 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
     substep_noise_scaling = float(get_extra_options_kv("substep_noise_scaling", "1.0",  extra_options))
     substep_noise_mode    =       get_extra_options_kv("substep_noise_mode",    "hard", extra_options)
     
-    substep_eta_start_step = int(get_extra_options_kv("substep_noise_start_step",  "0", extra_options))
+    substep_eta_start_step = int(get_extra_options_kv("substep_noise_start_step",  "-1", extra_options))
     substep_eta_final_step = int(get_extra_options_kv("substep_noise_final_step", "-1", extra_options))
     
     noise_substep_cossim_max_iter  =   int(get_extra_options_kv("noise_substep_cossim_max_iter",  "50",   extra_options))
@@ -226,10 +226,11 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
 
 
 
+
         if implicit_steps == 0: 
             for row in range(rk.rows - rk.multistep_stages):
                 
-                sub_sigma_up, sub_sigma, sub_sigma_down, sub_alpha_ratio = 0, s_[row], s_[row+1], 1
+                sub_sigma_up, sub_sigma, sub_sigma_next, sub_sigma_down, sub_alpha_ratio = 0, s_[row], s_[row+1], s_[row+1], 1
                 if row > 0 and step > substep_eta_start_step and s_[row+1] <= s_[row]:
                     #sub_sigma_up, sub_sigma, sub_sigma_down, sub_alpha_ratio = get_res4lyf_step_with_model(model, s_[row-1], s_[row], substep_eta, eta_var, substep_noise_mode, s_[row]-s_[row-1]) #rough
                     sub_sigma_up, sub_sigma, sub_sigma_down, sub_alpha_ratio = get_res4lyf_step_with_model(model, s_[row], s_[row+1], substep_eta, eta_var, substep_noise_mode, s_[row+1]-s_[row])
@@ -238,8 +239,10 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
                     sub_sigma_up, sub_sigma, sub_sigma_down, sub_alpha_ratio = 0, s_[row], s_[row+1], 1
 
                 if (substep_eta_final_step < 0 and step == len(sigmas)-1+substep_eta_final_step)   or   (substep_eta_final_step > 0 and step > substep_eta_final_step):
+                    #sub_sigma_up, sub_sigma, sub_sigma_down, sub_alpha_ratio = 0, s_[row-1], s_[row], 1
                     sub_sigma_up, sub_sigma, sub_sigma_down, sub_alpha_ratio = 0, s_[row], s_[row+1], 1
                 
+                # UPDATE
                 x_[row+1] = x_0 + h * rk.a_k_sum(eps_, row)     
 
                 if guide_mode == "data":
@@ -251,6 +254,7 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
                         denoised_shifted = denoised   +   lgw_mask * (y0 - denoised)   +   lgw_mask_inv * (y0_inv - denoised)
                     x_[row+1] = denoised_shifted + eps
                 
+                # NOISE ADD
                 if (row > 0) and (sub_sigma_up > 0) and ((SUBSTEP_SKIP_LAST == False) or (row < rk.rows - rk.multistep_stages - 1)):
                     data_tmp = denoised_prev if data_[row].sum() == 0 else data_[row]
                     eps_tmp  = eps_prev      if  eps_[row].sum() == 0 else eps_ [row]
@@ -265,15 +269,13 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
                             NOISE_SUBSTEP_COSSIM_SOURCE, NOISE_SUBSTEP_COSSIM_MODE, noise_substep_cossim_tile_size, noise_substep_cossim_iterations,
                             extra_options)
                     else:
-                        x_[row+1] = rk.add_noise_post(x_[row+1], sub_sigma_up, sub_sigma, s_[row], sub_alpha_ratio, s_noise, substep_noise_mode, SDE_NOISE_EXTERNAL, sde_noise_t)
+                        x_[row+1] = rk.add_noise_post(x_[row+1], sub_sigma_up, sub_sigma, sub_sigma_next, sub_alpha_ratio, s_noise, substep_noise_mode, SDE_NOISE_EXTERNAL, sde_noise_t)
 
-    
-                eps_[row], data_[row] = rk(x_0, x_[row+1], s_[row], h, **extra_args)       #MODEL CALL
+                #x_mid, eps_, data_ = get_explicit_rk_step(rk, rk_type, x_mid, y0, y0_inv, lgw[step], lgw_inv[step], mask, lgw_mask, lgw_mask_inv, step, s_all[i], s_all[i+1], eta, eta_var, s_noise, noise_mode, c2, c3, step+i, sigmas_and, x_, eps_, data_, unsample_resample_scale, guide_mode, latent_guide, latent_guide_inv, UNSAMPLE, extra_options, **extra_args)
                 
-                if sub_sigma_up > 0 and ((SUBSTEP_SKIP_LAST == False) or (row < rk.rows - rk.multistep_stages - 1))   and   row > 0   and   (sub_sigma_down > 0): # and sigma_next > 0:
-                    substep_noise_scaling_ratio = (s_[row]/sigma) * (sigma/sub_sigma_down)
-                    eps_[row] *= 1 + substep_noise_scaling*(substep_noise_scaling_ratio-1)
-
+                #MODEL CALL
+                eps_[row], data_[row] = rk(x_0, x_[row+1], s_[row], h, **extra_args)       
+                
                 cossim_cutoff = float(get_extra_options_kv("epsilon_cossim_cutoff", "1.0", extra_options))
                 #data_norm = latent_normalize_channels(data_[0]) #torch.norm(data_[0], dim=-3)
                 #y0_norm = latent_normalize_channels(y0) #torch.norm(y0, dim=-3)
@@ -284,11 +286,34 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
                 if cossim_cutoff > get_cosine_similarity(data_norm, y0_norm):
                     eps_, x_ = process_guides_substep(x_0, x_, eps_, data_, row, y0, y0_inv, lgw[step], lgw_inv[step], lgw_mask, lgw_mask_inv, step, sigma, sigma_next, sigma_down, s_, unsample_resample_scale, rk, rk_type, guide_mode, latent_guide_inv, UNSAMPLE, extra_options)
             
+                #if sub_sigma_up > 0 and ((SUBSTEP_SKIP_LAST == False) or (row < rk.rows - rk.multistep_stages - 1))   and   row > 0   and   (sub_sigma_down > 0): # and sigma_next > 0:
+                if substep_eta > 0 and row < rk.rows and ((SUBSTEP_SKIP_LAST == False) or (row < rk.rows - rk.multistep_stages - 1))   and   (sub_sigma_down > 0) and sigma_next > 0:
+                    #sub_sigma_up, sub_sigma, sub_sigma_down, sub_alpha_ratio = get_res4lyf_step_with_model(model, s_[row], s_[row+1], substep_eta, eta_var, substep_noise_mode, s_[row+1]-s_[row])
+                    #substep_noise_scaling_ratio = (s_[row+1]/sigma)**rk.c[row] * (sigma/sub_sigma_down)**rk.c[row]
+                    
+                    #substep_noise_scaling_ratio = (s_[row+1]/sigma)**rk.c[row] * (1 / ((sub_sigma_down/sigma)**rk.c[row])) #THIS IS WHAT I JUST RAN #comfyui 03442
+                    substep_noise_scaling_ratio = (s_[row+1]/sigma) * (sigma/sub_sigma_down)
+                    
+                    #substep_noise_scaling_ratio = (s_[row]/sigma)**rk.c[row] * (1 / ((sub_sigma_down/sigma)**rk.c[row]))   #HAVE NOT RUN THIS YET #ran overseas
+                    
+                    
+                    #substep_noise_scaling_ratio = (sigma - sub_sigma_down) / (sigma - sub_sigma_next)
+                    
+                    eps_[row] *= 1 + substep_noise_scaling*(substep_noise_scaling_ratio-1)
+
+            
             x = x_0 + h * rk.b_k_sum(eps_, 0)
                     
             denoised = x_0 + ((sigma / (sigma - sigma_down)) *  h) * rk.b_k_sum(eps_, 0) 
             eps = x - denoised
             x = process_guides_poststep(x, denoised, eps, y0, y0_inv, mask, lgw_mask, lgw_mask_inv, guide_mode, latent_guide, latent_guide_inv, UNSAMPLE, extra_options)
+            
+            #x = x_0 + h * rk.b_k_sum(eps_, 0)
+                    
+            #denoised = x_0 + ((sigma / (sigma - sigma_down)) *  h) * rk.b_k_sum(eps_, 0) 
+            #eps = x - denoised
+            #x = process_guides_poststep(x, denoised, eps, y0, y0_inv, mask, lgw_mask, lgw_mask_inv, guide_mode, latent_guide, latent_guide_inv, UNSAMPLE, extra_options)
+
 
 
 
@@ -391,7 +416,7 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
                 x = rk.add_noise_post(x, sigma_up, sigma, sigma_next, alpha_ratio, s_noise, noise_mode, SDE_NOISE_EXTERNAL, sde_noise_t)
 
         if PRINT_DEBUG:
-            print("Data vs. y0 cossim score: ", get_cosine_similarity(data_[0].item(), y0).item())
+            print("Data vs. y0 cossim score: ", get_cosine_similarity(data_[0], y0).item())
 
         for ms in range(rk.multistep_stages):
             eps_ [rk.multistep_stages - ms] = eps_ [rk.multistep_stages - ms - 1]
@@ -450,6 +475,11 @@ def get_explicit_rk_step(rk, rk_type, x, y0, y0_inv, lgw, lgw_inv, mask, lgw_mas
         data_[rk.multistep_stages - ms] = data_[rk.multistep_stages - ms - 1]
 
     return x, eps_, data_
+
+
+
+
+
 
 
 
