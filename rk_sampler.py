@@ -2,6 +2,7 @@ import torch
 import torch.nn.functional as F
 import torchvision.transforms as T
 import re
+import copy
 
 from tqdm.auto import trange
 import gc
@@ -247,7 +248,10 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
                     
                 h_new = (rk.h_fn(sub_sigma_down, sigma) / rk.c[row+1])[0]
                 rk_new. set_coeff(rk_type,  h_new,     c1, c2, c3, step, sigmas, sigma, sigma_down)
-                
+                s_new_       = [(  rk_new.sigma_fn( rk_new.t_fn(sigma) +     h_new*c_)) * s_one for c_ in   rk_new.c]
+                s_merge_ = copy.deepcopy(s_)
+                s_merge_[row+1] = s_new_[row+1]
+                s_new_ = s_merge_
                 
                 
                 
@@ -302,8 +306,9 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
                 if PRINT_DEBUG:
                     print(get_cosine_similarity(data_norm, y0_norm).item())
                 if cossim_cutoff > get_cosine_similarity(data_norm, y0_norm):
-                    eps_, x_ = process_guides_substep(x_0, x_, eps_, data_, row, y0, y0_inv, lgw[step], lgw_inv[step], lgw_mask, lgw_mask_inv, step, sigma, sigma_next, sigma_down, s_, unsample_resample_scale, rk, rk_type, guide_mode, latent_guide_inv, UNSAMPLE, extra_options)
-            
+                    #eps_, x_ = process_guides_substep(x_0, x_, eps_, data_, row, y0, y0_inv, lgw[step], lgw_inv[step], lgw_mask, lgw_mask_inv, step, sigma, sigma_next, sigma_down, s_, unsample_resample_scale, rk, rk_type, guide_mode, latent_guide_inv, UNSAMPLE, extra_options)
+                    eps_, x_ = process_guides_substep(x_0, x_, eps_, data_, row, y0, y0_inv, lgw[step], lgw_inv[step], lgw_mask, lgw_mask_inv, step, sigma, sigma_next, sigma_down, s_new_, unsample_resample_scale, rk, rk_type, guide_mode, latent_guide_inv, UNSAMPLE, extra_options)
+
                 #if sub_sigma_up > 0 and ((SUBSTEP_SKIP_LAST == False) or (row < rk.rows - rk.multistep_stages - 1))   and   row > 0   and   (sub_sigma_down > 0): # and sigma_next > 0:
                 if substep_eta > 0 and row < rk.rows-1 and ((SUBSTEP_SKIP_LAST == False) or (row < rk.rows - rk.multistep_stages - 1))   and   (sub_sigma_down > 0) and sigma_next > 0:
                     #sub_sigma_up, sub_sigma, sub_sigma_down, sub_alpha_ratio = get_res4lyf_step_with_model(model, s_[row], s_[row+1], substep_eta, eta_var, substep_noise_mode, s_[row+1]-s_[row])
