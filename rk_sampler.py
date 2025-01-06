@@ -29,6 +29,14 @@ def print_tensor_hash(tensor, hash_fn_name="md5"):
     else:
         print(hashlib.md5(tensor.cpu().numpy()).hexdigest())
 
+def cuda_cleanup(doSync=False, doEmpty=False, doGC=False):
+    if doSync:
+        torch.cuda.synchronize()
+    if doEmpty:
+        torch.cuda.empty_cache()
+    if doGC:
+        gc.collect()
+
 def get_cosine_similarity(a, b):
     if a.dim() == 5 and b.dim() == 5 and b.shape[2] == 1:
         b = b.expand(-1, -1, a.shape[2], -1, -1)
@@ -114,11 +122,31 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
     noise_cossim_max_iter          =   int(get_extra_options_kv("noise_cossim_max_iter",          "50",   extra_options))
     noise_substep_cossim_max_score = float(get_extra_options_kv("noise_substep_cossim_max_score", "1e-7", extra_options))
     noise_cossim_max_score         = float(get_extra_options_kv("noise_cossim_max_score",         "1e-7", extra_options))
-    
+
+    cossim_cutoff = float(get_extra_options_kv("epsilon_cossim_cutoff", "1.0", extra_options))
     cfg_cw = float(get_extra_options_kv("cfg_cw", "1.0", extra_options))
+    temporal_smoothing = float(get_extra_options_kv("temporal_smoothing", "0.0", extra_options))
+
+    # extra_options flags
+    fast_implicit_guess = extra_options_flag("fast_implicit_guess", extra_options)
+    fast_implicit_guess_use_guide = extra_options_flag("fast_implicit_guess_use_guide", extra_options)
+    noise_substep_cossim = extra_options_flag("noise_substep_cossim", extra_options)
+    eps_preview = extra_options_flag("eps_preview", extra_options)
+    noise_cossim = extra_options_flag("noise_cossim", extra_options)
+
+    # Dev kv and flags
+    def_dtype = get_extra_options_kv("default_dtype", "torch.float64", extra_options)
+    cuda_sync_a = extra_options_flag("cuda_sync_a", extra_options)
+    cuda_sync_b = extra_options_flag("cuda_sync_b", extra_options)
+    cuda_empty_a = extra_options_flag("cuda_empty_a", extra_options)
+    cuda_empty_b = extra_options_flag("cuda_empty_b", extra_options)
+    substep_old_sub_sigma = extra_options_flag("substep_old_sub_sigma", extra_options)
     
     s_in, s_one = x.new_ones([x.shape[0]]), x.new_ones([1])
-    default_dtype = torch.float64
+    if "float32" in def_dtype:
+        default_dtype = torch.float32
+    else:
+        default_dtype = torch.float64
     max_steps=10000
     
     SDE_NOISE_EXTERNAL = False
@@ -247,7 +275,7 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
         if implicit_steps == 0: 
             for row in range(rk.rows - rk.multistep_stages):
                 
-                if extra_options_flag("substep_old_sub_sigma", extra_options):
+                if substep_old_sub_sigma:
                     sub_sigma_up, sub_sigma, sub_sigma_down, sub_alpha_ratio = 0, s_[row], s_[row+1], 1
                 else:
                     sub_sigma_up, sub_sigma, sub_sigma_next, sub_sigma_down, sub_alpha_ratio = 0, s_[row], s_[row+1], s_[row+1], 1
@@ -288,7 +316,6 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
                     else:
                         denoised_shifted = denoised   +   lgw_mask_fw * (y0 - denoised)   +   lgw_mask_inv_fw * (y0_inv - denoised)
                    
-                    temporal_smoothing = float(get_extra_options_kv("temporal_smoothing", "0.0", extra_options))
                     if temporal_smoothing > 0:
                         denoised_tmp = apply_temporal_smoothing(denoised_shifted, temporal_smoothing)
                         denoised_shifted = denoised_shifted + lgw_mask_fw * (denoised_tmp - denoised_shifted)
@@ -305,31 +332,24 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
                         noise = rk.noise_sampler(sigma=sub_sigma, sigma_next=sub_sigma_next)    #should be s_[row-1]
                         noise_osde = Osde.get_ortho_noise(noise, prev_noises, max_iter=noise_substep_cossim_max_iter, max_score=noise_substep_cossim_max_score, NOISE_COSSIM_SOURCE=NOISE_SUBSTEP_COSSIM_SOURCE)
                         x_[row+1] = sub_alpha_ratio * x_[row+1] + sub_sigma_up * noise_osde * s_noise
-                    elif extra_options_flag("noise_substep_cossim", extra_options):
+                    elif noise_substep_cossim:
                         x_[row+1] = handle_tiled_etc_noise_steps(x_0, x_[row+1], x_prenoise, x_init, eps_tmp, data_tmp, y0, y0_inv, row, 
                             rk_type, rk, sub_sigma_up, s_[row-1], s_[row], sub_alpha_ratio, s_noise, substep_noise_mode, SDE_NOISE_EXTERNAL, sde_noise_t,
                             NOISE_SUBSTEP_COSSIM_SOURCE, NOISE_SUBSTEP_COSSIM_MODE, noise_substep_cossim_tile_size, noise_substep_cossim_iterations,
                             extra_options)
                     else:
-                        if extra_options_flag("substep_old_sub_sigma", extra_options):
+                        if substep_old_sub_sigma:
                             x_[row+1] = rk.add_noise_post(x_[row+1], sub_sigma_up, sub_sigma, s_[row], sub_alpha_ratio, s_noise, substep_noise_mode, SDE_NOISE_EXTERNAL, sde_noise_t)
                         else:
                             x_[row+1] = rk.add_noise_post(x_[row+1], sub_sigma_up, sub_sigma, sub_sigma_next, sub_alpha_ratio, s_noise, substep_noise_mode, SDE_NOISE_EXTERNAL, sde_noise_t)
 
-                if extra_options_flag("cuda_sync_a", extra_options):
-                    torch.cuda.synchronize()
-                if extra_options_flag("cuda_empty_a", extra_options):
-                    torch.cuda.empty_cache()
+                cuda_cleanup(cuda_sync_a, cuda_empty_a, False)
                 eps_[row], data_[row] = rk(x_0, x_[row+1], s_[row], h, **extra_args)       #MODEL CALL
-                if extra_options_flag("cuda_sync_b", extra_options):
-                    torch.cuda.synchronize()
-                if extra_options_flag("cuda_empty_b", extra_options):
-                    torch.cuda.empty_cache()
+                cuda_cleanup(cuda_sync_b, cuda_empty_b, False)                
                 if sub_sigma_up > 0 and ((SUBSTEP_SKIP_LAST == False) or (row < rk.rows - rk.multistep_stages - 1))   and   row > 0   and   (sub_sigma_down > 0): # and sigma_next > 0:
                     substep_noise_scaling_ratio = (s_[row]/sigma) * (sigma/sub_sigma_down)
                     eps_[row] *= 1 + substep_noise_scaling*(substep_noise_scaling_ratio-1)
 
-                cossim_cutoff = float(get_extra_options_kv("epsilon_cossim_cutoff", "1.0", extra_options))
                 dims = tuple(range(2, data_[0].ndim)) # dimensions 2 and above
                 data_norm = data_[0] - data_[0].mean(dim=dims, keepdim=True)
                 y0_norm   = y0 -             y0.mean(dim=dims, keepdim=True)
@@ -340,7 +360,7 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
                                                       sigma_down, s_new_, unsample_resample_scale, rk, rk_type, guide_mode, latent_guide_inv, UNSAMPLE, extra_options, frame_weights)
             
                 #if sub_sigma_up > 0 and ((SUBSTEP_SKIP_LAST == False) or (row < rk.rows - rk.multistep_stages - 1))   and   row > 0   and   (sub_sigma_down > 0): # and sigma_next > 0:
-                if substep_eta > 0 and row < rk.rows and ((SUBSTEP_SKIP_LAST == False) or (row < rk.rows - rk.multistep_stages - 1))   and   (sub_sigma_down > 0) and sigma_next > 0 and not extra_options_flag("substep_old_sub_sigma", extra_options):
+                if substep_eta > 0 and row < rk.rows and ((SUBSTEP_SKIP_LAST == False) or (row < rk.rows - rk.multistep_stages - 1))   and   (sub_sigma_down > 0) and sigma_next > 0 and not substep_old_sub_sigma:
                     substep_noise_scaling_ratio = s_[row+1]/sub_sigma_down
                     eps_[row] *= 1 + substep_noise_scaling*(substep_noise_scaling_ratio-1)
 
@@ -381,9 +401,9 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
             eps_ [0].zero_()
             eps_list = []
             
-            if extra_options_flag("fast_implicit_guess",  extra_options):
+            if fast_implicit_guess:
                 if denoised.sum() == 0:
-                    if extra_options_flag("fast_implicit_guess_use_guide",  extra_options):
+                    if fast_implicit_guess_use_guide:
                         data_s = y0
                         eps_s = x_0 - data_s
                     else:
@@ -425,7 +445,7 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
 
 
 
-        if extra_options_flag("eps_preview", extra_options) == False:
+        if not eps_preview:
             callback({'x': x, 'i': step, 'sigma': sigma, 'sigma_next': sigma_next, 'denoised': data_[0].to(torch.float32)}) if callback is not None else None
         elif latent_guide is not None:
             callback({'x': x, 'i': step, 'sigma': sigma, 'sigma_next': sigma_next, 'denoised': eps_[0]}) if callback is not None else None
@@ -446,7 +466,7 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
                 noise = rk.noise_sampler(sigma=sigma, sigma_next=sigma_next)
                 noise_osde = Osde.get_ortho_noise(noise, prev_noises, max_iter=noise_cossim_max_iter, max_score=noise_cossim_max_score, NOISE_COSSIM_SOURCE=NOISE_COSSIM_SOURCE)
                 x = alpha_ratio * x + sigma_up * noise_osde * s_noise
-            elif extra_options_flag("noise_cossim", extra_options):
+            elif noise_cossim:
                 x = handle_tiled_etc_noise_steps(x_0, x, x_prenoise, x_init, eps, denoised, y0, y0_inv, step, 
                                  rk_type, rk, sigma_up, sigma, sigma_next, alpha_ratio, s_noise, noise_mode, SDE_NOISE_EXTERNAL, sde_noise_t,
                                  NOISE_COSSIM_SOURCE, NOISE_COSSIM_MODE, noise_cossim_tile_size, noise_cossim_iterations,
