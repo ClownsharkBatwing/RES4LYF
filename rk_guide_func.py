@@ -139,23 +139,26 @@ def process_guides_substep(x_0, x_, eps_, data_, row, y0, y0_inv, lgw, lgw_inv, 
                     eps_row, eps_row_inv = get_guide_epsilon_substep(x_0, x_, y0, y0_inv, s_, row, rk_type, b, c)
                     eps_[row][b][c] = eps_[row][b][c] + lgw_mask_clamp[b][c] * (eps_row - eps_[row][b][c]) + lgw_mask_clamp_inv[b][c] * (eps_row_inv - eps_[row][b][c])
                     
+                    
+                    
             elif extra_options_flag("disable_lgw_scaling", extra_options):
                 eps_row, eps_row_inv = get_guide_epsilon_substep(x_0, x_, y0, y0_inv, s_, row, rk_type)
                 eps_[row] = eps_[row]      +     lgw_mask * (eps_row - eps_[row])    +    lgw_mask_inv * (eps_row_inv - eps_[row])
                 
 
-            elif extra_options_flag("epsilon_proj_test_split", extra_options):
+
+            elif guide_mode == "epsilon_projection" or extra_options_flag("epsilon_proj_test_split", extra_options):
                 eps_row, eps_row_inv = get_guide_epsilon_substep(x_0, x_, y0, y0_inv, s_, row, rk_type)
                 
-                eps_row     = get_collinear(eps_[row], eps_row) 
-                eps_row_inv = get_collinear(eps_[row], eps_row_inv) 
+                eps_row_collin     = get_collinear(eps_[row], eps_row) 
+                eps_row_inv_collin = get_collinear(eps_[row], eps_row_inv) 
                                 
-                eps_row_ortho     = get_orthogonal(eps_[row], eps_row)
-                eps_row_ortho_inv = get_orthogonal(eps_[row], eps_row_inv)
-
-                eps_next_row = eps_[row]    +    lgw_mask * (eps_row - eps_row_ortho)   +    lgw_mask_inv * (eps_row_inv - eps_row_ortho_inv)
-                #eps_[row] = torch.norm(eps_[row]) / torch.norm(eps_next_row)    *    eps_next_row
-                eps_[row] = eps_next_row
+                eps_row_ortho     = get_orthogonal(eps_[row], eps_row_collin)
+                eps_row_ortho_inv = get_orthogonal(eps_[row], eps_row_inv_collin)
+                
+                eps_[row] = eps_[row]    +    lgw_mask * (eps_row - eps_row_ortho)   +    lgw_mask_inv * (eps_row_inv - eps_row_ortho_inv)
+                
+                
                 
             elif extra_options_flag("epsilon_proj_test_scalesplit", extra_options) and (lgw > 0 or lgw_inv > 0):
                 avg, avg_inv = 0, 0
@@ -179,8 +182,6 @@ def process_guides_substep(x_0, x_, eps_, data_, row, y0, y0_inv, lgw, lgw_inv, 
 
                     eps_next_row = eps_[row][b][c]    +    ratio * lgw_mask[b][c] * (eps_row - eps_row_ortho)   +    ratio_inv * lgw_mask_inv[b][c] * (eps_row_inv - eps_row_ortho_inv)
                     eps_[row][b][c] = torch.norm(eps_[row][b][c]) / torch.norm(eps_next_row)    *    eps_next_row
-                    
-                    #eps_[row][b][c] = eps_[row][b][c]      +     ratio * lgw_mask[b][c] * (eps_row - eps_[row][b][c])    +    ratio_inv * lgw_mask_inv[b][c] * (eps_row_inv - eps_[row][b][c])
 
 
 
@@ -198,6 +199,8 @@ def process_guides_substep(x_0, x_, eps_, data_, row, y0, y0_inv, lgw, lgw_inv, 
                     
                     eps_row, eps_row_inv = get_guide_epsilon_substep(x_0, x_, y0, y0_inv, s_, row, rk_type, b, c)
                     eps_[row][b][c] = eps_[row][b][c]      +     ratio * lgw_mask[b][c] * (eps_row - eps_[row][b][c])    +    ratio_inv * lgw_mask_inv[b][c] * (eps_row_inv - eps_[row][b][c])
+
+
 
     elif (UNSAMPLE or guide_mode in {"resample", "unsample"}) and (lgw > 0 or lgw_inv > 0):
             
@@ -641,60 +644,6 @@ def get_orthogonal_noise_from_list(*refs, iterations=100):
 
 
 
-def get_orthogonal_noise_from_original(*refs, max_iter=100, max_score=1e-10):
-    
-    #noise = (noise - noise.mean()) / noise.std()
-    #noise = noise / noise.std()
-    noise, *refs = refs
-    
-    for iter in range(max_iter):
-        refs_flat = [ref.view(ref.size(0), -1).clone() for ref in refs]
-        noise_flat = noise.clone().view(noise.size(0), -1)
-        
-        #noise_flat -= noise_flat.mean(dim=-1, keepdim=True) #for pearson correlation
-        #refs_flat = [ref_flat - ref_flat.mean(dim=-1, keepdim=True) for ref_flat in refs_flat]
-        
-        for i, ref_flat in enumerate(refs_flat):
-            for j in range(i):  
-                ref_flat -= torch.sum(ref_flat * refs_flat[j], dim=-1, keepdim=True) * refs_flat[j]
-            ref_flat /= ref_flat.norm(dim=-1, keepdim=True)
-            noise_flat -= torch.sum(noise_flat * ref_flat, dim=-1, keepdim=True) * ref_flat
-        
-        noise_perp = noise_flat.view_as(noise)
-        
-        #noise_perp = (noise_perp - noise_perp.mean()) / noise_perp.std()
-        #noise_perp = noise_perp / noise_perp.std()
-        noise = noise_perp
-        
-        cossim_score = 0
-        for i, ref in enumerate(refs):
-            cossim_score_tmp = get_cosine_similarity(noise, refs[i])
-            cossim_score = max(cossim_score, cossim_score_tmp)
-        
-        if cossim_score < max_score:
-            break
-        
-    return noise
-
-
-def get_orthogonal_mean_noise_from_single(noise, *refs):
-    noise = noise.clone()
-    
-    refs_flat = [ref.view(ref.size(0), -1).clone() for ref in refs]
-    noise_flat = noise.view(noise.size(0), -1)
-    
-    dim = -1
-    
-    for i, ref_flat in enumerate(refs_flat):
-        for j in range(i):  
-            ref_flat -= torch.sum(ref_flat * refs_flat[j], dim=dim, keepdim=True) * refs_flat[j]
-        ref_flat /= ref_flat.norm(dim=dim, keepdim=True)
-        noise_flat -= torch.sum(noise_flat * ref_flat, dim=dim, keepdim=True) * ref_flat
-    
-    noise_perp = noise_flat.view_as(noise)
-    return noise_perp
-
-
 def gram_schmidt(A, *refs):
 
     for ref in refs:
@@ -759,54 +708,6 @@ def get_orthogonal(x, y):
 
 
 
-
-
-def gram_schmidt_channels_optimized(A, *refs):
-    b, c, h, w = A.shape
-
-    # Flatten spatial dimensions
-    A_flat = A.view(b, c, -1)  # Shape: (b, c, h*w)
-    
-    for ref in refs:
-        ref_flat = ref.view(b, c, -1).clone()  # Shape: (b, c, h*w)
-
-        # Normalize the reference tensor
-        ref_flat /= ref_flat.norm(dim=-1, keepdim=True)  # Normalize along the spatial dimension
-
-        # Compute the projection of A onto ref for all channels
-        proj_coeff = torch.sum(A_flat * ref_flat, dim=-1, keepdim=True)  # Shape: (b, c, 1)
-        projection = proj_coeff * ref_flat  # Shape: (b, c, h*w)
-
-        # Subtract the projection to orthogonalize
-        A_flat -= projection
-
-    return A_flat.view_as(A)
-
-def gram_schmidt_channels_per_channel(A, *refs):
-    """
-    Orthogonalize A with respect to refs for each channel independently.
-    """
-    b, c, h, w = A.shape
-
-    # Process each channel independently
-    for ref in refs:
-        A_flat = A.view(b, c, -1)  # Shape: (b, c, h*w)
-        ref_flat = ref.view(b, c, -1).clone()  # Shape: (b, c, h*w)
-
-        for channel in range(c):
-            # Normalize the reference tensor for this channel
-            ref_flat[:, channel, :] /= ref_flat[:, channel, :].norm(dim=-1, keepdim=True)
-            
-            # Compute the projection of A onto ref for this channel
-            proj_coeff = torch.sum(A_flat[:, channel, :] * ref_flat[:, channel, :], dim=-1, keepdim=True)  # Shape: (b, 1)
-            projection = proj_coeff * ref_flat[:, channel, :]  # Shape: (b, h*w)
-            
-            # Subtract the projection to orthogonalize
-            A_flat[:, channel, :] -= projection
-
-    return A.view(b, c, h, w)
-
-
 def get_orthogonal_noise_from_channelwise(*refs, max_iter=500, max_score=1e-15):
     noise, *refs = refs
     noise_tmp = noise.clone()
@@ -827,260 +728,23 @@ def get_orthogonal_noise_from_channelwise(*refs, max_iter=500, max_score=1e-15):
     return noise_tmp
 
 
-def get_orthogonal_noise_from_channelwise_SLOWBUTWORKS(*refs, max_iter=500, max_score=1e-15):
+
+def gram_schmidt_channels_optimized(A, *refs):
+    b, c, h, w = A.shape
+
+    A_flat = A.view(b, c, -1)  
     
-    noise, *refs = refs
-    noise_tmp = noise.clone()
-
-    for i in range(max_iter):
-        
-        cossim_scores = []
-        
-        for ref in refs:
-            for c in range(noise.shape[-3]):
-                noise_tmp[0][c] = get_orthogonal_mean_noise_from_single(noise_tmp[0][c], ref[0][c])
-            #noise_tmp /= noise_tmp.std()
-        noise_tmp = (noise_tmp - noise_tmp.mean()) / noise_tmp.std()
-        for ref in refs:
-            for c in range(noise.shape[-3]):
-                cossim_scores.append(get_cosine_similarity(noise_tmp[0][c], ref[0][c]).abs())
-            cossim_scores.append(get_cosine_similarity(noise_tmp[0], ref[0]).abs())
-            
-        if max(cossim_scores) < max_score:
-            break
-        
-    return noise_tmp
-
-
-
-
-def get_orthogonal_mean_noise_from_precalc(noise, ref_flat):
-
-    noise_flat = noise.clone().view_as(ref_flat)
-    
-    dim = 0
-
-    noise_flat -= torch.sum(noise_flat * ref_flat, dim=dim, keepdim=True) * ref_flat
-    
-    noise_perp = noise_flat.view_as(noise)
-    return noise_perp
-
-
-
-
-
-def get_orthogonal_noise_from_channelwise_FAST_ISH_MOSTRECENT(*refs, max_iter=500, max_score=1e-15):
-    
-    noise, *refs = refs
-    noise_tmp = noise.clone()
-    
-    b,c,h,w = noise.shape
-
-    """refs_flat = []
     for ref in refs:
-        ref_flat = ref.clone().view(b, c, -1) 
-        for j in range(len(refs_flat)): 
-            ref_flat -= torch.sum(ref_flat * refs_flat[j], dim=-1, keepdim=True) * refs_flat[j]
+        ref_flat = ref.view(b, c, -1).clone()  
+
         ref_flat /= ref_flat.norm(dim=-1, keepdim=True) 
-        refs_flat.append(ref_flat)"""
-    
-    
-    
-    refs_flat = [ref.view(b, c, -1).clone() for ref in refs]
-    for ref_flat in refs_flat:
-        for j in range(len(refs_flat)): 
-            ref_flat -= torch.sum(ref_flat * refs_flat[j], dim=-1, keepdim=True) * refs_flat[j]
-        ref_flat /= ref_flat.norm(dim=-1, keepdim=True) 
-        refs_flat.append(ref_flat)
-    
-    for i in range(max_iter):
-        
-        cossim_scores = []
-        
-        for ref in refs_flat:
-            for c in range(noise.shape[-3]):
-                noise_tmp[0][c] = get_orthogonal_mean_noise_from_precalc(noise_tmp[0][c], ref[0][c])
-        #noise_tmp /= noise_tmp.std()
-        noise_tmp = (noise_tmp - noise_tmp.mean()) / noise_tmp.std()
-        for ref in refs:
-            for c in range(noise.shape[-3]):
-                cossim_scores.append(get_cosine_similarity(noise_tmp[0][c], ref[0][c]).abs())
-            cossim_scores.append(get_cosine_similarity(noise_tmp[0], ref[0]).abs())
-            
-        if max(cossim_scores) < max_score:
-            break
-        
-    return noise_tmp
 
+        proj_coeff = torch.sum(A_flat * ref_flat, dim=-1, keepdim=True)  
+        projection = proj_coeff * ref_flat 
 
+        A_flat -= projection
 
-
-
-
-
-
-def get_orthogonal_noise_from_channelwise_batchwise(*refs, max_iter=100, max_score=1e-10):
-    noise, *refs = refs 
-    
-    b, c, h, w = noise.shape
-    for iter in range(max_iter):
-        refs_flat = [ref.clone().view(b, c, -1) for ref in refs]  
-        noise_flat = noise.clone().view(b, c, -1)
-
-        for i, ref_flat in enumerate(refs_flat):
-            for j in range(i):
-                ref_flat -= torch.sum(ref_flat * refs_flat[j], dim=-1, keepdim=True) * refs_flat[j]
-            ref_flat /= ref_flat.norm(dim=-1, keepdim=True)
-            noise_flat -= torch.sum(noise_flat * ref_flat, dim=-1, keepdim=True) * ref_flat
-
-        noise_perp_flat = noise_flat 
-        noise_perp = noise_perp_flat.view(b, c, h, w) 
-
-        #refs_flat = [ref.view(ref.size(0), -1).clone() for ref in refs]
-        #noise_flat = noise.clone().view(noise.size(0), -1)
-        
-        refs_flat = [ref.view(ref.size(0), -1).clone() for ref in refs]
-        noise_flat = noise_perp.clone().view(noise.size(0), -1)
-
-        #noise_flat -= noise_flat.mean(dim=-1, keepdim=True) #for pearson correlation
-        #refs_flat = [ref_flat - ref_flat.mean(dim=-1, keepdim=True) for ref_flat in refs_flat]
-        
-        for i, ref_flat in enumerate(refs_flat):
-            for j in range(i):  
-                ref_flat -= torch.sum(ref_flat * refs_flat[j], dim=-1, keepdim=True) * refs_flat[j]
-            ref_flat /= ref_flat.norm(dim=-1, keepdim=True)
-            noise_flat -= torch.sum(noise_flat * ref_flat, dim=-1, keepdim=True) * ref_flat 
-        
-        cossim_score = 0
-        for i, ref in enumerate(refs):
-            cossim_score_tmp = get_cosine_similarity(
-                noise_perp.view(b * c, -1), 
-                ref.view(b * c, -1)
-            )
-            cossim_score = max(cossim_score, cossim_score_tmp.abs())
-
-        cossim_score2 = 0
-        for i, ref in enumerate(refs):
-            cossim_score_tmp = get_cosine_similarity(noise, ref)
-            cossim_score2 = max(cossim_score2, cossim_score_tmp.abs())
- 
-        if max(cossim_score, cossim_score2) < max_score:
-            break
-
-        noise = noise_perp  
-
-    return noise_perp
-
-
-
-def get_orthogonal_noise_from_channelwise_works(*refs, max_iter=100, max_score=1e-10):
-    noise, *refs = refs 
-    
-    b, c, h, w = noise.shape
-    for iter in range(max_iter):
-        refs_flat = [ref.clone().view(b, c, -1) for ref in refs]  
-        noise_flat = noise.clone().view(b, c, -1)
-
-        for i, ref_flat in enumerate(refs_flat):
-            for j in range(i):
-                ref_flat -= torch.sum(ref_flat * refs_flat[j], dim=-1, keepdim=True) * refs_flat[j]
-            ref_flat /= ref_flat.norm(dim=-1, keepdim=True)
-            noise_flat -= torch.sum(noise_flat * ref_flat, dim=-1, keepdim=True) * ref_flat
-
-        noise_perp_flat = noise_flat 
-        noise_perp = noise_perp_flat.view(b, c, h, w) 
-
-        cossim_score = 0
-        for i, ref in enumerate(refs):
-            cossim_score_tmp = get_cosine_similarity(
-                noise_perp.view(b * c, -1), 
-                ref.view(b * c, -1)
-            )
-            cossim_score = max(cossim_score, cossim_score_tmp.abs())
-
-        if cossim_score < max_score:
-            break
-
-        noise = noise_perp  
-
-    return noise_perp
-
-
-
-def get_orthogonal_noise_from_channelwise_fast_version(*refs, max_iter=500, max_score=1e-15):
-    noise, *refs = refs 
-    
-    b, c, h, w = noise.shape
-    noise_flat = noise.view(b, c, -1)
-    
-    refs_flat = []
-    for ref in refs:
-        ref_flat = ref.clone().view(b, c, -1) 
-        for j in range(len(refs_flat)): 
-            ref_flat -= torch.sum(ref_flat * refs_flat[j], dim=-1, keepdim=True) * refs_flat[j]
-        ref_flat /= ref_flat.norm(dim=-1, keepdim=True) 
-        refs_flat.append(ref_flat)
-
-    for iter in range(max_iter):
-        for ref_flat in refs_flat:
-            noise_flat -= torch.sum(noise_flat * ref_flat, dim=-1, keepdim=True) * ref_flat
-        
-        noise_perp_flat = noise_flat
-        noise_perp = noise_perp_flat.view(b, c, h, w) 
-
-        cossim_score = 0
-        for ref in refs:
-            cossim_score_tmp = get_cosine_similarity(
-                noise_perp.view(b * c, -1), 
-                ref.view(b * c, -1)
-            )
-            cossim_score = max(cossim_score, cossim_score_tmp.abs())
-
-        if cossim_score < max_score:
-            break
-
-        noise = noise_perp 
-
-    return noise_perp
-
-
-def get_orthogonal_noise_from_channelwise_suspect_but_was_using_this(*refs, max_iter=500, max_score=1e-15):
-    noise, *refs = refs 
-    
-    b, c, h, w = noise.shape
-    noise_flat = noise.view(b, c, -1)
-    
-    refs_flat = []
-    for ref in refs:
-        ref_flat = ref.clone().view(b, c, -1) 
-        for j in range(len(refs_flat)): 
-            ref_flat -= torch.sum(ref_flat * refs_flat[j], dim=-1, keepdim=True) * refs_flat[j]
-        ref_flat /= ref_flat.norm(dim=-1, keepdim=True) 
-        refs_flat.append(ref_flat)
-
-    for iter in range(max_iter):
-        for ref_flat in refs_flat:
-            noise_flat -= torch.sum(noise_flat * ref_flat, dim=-1, keepdim=True) * ref_flat
-        
-        noise_perp_flat = noise_flat
-        noise_perp = noise_perp_flat.view(b, c, h, w) 
-
-        cossim_score = 0
-        for ref in refs:
-            cossim_score_tmp = get_cosine_similarity(
-                noise_perp.view(b * c, -1), 
-                ref.view(b * c, -1)
-            )
-            cossim_score = max(cossim_score, cossim_score_tmp.abs())
-
-        if cossim_score < max_score:
-            break
-
-        noise = noise_perp 
-
-    return noise_perp
-
-
+    return A_flat.view_as(A)
 
 
 
@@ -1156,63 +820,6 @@ class NoiseStepHandlerOSDE:
 
 
 
-
-
-class NoiseStepHandlerOSDE_Old:
-    def __init__(self, x, eps=None, data=None, x_init=None, guide=None, guide_bkg=None):
-        self.noise = None
-        self.x = x
-        self.eps = eps
-        self.data = data
-        self.x_init = x_init
-        self.guide = guide
-        self.guide_bkg = guide_bkg
-        
-        self.eps_list = None
-
-        self.noise_cossim_map = {
-            "eps_orthogonal":              [self.noise, self.eps],
-            "eps_data_orthogonal":         [self.noise, self.eps, self.data],
-
-            "data_orthogonal":             [self.noise, self.data],
-            "xinit_orthogonal":            [self.noise, self.x_init],
-            
-            "x_orthogonal":                [self.noise, self.x],
-            "x_data_orthogonal":           [self.noise, self.x, self.data],
-            "x_eps_orthogonal":            [self.noise, self.x, self.eps],
-
-            "x_eps_data_orthogonal":       [self.noise, self.x, self.eps, self.data],
-            "x_eps_data_xinit_orthogonal": [self.noise, self.x, self.eps, self.data, self.x_init],
-            
-            "x_eps_guide_orthogonal":      [self.noise, self.x, self.eps, self.guide],
-            "x_eps_guide_bkg_orthogonal":  [self.noise, self.x, self.eps, self.guide_bkg],
-            
-            "noise":                       [self.noise, self.x_init],
-            
-            "guide_orthogonal":            [self.noise, self.guide],
-            "guide_bkg_orthogonal":        [self.noise, self.guide_bkg],
-        }
-
-    def check_cossim_source(self, source):
-        return source in self.noise_cossim_map
-
-    def handle_step(self, noise, alpha_ratio, sigma_up, 
-                    x, eps, data, x_init, guide, guide_bkg, 
-                    NOISE_COSSIM_SOURCE="eps_orthogonal"):
-        
-        if NOISE_COSSIM_SOURCE not in self.noise_cossim_map:
-            raise ValueError(f"Invalid NOISE_COSSIM_SOURCE: {NOISE_COSSIM_SOURCE}")
-        
-        self.noise_cossim_map[NOISE_COSSIM_SOURCE][0] = noise
-
-        params = self.noise_cossim_map[NOISE_COSSIM_SOURCE]
-        
-        noise = get_orthogonal_noise_from_list(*params)
-        
-        self.x = alpha_ratio * self.x + sigma_up * noise
-
-        return self.x
-    
 
 
 
@@ -1293,3 +900,76 @@ def handle_tiled_etc_noise_steps(x_0, x, x_prenoise, x_init, eps, denoised, y0, 
                 break
     return x
 
+
+
+def target_pearson_combination__(A, B, target_corr):
+
+    A_flat = A.flatten()
+    B_flat = B.flatten()
+    
+    var_A = torch.var(A_flat)
+    var_B = torch.var(B_flat)
+    cov_AB = torch.mean((A_flat - A_flat.mean()) * (B_flat - B_flat.mean()))
+    
+    def pearson_for_alpha(alpha):
+        numerator = alpha * var_A + (1 - alpha) * cov_AB
+        denominator = torch.sqrt(
+            alpha**2 * var_A + 2 * alpha * (1 - alpha) * cov_AB + (1 - alpha)**2 * var_B
+        ) * torch.sqrt(var_A)
+        return numerator / denominator
+
+    from scipy.optimize import minimize_scalar
+
+    def objective(alpha):
+        return (pearson_for_alpha(alpha) - target_corr)**2
+
+    result = minimize_scalar(objective, bounds=(0, 1), method='bounded')
+    alpha_opt = result.x
+    
+    return alpha_opt
+
+
+
+import torch
+from scipy.optimize import minimize_scalar
+
+def target_pearson_combination(A, B, target_corr):
+    """
+    Finds alpha such that the Pearson correlation between
+    C = alpha * A + (1 - alpha) * B and A equals target_corr.
+    """
+    # Ensure A and B are on the same device
+    device = A.device
+    B = B.to(device)
+
+    A_flat = A.flatten()
+    B_flat = B.flatten()
+
+    # Compute variances and covariance
+    var_A = torch.var(A_flat)  # Variance of A
+    var_B = torch.var(B_flat)  # Variance of B
+    cov_AB = torch.mean((A_flat - A_flat.mean()) * (B_flat - B_flat.mean()))  # Covariance of A and B
+
+    # Handle edge cases for zero variance
+    if var_A == 0 or var_B == 0:
+        raise ValueError("Variance of A or B is zero, Pearson correlation undefined.")
+
+    # Pearson correlation as a function of alpha
+    def pearson_for_alpha(alpha):
+        numerator = alpha * var_A + (1 - alpha) * cov_AB
+        denominator = torch.sqrt(
+            alpha**2 * var_A + 2 * alpha * (1 - alpha) * cov_AB + (1 - alpha)**2 * var_B
+        ) * torch.sqrt(var_A)
+        return (numerator / denominator).item()  # Convert to Python float for scipy
+
+    # Objective function for scipy.optimize
+    def objective(alpha):
+        return (pearson_for_alpha(alpha) - target_corr)**2
+
+    # Minimize to find alpha
+    result = minimize_scalar(objective, bounds=(0, 1), method="bounded")
+    if not result.success:
+        raise RuntimeError(f"Optimization failed: {result.message}")
+    alpha_opt = result.x
+
+    return alpha_opt

@@ -19,9 +19,11 @@ from .latents import normalize_latent, initialize_or_scale, latent_normalize_cha
 from .helper import get_extra_options_kv, extra_options_flag
 from .sigmas import get_sigmas
 
-PRINT_DEBUG=False
+PRINT_DEBUG=True
 
 def get_cosine_similarity(a, b):
+    if a.dim() == 5 and b.dim() == 5 and b.shape[2] == 1:
+        b = b.expand(-1, -1, a.shape[2], -1, -1)
     return F.cosine_similarity(a.flatten(), b.flatten(), dim=0)
 
 def normalize_inputs(x, y0, y0_inv, guide_mode,  extra_options):
@@ -79,7 +81,7 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
                   latent_guide=None, latent_guide_inv=None, latent_guide_weight=0.0, latent_guide_weight_inv=0.0, latent_guide_weights=None, latent_guide_weights_inv=None, guide_mode="blend", 
                   GARBAGE_COLLECT=False, mask=None, mask_inv=None, LGW_MASK_RESCALE_MIN=True, sigmas_override=None, unsample_resample_scales=None,regional_conditioning_weights=None, sde_noise=[],
                   extra_options="",
-                  etas=None, s_noises=None, momentums=None, guides=None, cfg_cw = 1.0,regional_conditioning_floors=None,
+                  etas=None, s_noises=None, momentums=None, guides=None, cfg_cw = 1.0,regional_conditioning_floors=None, frame_weights=None,
                   ):
     extra_args = {} if extra_args is None else extra_args
     

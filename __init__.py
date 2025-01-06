@@ -217,6 +217,8 @@ NODE_CLASS_MAPPINGS = {
     "SigmasPreview": helper_sigma_preview_image_preproc.SigmasPreview,
     
     "ReFluxPatcher": models.ReFluxPatcher,
+    
+    #"ClownsharkSamplerOptions_FrameWeights": samplers_extensions.ClownsharKSamplerOptions_FrameWeights,
 }
 
 if flags["test_samplers"]:

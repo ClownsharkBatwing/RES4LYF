@@ -93,6 +93,7 @@ class SamplerOptions_GarbageCollection:
 GUIDE_MODE_NAMES = ["unsample", 
                     "resample", 
                     "epsilon",
+                    "epsilon_projection",
                     "epsilon_dynamic_mean",
                     "epsilon_dynamic_mean_std", 
                     "epsilon_dynamic_mean_from_bkg", 
@@ -423,6 +424,7 @@ class ClownsharKSamplerOptions_SDE_Noise:
             },
             "optional": {
                 "sde_noise": ("LATENT",),
+                "options": ("OPTIONS",),
             }
         }
     
@@ -440,6 +442,35 @@ class ClownsharKSamplerOptions_SDE_Noise:
         options['sde_noise_steps'] = sde_noise_steps
         options['sde_noise'] = sde_noise
         
+        return (options,)
+
+
+
+class ClownsharKSamplerOptions_FrameWeights:
+    @classmethod
+    def INPUT_TYPES(s):
+        return {
+            "required": {
+                "frame_weights": ("SIGMAS", ),
+            },
+            "optional": {
+                "options": ("OPTIONS",),
+            }
+        }
+
+    RETURN_TYPES = ("OPTIONS",)
+    RETURN_NAMES = ("options",)
+    CATEGORY = "sampling/custom_sampling/samplers"
+
+    FUNCTION = "main"
+
+    def main(self, frame_weights, options=None,):
+
+        if options is None:
+            options = {}
+
+        options['frame_weights'] = frame_weights
+
         return (options,)
 
 
