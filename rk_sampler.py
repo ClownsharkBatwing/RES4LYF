@@ -234,7 +234,7 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
             for row in range(rk.rows - rk.multistep_stages):
                 
                 sub_sigma_up, sub_sigma, sub_sigma_next, sub_sigma_down, sub_alpha_ratio = 0, s_[row], s_[row+1], s_[row+1], 1
-                if step > substep_eta_start_step:
+                if step > substep_eta_start_step and s_[row+1] <= s_[row]:
                     sub_sigma_up, sub_sigma, sub_sigma_down, sub_alpha_ratio = get_res4lyf_step_with_model(model, s_[row], s_[row+1], substep_eta, eta_var, substep_noise_mode, s_[row+1]-s_[row])
                     
                 if (substep_eta_final_step < 0 and step == len(sigmas)-1+substep_eta_final_step)   or   (substep_eta_final_step > 0 and step > substep_eta_final_step):
