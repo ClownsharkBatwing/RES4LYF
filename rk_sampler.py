@@ -2,6 +2,7 @@ import torch
 import torch.nn.functional as F
 import torchvision.transforms as T
 import re
+import copy
 
 from tqdm.auto import trange
 import gc
@@ -103,7 +104,7 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
     noise_substep_cossim_tile_size  = int(get_extra_options_kv("noise_substep_cossim_tile",       "2",          extra_options))
     
     substep_eta           = float(get_extra_options_kv("substep_eta",           "0.0",  extra_options))
-    substep_noise_scaling = float(get_extra_options_kv("substep_noise_scaling", "1.0",  extra_options))
+    substep_noise_scaling = float(get_extra_options_kv("substep_noise_scaling", "0.0",  extra_options))
     substep_noise_mode    =       get_extra_options_kv("substep_noise_mode",    "hard", extra_options)
     
     substep_eta_start_step = int(get_extra_options_kv("substep_noise_start_step",  "-1", extra_options))
@@ -216,7 +217,7 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
         
         if step == 0:
             x_, data_, data_u, eps_ = (torch.zeros(max(rk.rows, irk.rows) + 2, *x.shape, dtype=x.dtype, device=x.device) for step in range(4))
-        
+
         s_       = [(  rk.sigma_fn( rk.t_fn(sigma) +     h*c_)) * s_one for c_ in   rk.c]
         s_irk_rk = [(  rk.sigma_fn( rk.t_fn(sigma) +     h*c_)) * s_one for c_ in  irk.c]
         s_irk    = [( irk.sigma_fn(irk.t_fn(sigma) + h_irk*c_)) * s_one for c_ in  irk.c]
@@ -241,7 +242,7 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
         lgw_mask, lgw_mask_inv = prepare_weighted_masks(mask, mask_inv, lgw[step], lgw_inv[step], latent_guide, latent_guide_inv, LGW_MASK_RESCALE_MIN)        
 
 
-
+        rk_new       = RK_Method.create(model,  rk_type, x.device)
 
         if implicit_steps == 0: 
             for row in range(rk.rows - rk.multistep_stages):
@@ -250,19 +251,25 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
                     sub_sigma_up, sub_sigma, sub_sigma_down, sub_alpha_ratio = 0, s_[row], s_[row+1], 1
                 else:
                     sub_sigma_up, sub_sigma, sub_sigma_next, sub_sigma_down, sub_alpha_ratio = 0, s_[row], s_[row+1], s_[row+1], 1
-                if row > 0 and step > substep_eta_start_step and s_[row+1] <= s_[row]:
-                    #sub_sigma_up, sub_sigma, sub_sigma_down, sub_alpha_ratio = get_res4lyf_step_with_model(model, s_[row-1], s_[row], substep_eta, eta_var, substep_noise_mode, s_[row]-s_[row-1]) #rough
+                if step > substep_eta_start_step:
                     sub_sigma_up, sub_sigma, sub_sigma_down, sub_alpha_ratio = get_res4lyf_step_with_model(model, s_[row], s_[row+1], substep_eta, eta_var, substep_noise_mode, s_[row+1]-s_[row])
-                elif row > 0:
-                    #sub_sigma_up, sub_sigma, sub_sigma_down, sub_alpha_ratio = 0, s_[row-1], s_[row], 1
-                    sub_sigma_up, sub_sigma, sub_sigma_down, sub_alpha_ratio = 0, s_[row], s_[row+1], 1
-
+                    
                 if (substep_eta_final_step < 0 and step == len(sigmas)-1+substep_eta_final_step)   or   (substep_eta_final_step > 0 and step > substep_eta_final_step):
-                    #sub_sigma_up, sub_sigma, sub_sigma_down, sub_alpha_ratio = 0, s_[row-1], s_[row], 1
                     sub_sigma_up, sub_sigma, sub_sigma_down, sub_alpha_ratio = 0, s_[row], s_[row+1], 1
-                
+                    
+
+                h_new = (rk.h_fn(sub_sigma_down, sigma) / rk.c[row+1])[0]
+                rk_new. set_coeff(rk_type,  h_new,     c1, c2, c3, step, sigmas, sigma, sigma_down)
+                s_new_       = [(  rk_new.sigma_fn( rk_new.t_fn(sigma) +     h_new*c_)) * s_one for c_ in   rk_new.c]
+                s_merge_ = copy.deepcopy(s_)
+                s_merge_[row+1] = s_new_[row+1]
+                s_new_ = s_merge_
+
                 # UPDATE
-                x_[row+1] = x_0 + h * rk.a_k_sum(eps_, row)     
+                if substep_eta > 0:
+                    x_[row+1] = x_0 + h_new * rk_new.a_k_sum(eps_, row)
+                else:
+                    x_[row+1] = x_0 + h * rk.a_k_sum(eps_, row)     
 
                 if guide_mode == "data":
                     lgw_mask_fw = lgw_mask.clone()
@@ -290,11 +297,12 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
                 
                 # NOISE ADD
                 if (row > 0) and (sub_sigma_up > 0) and ((SUBSTEP_SKIP_LAST == False) or (row < rk.rows - rk.multistep_stages - 1)):
-                    data_tmp = denoised_prev if data_[row].sum() == 0 else data_[row]
-                    eps_tmp  = eps_prev      if  eps_[row].sum() == 0 else eps_ [row]
+                    data_tmp = denoised_prev if data_[row-1].sum() == 0 else data_[row-1]
+                    eps_tmp  = eps_prev      if  eps_[row-1].sum() == 0 else eps_ [row-1]
                     Osde = NoiseStepHandlerOSDE(x_[row+1], eps_tmp, data_tmp, x_init, y0, y0_inv)
                     if Osde.check_cossim_source(NOISE_SUBSTEP_COSSIM_SOURCE):
-                        noise = rk.noise_sampler(sigma=s_[row-1], sigma_next=s_[row])    #should be s_[row-1]
+                        #noise = rk.noise_sampler(sigma=s_[row-1], sigma_next=s_[row])    #should be s_[row-1]
+                        noise = rk.noise_sampler(sigma=sub_sigma, sigma_next=sub_sigma_next)    #should be s_[row-1]
                         noise_osde = Osde.get_ortho_noise(noise, prev_noises, max_iter=noise_substep_cossim_max_iter, max_score=noise_substep_cossim_max_score, NOISE_COSSIM_SOURCE=NOISE_SUBSTEP_COSSIM_SOURCE)
                         x_[row+1] = sub_alpha_ratio * x_[row+1] + sub_sigma_up * noise_osde * s_noise
                     elif extra_options_flag("noise_substep_cossim", extra_options):
@@ -322,44 +330,25 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
                     eps_[row] *= 1 + substep_noise_scaling*(substep_noise_scaling_ratio-1)
 
                 cossim_cutoff = float(get_extra_options_kv("epsilon_cossim_cutoff", "1.0", extra_options))
-                #data_norm = latent_normalize_channels(data_[0]) #torch.norm(data_[0], dim=-3)
-                #y0_norm = latent_normalize_channels(y0) #torch.norm(y0, dim=-3)
                 dims = tuple(range(2, data_[0].ndim)) # dimensions 2 and above
                 data_norm = data_[0] - data_[0].mean(dim=dims, keepdim=True)
-                y0_norm = y0 - y0.mean(dim=dims, keepdim=True)
+                y0_norm   = y0 -             y0.mean(dim=dims, keepdim=True)
                 log(f"cosine similarity: {get_cosine_similarity(data_norm, y0_norm).item()}")
                 if cossim_cutoff > get_cosine_similarity(data_norm, y0_norm):
                     log("running substep")
                     eps_, x_ = process_guides_substep(x_0, x_, eps_, data_, row, y0, y0_inv, lgw[step], lgw_inv[step], lgw_mask, lgw_mask_inv, step, sigma, sigma_next,
-                                                      sigma_down, s_, unsample_resample_scale, rk, rk_type, guide_mode, latent_guide_inv, UNSAMPLE, extra_options, frame_weights)
+                                                      sigma_down, s_new_, unsample_resample_scale, rk, rk_type, guide_mode, latent_guide_inv, UNSAMPLE, extra_options, frame_weights)
             
                 #if sub_sigma_up > 0 and ((SUBSTEP_SKIP_LAST == False) or (row < rk.rows - rk.multistep_stages - 1))   and   row > 0   and   (sub_sigma_down > 0): # and sigma_next > 0:
                 if substep_eta > 0 and row < rk.rows and ((SUBSTEP_SKIP_LAST == False) or (row < rk.rows - rk.multistep_stages - 1))   and   (sub_sigma_down > 0) and sigma_next > 0 and not extra_options_flag("substep_old_sub_sigma", extra_options):
-                    #sub_sigma_up, sub_sigma, sub_sigma_down, sub_alpha_ratio = get_res4lyf_step_with_model(model, s_[row], s_[row+1], substep_eta, eta_var, substep_noise_mode, s_[row+1]-s_[row])
-                    #substep_noise_scaling_ratio = (s_[row+1]/sigma)**rk.c[row] * (sigma/sub_sigma_down)**rk.c[row]
-                    
-                    #substep_noise_scaling_ratio = (s_[row+1]/sigma)**rk.c[row] * (1 / ((sub_sigma_down/sigma)**rk.c[row])) #THIS IS WHAT I JUST RAN #comfyui 03442
-                    substep_noise_scaling_ratio = (s_[row+1]/sigma) * (sigma/sub_sigma_down)
-                    
-                    #substep_noise_scaling_ratio = (s_[row]/sigma)**rk.c[row] * (1 / ((sub_sigma_down/sigma)**rk.c[row]))   #HAVE NOT RUN THIS YET #ran overseas
-                    
-                    
-                    #substep_noise_scaling_ratio = (sigma - sub_sigma_down) / (sigma - sub_sigma_next)
-                    
+                    substep_noise_scaling_ratio = s_[row+1]/sub_sigma_down
                     eps_[row] *= 1 + substep_noise_scaling*(substep_noise_scaling_ratio-1)
 
-            
             x = x_0 + h * rk.b_k_sum(eps_, 0)
                     
             denoised = x_0 + ((sigma / (sigma - sigma_down)) *  h) * rk.b_k_sum(eps_, 0) 
             eps = x - denoised
             x = process_guides_poststep(x, denoised, eps, y0, y0_inv, mask, lgw_mask, lgw_mask_inv, guide_mode, latent_guide, latent_guide_inv, UNSAMPLE, extra_options)
-            
-            #x = x_0 + h * rk.b_k_sum(eps_, 0)
-                    
-            #denoised = x_0 + ((sigma / (sigma - sigma_down)) *  h) * rk.b_k_sum(eps_, 0) 
-            #eps = x - denoised
-            #x = process_guides_poststep(x, denoised, eps, y0, y0_inv, mask, lgw_mask, lgw_mask_inv, guide_mode, latent_guide, latent_guide_inv, UNSAMPLE, extra_options)
 
 
 
