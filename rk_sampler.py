@@ -19,7 +19,7 @@ from .latents import normalize_latent, initialize_or_scale, latent_normalize_cha
 from .helper import get_extra_options_kv, extra_options_flag
 from .sigmas import get_sigmas
 
-PRINT_DEBUG=False
+PRINT_DEBUG=True
 
 def get_cosine_similarity(a, b):
     if a.dim() == 5 and b.dim() == 5 and b.shape[2] == 1:
@@ -240,8 +240,28 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
                 if (substep_eta_final_step < 0 and step == len(sigmas)-1+substep_eta_final_step)   or   (substep_eta_final_step > 0 and step > substep_eta_final_step):
                     sub_sigma_up, sub_sigma, sub_sigma_down, sub_alpha_ratio = 0, s_[row], s_[row+1], 1
                     
+                if row > 0 and not extra_options_flag("disable_rough_noise", extra_options):
+                    sub_sigma_up, sub_sigma, sub_sigma_down, sub_alpha_ratio = get_res4lyf_step_with_model(model, s_[row-1], s_[row], substep_eta, eta_var, substep_noise_mode, s_[row]-s_[row-1])
+                    sub_sigma_next = s_[row]
+                    
+                    
+                if row > 0 and substep_eta > 0 and row < rk.rows and ((SUBSTEP_SKIP_LAST == False) or (row < rk.rows - rk.multistep_stages - 1))   and   (sub_sigma_down > 0) and sigma_next > 0:
+                    if extra_options_flag("linear_scaling_reg", extra_options):
+                        substep_noise_scaling_ratio = (sub_sigma_down - sigma) / (sub_sigma_next - sigma)
+                    elif extra_options_flag("linear_scaling_inv", extra_options):
+                        substep_noise_scaling_ratio = (sub_sigma_next - sigma) / (sub_sigma_down - sigma)
+                    elif extra_options_flag("h_ratio_reg", extra_options):
+                        substep_noise_scaling_ratio = rk.h_fn(sub_sigma_down, sigma) / rk.h_fn(sub_sigma_next, sigma)
+                    elif extra_options_flag("h_ratio_inv", extra_options):
+                        substep_noise_scaling_ratio = rk.h_fn(sub_sigma_next, sigma) / rk.h_fn(sub_sigma_down, sigma)
+                    else:
+                        substep_noise_scaling_ratio = s_[row+1]/sub_sigma_down
+                    eps_[row-1] *= 1 + substep_noise_scaling*(substep_noise_scaling_ratio-1)
 
-                h_new = (rk.h_fn(sub_sigma_down, sigma) / rk.c[row+1])[0]
+                h_new = h
+                if row > 0:
+                    h_new = (rk.h_fn(sub_sigma_down, sigma) / rk.c[row])[0]   #used to be rk.c[row+1]
+                    
                 rk_new. set_coeff(rk_type,  h_new,     c1, c2, c3, step, sigmas, sigma, sigma_down)
                 s_new_       = [(  rk_new.sigma_fn( rk_new.t_fn(sigma) +     h_new*c_)) * s_one for c_ in   rk_new.c]
                 s_merge_ = copy.deepcopy(s_)
@@ -249,7 +269,9 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
                 s_new_ = s_merge_
 
                 # UPDATE
-                if substep_eta > 0:
+                if substep_eta > 0 and not extra_options_flag("disable_tableau_scaling_h_only", extra_options):
+                    x_[row+1] = x_0 + h_new * rk.a_k_sum(eps_, row)
+                elif substep_eta > 0 and extra_options_flag("enable_tableau_scaling_full", extra_options):
                     x_[row+1] = x_0 + h_new * rk_new.a_k_sum(eps_, row)
                 else:
                     x_[row+1] = x_0 + h * rk.a_k_sum(eps_, row)     
@@ -269,8 +291,7 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
                     eps_tmp  = eps_prev      if  eps_[row-1].sum() == 0 else eps_ [row-1]
                     Osde = NoiseStepHandlerOSDE(x_[row+1], eps_tmp, data_tmp, x_init, y0, y0_inv)
                     if Osde.check_cossim_source(NOISE_SUBSTEP_COSSIM_SOURCE):
-                        #noise = rk.noise_sampler(sigma=s_[row-1], sigma_next=s_[row])    #should be s_[row-1]
-                        noise = rk.noise_sampler(sigma=sub_sigma, sigma_next=sub_sigma_next)    #should be s_[row-1]
+                        noise = rk.noise_sampler(sigma=sub_sigma, sigma_next=sub_sigma_next) 
                         noise_osde = Osde.get_ortho_noise(noise, prev_noises, max_iter=noise_substep_cossim_max_iter, max_score=noise_substep_cossim_max_score, NOISE_COSSIM_SOURCE=NOISE_SUBSTEP_COSSIM_SOURCE)
                         x_[row+1] = sub_alpha_ratio * x_[row+1] + sub_sigma_up * noise_osde * s_noise
                     elif extra_options_flag("noise_substep_cossim", extra_options):
@@ -292,9 +313,7 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
                 if cossim_cutoff > get_cosine_similarity(data_norm, y0_norm):
                     eps_, x_ = process_guides_substep(x_0, x_, eps_, data_, row, y0, y0_inv, lgw[step], lgw_inv[step], lgw_mask, lgw_mask_inv, step, sigma, sigma_next, sigma_down, s_new_, unsample_resample_scale, rk, rk_type, guide_mode, latent_guide_inv, UNSAMPLE, extra_options)
 
-                if substep_eta > 0 and row < rk.rows and ((SUBSTEP_SKIP_LAST == False) or (row < rk.rows - rk.multistep_stages - 1))   and   (sub_sigma_down > 0) and sigma_next > 0:
-                    substep_noise_scaling_ratio = s_[row+1]/sub_sigma_down
-                    eps_[row] *= 1 + substep_noise_scaling*(substep_noise_scaling_ratio-1)
+
 
             x = x_0 + h * rk.b_k_sum(eps_, 0)
                     
