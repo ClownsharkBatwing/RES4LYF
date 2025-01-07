@@ -123,7 +123,10 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
     noise_substep_cossim_max_score = float(get_extra_options_kv("noise_substep_cossim_max_score", "1e-7", extra_options))
     noise_cossim_max_score         = float(get_extra_options_kv("noise_cossim_max_score",         "1e-7", extra_options))
 
-    cfg_cw = float(get_extra_options_kv("cfg_cw", "1.0", extra_options))
+    cfg_cw_extra_options = float(get_extra_options_kv("cfg_cw", "-1000.0", extra_options))
+    if cfg_cw_extra_options != -1000.0:
+        cfg_cw = cfg_cw_extra_options
+        
     temporal_smoothing = float(get_extra_options_kv("temporal_smoothing", "0.0", extra_options))
 
     # extra_options flags
