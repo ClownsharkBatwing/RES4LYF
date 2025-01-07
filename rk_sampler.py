@@ -19,7 +19,7 @@ from .latents import normalize_latent, initialize_or_scale, latent_normalize_cha
 from .helper import get_extra_options_kv, extra_options_flag
 from .sigmas import get_sigmas
 
-PRINT_DEBUG=False
+PRINT_DEBUG=True
 
 def get_cosine_similarity(a, b):
     if a.dim() == 5 and b.dim() == 5 and b.shape[2] == 1:
@@ -81,10 +81,10 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
                   latent_guide=None, latent_guide_inv=None, latent_guide_weight=0.0, latent_guide_weight_inv=0.0, latent_guide_weights=None, latent_guide_weights_inv=None, guide_mode="blend", 
                   GARBAGE_COLLECT=False, mask=None, mask_inv=None, LGW_MASK_RESCALE_MIN=True, sigmas_override=None, unsample_resample_scales=None,regional_conditioning_weights=None, sde_noise=[],
                   extra_options="",
-                  etas=None, s_noises=None, momentums=None, guides=None, cfg_cw = 1.0,regional_conditioning_floors=None, frame_weights=None,
+                  etas=None, s_noises=None, momentums=None, guides=None, cfg_cw = 1.0,regional_conditioning_floors=None, frame_weights=None, eta_substep=0.0, noise_mode_sde_substep="hard", 
                   ):
     extra_args = {} if extra_args is None else extra_args
-    
+
     noise_cossim_iterations         = int(get_extra_options_kv("noise_cossim_iterations",         "1",          extra_options))
     noise_substep_cossim_iterations = int(get_extra_options_kv("noise_substep_cossim_iterations", "1",          extra_options))
     NOISE_COSSIM_MODE               =     get_extra_options_kv("noise_cossim_mode",               "orthogonal", extra_options)
@@ -95,9 +95,9 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
     noise_cossim_tile_size          = int(get_extra_options_kv("noise_cossim_tile",               "2",          extra_options))
     noise_substep_cossim_tile_size  = int(get_extra_options_kv("noise_substep_cossim_tile",       "2",          extra_options))
     
-    substep_eta           = float(get_extra_options_kv("substep_eta",           "0.0",  extra_options))
+    substep_eta           = float(get_extra_options_kv("substep_eta",           str(eta_substep),  extra_options))
     substep_noise_scaling = float(get_extra_options_kv("substep_noise_scaling", "0.0",  extra_options))
-    substep_noise_mode    =       get_extra_options_kv("substep_noise_mode",    "hard", extra_options)
+    substep_noise_mode    =       get_extra_options_kv("substep_noise_mode",    noise_mode_sde_substep, extra_options)
     
     substep_eta_start_step = int(get_extra_options_kv("substep_noise_start_step",  "-1", extra_options))
     substep_eta_final_step = int(get_extra_options_kv("substep_noise_final_step", "-1", extra_options))
@@ -107,7 +107,10 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
     noise_substep_cossim_max_score = float(get_extra_options_kv("noise_substep_cossim_max_score", "1e-7", extra_options))
     noise_cossim_max_score         = float(get_extra_options_kv("noise_cossim_max_score",         "1e-7", extra_options))
     
-    cfg_cw = float(get_extra_options_kv("cfg_cw", "1.0", extra_options))
+    cossim_cutoff     = float(get_extra_options_kv("epsilon_cossim_cutoff",     "1.0", extra_options))
+    cossim_cutoff_bkg = float(get_extra_options_kv("epsilon_cossim_cutoff_bkg", "1.0", extra_options))
+    
+    cfg_cw = float(get_extra_options_kv("cfg_cw", str(cfg_cw), extra_options))
     
     s_in, s_one = x.new_ones([x.shape[0]]), x.new_ones([1])
     default_dtype = torch.float64
@@ -121,10 +124,13 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
     if guides is not None:
         guide_mode, latent_guide_weight, latent_guide_weight_inv, latent_guide_weights, latent_guide_weights_inv, latent_guide, latent_guide_inv, latent_guide_mask, latent_guide_mask_inv, scheduler_, scheduler_inv_, steps_, steps_inv_, denoise_, denoise_inv_ = guides
         mask, mask_inv = latent_guide_mask, latent_guide_mask_inv
-        if scheduler_ != "constant" and latent_guide_weights is None:
-            latent_guide_weights = get_sigmas(model, scheduler_, steps_, denoise_).to(default_dtype)
-        if scheduler_inv_ != "constant" and latent_guide_weights_inv is None:
-            latent_guide_weights_inv = get_sigmas(model, scheduler_inv_, steps_inv_, denoise_inv_).to(default_dtype)
+        
+        guide_cossim_cutoff_, guide_bkg_cossim_cutoff_ = denoise_, denoise_inv_
+        
+        #if scheduler_ != "constant" and latent_guide_weights is None:
+        #    latent_guide_weights = get_sigmas(model, scheduler_, steps_, denoise_).to(default_dtype)
+        #if scheduler_inv_ != "constant" and latent_guide_weights_inv is None:
+        #    latent_guide_weights_inv = get_sigmas(model, scheduler_inv_, steps_inv_, denoise_inv_).to(default_dtype)
             
     latent_guide_weights     = initialize_or_scale(latent_guide_weights,     latent_guide_weight,     max_steps).to(default_dtype)
     latent_guide_weights_inv = initialize_or_scale(latent_guide_weights_inv, latent_guide_weight_inv, max_steps).to(default_dtype)
@@ -254,25 +260,38 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
                         substep_noise_scaling_ratio = rk.h_fn(sub_sigma_down, sigma) / rk.h_fn(sub_sigma_next, sigma)
                     elif extra_options_flag("h_ratio_inv", extra_options):
                         substep_noise_scaling_ratio = rk.h_fn(sub_sigma_next, sigma) / rk.h_fn(sub_sigma_down, sigma)
+                    elif extra_options_flag("h_ratio_substep_reg", extra_options):
+                        substep_noise_scaling_ratio = rk.h_fn(sub_sigma_down, sub_sigma) / rk.h_fn(sub_sigma_next, sub_sigma)
                     else:
                         substep_noise_scaling_ratio = s_[row+1]/sub_sigma_down
                     eps_[row-1] *= 1 + substep_noise_scaling*(substep_noise_scaling_ratio-1)
 
-                h_new = h
+                h_new = h.clone()
                 if row > 0:
-                    h_new = (rk.h_fn(sub_sigma_down, sigma) / rk.c[row])[0]   #used to be rk.c[row+1]
+                    if extra_options_flag("h_new_substep_reg", extra_options):
+                        h_new = h_new * rk.h_fn(sub_sigma_down, sub_sigma) / rk.h_fn(sub_sigma_next, sub_sigma)
+                    else:
+                        h_new = (rk.h_fn(sub_sigma_down, sigma) / rk.c[row])[0]   #used to be rk.c[row+1]
                     
                 rk_new. set_coeff(rk_type,  h_new,     c1, c2, c3, step, sigmas, sigma, sigma_down)
                 s_new_       = [(  rk_new.sigma_fn( rk_new.t_fn(sigma) +     h_new*c_)) * s_one for c_ in   rk_new.c]
                 s_merge_ = copy.deepcopy(s_)
                 s_merge_[row+1] = s_new_[row+1]
                 s_new_ = s_merge_
+                
+                if extra_options_flag("aoeu", extra_options):
+                    substep_noise_scaling_ratio = (sub_sigma_down - sigma) / (sub_sigma_next - sigma)
+                    eps_row_new = ((x_[row+1] - data_[row-1]) / s_[row-1]) * substep_noise_scaling_ratio 
+                    
+                    
 
                 # UPDATE
                 if substep_eta > 0 and not extra_options_flag("disable_tableau_scaling_h_only", extra_options):
                     x_[row+1] = x_0 + h_new * rk.a_k_sum(eps_, row)
                 elif substep_eta > 0 and extra_options_flag("enable_tableau_scaling_full", extra_options):
                     x_[row+1] = x_0 + h_new * rk_new.a_k_sum(eps_, row)
+                elif substep_eta > 0 and extra_options_flag("enable_tableau_extra_linear_denoise", extra_options):
+                    x_[row+1] = x_0 + h * rk.a_k_sum(eps_, row) + (sub_sigma_down - sub_sigma_next) * rk.a_k_sum(eps_, row)
                 else:
                     x_[row+1] = x_0 + h * rk.a_k_sum(eps_, row)     
 
@@ -305,12 +324,13 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
                 #MODEL CALL
                 eps_[row], data_[row] = rk(x_0, x_[row+1], s_[row], h, **extra_args)       
                 
-                cossim_cutoff = float(get_extra_options_kv("epsilon_cossim_cutoff", "1.0", extra_options))
-                data_norm = data_[0] - data_[0].mean(dim=(2, 3), keepdim=True)
-                y0_norm   = y0 -             y0.mean(dim=(2, 3), keepdim=True)
+                
+                data_norm   = data_[0] - data_[0].mean(dim=(2, 3), keepdim=True)
+                y0_norm     = y0       -       y0.mean(dim=(2, 3), keepdim=True)
+                y0_inv_norm = y0_inv   -   y0_inv.mean(dim=(2, 3), keepdim=True)
                 if PRINT_DEBUG:
                     print(get_cosine_similarity(data_norm, y0_norm).item())
-                if cossim_cutoff > get_cosine_similarity(data_norm, y0_norm):
+                if guide_cossim_cutoff_ > get_cosine_similarity(data_norm, y0_norm) and guide_bkg_cossim_cutoff_ > get_cosine_similarity(data_norm, y0_inv_norm):
                     eps_, x_ = process_guides_substep(x_0, x_, eps_, data_, row, y0, y0_inv, lgw[step], lgw_inv[step], lgw_mask, lgw_mask_inv, step, sigma, sigma_next, sigma_down, s_new_, unsample_resample_scale, rk, rk_type, guide_mode, latent_guide_inv, UNSAMPLE, extra_options)
 
 

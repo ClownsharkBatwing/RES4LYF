@@ -88,7 +88,7 @@ class SigmasPreview(SaveImage):
         }
 
     FUNCTION = "sigmas_preview"
-    CATEGORY = 'sampling/custom_sampling/sigmas'
+    CATEGORY = 'res4lyf/sigmas'
     OUTPUT_NODE = True
 
     @staticmethod
@@ -96,8 +96,8 @@ class SigmasPreview(SaveImage):
         plt.figure()
         plt.plot(tensor.numpy(), marker='o', linestyle='-', color='blue')
         plt.title("Graph from Tensor")
-        plt.xlabel("Index")
-        plt.ylabel("Value")
+        plt.xlabel("Step Number")
+        plt.ylabel("Sigma Value")
         with BytesIO() as buf:
             plt.savefig(buf, format='png')
             buf.seek(0)
@@ -224,14 +224,14 @@ def image_resize(image, width, height, method="stretch", interpolation="nearest"
     return outputs
 
 
-class PrepForUnsampling:
+class VAEEncodeAdvanced:
     @classmethod
     def INPUT_TYPES(s):
         return {
             "required": {
                 "resize_to_input": (["false", "image_1", "image_2", "mask", "latent"], {"default": "false"},),
-                "width": ("INT", { "default": 1344, "min": 0, "max": MAX_RESOLUTION, "step": 1, }),
-                "height": ("INT", { "default": 768, "min": 0, "max": MAX_RESOLUTION, "step": 1, }),
+                "width": ("INT", { "default": 1024, "min": 0, "max": MAX_RESOLUTION, "step": 1, }),
+                "height": ("INT", { "default": 1024, "min": 0, "max": MAX_RESOLUTION, "step": 1, }),
                 "mask_channel": (["red", "green", "blue", "alpha"],),
                 "invert_mask": ("BOOLEAN", {"default": False}),
                 "latent_type": (["4_channels", "16_channels"], {"default": "16_channels",}),
@@ -249,7 +249,7 @@ class PrepForUnsampling:
     RETURN_TYPES = ("LATENT", "LATENT", "MASK", "LATENT", "INT", "INT",)
     RETURN_NAMES = ("latent_1", "latent_2", "mask", "empty_latent", "width", "height",)
     FUNCTION = "main"
-    CATEGORY = "essentials/image manipulation"
+    CATEGORY = "res4lyf/vae"
 
     def main(self, width, height, resize_to_input="false", image_1=None, image_2=None, mask=None, invert_mask=False, method="stretch", interpolation="lanczos", condition="always", multiple_of=0, keep_proportion=False, mask_channel="red", latent=None, latent_type="16_channels", vae=None):
         #NOTE: VAE encode with comyfui is *non-deterministic* in that each success encode will return slightly different latent images! The difference is visible after decoding.

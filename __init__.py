@@ -82,9 +82,11 @@ NODE_CLASS_MAPPINGS = {
     "Legacy_ClownsharKSamplerGuides": legacy_samplers.Legacy_ClownsharKSamplerGuides,
     
     "ClownSampler": samplers.ClownSampler,
+    "ClownSamplerAdvanced": samplers.ClownSamplerAdvanced,
     "SharkSampler": samplers.SharkSampler,
     "ClownsharKSampler": samplers.ClownsharKSampler,
     "ClownsharKSamplerGuides": samplers_extensions.ClownsharKSamplerGuides,
+    "ClownsharKSamplerGuide": samplers_extensions.ClownsharKSamplerGuide,
     
     "ClownInpaint": samplers_extensions.ClownInpaint,
     "ClownInpaintSimple": samplers_extensions.ClownInpaintSimple,
@@ -212,7 +214,8 @@ NODE_CLASS_MAPPINGS = {
     
     "UNetSave": models.UNetSave,
     
-    "PrepForUnsampling": helper_sigma_preview_image_preproc.PrepForUnsampling,
+    "PrepForUnsampling": helper_sigma_preview_image_preproc.VAEEncodeAdvanced,
+    "VAEEncodeAdvanced": helper_sigma_preview_image_preproc.VAEEncodeAdvanced,
     
     "SigmasPreview": helper_sigma_preview_image_preproc.SigmasPreview,
     

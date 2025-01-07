@@ -278,7 +278,8 @@ class SharkSampler:
 
                     
                     if cfg < 0:
-                        cfgpp = -cfg
+                        #cfgpp = -cfg
+                        sampler.extra_options['cfg_cw'] = -cfg
                         cfg = 1.0
                         
                     if sde_noise is None:
@@ -332,6 +333,179 @@ class SharkSampler:
             out_denoised['samples_fp64'] = torch.stack(out_denoised_samples_fp64, dim=0)
 
             return ( out, out_denoised, sde_noise,)
+
+
+
+
+
+
+
+
+
+
+from .rk_method import RK_Method
+
+
+
+class ClownSamplerAdvanced:
+    @classmethod
+    def INPUT_TYPES(s):
+        return {"required":
+                    {
+                    "noise_type_sde": (NOISE_GENERATOR_NAMES_SIMPLE, {"default": "gaussian"}),
+                    "noise_type_sde_substep": (NOISE_GENERATOR_NAMES_SIMPLE, {"default": "gaussian"}),
+                    "noise_mode_sde": (NOISE_MODE_NAMES, {"default": 'hard', "tooltip": "How noise scales with the sigma schedule. Hard is the most aggressive, the others start strong and drop rapidly."}),
+                    "noise_mode_sde_substep": (NOISE_MODE_NAMES, {"default": 'hard', "tooltip": "How noise scales with the sigma schedule. Hard is the most aggressive, the others start strong and drop rapidly."}),
+                    "eta": ("FLOAT", {"default": 0.5, "min": -100.0, "max": 100.0, "step":0.01, "round": False, "tooltip": "Calculated noise amount to be added, then removed, after each step."}),
+                    "eta_substep": ("FLOAT", {"default": 0.5, "min": -100.0, "max": 100.0, "step":0.01, "round": False, "tooltip": "Calculated noise amount to be added, then removed, after each step."}),
+                    "s_noise": ("FLOAT", {"default": 1.0, "min": -10000, "max": 10000, "step":0.01, "tooltip": "Adds extra SDE noise. Values around 1.03-1.07 can lead to a moderate boost in detail and paint textures."}),
+                    "d_noise": ("FLOAT", {"default": 1.0, "min": -10000, "max": 10000, "step":0.01, "tooltip": "Downscales the sigma schedule. Values around 0.98-0.95 can lead to a large boost in detail and paint textures."}),
+                    "noise_seed_sde": ("INT", {"default": -1, "min": -1, "max": 0xffffffffffffffff}),
+                    "sampler_name": (RK_SAMPLER_NAMES, {"default": "res_2m"}), 
+                    "implicit_sampler_name": (IRK_SAMPLER_NAMES, {"default": "gauss-legendre_2s"}), 
+                    "implicit_steps": ("INT", {"default": 0, "min": 0, "max": 10000}),
+                     },
+                "optional": 
+                    {
+                    "guides": ("GUIDES", ),     
+                    "options": ("OPTIONS", ),   
+                    "automation": ("AUTOMATION", ),
+                    "extra_options": ("STRING", {"default": "", "multiline": True}),   
+                    }
+                }
+
+    RETURN_TYPES = ("SAMPLER",)
+    RETURN_NAMES = ("sampler", ) 
+
+    FUNCTION = "main"
+
+    CATEGORY = "RES4LYF/samplers"
+    
+    def main(self, 
+             noise_type_sde="gaussian", noise_type_sde_substep="gaussian", noise_mode_sde="hard",
+             eta=0.25, eta_var=0.0, d_noise=1.0, s_noise=1.0, alpha_sde=-1.0, k_sde=1.0, cfgpp=0.0, c1=0.0, c2=0.5, c3=1.0, noise_seed_sde=-1, sampler_name="res_2m", implicit_sampler_name="gauss-legendre_2s",
+                    t_fn_formula=None, sigma_fn_formula=None, implicit_steps=0,
+                    latent_guide=None, latent_guide_inv=None, guide_mode="blend", latent_guide_weights=None, latent_guide_weights_inv=None, latent_guide_mask=None, latent_guide_mask_inv=None, rescale_floor=True, sigmas_override=None, unsampler_type="linear",
+                    guides=None, options=None, sde_noise=None,sde_noise_steps=1, 
+                    extra_options="", automation=None, etas=None, s_noises=None,unsample_resample_scales=None, regional_conditioning_weights=None,frame_weights=None, eta_substep=0.5, noise_mode_sde_substep="hard",
+                    ): 
+            if implicit_sampler_name == "none":
+                implicit_steps = 0 
+                implicit_sampler_name = "gauss-legendre_2s"
+
+            if noise_mode_sde == "none":
+                eta, eta_var = 0.0, 0.0
+                noise_mode_sde = "hard"
+        
+            default_dtype = torch.float64
+            max_steps = 10000
+
+            unsample_resample_scales_override = unsample_resample_scales
+
+            if options is not None:
+                noise_type_sde = options.get('noise_type_sde', noise_type_sde)
+                noise_mode_sde = options.get('noise_mode_sde', noise_mode_sde)
+                eta = options.get('eta', eta)
+                s_noise = options.get('s_noise', s_noise)
+                d_noise = options.get('d_noise', d_noise)
+                alpha_sde = options.get('alpha_sde', alpha_sde)
+                k_sde = options.get('k_sde', k_sde)
+                c1 = options.get('c1', c1)
+                c2 = options.get('c2', c2)
+                c3 = options.get('c3', c3)
+                t_fn_formula = options.get('t_fn_formula', t_fn_formula)
+                sigma_fn_formula = options.get('sigma_fn_formula', sigma_fn_formula)
+                unsampler_type = options.get('unsampler_type', unsampler_type)
+                frame_weights = options.get('frame_weights', frame_weights)
+                sde_noise = options.get('sde_noise', sde_noise)
+                sde_noise_steps = options.get('sde_noise_steps', sde_noise_steps)
+
+            noise_seed_sde = torch.initial_seed()+1 if noise_seed_sde < 0 else noise_seed_sde 
+
+            rescale_floor = extra_options_flag("rescale_floor", extra_options)
+
+            if automation is not None:
+                etas, s_noises, unsample_resample_scales = automation
+            etas = initialize_or_scale(etas, eta, max_steps).to(default_dtype)
+            etas = F.pad(etas, (0, max_steps), value=0.0)
+            s_noises = initialize_or_scale(s_noises, s_noise, max_steps).to(default_dtype)
+            s_noises = F.pad(s_noises, (0, max_steps), value=0.0)
+        
+            truncate_conditioning = extra_options_flag("truncate_conditioning", extra_options)
+            if truncate_conditioning == "true" or truncate_conditioning == "true_and_zero_neg":
+                if positive is not None:
+                    positive[0][0] = positive[0][0].clone().to(default_dtype)
+                    positive[0][1]["pooled_output"] = positive[0][1]["pooled_output"].clone().to(default_dtype)
+                if negative is not None:
+                    negative[0][0] = negative[0][0].clone().to(default_dtype)
+                    negative[0][1]["pooled_output"] = negative[0][1]["pooled_output"].clone().to(default_dtype)
+                c = []
+                for t in positive:
+                    d = t[1].copy()
+                    pooled_output = d.get("pooled_output", None)
+                    if pooled_output is not None:
+                        d["pooled_output"] = d["pooled_output"][:, :2048]
+                        n = [t[0][:, :154, :4096], d]
+                    c.append(n)
+                positive = c
+                
+                c = []
+                for t in negative:
+                    d = t[1].copy()
+                    pooled_output = d.get("pooled_output", None)
+                    if pooled_output is not None:
+                        if truncate_conditioning == "true_and_zero_neg":
+                            d["pooled_output"] = torch.zeros((1,2048), dtype=t[0].dtype, device=t[0].device)
+                            n = [torch.zeros((1,154,4096), dtype=t[0].dtype, device=t[0].device), d]
+                        else:
+                            d["pooled_output"] = d["pooled_output"][:, :2048]
+                            n = [t[0][:, :154, :4096], d]
+                    c.append(n)
+                negative = c
+
+            if sde_noise is None:
+                sde_noise = []
+            else:
+                sde_noise = copy.deepcopy(sde_noise)
+                for i in range(len(sde_noise)):
+                    sde_noise[i] = sde_noise[i].to('cuda')
+                    for j in range(sde_noise[i].shape[1]):
+                        sde_noise[i][0][j] = ((sde_noise[i][0][j] - sde_noise[i][0][j].mean()) / sde_noise[i][0][j].std()) #.to('cuda')
+                        
+            if unsample_resample_scales_override is not None:
+                unsample_resample_scales = unsample_resample_scales_override
+
+            sampler = comfy.samplers.ksampler("rk", {"eta": eta, "eta_var": eta_var, "s_noise": s_noise, "d_noise": d_noise, "alpha": alpha_sde, "k": k_sde, "c1": c1, "c2": c2, "c3": c3, "cfgpp": cfgpp, 
+                                                    "noise_sampler_type": noise_type_sde, "noise_mode": noise_mode_sde, "noise_seed": noise_seed_sde, "rk_type": sampler_name, "implicit_sampler_name": implicit_sampler_name,
+                                                            "t_fn_formula": t_fn_formula, "sigma_fn_formula": sigma_fn_formula, "implicit_steps": implicit_steps,
+                                                            "latent_guide": latent_guide, "latent_guide_inv": latent_guide_inv, "mask": latent_guide_mask, "mask_inv": latent_guide_mask_inv,
+                                                            "latent_guide_weights": latent_guide_weights, "latent_guide_weights_inv": latent_guide_weights_inv, "guide_mode": guide_mode,
+                                                            "LGW_MASK_RESCALE_MIN": rescale_floor, "sigmas_override": sigmas_override, "sde_noise": sde_noise,
+                                                            "extra_options": extra_options,
+                                                            "etas": etas, "s_noises": s_noises, "unsample_resample_scales": unsample_resample_scales, "regional_conditioning_weights": regional_conditioning_weights,
+                                                            "guides": guides, "frame_weights": frame_weights, "eta_substep": eta_substep, "noise_mode_sde_substep": noise_mode_sde_substep,
+                                                            })
+
+            return (sampler, )
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
@@ -462,6 +636,12 @@ class ClownSampler:
                         
             if unsample_resample_scales_override is not None:
                 unsample_resample_scales = unsample_resample_scales_override
+                
+            noise_mode_sde_substep = "hard"
+            if RK_Method.is_exponential(sampler_name):
+                eta_substep=0.5
+            else:
+                eta_substep=0.0
 
             sampler = comfy.samplers.ksampler("rk", {"eta": eta, "eta_var": eta_var, "s_noise": s_noise, "d_noise": d_noise, "alpha": alpha_sde, "k": k_sde, "c1": c1, "c2": c2, "c3": c3, "cfgpp": cfgpp, 
                                                     "noise_sampler_type": noise_type_sde, "noise_mode": noise_mode_sde, "noise_seed": noise_seed_sde, "rk_type": sampler_name, "implicit_sampler_name": implicit_sampler_name,
@@ -471,7 +651,7 @@ class ClownSampler:
                                                             "LGW_MASK_RESCALE_MIN": rescale_floor, "sigmas_override": sigmas_override, "sde_noise": sde_noise,
                                                             "extra_options": extra_options,
                                                             "etas": etas, "s_noises": s_noises, "unsample_resample_scales": unsample_resample_scales, "regional_conditioning_weights": regional_conditioning_weights,
-                                                            "guides": guides, "frame_weights": frame_weights,
+                                                            "guides": guides, "frame_weights": frame_weights, "eta_substep": eta_substep, "noise_mode_sde_substep": noise_mode_sde_substep,
                                                             })
 
             return (sampler, )
