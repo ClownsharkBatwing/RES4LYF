@@ -109,6 +109,7 @@ const nodesWithCommonConfig = [
     "AdvancedNoise",
     "Legacy_ClownSampler",
     "ClownSampler",
+    "ClownSamplerAdvanced",
     "ClownsharKSampler",
     "Legacy_ClownSampler",
     "Legacy_SharkSampler",
@@ -130,22 +131,6 @@ nodeConfigs["ClownsharKSamplerGuides"] = createNodeConfig("ClownsharKSamplerGuid
             {
                 inputs: ["guide_bkg"],
                 widgets: ["guide_weight_bkg", "guide_weight_bkg_scale", "guide_weight_scheduler_bkg", "guide_bkg_end_step"]
-            }
-        ]
-    }
-});
-
-nodeConfigs["Legacy_ClownSampler"] = createNodeConfig("Legacy_ClownSampler", {
-    optionalInputWidgets: {
-        // Define groups of widgets that should be shown/hidden based on input connections
-        groups: [
-            {
-                inputs: ["latent_guide", "latent_guide_inv"],   // Show widgets if ANY of these inputs are connected
-                widgets: ["latent_guide_weight", "guide_mode"]  // Widgets to show/hide
-            },
-            {
-                inputs: ["latent_guide_mask"],
-                widgets: ["rescale_floor"]
             }
         ]
     }
