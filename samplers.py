@@ -61,7 +61,7 @@ class SharkSampler:
                     "steps": ("INT", {"default": 30, "min": 1, "max": 10000}),
                     "denoise": ("FLOAT", {"default": 1.0, "min": -10000, "max": 10000, "step":0.01}),
                     "denoise_alt": ("FLOAT", {"default": 1.0, "min": -10000, "max": 10000, "step":0.01}),
-                    "cfg": ("FLOAT", {"default": 3.0, "min": -100.0, "max": 100.0, "step":0.01, "round": False, }),
+                    "cfg": ("FLOAT", {"default": 3.0, "min": -100.0, "max": 100.0, "step":0.01, "round": False, "tooltip": "Negative values use channelwise CFG." }),
                      },
                 "optional": 
                     {

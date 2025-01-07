@@ -44,6 +44,31 @@ def prepare_weighted_masks(mask, mask_inv, lgw_, lgw_inv_, latent_guide, latent_
             lgw_mask_inv = torch.zeros_like(mask)
     return lgw_mask, lgw_mask_inv
 
+def apply_temporal_smoothing(tensor, temporal_smoothing):
+    if temporal_smoothing <= 0 or tensor.dim() != 5:
+        return tensor
+
+    kernel_size = 5
+    padding = kernel_size // 2
+    temporal_kernel = torch.tensor(
+        [0.1, 0.2, 0.4, 0.2, 0.1],
+        device=tensor.device, dtype=tensor.dtype
+    ) * temporal_smoothing
+    temporal_kernel[kernel_size//2] += (1 - temporal_smoothing)
+    temporal_kernel = temporal_kernel / temporal_kernel.sum()
+
+    # resahpe for conv1d
+    b, c, f, h, w = tensor.shape
+    data_flat = tensor.permute(0, 1, 3, 4, 2).reshape(-1, f)
+
+    # apply smoohting
+    data_smooth = F.conv1d(
+        data_flat.unsqueeze(1),
+        temporal_kernel.view(1, 1, -1),
+        padding=padding
+    ).squeeze(1)
+
+    return data_smooth.view(b, c, h, w, f).permute(0, 1, 4, 2, 3)
 
 def get_guide_epsilon_substep(x_0, x_, y0, y0_inv, s_, row, rk_type, b=None, c=None):
     s_in = x_0.new_ones([x_0.shape[0]])
@@ -87,7 +112,7 @@ def get_guide_epsilon(x_0, x_, y0, sigma, rk_type, b=None, c=None):
 
 
 @torch.no_grad()
-def process_guides_substep(x_0, x_, eps_, data_, row, y0, y0_inv, lgw, lgw_inv, lgw_mask, lgw_mask_inv, step, sigma, sigma_next, sigma_down, s_, unsample_resample_scale, rk, rk_type, guide_mode, latent_guide_inv, UNSAMPLE, extra_options):
+def process_guides_substep(x_0, x_, eps_, data_, row, y0, y0_inv, lgw, lgw_inv, lgw_mask, lgw_mask_inv, step, sigma, sigma_next, sigma_down, s_, unsample_resample_scale, rk, rk_type, guide_mode, latent_guide_inv, UNSAMPLE, extra_options, frame_weights=None):
     
     if UNSAMPLE and RK_Method.is_exponential(rk_type):
         if not (extra_options_flag("disable_power_unsample", extra_options) or extra_options_flag("disable_power_resample", extra_options)):
@@ -110,6 +135,15 @@ def process_guides_substep(x_0, x_, eps_, data_, row, y0, y0_inv, lgw, lgw_inv, 
         y0 = y_shift
         if extra_options_flag("dynamic_guides_inv", extra_options):
             y0_inv = y_inv_shift
+
+    lgw_mask = lgw_mask.clone()
+    lgw_mask_inv = lgw_mask_inv.clone() if lgw_mask_inv is not None else None
+    if frame_weights is not None and x_0.dim() == 5:
+        for f in range(lgw_mask.shape[2]):
+            frame_weight = frame_weights[f]
+            lgw_mask[..., f:f+1, :, :] *= frame_weight
+            if lgw_mask_inv is not None:
+                lgw_mask_inv[..., f:f+1, :, :] *= frame_weight
 
     if "data" in guide_mode:
         y0_tmp = y0
@@ -199,6 +233,11 @@ def process_guides_substep(x_0, x_, eps_, data_, row, y0, y0_inv, lgw, lgw_inv, 
                     
                     eps_row, eps_row_inv = get_guide_epsilon_substep(x_0, x_, y0, y0_inv, s_, row, rk_type, b, c)
                     eps_[row][b][c] = eps_[row][b][c]      +     ratio * lgw_mask[b][c] * (eps_row - eps_[row][b][c])    +    ratio_inv * lgw_mask_inv[b][c] * (eps_row_inv - eps_[row][b][c])
+                    
+            temporal_smoothing = float(get_extra_options_kv("temporal_smoothing", "0.0", extra_options))
+            if temporal_smoothing > 0:
+                eps_[row] = apply_temporal_smoothing(eps_[row], temporal_smoothing)
+            
 
 
 

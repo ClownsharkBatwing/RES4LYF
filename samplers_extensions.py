@@ -154,7 +154,7 @@ class ClownInpaint: ############################################################
         
         denoise, denoise_bkg = guide_weight_scale, guide_weight_bkg_scale
         
-        if guide_mode.startswith("epsilon_") and guide_bkg == None:
+        if guide_mode.startswith("epsilon_") and guide_mode != "epsilon_projection" and guide_bkg == None:
             print("Warning: need two latent inputs for guide_mode=",guide_mode," to work. Falling back to epsilon.")
             guide_mode = "epsilon"
         
@@ -225,7 +225,7 @@ class ClownInpaintSimple: ######################################################
         
         denoise, denoise_bkg = guide_weight_scale, guide_weight_bkg_scale
         
-        if guide_mode.startswith("epsilon_") and guide_bkg == None:
+        if guide_mode.startswith("epsilon_") and guide_mode != "epsilon_projection" and guide_bkg == None:
             print("Warning: need two latent inputs for guide_mode=",guide_mode," to work. Falling back to epsilon.")
             guide_mode = "epsilon"
         
@@ -267,7 +267,7 @@ class ClownsharKSamplerGuide:
     @classmethod
     def INPUT_TYPES(s):
         return {"required":
-                    {"guide_mode": (GUIDE_MODE_NAMES, {"default": 'epsilon_projection', "tooltip": "Recommended: epsilon or mean/mean_std with sampler_mode = standard, and unsample/resample with sampler_mode = unsample/resample. Epsilon_dynamic_mean, etc. are only used with two latent inputs and a mask. Blend/hard_light/mean/mean_std etc. require low strengths, start with 0.01-0.02."}),
+                    {"guide_mode": (GUIDE_MODE_NAMES, {"default": 'epsilon', "tooltip": "Recommended: epsilon or mean/mean_std with sampler_mode = standard, and unsample/resample with sampler_mode = unsample/resample. Epsilon_dynamic_mean, etc. are only used with two latent inputs and a mask. Blend/hard_light/mean/mean_std etc. require low strengths, start with 0.01-0.02."}),
                      "guide_weight": ("FLOAT", {"default": 0.75, "min": -100.0, "max": 100.0, "step":0.01, "round": False, "tooltip": "Set the strength of the guide."}),
                      #"guide_weight_bkg": ("FLOAT", {"default": 0.75, "min": -100.0, "max": 100.0, "step":0.01, "round": False, "tooltip": "Set the strength of the guide_bkg."}),
                      "guide_weight_scale": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 1.0, "step":0.01, "round": False, "tooltip": "Disables the guide for the next step when the denoised image is similar to the guide. Higher values will strengthen the effect."}),
@@ -302,7 +302,7 @@ class ClownsharKSamplerGuide:
         
         denoise, denoise_bkg = guide_weight_scale, guide_weight_bkg_scale
         
-        if guide_mode.startswith("epsilon_") and guide_bkg == None:
+        if guide_mode.startswith("epsilon_") and guide_mode != "epsilon_projection" and guide_bkg == None:
             print("Warning: need two latent inputs for guide_mode=",guide_mode," to work. Falling back to epsilon.")
             guide_mode = "epsilon"
         
@@ -325,7 +325,7 @@ class ClownsharKSamplerGuides:
     @classmethod
     def INPUT_TYPES(s):
         return {"required":
-                    {"guide_mode": (GUIDE_MODE_NAMES, {"default": 'epsilon_projection', "tooltip": "Recommended: epsilon or mean/mean_std with sampler_mode = standard, and unsample/resample with sampler_mode = unsample/resample. Epsilon_dynamic_mean, etc. are only used with two latent inputs and a mask. Blend/hard_light/mean/mean_std etc. require low strengths, start with 0.01-0.02."}),
+                    {"guide_mode": (GUIDE_MODE_NAMES, {"default": 'epsilon', "tooltip": "Recommended: epsilon or mean/mean_std with sampler_mode = standard, and unsample/resample with sampler_mode = unsample/resample. Epsilon_dynamic_mean, etc. are only used with two latent inputs and a mask. Blend/hard_light/mean/mean_std etc. require low strengths, start with 0.01-0.02."}),
                      "guide_weight": ("FLOAT", {"default": 0.75, "min": -100.0, "max": 100.0, "step":0.01, "round": False, "tooltip": "Set the strength of the guide."}),
                      "guide_weight_bkg": ("FLOAT", {"default": 0.75, "min": -100.0, "max": 100.0, "step":0.01, "round": False, "tooltip": "Set the strength of the guide_bkg."}),
                      "guide_weight_scale": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 1.0, "step":0.01, "round": False, "tooltip": "Disables the guide for the next step when the denoised image is similar to the guide. Higher values will strengthen the effect."}),
@@ -360,7 +360,7 @@ class ClownsharKSamplerGuides:
         
         denoise, denoise_bkg = guide_weight_scale, guide_weight_bkg_scale
         
-        if guide_mode.startswith("epsilon_") and guide_bkg == None:
+        if guide_mode.startswith("epsilon_") and guide_mode != "epsilon_projection" and guide_bkg == None:
             print("Warning: need two latent inputs for guide_mode=",guide_mode," to work. Falling back to epsilon.")
             guide_mode = "epsilon"
         

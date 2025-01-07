@@ -59,10 +59,12 @@ extra_samplers = {
     "res_2s": rk_sampler.sample_res_2s,
     "res_3s": rk_sampler.sample_res_3s,
     "res_5s": rk_sampler.sample_res_5s,
+    "res_6s": rk_sampler.sample_res_6s,
     "res_2m_sde": rk_sampler.sample_res_2m_sde,
     "res_2s_sde": rk_sampler.sample_res_2s_sde,
     "res_3s_sde": rk_sampler.sample_res_3s_sde,
     "res_5s_sde": rk_sampler.sample_res_5s_sde,
+    "res_6s_sde": rk_sampler.sample_res_6s_sde,
     "deis_2m": rk_sampler.sample_deis_2m,
     "deis_3m": rk_sampler.sample_deis_3m,
     "deis_4m": rk_sampler.sample_deis_4m,
@@ -221,7 +223,7 @@ NODE_CLASS_MAPPINGS = {
     
     "ReFluxPatcher": models.ReFluxPatcher,
     
-    #"ClownsharkSamplerOptions_FrameWeights": samplers_extensions.ClownsharKSamplerOptions_FrameWeights,
+    "ClownsharkSamplerOptions_FrameWeights": samplers_extensions.ClownsharKSamplerOptions_FrameWeights,
 }
 
 if flags["test_samplers"]:

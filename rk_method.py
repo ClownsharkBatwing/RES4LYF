@@ -176,16 +176,19 @@ class RK_Method:
         self.multistep_stages = multistep_stages
         
         self.a = torch.tensor(a, dtype=h.dtype, device=h.device)
-        self.a = self.a.view(*self.a.shape, 1, 1, 1, 1)
+        #self.a = self.a.view(*self.a.shape, 1, 1, 1, 1)
+        self.a = self.a.view(*self.a.shape, 1, 1, 1, 1, 1)
+        
         
         self.b = torch.tensor(b, dtype=h.dtype, device=h.device)
-        self.b = self.b.view(*self.b.shape, 1, 1, 1, 1)
+        #self.b = self.b.view(*self.b.shape, 1, 1, 1, 1)
+        self.b = self.b.view(*self.b.shape, 1, 1, 1, 1, 1)
         
         self.c = torch.tensor(ci, dtype=h.dtype, device=h.device)
         self.rows = self.a.shape[0]
         self.cols = self.a.shape[1]
             
-    def a_k_sum(self, k, row):
+    """def a_k_sum(self, k, row):
         if len(k.shape) == 4:
             ks = k * self.a[row].sum(dim=0)
         ks = (k[0:self.cols] * self.a[row]).sum(dim=0)
@@ -195,28 +198,55 @@ class RK_Method:
         if len(k.shape) == 4:
             ks = k * self.b[row].sum(dim=0)
         ks = (k[0:self.cols] * self.b[row]).sum(dim=0)
+        return ks"""
+
+    def a_k_sum(self, k, row):
+        if len(k.shape) == 4:
+            a_coeff = self.a[row].squeeze(-1)
+            ks = k * a_coeff.sum(dim=0)
+        elif len(k.shape) == 5:
+            a_coeff = self.a[row].squeeze(-1)
+            ks = (k[0:self.cols] * a_coeff).sum(dim=0)
+        elif len(k.shape) == 6:
+            a_coeff = self.a[row]
+            ks = (k[0:self.cols] * a_coeff).sum(dim=0)
+        else:
+            raise ValueError(f"Unexpected k shape: {k.shape}")
         return ks
 
-
+    def b_k_sum(self, k, row):
+        if len(k.shape) == 4:
+            b_coeff = self.b[row].squeeze(-1)
+            ks = k * b_coeff.sum(dim=0)
+        elif len(k.shape) == 5:
+            b_coeff = self.b[row].squeeze(-1)
+            ks = (k[0:self.cols] * b_coeff).sum(dim=0)
+        elif len(k.shape) == 6:
+            b_coeff = self.b[row]
+            ks = (k[0:self.cols] * b_coeff).sum(dim=0)
+        else:
+            raise ValueError(f"Unexpected k shape: {k.shape}")
+        return ks
 
     def init_guides(self, x, latent_guide, latent_guide_inv, mask, sigmas, UNSAMPLE):
         y0, y0_inv = torch.zeros_like(x), torch.zeros_like(x)
         
+        latent_guide_samples = self.model.inner_model.inner_model.process_latent_in(latent_guide['samples']).clone().to(x.device)
         if latent_guide is not None:
             if sigmas[0] > sigmas[1]:
-                y0 = latent_guide = self.model.inner_model.inner_model.process_latent_in(latent_guide['samples']).clone().to(x.device)
+                y0 = latent_guide = latent_guide_samples
             elif UNSAMPLE and mask is not None:
-                x = (1-mask) * x + mask * self.model.inner_model.inner_model.process_latent_in(latent_guide['samples']).clone().to(x.device)
+                x = (1-mask) * x + mask * latent_guide_samples
             else:
-                x = self.model.inner_model.inner_model.process_latent_in(latent_guide['samples']).clone().to(x.device)
+                x = latent_guide_samples
 
         if latent_guide_inv is not None:
             if sigmas[0] > sigmas[1]:
-                y0_inv = latent_guide_inv = self.model.inner_model.inner_model.process_latent_in(latent_guide_inv['samples']).clone().to(x.device)
+                y0_inv = latent_guide_inv = latent_guide_samples
             elif UNSAMPLE and mask is not None:
-                x = mask * x + (1-mask) * self.model.inner_model.inner_model.process_latent_in(latent_guide_inv['samples']).clone().to(x.device)
+                x = mask * x + (1-mask) * latent_guide_samples
             else:
-                x = self.model.inner_model.inner_model.process_latent_in(latent_guide_inv['samples']).clone().to(x.device)   #THIS COULD LEAD TO WEIRD BEHAVIOR! OVERWRITING X WITH LG_INV AFTER SETTING TO LG above!
+                x = latent_guide_samples   #THIS COULD LEAD TO WEIRD BEHAVIOR! OVERWRITING X WITH LG_INV AFTER SETTING TO LG above!
                 
         if UNSAMPLE and sigmas[0] < sigmas[1]: #sigma_next > sigma:
             y0 = self.noise_sampler(sigma=self.sigma_max, sigma_next=self.sigma_min)

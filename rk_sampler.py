@@ -19,7 +19,7 @@ from .latents import normalize_latent, initialize_or_scale, latent_normalize_cha
 from .helper import get_extra_options_kv, extra_options_flag
 from .sigmas import get_sigmas
 
-PRINT_DEBUG=False
+PRINT_DEBUG=True
 
 def get_cosine_similarity(a, b):
     if a.dim() == 5 and b.dim() == 5 and b.shape[2] == 1:
@@ -106,10 +106,7 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
     noise_cossim_max_iter          =   int(get_extra_options_kv("noise_cossim_max_iter",          "50",   extra_options))
     noise_substep_cossim_max_score = float(get_extra_options_kv("noise_substep_cossim_max_score", "1e-7", extra_options))
     noise_cossim_max_score         = float(get_extra_options_kv("noise_cossim_max_score",         "1e-7", extra_options))
-    
-    cossim_cutoff     = float(get_extra_options_kv("epsilon_cossim_cutoff",     "1.0", extra_options))
-    cossim_cutoff_bkg = float(get_extra_options_kv("epsilon_cossim_cutoff_bkg", "1.0", extra_options))
-    
+
     cfg_cw = float(get_extra_options_kv("cfg_cw", str(cfg_cw), extra_options))
     
     s_in, s_one = x.new_ones([x.shape[0]]), x.new_ones([1])
@@ -143,6 +140,12 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
         lgw = latent_guide_weights.to(x.device)
     if latent_guide_weights_inv is not None:
         lgw_inv = latent_guide_weights_inv.to(x.device)
+    else:
+        lgw_inv = torch.full_like(sigmas, 0.)
+
+    if frame_weights is not None:
+        frame_weights = initialize_or_scale(frame_weights, 1.0, max_steps).to(default_dtype)
+        frame_weights = F.pad(frame_weights, (0, max_steps), value=0.0)
     
     if sigmas_override is not None:
         sigmas = sigmas_override.clone()
@@ -296,13 +299,38 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
                     x_[row+1] = x_0 + h * rk.a_k_sum(eps_, row)     
 
                 if guide_mode == "data":
+                    lgw_mask_fw = lgw_mask.clone()
+                    lgw_mask_inv_fw = lgw_mask_inv.clone() if lgw_mask_inv is not None else None
                     denoised = x_0 + ((sigma / (sigma - sigma_down)) *  h) * rk.a_k_sum(eps_, row) 
+                    eps = x_[row+1] - denoised
+                    if frame_weights is not None and x_0.dim() == 5:
+                        for f in range(lgw_mask_fw.shape[2]):
+                            frame_weight = frame_weights[f]
+                            lgw_mask_fw[..., f:f+1, :, :] *= frame_weight
+                            if lgw_mask_inv_fw is not None:
+                                lgw_mask_inv_fw[..., f:f+1, :, :] *= frame_weight
+
+                    if latent_guide_inv is None:
+                        #denoised_shifted = denoised   +   lgw_mask * (y0 - denoised) 
+                        denoised_shifted = denoised   +   lgw_mask_fw * (y0 - denoised) 
+                    else:
+                        #denoised_shifted = denoised   +   lgw_mask * (y0 - denoised)   +   lgw_mask_inv * (y0_inv - denoised)
+                        denoised_shifted = denoised   +   lgw_mask_fw * (y0 - denoised)   +   lgw_mask_inv_fw * (y0_inv - denoised)
+
+                    temporal_smoothing = float(get_extra_options_kv("temporal_smoothing", "0.0", extra_options))
+                    if temporal_smoothing > 0:
+                        denoised_tmp = apply_temporal_smoothing(denoised_shifted, temporal_smoothing)
+                        denoised_shifted = denoised_shifted + lgw_mask_fw * (denoised_tmp - denoised_shifted)
+                        
+                    x_[row+1] = denoised_shifted + eps
+
+                    """denoised = x_0 + ((sigma / (sigma - sigma_down)) *  h) * rk.a_k_sum(eps_, row) 
                     eps = x_[row+1] - denoised
                     if latent_guide_inv is None:
                         denoised_shifted = denoised   +   lgw_mask * (y0 - denoised) 
                     else:
                         denoised_shifted = denoised   +   lgw_mask * (y0 - denoised)   +   lgw_mask_inv * (y0_inv - denoised)
-                    x_[row+1] = denoised_shifted + eps
+                    x_[row+1] = denoised_shifted + eps"""
                 
                 # NOISE ADD
                 if (row > 0) and (sub_sigma_up > 0) and ((SUBSTEP_SKIP_LAST == False) or (row < rk.rows - rk.multistep_stages - 1)):
@@ -325,13 +353,18 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
                 eps_[row], data_[row] = rk(x_0, x_[row+1], s_[row], h, **extra_args)       
                 
                 
-                data_norm   = data_[0] - data_[0].mean(dim=(2, 3), keepdim=True)
-                y0_norm     = y0       -       y0.mean(dim=(2, 3), keepdim=True)
-                y0_inv_norm = y0_inv   -   y0_inv.mean(dim=(2, 3), keepdim=True)
+                #data_norm   = data_[0] - data_[0].mean(dim=(2, 3), keepdim=True)
+                #y0_norm     = y0       -       y0.mean(dim=(2, 3), keepdim=True)
+                #y0_inv_norm = y0_inv   -   y0_inv.mean(dim=(2, 3), keepdim=True)
+                
+                dims = tuple(range(2, data_[0].ndim)) # dimensions 2 and above
+                data_norm = data_[0] - data_[0].mean(dim=dims, keepdim=True)
+                y0_norm   = y0       -       y0.mean(dim=dims, keepdim=True)
+                y0_inv_norm = y0_inv -   y0_inv.mean(dim=dims, keepdim=True)
                 if PRINT_DEBUG:
                     print(get_cosine_similarity(data_norm, y0_norm).item())
                 if guide_cossim_cutoff_ > get_cosine_similarity(data_norm, y0_norm) and guide_bkg_cossim_cutoff_ > get_cosine_similarity(data_norm, y0_inv_norm):
-                    eps_, x_ = process_guides_substep(x_0, x_, eps_, data_, row, y0, y0_inv, lgw[step], lgw_inv[step], lgw_mask, lgw_mask_inv, step, sigma, sigma_next, sigma_down, s_new_, unsample_resample_scale, rk, rk_type, guide_mode, latent_guide_inv, UNSAMPLE, extra_options)
+                    eps_, x_ = process_guides_substep(x_0, x_, eps_, data_, row, y0, y0_inv, lgw[step], lgw_inv[step], lgw_mask, lgw_mask_inv, step, sigma, sigma_next, sigma_down, s_new_, unsample_resample_scale, rk, rk_type, guide_mode, latent_guide_inv, UNSAMPLE, extra_options, frame_weights)
 
 
 
@@ -351,7 +384,7 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
                 for diag_iter in range(implicit_steps+1):
                     x_[row+1] = x_0 + h_irk * irk.a_k_sum(eps_, row)
                     eps_[row], data_[row] = irk(x_0, x_[row+1], s_irk[row], h_irk, **extra_args)       #MODEL CALL
-                    eps_, x_ = process_guides_substep(x_0, x_, eps_, data_, row, y0, y0_inv, lgw[step], lgw_inv[step], lgw_mask, lgw_mask_inv, step, sigma, sigma_next, sigma_down, s_irk, unsample_resample_scale, irk, irk_type, guide_mode, latent_guide_inv, UNSAMPLE, extra_options)
+                    eps_, x_ = process_guides_substep(x_0, x_, eps_, data_, row, y0, y0_inv, lgw[step], lgw_inv[step], lgw_mask, lgw_mask_inv, step, sigma, sigma_next, sigma_down, s_irk, unsample_resample_scale, irk, irk_type, guide_mode, latent_guide_inv, UNSAMPLE, extra_options, frame_weights)
                     
             x = x_0 + h_irk * irk.b_k_sum(eps_, 0) 
             
@@ -387,6 +420,7 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
             else:
                 x_mid = x
                 for i in range(len(s_all)-1):
+                    extra_args["frame_weights"] = frame_weights
                     x_mid, eps_, data_ = get_explicit_rk_step(rk, rk_type, x_mid, y0, y0_inv, lgw[step], lgw_inv[step], mask, lgw_mask, lgw_mask_inv, step, s_all[i], s_all[i+1], eta, eta_var, s_noise, noise_mode, c2, c3, step+i, sigmas_and, x_, eps_, data_, unsample_resample_scale, guide_mode, latent_guide, latent_guide_inv, UNSAMPLE, extra_options, **extra_args)
                     eps_list.append(eps_[0])
                     data_[0].zero_()
@@ -405,7 +439,7 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
                 for row in range(irk.rows):
                     x_[row+1] = x_0 + h_irk * irk.a_k_sum(eps2_, row)
                     eps2_[row], data_[row] = irk(x_0, x_[row+1], s_irk[row], h_irk, **extra_args)
-                    eps2_, x_ = process_guides_substep(x_0, x_, eps2_, data_, row, y0, y0_inv, lgw[step], lgw_inv[step], lgw_mask, lgw_mask_inv, step, sigma, sigma_next, sigma_down, s_irk, unsample_resample_scale, irk, irk_type, guide_mode, latent_guide_inv, UNSAMPLE, extra_options)
+                    eps2_, x_ = process_guides_substep(x_0, x_, eps2_, data_, row, y0, y0_inv, lgw[step], lgw_inv[step], lgw_mask, lgw_mask_inv, step, sigma, sigma_next, sigma_down, s_irk, unsample_resample_scale, irk, irk_type, guide_mode, latent_guide_inv, UNSAMPLE, extra_options, frame_weights)
                 x = x_0 + h_irk * irk.b_k_sum(eps2_, 0)
                 denoised = x_0 + (sigma / (sigma - sigma_down)) *  h_irk * irk.b_k_sum(eps2_, 0) 
                 eps = x - denoised
@@ -462,6 +496,7 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
 
 def get_explicit_rk_step(rk, rk_type, x, y0, y0_inv, lgw, lgw_inv, mask, lgw_mask, lgw_mask_inv, step, sigma, sigma_next, eta, eta_var, s_noise, noise_mode, c2, c3, stepcount, sigmas, x_, eps_, data_, unsample_resample_scale, guide_mode, latent_guide, latent_guide_inv, UNSAMPLE, extra_options, **extra_args):
     extra_args = {} if extra_args is None else extra_args
+    frame_weights = extra_args.get("frame_weights", None)
     s_in = x.new_ones([x.shape[0]])
     
     eta = get_extra_options_kv("implicit_substep_eta", eta, extra_options)
@@ -487,7 +522,7 @@ def get_explicit_rk_step(rk, rk_type, x, y0, y0_inv, lgw, lgw_inv, mask, lgw_mas
         x_[row+1] = x_0 + h * rk.a_k_sum(eps_, row)
         eps_[row], data_[row] = rk(x_0, x_[row+1], s_[row], h, **extra_args)
         
-        eps_, x_ = process_guides_substep(x_0, x_, eps_, data_, row, y0, y0_inv, lgw, lgw_inv, lgw_mask, lgw_mask_inv, step, sigma, sigma_next, sigma_down, s_, unsample_resample_scale, rk, rk_type, guide_mode, latent_guide_inv, UNSAMPLE, extra_options)
+        eps_, x_ = process_guides_substep(x_0, x_, eps_, data_, row, y0, y0_inv, lgw, lgw_inv, lgw_mask, lgw_mask_inv, step, sigma, sigma_next, sigma_down, s_, unsample_resample_scale, rk, rk_type, guide_mode, latent_guide_inv, UNSAMPLE, extra_options, frame_weights)
         
     x = x_0 + h * rk.b_k_sum(eps_, 0)
     
@@ -518,15 +553,19 @@ def sample_res_3s(model, x, sigmas, extra_args=None, callback=None, disable=None
     return sample_rk(model, x, sigmas, extra_args, callback, disable, noise_sampler_type="gaussian", noise_mode="hard", noise_seed=-1, rk_type="res_3s", eta=0.0, )
 def sample_res_5s(model, x, sigmas, extra_args=None, callback=None, disable=None):
     return sample_rk(model, x, sigmas, extra_args, callback, disable, noise_sampler_type="gaussian", noise_mode="hard", noise_seed=-1, rk_type="res_5s", eta=0.0, )
+def sample_res_6s(model, x, sigmas, extra_args=None, callback=None, disable=None):
+    return sample_rk(model, x, sigmas, extra_args, callback, disable, noise_sampler_type="gaussian", noise_mode="hard", noise_seed=-1, rk_type="res_6s", eta=0.0, )
 
 def sample_res_2m_sde(model, x, sigmas, extra_args=None, callback=None, disable=None):
-    return sample_rk(model, x, sigmas, extra_args, callback, disable, noise_sampler_type="gaussian", noise_mode="hard", noise_seed=-1, rk_type="res_2m", eta=0.5, )
+    return sample_rk(model, x, sigmas, extra_args, callback, disable, noise_sampler_type="gaussian", noise_mode="hard", noise_seed=-1, rk_type="res_2m", eta=0.5, eta_substep=0.5, )
 def sample_res_2s_sde(model, x, sigmas, extra_args=None, callback=None, disable=None):
-    return sample_rk(model, x, sigmas, extra_args, callback, disable, noise_sampler_type="gaussian", noise_mode="hard", noise_seed=-1, rk_type="res_2s", eta=0.5, )
+    return sample_rk(model, x, sigmas, extra_args, callback, disable, noise_sampler_type="gaussian", noise_mode="hard", noise_seed=-1, rk_type="res_2s", eta=0.5, eta_substep=0.5, )
 def sample_res_3s_sde(model, x, sigmas, extra_args=None, callback=None, disable=None):
-    return sample_rk(model, x, sigmas, extra_args, callback, disable, noise_sampler_type="gaussian", noise_mode="hard", noise_seed=-1, rk_type="res_3s", eta=0.5, )
+    return sample_rk(model, x, sigmas, extra_args, callback, disable, noise_sampler_type="gaussian", noise_mode="hard", noise_seed=-1, rk_type="res_3s", eta=0.5, eta_substep=0.5, )
 def sample_res_5s_sde(model, x, sigmas, extra_args=None, callback=None, disable=None):
-    return sample_rk(model, x, sigmas, extra_args, callback, disable, noise_sampler_type="gaussian", noise_mode="hard", noise_seed=-1, rk_type="res_5s", eta=0.5, )
+    return sample_rk(model, x, sigmas, extra_args, callback, disable, noise_sampler_type="gaussian", noise_mode="hard", noise_seed=-1, rk_type="res_5s", eta=0.5, eta_substep=0.5, )
+def sample_res_6s_sde(model, x, sigmas, extra_args=None, callback=None, disable=None):
+    return sample_rk(model, x, sigmas, extra_args, callback, disable, noise_sampler_type="gaussian", noise_mode="hard", noise_seed=-1, rk_type="res_6s", eta=0.5, eta_substep=0.5, )
 
 def sample_deis_2m(model, x, sigmas, extra_args=None, callback=None, disable=None):
     return sample_rk(model, x, sigmas, extra_args, callback, disable, noise_sampler_type="gaussian", noise_mode="hard", noise_seed=-1, rk_type="deis_2m", eta=0.0, )
