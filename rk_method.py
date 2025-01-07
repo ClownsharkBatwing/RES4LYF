@@ -231,8 +231,8 @@ class RK_Method:
     def init_guides(self, x, latent_guide, latent_guide_inv, mask, sigmas, UNSAMPLE):
         y0, y0_inv = torch.zeros_like(x), torch.zeros_like(x)
         
-        latent_guide_samples = self.model.inner_model.inner_model.process_latent_in(latent_guide['samples']).clone().to(x.device)
         if latent_guide is not None:
+            latent_guide_samples = self.model.inner_model.inner_model.process_latent_in(latent_guide['samples']).clone().to(x.device)
             if sigmas[0] > sigmas[1]:
                 y0 = latent_guide = latent_guide_samples
             elif UNSAMPLE and mask is not None:
@@ -241,12 +241,13 @@ class RK_Method:
                 x = latent_guide_samples
 
         if latent_guide_inv is not None:
+            latent_guide_inv_samples = self.model.inner_model.inner_model.process_latent_in(latent_guide_inv['samples']).clone().to(x.device)
             if sigmas[0] > sigmas[1]:
-                y0_inv = latent_guide_inv = latent_guide_samples
+                y0_inv = latent_guide_inv = latent_guide_inv_samples
             elif UNSAMPLE and mask is not None:
-                x = mask * x + (1-mask) * latent_guide_samples
+                x = mask * x + (1-mask) * latent_guide_inv_samples
             else:
-                x = latent_guide_samples   #THIS COULD LEAD TO WEIRD BEHAVIOR! OVERWRITING X WITH LG_INV AFTER SETTING TO LG above!
+                x = latent_guide_inv_samples   #THIS COULD LEAD TO WEIRD BEHAVIOR! OVERWRITING X WITH LG_INV AFTER SETTING TO LG above!
                 
         if UNSAMPLE and sigmas[0] < sigmas[1]: #sigma_next > sigma:
             y0 = self.noise_sampler(sigma=self.sigma_max, sigma_next=self.sigma_min)
