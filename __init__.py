@@ -59,10 +59,12 @@ extra_samplers = {
     "res_2s": rk_sampler.sample_res_2s,
     "res_3s": rk_sampler.sample_res_3s,
     "res_5s": rk_sampler.sample_res_5s,
+    "res_6s": rk_sampler.sample_res_6s,
     "res_2m_sde": rk_sampler.sample_res_2m_sde,
     "res_2s_sde": rk_sampler.sample_res_2s_sde,
     "res_3s_sde": rk_sampler.sample_res_3s_sde,
     "res_5s_sde": rk_sampler.sample_res_5s_sde,
+    "res_6s_sde": rk_sampler.sample_res_6s_sde,
     "deis_2m": rk_sampler.sample_deis_2m,
     "deis_3m": rk_sampler.sample_deis_3m,
     "deis_4m": rk_sampler.sample_deis_4m,
@@ -82,9 +84,11 @@ NODE_CLASS_MAPPINGS = {
     "Legacy_ClownsharKSamplerGuides": legacy_samplers.Legacy_ClownsharKSamplerGuides,
     
     "ClownSampler": samplers.ClownSampler,
+    "ClownSamplerAdvanced": samplers.ClownSamplerAdvanced,
     "SharkSampler": samplers.SharkSampler,
     "ClownsharKSampler": samplers.ClownsharKSampler,
     "ClownsharKSamplerGuides": samplers_extensions.ClownsharKSamplerGuides,
+    "ClownsharKSamplerGuide": samplers_extensions.ClownsharKSamplerGuide,
     
     "ClownInpaint": samplers_extensions.ClownInpaint,
     "ClownInpaintSimple": samplers_extensions.ClownInpaintSimple,
@@ -213,7 +217,8 @@ NODE_CLASS_MAPPINGS = {
     
     "UNetSave": models.UNetSave,
     
-    "PrepForUnsampling": helper_sigma_preview_image_preproc.PrepForUnsampling,
+    "PrepForUnsampling": helper_sigma_preview_image_preproc.VAEEncodeAdvanced,
+    "VAEEncodeAdvanced": helper_sigma_preview_image_preproc.VAEEncodeAdvanced,
     
     "SigmasPreview": helper_sigma_preview_image_preproc.SigmasPreview,
     
