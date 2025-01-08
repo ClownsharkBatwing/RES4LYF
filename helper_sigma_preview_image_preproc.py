@@ -338,19 +338,34 @@ class SigmasSchedulePreview(SaveImage):
     CATEGORY = "res4lyf/schedules"
     OUTPUT_NODE = True
 
+
     @staticmethod
-    def tensor_to_graph_image(tensors, labels, colors, plot_max = -1.0):
-        plt.figure()
-        for tensor, label, color in zip(tensors, labels, colors):
-            plt.plot(tensor.numpy(), label=label, color=color)
-        plt.title("Sigma Schedule and Related Values")
-        plt.xlabel("Step Number")
-        plt.ylabel("Value")
+    def tensor_to_graph_image(tensors, labels, colors, plot_max):
+        plt.figure(figsize=(6.4, 6.4), dpi=320) 
+        ax = plt.gca()
+        ax.set_facecolor("black") 
+        ax.patch.set_alpha(1.0)  
+
+        for _ in range(50):
+            for tensor, color in zip(tensors, colors):
+                plt.plot(tensor.numpy(), color=color, alpha=0.1)
+
+        plt.axhline(y=1.0, color='gray', linestyle='dotted', linewidth=1.5)
+
+        plt.title("Sigma Schedule and Related Values", color="white", weight="bold", antialiased=False)
+        plt.xlabel("Step Number", color="white", weight="bold", antialiased=False)
+        plt.ylabel("Value", color="white", weight="bold", antialiased=False)
+        ax.tick_params(colors="white") 
+
         if plot_max > 0:
             plt.ylim(0, plot_max)
-        plt.legend();
+
+        from matplotlib.lines import Line2D
+        legend_handles = [Line2D([0], [0], color=color, lw=2, label=label) for label, color in zip(labels, colors)]
+        plt.legend(handles=legend_handles, facecolor="black", edgecolor="white", labelcolor="white", framealpha=1.0)
+
         with BytesIO() as buf:
-            plt.savefig(buf, format='png')
+            plt.savefig(buf, format='png', facecolor="black")
             buf.seek(0)
             image = Image.open(buf).copy()
         plt.close()
@@ -408,17 +423,17 @@ class SigmasSchedulePreview(SaveImage):
 
         tensors = [sigma_tensor, sigma_next_tensor, sigma_down_tensor, sigma_up_tensor]
         labels = ["$σ$", "$σ_{next}$", "$σ_{down}$", "$σ_{up}$"]
-        colors = ["black", "blue", "green", "red"]
+        colors = ["white", "dodgerblue", "green", "red"]
         
         if torch.norm(sigma_next_tensor - sigma_down_tensor) < 1e-2:
             tensors = [sigma_tensor, sigma_next_tensor, sigma_up_tensor]
             labels = ["$σ$", "$σ_{next,down}$", "$σ_{up}$"]
-            colors = ["black", "cyan", "red"]
+            colors = ["white", "cyan", "red"]
             
         elif torch.norm(sigma_next_tensor - sigma_up_tensor) < 1e-2:
             tensors = [sigma_tensor, sigma_next_tensor, sigma_down_tensor]
             labels = ["$σ$", "$σ_{next,up}$", "$σ_{down}$"]
-            colors = ["black", "violet", "green",]
+            colors = ["white", "violet", "green",]
         
         if torch.norm(sigma_tensor - sigma_plus_up_tensor) > 1e-2:
             tensors.append(sigma_plus_up_tensor)
