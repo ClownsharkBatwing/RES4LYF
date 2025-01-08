@@ -272,7 +272,7 @@ class ClownsharKSamplerGuide:
                      #"guide_weight_bkg": ("FLOAT", {"default": 0.75, "min": -100.0, "max": 100.0, "step":0.01, "round": False, "tooltip": "Set the strength of the guide_bkg."}),
                      "guide_weight_scale": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 1.0, "step":0.01, "round": False, "tooltip": "Disables the guide for the next step when the denoised image is similar to the guide. Higher values will strengthen the effect."}),
                      #"guide_weight_bkg_scale": ("FLOAT", {"default": 1.0, "min": -100.0, "max": 100.0, "step":0.01, "round": False, "tooltip": "Disables the guide for the next step when the denoised image is similar to the guide. Higher values will strengthen the effect."}),
-                    "guide_weight_scheduler": (["constant"] + get_res4lyf_scheduler_list(), {"default": "beta57"},),
+                    "guide_weight_scheduler":     (["constant"] + get_res4lyf_scheduler_list(), {"default": "beta57"},),
                     #"guide_weight_scheduler_bkg": (["constant"] + comfy.samplers.SCHEDULER_NAMES + ["beta57"], {"default": "beta57"},),
                     "guide_end_step": ("INT", {"default": 15, "min": 1, "max": 10000}),
                     #"guide_bkg_end_step": ("INT", {"default": 15, "min": 1, "max": 10000}),
@@ -330,10 +330,10 @@ class ClownsharKSamplerGuides:
                      "guide_weight_bkg": ("FLOAT", {"default": 0.75, "min": -100.0, "max": 100.0, "step":0.01, "round": False, "tooltip": "Set the strength of the guide_bkg."}),
                      "guide_weight_scale": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 1.0, "step":0.01, "round": False, "tooltip": "Disables the guide for the next step when the denoised image is similar to the guide. Higher values will strengthen the effect."}),
                      "guide_weight_bkg_scale": ("FLOAT", {"default": 1.0, "min": -100.0, "max": 100.0, "step":0.01, "round": False, "tooltip": "Disables the guide for the next step when the denoised image is similar to the guide. Higher values will strengthen the effect."}),
-                     "guide_weight_scheduler": (["constant"] + get_res4lyf_scheduler_list(), {"default": "beta57"},),
-                     "guide_weight_scheduler_bkg": (["constant"] + get_res4lyf_scheduler_list(), {"default": "beta57"},),
-                     "guide_end_step": ("INT", {"default": 15, "min": 1, "max": 10000}),
-                     "guide_bkg_end_step": ("INT", {"default": 15, "min": 1, "max": 10000}),
+                    "guide_weight_scheduler":     (["constant"] + get_res4lyf_scheduler_list(), {"default": "beta57"},),
+                    "guide_weight_scheduler_bkg": (["constant"] + get_res4lyf_scheduler_list(), {"default": "constant"},),
+                    "guide_end_step": ("INT", {"default": 15, "min": 1, "max": 10000}),
+                    "guide_bkg_end_step": ("INT", {"default": 15, "min": 1, "max": 10000}),
                     },
                     "optional": 
                     {

@@ -1,6 +1,7 @@
 import torch
 from .noise_classes import *
 import comfy.model_patcher
+from .helper import has_nested_attr
 
 def get_alpha_ratio_from_sigma_up(sigma_up, sigma_next, eta, sigma_max=1.0):
     if sigma_up >= sigma_next and sigma_next > 0:
@@ -110,7 +111,13 @@ def get_ancestral_step_RF_hard(sigma_next, eta, sigma_max=1.0):
 
 
 def get_res4lyf_step_with_model(model, sigma, sigma_next, eta=0.0, eta_var=1.0, noise_mode="hard", h=None):
-  if isinstance(model.inner_model.inner_model.model_sampling, comfy.model_sampling.CONST):
+  
+  if has_nested_attr(model, "inner_model.inner_model.model_sampling"):
+    model_sampling = model.inner_model.inner_model.model_sampling
+  elif has_nested_attr(model, "model.model_sampling"):
+    model_sampling = model.model.model_sampling
+  
+  if isinstance(model_sampling, comfy.model_sampling.CONST):
     sigma_var = (-1 + torch.sqrt(1 + 4 * sigma)) / 2
     if noise_mode == "hard_var" and eta_var > 0.0 and sigma_next > sigma_var:
       su, sd, alpha_ratio = get_ancestral_step_RF_var(sigma, sigma_next, eta_var)
@@ -148,6 +155,21 @@ def get_res4lyf_step_with_model(model, sigma, sigma_next, eta=0.0, eta_var=1.0, 
   alpha_ratio = torch.nan_to_num(alpha_ratio, 1.0)
   
   return su, sigma, sd, alpha_ratio
+
+
+
+NOISE_MODE_NAMES = ["none",
+                    "hard_sq",
+                    "hard",
+                    "lorentzian", 
+                    "soft", 
+                    "soft-linear",
+                    "softer",
+                    "sinusoidal",
+                    "exp", 
+                    "hard_var", 
+                    ]
+
 
 
 

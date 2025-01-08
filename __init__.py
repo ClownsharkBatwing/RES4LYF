@@ -220,6 +220,8 @@ NODE_CLASS_MAPPINGS = {
     "VAEEncodeAdvanced": helper_sigma_preview_image_preproc.VAEEncodeAdvanced,
     
     "SigmasPreview": helper_sigma_preview_image_preproc.SigmasPreview,
+    "SigmasSchedulePreview": helper_sigma_preview_image_preproc.SigmasSchedulePreview,
+
     
     "ReFluxPatcher": models.ReFluxPatcher,
     

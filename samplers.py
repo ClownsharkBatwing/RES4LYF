@@ -22,7 +22,7 @@ import copy
 from .helper import get_extra_options_kv, extra_options_flag, get_res4lyf_scheduler_list
 from .latents import initialize_or_scale
 
-
+from .noise_sigmas_timesteps_scaling import NOISE_MODE_NAMES
     
 def move_to_same_device(*tensors):
     if not tensors:
@@ -32,19 +32,7 @@ def move_to_same_device(*tensors):
     return tuple(tensor.to(device) for tensor in tensors)
 
 
-
-NOISE_MODE_NAMES = ["none",
-                    "hard_sq",
-                    "hard",
-                    "lorentzian", 
-                    "soft", 
-                    "soft-linear",
-                    "softer",
-                    "sinusoidal",
-                    "exp", 
-                    "hard_var", 
-                    ]
-
+#SCHEDULER_NAMES = comfy.samplers.SCHEDULER_NAMES + ["beta57"]
 
 
 class SharkSampler:
