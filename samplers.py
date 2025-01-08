@@ -19,7 +19,7 @@ import torch.nn.functional as F
 import math
 import copy
 
-from .helper import get_extra_options_kv, extra_options_flag
+from .helper import get_extra_options_kv, extra_options_flag, get_res4lyf_scheduler_list
 from .latents import initialize_or_scale
 
 
@@ -32,7 +32,6 @@ def move_to_same_device(*tensors):
     return tuple(tensor.to(device) for tensor in tensors)
 
 
-#SCHEDULER_NAMES = comfy.samplers.SCHEDULER_NAMES + ["beta57"]
 
 NOISE_MODE_NAMES = ["none",
                     "hard_sq",
@@ -57,7 +56,7 @@ class SharkSampler:
                     "noise_stdev": ("FLOAT", {"default": 1.0, "min": -10000.0, "max": 10000.0, "step":0.01, "round": False, }),
                     "noise_seed": ("INT", {"default": 0, "min": -1, "max": 0xffffffffffffffff}),
                     "sampler_mode": (['standard', 'unsample', 'resample'],),
-                    "scheduler": (comfy.samplers.SCHEDULER_NAMES + ["beta57"], {"default": "beta57"},),
+                    "scheduler": (get_res4lyf_scheduler_list(), {"default": "beta57"},),
                     "steps": ("INT", {"default": 30, "min": 1, "max": 10000}),
                     "denoise": ("FLOAT", {"default": 1.0, "min": -10000, "max": 10000, "step":0.01}),
                     "denoise_alt": ("FLOAT", {"default": 1.0, "min": -10000, "max": 10000, "step":0.01}),
@@ -674,7 +673,7 @@ class ClownsharKSampler:
                     "sampler_mode": (['standard', 'unsample', 'resample'],),
                     "sampler_name": (RK_SAMPLER_NAMES, {"default": "res_2m"}), 
                     "implicit_sampler_name": (IRK_SAMPLER_NAMES, {"default": "gauss-legendre_2s"}), 
-                    "scheduler": (comfy.samplers.SCHEDULER_NAMES + ["beta57"], {"default": "beta57"},),
+                    "scheduler": (get_res4lyf_scheduler_list(), {"default": "beta57"},),
                     "steps": ("INT", {"default": 30, "min": 1, "max": 10000}),
                     "implicit_steps": ("INT", {"default": 0, "min": 0, "max": 10000}),
                     "denoise": ("FLOAT", {"default": 1.0, "min": -10000, "max": 10000, "step":0.01}),

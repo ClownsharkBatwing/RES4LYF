@@ -1,5 +1,6 @@
 import re
 import torch
+from comfy.samplers import SCHEDULER_NAMES
 
 def get_extra_options_kv(key, default, extra_options):
 
@@ -11,10 +12,8 @@ def get_extra_options_kv(key, default, extra_options):
     return value
 
 
-
 def extra_options_flag(flag, extra_options):
     return bool(re.search(rf"{flag}", extra_options))
-
 
 
 def safe_get_nested(d, keys, default=None):
@@ -38,7 +37,11 @@ def initialize_or_scale(tensor, value, steps):
     else:
         return value * tensor
 
-
+def get_res4lyf_scheduler_list():
+    scheduler_names = SCHEDULER_NAMES.copy()
+    if "beta57" not in scheduler_names:
+        scheduler_names.append("beta57")
+    return scheduler_names
 
 
 # pytorch slerp implementation from https://gist.github.com/Birch-san/230ac46f99ec411ed5907b0a3d728efa
