@@ -437,7 +437,7 @@ class SigmasSchedulePreview(SaveImage):
         
         if torch.norm(sigma_tensor - sigma_plus_up_tensor) > 1e-2:
             tensors.append(sigma_plus_up_tensor)
-            labels.append("$σ + σ̂_{up}$")
+            labels.append("$σ + σ_{up}$")
             colors.append("brown")
             
         if sigma_hat_vals:
