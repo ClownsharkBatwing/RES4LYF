@@ -281,7 +281,10 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
         if implicit_steps == 0: 
             for row in range(rk.rows - rk.multistep_stages):
                 
-                sub_sigma_up, sub_sigma, sub_sigma_next, sub_sigma_down, sub_alpha_ratio = 0, s_[row], s_[row+1], s_[row+1], 1
+                if debug_substep_old_sub_sigma_flag:
+                    sub_sigma_up, sub_sigma, sub_sigma_down, sub_alpha_ratio = 0, s_[row], s_[row+1], 1
+                else:
+                    sub_sigma_up, sub_sigma, sub_sigma_next, sub_sigma_down, sub_alpha_ratio = 0, s_[row], s_[row+1], s_[row+1], 1
                 if step > substep_eta_start_step and s_[row+1] <= s_[row]:
                     sub_sigma_up, sub_sigma, sub_sigma_down, sub_alpha_ratio = get_res4lyf_step_with_model(model, s_[row], s_[row+1], substep_eta, eta_var, substep_noise_mode, s_[row+1]-s_[row])
                     
@@ -385,7 +388,10 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
                             NOISE_SUBSTEP_COSSIM_SOURCE, NOISE_SUBSTEP_COSSIM_MODE, noise_substep_cossim_tile_size, noise_substep_cossim_iterations,
                             extra_options)
                     else:
-                        x_[row+1] = rk.add_noise_post(x_[row+1], sub_sigma_up, sub_sigma, sub_sigma_next, sub_alpha_ratio, s_noise, substep_noise_mode, SDE_NOISE_EXTERNAL, sde_noise_t)
+                        if debug_substep_old_sub_sigma_flag:
+                            x_[row+1] = rk.add_noise_post(x_[row+1], sub_sigma_up, sub_sigma, s_[row], sub_alpha_ratio, s_noise, substep_noise_mode, SDE_NOISE_EXTERNAL, sde_noise_t)
+                        else:
+                            x_[row+1] = rk.add_noise_post(x_[row+1], sub_sigma_up, sub_sigma, sub_sigma_next, sub_alpha_ratio, s_noise, substep_noise_mode, SDE_NOISE_EXTERNAL, sde_noise_t)
                 
                 debug_cuda_cleanup(cuda_sync_a_flag, cuda_empty_a_flag, False)
                 #MODEL CALL
@@ -487,13 +493,12 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
 
 
 
-        if not eps_preview_flag:
-            callback({'x': x, 'i': step, 'sigma': sigma, 'sigma_next': sigma_next, 'denoised': data_[0].to(torch.float32)}) if callback is not None else None
-        elif latent_guide is not None:
-            callback({'x': x, 'i': step, 'sigma': sigma, 'sigma_next': sigma_next, 'denoised': eps_[0]}) if callback is not None else None
-            #callback({'x': x, 'i': step, 'sigma': sigma, 'sigma_next': sigma_next, 'denoised': ((x_0 - y0) / sigma).to(torch.float32)}) if callback is not None else None
-        else:
-            callback({'x': x, 'i': step, 'sigma': sigma, 'sigma_next': sigma_next, 'denoised': ((x_0 - data_[0]) / sigma).to(torch.float32)}) if callback is not None else None
+        if eps_preview_flag:
+            if latent_guide is not None:
+                callback({'x': x, 'i': step, 'sigma': sigma, 'sigma_next': sigma_next, 'denoised': eps_[0]}) if callback is not None else None
+                #callback({'x': x, 'i': step, 'sigma': sigma, 'sigma_next': sigma_next, 'denoised': ((x_0 - y0) / sigma).to(torch.float32)}) if callback is not None else None
+            else:
+                callback({'x': x, 'i': step, 'sigma': sigma, 'sigma_next': sigma_next, 'denoised': ((x_0 - data_[0]) / sigma).to(torch.float32)}) if callback is not None else None
 
         sde_noise_t = None
         if SDE_NOISE_EXTERNAL:
@@ -527,7 +532,11 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
         log("Denoised vs. y0 cossim score: ", get_cosine_similarity(denoised, y0).item())
         denoised_prev = denoised
         eps_prev = eps
-        
+
+        if not eps_preview_flag or step == len(sigmas)-2:
+            callback({'x': x, 'i': step, 'sigma': sigma, 'sigma_next': sigma_next, 'denoised': denoised_prev}) if callback is not None else None
+    
+
     return x
 
 

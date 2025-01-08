@@ -139,25 +139,25 @@ def process_guides_substep(x_0, x_, eps_, data_, row, y0, y0_inv, lgw, lgw_inv, 
         if extra_options_flag("dynamic_guides_inv", extra_options):
             y0_inv = y_inv_shift
 
-    lgw_mask = lgw_mask.clone()
-    lgw_mask_inv = lgw_mask_inv.clone() if lgw_mask_inv is not None else None
+    lgw_mask_fw = lgw_mask.clone()
+    lgw_mask_inv_fw = lgw_mask_inv.clone() if lgw_mask_inv is not None else None
     if frame_weights is not None and x_0.dim() == 5:
         for f in range(lgw_mask.shape[2]):
             frame_weight = frame_weights[f]
-            lgw_mask[..., f:f+1, :, :] *= frame_weight
+            lgw_mask_fw[..., f:f+1, :, :] *= frame_weight
             if lgw_mask_inv is not None:
-                lgw_mask_inv[..., f:f+1, :, :] *= frame_weight
+                lgw_mask_inv_fw[..., f:f+1, :, :] *= frame_weight
 
     if "data" in guide_mode:
         y0_tmp = y0
         if latent_guide_inv is not None:
-            y0_tmp = (1-lgw_mask) * data_[row] + lgw_mask * y0
-            y0_tmp = (1-lgw_mask_inv) * y0_tmp + lgw_mask_inv * y0_inv
+            y0_tmp = (1-lgw_mask_fw) * data_[row] + lgw_mask_fw * y0
+            y0_tmp = (1-lgw_mask_inv_fw) * y0_tmp + lgw_mask_inv_fw * y0_inv
         x_[row+1] = y0_tmp + eps_[row]
 
     elif "epsilon" in guide_mode:
         if sigma > sigma_next:
-                
+            eps_row_guided = eps_[row].clone()
             tol_value = float(get_extra_options_kv("tol", "-1.0", extra_options))
             if tol_value >= 0 and (lgw > 0 or lgw_inv > 0):           
                 for b, c in itertools.product(range(x_0.shape[0]), range(x_0.shape[1])):
@@ -170,17 +170,17 @@ def process_guides_substep(x_0, x_, eps_, data_, row, y0, y0_inv, lgw, lgw_inv, 
                     lgw_tmp     = min(lgw    , lgw_scaled)
                     lgw_tmp_inv = min(lgw_inv, lgw_scaled_inv)
 
-                    lgw_mask_clamp     = torch.clamp(lgw_mask,     max=lgw_tmp)
-                    lgw_mask_clamp_inv = torch.clamp(lgw_mask_inv, max=lgw_tmp_inv)
+                    lgw_mask_clamp     = torch.clamp(lgw_mask_fw,     max=lgw_tmp)
+                    lgw_mask_clamp_inv = torch.clamp(lgw_mask_inv_fw, max=lgw_tmp_inv)
                     
                     eps_row, eps_row_inv = get_guide_epsilon_substep(x_0, x_, y0, y0_inv, s_, row, rk_type, b, c)
-                    eps_[row][b][c] = eps_[row][b][c] + lgw_mask_clamp[b][c] * (eps_row - eps_[row][b][c]) + lgw_mask_clamp_inv[b][c] * (eps_row_inv - eps_[row][b][c])
+                    eps_row_guided[b][c] = eps_[row][b][c] + lgw_mask_clamp[b][c] * (eps_row - eps_[row][b][c]) + lgw_mask_clamp_inv[b][c] * (eps_row_inv - eps_[row][b][c])
                     
                     
                     
             elif extra_options_flag("disable_lgw_scaling", extra_options):
                 eps_row, eps_row_inv = get_guide_epsilon_substep(x_0, x_, y0, y0_inv, s_, row, rk_type)
-                eps_[row] = eps_[row]      +     lgw_mask * (eps_row - eps_[row])    +    lgw_mask_inv * (eps_row_inv - eps_[row])
+                eps_row_guided = eps_[row]      +     lgw_mask_fw * (eps_row - eps_[row])    +    lgw_mask_inv_fw * (eps_row_inv - eps_[row])
                 
 
 
@@ -193,7 +193,7 @@ def process_guides_substep(x_0, x_, eps_, data_, row, y0, y0_inv, lgw, lgw_inv, 
                 eps_row_ortho     = get_orthogonal(eps_[row], eps_row_collin)
                 eps_row_ortho_inv = get_orthogonal(eps_[row], eps_row_inv_collin)
                 
-                eps_[row] = eps_[row]    +    lgw_mask * (eps_row - eps_row_ortho)   +    lgw_mask_inv * (eps_row_inv - eps_row_ortho_inv)
+                eps_row_guided = eps_[row]    +    lgw_mask_fw * (eps_row - eps_row_ortho)   +    lgw_mask_inv_fw * (eps_row_inv - eps_row_ortho_inv)
                 
                 
                 
@@ -217,8 +217,8 @@ def process_guides_substep(x_0, x_, eps_, data_, row, y0, y0_inv, lgw, lgw_inv, 
                     eps_row_ortho     = get_orthogonal(eps_[row][b][c], eps_row)
                     eps_row_ortho_inv = get_orthogonal(eps_[row][b][c], eps_row_inv)
 
-                    eps_next_row = eps_[row][b][c]    +    ratio * lgw_mask[b][c] * (eps_row - eps_row_ortho)   +    ratio_inv * lgw_mask_inv[b][c] * (eps_row_inv - eps_row_ortho_inv)
-                    eps_[row][b][c] = torch.norm(eps_[row][b][c]) / torch.norm(eps_next_row)    *    eps_next_row
+                    eps_next_row = eps_[row][b][c]    +    ratio * lgw_mask_fw[b][c] * (eps_row - eps_row_ortho)   +    ratio_inv * lgw_mask_inv_fw[b][c] * (eps_row_inv - eps_row_ortho_inv)
+                    eps_row_guided[b][c] = torch.norm(eps_[row][b][c]) / torch.norm(eps_next_row)    *    eps_next_row
 
 
 
@@ -235,12 +235,13 @@ def process_guides_substep(x_0, x_, eps_, data_, row, y0, y0_inv, lgw, lgw_inv, 
                     ratio_inv = torch.nan_to_num(torch.norm(data_[row][b][c] - y0_inv[b][c])   /   avg_inv, 0)
                     
                     eps_row, eps_row_inv = get_guide_epsilon_substep(x_0, x_, y0, y0_inv, s_, row, rk_type, b, c)
-                    eps_[row][b][c] = eps_[row][b][c]      +     ratio * lgw_mask[b][c] * (eps_row - eps_[row][b][c])    +    ratio_inv * lgw_mask_inv[b][c] * (eps_row_inv - eps_[row][b][c])
+                    eps_row_guided[b][c] = eps_[row][b][c]      +     ratio * lgw_mask_fw[b][c] * (eps_row - eps_[row][b][c])    +    ratio_inv * lgw_mask_inv_fw[b][c] * (eps_row_inv - eps_[row][b][c])
                     
             temporal_smoothing = float(get_extra_options_kv("temporal_smoothing", "0.0", extra_options))
             if temporal_smoothing > 0:
-                eps_[row] = apply_temporal_smoothing(eps_[row], temporal_smoothing)
-            
+                eps_row_guided = apply_temporal_smoothing(eps_[row], temporal_smoothing)
+
+            eps_[row] = eps_row_guided
 
 
 
@@ -264,27 +265,27 @@ def process_guides_substep(x_0, x_, eps_, data_, row, y0, y0_inv, lgw, lgw_inv, 
                 lgw_tmp     = min(lgw    , lgw_scaled)
                 lgw_tmp_inv = min(lgw_inv, lgw_scaled_inv)
 
-                lgw_mask_clamp     = torch.clamp(lgw_mask,     max=lgw_tmp)
-                lgw_mask_clamp_inv = torch.clamp(lgw_mask_inv, max=lgw_tmp_inv)
+                lgw_mask_clamp     = torch.clamp(lgw_mask_fw,     max=lgw_tmp)
+                lgw_mask_clamp_inv = torch.clamp(lgw_mask_inv_fw, max=lgw_tmp_inv)
 
                 eps_[row][b][c] = eps_[row][b][c] + lgw_mask_clamp[b][c] * (cvf[b][c] - eps_[row][b][c]) + lgw_mask_clamp_inv[b][c] * (cvf_inv[b][c] - eps_[row][b][c])
                 
         elif extra_options_flag("disable_lgw_scaling", extra_options):
-            eps_[row] = eps_[row] + lgw_mask * (cvf - eps_[row]) + lgw_mask_inv * (cvf_inv - eps_[row])
+            eps_[row] = eps_[row] + lgw_mask_fw * (cvf - eps_[row]) + lgw_mask_inv_fw * (cvf_inv - eps_[row])
             
         else:
             avg, avg_inv = 0, 0
             for b, c in itertools.product(range(x_0.shape[0]), range(x_0.shape[1])):
-                avg     += torch.norm(lgw_mask    [b][c] * data_[row][b][c]   -   lgw_mask    [b][c] * y0    [b][c])
-                avg_inv += torch.norm(lgw_mask_inv[b][c] * data_[row][b][c]   -   lgw_mask_inv[b][c] * y0_inv[b][c])
+                avg     += torch.norm(lgw_mask_fw    [b][c] * data_[row][b][c]   -   lgw_mask_fw    [b][c] * y0    [b][c])
+                avg_inv += torch.norm(lgw_mask_inv_fw[b][c] * data_[row][b][c]   -   lgw_mask_inv_fw[b][c] * y0_inv[b][c])
             avg     /= x_0.shape[1]
             avg_inv /= x_0.shape[1]
             
             for b, c in itertools.product(range(x_0.shape[0]), range(x_0.shape[1])):
-                ratio     = torch.nan_to_num(torch.norm(lgw_mask    [b][c] * data_[row][b][c] - lgw_mask    [b][c] * y0    [b][c])   /   avg,     0)
-                ratio_inv = torch.nan_to_num(torch.norm(lgw_mask_inv[b][c] * data_[row][b][c] - lgw_mask_inv[b][c] * y0_inv[b][c])   /   avg_inv, 0)
+                ratio     = torch.nan_to_num(torch.norm(lgw_mask_fw    [b][c] * data_[row][b][c] - lgw_mask_fw    [b][c] * y0    [b][c])   /   avg,     0)
+                ratio_inv = torch.nan_to_num(torch.norm(lgw_mask_inv_fw[b][c] * data_[row][b][c] - lgw_mask_inv_fw[b][c] * y0_inv[b][c])   /   avg_inv, 0)
                          
-                eps_[row][b][c] = eps_[row][b][c]      +     ratio * lgw_mask[b][c] * (cvf[b][c] - eps_[row][b][c])    +    ratio_inv * lgw_mask_inv[b][c] * (cvf_inv[b][c] - eps_[row][b][c])
+                eps_[row][b][c] = eps_[row][b][c]      +     ratio * lgw_mask_fw[b][c] * (cvf[b][c] - eps_[row][b][c])    +    ratio_inv * lgw_mask_inv_fw[b][c] * (cvf_inv[b][c] - eps_[row][b][c])
                 
     if extra_options_flag("substep_eps_ch_mean_std", extra_options):
         eps_[row] = normalize_latent(eps_[row], eps_orig[row])
