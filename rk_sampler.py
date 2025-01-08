@@ -81,7 +81,7 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
                   latent_guide=None, latent_guide_inv=None, latent_guide_weight=0.0, latent_guide_weight_inv=0.0, latent_guide_weights=None, latent_guide_weights_inv=None, guide_mode="blend", 
                   GARBAGE_COLLECT=False, mask=None, mask_inv=None, LGW_MASK_RESCALE_MIN=True, sigmas_override=None, unsample_resample_scales=None,regional_conditioning_weights=None, sde_noise=[],
                   extra_options="",
-                  etas=None, s_noises=None, momentums=None, guides=None, cfg_cw = 1.0,regional_conditioning_floors=None, frame_weights=None, eta_substep=0.0, noise_mode_sde_substep="hard",  guide_cossim_cutoff_=1.0, guide_bkg_cossim_cutoff_=1.0,
+                  etas=None, s_noises=None, momentums=None, guides=None, cfg_cw = 1.0,regional_conditioning_floors=None, frame_weights=None, eta_substep=0.0, noise_mode_sde_substep="hard", guide_cossim_cutoff_=1.0, guide_bkg_cossim_cutoff_=1.0,
                   ):
     extra_args = {} if extra_args is None else extra_args
 
@@ -123,11 +123,6 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
         mask, mask_inv = latent_guide_mask, latent_guide_mask_inv
         
         guide_cossim_cutoff_, guide_bkg_cossim_cutoff_ = denoise_, denoise_inv_
-        
-        #if scheduler_ != "constant" and latent_guide_weights is None:
-        #    latent_guide_weights = get_sigmas(model, scheduler_, steps_, denoise_).to(default_dtype)
-        #if scheduler_inv_ != "constant" and latent_guide_weights_inv is None:
-        #    latent_guide_weights_inv = get_sigmas(model, scheduler_inv_, steps_inv_, denoise_inv_).to(default_dtype)
             
     latent_guide_weights     = initialize_or_scale(latent_guide_weights,     latent_guide_weight,     max_steps).to(default_dtype)
     latent_guide_weights_inv = initialize_or_scale(latent_guide_weights_inv, latent_guide_weight_inv, max_steps).to(default_dtype)
@@ -187,9 +182,10 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
         unsample_resample_scale = float(unsample_resample_scales[step]) if unsample_resample_scales is not None else None
         if regional_conditioning_weights is not None:
             extra_args['model_options']['transformer_options']['regional_conditioning_weight'] = regional_conditioning_weights[step]
-            extra_args['model_options']['transformer_options']['regional_conditioning_floor'] = regional_conditioning_floors[step]
+            extra_args['model_options']['transformer_options']['regional_conditioning_floor']  = regional_conditioning_floors [step]
         else:
             extra_args['model_options']['transformer_options']['regional_conditioning_weight'] = 0.0
+            extra_args['model_options']['transformer_options']['regional_conditioning_floor']  = 0.0
         
         eta = eta_var = etas[step] if etas is not None else eta
         s_noise = s_noises[step] if s_noises is not None else s_noise
@@ -223,6 +219,7 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
                 SDE_NOISE_EXTERNAL=False
             else:
                 sde_noise_t = sde_noise[step]
+                
         x_prenoise = x.clone()
         x_[0] = rk.add_noise_pre(x, sigma_up, sigma, sigma_next, alpha_ratio, s_noise, noise_mode, SDE_NOISE_EXTERNAL, sde_noise_t) #y0, lgw, sigma_down are currently unused
         
@@ -447,12 +444,13 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
 
 
 
-        if extra_options_flag("eps_preview", extra_options):
-            if latent_guide is not None:
-                callback({'x': x, 'i': step, 'sigma': sigma, 'sigma_next': sigma_next, 'denoised': eps_[0]}) if callback is not None else None
-                #callback({'x': x, 'i': step, 'sigma': sigma, 'sigma_next': sigma_next, 'denoised': ((x_0 - y0) / sigma).to(torch.float32)}) if callback is not None else None
-            else:
-                callback({'x': x, 'i': step, 'sigma': sigma, 'sigma_next': sigma_next, 'denoised': ((x_0 - data_[0]) / sigma).to(torch.float32)}) if callback is not None else None
+        if extra_options_flag("eps_preview", extra_options) == False:
+            callback({'x': x, 'i': step, 'sigma': sigma, 'sigma_next': sigma_next, 'denoised': data_[0].to(torch.float32)}) if callback is not None else None
+        elif latent_guide is not None:
+            callback({'x': x, 'i': step, 'sigma': sigma, 'sigma_next': sigma_next, 'denoised': eps_[0]}) if callback is not None else None
+            #callback({'x': x, 'i': step, 'sigma': sigma, 'sigma_next': sigma_next, 'denoised': ((x_0 - y0) / sigma).to(torch.float32)}) if callback is not None else None
+        else:
+            callback({'x': x, 'i': step, 'sigma': sigma, 'sigma_next': sigma_next, 'denoised': ((x_0 - data_[0]) / sigma).to(torch.float32)}) if callback is not None else None
 
         sde_noise_t = None
         if SDE_NOISE_EXTERNAL:
@@ -488,11 +486,8 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
             print("Denoised vs. y0 cossim score: ", get_cosine_similarity(denoised, y0).item())
         denoised_prev = denoised
         eps_prev = eps
-
-        if not extra_options_flag("eps_preview", extra_options) or step == len(sigmas)-2:
-            callback({'x': x, 'i': step, 'sigma': sigma, 'sigma_next': sigma_next, 'denoised': denoised_prev}) if callback is not None else None
-    
-
+        
+    callback({'x': x, 'i': step, 'sigma': sigma, 'sigma_next': sigma_next, 'denoised': denoised.to(torch.float32)}) if callback is not None else None
     return x
 
 

@@ -90,7 +90,7 @@ class SharkSampler:
                     shift=3.0, base_shift=0.85, options=None, sde_noise=None,sde_noise_steps=1, shift_scaling="exponential", unsampler_type="linear",
                     extra_options="", 
                     ): 
-            
+            # blame comfy here
             model = model.clone()
             if positive[0][1] is not None: 
                 if "regional_conditioning_weights" in positive[0][1]:
