@@ -18,6 +18,12 @@ import matplotlib
 matplotlib.use('Agg')  # use the Agg backend for non-interactive rendering... prevent crashes by not using tkinter (which requires running in the main thread)
 
 from .noise_sigmas_timesteps_scaling import get_res4lyf_step_with_model
+from .helper import get_res4lyf_scheduler_list
+
+from .noise_sigmas_timesteps_scaling import NOISE_MODE_NAMES
+from .sigmas import get_sigmas
+import comfy.samplers
+
 
 class SaveImage:
     def __init__(self):
@@ -300,12 +306,6 @@ class VAEEncodeAdvanced:
 
 
 
-from .noise_sigmas_timesteps_scaling import NOISE_MODE_NAMES
-from .sigmas import get_sigmas
-import comfy.samplers
-
-
-
 
 class SigmasSchedulePreview(SaveImage):
     def __init__(self):
@@ -324,10 +324,10 @@ class SigmasSchedulePreview(SaveImage):
                 "s_noise": ("FLOAT", {"default": 1.00, "step": 0.01, "min": -1000.0, "max": 1000.0}),
                 "denoise": ("FLOAT", {"default": 1.0, "min": -10000, "max": 10000, "step":0.01}),
                 "denoise_alt": ("FLOAT", {"default": 1.0, "min": -10000, "max": 10000, "step":0.01}),
-                "scheduler": (comfy.samplers.SCHEDULER_NAMES + ["beta57"], {"default": "beta57"},),
+                "scheduler": (get_res4lyf_scheduler_list(), {"default": "beta57"},),
                 "steps": ("INT", {"default": 30, "min": 1, "max": 10000}),
-                "res_dpmpp_ddim": ("BOOLEAN", {"default": True}),
                 "plot_max": ("FLOAT", {"default": 2.1, "min": -10000, "max": 10000, "step":0.01, "tooltip": "Set to a negative value to have the plot scale automatically."}),
+                "plot_min": ("FLOAT", {"default": 0.0, "min": -10000, "max": 10000, "step":0.01, "tooltip": "Set to a negative value to have the plot scale automatically."}),
             },
             "optional": {
                 "sigmas": ("SIGMAS",),
@@ -340,7 +340,7 @@ class SigmasSchedulePreview(SaveImage):
 
 
     @staticmethod
-    def tensor_to_graph_image(tensors, labels, colors, plot_max):
+    def tensor_to_graph_image(tensors, labels, colors, plot_min, plot_max, input_params):
         plt.figure(figsize=(6.4, 6.4), dpi=320) 
         ax = plt.gca()
         ax.set_facecolor("black") 
@@ -352,13 +352,22 @@ class SigmasSchedulePreview(SaveImage):
 
         plt.axhline(y=1.0, color='gray', linestyle='dotted', linewidth=1.5)
 
-        plt.title("Sigma Schedule and Related Values", color="white", weight="bold", antialiased=False)
-        plt.xlabel("Step Number", color="white", weight="bold", antialiased=False)
+        plt.xlabel("Step", color="white", weight="bold", antialiased=False)
         plt.ylabel("Value", color="white", weight="bold", antialiased=False)
         ax.tick_params(colors="white") 
 
         if plot_max > 0:
-            plt.ylim(0, plot_max)
+            plt.ylim(plot_min, plot_max)
+
+        input_text = (
+            f"noise_mode: {input_params['noise_mode']}  |  "
+            f"eta: {input_params['eta']}  |  "
+            f"s_noise: {input_params['s_noise']}  |  "
+            f"d_noise: {input_params['d_noise']}  |  "
+            f"d_noise_alt: {input_params['d_noise_alt']}  |  "
+            f"scheduler: {input_params['scheduler']}"
+        )
+        plt.text(0.5, 1.05, input_text, ha='center', va='center', color='white', fontsize=8, transform=ax.transAxes)
 
         from matplotlib.lines import Line2D
         legend_handles = [Line2D([0], [0], color=color, lw=2, label=label) for label, color in zip(labels, colors)]
@@ -371,7 +380,8 @@ class SigmasSchedulePreview(SaveImage):
         plt.close()
         return image
 
-    def plot_schedule(self, model, noise_mode, eta, s_noise, denoise, denoise_alt, scheduler, steps, res_dpmpp_ddim, plot_max, sigmas=None):
+
+    def plot_schedule(self, model, noise_mode, eta, s_noise, denoise, denoise_alt, scheduler, steps, plot_min, plot_max, sigmas=None):
         sigma_vals = []
         sigma_next_vals = []
         sigma_down_vals = []
@@ -380,6 +390,7 @@ class SigmasSchedulePreview(SaveImage):
         sigma_hat_vals = []
         alpha_ratio_vals = []
         sigma_step_size_vals = []
+        sigma_step_size_sde_vals = []
         
         eta_var = eta
         
@@ -393,12 +404,7 @@ class SigmasSchedulePreview(SaveImage):
             sigma = sigmas[i]
             sigma_next = sigmas[i + 1]
             
-            if res_dpmpp_ddim:
-                h = -torch.log(sigma_next/sigma)
-            else:
-                h = sigma_next - sigma
-
-            su, sigma_hat, sd, alpha_ratio = get_res4lyf_step_with_model(model, sigma, sigma_next, eta, eta_var, noise_mode, h=h)
+            su, sigma_hat, sd, alpha_ratio = get_res4lyf_step_with_model(model, sigma, sigma_next, eta, eta_var, noise_mode)
 
             su = su * s_noise
             
@@ -409,6 +415,7 @@ class SigmasSchedulePreview(SaveImage):
             sigma_plus_up_vals.append(sigma + su)
             alpha_ratio_vals.append(alpha_ratio)
             sigma_step_size_vals.append(sigma - sigma_next)
+            sigma_step_size_sde_vals.append(sigma + su - sd)
 
             if sigma_hat != sigma:
                 sigma_hat_vals.append(sigma_hat)
@@ -420,6 +427,7 @@ class SigmasSchedulePreview(SaveImage):
         sigma_plus_up_tensor = torch.tensor(sigma_plus_up_vals)
         alpha_ratio_tensor = torch.tensor(alpha_ratio_vals)
         sigma_step_size_tensor = torch.tensor(sigma_step_size_vals)
+        sigma_step_size_sde_tensor = torch.tensor(sigma_step_size_sde_vals)
 
         tensors = [sigma_tensor, sigma_next_tensor, sigma_down_tensor, sigma_up_tensor]
         labels = ["$σ$", "$σ_{next}$", "$σ_{down}$", "$σ_{up}$"]
@@ -439,6 +447,11 @@ class SigmasSchedulePreview(SaveImage):
             tensors.append(sigma_plus_up_tensor)
             labels.append("$σ + σ_{up}$")
             colors.append("brown")
+        
+        if torch.norm(sigma_step_size_tensor - sigma_step_size_sde_tensor) > 1e-2:
+            tensors.append(sigma_step_size_sde_tensor)
+            labels.append("$Δ \hat{t}$")
+            colors.append("gold")
             
         if sigma_hat_vals:
             sigma_hat_tensor = torch.tensor(sigma_hat_vals)
@@ -448,20 +461,29 @@ class SigmasSchedulePreview(SaveImage):
             
             tensors.append(sigma_step_size_tensor)
             labels.append("$σ̂ - σ_{next}$")
-            colors.append("gold")
+            colors.append("darkorange")
         else:
             tensors.append(sigma_step_size_tensor)
             #labels.append("$σ - σ_{next}$")
             labels.append("$Δt$")
-            colors.append("gold")
-        
+            colors.append("darkorange")
         
         tensors.append(alpha_ratio_tensor)
         labels.append("$α_{ratio}$")
         colors.append("grey")
         
-
-        graph_image = self.tensor_to_graph_image(tensors, labels, colors, plot_max)
+        
+        graph_image = self.tensor_to_graph_image(
+            tensors, labels, colors, plot_min, plot_max,
+            input_params={
+                "noise_mode": noise_mode,
+                "eta": eta,
+                "s_noise": s_noise,
+                "d_noise": denoise,
+                "d_noise_alt": denoise_alt,
+                "scheduler": scheduler,
+            }
+)
 
         numpy_image = np.array(graph_image)
         numpy_image = numpy_image / 255.0
