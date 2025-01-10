@@ -350,11 +350,13 @@ def process_guides_substep(x_0, x_, eps_, data_, row, y0, y0_inv, lgw, lgw_inv, 
                     
                 elif extra_options_flag("eps_proj_type_lgw_h", extra_options): #
                     eps_[row] = lgw_eps_row_collin + lgw_eps_row_ortho
-                    
-                else: # CLEAN 04422_
+                
+                elif extra_options_flag("eps_proj_original", extra_options): # CLEAN 04422_
                     eps_[row] = eps_[row]    +    lgw_mask * (eps_row - eps_row_collin_ortho)   +    lgw_mask_inv * (eps_row_inv - eps_row_collin_ortho_inv)
-
-
+                else: # elif extra_options_flag("eps_proj_type_lgw_d", extra_options): # amazing
+                    eps_[row] = fwd_lgw_eps_row_collin + lgw_eps_row_ortho
+                    
+                    
 
             elif extra_options_flag("epsilon_proj_test_scalesplit", extra_options) and (lgw > 0 or lgw_inv > 0):
                 avg, avg_inv = 0, 0
