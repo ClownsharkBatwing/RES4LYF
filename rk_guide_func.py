@@ -201,12 +201,12 @@ def process_guides_substep(x_0, x_, eps_, data_, row, y0, y0_inv, lgw, lgw_inv, 
                 if extra_options_flag("epsilon_proj_ortho_inv", extra_options):
                     lgw_eps_row_ortho     = get_orthogonal(eps_[row] + lgw_mask * (eps_row_inv-eps_[row]), eps_[row])         ####
                 else:
-                    lgw_eps_row_ortho     = get_orthogonal(eps_[row] + lgw_mask * (eps_row-eps_[row]), eps_[row])         ####
+                    lgw_eps_row_ortho     = get_orthogonal(eps_[row] + lgw_mask * (eps_row-eps_[row]) + lgw_mask_inv * (eps_row_inv-eps_[row]), eps_[row])         ####
                     
                 if extra_options_flag("epsilon_proj_collin_inv", extra_options):
                     fwd_lgw_eps_row_collin     = get_collinear(eps_[row], eps_[row] + lgw_mask * (eps_row_inv-eps_[row])) 
                 else:
-                    fwd_lgw_eps_row_collin     = get_collinear(eps_[row], eps_[row] + lgw_mask * (eps_row-eps_[row]))     ####
+                    fwd_lgw_eps_row_collin     = get_collinear(eps_[row], eps_[row] + lgw_mask * (eps_row-eps_[row]) + lgw_mask_inv * (eps_row_inv-eps_[row]))     ####
                 fwd_lgw_eps_row_ortho     = get_orthogonal(eps_[row], eps_[row] + lgw_mask * (eps_row-eps_[row]))
                 
                 
