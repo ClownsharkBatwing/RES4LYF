@@ -79,7 +79,7 @@ class SharkSampler:
                     ): 
             # blame comfy here
             
-            default_dtype = getattr(torch, get_extra_options_kv("default_dtype", "float64"), torch.float64)   
+            default_dtype = getattr(torch, get_extra_options_kv("default_dtype", "float64", extra_options), torch.float64)   
                      
             model = model.clone()
             if positive[0][1] is not None: 
