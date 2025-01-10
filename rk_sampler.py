@@ -177,7 +177,11 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
     prev_noises = []
     x_init = x.clone()
     
+    guide_skip_steps = int(get_extra_options_kv("guide_skip_steps", 0, extra_options))        
+    
     for step in trange(len(sigmas)-1, disable=disable):
+        #if step == 0 and guide_skip_steps > 0:
+        #    step = guide_skip_steps
         sigma, sigma_next = sigmas[step], sigmas[step+1]
         unsample_resample_scale = float(unsample_resample_scales[step]) if unsample_resample_scales is not None else None
         if regional_conditioning_weights is not None:
@@ -192,7 +196,7 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
         
         y0 = y0_batch
         if y0_batch.shape[0] > 1:
-            y0 = y0_batch[min(step, y0_batch.shape[0]-1)].unsqueeze(0)            
+            y0 = y0_batch[min(step, y0_batch.shape[0]-1)].unsqueeze(0)  
         
         if sigma_next == 0:
             rk, irk, rk_type, irk_type, eta, eta_var, extra_args = prepare_step_to_sigma_zero(rk, irk, rk_type, irk_type, model, x, extra_options, alpha, k, noise_sampler_type, cfg_cw=cfg_cw, **extra_args)
@@ -206,7 +210,7 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
         rk. set_coeff(rk_type,  h,     c1, c2, c3, step, sigmas, sigma, sigma_down)
         irk.set_coeff(irk_type, h_irk, c1, c2, c3, step, sigmas, sigma, sigma_down)
         
-        if step == 0:
+        if step == 0 or step == guide_skip_steps:
             x_, data_, data_u, eps_ = (torch.zeros(max(rk.rows, irk.rows) + 2, *x.shape, dtype=x.dtype, device=x.device) for step in range(4))
 
         s_       = [(  rk.sigma_fn( rk.t_fn(sigma) +     h*c_)) * s_one for c_ in   rk.c]
@@ -219,6 +223,10 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
                 SDE_NOISE_EXTERNAL=False
             else:
                 sde_noise_t = sde_noise[step]
+                
+        #if step > 0 and step == guide_skip_steps:
+        #    eps_guide, eps_guide_inv = get_guide_epsilon_substep(x, [x,x], y0, y0_inv, [sigmas[0]], 0, rk_type)
+        #    x = x - sigma * eps_guide
                 
         x_prenoise = x.clone()
         x_[0] = rk.add_noise_pre(x, sigma_up, sigma, sigma_next, alpha_ratio, s_noise, noise_mode, SDE_NOISE_EXTERNAL, sde_noise_t) #y0, lgw, sigma_down are currently unused
@@ -350,12 +358,25 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
                         x_[row+1] = rk.add_noise_post(x_[row+1], sub_sigma_up, sub_sigma, sub_sigma_next, sub_alpha_ratio, s_noise, substep_noise_mode, SDE_NOISE_EXTERNAL, sde_noise_t)
                 
                 #MODEL CALL
-                eps_[row], data_[row] = rk(x_0, x_[row+1], s_[row], h, **extra_args)       
-                
-                
-                #data_norm   = data_[0] - data_[0].mean(dim=(2, 3), keepdim=True)
-                #y0_norm     = y0       -       y0.mean(dim=(2, 3), keepdim=True)
-                #y0_inv_norm = y0_inv   -   y0_inv.mean(dim=(2, 3), keepdim=True)
+                if step < guide_skip_steps:
+                    eps_row, eps_row_inv = get_guide_epsilon_substep(x_0, x_, y0, y0_inv, s_, row, rk_type)
+                    if guide_mode == "epsilon_projection":
+                        lgw_eps_row_ortho     = get_orthogonal(eps_row_inv, eps_row)         ####
+                        fwd_lgw_eps_row_collin     = get_collinear(eps_row, eps_row_inv)
+                        """if extra_options_flag("epsilon_proj_ortho_inv", extra_options):
+                            lgw_eps_row_ortho     = get_orthogonal(eps_[row] + lgw_mask * (eps_row_inv-eps_[row]), eps_[row])         ####
+                        else:
+                            lgw_eps_row_ortho     = get_orthogonal(eps_[row] + lgw_mask * (eps_row-eps_[row]), eps_[row])         ####
+                        if extra_options_flag("epsilon_proj_collin_inv", extra_options):
+                            fwd_lgw_eps_row_collin     = get_collinear(eps_[row], eps_[row] + lgw_mask * (eps_row_inv-eps_[row])) 
+                        else:
+                            fwd_lgw_eps_row_collin     = get_collinear(eps_[row], eps_[row] + lgw_mask * (eps_row-eps_[row]))     ####"""
+                        eps_[row] = fwd_lgw_eps_row_collin + lgw_eps_row_ortho
+                    else:
+                        eps_[row] = eps_row
+                    
+                else:
+                    eps_[row], data_[row] = rk(x_0, x_[row+1], s_[row], h, **extra_args)       
                 
                 dims = tuple(range(2, data_[0].ndim)) # dimensions 2 and above
                 data_norm = data_[0] - data_[0].mean(dim=dims, keepdim=True)
