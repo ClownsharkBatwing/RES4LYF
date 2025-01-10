@@ -78,6 +78,9 @@ class SharkSampler:
                     extra_options="", 
                     ): 
             # blame comfy here
+            
+            default_dtype = getattr(torch, get_extra_options_kv("default_dtype", "float64"), torch.float64)   
+                     
             model = model.clone()
             if positive[0][1] is not None: 
                 if "regional_conditioning_weights" in positive[0][1]:
@@ -108,7 +111,8 @@ class SharkSampler:
             for batch_num in range(latent_image_batch['samples'].shape[0]):
                 latent_unbatch = copy.deepcopy(latent_image)
                 latent_unbatch['samples'] = latent_image_batch['samples'][batch_num].clone().unsqueeze(0)
-                default_dtype = torch.float64
+                
+
                 max_steps = 10000
 
                 if noise_seed == -1:

@@ -314,24 +314,33 @@ def process_guides_substep(x_0, x_, eps_, data_, row, y0, y0_inv, lgw, lgw_inv, 
                 elif extra_options_flag("eps_proj_type_wtf_d", extra_options): # 
                     eps_[row] = (1-lgw_mask) * eps_row_collin    +    lgw_mask * rev_eps_row_ortho
                     
-                elif extra_options_flag("eps_proj_type_wtf_e", extra_options): 
+                elif extra_options_flag("eps_proj_type_wtf_e", extra_options): # very nice? 04463?
                     eps_[row] = (1-lgw_mask) * eps_[row]    +    lgw_mask * (eps_row_collin + rev_eps_row_ortho)
                     
-                elif extra_options_flag("eps_proj_type_lgw_a", extra_options): #
+                elif extra_options_flag("eps_proj_type_lgw_a", extra_options): # 04464 looks good
                     eps_[row] = eps_[row]    +    lgw_mask * (lgw_eps_row_ortho)
-                elif extra_options_flag("eps_proj_type_lgw_a2", extra_options): #
+                elif extra_options_flag("eps_proj_type_lgw_a2", extra_options): # 04469 quite good
                     eps_[row] = eps_[row]    +    lgw_eps_row_ortho                    
-                elif extra_options_flag("eps_proj_type_lgw_b", extra_options): #
+                elif extra_options_flag("eps_proj_type_lgw_b", extra_options): # noisy, very strong guide following
                     eps_[row] = lgw_eps_row_ortho
                     
-                elif extra_options_flag("eps_proj_type_lgw_c", extra_options): #
+                elif extra_options_flag("eps_proj_type_lgw_c", extra_options): # noisy, ignored guide
                     eps_[row] = lgw_eps_row_collin
                     
-                elif extra_options_flag("eps_proj_type_lgw_d", extra_options): #
+                elif extra_options_flag("eps_proj_type_lgw_d", extra_options): # amazing
                     eps_[row] = fwd_lgw_eps_row_collin + lgw_eps_row_ortho
                     
-                elif extra_options_flag("eps_proj_type_lgw_e", extra_options): #
+                elif extra_options_flag("eps_proj_type_lgw_e", extra_options): # very noisy, very strong guide
                     eps_[row] = fwd_lgw_eps_row_ortho + lgw_eps_row_ortho
+                    
+                elif extra_options_flag("eps_proj_type_lgw_f", extra_options): # ignored guide, looked fine
+                    eps_[row] = fwd_lgw_eps_row_collin + fwd_lgw_eps_row_ortho
+                    
+                elif extra_options_flag("eps_proj_type_lgw_g", extra_options): #
+                    eps_[row] = lgw_eps_row_collin + fwd_lgw_eps_row_ortho
+                    
+                elif extra_options_flag("eps_proj_type_lgw_h", extra_options): #
+                    eps_[row] = lgw_eps_row_collin + lgw_eps_row_ortho
                     
                 else: # CLEAN 04422_
                     eps_[row] = eps_[row]    +    lgw_mask * (eps_row - eps_row_collin_ortho)   +    lgw_mask_inv * (eps_row_inv - eps_row_collin_ortho_inv)
