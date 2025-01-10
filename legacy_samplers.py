@@ -501,7 +501,7 @@ class Legacy_SharkSampler:
                     "noise_seed": ("INT", {"default": 0, "min": -1, "max": 0xffffffffffffffff}),
                     "sampler_mode": (['standard', 'unsample', 'resample'],),
                     #"scheduler": (comfy.samplers.SCHEDULER_NAMES, ),
-                    "scheduler": (get_res4lyf_scheduler_list(), {"default": "beta57"}),
+                    "scheduler": (get_res4lyf_scheduler_list(),),
 
                     "steps": ("INT", {"default": 30, "min": 1, "max": 10000}),
                     "denoise": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 10000, "step":0.01}),

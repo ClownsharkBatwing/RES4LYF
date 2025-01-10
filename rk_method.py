@@ -59,7 +59,7 @@ class RK_Method:
         self.h_prev2 = None
         self.multistep_stages = 0
         
-        self.cfg_cw = 0
+        self.cfg_cw = 1.0
 
         
     @staticmethod
@@ -281,6 +281,7 @@ class RK_Method:
             extra_args["model_options"] = comfy.model_patcher.set_model_options_post_cfg_function(model_options, post_cfg_function, disable_cfg1_optimization=True)
         return extra_args
             
+            
     def calc_cfg_channelwise(self, denoised):
         if self.cfg_cw != 1.0:            
             avg = 0
@@ -294,8 +295,8 @@ class RK_Method:
             return denoised_new
         else:
             return denoised
-
-
+        
+        
 
 class RK_Method_Exponential(RK_Method):
     def __init__(self, model, name="", method="explicit", device='cuda', dtype=torch.float64):

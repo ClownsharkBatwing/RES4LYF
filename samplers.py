@@ -22,7 +22,7 @@ import copy
 from .helper import get_extra_options_kv, extra_options_flag, get_res4lyf_scheduler_list
 from .latents import initialize_or_scale
 
-
+from .noise_sigmas_timesteps_scaling import NOISE_MODE_NAMES
     
 def move_to_same_device(*tensors):
     if not tensors:
@@ -123,7 +123,10 @@ class SharkSampler:
                     shift=3.0, base_shift=0.85, options=None, sde_noise=None,sde_noise_steps=1, shift_scaling="exponential", unsampler_type="linear",
                     extra_options="", 
                     ): 
+            # blame comfy here
             
+            default_dtype = getattr(torch, get_extra_options_kv("default_dtype", "float64", extra_options), torch.float64)   
+                     
             model = model.clone()
             if positive[0][1] is not None: 
                 if "regional_conditioning_weights" in positive[0][1]:
@@ -155,11 +158,7 @@ class SharkSampler:
                 latent_unbatch = copy.deepcopy(latent_image)
                 latent_unbatch['samples'] = latent_image_batch['samples'][batch_num].clone().unsqueeze(0)
                 
-                if extra_options_flag("use_fp32", extra_options) or extra_options_flag("use_float32", extra_options):
-                    default_dtype = torch.float32
-                else:
-                    default_dtype = torch.float64
-                
+
                 max_steps = 10000
 
                 if noise_seed == -1:
@@ -316,7 +315,8 @@ class SharkSampler:
 
                     
                     if cfg < 0:
-                        cfgpp = -cfg
+                        #cfgpp = -cfg
+                        sampler.extra_options['cfg_cw'] = -cfg
                         cfg = 1.0
                         
                     if sde_noise is None:

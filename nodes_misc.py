@@ -18,7 +18,7 @@ class TextBox1:
     RETURN_NAMES = ("text1",)
     FUNCTION = "main"
     
-    CATEGORY = "sampling/custom_sampling/samplers"
+    CATEGORY = "res4lyf/text"
     DESCRIPTION = "Multiline textbox."
 
     def main(self, text1):
@@ -42,7 +42,7 @@ class TextBox3:
     RETURN_NAMES = ("text1", "text2", "text3",)
     FUNCTION = "main"
     
-    CATEGORY = "sampling/custom_sampling/samplers"
+    CATEGORY = "res4lyf/text"
     DESCRIPTION = "Multiline textbox."
 
     def main(self, text1, text2, text3 ):

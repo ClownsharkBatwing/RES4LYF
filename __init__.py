@@ -221,10 +221,12 @@ NODE_CLASS_MAPPINGS = {
     "VAEEncodeAdvanced": helper_sigma_preview_image_preproc.VAEEncodeAdvanced,
     
     "SigmasPreview": helper_sigma_preview_image_preproc.SigmasPreview,
+    "SigmasSchedulePreview": helper_sigma_preview_image_preproc.SigmasSchedulePreview,
+
     
     "ReFluxPatcher": models.ReFluxPatcher,
     
-    #"ClownsharkSamplerOptions_FrameWeights": samplers_extensions.ClownsharKSamplerOptions_FrameWeights,
+    "ClownsharkSamplerOptions_FrameWeights": samplers_extensions.ClownsharKSamplerOptions_FrameWeights,
 }
 
 if flags["test_samplers"]:
@@ -236,6 +238,14 @@ if flags["test_samplers"]:
     extra_samplers.update({
         "rk_test":  test_samplers.sample_rk_test,
         "rk_sphere":  test_samplers.sample_rk_sphere,
+        "rk_vpsde":  test_samplers.sample_rk_vpsde,
+        "rk_vpsde_ddpm":  test_samplers.sample_rk_vpsde_ddpm,
+        "rk_vpsde_csbw":  test_samplers.sample_rk_vpsde_csbw,
+        "rk_momentum":  test_samplers.sample_rk_momentum,
+
+
+
+        "rk_vpsde_trivial":  test_samplers.sample_rk_vpsde_trivial,
         "zample": test_samplers.sample_zsample,
         "zample_paper": test_samplers.sample_zample_paper,
         "zample_inversion": test_samplers.sample_zample_inversion,
