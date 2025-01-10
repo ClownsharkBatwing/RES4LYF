@@ -384,8 +384,14 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
                 y0_inv_norm = y0_inv -   y0_inv.mean(dim=dims, keepdim=True)
                 if PRINT_DEBUG:
                     print(get_cosine_similarity(data_norm, y0_norm).item())
-                if guide_cossim_cutoff_ > get_cosine_similarity(data_norm, y0_norm) and guide_bkg_cossim_cutoff_ > get_cosine_similarity(data_norm, y0_inv_norm):
+                if guide_cossim_cutoff_ > get_cosine_similarity(data_norm*lgw_mask, y0_norm*lgw_mask) and guide_bkg_cossim_cutoff_ > get_cosine_similarity(data_norm*lgw_mask_inv, y0_inv_norm*lgw_mask_inv):
                     eps_, x_ = process_guides_substep(x_0, x_, eps_, data_, row, y0, y0_inv, lgw[step], lgw_inv[step], lgw_mask, lgw_mask_inv, step, sigma, sigma_next, sigma_down, s_, unsample_resample_scale, rk, rk_type, guide_mode, latent_guide_inv, UNSAMPLE, extra_options, frame_weights)
+                    
+                elif guide_cossim_cutoff_ > get_cosine_similarity(data_norm*lgw_mask, y0_norm*lgw_mask) and guide_bkg_cossim_cutoff_ <= get_cosine_similarity(data_norm*lgw_mask_inv, y0_inv_norm*lgw_mask_inv):
+                    eps_, x_ = process_guides_substep(x_0, x_, eps_, data_, row, y0, y0_inv, lgw[step], lgw_inv[step], lgw_mask, 0*lgw_mask_inv, step, sigma, sigma_next, sigma_down, s_, unsample_resample_scale, rk, rk_type, guide_mode, latent_guide_inv, UNSAMPLE, extra_options, frame_weights)
+                    
+                elif guide_cossim_cutoff_ <= get_cosine_similarity(data_norm*lgw_mask, y0_norm*lgw_mask) and guide_bkg_cossim_cutoff_ > get_cosine_similarity(data_norm*lgw_mask_inv, y0_inv_norm*lgw_mask_inv):
+                    eps_, x_ = process_guides_substep(x_0, x_, eps_, data_, row, y0, y0_inv, lgw[step], lgw_inv[step], 0*lgw_mask, lgw_mask_inv, step, sigma, sigma_next, sigma_down, s_, unsample_resample_scale, rk, rk_type, guide_mode, latent_guide_inv, UNSAMPLE, extra_options, frame_weights)
                     #eps_, x_ = process_guides_substep(x_0, x_, eps_, data_, row, y0, y0_inv, lgw[step], lgw_inv[step], lgw_mask, lgw_mask_inv, step, sigma, sigma_next, sigma_down, s_new_, unsample_resample_scale, rk, rk_type, guide_mode, latent_guide_inv, UNSAMPLE, extra_options, frame_weights)
 
 
