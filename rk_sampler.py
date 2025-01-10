@@ -197,7 +197,7 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
         if sigma_next == 0:
             rk, irk, rk_type, irk_type, eta, eta_var, extra_args = prepare_step_to_sigma_zero(rk, irk, rk_type, irk_type, model, x, extra_options, alpha, k, noise_sampler_type, cfg_cw=cfg_cw, **extra_args)
 
-        sigma_up, sigma, sigma_down, alpha_ratio = get_res4lyf_step_with_model(model, sigma, sigma_next, eta, eta_var, noise_mode, -torch.log(sigma_next/sigma) )
+        sigma_up, sigma, sigma_down, alpha_ratio = get_res4lyf_step_with_model(model, sigma, sigma_next, eta, eta_var, noise_mode)
         h     =  rk.h_fn(sigma_down, sigma)
         h_irk = irk.h_fn(sigma_down, sigma)
         
@@ -241,13 +241,13 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
                 
                 sub_sigma_up, sub_sigma, sub_sigma_next, sub_sigma_down, sub_alpha_ratio = 0, s_[row], s_[row+1], s_[row+1], 1
                 if step > substep_eta_start_step and s_[row+1] <= s_[row]:
-                    sub_sigma_up, sub_sigma, sub_sigma_down, sub_alpha_ratio = get_res4lyf_step_with_model(model, s_[row], s_[row+1], substep_eta, eta_var, substep_noise_mode, -torch.log(s_[row+1]/s_[row])) #s_[row+1]-s_[row])
+                    sub_sigma_up, sub_sigma, sub_sigma_down, sub_alpha_ratio = get_res4lyf_step_with_model(model, s_[row], s_[row+1], substep_eta, eta_var, substep_noise_mode)
                     
                 if (substep_eta_final_step < 0 and step == len(sigmas)-1+substep_eta_final_step)   or   (substep_eta_final_step > 0 and step > substep_eta_final_step):
                     sub_sigma_up, sub_sigma, sub_sigma_down, sub_alpha_ratio = 0, s_[row], s_[row+1], 1
                     
                 if row > 0 and not extra_options_flag("disable_rough_noise", extra_options):
-                    sub_sigma_up, sub_sigma, sub_sigma_down, sub_alpha_ratio = get_res4lyf_step_with_model(model, s_[row-1], s_[row], substep_eta, eta_var, substep_noise_mode, -torch.log(s_[row]/s_[row-1])) #s_[row]-s_[row-1])
+                    sub_sigma_up, sub_sigma, sub_sigma_down, sub_alpha_ratio = get_res4lyf_step_with_model(model, s_[row-1], s_[row], substep_eta, eta_var, substep_noise_mode)
                     sub_sigma_next = s_[row]
                     
                     
@@ -272,7 +272,7 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
                         h_new = h_new * rk.h_fn(sub_sigma_down, sub_sigma) / rk.h_fn(sub_sigma_next, sub_sigma)
                     else:
                         if extra_options_flag("substep_eta_c_row_plus_one", extra_options)
-                            h_new = (rk.h_fn(sub_sigma_down, sigma) / rk.c[row+1])[0]   #used to be rk.c[row+1]
+                            h_new = (rk.h_fn(sub_sigma_down, sigma) / rk.c[row+1])[0]  
                         else:
                             h_new = (rk.h_fn(sub_sigma_down, sigma) / rk.c[row])[0]   #used to be rk.c[row+1]
                     
@@ -364,7 +364,8 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
                 if PRINT_DEBUG:
                     print(get_cosine_similarity(data_norm, y0_norm).item())
                 if guide_cossim_cutoff_ > get_cosine_similarity(data_norm, y0_norm) and guide_bkg_cossim_cutoff_ > get_cosine_similarity(data_norm, y0_inv_norm):
-                    eps_, x_ = process_guides_substep(x_0, x_, eps_, data_, row, y0, y0_inv, lgw[step], lgw_inv[step], lgw_mask, lgw_mask_inv, step, sigma, sigma_next, sigma_down, s_new_, unsample_resample_scale, rk, rk_type, guide_mode, latent_guide_inv, UNSAMPLE, extra_options, frame_weights)
+                    eps_, x_ = process_guides_substep(x_0, x_, eps_, data_, row, y0, y0_inv, lgw[step], lgw_inv[step], lgw_mask, lgw_mask_inv, step, sigma, sigma_next, sigma_down, s_, unsample_resample_scale, rk, rk_type, guide_mode, latent_guide_inv, UNSAMPLE, extra_options, frame_weights)
+                    #eps_, x_ = process_guides_substep(x_0, x_, eps_, data_, row, y0, y0_inv, lgw[step], lgw_inv[step], lgw_mask, lgw_mask_inv, step, sigma, sigma_next, sigma_down, s_new_, unsample_resample_scale, rk, rk_type, guide_mode, latent_guide_inv, UNSAMPLE, extra_options, frame_weights)
 
 
 
@@ -502,8 +503,7 @@ def get_explicit_rk_step(rk, rk_type, x, y0, y0_inv, lgw, lgw_inv, mask, lgw_mas
     
     eta = get_extra_options_kv("implicit_substep_eta", eta, extra_options)
 
-    #sigma_up, sigma, sigma_down, alpha_ratio = get_res4lyf_step_with_model(rk.model, sigma, sigma_next, eta, eta_var, noise_mode, rk.h_fn(sigma_next,sigma) )
-    sigma_up, sigma, sigma_down, alpha_ratio = get_res4lyf_step_with_model(rk.model, sigma, sigma_next, eta, eta_var, noise_mode, -torch.log(sigma_next/sigma) )
+    sigma_up, sigma, sigma_down, alpha_ratio = get_res4lyf_step_with_model(rk.model, sigma, sigma_next, eta, eta_var, noise_mode)
     h = rk.h_fn(sigma_down, sigma)
     c2, c3 = get_res4lyf_half_step3(sigma, sigma_down, c2, c3, t_fn=rk.t_fn, sigma_fn=rk.sigma_fn)
     

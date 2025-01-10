@@ -483,7 +483,7 @@ class SigmasSchedulePreview(SaveImage):
                 "d_noise_alt": denoise_alt,
                 "scheduler": scheduler,
             }
-)
+        )
 
         numpy_image = np.array(graph_image)
         numpy_image = numpy_image / 255.0
