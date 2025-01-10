@@ -271,7 +271,10 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
                     if extra_options_flag("h_new_substep_reg", extra_options):
                         h_new = h_new * rk.h_fn(sub_sigma_down, sub_sigma) / rk.h_fn(sub_sigma_next, sub_sigma)
                     else:
-                        h_new = (rk.h_fn(sub_sigma_down, sigma) / rk.c[row])[0]   #used to be rk.c[row+1]
+                        if extra_options_flag("substep_eta_c_row_plus_one", extra_options)
+                            h_new = (rk.h_fn(sub_sigma_down, sigma) / rk.c[row+1])[0]   #used to be rk.c[row+1]
+                        else:
+                            h_new = (rk.h_fn(sub_sigma_down, sigma) / rk.c[row])[0]   #used to be rk.c[row+1]
                     
                 rk_new. set_coeff(rk_type,  h_new,     c1, c2, c3, step, sigmas, sigma, sigma_down)
                 s_new_       = [(  rk_new.sigma_fn( rk_new.t_fn(sigma) +     h_new*c_)) * s_one for c_ in   rk_new.c]
