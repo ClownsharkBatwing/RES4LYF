@@ -229,8 +229,8 @@ class RK_Method:
         return ks
 
     def init_guides(self, x, latent_guide, latent_guide_inv, mask, sigmas, UNSAMPLE):
-        y0, y0_inv = torch.zeros_like(x), torch.zeros_like(x)
-        
+        y0, y0_inv = None, None
+
         if latent_guide is not None:
             latent_guide_samples = self.model.inner_model.inner_model.process_latent_in(latent_guide['samples']).clone().to(x.device)
             if sigmas[0] > sigmas[1]:
@@ -248,6 +248,9 @@ class RK_Method:
                 x = mask * x + (1-mask) * latent_guide_inv_samples
             else:
                 x = latent_guide_inv_samples   #THIS COULD LEAD TO WEIRD BEHAVIOR! OVERWRITING X WITH LG_INV AFTER SETTING TO LG above!
+
+        y0 = torch.zeros_like(x).contiguous() if y0 is None else y0
+        y0_inv = torch.zeros_like(x).contiguous() if y0_inv is None else y0_inv
                 
         if UNSAMPLE and sigmas[0] < sigmas[1]: #sigma_next > sigma:
             y0 = self.noise_sampler(sigma=self.sigma_max, sigma_next=self.sigma_min)

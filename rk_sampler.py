@@ -491,8 +491,7 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
             else:
                 x_mid = x
                 for i in range(len(s_all)-1):
-                    extra_args["frame_weights"] = frame_weights
-                    x_mid, eps_, data_ = get_explicit_rk_step(rk, rk_type, x_mid, y0, y0_inv, lgw[step], lgw_inv[step], mask, lgw_mask, lgw_mask_inv, step, s_all[i], s_all[i+1], eta, eta_var, s_noise, noise_mode, c2, c3, step+i, sigmas_and, x_, eps_, data_, unsample_resample_scale, guide_mode, latent_guide, latent_guide_inv, UNSAMPLE, extra_options, **extra_args)
+                    x_mid, eps_, data_ = get_explicit_rk_step(rk, rk_type, x_mid, y0, y0_inv, lgw[step], lgw_inv[step], mask, lgw_mask, lgw_mask_inv, step, s_all[i], s_all[i+1], eta, eta_var, s_noise, noise_mode, c2, c3, step+i, sigmas_and, x_, eps_, data_, unsample_resample_scale, guide_mode, latent_guide, latent_guide_inv, UNSAMPLE, extra_options, frame_weights, **extra_args)
                     eps_list.append(eps_[0])
                     data_[0].zero_()
                     eps_ [0].zero_()
@@ -563,9 +562,8 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
 
 
 
-def get_explicit_rk_step(rk, rk_type, x, y0, y0_inv, lgw, lgw_inv, mask, lgw_mask, lgw_mask_inv, step, sigma, sigma_next, eta, eta_var, s_noise, noise_mode, c2, c3, stepcount, sigmas, x_, eps_, data_, unsample_resample_scale, guide_mode, latent_guide, latent_guide_inv, UNSAMPLE, extra_options, **extra_args):
+def get_explicit_rk_step(rk, rk_type, x, y0, y0_inv, lgw, lgw_inv, mask, lgw_mask, lgw_mask_inv, step, sigma, sigma_next, eta, eta_var, s_noise, noise_mode, c2, c3, stepcount, sigmas, x_, eps_, data_, unsample_resample_scale, guide_mode, latent_guide, latent_guide_inv, UNSAMPLE, extra_options, frame_weights, **extra_args):
     extra_args = {} if extra_args is None else extra_args
-    frame_weights = extra_args.get("frame_weights", None)
     s_in = x.new_ones([x.shape[0]])
     
     eta = get_extra_options_kv("implicit_substep_eta", eta, extra_options)
