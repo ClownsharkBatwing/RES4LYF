@@ -67,19 +67,6 @@ class KSamplerSelectAdvanced:
         return (sampler, )
 
 
-NOISE_MODE_NAMES = ["none",
-                    "hard_sq",
-                    "hard",
-                    "lorentzian", 
-                    "soft", 
-                    "soft-linear",
-                    "softer",
-                    "sinusoidal",
-                    "exp", 
-                    "hard_var", 
-                    ]
-
-
 
 class SharkSampler:
     @classmethod
@@ -165,7 +152,10 @@ class SharkSampler:
                     seed = torch.initial_seed() + 1 + batch_num
                 else:
                     seed = noise_seed + batch_num
-                    torch.manual_seed(noise_seed + batch_num)
+                    torch.manual_seed(seed)
+                    torch.cuda.manual_seed(seed)
+                    #torch.cuda.manual_seed_all(seed)
+
 
                 if options is not None:
                     noise_stdev     = options.get('noise_init_stdev', noise_stdev)
