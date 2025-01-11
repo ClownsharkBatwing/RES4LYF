@@ -374,7 +374,9 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
             else:
                 x_mid = x
                 for i in range(len(s_all)-1):
-                    x_mid, eps_, data_ = get_explicit_rk_step(rk, rk_type, x_mid, LG, step, s_all[i], s_all[i+1], eta, eta_var, s_noise, noise_mode, c2, c3, step+i, sigmas_and, x_, eps_, data_, unsample_resample_scale, extra_options, frame_weights, **extra_args)
+                    x_mid, eps_, data_ = get_explicit_rk_step(rk, rk_type, x_mid, LG, step, s_all[i], s_all[i+1], eta, eta_var, s_noise, noise_mode, c2, c3, step+i, sigmas_and, x_, eps_, data_, unsample_resample_scale, extra_options, frame_weights, 
+                                                              x_init, x_prenoise, NOISE_COSSIM_SOURCE, NOISE_COSSIM_MODE, noise_cossim_max_iter, noise_cossim_max_score, noise_cossim_tile_size, noise_cossim_iterations,SDE_NOISE_EXTERNAL,sde_noise_t,
+                                                              **extra_args)
 
                     eps_list.append(eps_[0])
                     data_[0].zero_()
@@ -449,7 +451,9 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
 
 
 
-def get_explicit_rk_step(rk, rk_type, x, LG, step, sigma, sigma_next, eta, eta_var, s_noise, noise_mode, c2, c3, stepcount, sigmas, x_, eps_, data_, unsample_resample_scale, extra_options, frame_weights, **extra_args):
+def get_explicit_rk_step(rk, rk_type, x, LG, step, sigma, sigma_next, eta, eta_var, s_noise, noise_mode, c2, c3, stepcount, sigmas, x_, eps_, data_, unsample_resample_scale, extra_options, frame_weights, 
+                         x_init, x_prenoise, NOISE_COSSIM_SOURCE, NOISE_COSSIM_MODE, noise_cossim_max_iter, noise_cossim_max_score, noise_cossim_tile_size, noise_cossim_iterations,SDE_NOISE_EXTERNAL,sde_noise_t,
+                         **extra_args):
 
     extra_args = {} if extra_args is None else extra_args
     s_in = x.new_ones([x.shape[0]])
@@ -490,7 +494,21 @@ def get_explicit_rk_step(rk, rk_type, x, LG, step, sigma, sigma_next, eta, eta_v
         
     x = LG.process_guides_poststep(x, denoised, eps, step, extra_options)
 
-    x = rk.add_noise_post(x, sigma_up, sigma, sigma_next, alpha_ratio, s_noise, noise_mode)
+    #x = rk.add_noise_post(x, sigma_up, sigma, sigma_next, alpha_ratio, s_noise, noise_mode)
+    
+    if sigma_up > 0:
+        Osde = NoiseStepHandlerOSDE(x, eps, denoised, x_init, y0, LG.y0_inv)
+        if Osde.check_cossim_source(NOISE_COSSIM_SOURCE):
+            noise = rk.noise_sampler(sigma=sigma, sigma_next=sigma_next)
+            noise_osde = Osde.get_ortho_noise(noise, [], max_iter=noise_cossim_max_iter, max_score=noise_cossim_max_score, NOISE_COSSIM_SOURCE=NOISE_COSSIM_SOURCE)
+            x = alpha_ratio * x + sigma_up * noise_osde * s_noise
+        elif extra_options_flag("noise_cossim", extra_options):
+            x = handle_tiled_etc_noise_steps(x_0, x, x_prenoise, x_init, eps, denoised, y0, LG.y0_inv, step, 
+                                rk_type, rk, sigma_up, sigma, sigma_next, alpha_ratio, s_noise, noise_mode, SDE_NOISE_EXTERNAL, sde_noise_t,
+                                NOISE_COSSIM_SOURCE, NOISE_COSSIM_MODE, noise_cossim_tile_size, noise_cossim_iterations,
+                                extra_options)
+        else:
+            x = rk.add_noise_post(x, sigma_up, sigma, sigma_next, alpha_ratio, s_noise, noise_mode, SDE_NOISE_EXTERNAL, sde_noise_t)
 
     for ms in range(rk.multistep_stages):
         eps_ [rk.multistep_stages - ms] = eps_ [rk.multistep_stages - ms - 1]
