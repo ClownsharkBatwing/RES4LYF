@@ -203,12 +203,24 @@ class LatentGuide:
                 if lgw_mask_inv is not None:
                     lgw_mask_inv[..., f:f+1, :, :] *= frame_weight
 
-        if "data" in guide_mode:
-            y0_tmp = y0
+        if "data" == guide_mode:
+            y0_tmp = y0.clone()
             if latent_guide_inv is not None:
                 y0_tmp = (1-lgw_mask) * data_[row] + lgw_mask * y0
                 y0_tmp = (1-lgw_mask_inv) * y0_tmp + lgw_mask_inv * y0_inv
             x_[row+1] = y0_tmp + eps_[row]
+            
+        if guide_mode == "data_projection":
+
+            d_lerp = data_[row]   +   lgw_mask * (y0-data_[row])   +   lgw_mask_inv * (y0_inv-data_[row])
+            
+            d_collinear_d_lerp = get_collinear(data_[row], d_lerp)  
+            d_lerp_ortho_d     = get_orthogonal(d_lerp, data_[row])  
+            
+            data_[row] = d_collinear_d_lerp + d_lerp_ortho_d
+            
+            x_[row+1] = data_[row] + eps_[row] * sigma
+            
 
         elif "epsilon" in guide_mode:
             if sigma > sigma_next:
@@ -400,23 +412,26 @@ class LatentGuide:
             x = denoised_shifted + eps
         
         
-        if UNSAMPLE == False and (latent_guide is not None or latent_guide_inv is not None) and guide_mode in ("hard_light", "blend", "blend_proj", "mean_std", "mean", "mean_tiled", "std"):
+        if UNSAMPLE == False and (latent_guide is not None or latent_guide_inv is not None) and guide_mode in ("hard_light", "blend", "blend_projection", "mean_std", "mean", "mean_tiled", "std"):
             if guide_mode == "hard_light":
                 d_shift, d_shift_inv = hard_light_blend(y0, denoised), hard_light_blend(y0_inv, denoised)
             elif guide_mode == "blend":
                 d_shift, d_shift_inv = y0, y0_inv
                 
-            elif guide_mode == "blend_proj":
-                d_shift     = get_collinear(denoised, y0) 
-                d_shift_inv = get_collinear(denoised, y0_inv) 
-                                
-                denoised_ortho    = get_orthogonal(denoised, d_shift)
-                denoised_ortho_inv    = get_orthogonal(denoised, d_shift_inv)          #WILL NEED TO BE UPDATED FOR A DENOSIED_INV HACK
-                                
-                #denoised_ortho    = get_orthogonal(denoised, y0)
-                #denoised_ortho_inv    = get_orthogonal(denoised, y0_inv)          #WILL NEED TO BE UPDATED FOR A DENOSIED_INV HACK
+            elif guide_mode == "blend_projection":
+                #d_shift     = get_collinear(denoised, y0) 
+                #d_shift_inv = get_collinear(denoised, y0_inv) 
                 
+                d_lerp = denoised   +   lgw_mask * (y0-denoised)   +   lgw_mask_inv * (y0_inv-denoised)
                 
+                d_collinear_d_lerp = get_collinear(denoised, d_lerp)  
+                d_lerp_ortho_d     = get_orthogonal(d_lerp, denoised)  
+                
+                denoised_shifted = d_collinear_d_lerp + d_lerp_ortho_d
+                x = denoised_shifted + eps
+                return x
+
+
             elif guide_mode == "mean_std":
                 d_shift, d_shift_inv = normalize_latent([denoised, denoised], [y0, y0_inv])
             elif guide_mode == "mean":
@@ -434,13 +449,6 @@ class LatentGuide:
                 d_shift     = rearrange(d_shift_tiled,     "(t1 t2) b c h w -> b c (h t1) (w t2)", t1=mean_tile_size, t2=mean_tile_size)
                 d_shift_inv = rearrange(d_shift_inv_tiled, "(t1 t2) b c h w -> b c (h t1) (w t2)", t1=mean_tile_size, t2=mean_tile_size)
 
-            if guide_mode in ("blend_proj", ):
-                if latent_guide_inv is None:
-                    denoised_shifted = denoised   +   lgw_mask * (d_shift - denoised_ortho) * torch.norm(denoised) / torch.norm(d_shift) 
-                else:
-                    denoised_shifted = denoised   +   lgw_mask * (d_shift - denoised_ortho)   +   lgw_mask_inv * (d_shift_inv - denoised_ortho_inv)
-                denoised_shifted = denoised_shifted * torch.norm(denoised) / torch.norm(denoised_shifted) 
-                x = denoised_shifted + eps
 
             if guide_mode in ("hard_light", "blend", "mean_std", "mean", "mean_tiled", "std"):
                 if latent_guide_inv is None:

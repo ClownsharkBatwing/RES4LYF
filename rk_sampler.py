@@ -145,6 +145,9 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
 
 
     irk_type = implicit_sampler_name if implicit_sampler_name != "use_explicit" else rk_type
+    
+    rk_type = "euler" if implicit_sampler_name == "use_explicit" else rk_type
+    rk_type = get_extra_options_kv("rk_type", rk_type, extra_options)
 
     rk       = RK_Method.create(model,  rk_type, x.device)
     irk      = RK_Method.create(model, irk_type, x.device)

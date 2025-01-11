@@ -335,7 +335,7 @@ class SigmasSchedulePreview(SaveImage):
         }
 
     FUNCTION = "plot_schedule"
-    CATEGORY = "RES4LYF/schedules"
+    CATEGORY = "RES4LYF/sigmas"
     OUTPUT_NODE = True
 
 
