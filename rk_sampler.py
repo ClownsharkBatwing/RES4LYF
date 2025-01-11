@@ -99,9 +99,9 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
     noise_cossim_iterations         = int(get_extra_options_kv("noise_cossim_iterations",         "1",          extra_options))
     noise_substep_cossim_iterations = int(get_extra_options_kv("noise_substep_cossim_iterations", "1",          extra_options))
     NOISE_COSSIM_MODE               =     get_extra_options_kv("noise_cossim_mode",               "orthogonal", extra_options)
-    NOISE_COSSIM_SOURCE             =     get_extra_options_kv("noise_cossim_source",             "data",       extra_options)
+    NOISE_COSSIM_SOURCE             =     get_extra_options_kv("noise_cossim_source",             "x_eps_data_xinit_orthogonal",       extra_options)
     NOISE_SUBSTEP_COSSIM_MODE       =     get_extra_options_kv("noise_substep_cossim_mode",       "orthogonal", extra_options)
-    NOISE_SUBSTEP_COSSIM_SOURCE     =     get_extra_options_kv("noise_substep_cossim_source",     "data",       extra_options)
+    NOISE_SUBSTEP_COSSIM_SOURCE     =     get_extra_options_kv("noise_substep_cossim_source",     "x_eps_data_xinit_orthogonal",       extra_options)
     SUBSTEP_SKIP_LAST               =     get_extra_options_kv("substep_skip_last",               "false",      extra_options) == "true" 
     noise_cossim_tile_size          = int(get_extra_options_kv("noise_cossim_tile",               "2",          extra_options))
     noise_substep_cossim_tile_size  = int(get_extra_options_kv("noise_substep_cossim_tile",       "2",          extra_options))
