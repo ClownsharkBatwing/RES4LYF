@@ -328,7 +328,6 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
             denoised = x_0 + ((sigma / (sigma - sigma_down)) *  h) * rk.b_k_sum(eps_, 0) 
             eps = x - denoised
             x = LG.process_guides_poststep(x, denoised, eps, step, extra_options)
-            #x = process_guides_poststep(x, denoised, eps, y0, y0_inv, mask, lgw_mask, lgw_mask_inv, guide_mode, latent_guide, latent_guide_inv, UNSAMPLE, extra_options)
 
 
 
@@ -346,7 +345,6 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
             denoised = x_0 + (sigma / (sigma - sigma_down)) *  h_irk * irk.b_k_sum(eps_, 0) 
             eps = x - denoised
             x = LG.process_guides_poststep(x, denoised, eps, step, extra_options)
-            #x = process_guides_poststep(x, denoised, eps, y0, y0_inv, mask, lgw_mask, lgw_mask_inv, guide_mode, latent_guide, latent_guide_inv, UNSAMPLE, extra_options)
 
 
 
@@ -400,7 +398,6 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
                 denoised = x_0 + (sigma / (sigma - sigma_down)) *  h_irk * irk.b_k_sum(eps2_, 0) 
                 eps = x - denoised
                 x = LG.process_guides_poststep(x, denoised, eps, step, extra_options)
-                #x = process_guides_poststep(x, denoised, eps, y0, y0_inv, mask, lgw_mask, lgw_mask_inv, guide_mode, latent_guide, latent_guide_inv, UNSAMPLE, extra_options)
 
 
 
@@ -490,7 +487,7 @@ def get_explicit_rk_step(rk, rk_type, x, LG, step, sigma, sigma_next, eta, eta_v
     y0 = LG.y0
     if LG.y0.shape[0] > 1:
         y0 = LG.y0[min(step, LG.y0.shape[0]-1)].unsqueeze(0)  
-    #x = process_guides_poststep(x, denoised, eps, y0, LG.y0_inv, LG.mask, LG.lgw_masks[step], LG.lgw_masks_inv[step], guide_mode, latent_guide, latent_guide_inv, UNSAMPLE, extra_options)
+        
     x = LG.process_guides_poststep(x, denoised, eps, step, extra_options)
 
     x = rk.add_noise_post(x, sigma_up, sigma, sigma_next, alpha_ratio, s_noise, noise_mode)
