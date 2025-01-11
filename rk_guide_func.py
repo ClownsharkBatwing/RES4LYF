@@ -6,12 +6,331 @@ import re
 from einops import rearrange
 
 from .noise_classes import *
-from .latents import hard_light_blend, normalize_latent
+from .latents import hard_light_blend, normalize_latent, initialize_or_scale
 from .rk_method import RK_Method
 from .helper import get_extra_options_kv, extra_options_flag, get_cosine_similarity
 
 
 import itertools
+
+
+def normalize_inputs(x, y0, y0_inv, guide_mode,  extra_options):
+    
+    if guide_mode == "epsilon_guide_mean_std_from_bkg":
+        y0 = normalize_latent(y0, y0_inv)
+        
+    input_norm = get_extra_options_kv("input_norm", "", extra_options)
+    input_std = float(get_extra_options_kv("input_std", "1.0", extra_options))
+    
+    if input_norm == "input_ch_mean_set_std_to":
+        x = normalize_latent(x, set_std=input_std)
+
+    if input_norm == "input_ch_set_std_to":
+        x = normalize_latent(x, set_std=input_std, mean=False)
+            
+    if input_norm == "input_mean_set_std_to":
+        x = normalize_latent(x, set_std=input_std, channelwise=False)
+        
+    if input_norm == "input_std_set_std_to":
+        x = normalize_latent(x, set_std=input_std, mean=False, channelwise=False)
+    
+    return x, y0, y0_inv
+
+
+class LatentGuide:
+    def __init__(self, guides, x, model, sigmas, UNSAMPLE, LGW_MASK_RESCALE_MIN, extra_options, device='cuda', dtype=torch.float64, max_steps=10000):
+        self.model    = model
+        self.sigma_min = model.inner_model.inner_model.model_sampling.sigma_min.to(dtype)
+        self.sigma_max = model.inner_model.inner_model.model_sampling.sigma_max.to(dtype)
+        self.sigmas   = sigmas
+        self.UNSAMPLE = UNSAMPLE
+        self.SAMPLE = (sigmas[0] > sigmas[1])
+        self.extra_options = extra_options
+        self.y0     = torch.zeros_like(x)
+        self.y0_inv = torch.zeros_like(x)
+        self.guide_mode = ""
+        self.mask = None
+        self.mask_inv = None
+        
+        self.latent_guide = None
+        self.latent_guide_inv = None
+
+        self.lgw_masks = []
+        self.lgw_masks_inv = []
+        self.lgw, self.lgw_inv = [torch.full_like(sigmas, 0.) for _ in range(2)]
+        
+        self.guide_cossim_cutoff_, self.guide_bkg_cossim_cutoff_ = 1.0, 1.0
+                
+        latent_guide_weight, latent_guide_weight_inv = 0.,0.
+        latent_guide_weights, latent_guide_weights_inv = None, None
+        if guides is not None:
+            self.guide_mode, latent_guide_weight, latent_guide_weight_inv, latent_guide_weights, latent_guide_weights_inv, self.latent_guide, self.latent_guide_inv, latent_guide_mask, latent_guide_mask_inv, scheduler_, scheduler_inv_, steps_, steps_inv_, denoise_, denoise_inv_ = guides
+            
+            self.mask, self.mask_inv                                 = latent_guide_mask, latent_guide_mask_inv
+            self.guide_cossim_cutoff_, self.guide_bkg_cossim_cutoff_ = denoise_, denoise_inv_
+            
+        latent_guide_weights     = initialize_or_scale(latent_guide_weights,     latent_guide_weight,     max_steps).to(dtype)
+        latent_guide_weights_inv = initialize_or_scale(latent_guide_weights_inv, latent_guide_weight_inv, max_steps).to(dtype)
+
+        latent_guide_weights     = F.pad(latent_guide_weights,     (0, max_steps), value=0.0)
+        latent_guide_weights_inv = F.pad(latent_guide_weights_inv, (0, max_steps), value=0.0)
+        
+        
+        if latent_guide_weights is not None:
+            self.lgw = latent_guide_weights.to(x.device)
+        if latent_guide_weights_inv is not None:
+            self.lgw_inv = latent_guide_weights_inv.to(x.device)
+            
+        self.mask, LGW_MASK_RESCALE_MIN = prepare_mask(x, self.mask, LGW_MASK_RESCALE_MIN)
+        if self.mask_inv is not None:
+            self.mask_inv, LGW_MASK_RESCALE_MIN = prepare_mask(x, self.mask_inv, LGW_MASK_RESCALE_MIN)
+        elif not self.SAMPLE:
+            self.mask_inv = (1-self.mask)
+            
+        for step in range(len(self.sigmas)-1):
+            lgw_mask, lgw_mask_inv = prepare_weighted_masks(self.mask, self.mask_inv, self.lgw[step], self.lgw_inv[step], self.latent_guide, self.latent_guide_inv, LGW_MASK_RESCALE_MIN)
+            self.lgw_masks.append(lgw_mask)
+            self.lgw_masks_inv.append(lgw_mask_inv)
+
+
+    def init_guides(self, x, noise_sampler, latent_guide=None, latent_guide_inv=None):
+        self.y0, self.y0_inv = torch.zeros_like(x), torch.zeros_like(x)
+        latent_guide = self.latent_guide if latent_guide is None else latent_guide
+        latent_guide_inv = self.latent_guide_inv if latent_guide_inv is None else latent_guide_inv
+
+
+        if latent_guide is not None:
+            if type(latent_guide) == dict:
+                latent_guide_samples = self.model.inner_model.inner_model.process_latent_in(latent_guide['samples']).clone().to(x.device)
+            else:
+                latent_guide_samples = latent_guide
+            if self.SAMPLE:
+                self.y0 = latent_guide_samples
+            elif self.UNSAMPLE: # and self.mask is not None:
+                x = (1-self.mask) * x + self.mask * latent_guide_samples
+            else:
+                x = latent_guide_samples
+
+        if latent_guide_inv is not None:
+            if type(latent_guide_inv) == dict:
+                latent_guide_inv_samples = self.model.inner_model.inner_model.process_latent_in(latent_guide_inv['samples']).clone().to(x.device)
+            else:
+                latent_guide_inv_samples = latent_guide_inv
+            if self.SAMPLE:
+                self.y0_inv = latent_guide_inv_samples
+            elif self.UNSAMPLE: # and self.mask is not None:
+                x = (1-self.mask_inv) * x + self.mask_inv * latent_guide_inv_samples #fixed old approach, which was mask, (1-mask)
+            else:
+                x = latent_guide_inv_samples   #THIS COULD LEAD TO WEIRD BEHAVIOR! OVERWRITING X WITH LG_INV AFTER SETTING TO LG above!
+                
+        if self.UNSAMPLE and not self.SAMPLE: #sigma_next > sigma:
+            self.y0 = noise_sampler(sigma=self.sigma_max, sigma_next=self.sigma_min)
+            self.y0 = (self.y0 - self.y0.mean()) / self.y0.std()
+            self.y0_inv = noise_sampler(sigma=self.sigma_max, sigma_next=self.sigma_min)
+            self.y0_inv = (self.y0_inv - self.y0_inv.mean()) / self.y0_inv.std()
+            
+        x, self.y0, self.y0_inv = normalize_inputs(x, self.y0, self.y0_inv, self.guide_mode, self.extra_options)
+
+        return x
+    
+
+    #def process_guides_substep(self, x_0, x_, eps_, data_, row, y0, y0_inv, lgw, lgw_inv, lgw_mask, lgw_mask_inv, step, sigma, sigma_next, sigma_down, s_, unsample_resample_scale, rk, rk_type, guide_mode, latent_guide_inv, UNSAMPLE, extra_options, frame_weights=None):
+    def process_guides_substep(self, x_0, x_, eps_, data_, row, step, sigma, sigma_next, sigma_down, s_, unsample_resample_scale, rk, rk_type, extra_options, frame_weights=None):
+
+        y0 = self.y0
+        if self.y0.shape[0] > 1:
+            y0 = self.y0[min(step, self.y0.shape[0]-1)].unsqueeze(0)  
+        y0_inv = self.y0_inv
+        
+        lgw_mask = self.lgw_masks[step].clone()
+        lgw_mask_inv = self.lgw_masks_inv[step].clone() if self.lgw_masks_inv is not None else None
+
+        if self.guide_mode: 
+            data_norm   = data_[row] - data_[row].mean(dim=(-2,-1), keepdim=True)
+            y0_norm     = y0         -         y0.mean(dim=(-2,-1), keepdim=True)
+            y0_inv_norm = y0_inv     -     y0_inv.mean(dim=(-2,-1), keepdim=True)
+
+            y0_cossim     = get_cosine_similarity(data_norm*lgw_mask,     y0_norm    *lgw_mask)
+            y0_cossim_inv = get_cosine_similarity(data_norm*lgw_mask_inv, y0_inv_norm*lgw_mask_inv)
+            
+            if y0_cossim < self.guide_cossim_cutoff_ or y0_cossim_inv < self.guide_bkg_cossim_cutoff_:
+                lgw_mask_cossim, lgw_mask_cossim_inv = lgw_mask, lgw_mask_inv
+                if y0_cossim     >= self.guide_cossim_cutoff_:
+                    lgw_mask_cossim     = torch.zeros_like(lgw_mask)
+                if y0_cossim_inv >= self.guide_bkg_cossim_cutoff_:
+                    lgw_mask_cossim_inv = torch.zeros_like(lgw_mask_inv)
+                lgw_mask = lgw_mask_cossim
+                lgw_mask_inv = lgw_mask_cossim_inv
+            else:
+                return eps_, x_ 
+        
+        if self.UNSAMPLE and RK_Method.is_exponential(rk_type):
+            if not (extra_options_flag("disable_power_unsample", extra_options) or extra_options_flag("disable_power_resample", extra_options)):
+                extra_options += "\npower_unsample\npower_resample\n"
+            if not extra_options_flag("disable_lgw_scaling_substep_ch_mean_std", extra_options):
+                extra_options += "\nsubstep_eps_ch_mean_std\n"
+                
+
+        lgw = self.lgw[step]
+        lgw_inv = self.lgw_inv[step]
+        
+        latent_guide = self.latent_guide
+        latent_guide_inv = self.latent_guide_inv
+        guide_mode = self.guide_mode
+        UNSAMPLE = self.UNSAMPLE
+        #sigma = self.sigmas[step]
+        #sigma_next = self.sigmas[step+1]
+        
+                
+        s_in = x_0.new_ones([x_0.shape[0]])
+        eps_orig = eps_.clone()
+        
+        if extra_options_flag("dynamic_guides_mean_std", extra_options):
+            y_shift, y_inv_shift = normalize_latent([y0, y0_inv], [data_, data_])
+            y0 = y_shift
+            if extra_options_flag("dynamic_guides_inv", extra_options):
+                y0_inv = y_inv_shift
+
+        if extra_options_flag("dynamic_guides_mean", extra_options):
+            y_shift, y_inv_shift = normalize_latent([y0, y0_inv], [data_, data_], std=False)
+            y0 = y_shift
+            if extra_options_flag("dynamic_guides_inv", extra_options):
+                y0_inv = y_inv_shift
+
+
+        if frame_weights is not None and x_0.dim() == 5:
+            for f in range(lgw_mask.shape[2]):
+                frame_weight = frame_weights[f]
+                lgw_mask[..., f:f+1, :, :] *= frame_weight
+                if lgw_mask_inv is not None:
+                    lgw_mask_inv[..., f:f+1, :, :] *= frame_weight
+
+        if "data" in guide_mode:
+            y0_tmp = y0
+            if latent_guide_inv is not None:
+                y0_tmp = (1-lgw_mask) * data_[row] + lgw_mask * y0
+                y0_tmp = (1-lgw_mask_inv) * y0_tmp + lgw_mask_inv * y0_inv
+            x_[row+1] = y0_tmp + eps_[row]
+
+        elif "epsilon" in guide_mode:
+            if sigma > sigma_next:
+                    
+                tol_value = float(get_extra_options_kv("tol", "-1.0", extra_options))
+                if tol_value >= 0 and (lgw > 0 or lgw_inv > 0):           
+                    for b, c in itertools.product(range(x_0.shape[0]), range(x_0.shape[1])):
+                        current_diff     = torch.norm(data_[row][b][c] - y0    [b][c])
+                        current_diff_inv = torch.norm(data_[row][b][c] - y0_inv[b][c])
+                        
+                        lgw_scaled     = torch.nan_to_num(1-(tol_value/current_diff),     0)
+                        lgw_scaled_inv = torch.nan_to_num(1-(tol_value/current_diff_inv), 0)
+                        
+                        lgw_tmp     = min(lgw    , lgw_scaled)
+                        lgw_tmp_inv = min(lgw_inv, lgw_scaled_inv)
+
+                        lgw_mask_clamp     = torch.clamp(lgw_mask,     max=lgw_tmp)
+                        lgw_mask_clamp_inv = torch.clamp(lgw_mask_inv, max=lgw_tmp_inv)
+                        
+                        eps_row, eps_row_inv = get_guide_epsilon_substep(x_0, x_, y0, y0_inv, s_, row, rk_type, b, c)
+                        eps_[row][b][c] = eps_[row][b][c] + lgw_mask_clamp[b][c] * (eps_row - eps_[row][b][c]) + lgw_mask_clamp_inv[b][c] * (eps_row_inv - eps_[row][b][c])
+
+
+                elif guide_mode == "epsilon_projection":
+                    eps_row, eps_row_inv = get_guide_epsilon_substep(x_0, x_, y0, y0_inv, s_, row, rk_type)
+                    
+                    eps_row_lerp = eps_[row]   +   lgw_mask * (eps_row-eps_[row])   +   lgw_mask_inv * (eps_row_inv-eps_[row])
+                    
+                    eps_collinear_eps_lerp = get_collinear(eps_[row], eps_row_lerp)  
+                    eps_lerp_ortho_eps     = get_orthogonal(eps_row_lerp, eps_[row])  
+                    
+                    eps_[row] = eps_collinear_eps_lerp + eps_lerp_ortho_eps
+
+
+                elif extra_options_flag("disable_lgw_scaling", extra_options):
+                    eps_row, eps_row_inv = get_guide_epsilon_substep(x_0, x_, y0, y0_inv, s_, row, rk_type)
+                    eps_[row] = eps_[row]      +     lgw_mask * (eps_row - eps_[row])    +    lgw_mask_inv * (eps_row_inv - eps_[row])
+                    
+
+                elif (lgw > 0 or lgw_inv > 0): # default old channelwise epsilon
+                    avg, avg_inv = 0, 0
+                    for b, c in itertools.product(range(x_0.shape[0]), range(x_0.shape[1])):
+                        avg     += torch.norm(data_[row][b][c] - y0    [b][c])
+                        avg_inv += torch.norm(data_[row][b][c] - y0_inv[b][c])
+                    avg     /= x_0.shape[1]
+                    avg_inv /= x_0.shape[1]
+                    
+                    for b, c in itertools.product(range(x_0.shape[0]), range(x_0.shape[1])):
+                        ratio     = torch.nan_to_num(torch.norm(data_[row][b][c] - y0    [b][c])   /   avg,     0)
+                        ratio_inv = torch.nan_to_num(torch.norm(data_[row][b][c] - y0_inv[b][c])   /   avg_inv, 0)
+                        
+                        eps_row, eps_row_inv = get_guide_epsilon_substep(x_0, x_, y0, y0_inv, s_, row, rk_type, b, c)
+                        eps_[row][b][c] = eps_[row][b][c]      +     ratio * lgw_mask[b][c] * (eps_row - eps_[row][b][c])    +    ratio_inv * lgw_mask_inv[b][c] * (eps_row_inv - eps_[row][b][c])
+                        
+                temporal_smoothing = float(get_extra_options_kv("temporal_smoothing", "0.0", extra_options))
+                if temporal_smoothing > 0:
+                    eps_[row] = apply_temporal_smoothing(eps_[row], temporal_smoothing)
+                
+
+
+
+        elif (UNSAMPLE or guide_mode in {"resample", "unsample"}) and (lgw > 0 or lgw_inv > 0):
+                
+            cvf = rk.get_epsilon(x_0, x_[row+1], y0, sigma, s_[row], sigma_down, unsample_resample_scale, extra_options)
+            if UNSAMPLE and sigma > sigma_next and latent_guide_inv is not None:
+                cvf_inv = rk.get_epsilon(x_0, x_[row+1], y0_inv, sigma, s_[row], sigma_down, unsample_resample_scale, extra_options)      
+            else:
+                cvf_inv = torch.zeros_like(cvf)
+
+            tol_value = float(get_extra_options_kv("tol", "-1.0", extra_options))
+            if tol_value >= 0:
+                for b, c in itertools.product(range(x_0.shape[0]), range(x_0.shape[1])):
+                    current_diff     = torch.norm(data_[row][b][c] - y0    [b][c]) 
+                    current_diff_inv = torch.norm(data_[row][b][c] - y0_inv[b][c]) 
+                    
+                    lgw_scaled     = torch.nan_to_num(1-(tol_value/current_diff),     0)
+                    lgw_scaled_inv = torch.nan_to_num(1-(tol_value/current_diff_inv), 0)
+                    
+                    lgw_tmp     = min(lgw    , lgw_scaled)
+                    lgw_tmp_inv = min(lgw_inv, lgw_scaled_inv)
+
+                    lgw_mask_clamp     = torch.clamp(lgw_mask,     max=lgw_tmp)
+                    lgw_mask_clamp_inv = torch.clamp(lgw_mask_inv, max=lgw_tmp_inv)
+
+                    eps_[row][b][c] = eps_[row][b][c] + lgw_mask_clamp[b][c] * (cvf[b][c] - eps_[row][b][c]) + lgw_mask_clamp_inv[b][c] * (cvf_inv[b][c] - eps_[row][b][c])
+                    
+            elif extra_options_flag("disable_lgw_scaling", extra_options):
+                eps_[row] = eps_[row] + lgw_mask * (cvf - eps_[row]) + lgw_mask_inv * (cvf_inv - eps_[row])
+                
+            else:
+                avg, avg_inv = 0, 0
+                for b, c in itertools.product(range(x_0.shape[0]), range(x_0.shape[1])):
+                    avg     += torch.norm(lgw_mask    [b][c] * data_[row][b][c]   -   lgw_mask    [b][c] * y0    [b][c])
+                    avg_inv += torch.norm(lgw_mask_inv[b][c] * data_[row][b][c]   -   lgw_mask_inv[b][c] * y0_inv[b][c])
+                avg     /= x_0.shape[1]
+                avg_inv /= x_0.shape[1]
+                
+                for b, c in itertools.product(range(x_0.shape[0]), range(x_0.shape[1])):
+                    ratio     = torch.nan_to_num(torch.norm(lgw_mask    [b][c] * data_[row][b][c] - lgw_mask    [b][c] * y0    [b][c])   /   avg,     0)
+                    ratio_inv = torch.nan_to_num(torch.norm(lgw_mask_inv[b][c] * data_[row][b][c] - lgw_mask_inv[b][c] * y0_inv[b][c])   /   avg_inv, 0)
+                            
+                    eps_[row][b][c] = eps_[row][b][c]      +     ratio * lgw_mask[b][c] * (cvf[b][c] - eps_[row][b][c])    +    ratio_inv * lgw_mask_inv[b][c] * (cvf_inv[b][c] - eps_[row][b][c])
+                    
+        if extra_options_flag("substep_eps_ch_mean_std", extra_options):
+            eps_[row] = normalize_latent(eps_[row], eps_orig[row])
+        if extra_options_flag("substep_eps_ch_mean", extra_options):
+            eps_[row] = normalize_latent(eps_[row], eps_orig[row], std=False)
+        if extra_options_flag("substep_eps_ch_std", extra_options):
+            eps_[row] = normalize_latent(eps_[row], eps_orig[row], mean=False)
+        if extra_options_flag("substep_eps_mean_std", extra_options):
+            eps_[row] = normalize_latent(eps_[row], eps_orig[row], channelwise=False)
+        if extra_options_flag("substep_eps_mean", extra_options):
+            eps_[row] = normalize_latent(eps_[row], eps_orig[row], std=False, channelwise=False)
+        if extra_options_flag("substep_eps_std", extra_options):
+            eps_[row] = normalize_latent(eps_[row], eps_orig[row], mean=False, channelwise=False)
+        return eps_, x_
+
+
+
+
 
 
 
@@ -101,12 +420,10 @@ def get_guide_epsilon(x_0, x_, y0, sigma, rk_type, b=None, c=None):
 
     if RK_Method.is_exponential(rk_type):
         eps     = y0    [index] - x_0[index]
-        #eps_inv = y0_inv[index] - x_0[index]
     else:
         eps     = (x_[index] - y0    [index]) / (sigma * s_in)
-        #eps_inv = (x_[index] - y0_inv[index]) / (sigma * s_in)
     
-    return eps#, eps_inv
+    return eps
 
 
 
@@ -121,17 +438,16 @@ def process_guides_substep(x_0, x_, eps_, data_, row, y0, y0_inv, lgw, lgw_inv, 
             extra_options += "\nsubstep_eps_ch_mean_std\n"
             
     s_in = x_0.new_ones([x_0.shape[0]])
-    y0_orig, y0_inv_orig = y0.clone(), y0_inv.clone()
     eps_orig = eps_.clone()
     
     if extra_options_flag("dynamic_guides_mean_std", extra_options):
-        y_shift, y_inv_shift = normalize_latent([y0_orig, y0_inv_orig], [data_, data_])
+        y_shift, y_inv_shift = normalize_latent([y0, y0_inv], [data_, data_])
         y0 = y_shift
         if extra_options_flag("dynamic_guides_inv", extra_options):
             y0_inv = y_inv_shift
 
     if extra_options_flag("dynamic_guides_mean", extra_options):
-        y_shift, y_inv_shift = normalize_latent([y0_orig, y0_inv_orig], [data_, data_], std=False)
+        y_shift, y_inv_shift = normalize_latent([y0, y0_inv], [data_, data_], std=False)
         y0 = y_shift
         if extra_options_flag("dynamic_guides_inv", extra_options):
             y0_inv = y_inv_shift
@@ -172,218 +488,25 @@ def process_guides_substep(x_0, x_, eps_, data_, row, y0, y0_inv, lgw, lgw_inv, 
                     
                     eps_row, eps_row_inv = get_guide_epsilon_substep(x_0, x_, y0, y0_inv, s_, row, rk_type, b, c)
                     eps_[row][b][c] = eps_[row][b][c] + lgw_mask_clamp[b][c] * (eps_row - eps_[row][b][c]) + lgw_mask_clamp_inv[b][c] * (eps_row_inv - eps_[row][b][c])
-                    
-                    
-                    
+
+
+            elif guide_mode == "epsilon_projection":
+                eps_row, eps_row_inv = get_guide_epsilon_substep(x_0, x_, y0, y0_inv, s_, row, rk_type)
+                
+                eps_row_lerp = eps_[row]   +   lgw_mask * (eps_row-eps_[row])   +   lgw_mask_inv * (eps_row_inv-eps_[row])
+                
+                eps_collinear_eps_lerp = get_collinear(eps_[row], eps_row_lerp)  
+                eps_lerp_ortho_eps     = get_orthogonal(eps_row_lerp, eps_[row])  
+                
+                eps_[row] = eps_collinear_eps_lerp + eps_lerp_ortho_eps
+
+
             elif extra_options_flag("disable_lgw_scaling", extra_options):
                 eps_row, eps_row_inv = get_guide_epsilon_substep(x_0, x_, y0, y0_inv, s_, row, rk_type)
                 eps_[row] = eps_[row]      +     lgw_mask * (eps_row - eps_[row])    +    lgw_mask_inv * (eps_row_inv - eps_[row])
                 
 
-
-            elif guide_mode == "epsilon_projection" or extra_options_flag("epsilon_proj_test_split", extra_options):
-                eps_row, eps_row_inv = get_guide_epsilon_substep(x_0, x_, y0, y0_inv, s_, row, rk_type)
-                
-                eps_row_collin     = get_collinear(eps_[row], eps_row) 
-                eps_row_inv_collin = get_collinear(eps_[row], eps_row_inv) 
-                                
-                eps_row_collin_ortho     = get_orthogonal(eps_[row], eps_row_collin)
-                eps_row_collin_ortho_inv = get_orthogonal(eps_[row], eps_row_inv_collin)
-                
-                eps_row_ortho     = get_orthogonal(eps_[row], eps_row)
-                eps_row_ortho_inv = get_orthogonal(eps_[row], eps_row_inv)
-                
-                rev_eps_row_collin     = get_collinear(eps_row, eps_[row])
-                rev_eps_row_ortho     = get_orthogonal(eps_row, eps_[row])
-                
-                
-                lgw_eps_row_collin     = get_collinear(eps_[row] + lgw_mask * (eps_row-eps_[row]), eps_[row])
-                if extra_options_flag("epsilon_proj_ortho_inv", extra_options):
-                    lgw_eps_row_ortho     = get_orthogonal(eps_[row] + lgw_mask * (eps_row_inv-eps_[row]), eps_[row])         ####
-                else:
-                    lgw_eps_row_ortho     = get_orthogonal(eps_[row] + lgw_mask * (eps_row-eps_[row]) + lgw_mask_inv * (eps_row_inv-eps_[row]), eps_[row])         ####
-                    
-                if extra_options_flag("epsilon_proj_collin_inv", extra_options):
-                    fwd_lgw_eps_row_collin     = get_collinear(eps_[row], eps_[row] + lgw_mask * (eps_row_inv-eps_[row])) 
-                else:
-                    fwd_lgw_eps_row_collin     = get_collinear(eps_[row], eps_[row] + lgw_mask * (eps_row-eps_[row]) + lgw_mask_inv * (eps_row_inv-eps_[row]))     ####
-                fwd_lgw_eps_row_ortho     = get_orthogonal(eps_[row], eps_[row] + lgw_mask * (eps_row-eps_[row]))
-                
-                
-                
-                
-                diff  = x_[row+1] - s_[row] * eps_[row]
-                diff2 = x_[row+1] - s_[row] * eps_row_collin
-                
-                if extra_options_flag("eps_proj_type1", extra_options):
-                    eps_[row] = eps_[row]    +    lgw_mask * (eps_row_collin - eps_row_ortho)   +    lgw_mask_inv * (eps_row_inv_collin - eps_row_ortho_inv)
-                elif extra_options_flag("eps_proj_type2", extra_options):
-                    eps_[row] = eps_[row]    +    lgw_mask * (eps_row_collin - eps_row_collin_ortho)   +    lgw_mask_inv * (eps_row_inv_collin - eps_row_collin_ortho_inv)
-                elif extra_options_flag("eps_proj_energy_type2", extra_options): # CLEAN 04427_ graffiti was bad 04430
-                    eps_row_orig_energy = torch.sum(eps_[row]**2, dim=(-2, -1), keepdim=True)
-                    collin_ortho_diff_energy = torch.sum((eps_row_collin - eps_row_collin_ortho)**2, dim=(-2, -1), keepdim=True)
-                    eps_[row] = eps_[row]    +    lgw_mask * (eps_row_collin - eps_row_collin_ortho) * (eps_row_orig_energy/collin_ortho_diff_energy)  +    lgw_mask_inv * (eps_row_inv_collin - eps_row_collin_ortho_inv) * (eps_row_orig_energy/collin_ortho_diff_energy)
-
-                elif extra_options_flag("eps_proj_postenergy_type2", extra_options): # CLEAN 04428_ graffiti was terrible 04431
-                    collin_ortho_diff_energy = torch.sum((eps_row_collin - eps_row_collin_ortho)**2, dim=(-2, -1), keepdim=True)
-                    eps_[row] = eps_[row]    +    lgw_mask * (eps_row_collin - eps_row_collin_ortho)  +    lgw_mask_inv * (eps_row_inv_collin - eps_row_collin_ortho_inv)
-                    eps_row_orig_energy = torch.sum(eps_[row]**2, dim=(-2, -1), keepdim=True)
-                    eps_[row] = eps_[row] * (eps_row_orig_energy/collin_ortho_diff_energy)
-                    
-                elif extra_options_flag("eps_proj_type3", extra_options):
-                    eps_[row] = eps_[row]    +    lgw_mask * (eps_row - eps_row_ortho)   +    lgw_mask_inv * (eps_row_inv - eps_row_ortho_inv)
-                elif extra_options_flag("eps_proj_type_weird1", extra_options):
-                    eps_[row] = (1-lgw_mask) * eps_[row] + lgw_mask * (eps_row_collin - eps_row_ortho)  # +    lgw_mask_inv * (eps_row_inv - eps_row_ortho_inv)
-                elif extra_options_flag("eps_proj_type_weird2", extra_options):
-                    eps_[row] = (1-lgw_mask) * eps_[row] + lgw_mask * (eps_row_collin) # - eps_row_ortho)  # +    lgw_mask_inv * (eps_row_inv - eps_row_ortho_inv)
-
-                elif extra_options_flag("eps_proj_type_energy_sum1", extra_options):
-                    eps_[row] = (1-lgw_mask) * eps_[row] + lgw_mask * (eps_row_collin) * torch.sum(eps_[row]**2, dim=(-2, -1), keepdim=True) / torch.sum(eps_row_collin**2, dim=(-2, -1), keepdim=True)
-
-                elif extra_options_flag("eps_proj_type_energy_sum2", extra_options):
-                    eps_[row] = (1-lgw_mask) * eps_[row] + lgw_mask * (eps_row_collin) * torch.sum(diff**2, dim=(-2, -1), keepdim=True) / torch.sum(diff2**2, dim=(-2, -1), keepdim=True)
-
-                elif extra_options_flag("eps_proj_type_add_collin", extra_options): # EXACTLY THE SAME as energy sum
-                    eps_[row] = eps_[row] + lgw_mask * eps_row_collin # * torch.mean(eps_[row]**2, dim=(-2, -1), keepdim=True) / torch.mean(eps_row_collin**2, dim=(-2, -1), keepdim=True)
-                elif extra_options_flag("eps_proj_type_weighted1", extra_options): # CLEAN 04429_, 04432
-                    eps_[row] = (1-lgw_mask) * eps_[row]    +    lgw_mask * (eps_row - eps_row_collin_ortho)   +    lgw_mask_inv * (eps_row_inv - eps_row_collin_ortho_inv)
-                elif extra_options_flag("eps_proj_type_weighted2", extra_options): # 04433 looks good, graffiti 
-                    eps_[row] = (1-lgw_mask) * eps_[row]    +    lgw_mask * (eps_row - eps_row_collin_ortho + eps_row_collin)   +    lgw_mask_inv * (eps_row_inv - eps_row_collin_ortho_inv + eps_row_collin)
-                elif extra_options_flag("eps_proj_type_nonweighted2", extra_options): # CLEAN! 04438 sky
-                    eps_[row] = eps_[row]    +    lgw_mask * (eps_row - eps_row_collin_ortho + eps_row_collin)   +    lgw_mask_inv * (eps_row_inv - eps_row_collin_ortho_inv + eps_row_collin)
-                    
-                elif extra_options_flag("eps_proj_type_weighted3", extra_options): # very soft but nice-ish 04439
-                    eps_[row] = (1-lgw_mask) * (eps_[row] + eps_row_collin_ortho - eps_row_collin)    +    lgw_mask * (eps_row - eps_row_collin_ortho + eps_row_collin)   +    lgw_mask_inv * (eps_row_inv - eps_row_collin_ortho_inv + eps_row_collin)
-                    
-                elif extra_options_flag("eps_proj_type_weighted4", extra_options): # very noisy
-                    eps_[row] = (1-lgw_mask) * eps_[row]    +    lgw_mask * (rev_eps_row_collin + eps_row_ortho)   +    lgw_mask_inv * (rev_eps_row_collin + eps_row_ortho_inv)
-                    
-                elif extra_options_flag("eps_proj_type_nonweighted4", extra_options): # very noisy 04440, 04441
-                    eps_[row] = eps_[row]    +    lgw_mask * (rev_eps_row_collin - eps_row_ortho)   +    lgw_mask_inv * (rev_eps_row_collin - eps_row_ortho_inv)
-                    
-                elif extra_options_flag("eps_proj_type_weird_ortho1", extra_options): # bad... 04435
-                    eps_[row] = eps_row_collin_ortho    +    lgw_mask * (eps_row - eps_row_collin_ortho)   +    lgw_mask_inv * (eps_row_inv - eps_row_collin_ortho_inv)
-                elif extra_options_flag("eps_proj_type_weird_ortho2", extra_options): # better than ortho1... 04436... nasty sky next image
-                    eps_[row] = eps_row_collin_ortho    +    lgw_mask * (eps_row - eps_row_collin_ortho + eps_row_collin)   +    lgw_mask_inv * (eps_row_inv - eps_row_collin_ortho_inv + eps_row_collin)
-                elif extra_options_flag("eps_proj_type_weird_ortho3", extra_options): # better than ortho1... 04436
-                    eps_[row] = eps_[row] + eps_row_collin_ortho    +    lgw_mask * (eps_row - eps_row_collin_ortho + eps_row_collin)   +    lgw_mask_inv * (eps_row_inv - eps_row_collin_ortho_inv + eps_row_collin)
-                    
-                elif extra_options_flag("eps_proj_type_nonweighted5", extra_options): # 04442 good
-                    eps_[row] = eps_[row]    +    lgw_mask * (eps_row - eps_row_ortho - eps_[row])   +    lgw_mask_inv * (eps_row_inv - eps_row_ortho_inv - eps_[row])
-                elif extra_options_flag("eps_proj_type_nonweighted6", extra_options): # 04443 good
-                    eps_[row] = eps_[row]    +    lgw_mask * (eps_row - eps_row_ortho + eps_row_collin - eps_[row])   +    lgw_mask_inv * (eps_row_inv - eps_row_ortho_inv + eps_row_collin - eps_[row])
-                    
-                elif extra_options_flag("eps_proj_type_nonweighted6a", extra_options): # 04455 good
-                    eps_[row] = eps_[row]    +    lgw_mask * (eps_row - eps_row_ortho + rev_eps_row_collin - eps_[row])   +    lgw_mask_inv * (eps_row_inv - eps_row_ortho_inv + rev_eps_row_collin - eps_[row])
-                    
-                elif extra_options_flag("eps_proj_type_nonweighted7", extra_options): # 04444 noisy
-                    eps_[row] = eps_[row]- lgw_mask*rev_eps_row_ortho    +    lgw_mask * (eps_row - eps_row_collin_ortho)   +    lgw_mask_inv * (eps_row_inv - eps_row_collin_ortho_inv)
-                elif extra_options_flag("eps_proj_type_nonweighted8", extra_options): # 04445 ignored guide, and noisy
-                    eps_[row] = eps_[row]    +    lgw_mask * (eps_row - rev_eps_row_ortho)   +    lgw_mask_inv * (eps_row_inv - rev_eps_row_ortho)
-                elif extra_options_flag("eps_proj_type_nonweighted9", extra_options): # very weak guide following, noisy
-                    eps_[row] = eps_[row]- lgw_mask*eps_row_ortho    +    lgw_mask * (eps_row - rev_eps_row_ortho)   +    lgw_mask_inv * (eps_row_inv - rev_eps_row_ortho)
-                    
-                elif extra_options_flag("eps_proj_type_nonweighted10", extra_options): # 04447 horrible, didn't follow guide
-                    eps_[row] = eps_[row]    +    lgw_mask * (rev_eps_row_collin) 
-                    
-                elif extra_options_flag("eps_proj_type_nonweighted11", extra_options): # 04448 cfg burn look, didn't follow guide
-                    eps_[row] = eps_[row]    +    lgw_mask * (-rev_eps_row_collin) 
-                    
-                elif extra_options_flag("eps_proj_type_nonweighted12", extra_options): # 04449 very saturated, maybe soft? looks good though
-                    eps_[row] = eps_[row]    +    lgw_mask * (eps_row+rev_eps_row_collin) 
-                    
-                elif extra_options_flag("eps_proj_type_nonweighted13", extra_options): # 04450 very good, high detail 04456 clean sky
-                    eps_[row] = eps_[row]    +    lgw_mask * (eps_row-rev_eps_row_collin) 
-                    
-                    
-
-                elif extra_options_flag("eps_proj_type_nonweighted14", extra_options): # 04451 good, similar to 13 above
-                    eps_[row] = eps_[row]    +    lgw_mask * (rev_eps_row_ortho) 
-                    
-                elif extra_options_flag("eps_proj_type_nonweighted15", extra_options): # 04452 very blown out, guide followed sorta in structure
-                    eps_[row] = eps_[row]    +    lgw_mask * (-rev_eps_row_ortho) 
-                    
-                elif extra_options_flag("eps_proj_type_nonweighted16", extra_options): # 04453 very clean
-                    eps_[row] = eps_[row]    +    lgw_mask * (eps_row+rev_eps_row_ortho) 
-                    
-                elif extra_options_flag("eps_proj_type_nonweighted17", extra_options): # 04454 ignored guide
-                    eps_[row] = eps_[row]    +    lgw_mask * (eps_row-rev_eps_row_ortho) 
-                    
-                    
-                elif extra_options_flag("eps_proj_type_nonweighted_brute0", extra_options): # 04457 sky faded blurry but worked. 04462 graffiti looked pretty good
-                    eps_[row] = eps_[row]    +    lgw_mask * eps_row
-                
-                elif extra_options_flag("eps_proj_type_wtf_a", extra_options): # 04458 very noisy
-                    eps_[row] = eps_row_ortho    +    lgw_mask * rev_eps_row_ortho
-                elif extra_options_flag("eps_proj_type_wtf_b", extra_options): # 04459 noisy, copied guide
-                    eps_[row] = (1-lgw_mask) * eps_row_ortho    +    lgw_mask * rev_eps_row_ortho
-                    
-                elif extra_options_flag("eps_proj_type_wtf_c", extra_options): # 04460 blurry, followed guide hardcore
-                    eps_[row] = eps_row_collin    +    lgw_mask * rev_eps_row_ortho
-                elif extra_options_flag("eps_proj_type_wtf_d", extra_options): # 
-                    eps_[row] = (1-lgw_mask) * eps_row_collin    +    lgw_mask * rev_eps_row_ortho
-                    
-                elif extra_options_flag("eps_proj_type_wtf_e", extra_options): # very nice? 04463?
-                    eps_[row] = (1-lgw_mask) * eps_[row]    +    lgw_mask * (eps_row_collin + rev_eps_row_ortho)
-                    
-                elif extra_options_flag("eps_proj_type_lgw_a", extra_options): # 04464 looks good
-                    eps_[row] = eps_[row]    +    lgw_mask * (lgw_eps_row_ortho)
-                elif extra_options_flag("eps_proj_type_lgw_a2", extra_options): # 04469 quite good
-                    eps_[row] = eps_[row]    +    lgw_eps_row_ortho                    
-                elif extra_options_flag("eps_proj_type_lgw_b", extra_options): # noisy, very strong guide following
-                    eps_[row] = lgw_eps_row_ortho
-                    
-                elif extra_options_flag("eps_proj_type_lgw_c", extra_options): # noisy, ignored guide
-                    eps_[row] = lgw_eps_row_collin
-                    
-                elif extra_options_flag("eps_proj_type_lgw_d", extra_options): # amazing
-                    eps_[row] = fwd_lgw_eps_row_collin + lgw_eps_row_ortho
-                    
-                elif extra_options_flag("eps_proj_type_lgw_e", extra_options): # very noisy, very strong guide
-                    eps_[row] = fwd_lgw_eps_row_ortho + lgw_eps_row_ortho
-                    
-                elif extra_options_flag("eps_proj_type_lgw_f", extra_options): # ignored guide, looked fine
-                    eps_[row] = fwd_lgw_eps_row_collin + fwd_lgw_eps_row_ortho
-                    
-                elif extra_options_flag("eps_proj_type_lgw_g", extra_options): #
-                    eps_[row] = lgw_eps_row_collin + fwd_lgw_eps_row_ortho
-                    
-                elif extra_options_flag("eps_proj_type_lgw_h", extra_options): #
-                    eps_[row] = lgw_eps_row_collin + lgw_eps_row_ortho
-                
-                elif extra_options_flag("eps_proj_original", extra_options): # CLEAN 04422_
-                    eps_[row] = eps_[row]    +    lgw_mask * (eps_row - eps_row_collin_ortho)   +    lgw_mask_inv * (eps_row_inv - eps_row_collin_ortho_inv)
-                else: # elif extra_options_flag("eps_proj_type_lgw_d", extra_options): # amazing
-                    eps_[row] = fwd_lgw_eps_row_collin + lgw_eps_row_ortho
-                    
-                    
-
-            elif extra_options_flag("epsilon_proj_test_scalesplit", extra_options) and (lgw > 0 or lgw_inv > 0):
-                avg, avg_inv = 0, 0
-                for b, c in itertools.product(range(x_0.shape[0]), range(x_0.shape[1])):
-                    avg     += torch.norm(data_[row][b][c] - y0    [b][c])
-                    avg_inv += torch.norm(data_[row][b][c] - y0_inv[b][c])
-                avg     /= x_0.shape[1]
-                avg_inv /= x_0.shape[1]
-                
-                for b, c in itertools.product(range(x_0.shape[0]), range(x_0.shape[1])):
-                    ratio     = torch.nan_to_num(torch.norm(data_[row][b][c] - y0    [b][c])   /   avg,     0)
-                    ratio_inv = torch.nan_to_num(torch.norm(data_[row][b][c] - y0_inv[b][c])   /   avg_inv, 0)
-                    
-                    eps_row, eps_row_inv = get_guide_epsilon_substep(x_0, x_, y0, y0_inv, s_, row, rk_type, b, c)
-                    
-                    eps_row     = get_collinear(eps_[row][b][c], eps_row) 
-                    eps_row_inv = get_collinear(eps_[row][b][c], eps_row_inv) 
-                                    
-                    eps_row_ortho     = get_orthogonal(eps_[row][b][c], eps_row)
-                    eps_row_ortho_inv = get_orthogonal(eps_[row][b][c], eps_row_inv)
-
-                    eps_next_row = eps_[row][b][c]    +    ratio * lgw_mask[b][c] * (eps_row - eps_row_ortho)   +    ratio_inv * lgw_mask_inv[b][c] * (eps_row_inv - eps_row_ortho_inv)
-                    eps_[row][b][c] = torch.norm(eps_[row][b][c]) / torch.norm(eps_next_row)    *    eps_next_row
-
-
-
-            elif (lgw > 0 or lgw_inv > 0):
+            elif (lgw > 0 or lgw_inv > 0): # default old channelwise epsilon
                 avg, avg_inv = 0, 0
                 for b, c in itertools.product(range(x_0.shape[0]), range(x_0.shape[1])):
                     avg     += torch.norm(data_[row][b][c] - y0    [b][c])
@@ -810,42 +933,6 @@ def noise_cossim_guide_eps_tiled(x_0, x_list, y0, noise_list, cossim_mode="forwa
 
 
 
-def get_orthogonal_noise_from_list(*refs, iterations=100):
-    
-    #noise = (noise - noise.mean()) / noise.std()
-    #noise = noise / noise.std()
-    noise, *refs = refs
-    
-    for iter in range(iterations):
-        refs_flat = [ref.view(ref.size(0), -1).clone() for ref in refs]
-        noise_flat = noise.clone().view(noise.size(0), -1)
-        
-        #noise_flat -= noise_flat.mean(dim=-1, keepdim=True) #for pearson correlation
-        #refs_flat = [ref_flat - ref_flat.mean(dim=-1, keepdim=True) for ref_flat in refs_flat]
-        
-        for i, ref_flat in enumerate(refs_flat):
-            for j in range(i):  
-                ref_flat -= torch.sum(ref_flat * refs_flat[j], dim=-1, keepdim=True) * refs_flat[j]
-            ref_flat /= ref_flat.norm(dim=-1, keepdim=True)
-            noise_flat -= torch.sum(noise_flat * ref_flat, dim=-1, keepdim=True) * ref_flat
-        
-        noise_perp = noise_flat.view_as(noise)
-        
-        #noise_perp = (noise_perp - noise_perp.mean()) / noise_perp.std()
-        #noise_perp = noise_perp / noise_perp.std()
-        noise = noise_perp
-        
-        cossim_score = 0
-        for i, ref in enumerate(refs):
-            cossim_score_tmp = get_cosine_similarity(noise, refs[i])
-            cossim_score = max(cossim_score, cossim_score_tmp)
-        
-        if cossim_score < 1e-7:
-            break
-        
-    return noise
-
-
 
 
 def get_collinear(x, y):
@@ -942,7 +1029,7 @@ class NoiseStepHandlerOSDE:
             "x_eps_guide_orthogonal":      [self.noise, self.x, self.eps, self.guide],
             "x_eps_guide_bkg_orthogonal":  [self.noise, self.x, self.eps, self.guide_bkg],
             
-            "noise_orthogonal":                       [self.noise, self.x_init],
+            "noise_orthogonal":            [self.noise, self.x_init],
             
             "guide_orthogonal":            [self.noise, self.guide],
             "guide_bkg_orthogonal":        [self.noise, self.guide_bkg],
@@ -950,24 +1037,6 @@ class NoiseStepHandlerOSDE:
 
     def check_cossim_source(self, source):
         return source in self.noise_cossim_map
-
-    def handle_step(self, noise, alpha_ratio, sigma_up, 
-                    x, eps, data, x_init, guide, guide_bkg, 
-                    NOISE_COSSIM_SOURCE="eps_orthogonal"):
-        
-        if NOISE_COSSIM_SOURCE not in self.noise_cossim_map:
-            raise ValueError(f"Invalid NOISE_COSSIM_SOURCE: {NOISE_COSSIM_SOURCE}")
-        
-        self.noise_cossim_map[NOISE_COSSIM_SOURCE][0] = noise
-
-        params = self.noise_cossim_map[NOISE_COSSIM_SOURCE]
-        
-        #for c in range (noise.shape[-3]): #iterate over channels
-        noise = get_orthogonal_noise_from_list(*params)
-        
-        self.x = alpha_ratio * self.x + sigma_up * noise
-
-        return self.x
 
     def get_ortho_noise(self, noise, prev_noises=None, max_iter=100, max_score=1e-7, NOISE_COSSIM_SOURCE="eps_orthogonal"):
         
@@ -979,16 +1048,11 @@ class NoiseStepHandlerOSDE:
         params = self.noise_cossim_map[NOISE_COSSIM_SOURCE]
         
         noise = get_orthogonal_noise_from_channelwise(*params, max_iter=max_iter, max_score=max_score)
-        #noise = get_orthogonal_noise_from_list(*params, *prev_noises)
         
         return noise
 
 
 
-
-
-
-    
 def handle_tiled_etc_noise_steps(x_0, x, x_prenoise, x_init, eps, denoised, y0, y0_inv, step, 
                                  rk_type, rk, sigma_up, sigma, sigma_next, alpha_ratio, s_noise, noise_mode, SDE_NOISE_EXTERNAL, sde_noise_t,
                                  NOISE_COSSIM_SOURCE, NOISE_COSSIM_MODE, noise_cossim_tile_size, noise_cossim_iterations,

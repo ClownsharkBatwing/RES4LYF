@@ -770,7 +770,8 @@ def get_rk_methods(rk_type, h, c1=0.0, c2=0.5, c3=1.0, h_prev=None, h_prev2=None
             rk_type = rk_type[:-2] + "3s"
     
     if rk_type in rk_coeff:
-        a, b, ci = copy.deepcopy(rk_coeff[rk_type])
+        #a, b, ci = copy.deepcopy(rk_coeff[rk_type])
+        a, b, ci = rk_coeff[rk_type]
         a = [row + [0] * (len(ci) - len(row)) for row in a]
 
     match rk_type:
@@ -899,7 +900,7 @@ def get_rk_methods(rk_type, h, c1=0.0, c2=0.5, c3=1.0, h_prev=None, h_prev2=None
             
             
         case "res_3s_cox_matthews": # Cox & Matthews; known as ETD3RK
-            c2 = 1/2
+            c2 = 1/2 # must be 1/2
             ci = [0,c2,1]
             φ = Phi(h, ci)
             
@@ -1438,11 +1439,7 @@ def get_rk_methods(rk_type, h, c1=0.0, c2=0.5, c3=1.0, h_prev=None, h_prev2=None
             
             
             
-            
-            
-            
-            
-            
+
             
         case "irk_exp_diag_2s":
             lam = (1 - torch.exp(-c1 * h)) / h

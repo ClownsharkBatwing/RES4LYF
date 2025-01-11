@@ -60,11 +60,11 @@ class ReFlux(Flux):
         self.num_heads   = params.num_heads    # 24
         self.pe_embedder = EmbedND(dim=pe_dim, theta=params.theta, axes_dim=params.axes_dim)
         
-        self.img_in = operations.Linear(     self.in_channels, self.hidden_size, bias=True, dtype=dtype, device=device)
-        self.txt_in = operations.Linear(params.context_in_dim, self.hidden_size,            dtype=dtype, device=device)
+        self.img_in = operations.Linear(     self.in_channels, self.hidden_size, bias=True, dtype=dtype, device=device)   # in_features=  64, out_features=3072
+        self.txt_in = operations.Linear(params.context_in_dim, self.hidden_size,            dtype=dtype, device=device)   # in_features=4096, out_features=3072, bias=True
 
         self.time_in      = MLPEmbedder(           in_dim=256, hidden_dim=self.hidden_size, dtype=dtype, device=device, operations=operations)
-        self.vector_in    = MLPEmbedder(params.vec_in_dim,                self.hidden_size, dtype=dtype, device=device, operations=operations)
+        self.vector_in    = MLPEmbedder(params.vec_in_dim,                self.hidden_size, dtype=dtype, device=device, operations=operations) # in_features=768, out_features=3072 (first layer) second layer 3072,3072
         self.guidance_in = (MLPEmbedder(           in_dim=256, hidden_dim=self.hidden_size, dtype=dtype, device=device, operations=operations) if params.guidance_embed else nn.Identity())
 
         self.double_blocks = nn.ModuleList([DoubleStreamBlock(self.hidden_size, self.num_heads, mlp_ratio=params.mlp_ratio, qkv_bias=params.qkv_bias, dtype=dtype, device=device, operations=operations, idx=_) for _ in range(params.depth)])
@@ -81,19 +81,19 @@ class ReFlux(Flux):
             raise ValueError("Input img and txt tensors must have 3 dimensions.")
 
         # running on sequences img
-        img = self.img_in(img)    # 1,9216,64  == 768x192
-        vec = self.time_in(timestep_embedding(timesteps, 256).to(img.dtype))
+        img = self.img_in(img)    # 1,9216,64  == 768x192       # 1,9216,64   ==   1,16,128,256 + 1,16,64,64    # 1,8192,64 with uncond/cond   #:,:,64 -> :,:,3072
+        vec = self.time_in(timestep_embedding(timesteps, 256).to(img.dtype)) # 1 -> 1,3072
         if self.params.guidance_embed:
             if guidance is None:
                 print("Guidance strength is none, not using distilled guidance.")
             else:
                 vec = vec + self.guidance_in(timestep_embedding(guidance, 256).to(img.dtype))
 
-        vec = vec + self.vector_in(y)
-        txt = self.txt_in(txt)
+        vec = vec + self.vector_in(y)  #y.shape=1,768  y==all 0s
+        txt = self.txt_in(txt)         #
 
-        ids = torch.cat((txt_ids, img_ids), dim=1)
-        pe = self.pe_embedder(ids)
+        ids = torch.cat((txt_ids, img_ids), dim=1) # img_ids.shape=1,8192,3    txt_ids.shape=1,512,3    #ids.shape=1,8704,3
+        pe = self.pe_embedder(ids)                 # pe.shape 1,1,8704,64,2,2
         
         weight = transformer_options['reg_cond_weight'] if 'reg_cond_weight' in transformer_options else 0.0
         floor  = transformer_options['reg_cond_floor']  if 'reg_cond_floor'  in transformer_options else 0.0
@@ -104,6 +104,7 @@ class ReFlux(Flux):
             mask_self = mask_orig.clone()
             mask_self[mask_obj[0].text_len:,   mask_obj[0].text_len:] = mask_self.max()
 
+        mask_resized_list = []
         mask = None
         mask_obj = transformer_options.get('patches', {}).get('regional_conditioning_mask', None)
         if mask_obj is not None and weight >= 0:
@@ -111,9 +112,13 @@ class ReFlux(Flux):
             text_len = mask_obj[0].text_len
             mask[text_len:,text_len:] = torch.clamp(mask[text_len:,text_len:], min=floor.to(mask.device))
 
-        for i, block in enumerate(self.double_blocks):
 
+
+        for i, block in enumerate(self.double_blocks):
+            #img, txt, mask_resized = block(img=img, txt=txt, vec=vec, pe=pe, timestep=timesteps, transformer_options=transformer_options, mask=mask, weight=weight) #, mask=mask)
             img, txt = block(img=img, txt=txt, vec=vec, pe=pe, timestep=timesteps, transformer_options=transformer_options, mask=mask, weight=weight) #, mask=mask)
+            #if mask is not None:
+            #    mask_resized_list.append(mask_resized)
 
             if control is not None: # Controlnet
                 control_i = control.get("input")
@@ -122,9 +127,10 @@ class ReFlux(Flux):
                     if add is not None:
                         img[:1] += add
 
+
+
         img = torch.cat((txt, img), 1)   #first 256 is txt embed
         for i, block in enumerate(self.single_blocks):
-
             img = block(img, vec=vec, pe=pe, timestep=timesteps, transformer_options=transformer_options, mask=mask, weight=weight)
 
             if control is not None: # Controlnet
@@ -134,9 +140,13 @@ class ReFlux(Flux):
                     if add is not None:
                         img[:1, txt.shape[1] :, ...] += add
                         
+                        
+                        
         img = img[:, txt.shape[1] :, ...]
-        img = self.final_layer(img, vec)  # (N, T, patch_size ** 2 * out_channels)
+        img = self.final_layer(img, vec)  # (N, T, patch_size ** 2 * out_channels)     1,8192,3072 -> 1,8192,64 
         return img
+    
+    
     
     def _get_img_ids(self, x, bs, h_len, w_len, h_start, h_end, w_start, w_end):
         img_ids = torch.zeros((h_len, w_len, 3), device=x.device, dtype=x.dtype)
@@ -144,6 +154,8 @@ class ReFlux(Flux):
         img_ids[..., 2] = img_ids[..., 2] + torch.linspace(w_start, w_end - 1, steps=w_len, device=x.device, dtype=x.dtype)[None, :]
         img_ids = repeat(img_ids, "h w c -> b (h w) c", b=bs)
         return img_ids
+
+
 
     def forward(self, x, timestep, context, y, guidance, control=None, transformer_options={}, **kwargs):
 
@@ -170,7 +182,7 @@ class ReFlux(Flux):
                 context_tmp = context[i][None,...].clone()
             elif UNCOND == False:
                 transformer_options['reg_cond_weight'] = transformer_options['regional_conditioning_weight']
-                transformer_options['reg_cond_floor'] = transformer_options['regional_conditioning_floor']
+                transformer_options['reg_cond_floor'] = transformer_options['regional_conditioning_floor'] #if "regional_conditioning_floor" in transformer_options else 0.0
                 regional_conditioning_positive = transformer_options.get('patches', {}).get('regional_conditioning_positive', None)
                 context_tmp = regional_conditioning_positive[0].concat_cond(context[i][None,...], transformer_options)
                 

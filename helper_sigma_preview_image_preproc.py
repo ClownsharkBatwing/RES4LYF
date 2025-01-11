@@ -99,7 +99,7 @@ class SigmasPreview(SaveImage):
         }
 
     FUNCTION = "sigmas_preview"
-    CATEGORY = 'res4lyf/sigmas'
+    CATEGORY = 'RES4LYF/sigmas'
     OUTPUT_NODE = True
 
     @staticmethod
@@ -260,7 +260,7 @@ class VAEEncodeAdvanced:
     RETURN_TYPES = ("LATENT", "LATENT", "MASK", "LATENT", "INT", "INT",)
     RETURN_NAMES = ("latent_1", "latent_2", "mask", "empty_latent", "width", "height",)
     FUNCTION = "main"
-    CATEGORY = "res4lyf/vae"
+    CATEGORY = "RES4LYF/vae"
 
     def main(self, width, height, resize_to_input="false", image_1=None, image_2=None, mask=None, invert_mask=False, method="stretch", interpolation="lanczos", condition="always", multiple_of=0, keep_proportion=False, mask_channel="red", latent=None, latent_type="16_channels", vae=None):
         #NOTE: VAE encode with comyfui is *non-deterministic* in that each success encode will return slightly different latent images! The difference is visible after decoding.
@@ -335,7 +335,7 @@ class SigmasSchedulePreview(SaveImage):
         }
 
     FUNCTION = "plot_schedule"
-    CATEGORY = "res4lyf/schedules"
+    CATEGORY = "RES4LYF/schedules"
     OUTPUT_NODE = True
 
 

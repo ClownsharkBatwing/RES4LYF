@@ -38,6 +38,8 @@ def initialize_or_scale(tensor, value, steps):
 
 
 def normalize_latent(target, source=None, mean=True, std=True, set_mean=None, set_std=None, channelwise=True):
+    target = target.clone()
+    source = source.clone() if source is not None else None
     def normalize_single_latent(single_target, single_source=None):
         y = torch.zeros_like(single_target)
         for b in range(y.shape[0]):

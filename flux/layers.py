@@ -9,7 +9,7 @@ from einops import rearrange
 from torch import Tensor
 from dataclasses import dataclass
 
-from .math import attention, rope
+from .math import attention, rope, apply_rope
 import comfy.ldm.common_dit
 
 class EmbedND(nn.Module):
@@ -28,6 +28,14 @@ class EmbedND(nn.Module):
 
         return emb.unsqueeze(1)
 
+def attention_weights(q, k):
+    # implementation of in-place softmax to reduce memory req
+    scores = torch.matmul(q, k.transpose(-2, -1))
+    scores.div_(math.sqrt(q.size(-1)))
+    torch.exp(scores, out=scores)
+    summed = torch.sum(scores, dim=-1, keepdim=True)
+    scores /= summed
+    return scores.nan_to_num_(0.0, 65504., -65504.)
 
 def timestep_embedding(t: Tensor, dim, max_period=10000, time_factor: float = 1000.0):
     """
@@ -64,7 +72,7 @@ class MLPEmbedder(nn.Module):
 class RMSNorm(torch.nn.Module):
     def __init__(self, dim: int, dtype=None, device=None, operations=None):
         super().__init__()
-        self.scale = nn.Parameter(torch.empty((dim), dtype=dtype, device=device))
+        self.scale = nn.Parameter(torch.empty((dim), dtype=dtype, device=device))    # self.scale.shape = 128
 
     def forward(self, x: Tensor):
         return comfy.ldm.common_dit.rms_norm(x, self.scale, 1e-6)
@@ -85,12 +93,12 @@ class QKNorm(torch.nn.Module):
 class SelfAttention(nn.Module):
     def __init__(self, dim: int, num_heads: int = 8, qkv_bias: bool = False, dtype=None, device=None, operations=None):
         super().__init__()
-        self.num_heads = num_heads
-        head_dim = dim // num_heads
+        self.num_heads = num_heads    # 24
+        head_dim = dim // num_heads   # 128 = 3072 / 24
 
         self.qkv = operations.Linear(dim, dim * 3, bias=qkv_bias, dtype=dtype, device=device)
         self.norm = QKNorm(head_dim, dtype=dtype, device=device, operations=operations)
-        self.proj = operations.Linear(dim, dim, dtype=dtype, device=device)
+        self.proj = operations.Linear(dim, dim, dtype=dtype, device=device)    # dim is usually 3072
 
 
 @dataclass
@@ -121,11 +129,11 @@ class DoubleStreamBlock(nn.Module):
         self.num_heads   = num_heads
         self.hidden_size = hidden_size
         
-        self.img_mod = Modulation(hidden_size, double=True, dtype=dtype, device=device, operations=operations)
-        self.txt_mod = Modulation(hidden_size, double=True, dtype=dtype, device=device, operations=operations)
+        self.img_mod = Modulation(hidden_size, double=True, dtype=dtype, device=device, operations=operations) # in_features=3072, out_features=18432 (3072*6)
+        self.txt_mod = Modulation(hidden_size, double=True, dtype=dtype, device=device, operations=operations) # in_features=3072, out_features=18432 (3072*6)
 
-        self.img_attn = SelfAttention(dim=hidden_size, num_heads=num_heads, qkv_bias=qkv_bias, dtype=dtype, device=device, operations=operations)
-        self.txt_attn = SelfAttention(dim=hidden_size, num_heads=num_heads, qkv_bias=qkv_bias, dtype=dtype, device=device, operations=operations)
+        self.img_attn = SelfAttention(dim=hidden_size, num_heads=num_heads, qkv_bias=qkv_bias, dtype=dtype, device=device, operations=operations) # .qkv: in_features=3072, out_features=9216   .proj: 3072,3072
+        self.txt_attn = SelfAttention(dim=hidden_size, num_heads=num_heads, qkv_bias=qkv_bias, dtype=dtype, device=device, operations=operations) # .qkv: in_features=3072, out_features=9216   .proj: 3072,3072
 
         self.img_norm1 = operations.LayerNorm(hidden_size, elementwise_affine=False, eps=1e-6, dtype=dtype, device=device)
         self.txt_norm1 = operations.LayerNorm(hidden_size, elementwise_affine=False, eps=1e-6, dtype=dtype, device=device)
@@ -137,12 +145,12 @@ class DoubleStreamBlock(nn.Module):
             operations.Linear(hidden_size, mlp_hidden_dim, bias=True, dtype=dtype, device=device),
             nn.GELU(approximate="tanh"),
             operations.Linear(mlp_hidden_dim, hidden_size, bias=True, dtype=dtype, device=device),
-        )
+        ) # 3072->12288, 12288->3072  (3072*4)
         self.txt_mlp = nn.Sequential(
             operations.Linear(hidden_size, mlp_hidden_dim, bias=True, dtype=dtype, device=device),
             nn.GELU(approximate="tanh"),
             operations.Linear(mlp_hidden_dim, hidden_size, bias=True, dtype=dtype, device=device),
-        )
+        ) # 3072->12288, 12288->3072  (3072*4)
     
     def img_attn_preproc(self, img, img_mod1):
         img_modulated = self.img_norm1(img)
@@ -156,13 +164,13 @@ class DoubleStreamBlock(nn.Module):
         txt_modulated = self.txt_norm1(txt)
         txt_modulated = (1 + txt_mod1.scale) * txt_modulated + txt_mod1.shift
         txt_qkv = self.txt_attn.qkv(txt_modulated)
-        txt_q, txt_k, txt_v = rearrange(txt_qkv, "B L (K H D) -> K B H L D", K=3, H=self.num_heads)
+        txt_q, txt_k, txt_v = rearrange(txt_qkv, "B L (K H D) -> K B H L D", K=3, H=self.num_heads)    # Batch SeqLen (9216==3*3072) -> 3*1 24 SeqLen 128
         txt_q, txt_k = self.txt_attn.norm(txt_q, txt_k, txt_v)
         return txt_q, txt_k, txt_v
     
     def forward(self, img: Tensor, txt: Tensor, vec: Tensor, pe: Tensor, timestep, transformer_options={}, mask=None, weight=1): # vec 1,3072
 
-        img_mod1, img_mod2 = self.img_mod(vec)
+        img_mod1, img_mod2 = self.img_mod(vec) # -> 3072, 3072
         txt_mod1, txt_mod2 = self.txt_mod(vec)
 
         img_q, img_k, img_v = self.img_attn_preproc(img, img_mod1)
@@ -177,9 +185,27 @@ class DoubleStreamBlock(nn.Module):
             attn = attention(q, k, v, pe=pe, mask=mask.to(torch.bool))
             attn = attn_false + weight * (attn - attn_false)"""
         
+        #I = torch.eye(q.shape[-2], q.shape[-2], dtype=q.dtype, device=q.device).expand((1,1) + (-1, -1))
+        #attn_map = attention_weights(q, k)
+        """mask_resized = None
+        if mask is not None:
+            txt_a = txt[:,:,:]
+            txt_qa, txt_ka, txt_va = self.txt_attn_preproc(txt_a, txt_mod1)
+            
+            txt_q_rope, txt_k_rope = apply_rope(txt_q, txt_k, pe[:,:,:512,:,:])
+            img_q_rope, img_k_rope = apply_rope(img_q, img_k, pe[:,:,512:,:,:])
+
+            attn_weights = attention_weights(txt_q_rope, img_k_rope)
+            attn_weights = attn_weights.permute(0,1,3,2)
+            attn_weights_slice = attn_weights[:,:,:,:]
+            test = attn_weights_slice.mean(dim=1)
+            test2 = rearrange(test, "b (h w) (c ph pw) -> b c (h ph) (w pw)", h=64, w=64, ph=1, pw=1)
+            test3 = test2.mean(dim=1)
+            mask_resized = F.interpolate(test3[None,:,:,:], size=(1024,1024), mode='bilinear', align_corners=False).squeeze(1)"""
+            
         attn = attention(q, k, v, pe=pe, mask=mask)
-        txt_attn = attn[:, : txt.shape[1]]                         # 1, 768,3072
-        img_attn = attn[:, txt.shape[1] :]  
+        txt_attn = attn[:, :txt.shape[1]]                         # 1, 768,3072
+        img_attn = attn[:,  txt.shape[1]:]  
         
         img += img_mod1.gate * self.img_attn.proj(img_attn)
         txt += txt_mod1.gate * self.txt_attn.proj(txt_attn)
@@ -187,7 +213,7 @@ class DoubleStreamBlock(nn.Module):
         img += img_mod2.gate * self.img_mlp((1 + img_mod2.scale) * self.img_norm2(img) + img_mod2.shift)
         txt += txt_mod2.gate * self.txt_mlp((1 + txt_mod2.scale) * self.txt_norm2(txt) + txt_mod2.shift)
         
-        return img, txt
+        return img, txt #, mask_resized
 
 
 
@@ -219,7 +245,7 @@ class SingleStreamBlock(nn.Module):
         self.modulation = Modulation(hidden_size, double=False, dtype=dtype, device=device, operations=operations)
         
     def img_attn(self, img, mod, pe, mask, weight):
-        img_mod = (1 + mod.scale) * self.pre_norm(img) + mod.shift
+        img_mod = (1 + mod.scale) * self.pre_norm(img) + mod.shift   # mod => vec
         qkv, mlp = torch.split(self.linear1(img_mod), [3 * self.hidden_size, self.mlp_hidden_dim], dim=-1)
 
         q, k, v = rearrange(qkv, "B L (K H D) -> K B H L D", K=3, H=self.num_heads)

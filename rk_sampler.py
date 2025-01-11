@@ -48,6 +48,17 @@ def normalize_inputs(x, y0, y0_inv, guide_mode,  extra_options):
     
     return x, y0, y0_inv
 
+def prepare_sigmas(model, sigmas):
+    if sigmas[0] == 0.0:      #remove padding used to prevent comfy from adding noise to the latent (for unsampling, etc.)
+        UNSAMPLE = True
+        sigmas = sigmas[1:-1]
+    else: 
+        UNSAMPLE = False
+        
+    if hasattr(model, "sigmas"):
+        model.sigmas = sigmas
+        
+    return sigmas, UNSAMPLE
 
 
 def prepare_step_to_sigma_zero(rk, irk, rk_type, irk_type, model, x, extra_options, alpha, k, noise_sampler_type, cfg_cw=1.0, **extra_args):
@@ -77,11 +88,11 @@ def prepare_step_to_sigma_zero(rk, irk, rk_type, irk_type, model, x, extra_optio
 @torch.no_grad()
 def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, noise_sampler_type="gaussian", noise_mode="hard", noise_seed=-1, rk_type="res_2m", implicit_sampler_name="use_explicit",
               sigma_fn_formula="", t_fn_formula="",
-                  eta=0.0, eta_var=0.0, s_noise=1., d_noise=1., alpha=-1.0, k=1.0, scale=0.1, c1=0.0, c2=0.5, c3=1.0,cfgpp=0.0, implicit_steps=0, reverse_weight=0.0,
-                  latent_guide=None, latent_guide_inv=None, latent_guide_weight=0.0, latent_guide_weight_inv=0.0, latent_guide_weights=None, latent_guide_weights_inv=None, guide_mode="blend", 
+                  eta=0.0, eta_var=0.0, s_noise=1., d_noise=1., alpha=-1.0, k=1.0, scale=0.1, c1=0.0, c2=0.5, c3=1.0, implicit_steps=0, reverse_weight=0.0,
+                  latent_guide=None, latent_guide_inv=None, latent_guide_weight=0.0, latent_guide_weight_inv=0.0, latent_guide_weights=None, latent_guide_weights_inv=None, guide_mode="", 
                   GARBAGE_COLLECT=False, mask=None, mask_inv=None, LGW_MASK_RESCALE_MIN=True, sigmas_override=None, unsample_resample_scales=None,regional_conditioning_weights=None, sde_noise=[],
                   extra_options="",
-                  etas=None, s_noises=None, momentums=None, guides=None, cfg_cw = 1.0,regional_conditioning_floors=None, frame_weights=None, eta_substep=0.0, noise_mode_sde_substep="hard", guide_cossim_cutoff_=1.0, guide_bkg_cossim_cutoff_=1.0,
+                  etas=None, s_noises=None, momentums=None, guides=None, cfgpp=0.0, cfg_cw = 1.0,regional_conditioning_floors=None, frame_weights=None, eta_substep=0.0, noise_mode_sde_substep="hard", guide_cossim_cutoff_=1.0, guide_bkg_cossim_cutoff_=1.0,
                   ):
     extra_args = {} if extra_args is None else extra_args
 
@@ -106,6 +117,8 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
     noise_cossim_max_iter          =   int(get_extra_options_kv("noise_cossim_max_iter",          "50",   extra_options))
     noise_substep_cossim_max_score = float(get_extra_options_kv("noise_substep_cossim_max_score", "1e-7", extra_options))
     noise_cossim_max_score         = float(get_extra_options_kv("noise_cossim_max_score",         "1e-7", extra_options))
+    
+    guide_skip_steps = int(get_extra_options_kv("guide_skip_steps", 0, extra_options))        
 
     cfg_cw = float(get_extra_options_kv("cfg_cw", str(cfg_cw), extra_options))
     
@@ -113,75 +126,58 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
     default_dtype = torch.float64
     max_steps=10000
     
-    SDE_NOISE_EXTERNAL = False
-    if sde_noise is not None:
-        if len(sde_noise) > 0 and sigmas[1] > sigmas[2]:
-            SDE_NOISE_EXTERNAL = True
-
-    if guides is not None:
-        guide_mode, latent_guide_weight, latent_guide_weight_inv, latent_guide_weights, latent_guide_weights_inv, latent_guide, latent_guide_inv, latent_guide_mask, latent_guide_mask_inv, scheduler_, scheduler_inv_, steps_, steps_inv_, denoise_, denoise_inv_ = guides
-        mask, mask_inv = latent_guide_mask, latent_guide_mask_inv
-        
-        guide_cossim_cutoff_, guide_bkg_cossim_cutoff_ = denoise_, denoise_inv_
-            
-    latent_guide_weights     = initialize_or_scale(latent_guide_weights,     latent_guide_weight,     max_steps).to(default_dtype)
-    latent_guide_weights_inv = initialize_or_scale(latent_guide_weights_inv, latent_guide_weight_inv, max_steps).to(default_dtype)
-
-    latent_guide_weights     = F.pad(latent_guide_weights,     (0, max_steps), value=0.0)
-    latent_guide_weights_inv = F.pad(latent_guide_weights_inv, (0, max_steps), value=0.0)
     
-    lgw, lgw_inv = [torch.full_like(sigmas, 0.) for _ in range(2)]
-    if latent_guide_weights is not None:
-        lgw = latent_guide_weights.to(x.device)
-    if latent_guide_weights_inv is not None:
-        lgw_inv = latent_guide_weights_inv.to(x.device)
-    else:
-        lgw_inv = torch.full_like(sigmas, 0.)
-
-    if frame_weights is not None:
-        frame_weights = initialize_or_scale(frame_weights, 1.0, max_steps).to(default_dtype)
-        frame_weights = F.pad(frame_weights, (0, max_steps), value=0.0)
     
     if sigmas_override is not None:
         sigmas = sigmas_override.clone()
     sigmas = sigmas.clone() * d_noise
+    sigmas, UNSAMPLE = prepare_sigmas(model, sigmas)
     
+    SDE_NOISE_EXTERNAL = False
+    if sde_noise is not None:
+        if len(sde_noise) > 0 and sigmas[1] > sigmas[2]:
+            SDE_NOISE_EXTERNAL = True
+            sigma_up_total = torch.zeros_like(sigmas[0])
+            for i in range(len(sde_noise)-1):
+                sigma_up_total += sigmas[i+1]
+            eta = eta / sigma_up_total
+
+
+
     irk_type = implicit_sampler_name if implicit_sampler_name != "use_explicit" else rk_type
 
     rk       = RK_Method.create(model,  rk_type, x.device)
     irk      = RK_Method.create(model, irk_type, x.device)
 
-    rk. init_noise_sampler(x, noise_seed,     noise_sampler_type, alpha=alpha, k=k)
-    irk.init_noise_sampler(x, noise_seed+100, noise_sampler_type, alpha=alpha, k=k)
-    
     extra_args = irk.init_cfg_channelwise(x, cfg_cw, **extra_args)
     extra_args =  rk.init_cfg_channelwise(x, cfg_cw, **extra_args)
 
-    sigmas, UNSAMPLE = rk.prepare_sigmas(sigmas)
-    mask, LGW_MASK_RESCALE_MIN = prepare_mask(x, mask, LGW_MASK_RESCALE_MIN)
-    if mask_inv is not None:
-        mask_inv, LGW_MASK_RESCALE_MIN = prepare_mask(x, mask_inv, LGW_MASK_RESCALE_MIN)
-    elif sigmas[0] < sigmas[1]:
-        mask_inv = (1-mask)
+    rk. init_noise_sampler(x, noise_seed,     noise_sampler_type, alpha=alpha, k=k)
+    irk.init_noise_sampler(x, noise_seed+100, noise_sampler_type, alpha=alpha, k=k)
+
+
+
+    if frame_weights is not None:
+        frame_weights = initialize_or_scale(frame_weights, 1.0, max_steps).to(default_dtype)
+        frame_weights = F.pad(frame_weights, (0, max_steps), value=0.0)
+
+    LG = LatentGuide(guides, x, model, sigmas, UNSAMPLE, LGW_MASK_RESCALE_MIN, extra_options)
+    x = LG.init_guides(x, rk.noise_sampler)
     
-    x, y0_batch, y0_inv = rk.init_guides(x, latent_guide, latent_guide_inv, mask, sigmas, UNSAMPLE)
-    x, y0_batch, y0_inv = normalize_inputs(x, y0_batch, y0_inv, guide_mode, extra_options)
-        
-    if SDE_NOISE_EXTERNAL:
-        sigma_up_total = torch.zeros_like(sigmas[0])
-        for i in range(len(sde_noise)-1):
-            sigma_up_total += sigmas[i+1]
-        eta = eta / sigma_up_total
+    y0, y0_inv = LG.y0, LG.y0_inv
+    lgw, lgw_inv = LG.lgw, LG.lgw_inv
+    guide_mode = LG.guide_mode
+
+
 
     denoised, denoised_prev, eps, eps_prev = [torch.zeros_like(x) for _ in range(4)]
     prev_noises = []
     x_init = x.clone()
     
-    guide_skip_steps = int(get_extra_options_kv("guide_skip_steps", 0, extra_options))        
+    
     
     for step in trange(len(sigmas)-1, disable=disable):
-        #if step == 0 and guide_skip_steps > 0:
-        #    step = guide_skip_steps
+
         sigma, sigma_next = sigmas[step], sigmas[step+1]
         unsample_resample_scale = float(unsample_resample_scales[step]) if unsample_resample_scales is not None else None
         if regional_conditioning_weights is not None:
@@ -194,10 +190,7 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
         eta = eta_var = etas[step] if etas is not None else eta
         s_noise = s_noises[step] if s_noises is not None else s_noise
         
-        y0 = y0_batch
-        if y0_batch.shape[0] > 1:
-            y0 = y0_batch[min(step, y0_batch.shape[0]-1)].unsqueeze(0)  
-        
+  
         if sigma_next == 0:
             rk, irk, rk_type, irk_type, eta, eta_var, extra_args = prepare_step_to_sigma_zero(rk, irk, rk_type, irk_type, model, x, extra_options, alpha, k, noise_sampler_type, cfg_cw=cfg_cw, **extra_args)
 
@@ -224,10 +217,7 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
             else:
                 sde_noise_t = sde_noise[step]
                 
-        #if step > 0 and step == guide_skip_steps:
-        #    eps_guide, eps_guide_inv = get_guide_epsilon_substep(x, [x,x], y0, y0_inv, [sigmas[0]], 0, rk_type)
-        #    x = x - sigma * eps_guide
-                
+
         x_prenoise = x.clone()
         x_[0] = rk.add_noise_pre(x, sigma_up, sigma, sigma_next, alpha_ratio, s_noise, noise_mode, SDE_NOISE_EXTERNAL, sde_noise_t) #y0, lgw, sigma_down are currently unused
         
@@ -235,11 +225,14 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
         
         for ms in range(rk.multistep_stages):
             if RK_Method.is_exponential(rk_type):
-                eps_ [rk.multistep_stages - ms] = data_ [rk.multistep_stages - ms] - x_0
+                eps_ [rk.multistep_stages - ms] = -(x_0 - data_ [rk.multistep_stages - ms])
             else:
-                eps_ [rk.multistep_stages - ms] = (x_0 - data_ [rk.multistep_stages - ms]) / sigma
+                eps_ [rk.multistep_stages - ms] =  (x_0 - data_ [rk.multistep_stages - ms]) / sigma
                 
-        lgw_mask, lgw_mask_inv = prepare_weighted_masks(mask, mask_inv, lgw[step], lgw_inv[step], latent_guide, latent_guide_inv, LGW_MASK_RESCALE_MIN)        
+                
+                
+        lgw_mask, lgw_mask_inv = LG.lgw_masks[step], LG.lgw_masks_inv[step]        
+
 
 
         rk_new       = RK_Method.create(model,  rk_type, x.device)
@@ -254,7 +247,7 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
                 if (substep_eta_final_step < 0 and step == len(sigmas)-1+substep_eta_final_step)   or   (substep_eta_final_step > 0 and step > substep_eta_final_step):
                     sub_sigma_up, sub_sigma, sub_sigma_down, sub_alpha_ratio = 0, s_[row], s_[row+1], 1
                     
-                if row > 0 and not extra_options_flag("disable_rough_noise", extra_options):
+                if row > 0 and not extra_options_flag("disable_rough_noise", extra_options): # and s_[row-1] >= s_[row]:
                     sub_sigma_up, sub_sigma, sub_sigma_down, sub_alpha_ratio = get_res4lyf_step_with_model(model, s_[row-1], s_[row], substep_eta, eta_var, substep_noise_mode)
                     sub_sigma_next = s_[row]
                     
@@ -275,7 +268,7 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
                     eps_[row-1] *= 1 + substep_noise_scaling*(substep_noise_scaling_ratio-1)
 
                 h_new = h.clone()
-                if row > 0:
+                if row > 0 and sub_sigma_up > 0:
                     if extra_options_flag("h_new_substep_reg", extra_options):
                         h_new = h_new * rk.h_fn(sub_sigma_down, sub_sigma) / rk.h_fn(sub_sigma_next, sub_sigma)
                     else:
@@ -284,21 +277,13 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
                         else:
                             h_new = (rk.h_fn(sub_sigma_down, sigma) / rk.c[row])[0]   #used to be rk.c[row+1]
                     
-                rk_new. set_coeff(rk_type,  h_new,     c1, c2, c3, step, sigmas, sigma, sigma_down)
-                s_new_       = [(  rk_new.sigma_fn( rk_new.t_fn(sigma) +     h_new*c_)) * s_one for c_ in   rk_new.c]
-                s_merge_ = copy.deepcopy(s_)
-                s_merge_[row+1] = s_new_[row+1]
-                s_new_ = s_merge_
-                
-                if extra_options_flag("aoeu", extra_options):
-                    substep_noise_scaling_ratio = (sub_sigma_down - sigma) / (sub_sigma_next - sigma)
-                    eps_row_new = ((x_[row+1] - data_[row-1]) / s_[row-1]) * substep_noise_scaling_ratio 
-                    
-                    
+                rk_new. set_coeff(rk_type, h_new, c1, c2, c3, step, sigmas, sigma, sigma_down)
+
 
                 # UPDATE
                 if substep_eta > 0 and not extra_options_flag("disable_tableau_scaling_h_only", extra_options):
                     x_[row+1] = x_0 + h_new * rk.a_k_sum(eps_, row)
+                    
                 elif substep_eta > 0 and extra_options_flag("enable_tableau_scaling_full", extra_options):
                     x_[row+1] = x_0 + h_new * rk_new.a_k_sum(eps_, row)
                 elif substep_eta > 0 and extra_options_flag("enable_tableau_extra_linear_denoise", extra_options):
@@ -306,40 +291,7 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
                 else:
                     x_[row+1] = x_0 + h * rk.a_k_sum(eps_, row)     
 
-                if guide_mode == "data":
-                    lgw_mask_fw = lgw_mask.clone()
-                    lgw_mask_inv_fw = lgw_mask_inv.clone() if lgw_mask_inv is not None else None
-                    denoised = x_0 + ((sigma / (sigma - sigma_down)) *  h) * rk.a_k_sum(eps_, row) 
-                    eps = x_[row+1] - denoised
-                    if frame_weights is not None and x_0.dim() == 5:
-                        for f in range(lgw_mask_fw.shape[2]):
-                            frame_weight = frame_weights[f]
-                            lgw_mask_fw[..., f:f+1, :, :] *= frame_weight
-                            if lgw_mask_inv_fw is not None:
-                                lgw_mask_inv_fw[..., f:f+1, :, :] *= frame_weight
 
-                    if latent_guide_inv is None:
-                        #denoised_shifted = denoised   +   lgw_mask * (y0 - denoised) 
-                        denoised_shifted = denoised   +   lgw_mask_fw * (y0 - denoised) 
-                    else:
-                        #denoised_shifted = denoised   +   lgw_mask * (y0 - denoised)   +   lgw_mask_inv * (y0_inv - denoised)
-                        denoised_shifted = denoised   +   lgw_mask_fw * (y0 - denoised)   +   lgw_mask_inv_fw * (y0_inv - denoised)
-
-                    temporal_smoothing = float(get_extra_options_kv("temporal_smoothing", "0.0", extra_options))
-                    if temporal_smoothing > 0:
-                        denoised_tmp = apply_temporal_smoothing(denoised_shifted, temporal_smoothing)
-                        denoised_shifted = denoised_shifted + lgw_mask_fw * (denoised_tmp - denoised_shifted)
-                        
-                    x_[row+1] = denoised_shifted + eps
-
-                    """denoised = x_0 + ((sigma / (sigma - sigma_down)) *  h) * rk.a_k_sum(eps_, row) 
-                    eps = x_[row+1] - denoised
-                    if latent_guide_inv is None:
-                        denoised_shifted = denoised   +   lgw_mask * (y0 - denoised) 
-                    else:
-                        denoised_shifted = denoised   +   lgw_mask * (y0 - denoised)   +   lgw_mask_inv * (y0_inv - denoised)
-                    x_[row+1] = denoised_shifted + eps"""
-                
                 # NOISE ADD
                 if (row > 0) and (sub_sigma_up > 0) and ((SUBSTEP_SKIP_LAST == False) or (row < rk.rows - rk.multistep_stages - 1)):
                     data_tmp = denoised_prev if data_[row-1].sum() == 0 else data_[row-1]
@@ -360,40 +312,12 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
                 #MODEL CALL
                 if step < guide_skip_steps:
                     eps_row, eps_row_inv = get_guide_epsilon_substep(x_0, x_, y0, y0_inv, s_, row, rk_type)
-                    if guide_mode == "epsilon_projection":
-                        lgw_eps_row_ortho     = get_orthogonal(eps_row_inv, eps_row)         ####
-                        fwd_lgw_eps_row_collin     = get_collinear(eps_row, eps_row_inv)
-                        """if extra_options_flag("epsilon_proj_ortho_inv", extra_options):
-                            lgw_eps_row_ortho     = get_orthogonal(eps_[row] + lgw_mask * (eps_row_inv-eps_[row]), eps_[row])         ####
-                        else:
-                            lgw_eps_row_ortho     = get_orthogonal(eps_[row] + lgw_mask * (eps_row-eps_[row]), eps_[row])         ####
-                        if extra_options_flag("epsilon_proj_collin_inv", extra_options):
-                            fwd_lgw_eps_row_collin     = get_collinear(eps_[row], eps_[row] + lgw_mask * (eps_row_inv-eps_[row])) 
-                        else:
-                            fwd_lgw_eps_row_collin     = get_collinear(eps_[row], eps_[row] + lgw_mask * (eps_row-eps_[row]))     ####"""
-                        eps_[row] = fwd_lgw_eps_row_collin + lgw_eps_row_ortho
-                    else:
-                        eps_[row] = eps_row
-                    
+                    #eps_[row] = lgw_mask * eps_row   +   lgw_mask_inv * eps_row_inv
+                    eps_[row] = eps_row
                 else:
                     eps_[row], data_[row] = rk(x_0, x_[row+1], s_[row], h, **extra_args)       
                 
-                dims = tuple(range(2, data_[0].ndim)) # dimensions 2 and above
-                data_norm = data_[0] - data_[0].mean(dim=dims, keepdim=True)
-                y0_norm   = y0       -       y0.mean(dim=dims, keepdim=True)
-                y0_inv_norm = y0_inv -   y0_inv.mean(dim=dims, keepdim=True)
-                if PRINT_DEBUG:
-                    print(get_cosine_similarity(data_norm, y0_norm).item())
-                if guide_cossim_cutoff_ > get_cosine_similarity(data_norm*lgw_mask, y0_norm*lgw_mask) and guide_bkg_cossim_cutoff_ > get_cosine_similarity(data_norm*lgw_mask_inv, y0_inv_norm*lgw_mask_inv):
-                    eps_, x_ = process_guides_substep(x_0, x_, eps_, data_, row, y0, y0_inv, lgw[step], lgw_inv[step], lgw_mask, lgw_mask_inv, step, sigma, sigma_next, sigma_down, s_, unsample_resample_scale, rk, rk_type, guide_mode, latent_guide_inv, UNSAMPLE, extra_options, frame_weights)
-                    
-                elif guide_cossim_cutoff_ > get_cosine_similarity(data_norm*lgw_mask, y0_norm*lgw_mask) and guide_bkg_cossim_cutoff_ <= get_cosine_similarity(data_norm*lgw_mask_inv, y0_inv_norm*lgw_mask_inv):
-                    eps_, x_ = process_guides_substep(x_0, x_, eps_, data_, row, y0, y0_inv, lgw[step], lgw_inv[step], lgw_mask, 0*lgw_mask_inv, step, sigma, sigma_next, sigma_down, s_, unsample_resample_scale, rk, rk_type, guide_mode, latent_guide_inv, UNSAMPLE, extra_options, frame_weights)
-                    
-                elif guide_cossim_cutoff_ <= get_cosine_similarity(data_norm*lgw_mask, y0_norm*lgw_mask) and guide_bkg_cossim_cutoff_ > get_cosine_similarity(data_norm*lgw_mask_inv, y0_inv_norm*lgw_mask_inv):
-                    eps_, x_ = process_guides_substep(x_0, x_, eps_, data_, row, y0, y0_inv, lgw[step], lgw_inv[step], 0*lgw_mask, lgw_mask_inv, step, sigma, sigma_next, sigma_down, s_, unsample_resample_scale, rk, rk_type, guide_mode, latent_guide_inv, UNSAMPLE, extra_options, frame_weights)
-                    #eps_, x_ = process_guides_substep(x_0, x_, eps_, data_, row, y0, y0_inv, lgw[step], lgw_inv[step], lgw_mask, lgw_mask_inv, step, sigma, sigma_next, sigma_down, s_new_, unsample_resample_scale, rk, rk_type, guide_mode, latent_guide_inv, UNSAMPLE, extra_options, frame_weights)
-
+                eps_, x_ = LG.process_guides_substep(x_0, x_, eps_, data_, row, step, sigma, sigma_next, sigma_down, s_, unsample_resample_scale, rk, rk_type, extra_options, frame_weights)
 
 
             x = x_0 + h * rk.b_k_sum(eps_, 0)
@@ -401,7 +325,6 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
             denoised = x_0 + ((sigma / (sigma - sigma_down)) *  h) * rk.b_k_sum(eps_, 0) 
             eps = x - denoised
             x = process_guides_poststep(x, denoised, eps, y0, y0_inv, mask, lgw_mask, lgw_mask_inv, guide_mode, latent_guide, latent_guide_inv, UNSAMPLE, extra_options)
-
 
 
 

@@ -20,9 +20,9 @@ import comfy.supported_models
 
 import itertools 
 
-from .noise_sigmas_timesteps_scaling import get_res4lyf_step_with_model, get_res4lyf_half_step3
 from .rk_coefficients import *
 from .phi_functions import *
+
 
 
 class RK_Method:
@@ -64,7 +64,7 @@ class RK_Method:
         
     @staticmethod
     def is_exponential(rk_type):
-        if rk_type.startswith(("res", "dpmpp", "ddim", "rk_exp", "irk_exp_diag_2s"   )): # ,  "irk_exp_diag_negh_2s")):   #, "irk_exp_diag"
+        if rk_type.startswith(("res", "dpmpp", "ddim", "irk_exp_diag_2s"   )): 
             return True
         else:
             return False
@@ -117,7 +117,7 @@ class RK_Method:
             self.noise_sampler = NOISE_GENERATOR_CLASSES_SIMPLE.get(noise_sampler_type)(x=x, seed=seed, sigma_min=self.sigma_min, sigma_max=self.sigma_max)
             
     def add_noise_pre(self, x, sigma_up, sigma, sigma_next, alpha_ratio, s_noise, noise_mode, SDE_NOISE_EXTERNAL=False, sde_noise_t=None):
-        if isinstance(self.model_sampling, comfy.model_sampling.CONST) == False and noise_mode == "hard":
+        if isinstance(self.model_sampling, comfy.model_sampling.CONST) == False and noise_mode == "hard": 
             return self.add_noise(x, sigma_up, sigma, sigma_next, alpha_ratio, s_noise, SDE_NOISE_EXTERNAL, sde_noise_t)
         else:
             return x
@@ -141,29 +141,8 @@ class RK_Method:
         
         else:
             return x
-    
-    def ab_sum(self, ab, row, columns, ki, ki_u, y0, y0_inv):
-        ks, ks_u, ys, ys_inv = torch.zeros_like(ki[0]), torch.zeros_like(ki[0]), torch.zeros_like(ki[0]), torch.zeros_like(ki[0])
-        for col in range(columns):
-            ks     += ab[row][col] * ki  [col]
-            ks_u   += ab[row][col] * ki_u[col]
-            ys     += ab[row][col] * y0
-            ys_inv += ab[row][col] * y0_inv
-        return ks, ks_u, ys, ys_inv
-    
-    def prepare_sigmas(self, sigmas):
-        if sigmas[0] == 0.0:      #remove padding used to prevent comfy from adding noise to the latent (for unsampling, etc.)
-            UNSAMPLE = True
-            sigmas = sigmas[1:-1]
-        else: 
-            UNSAMPLE = False
-            
-        if hasattr(self.model, "sigmas"):
-            self.model.sigmas = sigmas
-            
-        return sigmas, UNSAMPLE
-    
-    
+
+
     def set_coeff(self, rk_type, h, c1=0.0, c2=0.5, c3=1.0, stepcount=0, sigmas=None, sigma=None, sigma_down=None):
         if rk_type == "default": 
             return
@@ -176,29 +155,16 @@ class RK_Method:
         self.multistep_stages = multistep_stages
         
         self.a = torch.tensor(a, dtype=h.dtype, device=h.device)
-        #self.a = self.a.view(*self.a.shape, 1, 1, 1, 1)
         self.a = self.a.view(*self.a.shape, 1, 1, 1, 1, 1)
         
         
         self.b = torch.tensor(b, dtype=h.dtype, device=h.device)
-        #self.b = self.b.view(*self.b.shape, 1, 1, 1, 1)
         self.b = self.b.view(*self.b.shape, 1, 1, 1, 1, 1)
         
         self.c = torch.tensor(ci, dtype=h.dtype, device=h.device)
         self.rows = self.a.shape[0]
         self.cols = self.a.shape[1]
-            
-    """def a_k_sum(self, k, row):
-        if len(k.shape) == 4:
-            ks = k * self.a[row].sum(dim=0)
-        ks = (k[0:self.cols] * self.a[row]).sum(dim=0)
-        return ks
-    
-    def b_k_sum(self, k, row):
-        if len(k.shape) == 4:
-            ks = k * self.b[row].sum(dim=0)
-        ks = (k[0:self.cols] * self.b[row]).sum(dim=0)
-        return ks"""
+
 
     def a_k_sum(self, k, row):
         if len(k.shape) == 4:
@@ -228,47 +194,6 @@ class RK_Method:
             raise ValueError(f"Unexpected k shape: {k.shape}")
         return ks
 
-    def init_guides(self, x, latent_guide, latent_guide_inv, mask, sigmas, UNSAMPLE):
-        y0, y0_inv = torch.zeros_like(x), torch.zeros_like(x)
-        
-        if latent_guide is not None:
-            latent_guide_samples = self.model.inner_model.inner_model.process_latent_in(latent_guide['samples']).clone().to(x.device)
-            if sigmas[0] > sigmas[1]:
-                y0 = latent_guide = latent_guide_samples
-            elif UNSAMPLE and mask is not None:
-                x = (1-mask) * x + mask * latent_guide_samples
-            else:
-                x = latent_guide_samples
-
-        if latent_guide_inv is not None:
-            latent_guide_inv_samples = self.model.inner_model.inner_model.process_latent_in(latent_guide_inv['samples']).clone().to(x.device)
-            if sigmas[0] > sigmas[1]:
-                y0_inv = latent_guide_inv = latent_guide_inv_samples
-            elif UNSAMPLE and mask is not None:
-                x = mask * x + (1-mask) * latent_guide_inv_samples
-            else:
-                x = latent_guide_inv_samples   #THIS COULD LEAD TO WEIRD BEHAVIOR! OVERWRITING X WITH LG_INV AFTER SETTING TO LG above!
-                
-        if UNSAMPLE and sigmas[0] < sigmas[1]: #sigma_next > sigma:
-            y0 = self.noise_sampler(sigma=self.sigma_max, sigma_next=self.sigma_min)
-            y0 = (y0 - y0.mean()) / y0.std()
-            y0_inv = self.noise_sampler(sigma=self.sigma_max, sigma_next=self.sigma_min)
-            y0_inv = (y0_inv - y0_inv.mean()) / y0_inv.std()
-            
-        return x, y0, y0_inv
-
-
-
-    def init_cfgpp(self, x, cfgpp=0.0, **extra_args):
-        self.uncond = [torch.full_like(x, 0.0)]
-        if cfgpp != 0.0:
-            def post_cfg_function(args):
-                self.uncond[0] = args["uncond_denoised"]
-                return args["denoised"]
-            model_options = extra_args.get("model_options", {}).copy()
-            extra_args["model_options"] = comfy.model_patcher.set_model_options_post_cfg_function(model_options, post_cfg_function, disable_cfg1_optimization=True)
-        return extra_args
-        #TODO: complete this method
 
     def init_cfg_channelwise(self, x, cfg_cw=1.0, **extra_args):
         self.uncond = [torch.full_like(x, 0.0)]

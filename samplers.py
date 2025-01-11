@@ -119,7 +119,10 @@ class SharkSampler:
                     seed = torch.initial_seed() + 1 + batch_num
                 else:
                     seed = noise_seed + batch_num
-                    torch.manual_seed(noise_seed + batch_num)
+                    torch.manual_seed(seed)
+                    torch.cuda.manual_seed(seed)
+                    #torch.cuda.manual_seed_all(seed)
+
 
                 if options is not None:
                     noise_stdev     = options.get('noise_init_stdev', noise_stdev)
