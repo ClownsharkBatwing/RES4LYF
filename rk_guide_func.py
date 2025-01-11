@@ -865,7 +865,10 @@ def get_orthogonal_noise_from_channelwise(*refs, max_iter=500, max_score=1e-15):
 
 
 def gram_schmidt_channels_optimized(A, *refs):
-    b, c, h, w = A.shape
+    if (A.dim() == 4):
+        b,c,h,w = A.shape
+    elif (A.dim() == 5):
+        b,c,t,h,w = A.shape
 
     A_flat = A.view(b, c, -1)  
     
