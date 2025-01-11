@@ -395,7 +395,8 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
                 for row in range(irk.rows):
                     x_[row+1] = x_0 + h_irk * irk.a_k_sum(eps2_, row)
                     eps2_[row], data_[row] = irk(x_0, x_[row+1], s_irk[row], h_irk, **extra_args)
-                    eps_, x_ = LG.process_guides_substep(x_0, x_, eps2_, data_, row, step, sigma, sigma_next, sigma_down, s_irk, unsample_resample_scale, irk, irk_type, extra_options, frame_weights)
+                    if not extra_options_flag("implicit_loop_skip_guide", extra_options):
+                        eps2_, x_ = LG.process_guides_substep(x_0, x_, eps2_, data_, row, step, sigma, sigma_next, sigma_down, s_irk, unsample_resample_scale, irk, irk_type, extra_options, frame_weights)
                 x = x_0 + h_irk * irk.b_k_sum(eps2_, 0)
                 denoised = x_0 + (sigma / (sigma - sigma_down)) *  h_irk * irk.b_k_sum(eps2_, 0) 
                 eps = x - denoised
