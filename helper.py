@@ -7,7 +7,7 @@ def filter_comments(extra_options):
 
 def get_extra_options_kv(key, default, extra_options):
     extra_options = filter_comments(extra_options)
-    match = re.search(rf"{key}\s*=\\s*([a-zA-Z0-9_.+-]+)", extra_options)
+    match = re.search(rf"{key}\s*=\s*([a-zA-Z0-9_.+-]+)", extra_options)
     if match:
         value = match.group(1)
     else:
