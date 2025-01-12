@@ -100,6 +100,7 @@ IRK_SAMPLER_NAMES = ["none",
                     
                     "irk_exp_diag_2s",
                     "use_explicit", 
+                    "use_explicit_as_diag"
                     ]
 
 alpha_crouzeix = (2/(3**0.5)) * math.cos(math.pi / 18)
@@ -769,8 +770,6 @@ def get_rk_methods(rk_type, h, c1=0.0, c2=0.5, c3=1.0, h_prev=None, h_prev2=None
             c2 = -h_prev2 / h_prev
             c3 = -h_prev / h
             rk_type = rk_type[:-2] + "3s"
-        else:
-            rk_type = rk_type[:-2] + "3s"
     
     if rk_type in rk_coeff:
         #a, b, ci = copy.deepcopy(rk_coeff[rk_type])
@@ -849,8 +848,7 @@ def get_rk_methods(rk_type, h, c1=0.0, c2=0.5, c3=1.0, h_prev=None, h_prev2=None
             b = [
                     [b1, b2],
             ]
-            
-            
+
             
         case "res_3s":
             c2 = 1/2

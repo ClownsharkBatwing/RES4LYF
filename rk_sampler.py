@@ -147,8 +147,9 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
             eta = eta / sigma_up_total
 
 
-
-    irk_type = implicit_sampler_name if implicit_sampler_name != "use_explicit" else rk_type
+    irk_type = implicit_sampler_name
+    if irk_type in ("use_explicit", "use_explicit_as_diag"):
+        irk_type = rk_type
     
     rk_type = "euler" if implicit_sampler_name == "use_explicit" else rk_type
     rk_type = get_extra_options_kv("rk_type", rk_type, extra_options)
@@ -236,17 +237,13 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
                 eps_ [rk.multistep_stages - ms] = -(x_0 - data_ [rk.multistep_stages - ms])
             else:
                 eps_ [rk.multistep_stages - ms] =  (x_0 - data_ [rk.multistep_stages - ms]) / sigma
-                
 
 
-        rk_new       = RK_Method.create(model,  rk_type, x.device)
 
         if implicit_steps == 0: 
             for row in range(rk.rows - rk.multistep_stages):
                 
                 sub_sigma_up, sub_sigma, sub_sigma_next, sub_sigma_down, sub_alpha_ratio = 0, s_[row], s_[row+1], s_[row+1], 1
-                if step > substep_eta_start_step and s_[row+1] <= s_[row]:
-                    sub_sigma_up, sub_sigma, sub_sigma_down, sub_alpha_ratio = get_res4lyf_step_with_model(model, s_[row], s_[row+1], substep_eta, eta_var, substep_noise_mode)
                     
                 if (substep_eta_final_step < 0 and step == len(sigmas)-1+substep_eta_final_step)   or   (substep_eta_final_step > 0 and step > substep_eta_final_step):
                     sub_sigma_up, sub_sigma, sub_sigma_down, sub_alpha_ratio = 0, s_[row], s_[row+1], 1
@@ -255,51 +252,21 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
                     sub_sigma_up, sub_sigma, sub_sigma_down, sub_alpha_ratio = get_res4lyf_step_with_model(model, s_[row-1], s_[row], substep_eta, eta_var, substep_noise_mode)
                     sub_sigma_next = s_[row]
                     
-                    
                 if row > 0 and substep_eta > 0 and row < rk.rows and ((SUBSTEP_SKIP_LAST == False) or (row < rk.rows - rk.multistep_stages - 1))   and   (sub_sigma_down > 0) and sigma_next > 0:
-                    if extra_options_flag("linear_scaling_reg", extra_options):
-                        substep_noise_scaling_ratio = (sub_sigma_down - sigma) / (sub_sigma_next - sigma) #using this with disable_tableau_scaling_h_only gives the same result as h_new scaling alone
-                    elif extra_options_flag("linear_scaling_inv", extra_options):
-                        substep_noise_scaling_ratio = (sub_sigma_next - sigma) / (sub_sigma_down - sigma)
-                    if extra_options_flag("linear_scaling_dinky", extra_options):
-                        substep_noise_scaling_ratio = (sub_sigma_down - sub_sigma) / (sub_sigma_next - sub_sigma)
-                    elif extra_options_flag("h_ratio_reg", extra_options):
-                        substep_noise_scaling_ratio = rk.h_fn(sub_sigma_down, sigma) / rk.h_fn(sub_sigma_next, sigma)
-                    elif extra_options_flag("h_ratio_inv", extra_options):
-                        substep_noise_scaling_ratio = rk.h_fn(sub_sigma_next, sigma) / rk.h_fn(sub_sigma_down, sigma)
-                    elif extra_options_flag("h_ratio_substep_reg", extra_options):
-                        substep_noise_scaling_ratio = rk.h_fn(sub_sigma_down, sub_sigma) / rk.h_fn(sub_sigma_next, sub_sigma)
-                    elif extra_options_flag("h_ratio_substep_blah", extra_options):
-                        substep_noise_scaling_ratio = sub_sigma_next/sub_sigma_down
-                    else:
-                        substep_noise_scaling_ratio = s_[row+1]/sub_sigma_down
+                    substep_noise_scaling_ratio = s_[row+1]/sub_sigma_down
                     eps_[row-1] *= 1 + substep_noise_scaling*(substep_noise_scaling_ratio-1)
 
                 h_new = h.clone()
                 if row > 0 and sub_sigma_up > 0:
-                    if extra_options_flag("h_new_substep_reg", extra_options):
-                        h_new = h_new * rk.h_fn(sub_sigma_down, sub_sigma) / rk.h_fn(sub_sigma_next, sub_sigma)
+                    if extra_options_flag("substep_eta_c_row_plus_one", extra_options):
+                        h_new = (rk.h_fn(sub_sigma_down, sigma) / rk.c[row+1])[0]  
                     else:
-                        if extra_options_flag("substep_eta_c_row_plus_one", extra_options):
-                            h_new = (rk.h_fn(sub_sigma_down, sigma) / rk.c[row+1])[0]  
-                        else:
-                            h_new = (rk.h_fn(sub_sigma_down, sigma) / rk.c[row])[0]   #used to be rk.c[row+1]
-
-                    
-                rk_new. set_coeff(rk_type, h_new, c1, c2, c3, step, sigmas, sigma, sigma_down)
+                        h_new = (rk.h_fn(sub_sigma_down, sigma) / rk.c[row])[0]   #used to be rk.c[row+1]
 
 
                 # UPDATE
-                if sub_sigma_up > 0 and not extra_options_flag("disable_tableau_scaling_h_only", extra_options):
-                    x_[row+1] = x_0 + h_new * rk.a_k_sum(eps_, row)
+                x_[row+1] = x_0 + h_new * rk.a_k_sum(eps_, row)
                     
-                elif substep_eta > 0 and extra_options_flag("enable_tableau_scaling_full", extra_options):
-                    x_[row+1] = x_0 + h_new * rk_new.a_k_sum(eps_, row)
-                elif substep_eta > 0 and extra_options_flag("enable_tableau_extra_linear_denoise", extra_options):
-                    x_[row+1] = x_0 + h * rk.a_k_sum(eps_, row) + (sub_sigma_down - sub_sigma_next) * rk.a_k_sum(eps_, row)
-                else:
-                    x_[row+1] = x_0 + h * rk.a_k_sum(eps_, row)     
-
 
                 # NOISE ADD
                 if (row > 0) and (sub_sigma_up > 0) and ((SUBSTEP_SKIP_LAST == False) or (row < rk.rows - rk.multistep_stages - 1)):
@@ -311,12 +278,11 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
                         noise_osde = Osde.get_ortho_noise(noise, prev_noises, max_iter=noise_substep_cossim_max_iter, max_score=noise_substep_cossim_max_score, NOISE_COSSIM_SOURCE=NOISE_SUBSTEP_COSSIM_SOURCE)
                         x_[row+1] = sub_alpha_ratio * x_[row+1] + sub_sigma_up * noise_osde * s_noise
                     elif extra_options_flag("noise_substep_cossim", extra_options):
-                        x_[row+1] = handle_tiled_etc_noise_steps(x_0, x_[row+1], x_prenoise, x_init, eps_tmp, data_tmp, y0, y0_inv, row, 
-                            rk_type, rk, sub_sigma_up, s_[row-1], s_[row], sub_alpha_ratio, s_noise, substep_noise_mode, SDE_NOISE_EXTERNAL, sde_noise_t,
-                            NOISE_SUBSTEP_COSSIM_SOURCE, NOISE_SUBSTEP_COSSIM_MODE, noise_substep_cossim_tile_size, noise_substep_cossim_iterations,
-                            extra_options)
+                        x_[row+1] = handle_tiled_etc_noise_steps(x_0, x_[row+1], x_prenoise, x_init, eps_tmp, data_tmp, y0, y0_inv, row, rk_type, rk, sub_sigma_up, s_[row-1], s_[row], sub_alpha_ratio, s_noise, substep_noise_mode, SDE_NOISE_EXTERNAL, sde_noise_t,
+                            NOISE_SUBSTEP_COSSIM_SOURCE, NOISE_SUBSTEP_COSSIM_MODE, noise_substep_cossim_tile_size, noise_substep_cossim_iterations, extra_options)
                     else:
                         x_[row+1] = rk.add_noise_post(x_[row+1], sub_sigma_up, sub_sigma, sub_sigma_next, sub_alpha_ratio, s_noise, substep_noise_mode, SDE_NOISE_EXTERNAL, sde_noise_t)
+                
                 
                 # MODEL CALL
                 if step < guide_skip_steps:
@@ -344,7 +310,7 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
 
 
         # DIAGONALLY IMPLICIT
-        elif any(irk_type.startswith(prefix) for prefix in {"crouzeix", "irk_exp_diag", "pareschi_russo", "kraaijevanger_spijker", "qin_zhang"}):
+        elif implicit_sampler_name=="use_explicit_as_diag" or any(irk_type.startswith(prefix) for prefix in {"crouzeix", "irk_exp_diag", "pareschi_russo", "kraaijevanger_spijker", "qin_zhang",}):
             s_irk = [torch.full_like(s_irk[0], sigma.item())] + s_irk
 
             for row in range(irk.rows - irk.multistep_stages):
@@ -353,13 +319,14 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
                 if irk.c[row] > 0:
                     sub_sigma_up, sub_sigma, sub_sigma_down, sub_alpha_ratio = get_res4lyf_step_with_model(model, s_irk[row], s_irk[row+1], substep_eta, eta_var, substep_noise_mode)
                 
-                # MODEL CALL
-                eps_[row], data_[row] = irk(x_0, x_[row], s_irk[row], h_irk, **extra_args) 
+                if not extra_options_flag("diagonal_implicit_skip_initial", extra_options):
+                    # MODEL CALL
+                    eps_[row], data_[row] = irk(x_0, x_[row], s_irk[row], h_irk, **extra_args) 
+                    
+                    # GUIDES 
+                    eps_, x_ = LG.process_guides_substep(x_0, x_, eps_, data_, row, step, sigma, sigma_next, sigma_down, s_irk, unsample_resample_scale, irk, irk_type, extra_options, frame_weights)
                 
-                # GUIDES 
-                eps_, x_ = LG.process_guides_substep(x_0, x_, eps_, data_, row, step, sigma, sigma_next, sigma_down, s_irk, unsample_resample_scale, irk, irk_type, extra_options, frame_weights)
-                
-                for diag_iter in range(implicit_steps+1):
+                for diag_iter in range(implicit_steps):
                     h_new_irk = h.clone()
                     if irk.c[row] > 0:
                         h_new_irk = (irk.h_fn(sub_sigma_down, sigma) / irk.c[row])[0]
@@ -367,8 +334,22 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
                     # UPDATE
                     x_[row+1] = x_0 + h_new_irk * irk.a_k_sum(eps_, row)
                     
-                    # NOISE ADD
-                    x_[row+1] = rk.add_noise_post(x_[row+1], sub_sigma_up, sub_sigma, sub_sigma_next, sub_alpha_ratio, s_noise, substep_noise_mode, SDE_NOISE_EXTERNAL, sde_noise_t)
+                    # NOISE ADD                    
+                    if (row > 0) and (sub_sigma_up > 0) and ((SUBSTEP_SKIP_LAST == False) or (row < irk.rows - irk.multistep_stages - 1)):
+                        data_tmp = denoised_prev if data_[row-1].sum() == 0 else data_[row-1]
+                        eps_tmp  = eps_prev      if  eps_[row-1].sum() == 0 else eps_ [row-1]
+                        Osde = NoiseStepHandlerOSDE(x_[row+1], eps_tmp, data_tmp, x_init, y0, y0_inv)
+                        if Osde.check_cossim_source(NOISE_SUBSTEP_COSSIM_SOURCE):
+                            noise = irk.noise_sampler(sigma=sub_sigma, sigma_next=sub_sigma_next) 
+                            noise_osde = Osde.get_ortho_noise(noise, prev_noises, max_iter=noise_substep_cossim_max_iter, max_score=noise_substep_cossim_max_score, NOISE_COSSIM_SOURCE=NOISE_SUBSTEP_COSSIM_SOURCE)
+                            x_[row+1] = sub_alpha_ratio * x_[row+1] + sub_sigma_up * noise_osde * s_noise
+                        elif extra_options_flag("noise_substep_cossim", extra_options):
+                            x_[row+1] = handle_tiled_etc_noise_steps(x_0, x_[row+1], x_prenoise, x_init, eps_tmp, data_tmp, y0, y0_inv, row, 
+                                irk_type, irk, sub_sigma_up, s_irk[row-1], s_irk[row], sub_alpha_ratio, s_noise, substep_noise_mode, SDE_NOISE_EXTERNAL, sde_noise_t,
+                                NOISE_SUBSTEP_COSSIM_SOURCE, NOISE_SUBSTEP_COSSIM_MODE, noise_substep_cossim_tile_size, noise_substep_cossim_iterations,
+                                extra_options)
+                    else:
+                        x_[row+1] = irk.add_noise_post(x_[row+1], sub_sigma_up, sub_sigma, sub_sigma_next, sub_alpha_ratio, s_noise, substep_noise_mode, SDE_NOISE_EXTERNAL, sde_noise_t)
                     
                     # MODEL CALL
                     eps_[row], data_[row] = irk(x_0, x_[row+1], s_irk[row+1], h_irk, **extra_args)    
