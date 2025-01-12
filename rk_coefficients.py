@@ -730,6 +730,8 @@ def get_rk_methods(rk_type, h, c1=0.0, c2=0.5, c3=1.0, h_prev=None, h_prev2=None
     FSAL = False
     multistep_stages = 0
     
+
+    
     if c1 == -1:
         c1 = random.uniform(0, 1)
     if c2 == -1:

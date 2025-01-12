@@ -118,6 +118,10 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
     noise_substep_cossim_max_score = float(get_extra_options_kv("noise_substep_cossim_max_score", "1e-7", extra_options))
     noise_cossim_max_score         = float(get_extra_options_kv("noise_cossim_max_score",         "1e-7", extra_options))
     
+    c1 = c1_ = float(get_extra_options_kv("c1", str(c1), extra_options))
+    c2 = c2_ = float(get_extra_options_kv("c2", str(c2), extra_options))
+    c3 = c3_ = float(get_extra_options_kv("c3", str(c3), extra_options))
+    
     guide_skip_steps = int(get_extra_options_kv("guide_skip_steps", 0, extra_options))        
 
     cfg_cw = float(get_extra_options_kv("cfg_cw", str(cfg_cw), extra_options))
@@ -201,7 +205,7 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
         h     =  rk.h_fn(sigma_down, sigma)
         h_irk = irk.h_fn(sigma_down, sigma)
         
-        c2, c3 = get_res4lyf_half_step3(sigma, sigma_down, c2, c3, t_fn=rk.t_fn, sigma_fn=rk.sigma_fn, t_fn_formula=t_fn_formula, sigma_fn_formula=sigma_fn_formula)
+        c2, c3 = get_res4lyf_half_step3(sigma, sigma_down, c2_, c3_, t_fn=rk.t_fn, sigma_fn=rk.sigma_fn, t_fn_formula=t_fn_formula, sigma_fn_formula=sigma_fn_formula)
         
         rk. set_coeff(rk_type,  h,     c1, c2, c3, step, sigmas, sigma, sigma_down)
         irk.set_coeff(irk_type, h_irk, c1, c2, c3, step, sigmas, sigma, sigma_down)
@@ -324,6 +328,8 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
                     eps_[row] = eps_row
                 else:
                     eps_[row], data_[row] = rk(x_0, x_[row+1], s_[row], h, **extra_args)   
+                    if extra_options_flag("rk_linear_straight", extra_options):
+                        eps_[row] = (x_0 - data_[row]) / sigma
                     if sub_sigma_up > 0 and not RK_Method.is_exponential(rk_type):
                         eps_[row] = (x_0 - data_[row]) / sigma
                     
@@ -337,19 +343,18 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
             denoised = x_0 + ((sigma / (sigma - sigma_down)) *  h) * rk.b_k_sum(eps_, 0) 
             eps = x - denoised
             x = LG.process_guides_poststep(x, denoised, eps, step, extra_options)
-            
+
 
 
         # DIAGONALLY IMPLICIT
         elif any(irk_type.startswith(prefix) for prefix in {"crouzeix", "irk_exp_diag", "pareschi_russo", "kraaijevanger_spijker", "qin_zhang"}):
             s_irk = [torch.full_like(s_irk[0], sigma.item())] + s_irk
-            #irk_c = [0] + irk.c
-            #irk_c = torch.cat((torch.tensor([0.0], device=irk.c.device, dtype=irk.c.dtype), irk.c))
+
             for row in range(irk.rows - irk.multistep_stages):
                 
-                #sub_sigma_up, sub_sigma, sub_sigma_next, sub_sigma_down, sub_alpha_ratio = 0.0, s_irk[row], s_irk[row+1], s_irk[row+1], 1.0
-                #if sub_sigma_next < sub_sigma:
-                #sub_sigma_up, sub_sigma, sub_sigma_down, sub_alpha_ratio = get_res4lyf_step_with_model(model, s_irk[row], s_irk[row+1], substep_eta, eta_var, substep_noise_mode)
+                sub_sigma_up, sub_sigma, sub_sigma_next, sub_sigma_down, sub_alpha_ratio = 0.0, s_irk[row], s_irk[row+1], s_irk[row+1], 1.0
+                if irk.c[row] > 0:
+                    sub_sigma_up, sub_sigma, sub_sigma_down, sub_alpha_ratio = get_res4lyf_step_with_model(model, s_irk[row], s_irk[row+1], substep_eta, eta_var, substep_noise_mode)
                 
                 # MODEL CALL
                 eps_[row], data_[row] = irk(x_0, x_[row], s_irk[row], h_irk, **extra_args) 
@@ -358,18 +363,20 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
                 eps_, x_ = LG.process_guides_substep(x_0, x_, eps_, data_, row, step, sigma, sigma_next, sigma_down, s_irk, unsample_resample_scale, irk, irk_type, extra_options, frame_weights)
                 
                 for diag_iter in range(implicit_steps+1):
-                    #h_new_irk = (irk.h_fn(sub_sigma_down, sigma) / irk.c[row])[0]
-                    #h_new_irk = (irk.h_fn(sub_sigma_down, sub_sigma) / irk_c[row+1])[0]
+                    h_new_irk = h.clone()
+                    if irk.c[row] > 0:
+                        h_new_irk = (irk.h_fn(sub_sigma_down, sigma) / irk.c[row])[0]
                     
                     # UPDATE
-                    #x_[row+1] = x_0 + h_new_irk * irk.a_k_sum(eps_, row)
-                    x_[row+1] = x_0 + h_irk * irk.a_k_sum(eps_, row)
+                    x_[row+1] = x_0 + h_new_irk * irk.a_k_sum(eps_, row)
                     
                     # NOISE ADD
-                    #x_[row+1] = rk.add_noise_post(x_[row+1], sub_sigma_up, sub_sigma, sub_sigma_next, sub_alpha_ratio, s_noise, substep_noise_mode, SDE_NOISE_EXTERNAL, sde_noise_t)
+                    x_[row+1] = rk.add_noise_post(x_[row+1], sub_sigma_up, sub_sigma, sub_sigma_next, sub_alpha_ratio, s_noise, substep_noise_mode, SDE_NOISE_EXTERNAL, sde_noise_t)
                     
                     # MODEL CALL
-                    eps_[row], data_[row] = irk(x_0, x_[row+1], s_irk[row+1], h_irk, **extra_args)      
+                    eps_[row], data_[row] = irk(x_0, x_[row+1], s_irk[row+1], h_irk, **extra_args)    
+                    if sub_sigma_up > 0 and not RK_Method.is_exponential(irk_type):
+                        eps_[row] = (x_0 - data_[row]) / sigma
                     
                     # GUIDES 
                     eps_, x_ = LG.process_guides_substep(x_0, x_, eps_, data_, row, step, sigma, sigma_next, sigma_down, s_irk, unsample_resample_scale, irk, irk_type, extra_options, frame_weights)
@@ -439,14 +446,10 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
                 x = LG.process_guides_poststep(x, denoised, eps, step, extra_options)
 
 
-
-        if extra_options_flag("eps_preview", extra_options) == False:
-            callback({'x': x, 'i': step, 'sigma': sigma, 'sigma_next': sigma_next, 'denoised': data_[0].to(torch.float32)}) if callback is not None else None
-        elif latent_guide is not None:
-            callback({'x': x, 'i': step, 'sigma': sigma, 'sigma_next': sigma_next, 'denoised': eps_[0]}) if callback is not None else None
-            #callback({'x': x, 'i': step, 'sigma': sigma, 'sigma_next': sigma_next, 'denoised': ((x_0 - y0) / sigma).to(torch.float32)}) if callback is not None else None
+        if extra_options_flag("eps_preview", extra_options):
+            callback({'x': x, 'i': step, 'sigma': sigma, 'sigma_next': sigma_next, 'denoised': eps_[0].to(torch.float32)}) if callback is not None else None
         else:
-            callback({'x': x, 'i': step, 'sigma': sigma, 'sigma_next': sigma_next, 'denoised': ((x_0 - data_[0]) / sigma).to(torch.float32)}) if callback is not None else None
+            callback({'x': x, 'i': step, 'sigma': sigma, 'sigma_next': sigma_next, 'denoised': data_[0].to(torch.float32)}) if callback is not None else None
 
         sde_noise_t = None
         if SDE_NOISE_EXTERNAL:
