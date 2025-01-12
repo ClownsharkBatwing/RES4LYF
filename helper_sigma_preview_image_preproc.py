@@ -363,8 +363,8 @@ class SigmasSchedulePreview(SaveImage):
             f"noise_mode: {input_params['noise_mode']}  |  "
             f"eta: {input_params['eta']}  |  "
             f"s_noise: {input_params['s_noise']}  |  "
-            f"d_noise: {input_params['d_noise']}  |  "
-            f"d_noise_alt: {input_params['d_noise_alt']}  |  "
+            f"denoise: {input_params['denoise']}  |  "
+            f"denoise_alt: {input_params['denoise_alt']}  |  "
             f"scheduler: {input_params['scheduler']}"
         )
         plt.text(0.5, 1.05, input_text, ha='center', va='center', color='white', fontsize=8, transform=ax.transAxes)
@@ -479,8 +479,8 @@ class SigmasSchedulePreview(SaveImage):
                 "noise_mode": noise_mode,
                 "eta": eta,
                 "s_noise": s_noise,
-                "d_noise": denoise,
-                "d_noise_alt": denoise_alt,
+                "denoise": denoise,
+                "denoise_alt": denoise_alt,
                 "scheduler": scheduler,
             }
         )
