@@ -111,7 +111,14 @@ class SharkSampler:
                     extra_options="", 
                     ): 
             # blame comfy here
-            
+
+            if sampler is None:
+                raise ValueError("sampler is required")
+            else:
+                print(f"\nEntering main with sampler {id(sampler)}")
+                sampler = copy.deepcopy(sampler)
+                print(f"Created copy {id(sampler)}")
+
             default_dtype = getattr(torch, get_extra_options_kv("default_dtype", "float64", extra_options), torch.float64)   
                      
             model = model.clone()
