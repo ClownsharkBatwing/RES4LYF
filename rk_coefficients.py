@@ -725,12 +725,13 @@ rk_coeff = {
     ),
 }
 
+from .helper import get_extra_options_kv
 
-def get_rk_methods(rk_type, h, c1=0.0, c2=0.5, c3=1.0, h_prev=None, h_prev2=None, stepcount=0, sigmas=None, sigma=None, sigma_next=None, sigma_down=None):
+
+
+def get_rk_methods(rk_type, h, c1=0.0, c2=0.5, c3=1.0, h_prev=None, h_prev2=None, stepcount=0, sigmas=None, sigma=None, sigma_next=None, sigma_down=None, extra_options=None):
     FSAL = False
     multistep_stages = 0
-    
-
     
     if c1 == -1:
         c1 = random.uniform(0, 1)
@@ -831,6 +832,9 @@ def get_rk_methods(rk_type, h, c1=0.0, c2=0.5, c3=1.0, h_prev=None, h_prev2=None
             ci = [0]
 
         case "res_2s":
+            c2 = 1/2
+            c2 = float(get_extra_options_kv("c2", str(c2), extra_options))
+
             ci = [0, c2]
             φ = Phi(h, ci)
             
@@ -849,6 +853,11 @@ def get_rk_methods(rk_type, h, c1=0.0, c2=0.5, c3=1.0, h_prev=None, h_prev2=None
             
             
         case "res_3s":
+            c2 = 1/2
+            c3 = 1.0
+            c2 = float(get_extra_options_kv("c2", str(c2), extra_options))
+            c3 = float(get_extra_options_kv("c3", str(c3), extra_options))
+            
             gamma = calculate_gamma(c2, c3)
             a2_1 = c2 * phi(1, -h*c2)
             a3_2 = gamma * c2 * phi(2, -h*c2) + (c3 ** 2 / c2) * phi(2, -h*c3) #phi_2_c3_h  # a32 from k2 to k3
@@ -868,6 +877,9 @@ def get_rk_methods(rk_type, h, c1=0.0, c2=0.5, c3=1.0, h_prev=None, h_prev2=None
             ci = [c1, c2, c3]
             
         case "res_3s_alt":
+            c2 = 1/3
+            c2 = float(get_extra_options_kv("c2", str(c2), extra_options))
+            
             c1,c2,c3 = 0, c2, 2/3
             ci = [c1,c2,c3]
             φ = Phi(h, ci)
@@ -884,6 +896,9 @@ def get_rk_methods(rk_type, h, c1=0.0, c2=0.5, c3=1.0, h_prev=None, h_prev2=None
             a, b = gen_first_col_exp(a,b,ci,φ)
             
         case "res_3s_strehmel_weiner": # weak 4th order, Krogstad
+            c2 = 1/2
+            c2 = float(get_extra_options_kv("c2", str(c2), extra_options))
+
             ci = [0,c2,1]
             φ = Phi(h, ci)
             
@@ -1003,6 +1018,8 @@ def get_rk_methods(rk_type, h, c1=0.0, c2=0.5, c3=1.0, h_prev=None, h_prev2=None
             a, b = gen_first_col_exp(a,b,ci,φ)
             
         case "dpmpp_2s":
+            c2 = float(get_extra_options_kv("c2", str(c2), extra_options))
+            
             a2_1 =         c2   * phi(1, -h*c2)
             b1 = (1 - 1/(2*c2)) * phi(1, -h)
             b2 =     (1/(2*c2)) * phi(1, -h)
@@ -1032,6 +1049,9 @@ def get_rk_methods(rk_type, h, c1=0.0, c2=0.5, c3=1.0, h_prev=None, h_prev2=None
             ci = [0, c2]
 
         case "dpmpp_3s":
+            c2 = float(get_extra_options_kv("c2", str(c2), extra_options))
+            c3 = float(get_extra_options_kv("c3", str(c3), extra_options))
+            
             a2_1 = c2 * phi(1, -h*c2)
             a3_2 = (c3**2 / c2) * phi(2, -h*c3)
             a3_1 = c3 * phi(1, -h*c3) - a3_2
@@ -1444,6 +1464,11 @@ def get_rk_methods(rk_type, h, c1=0.0, c2=0.5, c3=1.0, h_prev=None, h_prev2=None
 
             
         case "irk_exp_diag_2s":
+            c1 = 1/3
+            c2 = 2/3
+            c1 = float(get_extra_options_kv("c1", str(c1), extra_options))
+            c2 = float(get_extra_options_kv("c2", str(c2), extra_options))
+            
             lam = (1 - torch.exp(-c1 * h)) / h
             a2_1 = ( torch.exp(c2*h) - torch.exp(c1*h))    /    (h * torch.exp(2*c1*h))
             b1 =  (1 + c2*h + torch.exp(h) * (-1 + h - c2*h)) / ((c1-c2) * h**2 * torch.exp(c1*h))
