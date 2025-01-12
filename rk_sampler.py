@@ -139,7 +139,7 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
     c2 = c2_ = float(get_extra_options_kv("c2", str(c2), extra_options))
     c3 = c3_ = float(get_extra_options_kv("c3", str(c3), extra_options))
 
-    temporal_smoothing = float(get_extra_options_kv("temporal_smoothing", "0.0", extra_options))
+    explicit_implicit_steps = int(get_extra_options_kv("explicit_implicit_steps", int("0"), extra_options))
 
     # Flags
     noise_cossim_flag = extra_options_flag("noise_cossim", extra_options)
@@ -147,6 +147,9 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
     fast_implicit_guess_flag = extra_options_flag("fast_implicit_guess", extra_options)
     fast_implicit_guess_use_guide_flag = extra_options_flag("fast_implicit_guess_use_guide", extra_options)
     eps_preview_flag = extra_options_flag("eps_preview", extra_options)
+    disable_rough_noise_flag = extra_options_flag("disable_rough_noise", extra_options)
+    substep_eta_c_row_plus_one_flag = extra_options_flag("substep_eta_c_row_plus_one", extra_options)
+    rk_linear_straight_flag = extra_options_flag("rk_linear_straight", extra_options)
 
     # Debugging code:
     cuda_sync_a_flag = extra_options_flag("cuda_sync_a", extra_options)
@@ -188,8 +191,10 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
     if irk_type in ("use_explicit", "use_explicit_as_diag"):
         irk_type = rk_type
     
-    rk_type = "euler" if implicit_sampler_name == "use_explicit" else rk_type
+    rk_type = "euler" if implicit_steps > 0 else rk_type
+    rk_type = "euler" if implicit_steps > 0 and implicit_sampler_name == "use_explicit" else rk_type
     rk_type = get_extra_options_kv("rk_type", rk_type, extra_options)
+    print("rk_type: ", rk_type)
 
     rk       = RK_Method.create(model,  rk_type, x.device)
     irk      = RK_Method.create(model, irk_type, x.device)
@@ -276,69 +281,70 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
                 eps_ [rk.multistep_stages - ms] =  (x_0 - data_ [rk.multistep_stages - ms]) / sigma
 
 
-
         if implicit_steps == 0: 
             for row in range(rk.rows - rk.multistep_stages):
-                
-                sub_sigma_up, sub_sigma, sub_sigma_next, sub_sigma_down, sub_alpha_ratio = 0, s_[row], s_[row+1], s_[row+1], 1
-                    
-                if (substep_eta_final_step < 0 and step == len(sigmas)-1+substep_eta_final_step)   or   (substep_eta_final_step > 0 and step > substep_eta_final_step):
-                    sub_sigma_up, sub_sigma, sub_sigma_down, sub_alpha_ratio = 0, s_[row], s_[row+1], 1
-                    
-                if row > 0 and not extra_options_flag("disable_rough_noise", extra_options): # and s_[row-1] >= s_[row]:
-                    sub_sigma_up, sub_sigma, sub_sigma_down, sub_alpha_ratio = get_res4lyf_step_with_model(model, s_[row-1], s_[row], substep_eta, eta_var, substep_noise_mode)
-                    sub_sigma_next = s_[row]
-                    
-                if row > 0 and substep_eta > 0 and row < rk.rows and ((SUBSTEP_SKIP_LAST == False) or (row < rk.rows - rk.multistep_stages - 1))   and   (sub_sigma_down > 0) and sigma_next > 0:
-                    substep_noise_scaling_ratio = s_[row+1]/sub_sigma_down
-                    eps_[row-1] *= 1 + substep_noise_scaling*(substep_noise_scaling_ratio-1)
+                for exim_iter in range(explicit_implicit_steps+1):
+                    sub_sigma_up, sub_sigma, sub_sigma_next, sub_sigma_down, sub_alpha_ratio = 0, s_[row], s_[row+1], s_[row+1], 1
+                        
+                    if (substep_eta_final_step < 0 and step == len(sigmas)-1+substep_eta_final_step)   or   (substep_eta_final_step > 0 and step > substep_eta_final_step):
+                        sub_sigma_up, sub_sigma, sub_sigma_down, sub_alpha_ratio = 0, s_[row], s_[row+1], 1
+                        
+                    if row > 0 and not disable_rough_noise_flag: # and s_[row-1] >= s_[row]:
+                        sub_sigma_up, sub_sigma, sub_sigma_down, sub_alpha_ratio = get_res4lyf_step_with_model(model, s_[row-1], s_[row], substep_eta, eta_var, substep_noise_mode)
+                        sub_sigma_next = s_[row]
+                        
+                    if row > 0 and substep_eta > 0 and row < rk.rows and ((SUBSTEP_SKIP_LAST == False) or (row < rk.rows - rk.multistep_stages - 1))   and   (sub_sigma_down > 0) and sigma_next > 0:
+                        substep_noise_scaling_ratio = s_[row+1]/sub_sigma_down
+                        eps_[row-1] *= 1 + substep_noise_scaling*(substep_noise_scaling_ratio-1)
 
-                h_new = h.clone()
-                if row > 0 and sub_sigma_up > 0:
-                    if extra_options_flag("substep_eta_c_row_plus_one", extra_options):
-                        h_new = (rk.h_fn(sub_sigma_down, sigma) / rk.c[row+1])[0]  
+                    h_new = h.clone()
+                    if row > 0 and sub_sigma_up > 0:
+                        if substep_eta_c_row_plus_one_flag:
+                            h_new = (rk.h_fn(sub_sigma_down, sigma) / rk.c[row+1])[0]  
+                        else:
+                            h_new = (rk.h_fn(sub_sigma_down, sigma) / rk.c[row])[0]   #used to be rk.c[row+1]
+
+
+                    # UPDATE
+                    x_[row+1] = x_0 + h_new * rk.a_k_sum(eps_, row)
+                        
+
+                    # NOISE ADD
+                    if (row > 0) and (sub_sigma_up > 0) and ((SUBSTEP_SKIP_LAST == False) or (row < rk.rows - rk.multistep_stages - 1)):
+                        data_tmp = denoised_prev if data_[row-1].sum() == 0 else data_[row-1]
+                        eps_tmp  = eps_prev      if  eps_[row-1].sum() == 0 else eps_ [row-1]
+                        Osde = NoiseStepHandlerOSDE(x_[row+1], eps_tmp, data_tmp, x_init, y0, y0_inv)
+                        if Osde.check_cossim_source(NOISE_SUBSTEP_COSSIM_SOURCE):
+                            noise = rk.noise_sampler(sigma=sub_sigma, sigma_next=sub_sigma_next) 
+                            noise_osde = Osde.get_ortho_noise(noise, prev_noises, max_iter=noise_substep_cossim_max_iter, max_score=noise_substep_cossim_max_score, NOISE_COSSIM_SOURCE=NOISE_SUBSTEP_COSSIM_SOURCE)
+                            x_[row+1] = sub_alpha_ratio * x_[row+1] + sub_sigma_up * noise_osde * s_noise
+                        elif noise_substep_cossim_flag:
+                            x_[row+1] = handle_tiled_etc_noise_steps(x_0, x_[row+1], x_prenoise, x_init, eps_tmp, data_tmp, y0, y0_inv, row, rk_type, rk, sub_sigma_up, s_[row-1], s_[row], sub_alpha_ratio, s_noise, substep_noise_mode, SDE_NOISE_EXTERNAL, sde_noise_t,
+                                NOISE_SUBSTEP_COSSIM_SOURCE, NOISE_SUBSTEP_COSSIM_MODE, noise_substep_cossim_tile_size, noise_substep_cossim_iterations, extra_options)
+                        else:
+                            x_[row+1] = rk.add_noise_post(x_[row+1], sub_sigma_up, sub_sigma, sub_sigma_next, sub_alpha_ratio, s_noise, substep_noise_mode, SDE_NOISE_EXTERNAL, sde_noise_t)
+                    
+                    
+                    # MODEL CALL
+                    if step < guide_skip_steps:
+                        eps_row, eps_row_inv = get_guide_epsilon_substep(x_0, x_, y0, y0_inv, s_, row, rk_type)
+                        #eps_[row] = lgw_mask * eps_row   +   lgw_mask_inv * eps_row_inv
+                        eps_[row] = eps_row
                     else:
-                        h_new = (rk.h_fn(sub_sigma_down, sigma) / rk.c[row])[0]   #used to be rk.c[row+1]
-
-
-                # UPDATE
-                x_[row+1] = x_0 + h_new * rk.a_k_sum(eps_, row)
+                        debug_cuda_cleanup(cuda_sync_a_flag, cuda_empty_a_flag, cuda_gc_a_flag)
+                        eps_[row], data_[row] = rk(x_0, x_[row+1], s_[row], h, **extra_args)   
+                        debug_cuda_cleanup(cuda_sync_b_flag, cuda_empty_b_flag, cuda_gc_b_flag)
                     
-
-                # NOISE ADD
-                if (row > 0) and (sub_sigma_up > 0) and ((SUBSTEP_SKIP_LAST == False) or (row < rk.rows - rk.multistep_stages - 1)):
-                    data_tmp = denoised_prev if data_[row-1].sum() == 0 else data_[row-1]
-                    eps_tmp  = eps_prev      if  eps_[row-1].sum() == 0 else eps_ [row-1]
-                    Osde = NoiseStepHandlerOSDE(x_[row+1], eps_tmp, data_tmp, x_init, y0, y0_inv)
-                    if Osde.check_cossim_source(NOISE_SUBSTEP_COSSIM_SOURCE):
-                        noise = rk.noise_sampler(sigma=sub_sigma, sigma_next=sub_sigma_next) 
-                        noise_osde = Osde.get_ortho_noise(noise, prev_noises, max_iter=noise_substep_cossim_max_iter, max_score=noise_substep_cossim_max_score, NOISE_COSSIM_SOURCE=NOISE_SUBSTEP_COSSIM_SOURCE)
-                        x_[row+1] = sub_alpha_ratio * x_[row+1] + sub_sigma_up * noise_osde * s_noise
-                    elif noise_substep_cossim_flag:
-                        x_[row+1] = handle_tiled_etc_noise_steps(x_0, x_[row+1], x_prenoise, x_init, eps_tmp, data_tmp, y0, y0_inv, row, rk_type, rk, sub_sigma_up, s_[row-1], s_[row], sub_alpha_ratio, s_noise, substep_noise_mode, SDE_NOISE_EXTERNAL, sde_noise_t,
-                            NOISE_SUBSTEP_COSSIM_SOURCE, NOISE_SUBSTEP_COSSIM_MODE, noise_substep_cossim_tile_size, noise_substep_cossim_iterations, extra_options)
-                    else:
-                        x_[row+1] = rk.add_noise_post(x_[row+1], sub_sigma_up, sub_sigma, sub_sigma_next, sub_alpha_ratio, s_noise, substep_noise_mode, SDE_NOISE_EXTERNAL, sde_noise_t)
-                
-                
-                # MODEL CALL
-                if step < guide_skip_steps:
-                    eps_row, eps_row_inv = get_guide_epsilon_substep(x_0, x_, y0, y0_inv, s_, row, rk_type)
-                    #eps_[row] = lgw_mask * eps_row   +   lgw_mask_inv * eps_row_inv
-                    eps_[row] = eps_row
-                else:
-                    debug_cuda_cleanup(cuda_sync_a_flag, cuda_empty_a_flag, cuda_gc_a_flag)
-                    eps_[row], data_[row] = rk(x_0, x_[row+1], s_[row], h, **extra_args)   
-                    debug_cuda_cleanup(cuda_sync_b_flag, cuda_empty_b_flag, cuda_gc_b_flag)
-                    
-                    if extra_options_flag("rk_linear_straight", extra_options):
-                        eps_[row] = (x_0 - data_[row]) / sigma
-                    if sub_sigma_up > 0 and not RK_Method.is_exponential(rk_type):
-                        eps_[row] = (x_0 - data_[row]) / sigma
+                        if rk_linear_straight_flag:
+                            eps_[row] = (x_0 - data_[row]) / sigma
+                        if sub_sigma_up > 0 and not RK_Method.is_exponential(rk_type):
+                            eps_[row] = (x_0 - data_[row]) / sigma
+                    if row > 0 and exim_iter <= explicit_implicit_steps:
+                        eps_[row-1] = eps_[row]
 
 
-                # GUIDES 
-                eps_, x_ = LG.process_guides_substep(x_0, x_, eps_, data_, row, step, sigma, sigma_next, sigma_down, s_, unsample_resample_scale, rk, rk_type, extra_options, frame_weights)
+                    # GUIDES 
+                    eps_, x_ = LG.process_guides_substep(x_0, x_, eps_, data_, row, step, sigma, sigma_next, sigma_down, s_, unsample_resample_scale, rk, rk_type, extra_options, frame_weights)
 
 
             x = x_0 + h * rk.b_k_sum(eps_, 0)
@@ -464,7 +470,7 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
                 x = LG.process_guides_poststep(x, denoised, eps, step, extra_options)
 
 
-        if extra_options_flag("eps_preview", extra_options):
+        if eps_preview_flag:
             callback({'x': x, 'i': step, 'sigma': sigma, 'sigma_next': sigma_next, 'denoised': eps_[0].to(torch.float32)}) if callback is not None else None
         else:
             callback({'x': x, 'i': step, 'sigma': sigma, 'sigma_next': sigma_next, 'denoised': data_[0].to(torch.float32)}) if callback is not None else None
@@ -477,18 +483,24 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
                 sde_noise_t = sde_noise[step]
                 
         if sigma_up > 0:
+            if implicit_steps==0:
+                rk_or_irk = rk
+                rk_or_irk_type = rk_type
+            else:
+                rk_or_irk = irk
+                rk_or_irk_type = irk_type
             Osde = NoiseStepHandlerOSDE(x, eps, denoised, x_init, y0, y0_inv)
             if Osde.check_cossim_source(NOISE_COSSIM_SOURCE):
-                noise = rk.noise_sampler(sigma=sigma, sigma_next=sigma_next)
+                noise = rk_or_irk.noise_sampler(sigma=sigma, sigma_next=sigma_next)
                 noise_osde = Osde.get_ortho_noise(noise, prev_noises, max_iter=noise_cossim_max_iter, max_score=noise_cossim_max_score, NOISE_COSSIM_SOURCE=NOISE_COSSIM_SOURCE)
                 x = alpha_ratio * x + sigma_up * noise_osde * s_noise
             elif noise_cossim_flag:
                 x = handle_tiled_etc_noise_steps(x_0, x, x_prenoise, x_init, eps, denoised, y0, y0_inv, step, 
-                                 rk_type, rk, sigma_up, sigma, sigma_next, alpha_ratio, s_noise, noise_mode, SDE_NOISE_EXTERNAL, sde_noise_t,
+                                 rk_or_irk_type, rk_or_irk, sigma_up, sigma, sigma_next, alpha_ratio, s_noise, noise_mode, SDE_NOISE_EXTERNAL, sde_noise_t,
                                  NOISE_COSSIM_SOURCE, NOISE_COSSIM_MODE, noise_cossim_tile_size, noise_cossim_iterations,
                                  extra_options)
             else:
-                x = rk.add_noise_post(x, sigma_up, sigma, sigma_next, alpha_ratio, s_noise, noise_mode, SDE_NOISE_EXTERNAL, sde_noise_t)
+                x = rk_or_irk.add_noise_post(x, sigma_up, sigma, sigma_next, alpha_ratio, s_noise, noise_mode, SDE_NOISE_EXTERNAL, sde_noise_t)
 
         log("Data vs. y0 cossim score: ", get_cosine_similarity(data_[0], y0).item())
 

@@ -171,6 +171,8 @@ class LatentGuide:
                 lgw_mask_inv = lgw_mask_cossim_inv
             else:
                 return eps_, x_ 
+        else:
+            return eps_, x_ 
         
         if self.UNSAMPLE and RK_Method.is_exponential(rk_type):
             if not (extra_options_flag("disable_power_unsample", extra_options) or extra_options_flag("disable_power_resample", extra_options)):
