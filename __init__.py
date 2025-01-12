@@ -246,6 +246,11 @@ if flags["test_samplers"]:
         "rk_vpsde_csbw":  test_samplers.sample_rk_vpsde_csbw,
         "rk_momentum":  test_samplers.sample_rk_momentum,
         "rk_ralston_2s":  test_samplers.sample_rk_ralston_2s,
+        "rk_implicit_res_2s":  test_samplers.sample_rk_implicit_res_2s,
+        "res_multistep": test_samplers.sample_res_multistep,
+
+        "rk_implicit_euler":  test_samplers.sample_rk_implicit_euler,
+
 
 
 
