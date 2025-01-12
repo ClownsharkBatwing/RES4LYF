@@ -143,14 +143,14 @@ class RK_Method:
             return x
 
 
-    def set_coeff(self, rk_type, h, c1=0.0, c2=0.5, c3=1.0, stepcount=0, sigmas=None, sigma=None, sigma_down=None):
+    def set_coeff(self, rk_type, h, c1=0.0, c2=0.5, c3=1.0, stepcount=0, sigmas=None, sigma=None, sigma_down=None, extra_options=None):
         if rk_type == "default": 
             return
 
         sigma = sigmas[stepcount]
         sigma_next = sigmas[stepcount+1]
         
-        a, b, ci, multistep_stages, FSAL = get_rk_methods(rk_type, h, c1, c2, c3, self.h_prev, self.h_prev2, stepcount, sigmas, sigma, sigma_next, sigma_down)
+        a, b, ci, multistep_stages, FSAL = get_rk_methods(rk_type, h, c1, c2, c3, self.h_prev, self.h_prev2, stepcount, sigmas, sigma, sigma_next, sigma_down, extra_options)
         
         self.multistep_stages = multistep_stages
         
