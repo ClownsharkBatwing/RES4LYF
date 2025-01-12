@@ -2,10 +2,12 @@ import re
 import torch
 from comfy.samplers import SCHEDULER_NAMES
 
+def filter_comments(extra_options):
+    return "\n".join(line for line in extra_options.splitlines() if not line.strip().startswith("#"))
 
 def get_extra_options_kv(key, default, extra_options):
-
-    match = re.search(rf"{key}\s*=\s*([a-zA-Z0-9_.+-]+)", extra_options)
+    extra_options = filter_comments(extra_options)
+    match = re.search(rf"{key}\s*=\\s*([a-zA-Z0-9_.+-]+)", extra_options)
     if match:
         value = match.group(1)
     else:
@@ -14,6 +16,7 @@ def get_extra_options_kv(key, default, extra_options):
 
 
 def extra_options_flag(flag, extra_options):
+    extra_options = filter_comments(extra_options)
     return bool(re.search(rf"{flag}", extra_options))
 
 
