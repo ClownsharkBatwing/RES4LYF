@@ -5,7 +5,6 @@ import re
 import copy
 
 from tqdm.auto import trange
-import gc
 
 import comfy.model_patcher
 
@@ -35,6 +34,7 @@ def debug_cuda_cleanup(doSync=False, doEmpty=False, doGC=False):
     if doEmpty:
         torch.cuda.empty_cache()
     if doGC:
+        import gc
         gc.collect()
 # End debugging code
 
