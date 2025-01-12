@@ -1444,8 +1444,8 @@ def get_rk_methods(rk_type, h, c1=0.0, c2=0.5, c3=1.0, h_prev=None, h_prev2=None
         case "irk_exp_diag_2s":
             lam = (1 - torch.exp(-c1 * h)) / h
             a2_1 = ( torch.exp(c2*h) - torch.exp(c1*h))    /    (h * torch.exp(2*c1*h))
-            b1 = (1 + c2*h + torch.exp(h) * (-1 + h - c2 *h))   /   (  (c1-c2) * h**2 * torch.exp(c1*h))
-            b2 = -(1 + c1*h - torch.exp(h) * (1-h+c1*h)) /  (   (c1-c2) * h**2 * torch.exp(c2*h))
+            b1 =  (1 + c2*h + torch.exp(h) * (-1 + h - c2*h)) / ((c1-c2) * h**2 * torch.exp(c1*h))
+            b2 = -(1 + c1*h - torch.exp(h) * ( 1 - h + c1*h)) / ((c1-c2) * h**2 * torch.exp(c2*h))
 
             a = [
                     [lam, 0],

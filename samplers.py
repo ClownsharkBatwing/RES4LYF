@@ -632,10 +632,8 @@ class ClownSampler:
                 unsample_resample_scales = unsample_resample_scales_override
                 
             noise_mode_sde_substep = "hard"
-            if RK_Method.is_exponential(sampler_name):
-                eta_substep=0.5
-            else:
-                eta_substep=0.0
+            
+            eta_substep=0.5
 
             sampler = comfy.samplers.ksampler("rk", {"eta": eta, "eta_var": eta_var, "s_noise": s_noise, "d_noise": d_noise, "alpha": alpha_sde, "k": k_sde, "c1": c1, "c2": c2, "c3": c3, "cfgpp": cfgpp, 
                                                     "noise_sampler_type": noise_type_sde, "noise_mode": noise_mode_sde, "noise_seed": noise_seed_sde, "rk_type": sampler_name, "implicit_sampler_name": implicit_sampler_name,
