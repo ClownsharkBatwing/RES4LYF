@@ -848,14 +848,19 @@ def get_orthogonal(x, y):
 def get_orthogonal_noise_from_channelwise(*refs, max_iter=500, max_score=1e-15):
     noise, *refs = refs
     noise_tmp = noise.clone()
-    b,c,h,w = noise.shape
+    #b,c,h,w = noise.shape
+    if (noise.dim() == 4):
+        b,ch,h,w = noise.shape
+    elif (noise.dim() == 5):
+        b,ch,t,h,w = noise.shape
     
     for i in range(max_iter):
         noise_tmp = gram_schmidt_channels_optimized(noise_tmp, *refs)
         
         cossim_scores = []
         for ref in refs:
-            for c in range(noise.shape[-3]):
+            #for c in range(noise.shape[-3]):
+            for c in range(ch):
                 cossim_scores.append(get_cosine_similarity(noise_tmp[0][c], ref[0][c]).abs())
             cossim_scores.append(get_cosine_similarity(noise_tmp[0], ref[0]).abs())
             

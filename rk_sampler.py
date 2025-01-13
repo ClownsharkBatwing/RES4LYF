@@ -126,6 +126,8 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
 
     cfg_cw = float(get_extra_options_kv("cfg_cw", str(cfg_cw), extra_options))
     
+    MODEL_SAMPLING = model.inner_model.inner_model.model_sampling
+    
     s_in, s_one = x.new_ones([x.shape[0]]), x.new_ones([1])
     default_dtype = torch.float64
     max_steps=10000
@@ -146,6 +148,8 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
                 sigma_up_total += sigmas[i+1]
             eta = eta / sigma_up_total
 
+    #if implicit_sampler_name in ("none", "explicit_diagonal"):
+    #    irk_type = "euler"
     irk_type = implicit_sampler_name
     if implicit_sampler_name in ("explicit_full", "explicit_diagonal", "none"):
         irk_type = rk_type
@@ -270,19 +274,20 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
                         
 
                     # NOISE ADD
-                    if (row > 0) and (sub_sigma_up > 0) and ((SUBSTEP_SKIP_LAST == False) or (row < rk.rows - rk.multistep_stages - 1)):
-                        data_tmp = denoised_prev if data_[row-1].sum() == 0 else data_[row-1]
-                        eps_tmp  = eps_prev      if  eps_[row-1].sum() == 0 else eps_ [row-1]
-                        Osde = NoiseStepHandlerOSDE(x_[row+1], eps_tmp, data_tmp, x_init, y0, y0_inv)
-                        if Osde.check_cossim_source(NOISE_SUBSTEP_COSSIM_SOURCE):
-                            noise = rk.noise_sampler(sigma=sub_sigma, sigma_next=sub_sigma_next) 
-                            noise_osde = Osde.get_ortho_noise(noise, prev_noises, max_iter=noise_substep_cossim_max_iter, max_score=noise_substep_cossim_max_score, NOISE_COSSIM_SOURCE=NOISE_SUBSTEP_COSSIM_SOURCE)
-                            x_[row+1] = sub_alpha_ratio * x_[row+1] + sub_sigma_up * noise_osde * s_noise
-                        elif extra_options_flag("noise_substep_cossim", extra_options):
-                            x_[row+1] = handle_tiled_etc_noise_steps(x_0, x_[row+1], x_prenoise, x_init, eps_tmp, data_tmp, y0, y0_inv, row, rk_type, rk, sub_sigma_up, s_[row-1], s_[row], sub_alpha_ratio, s_noise, substep_noise_mode, SDE_NOISE_EXTERNAL, sde_noise_t,
-                                NOISE_SUBSTEP_COSSIM_SOURCE, NOISE_SUBSTEP_COSSIM_MODE, noise_substep_cossim_tile_size, noise_substep_cossim_iterations, extra_options)
-                        else:
-                            x_[row+1] = rk.add_noise_post(x_[row+1], sub_sigma_up, sub_sigma, sub_sigma_next, sub_alpha_ratio, s_noise, substep_noise_mode, SDE_NOISE_EXTERNAL, sde_noise_t)
+                    if isinstance(MODEL_SAMPLING, comfy.model_sampling.CONST) == True   or   (isinstance(MODEL_SAMPLING, comfy.model_sampling.CONST) == False and noise_mode != "hard"):
+                        if (row > 0) and (sub_sigma_up > 0) and ((SUBSTEP_SKIP_LAST == False) or (row < rk.rows - rk.multistep_stages - 1)):
+                            data_tmp = denoised_prev if data_[row-1].sum() == 0 else data_[row-1]
+                            eps_tmp  = eps_prev      if  eps_[row-1].sum() == 0 else eps_ [row-1]
+                            Osde = NoiseStepHandlerOSDE(x_[row+1], eps_tmp, data_tmp, x_init, y0, y0_inv)
+                            if Osde.check_cossim_source(NOISE_SUBSTEP_COSSIM_SOURCE):
+                                noise = rk.noise_sampler(sigma=sub_sigma, sigma_next=sub_sigma_next) 
+                                noise_osde = Osde.get_ortho_noise(noise, prev_noises, max_iter=noise_substep_cossim_max_iter, max_score=noise_substep_cossim_max_score, NOISE_COSSIM_SOURCE=NOISE_SUBSTEP_COSSIM_SOURCE)
+                                x_[row+1] = sub_alpha_ratio * x_[row+1] + sub_sigma_up * noise_osde * s_noise
+                            elif extra_options_flag("noise_substep_cossim", extra_options):
+                                x_[row+1] = handle_tiled_etc_noise_steps(x_0, x_[row+1], x_prenoise, x_init, eps_tmp, data_tmp, y0, y0_inv, row, rk_type, rk, sub_sigma_up, s_[row-1], s_[row], sub_alpha_ratio, s_noise, substep_noise_mode, SDE_NOISE_EXTERNAL, sde_noise_t,
+                                    NOISE_SUBSTEP_COSSIM_SOURCE, NOISE_SUBSTEP_COSSIM_MODE, noise_substep_cossim_tile_size, noise_substep_cossim_iterations, extra_options)
+                            else:
+                                x_[row+1] = rk.add_noise_post(x_[row+1], sub_sigma_up, sub_sigma, sub_sigma_next, sub_alpha_ratio, s_noise, substep_noise_mode, SDE_NOISE_EXTERNAL, sde_noise_t)
                     
                     
                     # MODEL CALL
@@ -337,20 +342,21 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
                     # UPDATE
                     x_[row+1] = x_0 + h_new_irk * irk.a_k_sum(eps_, row)
                     
-                    # NOISE ADD                    
-                    if (row > 0) and (sub_sigma_up > 0) and ((SUBSTEP_SKIP_LAST == False) or (row < irk.rows - irk.multistep_stages - 1)):
-                        data_tmp = denoised_prev if data_[row-1].sum() == 0 else data_[row-1]
-                        eps_tmp  = eps_prev      if  eps_[row-1].sum() == 0 else eps_ [row-1]
-                        Osde = NoiseStepHandlerOSDE(x_[row+1], eps_tmp, data_tmp, x_init, y0, y0_inv)
-                        if Osde.check_cossim_source(NOISE_SUBSTEP_COSSIM_SOURCE):
-                            noise = irk.noise_sampler(sigma=sub_sigma, sigma_next=sub_sigma_next) 
-                            noise_osde = Osde.get_ortho_noise(noise, prev_noises, max_iter=noise_substep_cossim_max_iter, max_score=noise_substep_cossim_max_score, NOISE_COSSIM_SOURCE=NOISE_SUBSTEP_COSSIM_SOURCE)
-                            x_[row+1] = sub_alpha_ratio * x_[row+1] + sub_sigma_up * noise_osde * s_noise
-                        elif extra_options_flag("noise_substep_cossim", extra_options):
-                            x_[row+1] = handle_tiled_etc_noise_steps(x_0, x_[row+1], x_prenoise, x_init, eps_tmp, data_tmp, y0, y0_inv, row, 
-                                irk_type, irk, sub_sigma_up, s_irk[row-1], s_irk[row], sub_alpha_ratio, s_noise, substep_noise_mode, SDE_NOISE_EXTERNAL, sde_noise_t,
-                                NOISE_SUBSTEP_COSSIM_SOURCE, NOISE_SUBSTEP_COSSIM_MODE, noise_substep_cossim_tile_size, noise_substep_cossim_iterations,
-                                extra_options)
+                    # NOISE ADD              
+                    if isinstance(MODEL_SAMPLING, comfy.model_sampling.CONST) == True   or   (isinstance(MODEL_SAMPLING, comfy.model_sampling.CONST) == False and noise_mode != "hard"):      
+                        if (row > 0) and (sub_sigma_up > 0) and ((SUBSTEP_SKIP_LAST == False) or (row < irk.rows - irk.multistep_stages - 1)):
+                            data_tmp = denoised_prev if data_[row-1].sum() == 0 else data_[row-1]
+                            eps_tmp  = eps_prev      if  eps_[row-1].sum() == 0 else eps_ [row-1]
+                            Osde = NoiseStepHandlerOSDE(x_[row+1], eps_tmp, data_tmp, x_init, y0, y0_inv)
+                            if Osde.check_cossim_source(NOISE_SUBSTEP_COSSIM_SOURCE):
+                                noise = irk.noise_sampler(sigma=sub_sigma, sigma_next=sub_sigma_next) 
+                                noise_osde = Osde.get_ortho_noise(noise, prev_noises, max_iter=noise_substep_cossim_max_iter, max_score=noise_substep_cossim_max_score, NOISE_COSSIM_SOURCE=NOISE_SUBSTEP_COSSIM_SOURCE)
+                                x_[row+1] = sub_alpha_ratio * x_[row+1] + sub_sigma_up * noise_osde * s_noise
+                            elif extra_options_flag("noise_substep_cossim", extra_options):
+                                x_[row+1] = handle_tiled_etc_noise_steps(x_0, x_[row+1], x_prenoise, x_init, eps_tmp, data_tmp, y0, y0_inv, row, 
+                                    irk_type, irk, sub_sigma_up, s_irk[row-1], s_irk[row], sub_alpha_ratio, s_noise, substep_noise_mode, SDE_NOISE_EXTERNAL, sde_noise_t,
+                                    NOISE_SUBSTEP_COSSIM_SOURCE, NOISE_SUBSTEP_COSSIM_MODE, noise_substep_cossim_tile_size, noise_substep_cossim_iterations,
+                                    extra_options)
                     else:
                         x_[row+1] = irk.add_noise_post(x_[row+1], sub_sigma_up, sub_sigma, sub_sigma_next, sub_alpha_ratio, s_noise, substep_noise_mode, SDE_NOISE_EXTERNAL, sde_noise_t)
                     
@@ -439,25 +445,26 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
             else:
                 sde_noise_t = sde_noise[step]
                 
-        if sigma_up > 0:
-            if implicit_steps==0:
-                rk_or_irk = rk
-                rk_or_irk_type = rk_type
-            else:
-                rk_or_irk = irk
-                rk_or_irk_type = irk_type
-            Osde = NoiseStepHandlerOSDE(x, eps, denoised, x_init, y0, y0_inv)
-            if Osde.check_cossim_source(NOISE_COSSIM_SOURCE):
-                noise = rk_or_irk.noise_sampler(sigma=sigma, sigma_next=sigma_next)
-                noise_osde = Osde.get_ortho_noise(noise, prev_noises, max_iter=noise_cossim_max_iter, max_score=noise_cossim_max_score, NOISE_COSSIM_SOURCE=NOISE_COSSIM_SOURCE)
-                x = alpha_ratio * x + sigma_up * noise_osde * s_noise
-            elif extra_options_flag("noise_cossim", extra_options):
-                x = handle_tiled_etc_noise_steps(x_0, x, x_prenoise, x_init, eps, denoised, y0, y0_inv, step, 
-                                 rk_or_irk_type, rk_or_irk, sigma_up, sigma, sigma_next, alpha_ratio, s_noise, noise_mode, SDE_NOISE_EXTERNAL, sde_noise_t,
-                                 NOISE_COSSIM_SOURCE, NOISE_COSSIM_MODE, noise_cossim_tile_size, noise_cossim_iterations,
-                                 extra_options)
-            else:
-                x = rk_or_irk.add_noise_post(x, sigma_up, sigma, sigma_next, alpha_ratio, s_noise, noise_mode, SDE_NOISE_EXTERNAL, sde_noise_t)
+        if isinstance(MODEL_SAMPLING, comfy.model_sampling.CONST) == True   or   (isinstance(MODEL_SAMPLING, comfy.model_sampling.CONST) == False and noise_mode != "hard"):
+            if sigma_up > 0:
+                if implicit_steps==0:
+                    rk_or_irk = rk
+                    rk_or_irk_type = rk_type
+                else:
+                    rk_or_irk = irk
+                    rk_or_irk_type = irk_type
+                Osde = NoiseStepHandlerOSDE(x, eps, denoised, x_init, y0, y0_inv)
+                if Osde.check_cossim_source(NOISE_COSSIM_SOURCE):
+                    noise = rk_or_irk.noise_sampler(sigma=sigma, sigma_next=sigma_next)
+                    noise_osde = Osde.get_ortho_noise(noise, prev_noises, max_iter=noise_cossim_max_iter, max_score=noise_cossim_max_score, NOISE_COSSIM_SOURCE=NOISE_COSSIM_SOURCE)
+                    x = alpha_ratio * x + sigma_up * noise_osde * s_noise
+                elif extra_options_flag("noise_cossim", extra_options):
+                    x = handle_tiled_etc_noise_steps(x_0, x, x_prenoise, x_init, eps, denoised, y0, y0_inv, step, 
+                                    rk_or_irk_type, rk_or_irk, sigma_up, sigma, sigma_next, alpha_ratio, s_noise, noise_mode, SDE_NOISE_EXTERNAL, sde_noise_t,
+                                    NOISE_COSSIM_SOURCE, NOISE_COSSIM_MODE, noise_cossim_tile_size, noise_cossim_iterations,
+                                    extra_options)
+                else:
+                    x = rk_or_irk.add_noise_post(x, sigma_up, sigma, sigma_next, alpha_ratio, s_noise, noise_mode, SDE_NOISE_EXTERNAL, sde_noise_t)
 
         if PRINT_DEBUG:
             print("Data vs. y0 cossim score: ", get_cosine_similarity(data_[0], y0).item())
@@ -529,19 +536,20 @@ def get_explicit_rk_step(rk, rk_type, x, LG, step, sigma, sigma_next, eta, eta_v
 
     #x = rk.add_noise_post(x, sigma_up, sigma, sigma_next, alpha_ratio, s_noise, noise_mode)
     
-    if sigma_up > 0:
-        Osde = NoiseStepHandlerOSDE(x, eps, denoised, x_init, y0, LG.y0_inv)
-        if Osde.check_cossim_source(NOISE_COSSIM_SOURCE):
-            noise = rk.noise_sampler(sigma=sigma, sigma_next=sigma_next)
-            noise_osde = Osde.get_ortho_noise(noise, [], max_iter=noise_cossim_max_iter, max_score=noise_cossim_max_score, NOISE_COSSIM_SOURCE=NOISE_COSSIM_SOURCE)
-            x = alpha_ratio * x + sigma_up * noise_osde * s_noise
-        elif extra_options_flag("noise_cossim", extra_options):
-            x = handle_tiled_etc_noise_steps(x_0, x, x_prenoise, x_init, eps, denoised, y0, LG.y0_inv, step, 
-                                rk_type, rk, sigma_up, sigma, sigma_next, alpha_ratio, s_noise, noise_mode, SDE_NOISE_EXTERNAL, sde_noise_t,
-                                NOISE_COSSIM_SOURCE, NOISE_COSSIM_MODE, noise_cossim_tile_size, noise_cossim_iterations,
-                                extra_options)
-        else:
-            x = rk.add_noise_post(x, sigma_up, sigma, sigma_next, alpha_ratio, s_noise, noise_mode, SDE_NOISE_EXTERNAL, sde_noise_t)
+    if isinstance(MODEL_SAMPLING, comfy.model_sampling.CONST) == True   or   (isinstance(MODEL_SAMPLING, comfy.model_sampling.CONST) == False and noise_mode != "hard"):
+        if sigma_up > 0:
+            Osde = NoiseStepHandlerOSDE(x, eps, denoised, x_init, y0, LG.y0_inv)
+            if Osde.check_cossim_source(NOISE_COSSIM_SOURCE):
+                noise = rk.noise_sampler(sigma=sigma, sigma_next=sigma_next)
+                noise_osde = Osde.get_ortho_noise(noise, [], max_iter=noise_cossim_max_iter, max_score=noise_cossim_max_score, NOISE_COSSIM_SOURCE=NOISE_COSSIM_SOURCE)
+                x = alpha_ratio * x + sigma_up * noise_osde * s_noise
+            elif extra_options_flag("noise_cossim", extra_options):
+                x = handle_tiled_etc_noise_steps(x_0, x, x_prenoise, x_init, eps, denoised, y0, LG.y0_inv, step, 
+                                    rk_type, rk, sigma_up, sigma, sigma_next, alpha_ratio, s_noise, noise_mode, SDE_NOISE_EXTERNAL, sde_noise_t,
+                                    NOISE_COSSIM_SOURCE, NOISE_COSSIM_MODE, noise_cossim_tile_size, noise_cossim_iterations,
+                                    extra_options)
+            else:
+                x = rk.add_noise_post(x, sigma_up, sigma, sigma_next, alpha_ratio, s_noise, noise_mode, SDE_NOISE_EXTERNAL, sde_noise_t)
 
     for ms in range(rk.multistep_stages):
         eps_ [rk.multistep_stages - ms] = eps_ [rk.multistep_stages - ms - 1]
