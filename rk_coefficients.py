@@ -735,6 +735,13 @@ def get_rk_methods(rk_type, h, c1=0.0, c2=0.5, c3=1.0, h_prev=None, h_prev2=None
     multistep_stages = 0
     multistep_mirror = False
     
+    if type(c1) == torch.Tensor:
+        c1 = c1.item()
+    if type(c2) == torch.Tensor:
+        c2 = c2.item()
+    if type(c3) == torch.Tensor:
+        c3 = c3.item()
+    
     if c1 == -1:
         c1 = random.uniform(0, 1)
     if c2 == -1:
@@ -761,7 +768,7 @@ def get_rk_methods(rk_type, h, c1=0.0, c2=0.5, c3=1.0, h_prev=None, h_prev2=None
         if h_prev is not None: 
             multistep_stages = 1
             multistep_mirror = True
-            c2 = -h_prev / h
+            c2 = (-h_prev / h).item()
             #rk_type = rk_type[:-2] + "2s"
         #else:
         #    rk_type = rk_type[:-2] + "2s"
@@ -771,8 +778,8 @@ def get_rk_methods(rk_type, h, c1=0.0, c2=0.5, c3=1.0, h_prev=None, h_prev2=None
         if h_prev2 is not None: 
             multistep_stages = 2
             multistep_mirror = True
-            c2 = -h_prev2 / h_prev
-            c3 = -h_prev / h
+            c2 = (-h_prev2 / h_prev).item()
+            c3 = (-h_prev / h).item()
             #rk_type = rk_type[:-2] + "3s"
     
     if rk_type in rk_coeff:
@@ -835,7 +842,7 @@ def get_rk_methods(rk_type, h, c1=0.0, c2=0.5, c3=1.0, h_prev=None, h_prev2=None
             ci = [0]
 
         case "res_2s":
-            c2 = 1/2
+            #c2 = 1/2
             c2 = float(get_extra_options_kv("c2", str(c2), extra_options))
 
             ci = [0, c2]
@@ -855,8 +862,8 @@ def get_rk_methods(rk_type, h, c1=0.0, c2=0.5, c3=1.0, h_prev=None, h_prev2=None
 
             
         case "res_3s":
-            c2 = 1/2
-            c3 = 1.0
+            #c2 = 1/2
+            #c3 = 1.0
             c2 = float(get_extra_options_kv("c2", str(c2), extra_options))
             c3 = float(get_extra_options_kv("c3", str(c3), extra_options))
             
@@ -1490,8 +1497,8 @@ def get_rk_methods(rk_type, h, c1=0.0, c2=0.5, c3=1.0, h_prev=None, h_prev2=None
     if rk_type.startswith("lob") == False:
         ci.append(1)
         
-    if multistep_mirror:
-        b = [sublist[::-1] for sublist in b]
+    #if multistep_mirror:
+    #    b = [sublist[::-1] for sublist in b]
         
     return a, b, ci, multistep_stages, FSAL
 
