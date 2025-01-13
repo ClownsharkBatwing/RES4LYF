@@ -68,6 +68,11 @@ RK_SAMPLER_NAMES = ["none",
 
 
 IRK_SAMPLER_NAMES = ["none",
+                    "explicit_diagonal", 
+                    "explicit_full",
+                    
+                    "irk_exp_diag_2s",
+                    
                     "gauss-legendre_2s",
                     "gauss-legendre_3s", 
                     "gauss-legendre_4s",
@@ -97,10 +102,6 @@ IRK_SAMPLER_NAMES = ["none",
                     
                     "crouzeix_2s",
                     "crouzeix_3s",
-                    
-                    "irk_exp_diag_2s",
-                    "use_explicit", 
-                    "use_explicit_as_diag"
                     ]
 
 alpha_crouzeix = (2/(3**0.5)) * math.cos(math.pi / 18)
@@ -734,6 +735,13 @@ def get_rk_methods(rk_type, h, c1=0.0, c2=0.5, c3=1.0, h_prev=None, h_prev2=None
     FSAL = False
     multistep_stages = 0
     
+    if type(c1) == torch.Tensor:
+        c1 = c1.item()
+    if type(c2) == torch.Tensor:
+        c2 = c2.item()
+    if type(c3) == torch.Tensor:
+        c3 = c3.item()
+    
     if c1 == -1:
         c1 = random.uniform(0, 1)
     if c2 == -1:
@@ -754,25 +762,22 @@ def get_rk_methods(rk_type, h, c1=0.0, c2=0.5, c3=1.0, h_prev=None, h_prev2=None
         else:
             rk_type = "deis"
             multistep_stages = order-1
-
     
     if rk_type[-2:] == "2m": #multistep method
+        rk_type = rk_type[:-2] + "2s"
         if h_prev is not None: 
             multistep_stages = 1
-            c2 = -h_prev / h
-            rk_type = rk_type[:-2] + "2s"
-        else:
-            rk_type = rk_type[:-2] + "2s"
+            c2 = (-h_prev / h).item()
             
     if rk_type[-2:] == "3m": #multistep method
+        rk_type = rk_type[:-2] + "3s"
         if h_prev2 is not None: 
             multistep_stages = 2
-            c2 = -h_prev2 / h_prev
-            c3 = -h_prev / h
-            rk_type = rk_type[:-2] + "3s"
+            c2 = (-h_prev2 / h_prev).item()
+            c3 = (-h_prev / h).item()
     
     if rk_type in rk_coeff:
-        #a, b, ci = copy.deepcopy(rk_coeff[rk_type])
+        a, b, ci = copy.deepcopy(rk_coeff[rk_type])
         a, b, ci = rk_coeff[rk_type]
         a = [row + [0] * (len(ci) - len(row)) for row in a]
 
@@ -831,7 +836,6 @@ def get_rk_methods(rk_type, h, c1=0.0, c2=0.5, c3=1.0, h_prev=None, h_prev2=None
             ci = [0]
 
         case "res_2s":
-            c2 = 1/2
             c2 = float(get_extra_options_kv("c2", str(c2), extra_options))
 
             ci = [0, c2]
@@ -851,8 +855,6 @@ def get_rk_methods(rk_type, h, c1=0.0, c2=0.5, c3=1.0, h_prev=None, h_prev2=None
 
             
         case "res_3s":
-            c2 = 1/2
-            c3 = 1.0
             c2 = float(get_extra_options_kv("c2", str(c2), extra_options))
             c3 = float(get_extra_options_kv("c3", str(c3), extra_options))
             
@@ -1481,10 +1483,10 @@ def get_rk_methods(rk_type, h, c1=0.0, c2=0.5, c3=1.0, h_prev=None, h_prev2=None
             ]
             ci = [c1, c2]
 
-
     ci = ci[:]
     if rk_type.startswith("lob") == False:
         ci.append(1)
+        
     return a, b, ci, multistep_stages, FSAL
 
 
