@@ -113,6 +113,7 @@ def get_ancestral_step_RF_hard(sigma_next, eta, sigma_max=1.0):
 def get_res4lyf_step_with_model(model, sigma, sigma_next, eta=0.0, eta_var=1.0, noise_mode="hard", h=None):
   
   h = -torch.log(sigma_next/sigma)
+  su, sd, alpha_ratio = torch.zeros_like(sigma), sigma_next.clone(), torch.ones_like(sigma)
   
   if has_nested_attr(model, "inner_model.inner_model.model_sampling"):
     model_sampling = model.inner_model.inner_model.model_sampling
