@@ -248,6 +248,8 @@ if flags["test_samplers"]:
         "rk_ralston_2s":  test_samplers.sample_rk_ralston_2s,
         "rk_implicit_res_2s":  test_samplers.sample_rk_implicit_res_2s,
         "res_multistep": test_samplers.sample_res_multistep,
+        "rk_res_2m": test_samplers.sample_rk_res_2m,
+
 
         "rk_implicit_euler":  test_samplers.sample_rk_implicit_euler,
 
