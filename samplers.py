@@ -356,7 +356,7 @@ class ClownSamplerAdvanced:
                     "d_noise": ("FLOAT", {"default": 1.0, "min": -10000, "max": 10000, "step":0.01, "tooltip": "Downscales the sigma schedule. Values around 0.98-0.95 can lead to a large boost in detail and paint textures."}),
                     "noise_seed_sde": ("INT", {"default": -1, "min": -1, "max": 0xffffffffffffffff}),
                     "sampler_name": (RK_SAMPLER_NAMES, {"default": "res_2m"}), 
-                    "implicit_sampler_name": (IRK_SAMPLER_NAMES, {"default": "gauss-legendre_2s"}), 
+                    "implicit_sampler_name": (IRK_SAMPLER_NAMES, {"default": "explicit_diagonal"}), 
                     "implicit_steps": ("INT", {"default": 0, "min": 0, "max": 10000}),
                      },
                 "optional": 
@@ -490,22 +490,6 @@ class ClownSamplerAdvanced:
 
 
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 class ClownSampler:
     @classmethod
     def INPUT_TYPES(s):
@@ -518,7 +502,7 @@ class ClownSampler:
                     "d_noise": ("FLOAT", {"default": 1.0, "min": -10000, "max": 10000, "step":0.01}),
                     "noise_seed_sde": ("INT", {"default": -1, "min": -1, "max": 0xffffffffffffffff}),
                     "sampler_name": (RK_SAMPLER_NAMES, {"default": "res_2m"}), 
-                    "implicit_sampler_name": (IRK_SAMPLER_NAMES, {"default": "gauss-legendre_2s"}), 
+                    "implicit_sampler_name": (IRK_SAMPLER_NAMES, {"default": "explicit_diagonal"}), 
                     "implicit_steps": ("INT", {"default": 0, "min": 0, "max": 10000}),
                      },
                 "optional": 
@@ -545,104 +529,27 @@ class ClownSampler:
                     guides=None, options=None, sde_noise=None,sde_noise_steps=1, 
                     extra_options="", automation=None, etas=None, s_noises=None,unsample_resample_scales=None, regional_conditioning_weights=None,frame_weights=None,eta_substep=0.0, noise_mode_sde_substep="hard",
                     ): 
-            if implicit_sampler_name == "none":
-                implicit_steps = 0 
-                implicit_sampler_name = "gauss-legendre_2s"
 
-            if noise_mode_sde == "none":
-                eta, eta_var = 0.0, 0.0
-                noise_mode_sde = "hard"
+        eta_substep = eta
+        noise_mode_sde_substep = noise_mode_sde
+        noise_type_sde_substep = noise_type_sde
+
+        sampler = ClownSamplerAdvanced().main(
+                noise_type_sde=noise_type_sde, noise_type_sde_substep=noise_type_sde_substep, noise_mode_sde=noise_mode_sde,
+             eta=eta, eta_var=eta_var, d_noise=d_noise, s_noise=s_noise, alpha_sde=alpha_sde, k_sde=k_sde, cfgpp=cfgpp, c1=c1, c2=c2, c3=c3, noise_seed_sde=noise_seed_sde, sampler_name=sampler_name, implicit_sampler_name=implicit_sampler_name,
+                    t_fn_formula=t_fn_formula, sigma_fn_formula=sigma_fn_formula, implicit_steps=implicit_steps,
+                    latent_guide=latent_guide, latent_guide_inv=latent_guide_inv, guide_mode=guide_mode, latent_guide_weights=latent_guide_weights, latent_guide_weights_inv=latent_guide_weights_inv, latent_guide_mask=latent_guide_mask, latent_guide_mask_inv=latent_guide_mask_inv, rescale_floor=rescale_floor, sigmas_override=sigmas_override, unsampler_type=unsampler_type,
+                    guides=guides, options=options, sde_noise=sde_noise,sde_noise_steps=sde_noise_steps, 
+                    extra_options=extra_options, automation=automation, etas=etas, s_noises=s_noises,unsample_resample_scales=unsample_resample_scales, regional_conditioning_weights=regional_conditioning_weights,frame_weights=frame_weights, eta_substep=eta_substep, noise_mode_sde_substep=noise_mode_sde_substep,
+                    )
         
-            default_dtype = torch.float64
-            max_steps = 10000
+        return (sampler, )
 
-            unsample_resample_scales_override = unsample_resample_scales
 
-            if options is not None:
-                noise_type_sde = options.get('noise_type_sde', noise_type_sde)
-                noise_mode_sde = options.get('noise_mode_sde', noise_mode_sde)
-                eta = options.get('eta', eta)
-                s_noise = options.get('s_noise', s_noise)
-                d_noise = options.get('d_noise', d_noise)
-                alpha_sde = options.get('alpha_sde', alpha_sde)
-                k_sde = options.get('k_sde', k_sde)
-                c1 = options.get('c1', c1)
-                c2 = options.get('c2', c2)
-                c3 = options.get('c3', c3)
-                t_fn_formula = options.get('t_fn_formula', t_fn_formula)
-                sigma_fn_formula = options.get('sigma_fn_formula', sigma_fn_formula)
-                unsampler_type = options.get('unsampler_type', unsampler_type)
-                frame_weights = options.get('frame_weights', frame_weights)
-                sde_noise = options.get('sde_noise', sde_noise)
-                sde_noise_steps = options.get('sde_noise_steps', sde_noise_steps)
 
-            noise_seed_sde = torch.initial_seed()+1 if noise_seed_sde < 0 else noise_seed_sde 
 
-            rescale_floor = extra_options_flag("rescale_floor", extra_options)
 
-            if automation is not None:
-                etas, s_noises, unsample_resample_scales = automation
-            etas = initialize_or_scale(etas, eta, max_steps).to(default_dtype)
-            etas = F.pad(etas, (0, max_steps), value=0.0)
-            s_noises = initialize_or_scale(s_noises, s_noise, max_steps).to(default_dtype)
-            s_noises = F.pad(s_noises, (0, max_steps), value=0.0)
-        
-            truncate_conditioning = extra_options_flag("truncate_conditioning", extra_options)
-            if truncate_conditioning == "true" or truncate_conditioning == "true_and_zero_neg":
-                if positive is not None:
-                    positive[0][0] = positive[0][0].clone().to(default_dtype)
-                    positive[0][1]["pooled_output"] = positive[0][1]["pooled_output"].clone().to(default_dtype)
-                if negative is not None:
-                    negative[0][0] = negative[0][0].clone().to(default_dtype)
-                    negative[0][1]["pooled_output"] = negative[0][1]["pooled_output"].clone().to(default_dtype)
-                c = []
-                for t in positive:
-                    d = t[1].copy()
-                    pooled_output = d.get("pooled_output", None)
-                    if pooled_output is not None:
-                        d["pooled_output"] = d["pooled_output"][:, :2048]
-                        n = [t[0][:, :154, :4096], d]
-                    c.append(n)
-                positive = c
-                
-                c = []
-                for t in negative:
-                    d = t[1].copy()
-                    pooled_output = d.get("pooled_output", None)
-                    if pooled_output is not None:
-                        if truncate_conditioning == "true_and_zero_neg":
-                            d["pooled_output"] = torch.zeros((1,2048), dtype=t[0].dtype, device=t[0].device)
-                            n = [torch.zeros((1,154,4096), dtype=t[0].dtype, device=t[0].device), d]
-                        else:
-                            d["pooled_output"] = d["pooled_output"][:, :2048]
-                            n = [t[0][:, :154, :4096], d]
-                    c.append(n)
-                negative = c
 
-            if sde_noise is None:
-                sde_noise = []
-            else:
-                sde_noise = copy.deepcopy(sde_noise)
-                for i in range(len(sde_noise)):
-                    sde_noise[i] = sde_noise[i].to('cuda')
-                    for j in range(sde_noise[i].shape[1]):
-                        sde_noise[i][0][j] = ((sde_noise[i][0][j] - sde_noise[i][0][j].mean()) / sde_noise[i][0][j].std()) #.to('cuda')
-                        
-            if unsample_resample_scales_override is not None:
-                unsample_resample_scales = unsample_resample_scales_override
-                
-            sampler = comfy.samplers.ksampler("rk", {"eta": eta, "eta_var": eta_var, "s_noise": s_noise, "d_noise": d_noise, "alpha": alpha_sde, "k": k_sde, "c1": c1, "c2": c2, "c3": c3, "cfgpp": cfgpp, 
-                                                    "noise_sampler_type": noise_type_sde, "noise_mode": noise_mode_sde, "noise_seed": noise_seed_sde, "rk_type": sampler_name, "implicit_sampler_name": implicit_sampler_name,
-                                                            "t_fn_formula": t_fn_formula, "sigma_fn_formula": sigma_fn_formula, "implicit_steps": implicit_steps,
-                                                            "latent_guide": latent_guide, "latent_guide_inv": latent_guide_inv, "mask": latent_guide_mask, "mask_inv": latent_guide_mask_inv,
-                                                            "latent_guide_weights": latent_guide_weights, "latent_guide_weights_inv": latent_guide_weights_inv, "guide_mode": guide_mode,
-                                                            "LGW_MASK_RESCALE_MIN": rescale_floor, "sigmas_override": sigmas_override, "sde_noise": sde_noise,
-                                                            "extra_options": extra_options,
-                                                            "etas": etas, "s_noises": s_noises, "unsample_resample_scales": unsample_resample_scales, "regional_conditioning_weights": regional_conditioning_weights,
-                                                            "guides": guides, "frame_weights": frame_weights, "eta_substep": eta_substep, "noise_mode_sde_substep": noise_mode_sde_substep,
-                                                            })
-
-            return (sampler, )
 
 
 
@@ -661,7 +568,7 @@ class ClownsharKSampler:
                     "noise_seed": ("INT", {"default": 0, "min": -1, "max": 0xffffffffffffffff}),
                     "sampler_mode": (['standard', 'unsample', 'resample'],),
                     "sampler_name": (RK_SAMPLER_NAMES, {"default": "res_2m"}), 
-                    "implicit_sampler_name": (IRK_SAMPLER_NAMES, {"default": "gauss-legendre_2s"}), 
+                    "implicit_sampler_name": (IRK_SAMPLER_NAMES, {"default": "explicit_diagonal"}), 
                     "scheduler": (get_res4lyf_scheduler_list(), {"default": "beta57"},),
                     "steps": ("INT", {"default": 30, "min": 1, "max": 10000}),
                     "implicit_steps": ("INT", {"default": 0, "min": 0, "max": 10000}),
@@ -697,19 +604,24 @@ class ClownsharKSampler:
                     t_fn_formula=None, sigma_fn_formula=None, implicit_steps=0,
                     latent_guide=None, latent_guide_inv=None, guide_mode="blend", latent_guide_weights=None, latent_guide_weights_inv=None, latent_guide_mask=None, latent_guide_mask_inv=None, rescale_floor=True, sigmas_override=None, unsampler_type="linear",
                     shift=3.0, base_shift=0.85, guides=None, options=None, sde_noise=None,sde_noise_steps=1, shift_scaling="exponential",
-                    extra_options="", automation=None, etas=None, s_noises=None,unsample_resample_scales=None, regional_conditioning_weights=None,
+                    extra_options="", automation=None, etas=None, s_noises=None,unsample_resample_scales=None, regional_conditioning_weights=None,frame_weights=None,
                     ): 
 
         noise_seed_sde = noise_seed + 1
+        
+        eta_substep = eta
+        noise_mode_sde_substep = noise_mode_sde
+        noise_type_sde_substep = noise_type_sde 
 
-        sampler = ClownSampler().main(
-                noise_type_sde, noise_type_sde, noise_mode_sde,  #placeholder for substep
-                eta, eta_var, d_noise, s_noise, alpha_sde, k_sde, cfgpp, c1, c2, c3, noise_seed_sde, sampler_name, implicit_sampler_name,
-                t_fn_formula, sigma_fn_formula, implicit_steps,
-                latent_guide, latent_guide_inv, guide_mode, latent_guide_weights, latent_guide_weights_inv, latent_guide_mask, latent_guide_mask_inv, rescale_floor, sigmas_override, unsampler_type,
-                guides, options, sde_noise, sde_noise_steps, 
-                extra_options, automation, etas, s_noises, unsample_resample_scales, regional_conditioning_weights, None, 0.0, noise_mode_sde) #placehoolder for substep # None for frame_weights, 0.0 for eta_substep
-            
+        sampler = ClownSamplerAdvanced().main(
+                noise_type_sde=noise_type_sde, noise_type_sde_substep=noise_type_sde_substep, noise_mode_sde=noise_mode_sde,
+             eta=eta, eta_var=eta_var, d_noise=d_noise, s_noise=s_noise, alpha_sde=alpha_sde, k_sde=k_sde, cfgpp=cfgpp, c1=c1, c2=c2, c3=c3, noise_seed_sde=noise_seed_sde, sampler_name=sampler_name, implicit_sampler_name=implicit_sampler_name,
+                    t_fn_formula=t_fn_formula, sigma_fn_formula=sigma_fn_formula, implicit_steps=implicit_steps,
+                    latent_guide=latent_guide, latent_guide_inv=latent_guide_inv, guide_mode=guide_mode, latent_guide_weights=latent_guide_weights, latent_guide_weights_inv=latent_guide_weights_inv, latent_guide_mask=latent_guide_mask, latent_guide_mask_inv=latent_guide_mask_inv, rescale_floor=rescale_floor, sigmas_override=sigmas_override, unsampler_type=unsampler_type,
+                    guides=guides, options=options, sde_noise=sde_noise,sde_noise_steps=sde_noise_steps, 
+                    extra_options=extra_options, automation=automation, etas=etas, s_noises=s_noises,unsample_resample_scales=unsample_resample_scales, regional_conditioning_weights=regional_conditioning_weights,frame_weights=frame_weights, eta_substep=eta_substep, noise_mode_sde_substep=noise_mode_sde_substep,
+                    )
+
         return SharkSampler().main(
             model, cfg, sampler_mode, scheduler, steps, denoise, denoise_alt,
             noise_type_init, latent_image, 
@@ -718,7 +630,6 @@ class ClownsharKSampler:
             d_noise, alpha_init, k_init, cfgpp, noise_seed,
             shift, base_shift, options, sde_noise, sde_noise_steps, shift_scaling,
             extra_options)
-
 
 
 

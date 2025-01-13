@@ -86,7 +86,7 @@ def prepare_step_to_sigma_zero(rk, irk, rk_type, irk_type, model, x, extra_optio
 
 
 @torch.no_grad()
-def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, noise_sampler_type="gaussian", noise_mode="hard", noise_seed=-1, rk_type="res_2m", implicit_sampler_name="use_explicit",
+def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, noise_sampler_type="gaussian", noise_mode="hard", noise_seed=-1, rk_type="res_2m", implicit_sampler_name="explicit_full",
               sigma_fn_formula="", t_fn_formula="",
                   eta=0.0, eta_var=0.0, s_noise=1., d_noise=1., alpha=-1.0, k=1.0, scale=0.1, c1=0.0, c2=0.5, c3=1.0, implicit_steps=0, reverse_weight=0.0,
                   latent_guide=None, latent_guide_inv=None, latent_guide_weight=0.0, latent_guide_weight_inv=0.0, latent_guide_weights=None, latent_guide_weights_inv=None, guide_mode="", 
@@ -147,12 +147,12 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
             eta = eta / sigma_up_total
 
 
-    irk_type = implicit_sampler_name
-    if irk_type in ("use_explicit", "use_explicit_as_diag"):
+    irk_type = "euler"
+    if implicit_sampler_name in ("explicit_full"):
         irk_type = rk_type
     
-    rk_type = "euler" if implicit_steps > 0 else rk_type
-    rk_type = "euler" if implicit_steps > 0 and implicit_sampler_name == "use_explicit" else rk_type
+    #rk_type = "euler" if implicit_steps > 0 else rk_type
+    rk_type = "euler" if implicit_steps > 0 and implicit_sampler_name == "explicit_full" else rk_type
     rk_type = get_extra_options_kv("rk_type", rk_type, extra_options)
     print("rk_type: ", rk_type)
 
@@ -240,11 +240,11 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
             else:
                 eps_ [rk.multistep_stages - ms] =  (x_0 - data_ [rk.multistep_stages - ms]) / sigma
 
-        explicit_implicit_steps = int(get_extra_options_kv("explicit_implicit_steps", int("0"), extra_options))
+        #explicit_implicit_steps = int(get_extra_options_kv("explicit_implicit_steps", int("0"), extra_options))
 
-        if implicit_steps == 0: 
+        if implicit_steps == 0 or implicit_sampler_name == "explicit_diagonal": 
             for row in range(rk.rows - rk.multistep_stages):
-                for exim_iter in range(explicit_implicit_steps+1):
+                for exim_iter in range(implicit_steps+1):
                     sub_sigma_up, sub_sigma, sub_sigma_next, sub_sigma_down, sub_alpha_ratio = 0, s_[row], s_[row+1], s_[row+1], 1
                         
                     if (substep_eta_final_step < 0 and step == len(sigmas)-1+substep_eta_final_step)   or   (substep_eta_final_step > 0 and step > substep_eta_final_step):
@@ -297,7 +297,7 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
                             eps_[row] = (x_0 - data_[row]) / sigma
                         if sub_sigma_up > 0 and not RK_Method.is_exponential(rk_type):
                             eps_[row] = (x_0 - data_[row]) / sigma
-                    if row > 0 and exim_iter <= explicit_implicit_steps:
+                    if row > 0 and exim_iter <= implicit_steps:
                         eps_[row-1] = eps_[row]
 
 
@@ -314,7 +314,7 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
 
 
         # DIAGONALLY IMPLICIT
-        elif implicit_sampler_name=="use_explicit_as_diag" or any(irk_type.startswith(prefix) for prefix in {"crouzeix", "irk_exp_diag", "pareschi_russo", "kraaijevanger_spijker", "qin_zhang",}):
+        elif implicit_sampler_name=="explicit_diagonal_alt" or any(irk_type.startswith(prefix) for prefix in {"crouzeix", "irk_exp_diag", "pareschi_russo", "kraaijevanger_spijker", "qin_zhang",}):
             s_irk = [torch.full_like(s_irk[0], sigma.item())] + s_irk
 
             for row in range(irk.rows - irk.multistep_stages):

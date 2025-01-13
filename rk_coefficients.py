@@ -68,6 +68,11 @@ RK_SAMPLER_NAMES = ["none",
 
 
 IRK_SAMPLER_NAMES = ["none",
+                    "explicit_diagonal", 
+                    "explicit_full",
+                    
+                    "irk_exp_diag_2s",
+                    
                     "gauss-legendre_2s",
                     "gauss-legendre_3s", 
                     "gauss-legendre_4s",
@@ -97,10 +102,6 @@ IRK_SAMPLER_NAMES = ["none",
                     
                     "crouzeix_2s",
                     "crouzeix_3s",
-                    
-                    "irk_exp_diag_2s",
-                    "use_explicit", 
-                    "use_explicit_as_diag"
                     ]
 
 alpha_crouzeix = (2/(3**0.5)) * math.cos(math.pi / 18)
