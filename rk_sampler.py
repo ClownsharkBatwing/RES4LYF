@@ -146,9 +146,8 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
                 sigma_up_total += sigmas[i+1]
             eta = eta / sigma_up_total
 
-
-    irk_type = "euler"
-    if implicit_sampler_name in ("explicit_full"):
+    irk_type = implicit_sampler_name
+    if implicit_sampler_name in ("explicit_full", "explicit_diagonal", "none"):
         irk_type = rk_type
     
     #rk_type = "euler" if implicit_steps > 0 else rk_type
