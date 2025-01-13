@@ -78,6 +78,8 @@ class SharkSampler:
                     extra_options="", 
                     ): 
             # blame comfy here
+
+            sampler = copy.deepcopy(sampler)
             
             default_dtype = getattr(torch, get_extra_options_kv("default_dtype", "float64", extra_options), torch.float64)   
                      
