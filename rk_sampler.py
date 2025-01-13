@@ -233,7 +233,8 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
                 
 
         x_prenoise = x.clone()
-        x_[0] = rk.add_noise_pre(x, sigma_up, sigma, sigma_next, alpha_ratio, s_noise, noise_mode, SDE_NOISE_EXTERNAL, sde_noise_t) #y0, lgw, sigma_down are currently unused
+        if sigma_up > 0:
+            x_[0] = rk.add_noise_pre(x, sigma_up, sigma, sigma_next, alpha_ratio, s_noise, noise_mode, SDE_NOISE_EXTERNAL, sde_noise_t) #y0, lgw, sigma_down are currently unused
         
         x_0 = x_[0].clone()
         
