@@ -464,8 +464,14 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
             print("Data vs. y0 cossim score: ", get_cosine_similarity(data_[0], y0).item())
 
         for ms in range(rk.multistep_stages):
-            eps_ [rk.multistep_stages - ms] = eps_ [rk.multistep_stages - ms - 1]
+            if RK_Method.is_exponential(rk_type):
+                eps_[rk.multistep_stages - ms] = data_[rk.multistep_stages - ms - 1] - x
+            else:
+                eps_[rk.multistep_stages - ms] = (x - data_[rk.multistep_stages - ms - 1]) / sigma
+                
+            #eps_ [rk.multistep_stages - ms] = eps_ [rk.multistep_stages - ms - 1]
             data_[rk.multistep_stages - ms] = data_[rk.multistep_stages - ms - 1]
+                
         eps_ [0] = torch.zeros_like(eps_ [0])
         data_[0] = torch.zeros_like(data_[0])
         
