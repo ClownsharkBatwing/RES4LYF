@@ -543,7 +543,7 @@ class ClownSampler:
                     extra_options=extra_options, automation=automation, etas=etas, s_noises=s_noises,unsample_resample_scales=unsample_resample_scales, regional_conditioning_weights=regional_conditioning_weights,frame_weights=frame_weights, eta_substep=eta_substep, noise_mode_sde_substep=noise_mode_sde_substep,
                     )
         
-        return (sampler, )
+        return sampler
 
 
 
