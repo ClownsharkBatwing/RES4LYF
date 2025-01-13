@@ -249,12 +249,39 @@ class LatentGuide:
                 elif guide_mode == "epsilon_projection":
                     eps_row, eps_row_inv = get_guide_epsilon_substep(x_0, x_, y0, y0_inv, s_, row, rk_type)
                     
-                    eps_row_lerp = eps_[row]   +   lgw_mask * (eps_row-eps_[row])   +   lgw_mask_inv * (eps_row_inv-eps_[row])
-                    
-                    eps_collinear_eps_lerp = get_collinear(eps_[row], eps_row_lerp)  
-                    eps_lerp_ortho_eps     = get_orthogonal(eps_row_lerp, eps_[row])  
-                    
-                    eps_[row] = eps_collinear_eps_lerp + eps_lerp_ortho_eps
+                    if extra_options_flag("eps_proj_v2", extra_options):
+                        
+                        eps_row_lerp_fg = eps_[row]   +   lgw_mask * (eps_row-eps_[row])
+                        eps_row_lerp_bg = eps_[row]   +   lgw_mask_inv * (eps_row_inv-eps_[row])
+                        
+                        eps_collinear_eps_lerp_fg = get_collinear(eps_[row], eps_row_lerp_fg)  
+                        eps_lerp_ortho_eps_fg     = get_orthogonal(eps_row_lerp_fg, eps_[row])  
+                        
+                        eps_collinear_eps_lerp_bg = get_collinear(eps_[row], eps_row_lerp_bg)  
+                        eps_lerp_ortho_eps_bg     = get_orthogonal(eps_row_lerp_bg, eps_[row])  
+                        
+                        eps_[row] = eps_[row] + lgw_mask * (eps_collinear_eps_lerp_fg + eps_lerp_ortho_eps_fg - eps_[row]) + lgw_mask_inv * (eps_collinear_eps_lerp_bg + eps_lerp_ortho_eps_bg - eps_[row]) 
+                        
+                    if extra_options_flag("eps_proj_v3", extra_options):
+                        
+                        # eps_row_lerp_fg = eps_[row]   +   lgw_mask * (eps_row-eps_[row])
+                        #eps_row_lerp_bg = eps_[row]   +   lgw_mask_inv * (eps_row_inv-eps_[row])
+                        
+                        eps_collinear_eps_lerp_fg = get_collinear(eps_[row], eps_row)  
+                        eps_lerp_ortho_eps_fg     = get_orthogonal(eps_row, eps_[row])  
+                        
+                        eps_collinear_eps_lerp_bg = get_collinear(eps_[row], eps_row_inv)  
+                        eps_lerp_ortho_eps_bg     = get_orthogonal(eps_row_inv, eps_[row])  
+                        
+                        eps_[row] = eps_[row] + lgw_mask * (eps_collinear_eps_lerp_fg + eps_lerp_ortho_eps_fg - eps_[row]) + lgw_mask_inv * (eps_collinear_eps_lerp_bg + eps_lerp_ortho_eps_bg - eps_[row]) 
+                        
+                    else:
+                        eps_row_lerp = eps_[row]   +   lgw_mask * (eps_row-eps_[row])   +   lgw_mask_inv * (eps_row_inv-eps_[row])
+                        
+                        eps_collinear_eps_lerp = get_collinear(eps_[row], eps_row_lerp)  
+                        eps_lerp_ortho_eps     = get_orthogonal(eps_row_lerp, eps_[row])  
+                        
+                        eps_[row] = eps_collinear_eps_lerp + eps_lerp_ortho_eps
 
 
                 elif extra_options_flag("disable_lgw_scaling", extra_options):
