@@ -313,8 +313,8 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
                     if extra_options_flag("explicit_diagonal_eps_proj_factors", extra_options):
                         value_str = get_extra_options_list("explicit_diagonal_eps_proj_factors", "", extra_options)
                         float_list = [float(item.strip()) for item in value_str.split(',') if item.strip()]
-                        eps_[row] = (1-float_list[row]) * eps_[row]   +   float_list[row] * eps_row_tmp
-                        x_[row+1] = (1-float_list[row]) * x_[row+1]   +   float_list[row] * x_row_tmp
+                        eps_[row] = (1-float_list[exim_iter]) * eps_[row]   +   float_list[exim_iter] * eps_row_tmp
+                        x_[row+1] = (1-float_list[exim_iter]) * x_[row+1]   +   float_list[exim_iter] * x_row_tmp
 
                     if row > 0 and exim_iter <= implicit_steps:
                         eps_[row-1] = eps_[row]
