@@ -265,7 +265,7 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
                         value_str = get_extra_options_list("noise_eta_substep_factors", "", extra_options)
                         nsef_list = [float(item.strip()) for item in value_str.split(',') if item.strip()]
                         nsef = nsef_list[row]
-                    if (exim_iter < implicit_steps) and rk_type.endswith("m") and step >= int(rk_type[-2]): 
+                    if (exim_iter > 0) and rk_type.endswith("m") and step >= int(rk_type[-2]): 
                         sub_sigma_up, sub_sigma, sub_sigma_down, sub_alpha_ratio = get_res4lyf_step_with_model(model, sigma, sigma_next, substep_eta*edsef*nsef, eta_var, substep_noise_mode)
                         sub_sigma_next = sigma_next
                     if (row > 0 and not extra_options_flag("disable_rough_noise", extra_options)): # and s_[row-1] >= s_[row]:
@@ -334,7 +334,7 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
                         #eps_[row] = (1-float_list[exim_iter]) * eps_[row]   +   float_list[exim_iter] * eps_row_tmp
                         #x_[row+1] = (1-float_list[exim_iter]) * x_[row+1]   +   float_list[exim_iter] * x_row_tmp
 
-                    if row > 0 and exim_iter <= implicit_steps:
+                    if row > 0 and exim_iter <= implicit_steps and implicit_steps > 0:
                         eps_[row-1] = eps_[row]
 
 
