@@ -265,7 +265,10 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
                         value_str = get_extra_options_list("noise_eta_substep_factors", "", extra_options)
                         nsef_list = [float(item.strip()) for item in value_str.split(',') if item.strip()]
                         nsef = nsef_list[row]
-                    if row > 0 and not extra_options_flag("disable_rough_noise", extra_options): # and s_[row-1] >= s_[row]:
+                    if (exim_iter < implicit_steps) and rk_type.endswith("m") and step >= int(rk_type[-2]): 
+                        sub_sigma_up, sub_sigma, sub_sigma_down, sub_alpha_ratio = get_res4lyf_step_with_model(model, sigma, sigma_next, substep_eta*edsef*nsef, eta_var, substep_noise_mode)
+                        sub_sigma_next = sigma_next
+                    if (row > 0 and not extra_options_flag("disable_rough_noise", extra_options)): # and s_[row-1] >= s_[row]:
                         sub_sigma_up, sub_sigma, sub_sigma_down, sub_alpha_ratio = get_res4lyf_step_with_model(model, s_[row-1], s_[row], substep_eta*edsef*nsef, eta_var, substep_noise_mode)
                         sub_sigma_next = s_[row]
                         
@@ -274,11 +277,15 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
                         eps_[row-1] *= 1 + substep_noise_scaling*(substep_noise_scaling_ratio-1)
 
                     h_new = h.clone()
-                    if row > 0 and sub_sigma_up > 0:
+                    if (step >= int(rk_type[-2]) and rk_type.endswith("m") and sub_sigma_up > 0) or (row > 0 and sub_sigma_up > 0):
                         if extra_options_flag("substep_eta_c_row_plus_one", extra_options):
                             h_new = (rk.h_fn(sub_sigma_down, sigma) / rk.c[row+1])[0]  
                         else:
-                            h_new = (rk.h_fn(sub_sigma_down, sigma) / rk.c[row])[0]   #used to be rk.c[row+1]
+                            if (exim_iter < implicit_steps) and rk_type.endswith("m") and step > 0:
+                                c_val = -rk.h_prev/h
+                                h_new = (rk.h_fn(sub_sigma_down, sigma)) / c_val
+                            else:   
+                                h_new = (rk.h_fn(sub_sigma_down, sigma) / rk.c[row])[0]   #used to be rk.c[row+1]
 
 
                     # UPDATE
@@ -287,7 +294,7 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
 
                     # NOISE ADD
                     if isinstance(MODEL_SAMPLING, comfy.model_sampling.CONST) == True   or   (isinstance(MODEL_SAMPLING, comfy.model_sampling.CONST) == False and noise_mode != "hard"):
-                        if (row > 0) and (sub_sigma_up > 0) and ((SUBSTEP_SKIP_LAST == False) or (row < rk.rows - rk.multistep_stages - 1)):
+                        if (exim_iter < implicit_steps and sub_sigma_up > 0) or ((row > 0) and (sub_sigma_up > 0) and ((SUBSTEP_SKIP_LAST == False) or (row < rk.rows - rk.multistep_stages - 1))):
                             data_tmp = denoised_prev if data_[row-1].sum() == 0 else data_[row-1]
                             eps_tmp  = eps_prev      if  eps_[row-1].sum() == 0 else eps_ [row-1]
                             Osde = NoiseStepHandlerOSDE(x_[row+1], eps_tmp, data_tmp, x_init, y0, y0_inv)
