@@ -36,8 +36,10 @@ def normalize_inputs(x, y0, y0_inv, guide_mode,  extra_options):
 
 
 class LatentGuide:
-    def __init__(self, guides, x, model, sigmas, UNSAMPLE, LGW_MASK_RESCALE_MIN, extra_options, device='cuda', dtype=torch.float64, max_steps=10000):
+    def __init__(self, guides, x, model, sigmas, UNSAMPLE, LGW_MASK_RESCALE_MIN, extra_options, device='cuda', offload_device='cpu', dtype=torch.float64, max_steps=10000):
         self.model    = model
+        self.device = device
+        self.offload_device = offload_device
         self.sigma_min = model.inner_model.inner_model.model_sampling.sigma_min.to(dtype)
         self.sigma_max = model.inner_model.inner_model.model_sampling.sigma_max.to(dtype)
         self.sigmas   = sigmas
@@ -136,7 +138,7 @@ class LatentGuide:
             
         x_, self.y0, self.y0_inv = normalize_inputs(x_, self.y0, self.y0_inv, self.guide_mode, self.extra_options)
 
-        return x
+        return x_
     
 
 
