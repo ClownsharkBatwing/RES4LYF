@@ -303,12 +303,18 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
                             eps_[row] = (x_0 - data_[row]) / sigma
                         if sub_sigma_up > 0 and not RK_Method.is_exponential(rk_type):
                             eps_[row] = (x_0 - data_[row]) / sigma
-                    if row > 0 and exim_iter <= implicit_steps:
-                        eps_[row-1] = eps_[row]
+                    
+                    if extra_options_flag("explicit_diagonal_guide_first_iter_only", extra_options):
+                        if row > 0 and exim_iter <= implicit_steps:
+                            eps_[row-1] = eps_[row]
 
 
                     # GUIDES 
                     eps_, x_ = LG.process_guides_substep(x_0, x_, eps_, data_, row, step, sigma, sigma_next, sigma_down, s_, unsample_resample_scale, rk, rk_type, extra_options, frame_weights)
+
+                    if not extra_options_flag("explicit_diagonal_guide_first_iter_only", extra_options):
+                        if row > 0 and exim_iter <= implicit_steps:
+                            eps_[row-1] = eps_[row]
 
 
             x = x_0 + h * rk.b_k_sum(eps_, 0)
@@ -316,6 +322,7 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
             denoised = x_0 + ((sigma / (sigma - sigma_down)) *  h) * rk.b_k_sum(eps_, 0) 
             eps = x - denoised
             x = LG.process_guides_poststep(x, denoised, eps, step, extra_options)
+            
 
 
 
@@ -506,7 +513,7 @@ def get_explicit_rk_step(rk, rk_type, x, LG, step, sigma, sigma_next, eta, eta_v
     h = rk.h_fn(sigma_down, sigma)
     c2, c3 = get_res4lyf_half_step3(sigma, sigma_down, c2, c3, t_fn=rk.t_fn, sigma_fn=rk.sigma_fn)
     
-    rk.set_coeff(rk_type, h, c2=c2, c3=c3, stepcount=stepcount, sigmas=sigmas, sigma_down=sigma_down)
+    rk.set_coeff(rk_type, h, c2=c2, c3=c3, stepcount=stepcount, sigmas=sigmas, sigma_down=sigma_down, extra_options=extra_options)
 
     s_ = [(sigma + h * c_) * s_in for c_ in rk.c]
     x_[0] = rk.add_noise_pre(x, sigma_up, sigma, sigma_next, alpha_ratio, s_noise, noise_mode)
