@@ -255,11 +255,21 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
                     if (substep_eta_final_step < 0 and step == len(sigmas)-1+substep_eta_final_step)   or   (substep_eta_final_step > 0 and step > substep_eta_final_step):
                         sub_sigma_up, sub_sigma, sub_sigma_down, sub_alpha_ratio = 0, s_[row], s_[row+1], 1
                         
+                    edsef=1
+                    if extra_options_flag("explicit_diagonal_substep_eta_factors", extra_options):
+                        value_str = get_extra_options_list("explicit_diagonal_substep_eta_factors", "", extra_options)
+                        float_list = [float(item.strip()) for item in value_str.split(',') if item.strip()]
+                        edsef = float_list[exim_iter]
+                    nsef = 1
+                    if extra_options_flag("noise_substep_eta_factors", extra_options):
+                        value_str = get_extra_options_list("noise_substep_eta_factors", "", extra_options)
+                        nsef_list = [float(item.strip()) for item in value_str.split(',') if item.strip()]
+                        nsef = nsef_list[row]
                     if row > 0 and not extra_options_flag("disable_rough_noise", extra_options): # and s_[row-1] >= s_[row]:
-                        sub_sigma_up, sub_sigma, sub_sigma_down, sub_alpha_ratio = get_res4lyf_step_with_model(model, s_[row-1], s_[row], substep_eta, eta_var, substep_noise_mode)
+                        sub_sigma_up, sub_sigma, sub_sigma_down, sub_alpha_ratio = get_res4lyf_step_with_model(model, s_[row-1], s_[row], substep_eta*edsef*nsef, eta_var, substep_noise_mode)
                         sub_sigma_next = s_[row]
                         
-                    if row > 0 and substep_eta > 0 and row < rk.rows and ((SUBSTEP_SKIP_LAST == False) or (row < rk.rows - rk.multistep_stages - 1))   and   (sub_sigma_down > 0) and sigma_next > 0:
+                    if row > 0 and substep_eta*edsef*nsef > 0 and row < rk.rows and ((SUBSTEP_SKIP_LAST == False) or (row < rk.rows - rk.multistep_stages - 1))   and   (sub_sigma_down > 0) and sigma_next > 0:
                         substep_noise_scaling_ratio = s_[row+1]/sub_sigma_down
                         eps_[row-1] *= 1 + substep_noise_scaling*(substep_noise_scaling_ratio-1)
 
