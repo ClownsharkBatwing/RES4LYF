@@ -64,6 +64,8 @@ class LatentGuide:
                 
         latent_guide_weight, latent_guide_weight_inv = 0.,0.
         latent_guide_weights, latent_guide_weights_inv = None, None
+        latent_guide_weights = torch.zeros_like(sigmas)
+        latent_guide_weights_inv = torch.zeros_like(sigmas)
         if guides is not None:
             self.guide_mode, latent_guide_weight, latent_guide_weight_inv, latent_guide_weights, latent_guide_weights_inv, self.latent_guide, self.latent_guide_inv, latent_guide_mask, latent_guide_mask_inv, scheduler_, scheduler_inv_, steps_, steps_inv_, denoise_, denoise_inv_ = guides
             
