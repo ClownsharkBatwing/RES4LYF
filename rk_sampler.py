@@ -256,13 +256,13 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
                         sub_sigma_up, sub_sigma, sub_sigma_down, sub_alpha_ratio = 0, s_[row], s_[row+1], 1
                         
                     edsef=1
-                    if extra_options_flag("explicit_diagonal_substep_eta_factors", extra_options):
-                        value_str = get_extra_options_list("explicit_diagonal_substep_eta_factors", "", extra_options)
+                    if extra_options_flag("explicit_diagonal_eta_substep_factors", extra_options):
+                        value_str = get_extra_options_list("explicit_diagonal_eta_substep_factors", "", extra_options)
                         float_list = [float(item.strip()) for item in value_str.split(',') if item.strip()]
                         edsef = float_list[exim_iter]
                     nsef = 1
-                    if extra_options_flag("noise_substep_eta_factors", extra_options):
-                        value_str = get_extra_options_list("noise_substep_eta_factors", "", extra_options)
+                    if extra_options_flag("noise_eta_substep_factors", extra_options):
+                        value_str = get_extra_options_list("noise_eta_substep_factors", "", extra_options)
                         nsef_list = [float(item.strip()) for item in value_str.split(',') if item.strip()]
                         nsef = nsef_list[row]
                     if row > 0 and not extra_options_flag("disable_rough_noise", extra_options): # and s_[row-1] >= s_[row]:
@@ -317,8 +317,7 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
 
                     # GUIDES 
                     eps_row_tmp, x_row_tmp = eps_[row], x_[row+1]
-                    if not extra_options_flag("explicit_diagonal_guide_first_iter_only", extra_options) or exim_iter == 0:
-                        eps_, x_ = LG.process_guides_substep(x_0, x_, eps_, data_, row, step, sigma, sigma_next, sigma_down, s_, unsample_resample_scale, rk, rk_type, extra_options, frame_weights)
+                    eps_, x_ = LG.process_guides_substep(x_0, x_, eps_, data_, row, step, sigma, sigma_next, sigma_down, s_, unsample_resample_scale, rk, rk_type, extra_options, frame_weights)
 
                     if extra_options_flag("explicit_diagonal_eps_proj_factors", extra_options):
                         value_str = get_extra_options_list("explicit_diagonal_eps_proj_factors", "", extra_options)
