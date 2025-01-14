@@ -1,6 +1,7 @@
 import re
 import torch
 from comfy.samplers import SCHEDULER_NAMES
+from comfy import model_sampling
 
 def filter_comments(extra_options):
     return "\n".join(line for line in extra_options.splitlines() if not line.strip().startswith("#"))
@@ -28,6 +29,9 @@ def safe_get_nested(d, keys, default=None):
             return default
     return d
 
+def is_RF_model(model) -> bool:
+    modelsampling = model.inner_model.inner_model.model_sampling
+    return isinstance(modelsampling, model_sampling.CONST)
 
 
 def get_cosine_similarity(a, b):

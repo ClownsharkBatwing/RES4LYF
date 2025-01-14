@@ -1,21 +1,17 @@
 import torch
 import torch.nn.functional as F
-import torchvision.transforms as T
-import re
-import copy
+import gc
 
 from tqdm.auto import trange
 
-import comfy.model_patcher
 
-from .noise_classes import *
 from .noise_sigmas_timesteps_scaling import get_res4lyf_step_with_model, get_res4lyf_half_step3
 
 from .rk_method import RK_Method
-from .rk_guide_func import *
+from .rk_guide_func import LatentGuide, NoiseStepHandlerOSDE, handle_tiled_etc_noise_steps, get_guide_epsilon_substep
 
-from .latents import normalize_latent, initialize_or_scale, latent_normalize_channels
-from .helper import get_extra_options_kv, extra_options_flag
+from .latents import normalize_latent, initialize_or_scale
+from .helper import get_extra_options_kv, extra_options_flag, is_RF_model
 from .sigmas import get_sigmas
 from .res4lyf import log
 
@@ -216,12 +212,11 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
 
     LG = LatentGuide(guides, x, model, sigmas, UNSAMPLE, LGW_MASK_RESCALE_MIN, extra_options)
     x = LG.init_guides(x, rk.noise_sampler)
+    gc.collect()
     
     y0, y0_inv = LG.y0, LG.y0_inv
-    lgw, lgw_inv = LG.lgw, LG.lgw_inv
-    guide_mode = LG.guide_mode
-
-
+    # lgw, lgw_inv = LG.lgw, LG.lgw_inv
+    # guide_mode = LG.guide_mode
 
     denoised, denoised_prev, eps, eps_prev = [torch.zeros_like(x) for _ in range(4)]
     prev_noises = []
@@ -313,7 +308,7 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
                         
 
                     # NOISE ADD
-                    if isinstance(MODEL_SAMPLING, comfy.model_sampling.CONST) == True   or   (isinstance(MODEL_SAMPLING, comfy.model_sampling.CONST) == False and noise_mode != "hard"):
+                    if is_RF_model(model) == True   or   noise_mode != "hard":
                         if (row > 0) and (sub_sigma_up > 0) and ((SUBSTEP_SKIP_LAST == False) or (row < rk.rows - rk.multistep_stages - 1)):
                             data_tmp = denoised_prev if data_[row-1].sum() == 0 else data_[row-1]
                             eps_tmp  = eps_prev      if  eps_[row-1].sum() == 0 else eps_ [row-1]
@@ -385,7 +380,7 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
                     x_[row+1] = x_0 + h_new_irk * irk.a_k_sum(eps_, row)
                     
                     # NOISE ADD              
-                    if isinstance(MODEL_SAMPLING, comfy.model_sampling.CONST) == True   or   (isinstance(MODEL_SAMPLING, comfy.model_sampling.CONST) == False and noise_mode != "hard"):      
+                    if is_RF_model(model) == True   or  noise_mode != "hard":
                         if (row > 0) and (sub_sigma_up > 0) and ((SUBSTEP_SKIP_LAST == False) or (row < irk.rows - irk.multistep_stages - 1)):
                             data_tmp = denoised_prev if data_[row-1].sum() == 0 else data_[row-1]
                             eps_tmp  = eps_prev      if  eps_[row-1].sum() == 0 else eps_ [row-1]
@@ -486,8 +481,7 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
                 SDE_NOISE_EXTERNAL=False
             else:
                 sde_noise_t = sde_noise[step]
-                
-        if isinstance(MODEL_SAMPLING, comfy.model_sampling.CONST) == True   or   (isinstance(MODEL_SAMPLING, comfy.model_sampling.CONST) == False and noise_mode != "hard"):
+        if is_RF_model(model) == True   or   noise_mode != "hard":
             if sigma_up > 0:
                 if implicit_steps==0:
                     rk_or_irk = rk
@@ -576,7 +570,7 @@ def get_explicit_rk_step(rk, rk_type, x, LG, step, sigma, sigma_next, eta, eta_v
 
     #x = rk.add_noise_post(x, sigma_up, sigma, sigma_next, alpha_ratio, s_noise, noise_mode)
     
-    if isinstance(MODEL_SAMPLING, comfy.model_sampling.CONST) == True   or   (isinstance(MODEL_SAMPLING, comfy.model_sampling.CONST) == False and noise_mode != "hard"):
+    if is_RF_model(rk.model)   or   noise_mode != "hard":
         if sigma_up > 0:
             Osde = NoiseStepHandlerOSDE(x, eps, denoised, x_init, y0, LG.y0_inv)
             if Osde.check_cossim_source(NOISE_COSSIM_SOURCE):
