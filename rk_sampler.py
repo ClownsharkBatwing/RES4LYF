@@ -306,8 +306,15 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
 
 
                     # GUIDES 
+                    eps_row_tmp, x_row_tmp = eps_[row], x_[row+1]
                     if not extra_options_flag("explicit_diagonal_guide_first_iter_only", extra_options) or exim_iter == 0:
                         eps_, x_ = LG.process_guides_substep(x_0, x_, eps_, data_, row, step, sigma, sigma_next, sigma_down, s_, unsample_resample_scale, rk, rk_type, extra_options, frame_weights)
+
+                    if extra_options_flag("explicit_diagonal_eps_proj_factors", extra_options):
+                        value_str = get_extra_options_list("explicit_diagonal_eps_proj_factors", "", extra_options)
+                        float_list = [float(item.strip()) for item in value_str.split(',') if item.strip()]
+                        eps_[row] = (1-float_list[row]) * eps_[row]   +   float_list[row] * eps_row_tmp
+                        x_[row+1] = (1-float_list[row]) * x_[row+1]   +   float_list[row] * x_row_tmp
 
                     if row > 0 and exim_iter <= implicit_steps:
                         eps_[row-1] = eps_[row]
@@ -371,13 +378,7 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
                         eps_[row] = (x_0 - data_[row]) / sigma
                     
                     # GUIDES 
-                    eps_row_tmp, x_row_tmp = eps_[row], x_row_tmp = x_[row+1]
                     eps_, x_ = LG.process_guides_substep(x_0, x_, eps_, data_, row, step, sigma, sigma_next, sigma_down, s_irk, unsample_resample_scale, irk, irk_type, extra_options, frame_weights)
-                    if extra_options_flag("explicit_diagonal_eps_proj_factors", extra_options):
-                        value_str = get_extra_options_list("explicit_diagonal_eps_proj_factors", "", extra_options)
-                        float_list = [float(item.strip()) for item in value_str.split(',') if item.strip()]
-                        eps_[row] = (1-float_list[row]) * eps_[row]   +   float_list[row] * eps_row_tmp
-                        x_[row+1] = (1-float_list[row]) * x_[row+1]   +   float_list[row] * x_row_tmp
                     
                     
             x = x_0 + h_irk * irk.b_k_sum(eps_, 0) 
