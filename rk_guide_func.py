@@ -8,7 +8,7 @@ from einops import rearrange
 from .noise_classes import *
 from .latents import hard_light_blend, normalize_latent, initialize_or_scale
 from .rk_method import RK_Method
-from .helper import get_extra_options_kv, extra_options_flag, get_cosine_similarity
+from .helper import get_extra_options_kv, extra_options_flag, get_cosine_similarity, get_extra_options_list
 
 
 import itertools
@@ -380,6 +380,18 @@ class LatentGuide:
                         eps_[row] = eps_collinear_eps_lerp + eps_lerp_ortho_eps
                         
                     else: #elif extra_options_flag("eps_proj_v4d", extra_options):
+                        #if row > 0:
+                            #lgw_mask_factor = float(get_extra_options_kv("substep_lgw_mask_factor", "1.0", extra_options))
+                            #lgw_mask_inv_factor = float(get_extra_options_kv("substep_lgw_mask_inv_factor", "1.0", extra_options))
+                        lgw_mask_factor = 1
+                        if extra_options_flag("substep_eps_proj_scaling", extra_options):
+                            lgw_mask_factor = 1/(row+1)
+                            
+                        if extra_options_flag("substep_eps_proj_factors", extra_options):
+                            value_str = get_extra_options_list("substep_eps_proj_factors", "", extra_options)
+                            float_list = [float(item.strip()) for item in value_str.split(',') if item.strip()]
+                            lgw_mask_factor = float_list[row]
+                        
                         eps_row_lerp = eps_[row]   +   self.mask * (eps_row-eps_[row])   +   (1-self.mask) * (eps_row_inv-eps_[row])
 
                         eps_collinear_eps_lerp = get_collinear(eps_[row], eps_row_lerp)
@@ -387,7 +399,7 @@ class LatentGuide:
 
                         eps_sum = eps_collinear_eps_lerp + eps_lerp_ortho_eps
 
-                        eps_[row] = eps_[row] + lgw_mask * (eps_sum - eps_[row]) + lgw_mask_inv * (eps_sum - eps_[row])
+                        eps_[row] = eps_[row] + lgw_mask_factor*lgw_mask * (eps_sum - eps_[row]) + lgw_mask_factor*lgw_mask_inv * (eps_sum - eps_[row])
 
 
 

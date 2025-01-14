@@ -303,18 +303,14 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
                             eps_[row] = (x_0 - data_[row]) / sigma
                         if sub_sigma_up > 0 and not RK_Method.is_exponential(rk_type):
                             eps_[row] = (x_0 - data_[row]) / sigma
-                    
-                    if extra_options_flag("explicit_diagonal_guide_first_iter_only", extra_options):
-                        if row > 0 and exim_iter <= implicit_steps:
-                            eps_[row-1] = eps_[row]
 
 
                     # GUIDES 
-                    eps_, x_ = LG.process_guides_substep(x_0, x_, eps_, data_, row, step, sigma, sigma_next, sigma_down, s_, unsample_resample_scale, rk, rk_type, extra_options, frame_weights)
+                    if not extra_options_flag("explicit_diagonal_guide_first_iter_only", extra_options) or exim_iter == 0:
+                        eps_, x_ = LG.process_guides_substep(x_0, x_, eps_, data_, row, step, sigma, sigma_next, sigma_down, s_, unsample_resample_scale, rk, rk_type, extra_options, frame_weights)
 
-                    if not extra_options_flag("explicit_diagonal_guide_first_iter_only", extra_options):
-                        if row > 0 and exim_iter <= implicit_steps:
-                            eps_[row-1] = eps_[row]
+                    if row > 0 and exim_iter <= implicit_steps:
+                        eps_[row-1] = eps_[row]
 
 
             x = x_0 + h * rk.b_k_sum(eps_, 0)
