@@ -113,8 +113,8 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
     substep_eta_start_step = int(get_extra_options_kv("substep_noise_start_step",  "-1", extra_options))
     substep_eta_final_step = int(get_extra_options_kv("substep_noise_final_step", "-1", extra_options))
     
-    noise_substep_cossim_max_iter  =   int(get_extra_options_kv("noise_substep_cossim_max_iter",  "50",   extra_options))
-    noise_cossim_max_iter          =   int(get_extra_options_kv("noise_cossim_max_iter",          "50",   extra_options))
+    noise_substep_cossim_max_iter  =   int(get_extra_options_kv("noise_substep_cossim_max_iter",  "5",   extra_options))
+    noise_cossim_max_iter          =   int(get_extra_options_kv("noise_cossim_max_iter",          "5",   extra_options))
     noise_substep_cossim_max_score = float(get_extra_options_kv("noise_substep_cossim_max_score", "1e-7", extra_options))
     noise_cossim_max_score         = float(get_extra_options_kv("noise_cossim_max_score",         "1e-7", extra_options))
     
