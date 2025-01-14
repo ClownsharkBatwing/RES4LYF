@@ -457,10 +457,31 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
                 x = LG.process_guides_poststep(x, denoised, eps, step, extra_options)
 
 
-        if extra_options_flag("eps_preview", extra_options):
-            callback({'x': x, 'i': step, 'sigma': sigma, 'sigma_next': sigma_next, 'denoised': eps_[0].to(torch.float32)}) if callback is not None else None
+        if extra_options_flag("eps_substep_preview", extra_options):
+            row_callback = int(get_extra_options_kv("eps_substep_preview", "0", extra_options))
+            denoised_callback = eps_[row_callback]
+            
+        elif extra_options_flag("denoised_substep_preview", extra_options):
+            row_callback = int(get_extra_options_kv("denoised_substep_preview", "0", extra_options))
+            denoised_callback = data_[row_callback]
+            
+        elif extra_options_flag("x_substep_preview", extra_options):
+            row_callback = int(get_extra_options_kv("x_substep_preview", "0", extra_options))
+            denoised_callback = x_[row_callback]
+            
+        elif extra_options_flag("eps_preview", extra_options):
+            denoised_callback = eps
+            
+        elif extra_options_flag("denoised_preview", extra_options):
+            denoised_callback = denoised
+            
+        elif extra_options_flag("x_preview", extra_options):
+            denoised_callback = x
+            
         else:
-            callback({'x': x, 'i': step, 'sigma': sigma, 'sigma_next': sigma_next, 'denoised': data_[0].to(torch.float32)}) if callback is not None else None
+            denoised_callback = data_[0]
+            
+        callback({'x': x, 'i': step, 'sigma': sigma, 'sigma_next': sigma_next, 'denoised': denoised_callback.to(torch.float32)}) if callback is not None else None
 
         sde_noise_t = None
         if SDE_NOISE_EXTERNAL:
