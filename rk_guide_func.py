@@ -5,6 +5,7 @@ import re
 
 from einops import rearrange
 
+from .sigmas import get_sigmas
 from .noise_classes import *
 from .latents import hard_light_blend, normalize_latent, initialize_or_scale
 from .rk_method import RK_Method
@@ -68,11 +69,17 @@ class LatentGuide:
             
             self.mask, self.mask_inv                                 = latent_guide_mask, latent_guide_mask_inv
             self.guide_cossim_cutoff_, self.guide_bkg_cossim_cutoff_ = denoise_, denoise_inv_
-            
-        latent_guide_weights     = initialize_or_scale(latent_guide_weights,     latent_guide_weight,     max_steps).to(dtype)
-        latent_guide_weights_inv = initialize_or_scale(latent_guide_weights_inv, latent_guide_weight_inv, max_steps).to(dtype)
-
+        
+        if latent_guide_weights == None:
+            latent_guide_weights = get_sigmas(model, scheduler_, steps_, 1.0).to(x.dtype)
+        else:
+            latent_guide_weights     = initialize_or_scale(latent_guide_weights,     latent_guide_weight,     max_steps).to(dtype)
         latent_guide_weights     = F.pad(latent_guide_weights,     (0, max_steps), value=0.0)
+
+        if latent_guide_weights_inv == None:
+            latent_guide_weights_inv = get_sigmas(model, scheduler_inv_, steps_inv_, 1.0).to(x.dtype)
+        else:
+            latent_guide_weights_inv = initialize_or_scale(latent_guide_weights_inv, latent_guide_weight_inv, max_steps).to(dtype)
         latent_guide_weights_inv = F.pad(latent_guide_weights_inv, (0, max_steps), value=0.0)
         
         
