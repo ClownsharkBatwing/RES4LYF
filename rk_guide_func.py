@@ -1001,6 +1001,8 @@ def get_orthogonal_noise_from_channelwise(*refs, max_iter=500, max_score=1e-15):
     elif (noise.dim() == 5):
         b,ch,t,h,w = noise.shape
     
+    print("\nRunning orthogonalization")
+    
     for i in range(max_iter):
         noise_tmp = gram_schmidt_channels_optimized(noise_tmp, *refs)
         
@@ -1016,6 +1018,47 @@ def get_orthogonal_noise_from_channelwise(*refs, max_iter=500, max_score=1e-15):
     
     return noise_tmp
 
+def gram_schmidt_channels_optimized_with_scores(A, *refs):
+    if (A.dim() == 4):
+        b,c,h,w = A.shape
+    elif (A.dim() == 5):
+        b,c,t,h,w = A.shape
+
+    A_flat = A.view(b, c, -1)
+    
+    # Do all projections first
+    for ref in refs:
+        ref_flat = ref.view(b, c, -1)
+        ref_norm = ref_flat.norm(dim=-1, keepdim=True)
+        ref_flat = ref_flat / ref_norm
+        proj_coeff = torch.sum(A_flat * ref_flat, dim=-1, keepdim=True)
+        projection = proj_coeff * ref_flat
+        A_flat -= projection
+
+    # Then check orthogonality against all refs
+    max_scores = []
+    for ref in refs:
+        ref_flat = ref.view(b, c, -1)
+        # Per channel checks
+        for ch_idx in range(c):
+            max_scores.append(get_cosine_similarity(A_flat[:,ch_idx], ref_flat[:,ch_idx]).abs())
+        # Full tensor check
+        max_scores.append(get_cosine_similarity(A_flat.view(b,-1), ref_flat.view(b,-1)).abs())
+
+    return A_flat.view_as(A), max(max_scores)
+
+def get_orthogonal_noise_from_channelwise_fast(*refs, max_iter=500, max_score=1e-15):
+    noise, *refs = refs
+    noise_tmp = noise.clone()
+    
+    print("\nRunning fast orthogonalization")
+
+    for i in range(max_iter):
+        noise_tmp, curr_max_score = gram_schmidt_channels_optimized_with_scores(noise_tmp, *refs)
+        if curr_max_score < max_score:
+            break
+    
+    return noise_tmp
 
 
 def gram_schmidt_channels_optimized(A, *refs):
@@ -1078,7 +1121,7 @@ class NoiseStepHandlerOSDE:
     def check_cossim_source(self, source):
         return source in self.noise_cossim_map
 
-    def get_ortho_noise(self, noise, prev_noises=None, max_iter=100, max_score=1e-7, NOISE_COSSIM_SOURCE="eps_orthogonal"):
+    def get_ortho_noise(self, noise, prev_noises=None, max_iter=100, max_score=1e-7, NOISE_COSSIM_SOURCE="eps_orthogonal", extra_options=""):
         
         if NOISE_COSSIM_SOURCE not in self.noise_cossim_map:
             raise ValueError(f"Invalid NOISE_COSSIM_SOURCE: {NOISE_COSSIM_SOURCE}")
@@ -1086,8 +1129,10 @@ class NoiseStepHandlerOSDE:
         self.noise_cossim_map[NOISE_COSSIM_SOURCE][0] = noise
 
         params = self.noise_cossim_map[NOISE_COSSIM_SOURCE]
-        
-        noise = get_orthogonal_noise_from_channelwise(*params, max_iter=max_iter, max_score=max_score)
+        if extra_options_flag("noise_cossim_fast", extra_options):
+            noise = get_orthogonal_noise_from_channelwise_fast(*params, max_iter=max_iter, max_score=max_score)
+        elif not extra_options_flag("skip_noise_cossim", extra_options):
+            noise = get_orthogonal_noise_from_channelwise(*params, max_iter=max_iter, max_score=max_score)
         
         return noise
 

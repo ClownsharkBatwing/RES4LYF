@@ -1,6 +1,7 @@
 import torch
 import torch.nn.functional as F
 import gc
+import copy
 
 from tqdm.auto import trange
 
@@ -11,7 +12,7 @@ from .rk_method import RK_Method
 from .rk_guide_func import LatentGuide, NoiseStepHandlerOSDE, handle_tiled_etc_noise_steps, get_guide_epsilon_substep
 
 from .latents import normalize_latent, initialize_or_scale
-from .helper import get_extra_options_kv, extra_options_flag, is_RF_model
+from .helper import get_extra_options_kv, extra_options_flag, get_extra_options_list, is_RF_model
 from .sigmas import get_sigmas
 from .res4lyf import log
 
@@ -224,8 +225,8 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
     
     
     
+    cache = {'inputs': None, 'outputs': None}
     for step in trange(len(sigmas)-1, disable=disable):
-
         sigma, sigma_next = sigmas[step], sigmas[step+1]
         unsample_resample_scale = float(unsample_resample_scales[step]) if unsample_resample_scales is not None else None
         if regional_conditioning_weights is not None:
@@ -327,7 +328,7 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
                             Osde = NoiseStepHandlerOSDE(x_[row+1], eps_tmp, data_tmp, x_init, y0, y0_inv)
                             if Osde.check_cossim_source(NOISE_SUBSTEP_COSSIM_SOURCE):
                                 noise = rk.noise_sampler(sigma=sub_sigma, sigma_next=sub_sigma_next) 
-                                noise_osde = Osde.get_ortho_noise(noise, prev_noises, max_iter=noise_substep_cossim_max_iter, max_score=noise_substep_cossim_max_score, NOISE_COSSIM_SOURCE=NOISE_SUBSTEP_COSSIM_SOURCE)
+                                noise_osde = Osde.get_ortho_noise(noise, prev_noises, max_iter=noise_substep_cossim_max_iter, max_score=noise_substep_cossim_max_score, NOISE_COSSIM_SOURCE=NOISE_SUBSTEP_COSSIM_SOURCE, extra_options=extra_options)
                                 x_[row+1] = sub_alpha_ratio * x_[row+1] + sub_sigma_up * noise_osde * s_noise
                             elif noise_substep_cossim_flag:
                                 x_[row+1] = handle_tiled_etc_noise_steps(x_0, x_[row+1], x_prenoise, x_init, eps_tmp, data_tmp, y0, y0_inv, row, rk_type, rk, sub_sigma_up, s_[row-1], s_[row], sub_alpha_ratio, s_noise, substep_noise_mode, SDE_NOISE_EXTERNAL, sde_noise_t,
@@ -342,14 +343,29 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
                         #eps_[row] = lgw_mask * eps_row   +   lgw_mask_inv * eps_row_inv
                         eps_[row] = eps_row
                     else:
-                        debug_cuda_cleanup(cuda_sync_a_flag, cuda_empty_a_flag, cuda_gc_a_flag)
-                        eps_[row], data_[row] = rk(x_0, x_[row+1], s_[row], h, **extra_args)   
-                        debug_cuda_cleanup(cuda_sync_b_flag, cuda_empty_b_flag, cuda_gc_b_flag)
+                        current_inputs = (x_0, x_[row+1], s_[row], h, extra_args)
+                        log(f"\nimplicit_steps: {implicit_steps}, exim_iter: {exim_iter}, row: {row}, step: {step}")
+                        if (cache['inputs'] is not None and cache['outputs'] is not None and
+                            torch.equal(cache['inputs'][0], current_inputs[0]) and
+                            torch.equal(cache['inputs'][1], current_inputs[1]) and
+                            torch.equal(cache['inputs'][2], current_inputs[2]) and
+                            torch.equal(cache['inputs'][3], current_inputs[3]) and
+                            extra_options_flag("cache_implicit_steps", extra_options)):
+                            eps_[row], data_[row] = cache['outputs']
+                            log("Used cache (cache_implicit_steps)")
+                        else:
+                            debug_cuda_cleanup(cuda_sync_a_flag, cuda_empty_a_flag, cuda_gc_a_flag)
+                            eps_[row], data_[row] = rk(x_0, x_[row+1], s_[row], h, **extra_args)
+                            debug_cuda_cleanup(cuda_sync_b_flag, cuda_empty_b_flag, cuda_gc_b_flag)
+                            cache['outputs'] = (eps_[row].clone(), data_[row].clone())
+                            cache['inputs'] = (x_0.clone(), x_[row+1].clone(), s_[row].clone(), h.clone(), copy.deepcopy(extra_args))
+
                     
                         if rk_linear_straight_flag:
                             eps_[row] = (x_0 - data_[row]) / sigma
                         if sub_sigma_up > 0 and not RK_Method.is_exponential(rk_type):
                             eps_[row] = (x_0 - data_[row]) / sigma
+                        
 
 
                     # GUIDES 
@@ -408,7 +424,7 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
                             Osde = NoiseStepHandlerOSDE(x_[row+1], eps_tmp, data_tmp, x_init, y0, y0_inv)
                             if Osde.check_cossim_source(NOISE_SUBSTEP_COSSIM_SOURCE):
                                 noise = irk.noise_sampler(sigma=sub_sigma, sigma_next=sub_sigma_next) 
-                                noise_osde = Osde.get_ortho_noise(noise, prev_noises, max_iter=noise_substep_cossim_max_iter, max_score=noise_substep_cossim_max_score, NOISE_COSSIM_SOURCE=NOISE_SUBSTEP_COSSIM_SOURCE)
+                                noise_osde = Osde.get_ortho_noise(noise, prev_noises, max_iter=noise_substep_cossim_max_iter, max_score=noise_substep_cossim_max_score, NOISE_COSSIM_SOURCE=NOISE_SUBSTEP_COSSIM_SOURCE, extra_options=extra_options)
                                 x_[row+1] = sub_alpha_ratio * x_[row+1] + sub_sigma_up * noise_osde * s_noise
                             elif extra_options_flag("noise_substep_cossim", extra_options):
                                 x_[row+1] = handle_tiled_etc_noise_steps(x_0, x_[row+1], x_prenoise, x_init, eps_tmp, data_tmp, y0, y0_inv, row, 
@@ -514,7 +530,7 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
                 Osde = NoiseStepHandlerOSDE(x, eps, denoised, x_init, y0, y0_inv)
                 if Osde.check_cossim_source(NOISE_COSSIM_SOURCE):
                     noise = rk_or_irk.noise_sampler(sigma=sigma, sigma_next=sigma_next)
-                    noise_osde = Osde.get_ortho_noise(noise, prev_noises, max_iter=noise_cossim_max_iter, max_score=noise_cossim_max_score, NOISE_COSSIM_SOURCE=NOISE_COSSIM_SOURCE)
+                    noise_osde = Osde.get_ortho_noise(noise, prev_noises, max_iter=noise_cossim_max_iter, max_score=noise_cossim_max_score, NOISE_COSSIM_SOURCE=NOISE_COSSIM_SOURCE, extra_options=extra_options)
                     x = alpha_ratio * x + sigma_up * noise_osde * s_noise
                 elif noise_cossim_flag:
                     x = handle_tiled_etc_noise_steps(x_0, x, x_prenoise, x_init, eps, denoised, y0, y0_inv, step, 
@@ -597,7 +613,7 @@ def get_explicit_rk_step(rk, rk_type, x, LG, step, sigma, sigma_next, eta, eta_v
             Osde = NoiseStepHandlerOSDE(x, eps, denoised, x_init, y0, LG.y0_inv)
             if Osde.check_cossim_source(NOISE_COSSIM_SOURCE):
                 noise = rk.noise_sampler(sigma=sigma, sigma_next=sigma_next)
-                noise_osde = Osde.get_ortho_noise(noise, [], max_iter=noise_cossim_max_iter, max_score=noise_cossim_max_score, NOISE_COSSIM_SOURCE=NOISE_COSSIM_SOURCE)
+                noise_osde = Osde.get_ortho_noise(noise, [], max_iter=noise_cossim_max_iter, max_score=noise_cossim_max_score, NOISE_COSSIM_SOURCE=NOISE_COSSIM_SOURCE, extra_options=extra_options)
                 x = alpha_ratio * x + sigma_up * noise_osde * s_noise
             elif extra_options_flag("noise_cossim", extra_options):
                 x = handle_tiled_etc_noise_steps(x_0, x, x_prenoise, x_init, eps, denoised, y0, LG.y0_inv, step, 
