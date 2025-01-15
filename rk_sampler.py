@@ -290,6 +290,7 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
 
                     # UPDATE
                     x_[row+1] = x_0 + h_new * rk.a_k_sum(eps_, row)
+                    #print("step, row, exim_iter: ", step, row, exim_iter)
                         
 
                     # NOISE ADD
@@ -336,6 +337,9 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
 
                     if row > 0 and exim_iter <= implicit_steps and implicit_steps > 0:
                         eps_[row-1] = eps_[row]
+                    
+                    if implicit_steps > 0 and row == 0:
+                        break
 
 
             x = x_0 + h * rk.b_k_sum(eps_, 0)
