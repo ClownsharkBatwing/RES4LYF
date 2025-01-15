@@ -268,7 +268,9 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
                 
 
         x_prenoise = x.clone()
-        x_[0] = rk.add_noise_pre(x, sigma_up, sigma, sigma_next, alpha_ratio, s_noise, noise_mode, SDE_NOISE_EXTERNAL, sde_noise_t) #y0, lgw, sigma_down are currently unused
+        x_[0] = x
+        if sigma_up > 0:
+            x_[0] = rk.add_noise_pre(x, sigma_up, sigma, sigma_next, alpha_ratio, s_noise, noise_mode, SDE_NOISE_EXTERNAL, sde_noise_t) #y0, lgw, sigma_down are currently unused
         
         x_0 = x_[0].clone()
         
@@ -287,11 +289,21 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
                     if (substep_eta_final_step < 0 and step == len(sigmas)-1+substep_eta_final_step)   or   (substep_eta_final_step > 0 and step > substep_eta_final_step):
                         sub_sigma_up, sub_sigma, sub_sigma_down, sub_alpha_ratio = 0, s_[row], s_[row+1], 1
                         
+                    edsef=1
+                    if extra_options_flag("explicit_diagonal_eta_substep_factors", extra_options):
+                        value_str = get_extra_options_list("explicit_diagonal_eta_substep_factors", "", extra_options)
+                        float_list = [float(item.strip()) for item in value_str.split(',') if item.strip()]
+                        edsef = float_list[exim_iter]
+                    nsef = 1
+                    if extra_options_flag("noise_eta_substep_factors", extra_options):
+                        value_str = get_extra_options_list("noise_eta_substep_factors", "", extra_options)
+                        nsef_list = [float(item.strip()) for item in value_str.split(',') if item.strip()]
+                        nsef = nsef_list[row]
                     if row > 0 and not disable_rough_noise_flag: # and s_[row-1] >= s_[row]:
-                        sub_sigma_up, sub_sigma, sub_sigma_down, sub_alpha_ratio = get_res4lyf_step_with_model(model, s_[row-1], s_[row], substep_eta, eta_var, substep_noise_mode)
+                        sub_sigma_up, sub_sigma, sub_sigma_down, sub_alpha_ratio = get_res4lyf_step_with_model(model, s_[row-1], s_[row], substep_eta*edsef*nsef, eta_var, substep_noise_mode)
                         sub_sigma_next = s_[row]
                         
-                    if row > 0 and substep_eta > 0 and row < rk.rows and ((SUBSTEP_SKIP_LAST == False) or (row < rk.rows - rk.multistep_stages - 1))   and   (sub_sigma_down > 0) and sigma_next > 0:
+                    if row > 0 and substep_eta*edsef*nsef > 0 and row < rk.rows and ((SUBSTEP_SKIP_LAST == False) or (row < rk.rows - rk.multistep_stages - 1))   and   (sub_sigma_down > 0) and sigma_next > 0:
                         substep_noise_scaling_ratio = s_[row+1]/sub_sigma_down
                         eps_[row-1] *= 1 + substep_noise_scaling*(substep_noise_scaling_ratio-1)
 
@@ -338,12 +350,20 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
                             eps_[row] = (x_0 - data_[row]) / sigma
                         if sub_sigma_up > 0 and not RK_Method.is_exponential(rk_type):
                             eps_[row] = (x_0 - data_[row]) / sigma
-                    if row > 0 and exim_iter <= implicit_steps:
-                        eps_[row-1] = eps_[row]
 
 
                     # GUIDES 
+                    eps_row_tmp, x_row_tmp = eps_[row], x_[row+1]
                     eps_, x_ = LG.process_guides_substep(x_0, x_, eps_, data_, row, step, sigma, sigma_next, sigma_down, s_, unsample_resample_scale, rk, rk_type, extra_options, frame_weights)
+
+                    if extra_options_flag("explicit_diagonal_eps_proj_factors", extra_options):
+                        value_str = get_extra_options_list("explicit_diagonal_eps_proj_factors", "", extra_options)
+                        float_list = [float(item.strip()) for item in value_str.split(',') if item.strip()]
+                        eps_[row] = (1-float_list[exim_iter]) * eps_[row]   +   float_list[exim_iter] * eps_row_tmp
+                        x_[row+1] = (1-float_list[exim_iter]) * x_[row+1]   +   float_list[exim_iter] * x_row_tmp
+
+                    if row > 0 and exim_iter <= implicit_steps:
+                        eps_[row-1] = eps_[row]
 
 
             x = x_0 + h * rk.b_k_sum(eps_, 0)
@@ -351,6 +371,7 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
             denoised = x_0 + ((sigma / (sigma - sigma_down)) *  h) * rk.b_k_sum(eps_, 0) 
             eps = x - denoised
             x = LG.process_guides_poststep(x, denoised, eps, step, extra_options)
+            
 
 
 
@@ -405,6 +426,7 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
                     # GUIDES 
                     eps_, x_ = LG.process_guides_substep(x_0, x_, eps_, data_, row, step, sigma, sigma_next, sigma_down, s_irk, unsample_resample_scale, irk, irk_type, extra_options, frame_weights)
                     
+                    
             x = x_0 + h_irk * irk.b_k_sum(eps_, 0) 
             
             denoised = x_0 + (sigma / (sigma - sigma_down)) *  h_irk * irk.b_k_sum(eps_, 0) 
@@ -441,7 +463,7 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
                 x_mid = x
                 for i in range(len(s_all)-1):
                     x_mid, eps_, data_ = get_explicit_rk_step(rk, rk_type, x_mid, LG, step, s_all[i], s_all[i+1], eta, eta_var, s_noise, noise_mode, c2, c3, step+i, sigmas_and, x_, eps_, data_, unsample_resample_scale, extra_options, frame_weights, 
-                                                              x_init, x_prenoise, NOISE_COSSIM_SOURCE, NOISE_COSSIM_MODE, noise_cossim_max_iter, noise_cossim_max_score, noise_cossim_tile_size, noise_cossim_iterations,SDE_NOISE_EXTERNAL,sde_noise_t,
+                                                              x_init, x_prenoise, NOISE_COSSIM_SOURCE, NOISE_COSSIM_MODE, noise_cossim_max_iter, noise_cossim_max_score, noise_cossim_tile_size, noise_cossim_iterations,SDE_NOISE_EXTERNAL,sde_noise_t,MODEL_SAMPLING,
                                                               **extra_args)
 
                     eps_list.append(eps_[0])
@@ -526,7 +548,7 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
 
 
 def get_explicit_rk_step(rk, rk_type, x, LG, step, sigma, sigma_next, eta, eta_var, s_noise, noise_mode, c2, c3, stepcount, sigmas, x_, eps_, data_, unsample_resample_scale, extra_options, frame_weights, 
-                         x_init, x_prenoise, NOISE_COSSIM_SOURCE, NOISE_COSSIM_MODE, noise_cossim_max_iter, noise_cossim_max_score, noise_cossim_tile_size, noise_cossim_iterations,SDE_NOISE_EXTERNAL,sde_noise_t,
+                         x_init, x_prenoise, NOISE_COSSIM_SOURCE, NOISE_COSSIM_MODE, noise_cossim_max_iter, noise_cossim_max_score, noise_cossim_tile_size, noise_cossim_iterations,SDE_NOISE_EXTERNAL,sde_noise_t,MODEL_SAMPLING,
                          **extra_args):
 
     extra_args = {} if extra_args is None else extra_args
@@ -538,7 +560,7 @@ def get_explicit_rk_step(rk, rk_type, x, LG, step, sigma, sigma_next, eta, eta_v
     h = rk.h_fn(sigma_down, sigma)
     c2, c3 = get_res4lyf_half_step3(sigma, sigma_down, c2, c3, t_fn=rk.t_fn, sigma_fn=rk.sigma_fn)
     
-    rk.set_coeff(rk_type, h, c2=c2, c3=c3, stepcount=stepcount, sigmas=sigmas, sigma_down=sigma_down)
+    rk.set_coeff(rk_type, h, c2=c2, c3=c3, stepcount=stepcount, sigmas=sigmas, sigma_down=sigma_down, extra_options=extra_options)
 
     s_ = [(sigma + h * c_) * s_in for c_ in rk.c]
     x_[0] = rk.add_noise_pre(x, sigma_up, sigma, sigma_next, alpha_ratio, s_noise, noise_mode)
@@ -585,7 +607,7 @@ def get_explicit_rk_step(rk, rk_type, x, LG, step, sigma, sigma_next, eta, eta_v
             else:
                 x = rk.add_noise_post(x, sigma_up, sigma, sigma_next, alpha_ratio, s_noise, noise_mode, SDE_NOISE_EXTERNAL, sde_noise_t)
 
-    for ms in range(rk.multistep_stages):
+    for ms in range(rk.multistep_stages): # NEEDS ADJUSTING?
         eps_ [rk.multistep_stages - ms] = eps_ [rk.multistep_stages - ms - 1]
         data_[rk.multistep_stages - ms] = data_[rk.multistep_stages - ms - 1]
 

@@ -15,6 +15,14 @@ def get_extra_options_kv(key, default, extra_options):
         value = default
     return value
 
+def get_extra_options_list(key, default, extra_options):
+
+    match = re.search(rf"{key}\s*=\s*([a-zA-Z0-9_.,+-]+)", extra_options)
+    if match:
+        value = match.group(1)
+    else:
+        value = default
+    return value
 
 def extra_options_flag(flag, extra_options):
     extra_options = filter_comments(extra_options)

@@ -6,7 +6,7 @@ from einops import rearrange
 
 from .latents import hard_light_blend, normalize_latent, initialize_or_scale
 from .rk_method import RK_Method
-from .helper import get_extra_options_kv, extra_options_flag, get_cosine_similarity
+from .helper import get_extra_options_kv, extra_options_flag, get_cosine_similarity, get_extra_options_list
 
 
 import itertools
@@ -255,12 +255,158 @@ class LatentGuide:
                 elif guide_mode == "epsilon_projection":
                     eps_row, eps_row_inv = get_guide_epsilon_substep(x_0, x_, y0, y0_inv, s_, row, rk_type)
                     
-                    eps_row_lerp = eps_[row]   +   lgw_mask * (eps_row-eps_[row])   +   lgw_mask_inv * (eps_row_inv-eps_[row])
-                    
-                    eps_collinear_eps_lerp = get_collinear(eps_[row], eps_row_lerp)  
-                    eps_lerp_ortho_eps     = get_orthogonal(eps_row_lerp, eps_[row])  
-                    
-                    eps_[row] = eps_collinear_eps_lerp + eps_lerp_ortho_eps
+                    if extra_options_flag("eps_proj_v2", extra_options):
+                        
+                        eps_row_lerp_fg = eps_[row]   +   lgw_mask * (eps_row-eps_[row])
+                        eps_row_lerp_bg = eps_[row]   +   lgw_mask_inv * (eps_row_inv-eps_[row])
+                        
+                        eps_collinear_eps_lerp_fg = get_collinear(eps_[row], eps_row_lerp_fg)  
+                        eps_lerp_ortho_eps_fg     = get_orthogonal(eps_row_lerp_fg, eps_[row])  
+                        
+                        eps_collinear_eps_lerp_bg = get_collinear(eps_[row], eps_row_lerp_bg)  
+                        eps_lerp_ortho_eps_bg     = get_orthogonal(eps_row_lerp_bg, eps_[row])  
+                        
+                        eps_[row] = eps_[row] + lgw_mask * (eps_collinear_eps_lerp_fg + eps_lerp_ortho_eps_fg - eps_[row]) + lgw_mask_inv * (eps_collinear_eps_lerp_bg + eps_lerp_ortho_eps_bg - eps_[row]) 
+                        
+                    elif extra_options_flag("eps_proj_v3", extra_options):
+
+                        eps_collinear_eps_lerp_fg = get_collinear(eps_[row], eps_row)  
+                        eps_lerp_ortho_eps_fg     = get_orthogonal(eps_row, eps_[row])  
+                        
+                        eps_collinear_eps_lerp_bg = get_collinear(eps_[row], eps_row_inv)  
+                        eps_lerp_ortho_eps_bg     = get_orthogonal(eps_row_inv, eps_[row])  
+                        
+                        eps_[row] = eps_[row] + lgw_mask * (eps_collinear_eps_lerp_fg + eps_lerp_ortho_eps_fg - eps_[row]) + lgw_mask_inv * (eps_collinear_eps_lerp_bg + eps_lerp_ortho_eps_bg - eps_[row]) 
+                       
+                    elif extra_options_flag("eps_proj_v5", extra_options):
+
+                        eps2g_collin = get_collinear(eps_[row], eps_row)  
+                        g2eps_ortho  = get_orthogonal(eps_row, eps_[row])  
+                        
+                        g2eps_collin = get_collinear(eps_row, eps_[row])  
+                        eps2g_ortho  = get_orthogonal(eps_[row], eps_row)  
+                        
+                        eps2i_collin = get_collinear(eps_[row], eps_row_inv)  
+                        i2eps_ortho  = get_orthogonal(eps_row_inv, eps_[row])  
+                        
+                        i2eps_collin = get_collinear(eps_row_inv, eps_[row])  
+                        eps2i_ortho  = get_orthogonal(eps_[row], eps_row_inv)  
+                        
+                        #eps_[row] = (eps2g_collin+g2eps_ortho)   +   (g2eps_collin+eps2g_ortho)       +       (eps2i_collin+i2eps_ortho)   +   (i2eps_collin+eps2i_ortho)
+                        #eps_[row] = eps_[row] + lgw_mask * (eps2g_collin+g2eps_ortho)   +   (1-lgw_mask) * (g2eps_collin+eps2g_ortho)       +      lgw_mask_inv * (eps2i_collin+i2eps_ortho)   +   (1-lgw_mask_inv) * (i2eps_collin+eps2i_ortho)
+
+                        eps_[row] = lgw_mask * (eps2g_collin+g2eps_ortho)   -   lgw_mask * (g2eps_collin+eps2g_ortho)       +      lgw_mask_inv * (eps2i_collin+i2eps_ortho)   -   lgw_mask_inv * (i2eps_collin+eps2i_ortho)
+                        
+                        #eps_[row] = eps_[row] + lgw_mask * (eps_collinear_eps_lerp_fg + eps_lerp_ortho_eps_fg - eps_[row]) + lgw_mask_inv * (eps_collinear_eps_lerp_bg + eps_lerp_ortho_eps_bg - eps_[row]) 
+                       
+                       
+                    elif extra_options_flag("eps_proj_v4a", extra_options):
+                        eps_row_lerp = eps_[row]   +   lgw_mask * (eps_row-eps_[row])   +   lgw_mask_inv * (eps_row_inv-eps_[row])
+
+                        eps_collinear_eps_lerp = get_collinear(eps_[row], eps_row_lerp)
+                        eps_lerp_ortho_eps     = get_orthogonal(eps_row_lerp, eps_[row])
+
+                        eps_[row] = (1 - torch.clamp(lgw_mask + lgw_mask_inv, max=1.0)) * eps_[row]   +   torch.clamp((lgw_mask + lgw_mask_inv), max=1.0) * (eps_collinear_eps_lerp + eps_lerp_ortho_eps)
+
+
+                    elif extra_options_flag("eps_proj_v4b", extra_options):
+                        eps_row_lerp = eps_[row]   +   lgw_mask * (eps_row-eps_[row])   +   lgw_mask_inv * (eps_row_inv-eps_[row])
+
+                        eps_collinear_eps_lerp = get_collinear(eps_[row], eps_row_lerp)
+                        eps_lerp_ortho_eps     = get_orthogonal(eps_row_lerp, eps_[row])
+
+                        eps_[row] = (1 - (lgw_mask + lgw_mask_inv)/2) * eps_[row]   +   ((lgw_mask + lgw_mask_inv)/2) * (eps_collinear_eps_lerp + eps_lerp_ortho_eps)
+
+                    elif extra_options_flag("eps_proj_v4c", extra_options):
+                        eps_row_lerp = eps_[row]   +   lgw_mask * (eps_row-eps_[row])   +   lgw_mask_inv * (eps_row_inv-eps_[row])
+
+                        eps_collinear_eps_lerp = get_collinear(eps_[row], eps_row_lerp)
+                        eps_lerp_ortho_eps     = get_orthogonal(eps_row_lerp, eps_[row])
+
+                        lgw_mask_sum = (lgw_mask + lgw_mask_inv)
+
+
+                        eps_[row] = (1 - (lgw_mask + lgw_mask_inv)/2) * eps_[row]   +   ((lgw_mask + lgw_mask_inv)/2) * (eps_collinear_eps_lerp + eps_lerp_ortho_eps)
+
+                    elif extra_options_flag("eps_proj_v4e", extra_options):
+                        eps_row_lerp = eps_[row]   +   lgw_mask * (eps_row-eps_[row])   +   lgw_mask_inv * (eps_row_inv-eps_[row])
+
+                        eps_collinear_eps_lerp = get_collinear(eps_[row], eps_row_lerp)
+                        eps_lerp_ortho_eps     = get_orthogonal(eps_row_lerp, eps_[row])
+
+                        eps_sum = eps_collinear_eps_lerp + eps_lerp_ortho_eps
+
+                        eps_[row] = eps_[row] + self.mask * (eps_sum - eps_[row]) + self.mask_inv * (eps_sum - eps_[row])
+
+                    elif extra_options_flag("eps_proj_self1", extra_options):
+                        eps_row_lerp = eps_[row]   +   self.mask * (eps_row-eps_[row])   +   self.mask_inv * (eps_row_inv-eps_[row])
+
+                        eps_collinear_eps_lerp = get_collinear(eps_[row], eps_[row])
+                        eps_lerp_ortho_eps     = get_orthogonal(eps_[row], eps_[row])
+
+                        eps_[row] = eps_collinear_eps_lerp + eps_lerp_ortho_eps
+
+                    elif extra_options_flag("eps_proj_v4z", extra_options):
+                        eps_row_lerp = eps_[row]   +   self.mask * (eps_row-eps_[row])   +   self.mask_inv * (eps_row_inv-eps_[row])
+
+                        eps_collinear_eps_lerp = get_collinear(eps_[row], eps_row_lerp)
+                        eps_lerp_ortho_eps     = get_orthogonal(eps_row_lerp, eps_[row])
+
+                        peak = max(lgw, lgw_inv)
+                        lgw_mask_sum = (lgw_mask + lgw_mask_inv)
+
+                        eps_sum = eps_collinear_eps_lerp + eps_lerp_ortho_eps
+                        #NOT FINISHED!!!
+                        #eps_[row] = eps_[row] + lgw_mask * (eps_sum - eps_[row]) + lgw_mask_inv * (eps_sum - eps_[row])
+
+                    elif extra_options_flag("eps_proj_v5", extra_options):
+                        eps_row_lerp = eps_[row]   +   lgw_mask * (eps_row-eps_[row])   +   lgw_mask_inv * (eps_row_inv-eps_[row])
+
+                        eps_collinear_eps_lerp = get_collinear(eps_[row], eps_row_lerp)
+                        eps_lerp_ortho_eps     = get_orthogonal(eps_row_lerp, eps_[row])
+
+                        eps_[row] = ((lgw_mask + lgw_mask_inv)==0) * eps_[row]   +   ((lgw_mask + lgw_mask_inv)>0) * (eps_collinear_eps_lerp + eps_lerp_ortho_eps)
+
+                    elif extra_options_flag("eps_proj_v6", extra_options):
+                        eps_row_lerp = eps_[row]   +   lgw_mask * (eps_row-eps_[row])   +   lgw_mask_inv * (eps_row_inv-eps_[row])
+
+                        eps_collinear_eps_lerp = get_collinear(eps_[row], eps_row_lerp)
+                        eps_lerp_ortho_eps     = get_orthogonal(eps_row_lerp, eps_[row])
+
+                        eps_[row] = ((lgw_mask * lgw_mask_inv)==0) * eps_[row]   +   ((lgw_mask * lgw_mask_inv)>0) * (eps_collinear_eps_lerp + eps_lerp_ortho_eps)
+
+
+                    elif extra_options_flag("eps_proj_old_default", extra_options):
+                        eps_row_lerp = eps_[row]   +   lgw_mask * (eps_row-eps_[row])   +   lgw_mask_inv * (eps_row_inv-eps_[row])
+                        #eps_row_lerp = eps_[row]   +   lgw_mask * (eps_row-eps_[row])   +   (1-lgw_mask) * (eps_row_inv-eps_[row])
+                        
+                        eps_collinear_eps_lerp = get_collinear(eps_[row], eps_row_lerp)  
+                        eps_lerp_ortho_eps     = get_orthogonal(eps_row_lerp, eps_[row])  
+                        
+                        eps_[row] = eps_collinear_eps_lerp + eps_lerp_ortho_eps
+                        
+                    else: #elif extra_options_flag("eps_proj_v4d", extra_options):
+                        #if row > 0:
+                            #lgw_mask_factor = float(get_extra_options_kv("substep_lgw_mask_factor", "1.0", extra_options))
+                            #lgw_mask_inv_factor = float(get_extra_options_kv("substep_lgw_mask_inv_factor", "1.0", extra_options))
+                        lgw_mask_factor = 1
+                        if extra_options_flag("substep_eps_proj_scaling", extra_options):
+                            lgw_mask_factor = 1/(row+1)
+                            
+                        if extra_options_flag("substep_eps_proj_factors", extra_options):
+                            value_str = get_extra_options_list("substep_eps_proj_factors", "", extra_options)
+                            float_list = [float(item.strip()) for item in value_str.split(',') if item.strip()]
+                            lgw_mask_factor = float_list[row]
+                        
+                        eps_row_lerp = eps_[row]   +   self.mask * (eps_row-eps_[row])   +   (1-self.mask) * (eps_row_inv-eps_[row])
+
+                        eps_collinear_eps_lerp = get_collinear(eps_[row], eps_row_lerp)
+                        eps_lerp_ortho_eps     = get_orthogonal(eps_row_lerp, eps_[row])
+
+                        eps_sum = eps_collinear_eps_lerp + eps_lerp_ortho_eps
+
+                        eps_[row] = eps_[row] + lgw_mask_factor*lgw_mask * (eps_sum - eps_[row]) + lgw_mask_factor*lgw_mask_inv * (eps_sum - eps_[row])
+
 
 
                 elif extra_options_flag("disable_lgw_scaling", extra_options):
