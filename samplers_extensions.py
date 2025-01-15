@@ -306,13 +306,15 @@ class ClownsharKSamplerGuide:
         if guide_mode.startswith("epsilon_") and guide_mode != "epsilon_projection" and guide_bkg == None:
             print("Warning: need two latent inputs for guide_mode=",guide_mode," to work. Falling back to epsilon.")
             guide_mode = "epsilon"
-        
-        if guide_weight_scheduler == "constant": 
-            guide_weights = initialize_or_scale(None, guide_weight, guide_end_step).to(default_dtype)
+      
+        if guide_weight_scheduler == "constant" and guide_weights == None: 
+            guide_weights = initialize_or_scale(None, 1.0, guide_end_step).to(default_dtype)
+            #guide_weights = initialize_or_scale(None, guide_weight, guide_end_step).to(default_dtype)
             guide_weights = F.pad(guide_weights, (0, max_steps), value=0.0)
         
         if guide_weight_scheduler_bkg == "constant": 
-            guide_weights_bkg = initialize_or_scale(None, guide_weight_bkg, guide_bkg_end_step).to(default_dtype)
+            guide_weights_bkg = initialize_or_scale(None, 0.0, guide_bkg_end_step).to(default_dtype)
+            #guide_weights_bkg = initialize_or_scale(None, guide_weight_bkg, guide_bkg_end_step).to(default_dtype)
             guide_weights_bkg = F.pad(guide_weights_bkg, (0, max_steps), value=0.0)
             
         guides = (guide_mode, guide_weight, guide_weight_bkg, guide_weights, guide_weights_bkg, guide, guide_bkg, guide_mask, guide_mask_bkg,
@@ -365,14 +367,14 @@ class ClownsharKSamplerGuides:
             print("Warning: need two latent inputs for guide_mode=",guide_mode," to work. Falling back to epsilon.")
             guide_mode = "epsilon"
         
-        if guide_weight_scheduler == "constant": 
-            guide_weights = initialize_or_scale(None, guide_weight, guide_end_step).to(default_dtype)
+        if guide_weight_scheduler == "constant" and guide_weights == None: 
+            guide_weights = initialize_or_scale(None, 1.0, guide_end_step).to(default_dtype)
             guide_weights = F.pad(guide_weights, (0, max_steps), value=0.0)
         
-        if guide_weight_scheduler_bkg == "constant": 
-            guide_weights_bkg = initialize_or_scale(None, guide_weight_bkg, guide_bkg_end_step).to(default_dtype)
+        if guide_weight_scheduler_bkg == "constant" and guide_weights_bkg == None: 
+            guide_weights_bkg = initialize_or_scale(None, 1.0, guide_bkg_end_step).to(default_dtype)
             guide_weights_bkg = F.pad(guide_weights_bkg, (0, max_steps), value=0.0)
-            
+    
         guides = (guide_mode, guide_weight, guide_weight_bkg, guide_weights, guide_weights_bkg, guide, guide_bkg, guide_mask, guide_mask_bkg,
                   guide_weight_scheduler, guide_weight_scheduler_bkg, guide_end_step, guide_bkg_end_step, denoise, denoise_bkg)
         return (guides, )
