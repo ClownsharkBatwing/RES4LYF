@@ -320,9 +320,11 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
                             eps_[row], data_[row] = rk(x_0, x_[row+1], s_[row], h, **extra_args)   
                             #print("exim: ", step, row, exim_iter)
                         else:
-                            for inner_exim_iter in range(implicit_steps+1):
+                            eps_[row], data_[row] = rk(x_0, x_[row+1], s_[row], h, **extra_args)
+                            x_[row+1] = x_0 + h * eps_[row]
+                            for inner_exim_iter in range(implicit_steps):
                                 #print("inner_exim: ", step, row, inner_exim_iter)
-                                eps_[row], data_[row] = rk(x_0, x_[row+1], s_[row], h, **extra_args)
+                                eps_[row], data_[row] = rk(x_0, x_[row+1], s_[row+1], h, **extra_args)
                                 eps_, x_ = LG.process_guides_substep(x_0, x_, eps_, data_, row, step, sigma, sigma_next, sigma_down, s_, unsample_resample_scale, rk, rk_type, extra_options, frame_weights)
                                 x_[row+1] = x_0 + h * eps_[row]
 
