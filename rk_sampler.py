@@ -318,10 +318,10 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
                     else:
                         if implicit_steps == 0 or row > 0 or (row == 0 and not extra_options_flag("explicit_diagonal_implicit_predictor", extra_options)):
                             eps_[row], data_[row] = rk(x_0, x_[row+1], s_[row], h, **extra_args)   
-                            print("exim: ", step, row, exim_iter)
+                            #print("exim: ", step, row, exim_iter)
                         else:
                             for inner_exim_iter in range(implicit_steps+1):
-                                print("inner_exim: ", step, row, inner_exim_iter)
+                                #print("inner_exim: ", step, row, inner_exim_iter)
                                 eps_[row], data_[row] = rk(x_0, x_[row+1], s_[row], h, **extra_args)
                                 eps_, x_ = LG.process_guides_substep(x_0, x_, eps_, data_, row, step, sigma, sigma_next, sigma_down, s_, unsample_resample_scale, rk, rk_type, extra_options, frame_weights)
                                 x_[row+1] = x_0 + h * eps_[row]
