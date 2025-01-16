@@ -128,20 +128,36 @@ class FluxGuidanceDisable:
         return {"required": { 
             "model": ("MODEL",),
             "disable": ("BOOLEAN", {"default": True}),
+            "zero_clip_L": ("BOOLEAN", {"default": True}),
             }
         }
+        
     RETURN_TYPES = ("MODEL",)
     RETURN_NAMES = ("model",)
 
     CATEGORY = "model_patches"
     FUNCTION = "main"
 
-    def main(self, model, disable=True):
+    original_forward = Flux.forward
+
+    @staticmethod
+    def new_forward(self, x, timestep, context, y, guidance, control=None, transformer_options={}, **kwargs):
+
+        y = torch.zeros_like(y)
+        
+        return FluxGuidanceDisable.original_forward(self, x, timestep, context, y, guidance, control, transformer_options, **kwargs)
+
+    def main(self, model, disable=True, zero_clip_L=True):
         m = model.clone()
         if disable:
             m.model.diffusion_model.params.guidance_embed = False
         else:
             m.model.diffusion_model.params.guidance_embed = True
+            
+        #m.model.diffusion_model.zero_clip_L = zero_clip_L
+        if zero_clip_L:
+            Flux.forward = types.MethodType(FluxGuidanceDisable.new_forward, m.model.diffusion_model)
+
         return (m,)
 
 
