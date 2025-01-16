@@ -34,13 +34,6 @@ def debug_cuda_cleanup(doSync=False, doEmpty=False, doGC=False):
         import gc
         gc.collect()
 
-def is_RK_input_same(cached_inputs, new_inputs):
-    isDifferent = cached_inputs is not None and \
-    torch.equal(cached_inputs[0], new_inputs[0]) and \
-    torch.equal(cached_inputs[1], new_inputs[1]) and \
-    torch.equal(cached_inputs[2], new_inputs[2]) and \
-    torch.equal(cached_inputs[3], new_inputs[3])
-    return isDifferent
 # End debugging code
 
 def get_cosine_similarity(a, b):
@@ -144,8 +137,6 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
     c2 = c2_ = float(get_extra_options_kv("c2", str(c2), extra_options))
     c3 = c3_ = float(get_extra_options_kv("c3", str(c3), extra_options))
 
-    explicit_implicit_steps = int(get_extra_options_kv("explicit_implicit_steps", int("0"), extra_options))
-
     # Flags
     noise_cossim_flag = extra_options_flag("noise_cossim", extra_options)
     noise_substep_cossim_flag = extra_options_flag("noise_substep_cossim", extra_options)
@@ -225,8 +216,10 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
     gc.collect()
     
     y0, y0_inv = LG.y0, LG.y0_inv
-    # lgw, lgw_inv = LG.lgw, LG.lgw_inv
-    # guide_mode = LG.guide_mode
+    lgw, lgw_inv = LG.lgw, LG.lgw_inv
+    guide_mode = LG.guide_mode
+
+
 
     denoised, denoised_prev, eps, eps_prev = [torch.zeros_like(x) for _ in range(4)]
     prev_noises = []
@@ -234,8 +227,8 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
     
     
     
-    cache = {'inputs': None, 'outputs': None}
     for step in trange(len(sigmas)-1, disable=disable):
+
         sigma, sigma_next = sigmas[step], sigmas[step+1]
         unsample_resample_scale = float(unsample_resample_scales[step]) if unsample_resample_scales is not None else None
         if regional_conditioning_weights is not None:
@@ -290,6 +283,7 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
             else:
                 eps_ [rk.multistep_stages - ms] =  (x_0 - data_ [rk.multistep_stages - ms]) / sigma
 
+        #explicit_implicit_steps = int(get_extra_options_kv("explicit_implicit_steps", int("0"), extra_options))
 
         if implicit_steps == 0 or implicit_sampler_name == "explicit_diagonal": 
             for row in range(rk.rows - rk.multistep_stages):
@@ -362,37 +356,18 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
                         eps_[row] = eps_row
                     else:
                         if implicit_steps == 0 or row > 0 or (row == 0 and not extra_options_flag("explicit_diagonal_implicit_predictor", extra_options)):
-
-                            if is_RK_input_same(cache['inputs'], (x_0, x_[row+1], s_[row], h)) and cache_implicit_steps_flag:
-                                eps_[row], data_[row] = cache['outputs']
-                                log("Using cached output (1)")
-                            else:
-                                eps_[row], data_[row] = rk(x_0, x_[row+1], s_[row], h, **extra_args)   
-
+                            eps_[row], data_[row] = rk(x_0, x_[row+1], s_[row], h, **extra_args)   
                             #print("exim: ", step, row, exim_iter)
                         else:
                             if extra_options_flag("explicit_diagonal_implicit_predictor_disable_noise", extra_options):
                                 sub_sigma_up, sub_sigma_down, sub_alpha_ratio = sub_sigma_up*0, sub_sigma_next, sub_alpha_ratio/sub_alpha_ratio
-
-                            if is_RK_input_same(cache['inputs'], (x_0, x_[row+1], s_[row], h)) and cache_implicit_steps_flag:
-                                eps_[row], data_[row] = cache['outputs']
-                                log("Using cached output (2)")
-                            else:
-                                eps_[row], data_[row] = rk(x_0, x_[row+1], s_[row], h, **extra_args)
-
+                            eps_[row], data_[row] = rk(x_0, x_[row+1], s_[row], h, **extra_args)
                             h_mini = rk.h_fn(sub_sigma_down, sub_sigma)
                             x_[row+1] = x_0 + h_mini * eps_[row]
                             x_[row+1] = rk.add_noise_post(x_[row+1], sub_sigma_up, sub_sigma, sub_sigma_next, sub_alpha_ratio, s_noise, substep_noise_mode, SDE_NOISE_EXTERNAL, sde_noise_t)
-                            cache_internal = {'inputs': None, 'outputs': None}
                             for inner_exim_iter in range(implicit_steps):
                                 #print("inner_exim: ", step, row, inner_exim_iter)
-                                if is_RK_input_same(cache_internal['inputs'], (x_0, x_[row+1], s_[row], h_mini)) and cache_implicit_steps_flag:
-                                    eps_[row], data_[row] = cache_internal['outputs']
-                                    log("Using cached output (3)")
-                                else:
-                                    eps_[row], data_[row] = rk(x_0, x_[row+1], s_[row], h, **extra_args)
-                                cache_internal['outputs'] = (eps_[row].clone(), data_[row].clone()) if cache_implicit_steps_flag else None
-                                cache_internal['inputs'] = (x_0.clone(), x_[row+1].clone(), s_[row].clone(), h_mini.clone()) if cache_implicit_steps_flag else None
+                                eps_[row], data_[row] = rk(x_0, x_[row+1], s_[row+1], h, **extra_args)
                                 eps_, x_ = LG.process_guides_substep(x_0, x_, eps_, data_, row, step, sigma, sigma_next, sigma_down, s_, unsample_resample_scale, rk, rk_type, extra_options, frame_weights)
                                 x_[row+1] = x_0 + h_mini * eps_[row]
                                 #x_[row+1] = rk.add_noise_post(x_[row+1], sub_sigma_up, sub_sigma, sub_sigma_next, sub_alpha_ratio, s_noise, substep_noise_mode, SDE_NOISE_EXTERNAL, sde_noise_t)
@@ -402,9 +377,6 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
                                     noise = rk.noise_sampler(sigma=sub_sigma, sigma_next=sub_sigma_next)
                                     noise_osde = Osde.get_ortho_noise(noise, prev_noises, max_iter=noise_substep_cossim_max_iter, max_score=noise_substep_cossim_max_score, NOISE_COSSIM_SOURCE=NOISE_SUBSTEP_COSSIM_SOURCE)
                                     x_[row+1] = sub_alpha_ratio * x_[row+1] + sub_sigma_up * noise_osde * s_noise
-                        
-                        cache['outputs'] = (eps_[row].clone(), data_[row].clone()) if cache_implicit_steps_flag else None
-                        cache['inputs'] = (x_0.clone(), x_[row+1].clone(), s_[row].clone(), h.clone()) if cache_implicit_steps_flag else None
 
 
 
@@ -412,7 +384,6 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
                             eps_[row] = (x_0 - data_[row]) / sigma
                         if sub_sigma_up > 0 and not RK_Method.is_exponential(rk_type):
                             eps_[row] = (x_0 - data_[row]) / sigma
-                        
 
                     debug_cuda_cleanup(cuda_sync_b_flag, cuda_empty_b_flag, cuda_gc_b_flag)
 
@@ -470,7 +441,7 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
                     x_[row+1] = x_0 + h_new_irk * irk.a_k_sum(eps_, row)
                     
                     # NOISE ADD              
-                    if is_RF_model(model) == True   or  noise_mode != "hard":
+                    if is_RF_model(model) == True   or   (is_RF_model(model) == False and noise_mode != "hard"):      
                         if (row > 0) and (sub_sigma_up > 0) and ((SUBSTEP_SKIP_LAST == False) or (row < irk.rows - irk.multistep_stages - 1)):
                             data_tmp = denoised_prev if data_[row-1].sum() == 0 else data_[row-1]
                             eps_tmp  = eps_prev      if  eps_[row-1].sum() == 0 else eps_ [row-1]
@@ -593,7 +564,8 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
                 SDE_NOISE_EXTERNAL=False
             else:
                 sde_noise_t = sde_noise[step]
-        if is_RF_model(model) == True   or   noise_mode != "hard":
+                
+        if is_RF_model(model) == True   or   (is_RF_model(model) == False and noise_mode != "hard"):
             if sigma_up > 0:
                 if implicit_steps==0:
                     rk_or_irk = rk
@@ -682,7 +654,7 @@ def get_explicit_rk_step(rk, rk_type, x, LG, step, sigma, sigma_next, eta, eta_v
 
     #x = rk.add_noise_post(x, sigma_up, sigma, sigma_next, alpha_ratio, s_noise, noise_mode)
     
-    if is_RF_model(rk.model)   or   noise_mode != "hard":
+    if is_RF_model(rk.model) == True   or   (is_RF_model(rk.model) == False and noise_mode != "hard"):
         if sigma_up > 0:
             Osde = NoiseStepHandlerOSDE(x, eps, denoised, x_init, y0, LG.y0_inv)
             if Osde.check_cossim_source(NOISE_COSSIM_SOURCE):
