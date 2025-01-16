@@ -21,6 +21,7 @@ import copy
 
 from .helper import get_extra_options_kv, extra_options_flag, get_res4lyf_scheduler_list
 from .latents import initialize_or_scale
+from .rk_guide_func import get_orthogonal
 
 from .noise_sigmas_timesteps_scaling import NOISE_MODE_NAMES
     
@@ -144,6 +145,17 @@ class SharkSampler:
                             {'pooled_output': torch.zeros((1, 768))}
                             ]]
 
+                    if extra_options_flag("uncond_ortho_flux", extra_options):
+                        if negative is None:
+                            negative = [[
+                                torch.randn((1, 256, 4096)),
+                                {'pooled_output': torch.randn((1, 768))}
+                                ]]
+                        #negative[0][0] = get_orthogonal(negative[0][0].to(torch.bfloat16), positive[0][0].to(torch.bfloat16))
+                        #negative[0][1]['pooled_output'] = get_orthogonal(negative[0][1]['pooled_output'].to(torch.bfloat16), positive[0][1]['pooled_output'].to(torch.bfloat16))
+                        negative[0][0] = get_orthogonal(negative[0][0], positive[0][0])
+                        negative[0][1]['pooled_output'] = get_orthogonal(negative[0][1]['pooled_output'], positive[0][1]['pooled_output'])
+                        
                     if negative is None:
                         negative = [[
                             torch.zeros((1, 256, 4096)),
@@ -156,11 +168,26 @@ class SharkSampler:
                             {'pooled_output': torch.zeros((1, 2048))}
                             ]]
 
+                    if extra_options_flag("uncond_ortho_sd35", extra_options):
+                        if negative is None:
+                            negative = [[
+                                torch.randn((1, 154, 4096)),
+                                {'pooled_output': torch.randn((1, 2048))}
+                                ]]
+                        
+                        negative[0][0] = get_orthogonal(negative[0][0], positive[0][0])
+                        negative[0][1]['pooled_output'] = get_orthogonal(negative[0][1]['pooled_output'], positive[0][1]['pooled_output'])
+                        
+
                     if negative is None:
                         negative = [[
                             torch.zeros((1, 154, 4096)),
                             {'pooled_output': torch.zeros((1, 2048))}
                             ]]
+                        
+                if extra_options_flag("zero_pooled_output", extra_options):
+                    positive[0][1]['pooled_output'] = torch.zeros_like(positive[0][1]['pooled_output'])
+                    negative[0][1]['pooled_output'] = torch.zeros_like(negative[0][1]['pooled_output'])
 
                 if denoise_alt < 0:
                     d_noise = denoise_alt = -denoise_alt

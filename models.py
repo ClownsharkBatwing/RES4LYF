@@ -23,6 +23,8 @@ from .flux.layers import SingleStreamBlock as ReSingleStreamBlock, DoubleStreamB
 from comfy.ldm.flux.model import Flux
 from comfy.ldm.flux.layers import SingleStreamBlock, DoubleStreamBlock
 
+from .rk_guide_func import get_orthogonal, get_cosine_similarity
+
 
 class ReFluxPatcher:
     @classmethod
@@ -64,6 +66,59 @@ class ReFluxPatcher:
                 block.idx = i
         
         return (m,)
+    
+import types
+
+
+class FluxOrthoCFGPatcher:
+    @classmethod
+    def INPUT_TYPES(s):
+        return {"required": { 
+            "model": ("MODEL",),
+            "enable": ("BOOLEAN", {"default": True}),
+            "ortho_T5": ("BOOLEAN", {"default": True}),
+            "ortho_clip_L": ("BOOLEAN", {"default": True}),
+            "zero_clip_L": ("BOOLEAN", {"default": True}),
+           }
+        }
+    RETURN_TYPES = ("MODEL",)
+    RETURN_NAMES = ("model",)
+
+    CATEGORY = "model_patches"
+    FUNCTION = "main"
+    
+    original_forward = Flux.forward
+
+    @staticmethod
+    def new_forward(self, x, timestep, context, y, guidance, control=None, transformer_options={}, **kwargs):
+
+        for _ in range(500):
+            if self.ortho_T5 and get_cosine_similarity(context[0], context[1]) != 0:
+                context[0] = get_orthogonal(context[0], context[1])
+            if self.ortho_clip_L and get_cosine_similarity(y[0], y[1]) != 0:
+                y[0] = get_orthogonal(y[0].unsqueeze(0), y[1].unsqueeze(0)).squeeze(0)
+                
+        print("postcossim1: ", get_cosine_similarity(context[0], context[1]))
+        print("postcossim2: ", get_cosine_similarity(y[0], y[1]))
+        
+        if self.zero_clip_L:
+            y[0] = torch.zeros_like(y[0])
+        
+        return FluxOrthoCFGPatcher.original_forward(self, x, timestep, context, y, guidance, control, transformer_options, **kwargs)
+
+    def main(self, model, enable=True, ortho_T5=True, ortho_clip_L=True, zero_clip_L=True):
+        m = model.clone()
+
+        if enable:
+            m.model.diffusion_model.ortho_T5 = ortho_T5
+            m.model.diffusion_model.ortho_clip_L = ortho_clip_L
+            m.model.diffusion_model.zero_clip_L = zero_clip_L
+            Flux.forward = types.MethodType(FluxOrthoCFGPatcher.new_forward, m.model.diffusion_model)
+        else:
+            Flux.forward = FluxOrthoCFGPatcher.original_forward
+
+        return (m,)
+    
     
     
     

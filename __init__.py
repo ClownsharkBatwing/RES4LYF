@@ -228,6 +228,7 @@ NODE_CLASS_MAPPINGS = {
 
     
     "ReFluxPatcher": models.ReFluxPatcher,
+    "FluxOrthoCFGPatcher": models.FluxOrthoCFGPatcher,
     
     "ClownsharkSamplerOptions_FrameWeights": samplers_extensions.ClownsharKSamplerOptions_FrameWeights,
 }
