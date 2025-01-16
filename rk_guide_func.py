@@ -1009,9 +1009,7 @@ def get_orthogonal_noise_from_channelwise(*refs, max_iter=500, max_score=1e-15):
         b,ch,h,w = noise.shape
     elif (noise.dim() == 5):
         b,ch,t,h,w = noise.shape
-    
-    print("\nRunning orthogonalization")
-    
+        
     for i in range(max_iter):
         noise_tmp = gram_schmidt_channels_optimized(noise_tmp, *refs)
         
@@ -1034,41 +1032,37 @@ def gram_schmidt_channels_optimized_with_scores(A, *refs):
         b,c,t,h,w = A.shape
 
     A_flat = A.view(b, c, -1)
+    max_score = 0.0
     
-    # Do all projections first
     for ref in refs:
         ref_flat = ref.view(b, c, -1)
         ref_norm = ref_flat.norm(dim=-1, keepdim=True)
         ref_flat = ref_flat / ref_norm
+
+        # Compute projection coefficients (normalized dot products)
         proj_coeff = torch.sum(A_flat * ref_flat, dim=-1, keepdim=True)
+        
+        # Track maximum cosine similarity 
+        A_norm = A_flat.norm(dim=-1, keepdim=True)
+        cos_sim = (proj_coeff / A_norm).abs().max().item()
+        max_score = max(max_score, cos_sim)
+        
+        # Perform projection
         projection = proj_coeff * ref_flat
         A_flat -= projection
 
-    # Then check orthogonality against all refs
-    max_scores = []
-    for ref in refs:
-        ref_flat = ref.view(b, c, -1)
-        # Per channel checks
-        for ch_idx in range(c):
-            max_scores.append(get_cosine_similarity(A_flat[:,ch_idx], ref_flat[:,ch_idx]).abs())
-        # Full tensor check
-        max_scores.append(get_cosine_similarity(A_flat.view(b,-1), ref_flat.view(b,-1)).abs())
-
-    return A_flat.view_as(A), max(max_scores)
+    return A_flat.view_as(A), max_score
 
 def get_orthogonal_noise_from_channelwise_fast(*refs, max_iter=500, max_score=1e-15):
     noise, *refs = refs
     noise_tmp = noise.clone()
     
-    print("\nRunning fast orthogonalization")
-
     for i in range(max_iter):
         noise_tmp, curr_max_score = gram_schmidt_channels_optimized_with_scores(noise_tmp, *refs)
         if curr_max_score < max_score:
             break
     
     return noise_tmp
-
 
 def gram_schmidt_channels_optimized(A, *refs):
     if (A.dim() == 4):
