@@ -16,37 +16,11 @@ from .rk_method import RK_Method
 from .rk_guide_func import *
 
 from .latents import normalize_latent, initialize_or_scale, latent_normalize_channels
-from .helper import get_extra_options_kv, extra_options_flag
+from .helper import get_extra_options_kv, extra_options_flag, get_cosine_similarity
 from .sigmas import get_sigmas
 
 PRINT_DEBUG=False
 
-def get_cosine_similarity(a, b):
-    if a.dim() == 5 and b.dim() == 5 and b.shape[2] == 1:
-        b = b.expand(-1, -1, a.shape[2], -1, -1)
-    return F.cosine_similarity(a.flatten(), b.flatten(), dim=0)
-
-def normalize_inputs(x, y0, y0_inv, guide_mode,  extra_options):
-    
-    if guide_mode == "epsilon_guide_mean_std_from_bkg":
-        y0 = normalize_latent(y0, y0_inv)
-        
-    input_norm = get_extra_options_kv("input_norm", "", extra_options)
-    input_std = float(get_extra_options_kv("input_std", "1.0", extra_options))
-    
-    if input_norm == "input_ch_mean_set_std_to":
-        x = normalize_latent(x, set_std=input_std)
-
-    if input_norm == "input_ch_set_std_to":
-        x = normalize_latent(x, set_std=input_std, mean=False)
-            
-    if input_norm == "input_mean_set_std_to":
-        x = normalize_latent(x, set_std=input_std, channelwise=False)
-        
-    if input_norm == "input_std_set_std_to":
-        x = normalize_latent(x, set_std=input_std, mean=False, channelwise=False)
-    
-    return x, y0, y0_inv
 
 def prepare_sigmas(model, sigmas):
     if sigmas[0] == 0.0:      #remove padding used to prevent comfy from adding noise to the latent (for unsampling, etc.)
@@ -148,13 +122,10 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
                 sigma_up_total += sigmas[i+1]
             eta = eta / sigma_up_total
 
-    #if implicit_sampler_name in ("none", "explicit_diagonal"):
-    #    irk_type = "euler"
     irk_type = implicit_sampler_name
     if implicit_sampler_name in ("explicit_full", "explicit_diagonal", "none"):
         irk_type = rk_type
     
-    #rk_type = "euler" if implicit_steps > 0 else rk_type
     rk_type = "euler" if implicit_steps > 0 and implicit_sampler_name == "explicit_full" else rk_type
     rk_type = get_extra_options_kv("rk_type", rk_type, extra_options)
     print("rk_type: ", rk_type)
@@ -245,8 +216,6 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
             else:
                 eps_ [rk.multistep_stages - ms] =  (x_0 - data_ [rk.multistep_stages - ms]) / sigma
 
-        #explicit_implicit_steps = int(get_extra_options_kv("explicit_implicit_steps", int("0"), extra_options))
-
         if implicit_steps == 0 or implicit_sampler_name == "explicit_diagonal": 
             for row in range(rk.rows - rk.multistep_stages):
                 for exim_iter in range(implicit_steps+1):
@@ -313,8 +282,7 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
                     # MODEL CALL
                     if step < guide_skip_steps:
                         eps_row, eps_row_inv = get_guide_epsilon_substep(x_0, x_, y0, y0_inv, s_, row, rk_type)
-                        #eps_[row] = lgw_mask * eps_row   +   lgw_mask_inv * eps_row_inv
-                        eps_[row] = eps_row
+                        eps_[row] = LG.mask * eps_row   +   (1-LG.mask) * eps_row_inv
                     else:
                         if implicit_steps == 0 or row > 0 or (row == 0 and not extra_options_flag("explicit_diagonal_implicit_predictor", extra_options)):
                             eps_[row], data_[row] = rk(x_0, x_[row+1], s_[row], h, **extra_args)   
@@ -340,7 +308,6 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
                                 eps_[row], data_[row] = rk(x_0, x_[row+1], s_[row+1], h, **extra_args)
                                 eps_, x_ = LG.process_guides_substep(x_0, x_, eps_, data_, row, step, sigma, sigma_next, sigma_down, s_, unsample_resample_scale, rk, rk_type, extra_options, frame_weights)
                                 x_[row+1] = x_0 + h_mini * eps_[row]
-                                #x_[row+1] = rk.add_noise_post(x_[row+1], sub_sigma_up, sub_sigma, sub_sigma_next, sub_alpha_ratio, s_noise, substep_noise_mode, SDE_NOISE_EXTERNAL, sde_noise_t)
                
                                 Osde = NoiseStepHandlerOSDE(x_[row+1], eps_[row], data_[row], x_init, y0, y0_inv)
                                 if Osde.check_cossim_source(NOISE_SUBSTEP_COSSIM_SOURCE):
@@ -367,8 +334,6 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
                         float_list = [float(item.strip()) for item in value_str.split(',') if item.strip()]
                         eps_[row] = (float_list[exim_iter]) * eps_[row]   +   (1-float_list[exim_iter]) * eps_row_tmp
                         x_[row+1] = (float_list[exim_iter]) * x_[row+1]   +   (1-float_list[exim_iter]) * x_row_tmp
-                        #eps_[row] = (1-float_list[exim_iter]) * eps_[row]   +   float_list[exim_iter] * eps_row_tmp
-                        #x_[row+1] = (1-float_list[exim_iter]) * x_[row+1]   +   float_list[exim_iter] * x_row_tmp
 
                     if row > 0 and exim_iter <= implicit_steps and implicit_steps > 0:
                         eps_[row-1] = eps_[row]
@@ -503,31 +468,7 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
                 x = LG.process_guides_poststep(x, denoised, eps, step, extra_options)
 
 
-        if extra_options_flag("eps_substep_preview", extra_options):
-            row_callback = int(get_extra_options_kv("eps_substep_preview", "0", extra_options))
-            denoised_callback = eps_[row_callback]
-            
-        elif extra_options_flag("denoised_substep_preview", extra_options):
-            row_callback = int(get_extra_options_kv("denoised_substep_preview", "0", extra_options))
-            denoised_callback = data_[row_callback]
-            
-        elif extra_options_flag("x_substep_preview", extra_options):
-            row_callback = int(get_extra_options_kv("x_substep_preview", "0", extra_options))
-            denoised_callback = x_[row_callback]
-            
-        elif extra_options_flag("eps_preview", extra_options):
-            denoised_callback = eps
-            
-        elif extra_options_flag("denoised_preview", extra_options):
-            denoised_callback = denoised
-            
-        elif extra_options_flag("x_preview", extra_options):
-            denoised_callback = x
-            
-        else:
-            denoised_callback = data_[0]
-            
-        callback({'x': x, 'i': step, 'sigma': sigma, 'sigma_next': sigma_next, 'denoised': denoised_callback.to(torch.float32)}) if callback is not None else None
+        preview_callback(x, eps, denoised, x_, eps_, data_, step, sigma, sigma_next, callback, extra_options)
 
         sde_noise_t = None
         if SDE_NOISE_EXTERNAL:
@@ -572,12 +513,10 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
         eps_ [0] = torch.zeros_like(eps_ [0])
         data_[0] = torch.zeros_like(data_[0])
         
-        if PRINT_DEBUG:
-            print("Denoised vs. y0 cossim score: ", get_cosine_similarity(denoised, y0).item())
         denoised_prev = denoised
         eps_prev = eps
         
-    callback({'x': x, 'i': step, 'sigma': sigma, 'sigma_next': sigma_next, 'denoised': denoised.to(torch.float32)}) if callback is not None else None
+    preview_callback(x, eps, denoised, x_, eps_, data_, step, sigma, sigma_next, callback, extra_options, FINAL_STEP=True)
     return x
 
 
@@ -650,7 +589,38 @@ def get_explicit_rk_step(rk, rk_type, x, LG, step, sigma, sigma_next, eta, eta_v
 
 
 
-
+def preview_callback(x, eps, denoised, x_, eps_, data_, step, sigma, sigma_next, callback, extra_options, FINAL_STEP=False):
+    
+    if FINAL_STEP:
+        denoised_callback = denoised
+        
+    elif extra_options_flag("eps_substep_preview", extra_options):
+        row_callback = int(get_extra_options_kv("eps_substep_preview", "0", extra_options))
+        denoised_callback = eps_[row_callback]
+        
+    elif extra_options_flag("denoised_substep_preview", extra_options):
+        row_callback = int(get_extra_options_kv("denoised_substep_preview", "0", extra_options))
+        denoised_callback = data_[row_callback]
+        
+    elif extra_options_flag("x_substep_preview", extra_options):
+        row_callback = int(get_extra_options_kv("x_substep_preview", "0", extra_options))
+        denoised_callback = x_[row_callback]
+        
+    elif extra_options_flag("eps_preview", extra_options):
+        denoised_callback = eps
+        
+    elif extra_options_flag("denoised_preview", extra_options):
+        denoised_callback = denoised
+        
+    elif extra_options_flag("x_preview", extra_options):
+        denoised_callback = x
+        
+    else:
+        denoised_callback = data_[0]
+        
+    callback({'x': x, 'i': step, 'sigma': sigma, 'sigma_next': sigma_next, 'denoised': denoised_callback.to(torch.float32)}) if callback is not None else None
+    
+    return
 
 
 
@@ -685,9 +655,9 @@ def sample_deis_4m(model, x, sigmas, extra_args=None, callback=None, disable=Non
     return sample_rk(model, x, sigmas, extra_args, callback, disable, noise_sampler_type="gaussian", noise_mode="hard", noise_seed=-1, rk_type="deis_4m", eta=0.0, )
 
 def sample_deis_2m_sde(model, x, sigmas, extra_args=None, callback=None, disable=None):
-    return sample_rk(model, x, sigmas, extra_args, callback, disable, noise_sampler_type="gaussian", noise_mode="hard", noise_seed=-1, rk_type="deis_2m", eta=0.5, )
+    return sample_rk(model, x, sigmas, extra_args, callback, disable, noise_sampler_type="gaussian", noise_mode="hard", noise_seed=-1, rk_type="deis_2m", eta=0.5, eta_substep=0.5, )
 def sample_deis_3m_sde(model, x, sigmas, extra_args=None, callback=None, disable=None):
-    return sample_rk(model, x, sigmas, extra_args, callback, disable, noise_sampler_type="gaussian", noise_mode="hard", noise_seed=-1, rk_type="deis_3m", eta=0.5, )
+    return sample_rk(model, x, sigmas, extra_args, callback, disable, noise_sampler_type="gaussian", noise_mode="hard", noise_seed=-1, rk_type="deis_3m", eta=0.5, eta_substep=0.5, )
 def sample_deis_4m_sde(model, x, sigmas, extra_args=None, callback=None, disable=None):
-    return sample_rk(model, x, sigmas, extra_args, callback, disable, noise_sampler_type="gaussian", noise_mode="hard", noise_seed=-1, rk_type="deis_4m", eta=0.5, )
+    return sample_rk(model, x, sigmas, extra_args, callback, disable, noise_sampler_type="gaussian", noise_mode="hard", noise_seed=-1, rk_type="deis_4m", eta=0.5, eta_substep=0.5, )
 

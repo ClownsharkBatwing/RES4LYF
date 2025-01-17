@@ -27,11 +27,18 @@ import sys
 
 flags = {
     "test_samplers": False,
+    "beta_samplers": False,
 }
 try:
     from . import test_samplers
     flags["test_samplers"] = True
     print("Importing test_samplers.py")
+except ImportError:
+    pass
+try:
+    from . import rk_sampler_beta
+    flags["beta_samplers"] = True
+    print("Importing rk_sampler_beta.py")
 except ImportError:
     pass
 
@@ -125,6 +132,7 @@ NODE_CLASS_MAPPINGS = {
     
     
     "CLIPTextEncodeFluxUnguided": conditioning.CLIPTextEncodeFluxUnguided,
+    "ConditioningOrthoCollin": conditioning.ConditioningOrthoCollin,
 
     "ConditioningAverageScheduler": conditioning.ConditioningAverageScheduler,
     "ConditioningMultiply": conditioning.ConditioningMultiply,
@@ -250,18 +258,29 @@ if flags["test_samplers"]:
         "rk_implicit_res_2s":  test_samplers.sample_rk_implicit_res_2s,
         "res_multistep": test_samplers.sample_res_multistep,
         "rk_res_2m": test_samplers.sample_rk_res_2m,
+        "rk_res_2s": test_samplers.sample_rk_res_2s,
 
+        "rk_ddim_test": test_samplers.sample_rk_ddim_test,
+        "rk_res_denoise_eps": test_samplers.sample_rk_res_denoise_eps,
+        "rk_exp_euler_denoise_eps": test_samplers.sample_rk_exp_euler_denoise_eps,
+        "rk_euler_alt_sde": test_samplers.sample_rk_euler_alt_sde,
 
         "rk_implicit_euler":  test_samplers.sample_rk_implicit_euler,
-
-
-
 
         "rk_vpsde_trivial":  test_samplers.sample_rk_vpsde_trivial,
         "zample": test_samplers.sample_zsample,
         "zample_paper": test_samplers.sample_zample_paper,
         "zample_inversion": test_samplers.sample_zample_inversion,
         "sample_zample_edit": test_samplers.sample_zample_edit,
+    })
+    
+
+if flags["beta_samplers"]:
+    NODE_CLASS_MAPPINGS.update({
+        "ClownSamplerAdvanced_Beta": samplers.ClownSamplerAdvanced_Beta,
+    })
+    extra_samplers.update({
+        "rk_beta": rk_sampler_beta.sample_rk_beta,
     })
 
 WEB_DIRECTORY = "./web/js"

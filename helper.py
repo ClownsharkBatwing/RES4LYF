@@ -1,6 +1,7 @@
 import re
 import torch
 from comfy.samplers import SCHEDULER_NAMES
+import torch.nn.functional as F
 
 
 def get_extra_options_kv(key, default, extra_options):
@@ -36,8 +37,15 @@ def safe_get_nested(d, keys, default=None):
 
 
 
-def get_cosine_similarity(a, b):
+def get_cosine_similarity_manual(a, b):
     return (a * b).sum() / (torch.norm(a) * torch.norm(b))
+
+
+
+def get_cosine_similarity(a, b):
+    if a.dim() == 5 and b.dim() == 5 and b.shape[2] == 1:
+        b = b.expand(-1, -1, a.shape[2], -1, -1)
+    return F.cosine_similarity(a.flatten(), b.flatten(), dim=0)
 
 
 
@@ -61,6 +69,17 @@ def get_res4lyf_scheduler_list():
     if "beta57" not in scheduler_names:
         scheduler_names.append("beta57")
     return scheduler_names
+
+def conditioning_set_values(conditioning, values={}):
+    c = []
+    for t in conditioning:
+        n = [t[0], t[1].copy()]
+        for k in values:
+            n[1][k] = values[k]
+        c.append(n)
+
+    return c
+
 
 
 # pytorch slerp implementation from https://gist.github.com/Birch-san/230ac46f99ec411ed5907b0a3d728efa
