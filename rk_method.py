@@ -64,7 +64,8 @@ class RK_Method:
         
     @staticmethod
     def is_exponential(rk_type):
-        if rk_type.startswith(("res", "dpmpp", "ddim", "irk_exp_diag_2s"   )): 
+        #if rk_type.startswith(("res", "dpmpp", "ddim", "irk_exp_diag_2s"   )): 
+        if rk_type.startswith(("res", "dpmpp", "ddim")): 
             return True
         else:
             return False
@@ -94,18 +95,8 @@ class RK_Method:
         denoised = self.calc_cfg_channelwise(denoised)
         return denoised
     
-    @staticmethod
-    def phi(j, neg_h):
-        remainder = torch.zeros_like(neg_h)
-        for k in range(j): 
-            remainder += (neg_h)**k / math.factorial(k)
-        phi_j_h = ((neg_h).exp() - remainder) / (neg_h)**j
-        return phi_j_h
-    
-    @staticmethod
-    def calculate_gamma(c2, c3):
-        return (3*(c3**3) - 2*c3) / (c2*(2 - 3*c2))
-    
+
+
     def init_noise_sampler(self, x, noise_seed, noise_sampler_type, alpha, k=1., scale=0.1):
         seed = torch.initial_seed()+1 if noise_seed == -1 else noise_seed
         if noise_sampler_type == "fractal":
@@ -257,9 +248,10 @@ class RK_Method_Exponential(RK_Method):
             epsilon_u = [torch.zeros_like(x_0)]
         else:
             epsilon_u = denoised_u[0] - x_0"""
+        if h is not None:
+            self.h_prev2 = self.h_prev
+            self.h_prev = h
             
-        self.h_prev2 = self.h_prev
-        self.h_prev = h
         return epsilon, denoised
     
     def data_to_vel(self, x, data, sigma):
@@ -324,9 +316,10 @@ class RK_Method_Linear(RK_Method):
             epsilon_u = [torch.zeros_like(x_0)]
         else:
             epsilon_u  = (x_0 - denoised_u[0]) / (sigma * s_in).view(x.shape[0], 1, 1, 1)"""
+        if h is not None:
+            self.h_prev2 = self.h_prev
+            self.h_prev = h
             
-        self.h_prev2 = self.h_prev
-        self.h_prev = h
         return epsilon, denoised
 
     def data_to_vel(self, x, data, sigma):
