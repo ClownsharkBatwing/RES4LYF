@@ -765,16 +765,16 @@ def get_rk_methods(rk_type, h, c1=0.0, c2=0.5, c3=1.0, h_prev=None, h_prev2=None
     
     if rk_type[-2:] == "2m": #multistep method
         rk_type = rk_type[:-2] + "2s"
-        if h_prev is not None: 
+        if h_prev is not None and stepcount >= 1: 
             multistep_stages = 1
             c2 = (-h_prev / h).item()
             
     if rk_type[-2:] == "3m": #multistep method
         rk_type = rk_type[:-2] + "3s"
-        if h_prev2 is not None: 
+        if h_prev2 is not None and stepcount >= 2: 
             multistep_stages = 2
-            c2 = (-h_prev2 / h_prev).item()
-            c3 = (-h_prev / h).item()
+            c2 = (-h_prev2 / h).item()
+            c3 = (-(h_prev2+h_prev) / h).item()
     
     if rk_type in rk_coeff:
         a, b, ci = copy.deepcopy(rk_coeff[rk_type])
