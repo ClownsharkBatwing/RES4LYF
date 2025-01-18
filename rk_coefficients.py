@@ -19,6 +19,8 @@ RK_SAMPLER_NAMES = ["none",
                     "res_3s_strehmel_weiner",
                     "res_4s_krogstad",
                     "res_4s_strehmel_weiner",
+                    "res_4s_cox_matthews",
+                    "res_4s_munthe-kaas",
                     "res_5s",
                     "res_6s",
                     "res_8s",
@@ -40,6 +42,8 @@ RK_SAMPLER_NAMES = ["none",
                     "dpmpp_sde_2s",
                     "dpmpp_3s",
                     
+                    "lawson4",
+
                     "midpoint_2s",
                     "heun_2s", 
                     "heun_3s", 
@@ -731,9 +735,18 @@ from .helper import get_extra_options_kv
 
 
 
-def get_rk_methods(rk_type, h, c1=0.0, c2=0.5, c3=1.0, h_prev=None, h_prev2=None, stepcount=0, sigmas=None, sigma=None, sigma_next=None, sigma_down=None, extra_options=None):
+def get_rk_methods(rk_type, h, c1=0.0, c2=0.5, c3=1.0, h_prev=None, h_prev2=None, step=0, sigmas=None, sigma=None, sigma_next=None, sigma_down=None, extra_options=None):
     FSAL = False
     multistep_stages = 0
+    
+    if rk_type.startswith(("res", "dpmpp", "ddim"   )): 
+        h_no_eta = -torch.log(sigma_next/sigma)
+        h_prev_no_eta  = -torch.log(sigmas[step]  /sigmas[step-1]) if step >= 1 else None
+        h_prev2_no_eta = -torch.log(sigmas[step-1]/sigmas[step-2]) if step >= 2 else None
+    else:
+        h_no_eta = sigma_next - sigma
+        h_prev_no_eta  = sigmas[step]   - sigmas[step-1] if step >= 1 else None
+        h_prev2_no_eta = sigmas[step-1] - sigmas[step-2] if step >= 2 else None
     
     if type(c1) == torch.Tensor:
         c1 = c1.item()
@@ -751,7 +764,7 @@ def get_rk_methods(rk_type, h, c1=0.0, c2=0.5, c3=1.0, h_prev=None, h_prev2=None
         
     if rk_type[:4] == "deis": 
         order = int(rk_type[-2])
-        if stepcount < order:
+        if step < order:
             if order == 4:
                 rk_type = "res_3s"
                 order = 3
@@ -765,16 +778,22 @@ def get_rk_methods(rk_type, h, c1=0.0, c2=0.5, c3=1.0, h_prev=None, h_prev2=None
     
     if rk_type[-2:] == "2m": #multistep method
         rk_type = rk_type[:-2] + "2s"
-        if h_prev is not None and stepcount >= 1: 
+        if h_prev is not None: 
             multistep_stages = 1
             c2 = (-h_prev / h).item()
+            print("c2: ", c2, h_prev, h)
             
     if rk_type[-2:] == "3m": #multistep method
         rk_type = rk_type[:-2] + "3s"
-        if h_prev2 is not None and stepcount >= 2: 
+        if h_prev2 is not None: 
             multistep_stages = 2
+            print("3m")
+            #c2 = (-h_prev2 / (h_prev + h)).item()
             c2 = (-h_prev2 / h).item()
-            c3 = (-(h_prev2+h_prev) / h).item()
+            #c3 = (-h_prev / h).item()
+            c3 = (-(h_prev2 + h_prev) / h).item()
+            print(c2, h_prev2, h_prev)
+            print(c3, h_prev, h)
     
     if rk_type in rk_coeff:
         a, b, ci = copy.deepcopy(rk_coeff[rk_type])
@@ -786,7 +805,7 @@ def get_rk_methods(rk_type, h, c1=0.0, c2=0.5, c3=1.0, h_prev=None, h_prev2=None
             coeff_list = get_deis_coeff_list(sigmas, multistep_stages+1, deis_mode="rhoab")
             coeff_list = [[elem / h for elem in inner_list] for inner_list in coeff_list]
             if multistep_stages == 1:
-                b1, b2 = coeff_list[stepcount]
+                b1, b2 = coeff_list[step]
                 a = [
                         [0, 0],
                         [0, 0],
@@ -796,7 +815,7 @@ def get_rk_methods(rk_type, h, c1=0.0, c2=0.5, c3=1.0, h_prev=None, h_prev2=None
                 ]
                 ci = [0, 0]
             if multistep_stages == 2:
-                b1, b2, b3 = coeff_list[stepcount]
+                b1, b2, b3 = coeff_list[step]
                 a = [
                         [0, 0, 0],
                         [0, 0, 0],
@@ -807,7 +826,7 @@ def get_rk_methods(rk_type, h, c1=0.0, c2=0.5, c3=1.0, h_prev=None, h_prev2=None
                 ]
                 ci = [0, 0, 0]
             if multistep_stages == 3:
-                b1, b2, b3, b4 = coeff_list[stepcount]
+                b1, b2, b3, b4 = coeff_list[step]
                 a = [
                         [0, 0, 0, 0],
                         [0, 0, 0, 0],
@@ -875,7 +894,7 @@ def get_rk_methods(rk_type, h, c1=0.0, c2=0.5, c3=1.0, h_prev=None, h_prev2=None
                     [b1, b2, b3],
             ]
             ci = [c1, c2, c3]
-            
+
         case "res_3s_alt":
             c2 = 1/3
             c2 = float(get_extra_options_kv("c2", str(c2), extra_options))
@@ -959,8 +978,9 @@ def get_rk_methods(rk_type, h, c1=0.0, c2=0.5, c3=1.0, h_prev=None, h_prev2=None
             
             a2_1 = c2 * φ(1,2)
             a3_2 = c3 * φ(1,3)
-            a4_1 = (1/2) * φ(1,3) * φ(0,3 - 1)   # This doesn't work, but it's in the paper: j=0 leads to taking a factorial of a negative with the remainder method, and doesn't work with the analytic solution either
-            
+            #a4_1 = (1/2) * φ(1,3) * φ(0,3 - 1)   # This doesn't work, but it's in the paper: j=0 leads to taking a factorial of a negative with the remainder method, and doesn't work with the analytic solution either
+            a4_1 = (1/2) * φ(1,3) * (torch.exp(-h*c3) - 1) 
+            a4_3 = φ(1,3)
             b1 = φ(1) - 3*φ(2) + 4*φ(3)
             b2 = 2*φ(2) - 4*φ(3)
             b3 = 2*φ(2) - 4*φ(3)
@@ -974,6 +994,24 @@ def get_rk_methods(rk_type, h, c1=0.0, c2=0.5, c3=1.0, h_prev=None, h_prev2=None
             ]
             b = [
                     [b1, b2, b3, b4],
+            ]
+
+        case "res_4s_munthe-kaas": # unstable RKMK4t
+            c1,c2,c3,c4 = 0, 1/2, 1/2, 1
+            ci = [c1,c2,c3,c4]
+            φ = Phi(h, ci)
+
+            a = [
+                    [0, 0,      0,        0],
+                    [c2*φ(1,2), 0,      0,        0],
+                    [(h/8)*φ(1,2), (1/2)*(1-h/4)*φ(1,2), 0,        0],
+                    [0, 0,      φ(1), 0],
+            ]
+            b = [
+                    [(1/6)*φ(1)*(1+h/2),
+                     (1/3)*φ(1),
+                     (1/3)*φ(1),
+                     (1/6)*φ(1)*(1-h/2)],
             ]
 
         case "res_4s_krogstad": # weak 4th order, Krogstad
@@ -1016,7 +1054,26 @@ def get_rk_methods(rk_type, h, c1=0.0, c2=0.5, c3=1.0, h_prev=None, h_prev2=None
             ]
             
             a, b = gen_first_col_exp(a,b,ci,φ)
-            
+           
+        case "lawson4": 
+            c1,c2,c3,c4 = 0, 1/2, 1/2, 1
+            ci = [c1,c2,c3,c4]
+
+            a = [
+                    [0,         0,        0, 0],
+                    [c2 * torch.exp(-h*c2), 0,          0,        0],
+                    [0, 1/2, 0,        0],
+                    [0, 0, torch.exp(-h*c2), 0],
+            ]
+            b = [
+                    [1/6*torch.exp(-h),
+                     1/3*torch.exp(-h*c2),
+                     1/3*torch.exp(-h*c2),
+                     1/6],
+            ]
+
+            #a, b = gen_first_col_exp(a,b,ci,φ)
+
         case "dpmpp_2s":
             c2 = float(get_extra_options_kv("c2", str(c2), extra_options))
             
