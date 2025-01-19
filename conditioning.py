@@ -15,17 +15,9 @@ from .helper import initialize_or_scale
 import torch.nn.functional as F
 import copy
 
+from .rk_guide_func import get_orthogonal, get_collinear
 
 
-def conditioning_set_values(conditioning, values={}):
-    c = []
-    for t in conditioning:
-        n = [t[0], t[1].copy()]
-        for k in values:
-            n[1][k] = values[k]
-        c.append(n)
-
-    return c
 
 def multiply_nested_tensors(structure, scalar):
     if isinstance(structure, torch.Tensor):
@@ -36,6 +28,51 @@ def multiply_nested_tensors(structure, scalar):
         return {key: multiply_nested_tensors(value, scalar) for key, value in structure.items()}
     else:
         return structure
+
+
+
+
+class ConditioningOrthoCollin:
+    @classmethod
+    def INPUT_TYPES(s):
+        return {"required": {
+            "conditioning_0": ("CONDITIONING", ), 
+            "conditioning_1": ("CONDITIONING", ),
+            "t5_strength": ("FLOAT", {"default": 1.0, "min": -10000, "max": 10000, "step":0.01}),
+            "clip_strength": ("FLOAT", {"default": 1.0, "min": -10000, "max": 10000, "step":0.01}),
+            }}
+    RETURN_TYPES = ("CONDITIONING",)
+    FUNCTION = "combine"
+
+    CATEGORY = "RES4LYF/conditioning"
+
+    def combine(self, conditioning_0, conditioning_1, t5_strength, clip_strength):
+
+        t5_0_1_collin = get_collinear (conditioning_0[0][0], conditioning_1[0][0])
+        t5_1_0_ortho  = get_orthogonal(conditioning_1[0][0], conditioning_0[0][0])
+
+        t5_combined = t5_0_1_collin + t5_1_0_ortho
+        
+        t5_1_0_collin = get_collinear (conditioning_1[0][0], conditioning_0[0][0])
+        t5_0_1_ortho  = get_orthogonal(conditioning_0[0][0], conditioning_1[0][0])
+
+        t5_B_combined = t5_1_0_collin + t5_0_1_ortho
+
+        pooled_0_1_collin = get_collinear (conditioning_0[0][1]['pooled_output'].unsqueeze(0), conditioning_1[0][1]['pooled_output'].unsqueeze(0)).squeeze(0)
+        pooled_1_0_ortho  = get_orthogonal(conditioning_1[0][1]['pooled_output'].unsqueeze(0), conditioning_0[0][1]['pooled_output'].unsqueeze(0)).squeeze(0)
+
+        pooled_combined = pooled_0_1_collin + pooled_1_0_ortho
+        
+        #conditioning_0[0][0] = conditioning_0[0][0] + t5_strength * (t5_combined - conditioning_0[0][0])
+        
+        #conditioning_0[0][0] = t5_strength * t5_combined + (1-t5_strength) * t5_B_combined
+        
+        conditioning_0[0][0] = t5_strength * t5_0_1_collin + (1-t5_strength) * t5_1_0_collin
+        
+        conditioning_0[0][1]['pooled_output'] = conditioning_0[0][1]['pooled_output'] + clip_strength * (pooled_combined - conditioning_0[0][1]['pooled_output'])
+
+        return (conditioning_0, )
+
 
 
 class CLIPTextEncodeFluxUnguided:
@@ -97,6 +134,7 @@ class StyleModelApplyAdvanced:
             c.append(n)
         return (c, )
 
+
 class ConditioningZeroAndTruncate: 
     # needs updating to ensure dims are correct for arbitrary models without hardcoding. 
     # vanilla ConditioningZeroOut node doesn't truncate and SD3.5M degrades badly with large embeddings, even if zeroed out, as the negative conditioning
@@ -121,29 +159,6 @@ class ConditioningZeroAndTruncate:
             c.append(n)
         return (c, )
 
-class ConditioningZeroAndTruncate2: 
-    # needs updating to ensure dims are correct for arbitrary models without hardcoding. 
-    # vanilla ConditioningZeroOut node doesn't truncate and SD3.5M degrades badly with large embeddings, even if zeroed out, as the negative conditioning
-    @classmethod
-    def INPUT_TYPES(s):
-        return { "required": {"conditioning": ("CONDITIONING", )}}
-    RETURN_TYPES = ("CONDITIONING",)
-    FUNCTION = "zero_out"
-
-    CATEGORY = "RES4LYF/conditioning"
-    DESCRIPTION = "Use for negative conditioning with SD3.5. ConditioningZeroOut does not truncate the embedding, \
-                   which results in severe degradation of image quality with SD3.5 when the token limit is exceeded."
-
-    def zero_out(self, conditioning):
-        c = []
-        for t in conditioning:
-            d = t[1].copy()
-            pooled_output = d.get("pooled_output", None)
-            if pooled_output is not None:
-                d["pooled_output"] = torch.zeros((1,2048), dtype=t[0].dtype, device=t[0].device)
-                n = [torch.zeros((1,154,4096), dtype=t[0].dtype, device=t[0].device), d]
-            c.append(n)
-        return (c, )
 
 class ConditioningTruncate: 
     # needs updating to ensure dims are correct for arbitrary models without hardcoding. 
@@ -217,7 +232,6 @@ class ConditioningCombine:
     CATEGORY = "RES4LYF/conditioning"
 
     def combine(self, conditioning_1, conditioning_2):
-        import pdb; pdb.set_trace()
         return (conditioning_1 + conditioning_2, )
 
 
@@ -234,7 +248,6 @@ class ConditioningAverage :
     CATEGORY = "RES4LYF/conditioning"
 
     def addWeighted(self, conditioning_to, conditioning_from, conditioning_to_strength):
-        import pdb; pdb.set_trace()
         out = []
 
         if len(conditioning_from) > 1:
@@ -274,7 +287,6 @@ class ConditioningSetTimestepRange:
     CATEGORY = "RES4LYF/conditioning"
 
     def set_range(self, conditioning, start, end):
-        import pdb; pdb.set_trace()
         c = node_helpers.conditioning_set_values(conditioning, {"start_percent": start,
                                                                 "end_percent": end})
         return (c, )
@@ -363,12 +375,6 @@ class StableCascade_StageB_Conditioning64:
             n = [t[0], d]
             c.append(n)
         return (c, )
-
-
-
-
-
-
 
 
 

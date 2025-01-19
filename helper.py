@@ -2,7 +2,7 @@ import re
 import torch
 from comfy.samplers import SCHEDULER_NAMES
 from comfy import model_sampling
-from torch.nn import functional as F
+import torch.nn.functional as F
 
 def filter_comments(extra_options):
     return "\n".join(line for line in extra_options.splitlines() if not line.strip().startswith("#"))
@@ -42,19 +42,26 @@ def is_RF_model(model) -> bool:
     modelsampling = model.inner_model.inner_model.model_sampling
     return isinstance(modelsampling, model_sampling.CONST)
 
+def get_cosine_similarity_manual(a, b) -> torch.Tensor:
+    return (a * b).sum() / (torch.norm(a) * torch.norm(b))
+
+
+
 def get_cosine_similarity(a, b) -> torch.Tensor:
     if a.dim() == 5 and b.dim() == 5 and b.shape[2] == 1:
         b = b.expand(-1, -1, a.shape[2], -1, -1)
     return F.cosine_similarity(a.flatten(), b.flatten(), dim=0)
 
-def initialize_or_scale(tensor, value, steps):
+
+
+def initialize_or_scale(tensor, value, steps) -> torch.Tensor:
     if tensor is None:
         return torch.full((steps,), value)
     else:
         return value * tensor
 
 
-def has_nested_attr(obj, attr_path):
+def has_nested_attr(obj, attr_path) -> bool:
     attrs = attr_path.split('.')
     for attr in attrs:
         if not hasattr(obj, attr):
@@ -62,11 +69,22 @@ def has_nested_attr(obj, attr_path):
         obj = getattr(obj, attr)
     return True
 
-def get_res4lyf_scheduler_list():
+def get_res4lyf_scheduler_list() -> list:
     scheduler_names = SCHEDULER_NAMES.copy()
     if "beta57" not in scheduler_names:
         scheduler_names.append("beta57")
     return scheduler_names
+
+def conditioning_set_values(conditioning, values={}) -> list:
+    c = []
+    for t in conditioning:
+        n = [t[0], t[1].copy()]
+        for k in values:
+            n[1][k] = values[k]
+        c.append(n)
+
+    return c
+
 
 
 # pytorch slerp implementation from https://gist.github.com/Birch-san/230ac46f99ec411ed5907b0a3d728efa
@@ -88,7 +106,7 @@ from torch.linalg import norm
 #         t:  torch.Size([4,1,1]), 
 #       )
 #   - this makes it interface-compatible with lerp()
-def slerp(v0: FloatTensor, v1: FloatTensor, t: float|FloatTensor, DOT_THRESHOLD=0.9995):
+def slerp(v0: FloatTensor, v1: FloatTensor, t: float|FloatTensor, DOT_THRESHOLD=0.9995) -> FloatTensor:
   '''
   Spherical linear interpolation
   Args:

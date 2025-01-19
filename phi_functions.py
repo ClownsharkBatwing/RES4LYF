@@ -74,17 +74,29 @@ class Phi:
     def __init__(self, h, c, analytic_solution=True): 
         self.h = h
         self.c = c
+        self.cache = {}  
         if analytic_solution:
             self.phi_f = phi
         else:
-            self.phi_f = _phi #remainder method
-    
+            self.phi_f = _phi  # remainder method
+
     def __call__(self, j, i=-1):
+        if (j, i) in self.cache:
+            return self.cache[(j, i)]
+
         if i < 0:
             c = 1
         else:
-            c = self.c[i-1]
+            c = self.c[i - 1]
             if c == 0:
+                self.cache[(j, i)] = 0
                 return 0
-        return self.phi_f(j, -self.h * c)
-        
+
+        if j == 0:
+            result = torch.exp(-self.h * c)
+        else:
+            result = self.phi_f(j, -self.h * c)
+
+        self.cache[(j, i)] = result
+
+        return result
