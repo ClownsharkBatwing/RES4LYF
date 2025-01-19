@@ -11,6 +11,7 @@ from .helper import get_extra_options_kv, extra_options_flag, get_cosine_similar
 
 
 import itertools
+from typing import Tuple
 
 
 def normalize_inputs(x, y0, y0_inv, guide_mode,  extra_options):
@@ -648,19 +649,56 @@ class LatentGuide:
 
 
 
-
-def prepare_mask(x, mask, LGW_MASK_RESCALE_MIN):
-    if mask is None:
-        mask = torch.ones_like(x)
-        LGW_MASK_RESCALE_MIN = False
-    else:
-        mask = mask.unsqueeze(1)
-        mask = mask.repeat(1, x.shape[1], 1, 1) 
-        mask = F.interpolate(mask, size=(x.shape[2], x.shape[3]), mode='bilinear', align_corners=False)
-        mask = mask.to(x.dtype).to(x.device)
-    return mask, LGW_MASK_RESCALE_MIN
+def prepare_mask(x, mask, LGW_MASK_RESCALE_MIN) -> Tuple[torch.Tensor, bool]:
+    spatial_mask = None
+    result_mask = None
     
-def prepare_weighted_masks(mask, mask_inv, lgw_, lgw_inv_, latent_guide, latent_guide_inv, LGW_MASK_RESCALE_MIN):
+    if mask is None:
+        result_mask = torch.ones_like(x)
+        LGW_MASK_RESCALE_MIN = False
+        return result_mask, LGW_MASK_RESCALE_MIN
+
+    # First handle spatial dimensions with interpolation
+    spatial_mask = mask.unsqueeze(1)  # Add channel dim to make it 4D [B, 1, H, W]
+    target_height = x.shape[-2]  # Get target height from second-to-last dim
+    target_width = x.shape[-1]   # Get target width from last dim
+    
+    spatial_mask = F.interpolate(
+        spatial_mask, 
+        size=(target_height, target_width), 
+        mode='bilinear', 
+        align_corners=False
+    )
+    
+    dims_needed = x.dim() - spatial_mask.dim()
+    for _ in range(dims_needed):
+        spatial_mask = spatial_mask.unsqueeze(2)
+    
+    # Build repeat shape with validation
+    if x.dim() < 3:
+        raise ValueError(f"Input tensor must have at least 3 dimensions, got {x.dim()}")
+        
+    # Build repeat shape: [1, channels, time/depth/etc., 1, 1]
+    repeat_shape = [1]  # First 1 is for batch dimension
+    # Add the middle dimensions from x (channels, time, etc.)
+    for dim_idx in range(1, x.dim() - 2):
+        repeat_shape.append(x.shape[dim_idx])
+    # Add 1s for spatial dimensions
+    repeat_shape.extend([1, 1])  # For height and width
+    
+    result_mask = spatial_mask.repeat(*repeat_shape)
+    result_mask = result_mask.to(dtype=x.dtype, device=x.device)
+    
+    if 'spatial_mask' in locals():
+        if spatial_mask is not None and spatial_mask is not result_mask:
+            del spatial_mask
+    
+    return result_mask, LGW_MASK_RESCALE_MIN
+
+def prepare_weighted_masks(mask, mask_inv, lgw_, lgw_inv_, latent_guide, latent_guide_inv, LGW_MASK_RESCALE_MIN) -> Tuple[torch.Tensor, torch.Tensor]:
+    lgw_mask = None
+    lgw_mask_inv = None
+    
     if LGW_MASK_RESCALE_MIN: 
         lgw_mask     =    mask  * (1-lgw_) + lgw_
         lgw_mask_inv = (1-mask) * (1-lgw_inv_) + lgw_inv_
@@ -669,50 +707,68 @@ def prepare_weighted_masks(mask, mask_inv, lgw_, lgw_inv_, latent_guide, latent_
             lgw_mask = mask * lgw_
         else:
             lgw_mask = torch.zeros_like(mask)
+            
         if latent_guide_inv is not None:
             if mask_inv is not None:
-                lgw_mask_inv = torch.minimum(1-mask_inv, (1-mask) * lgw_inv_)
+                inv_mask = 1-mask_inv
+                scaled_mask = (1-mask) * lgw_inv_
+                lgw_mask_inv = torch.minimum(inv_mask, scaled_mask)
+                del inv_mask, scaled_mask
             else:
                 lgw_mask_inv = (1-mask) * lgw_inv_
         else:
             lgw_mask_inv = torch.zeros_like(mask)
+            
     return lgw_mask, lgw_mask_inv
 
-def apply_temporal_smoothing(tensor, temporal_smoothing):
-    if temporal_smoothing <= 0 or tensor.dim() != 5:
+def apply_temporal_smoothing(tensor, temporal_smoothing) -> torch.Tensor:
+    if temporal_smoothing <= 0:
         return tensor
-
-    kernel_size = 5
-    padding = kernel_size // 2
-    temporal_kernel = torch.tensor(
-        [0.1, 0.2, 0.4, 0.2, 0.1],
-        device=tensor.device, dtype=tensor.dtype
-    ) * temporal_smoothing
-    temporal_kernel[kernel_size//2] += (1 - temporal_smoothing)
-    temporal_kernel = temporal_kernel / temporal_kernel.sum()
-
-    # resahpe for conv1d
-    b, c, f, h, w = tensor.shape
-    data_flat = tensor.permute(0, 1, 3, 4, 2).reshape(-1, f)
-
-    # apply smoohting
-    data_smooth = F.conv1d(
-        data_flat.unsqueeze(1),
-        temporal_kernel.view(1, 1, -1),
-        padding=padding
-    ).squeeze(1)
-
-    return data_smooth.view(b, c, h, w, f).permute(0, 1, 4, 2, 3)
-
-def get_guide_epsilon_substep(x_0, x_, y0, y0_inv, s_, row, rk_type, b=None, c=None):
-    s_in = x_0.new_ones([x_0.shape[0]])
     
-    if b is not None and c is not None:  
-        index = (b, c)
-    elif b is not None: 
-        index = (b,)
-    else: 
-        index = ()
+    if tensor.dim() != 5:
+        print(f"Temporal-smoothing is enabled but expected 5D video tensor, got {tensor.dim()}D")
+        return tensor
+        
+    data_flat = None
+    temporal_kernel = None
+    data_smooth = None
+    try:
+        kernel_size = 5
+        padding = kernel_size // 2
+    
+        temporal_kernel = torch.tensor([0.1, 0.2, 0.4, 0.2, 0.1], device=tensor.device, dtype=tensor.dtype) * temporal_smoothing
+        temporal_kernel[kernel_size//2] += (1 - temporal_smoothing)
+        temporal_kernel.div_(temporal_kernel.sum())
+
+        b, c, f, h, w = tensor.shape
+        data_flat = tensor.permute(0, 1, 3, 4, 2).reshape(-1, f)
+
+        data_smooth = F.conv1d(data_flat.unsqueeze(1), temporal_kernel.view(1, 1, -1), padding=padding).squeeze(1)
+        result = data_smooth.view(b, c, h, w, f).permute(0, 1, 4, 2, 3)
+        return result
+
+    finally:
+        if 'temporal_kernel' in locals() and temporal_kernel is not None:
+            del temporal_kernel
+        if 'data_flat' in locals() and data_flat is not None:
+            del data_flat
+        if 'data_smooth' in locals() and data_smooth is not None:
+            del data_smooth
+
+def get_guide_epsilon_substep(x_0, x_, y0, y0_inv, s_, row, rk_type, b=None, c=None) -> Tuple[torch.Tensor, torch.Tensor]:
+    eps_row = None
+    eps_row_inv = None
+    s_in = None
+    
+    try:
+        s_in = x_0.new_ones([x_0.shape[0]])
+        
+        if b is not None and c is not None:
+            index = (b, c)
+        elif b is not None:
+            index = (b,)
+        else:
+            index = ()
 
     if RK_Method.is_exponential(rk_type):
         eps_row     = y0    [index] - x_0[index]
