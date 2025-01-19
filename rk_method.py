@@ -82,17 +82,20 @@ class RK_Method:
     def model_epsilon(self, x, sigma, **extra_args):
         s_in = x.new_ones([x.shape[0]])
         denoised = self.model(x, sigma * s_in, **extra_args)
-        denoised = self.calc_cfg_channelwise(denoised)
+        denoised_ = self.calc_cfg_channelwise(denoised)
 
         #return x0 ###################################THIS WORKS ONLY WITH THE MODEL SAMPLING PATCH
-        eps = (x - denoised) / (sigma * s_in).view(x.shape[0], 1, 1, 1)
-        return eps, denoised
+        eps = (x - denoised_) / (sigma * s_in).view(x.shape[0], 1, 1, 1)
+        del denoised
+        return eps, denoised_
     
     def model_denoised(self, x, sigma, **extra_args):
         s_in = x.new_ones([x.shape[0]])
         denoised = self.model(x, sigma * s_in, **extra_args)
-        denoised = self.calc_cfg_channelwise(denoised)
-        return denoised
+        denoised_ = self.calc_cfg_channelwise(denoised)
+        del denoised
+        return denoised_
+
     
     @staticmethod
     def phi(j, neg_h):
@@ -217,6 +220,7 @@ class RK_Method:
             for b, c in itertools.product(range(denoised.shape[0]), range(denoised.shape[1])):
                 ratio     = torch.nan_to_num(torch.norm(denoised[b][c] - self.uncond[0][b][c])   /   avg,     0)
                 denoised_new = self.uncond[0] + ratio * self.cfg_cw * (denoised - self.uncond[0])
+            del avg
             return denoised_new
         else:
             return denoised
@@ -263,7 +267,8 @@ class RK_Method_Exponential(RK_Method):
         return epsilon, denoised
     
     def data_to_vel(self, x, data, sigma):
-        return data - x
+        vel =  data - x
+        return vel
     
     def get_epsilon(self, x_0, x, y, sigma, sigma_cur, sigma_down=None, unsample_resample_scale=None, extra_options=None):
         if sigma_down > sigma:
@@ -313,7 +318,7 @@ class RK_Method_Linear(RK_Method):
         return sigma_down - sigma
     
     def __call__(self, x_0, x, sigma, h, **extra_args):
-        s_in = x.new_ones([x.shape[0]])
+        #s_in = x.new_ones([x.shape[0]])
         
         epsilon, denoised = self.model_epsilon(x, sigma, **extra_args)
         
@@ -330,7 +335,8 @@ class RK_Method_Linear(RK_Method):
         return epsilon, denoised
 
     def data_to_vel(self, x, data, sigma):
-        return (data - x) / sigma
+        vel =  data - x
+        return vel
     
     def get_epsilon(self, x_0, x, y, sigma, sigma_cur, sigma_down=None, unsample_resample_scale=None, extra_options=None):
         if sigma_down > sigma:

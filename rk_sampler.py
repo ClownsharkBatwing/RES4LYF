@@ -13,19 +13,21 @@ from .rk_guide_func import LatentGuide, NoiseStepHandlerOSDE, handle_tiled_etc_n
 
 from .latents import normalize_latent, initialize_or_scale
 from .helper import get_extra_options_kv, extra_options_flag, get_extra_options_list, is_RF_model
-from .sigmas import get_sigmas
-from .res4lyf import log
+from typing import Tuple, Dict
+# from .sigmas import get_sigmas
+# from .res4lyf import log
 
 #Debugging code:
+# from .memory_profiler import AutoMemoryTracker, print_tensors, get_module_size, get_tensor_size
 import hashlib
 
-def debug_print_tensor_hash(tensor, hash_fn_name="md5"):
+def debug_print_tensor_hash(tensor, hash_fn_name="md5") -> None:
     if hash_fn_name == "sha256":
         print(hashlib.sha256(tensor.cpu().numpy()).hexdigest())
     else:
         print(hashlib.md5(tensor.cpu().numpy()).hexdigest())
 
-def debug_cuda_cleanup(doSync=False, doEmpty=False, doGC=False):
+def debug_cuda_cleanup(doSync=False, doEmpty=False, doGC=False) -> None:
     if doSync:
         torch.cuda.synchronize()
     if doEmpty:
@@ -76,7 +78,7 @@ def prepare_sigmas(model, sigmas):
     return sigmas, UNSAMPLE
 
 
-def prepare_step_to_sigma_zero(rk, irk, rk_type, irk_type, model, x, extra_options, alpha, k, noise_sampler_type, cfg_cw=1.0, **extra_args):
+def prepare_step_to_sigma_zero(rk, irk, rk_type, irk_type, model, x, extra_options, alpha, k, noise_sampler_type, cfg_cw=1.0, **extra_args) -> Tuple[RK_Method, RK_Method, str, str, float, float, Dict]:
     rk_type_final_step = f"ralston_{rk_type[-2:]}" if rk_type[-2:] in {"2s", "3s"} else "ralston_3s"
     rk_type_final_step = f"deis_2m" if rk_type[-2:] in {"2m", "3m", "4m"} else rk_type_final_step
     rk_type_final_step = f"euler" if rk_type in {"ddim"} else rk_type_final_step
@@ -108,9 +110,9 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
                   GARBAGE_COLLECT=False, mask=None, mask_inv=None, LGW_MASK_RESCALE_MIN=True, sigmas_override=None, unsample_resample_scales=None,regional_conditioning_weights=None, sde_noise=[],
                   extra_options="",
                   etas=None, s_noises=None, momentums=None, guides=None, cfgpp=0.0, cfg_cw = 1.0,regional_conditioning_floors=None, frame_weights=None, eta_substep=0.0, noise_mode_sde_substep="hard", guide_cossim_cutoff_=1.0, guide_bkg_cossim_cutoff_=1.0,
-                  ):
+                  ) -> torch.Tensor:
     extra_args = {} if extra_args is None else extra_args
-
+    # tracker = AutoMemoryTracker(model.inner_model.inner_model.diffusion_model, 1)
     noise_cossim_iterations         = int(get_extra_options_kv("noise_cossim_iterations",         "1",          extra_options))
     noise_substep_cossim_iterations = int(get_extra_options_kv("noise_substep_cossim_iterations", "1",          extra_options))
     NOISE_COSSIM_MODE               =     get_extra_options_kv("noise_cossim_mode",               "orthogonal", extra_options)
@@ -216,8 +218,8 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
     gc.collect()
     
     y0, y0_inv = LG.y0, LG.y0_inv
-    lgw, lgw_inv = LG.lgw, LG.lgw_inv
-    guide_mode = LG.guide_mode
+    # lgw, lgw_inv = LG.lgw, LG.lgw_inv
+    # guide_mode = LG.guide_mode
 
 
 
@@ -225,10 +227,9 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
     prev_noises = []
     x_init = x.clone()
     
-    
+    x_, data_, eps_ = None, None, None
     
     for step in trange(len(sigmas)-1, disable=disable):
-
         sigma, sigma_next = sigmas[step], sigmas[step+1]
         unsample_resample_scale = float(unsample_resample_scales[step]) if unsample_resample_scales is not None else None
         if regional_conditioning_weights is not None:
@@ -240,6 +241,11 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
         
         eta = eta_var = etas[step] if etas is not None else eta
         s_noise = s_noises[step] if s_noises is not None else s_noise
+
+        if step > 0:
+            del s_
+            del s_irk
+            del s_irk_rk
         
   
         if sigma_next == 0:
@@ -259,7 +265,7 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
         s_irk    = [( irk.sigma_fn(irk.t_fn(sigma) + h_irk*c_)) * s_one for c_ in  irk.c]
         
         if step == 0 or step == guide_skip_steps:
-            x_, data_, data_u, eps_ = (torch.zeros(max(rk.rows, irk.rows) + 2, *x.shape, dtype=x.dtype, device=x.device) for step in range(4))
+            x_, data_, eps_ = (torch.zeros(max(rk.rows, irk.rows) + 1, *x.shape, dtype=x.dtype, device=x.device) for step in range(3))
 
         
         sde_noise_t = None
@@ -356,7 +362,9 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
                         eps_[row] = eps_row
                     else:
                         if implicit_steps == 0 or row > 0 or (row == 0 and not extra_options_flag("explicit_diagonal_implicit_predictor", extra_options)):
+                            # tracker.track_step("pre_model",step, sub_step=row)
                             eps_[row], data_[row] = rk(x_0, x_[row+1], s_[row], h, **extra_args)   
+                            # tracker.track_step("post_model",step, sub_step=row)
                             #print("exim: ", step, row, exim_iter)
                         else:
                             if extra_options_flag("explicit_diagonal_implicit_predictor_disable_noise", extra_options):
@@ -509,6 +517,11 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
                     eps_list.append(eps_s * s_all[i]/sigma)
                 if torch.allclose(s_all[-1], sigma_down, atol=1e-8):
                     eps_list.append(eps_s * sigma_down/sigma)
+                    
+                if not (eps_s is eps):
+                    del eps_s
+                if not (data_s is y0 or data_s is denoised):
+                    del data_s
             else:
                 # EXPLICIT GUESS
                 x_mid = x
@@ -541,7 +554,9 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
                 denoised = x_0 + (sigma / (sigma - sigma_down)) *  h_irk * irk.b_k_sum(eps2_, 0) 
                 eps = x - denoised
                 x = LG.process_guides_poststep(x, denoised, eps, step, extra_options)
+            del eps2_
 
+        denoised_callback = None
 
         if extra_options_flag("eps_substep_preview", extra_options):
             row_callback = int(get_extra_options_kv("eps_substep_preview", "0", extra_options))
@@ -589,6 +604,7 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
                     noise = rk_or_irk.noise_sampler(sigma=sigma, sigma_next=sigma_next)
                     noise_osde = Osde.get_ortho_noise(noise, prev_noises, max_iter=noise_cossim_max_iter, max_score=noise_cossim_max_score, NOISE_COSSIM_SOURCE=NOISE_COSSIM_SOURCE, extra_options=extra_options)
                     x = alpha_ratio * x + sigma_up * noise_osde * s_noise
+                    del noise, noise_osde
                 elif noise_cossim_flag:
                     x = handle_tiled_etc_noise_steps(x_0, x, x_prenoise, x_init, eps, denoised, y0, y0_inv, step, 
                                     rk_or_irk_type, rk_or_irk, sigma_up, sigma, sigma_next, alpha_ratio, s_noise, noise_mode, SDE_NOISE_EXTERNAL, sde_noise_t,
@@ -597,7 +613,7 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
                 else:
                     x = rk_or_irk.add_noise_post(x, sigma_up, sigma, sigma_next, alpha_ratio, s_noise, noise_mode, SDE_NOISE_EXTERNAL, sde_noise_t)
 
-        log("Data vs. y0 cossim score: ", get_cosine_similarity(data_[0], y0).item())
+        #log("Data vs. y0 cossim score: ", get_cosine_similarity(data_[0], y0).item())
 
         for ms in range(rk.multistep_stages):
             if RK_Method.is_exponential(rk_type):
@@ -611,18 +627,37 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
         eps_ [0] = torch.zeros_like(eps_ [0])
         data_[0] = torch.zeros_like(data_[0])
         
-        log("Denoised vs. y0 cossim score: ", get_cosine_similarity(denoised, y0).item())
+        #log("Denoised vs. y0 cossim score: ", get_cosine_similarity(denoised, y0).item())
         denoised_prev = denoised
         eps_prev = eps
+
+        del denoised_callback
+        gc.collect()
+    
+
         
     callback({'x': x, 'i': step, 'sigma': sigma, 'sigma_next': sigma_next, 'denoised': denoised.to(torch.float32)}) if callback is not None else None
+    # Clean up tensors
+    if 'x_' in locals():
+        del x_
+    if 'data_' in locals():
+        del data_
+    if 'eps_' in locals():
+        del eps_
+    if 'rk' in locals():
+        del rk
+    if 'irk' in locals():
+        del irk
+    if 'LG' in locals():
+        del LG
+        
     return x
 
 
 
 def get_explicit_rk_step(rk, rk_type, x, LG, step, sigma, sigma_next, eta, eta_var, s_noise, noise_mode, c2, c3, stepcount, sigmas, x_, eps_, data_, unsample_resample_scale, extra_options, frame_weights, 
                          x_init, x_prenoise, NOISE_COSSIM_SOURCE, NOISE_COSSIM_MODE, noise_cossim_max_iter, noise_cossim_max_score, noise_cossim_tile_size, noise_cossim_iterations,SDE_NOISE_EXTERNAL,sde_noise_t,MODEL_SAMPLING,
-                         **extra_args):
+                         **extra_args) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
 
     extra_args = {} if extra_args is None else extra_args
     s_in = x.new_ones([x.shape[0]])
@@ -638,7 +673,7 @@ def get_explicit_rk_step(rk, rk_type, x, LG, step, sigma, sigma_next, eta, eta_v
     s_ = [(sigma + h * c_) * s_in for c_ in rk.c]
     x_[0] = rk.add_noise_pre(x, sigma_up, sigma, sigma_next, alpha_ratio, s_noise, noise_mode)
     
-    x_0 = x_[0].clone()
+    x_0 = x_[0]
     
     for ms in range(rk.multistep_stages):
         if RK_Method.is_exponential(rk_type):
@@ -672,6 +707,7 @@ def get_explicit_rk_step(rk, rk_type, x, LG, step, sigma, sigma_next, eta, eta_v
                 noise = rk.noise_sampler(sigma=sigma, sigma_next=sigma_next)
                 noise_osde = Osde.get_ortho_noise(noise, [], max_iter=noise_cossim_max_iter, max_score=noise_cossim_max_score, NOISE_COSSIM_SOURCE=NOISE_COSSIM_SOURCE, extra_options=extra_options)
                 x = alpha_ratio * x + sigma_up * noise_osde * s_noise
+                del noise, noise_osde, Osde
             elif extra_options_flag("noise_cossim", extra_options):
                 x = handle_tiled_etc_noise_steps(x_0, x, x_prenoise, x_init, eps, denoised, y0, LG.y0_inv, step, 
                                     rk_type, rk, sigma_up, sigma, sigma_next, alpha_ratio, s_noise, noise_mode, SDE_NOISE_EXTERNAL, sde_noise_t,
@@ -693,39 +729,39 @@ def get_explicit_rk_step(rk, rk_type, x, LG, step, sigma, sigma_next, eta, eta_v
 
 
 
-def sample_res_2m(model, x, sigmas, extra_args=None, callback=None, disable=None):
+def sample_res_2m(model, x, sigmas, extra_args=None, callback=None, disable=None) -> torch.Tensor:
     return sample_rk(model, x, sigmas, extra_args, callback, disable, noise_sampler_type="gaussian", noise_mode="hard", noise_seed=-1, rk_type="res_2m", eta=0.0, )
-def sample_res_2s(model, x, sigmas, extra_args=None, callback=None, disable=None):
+def sample_res_2s(model, x, sigmas, extra_args=None, callback=None, disable=None) -> torch.Tensor:
     return sample_rk(model, x, sigmas, extra_args, callback, disable, noise_sampler_type="gaussian", noise_mode="hard", noise_seed=-1, rk_type="res_2s", eta=0.0, )
-def sample_res_3s(model, x, sigmas, extra_args=None, callback=None, disable=None):
+def sample_res_3s(model, x, sigmas, extra_args=None, callback=None, disable=None) -> torch.Tensor:
     return sample_rk(model, x, sigmas, extra_args, callback, disable, noise_sampler_type="gaussian", noise_mode="hard", noise_seed=-1, rk_type="res_3s", eta=0.0, )
-def sample_res_5s(model, x, sigmas, extra_args=None, callback=None, disable=None):
+def sample_res_5s(model, x, sigmas, extra_args=None, callback=None, disable=None) -> torch.Tensor:
     return sample_rk(model, x, sigmas, extra_args, callback, disable, noise_sampler_type="gaussian", noise_mode="hard", noise_seed=-1, rk_type="res_5s", eta=0.0, )
-def sample_res_6s(model, x, sigmas, extra_args=None, callback=None, disable=None):
+def sample_res_6s(model, x, sigmas, extra_args=None, callback=None, disable=None) -> torch.Tensor:
     return sample_rk(model, x, sigmas, extra_args, callback, disable, noise_sampler_type="gaussian", noise_mode="hard", noise_seed=-1, rk_type="res_6s", eta=0.0, )
 
-def sample_res_2m_sde(model, x, sigmas, extra_args=None, callback=None, disable=None):
+def sample_res_2m_sde(model, x, sigmas, extra_args=None, callback=None, disable=None) -> torch.Tensor:
     return sample_rk(model, x, sigmas, extra_args, callback, disable, noise_sampler_type="gaussian", noise_mode="hard", noise_seed=-1, rk_type="res_2m", eta=0.5, eta_substep=0.5, )
-def sample_res_2s_sde(model, x, sigmas, extra_args=None, callback=None, disable=None):
+def sample_res_2s_sde(model, x, sigmas, extra_args=None, callback=None, disable=None) -> torch.Tensor:
     return sample_rk(model, x, sigmas, extra_args, callback, disable, noise_sampler_type="gaussian", noise_mode="hard", noise_seed=-1, rk_type="res_2s", eta=0.5, eta_substep=0.5, )
-def sample_res_3s_sde(model, x, sigmas, extra_args=None, callback=None, disable=None):
+def sample_res_3s_sde(model, x, sigmas, extra_args=None, callback=None, disable=None) -> torch.Tensor:
     return sample_rk(model, x, sigmas, extra_args, callback, disable, noise_sampler_type="gaussian", noise_mode="hard", noise_seed=-1, rk_type="res_3s", eta=0.5, eta_substep=0.5, )
-def sample_res_5s_sde(model, x, sigmas, extra_args=None, callback=None, disable=None):
+def sample_res_5s_sde(model, x, sigmas, extra_args=None, callback=None, disable=None) -> torch.Tensor:
     return sample_rk(model, x, sigmas, extra_args, callback, disable, noise_sampler_type="gaussian", noise_mode="hard", noise_seed=-1, rk_type="res_5s", eta=0.5, eta_substep=0.5, )
-def sample_res_6s_sde(model, x, sigmas, extra_args=None, callback=None, disable=None):
+def sample_res_6s_sde(model, x, sigmas, extra_args=None, callback=None, disable=None) -> torch.Tensor:
     return sample_rk(model, x, sigmas, extra_args, callback, disable, noise_sampler_type="gaussian", noise_mode="hard", noise_seed=-1, rk_type="res_6s", eta=0.5, eta_substep=0.5, )
 
-def sample_deis_2m(model, x, sigmas, extra_args=None, callback=None, disable=None):
+def sample_deis_2m(model, x, sigmas, extra_args=None, callback=None, disable=None) -> torch.Tensor:
     return sample_rk(model, x, sigmas, extra_args, callback, disable, noise_sampler_type="gaussian", noise_mode="hard", noise_seed=-1, rk_type="deis_2m", eta=0.0, )
-def sample_deis_3m(model, x, sigmas, extra_args=None, callback=None, disable=None):
+def sample_deis_3m(model, x, sigmas, extra_args=None, callback=None, disable=None) -> torch.Tensor:
     return sample_rk(model, x, sigmas, extra_args, callback, disable, noise_sampler_type="gaussian", noise_mode="hard", noise_seed=-1, rk_type="deis_3m", eta=0.0, )
-def sample_deis_4m(model, x, sigmas, extra_args=None, callback=None, disable=None):
+def sample_deis_4m(model, x, sigmas, extra_args=None, callback=None, disable=None) -> torch.Tensor:
     return sample_rk(model, x, sigmas, extra_args, callback, disable, noise_sampler_type="gaussian", noise_mode="hard", noise_seed=-1, rk_type="deis_4m", eta=0.0, )
 
-def sample_deis_2m_sde(model, x, sigmas, extra_args=None, callback=None, disable=None):
+def sample_deis_2m_sde(model, x, sigmas, extra_args=None, callback=None, disable=None) -> torch.Tensor:
     return sample_rk(model, x, sigmas, extra_args, callback, disable, noise_sampler_type="gaussian", noise_mode="hard", noise_seed=-1, rk_type="deis_2m", eta=0.5, )
-def sample_deis_3m_sde(model, x, sigmas, extra_args=None, callback=None, disable=None):
+def sample_deis_3m_sde(model, x, sigmas, extra_args=None, callback=None, disable=None) -> torch.Tensor:
     return sample_rk(model, x, sigmas, extra_args, callback, disable, noise_sampler_type="gaussian", noise_mode="hard", noise_seed=-1, rk_type="deis_3m", eta=0.5, )
-def sample_deis_4m_sde(model, x, sigmas, extra_args=None, callback=None, disable=None):
+def sample_deis_4m_sde(model, x, sigmas, extra_args=None, callback=None, disable=None) -> torch.Tensor:
     return sample_rk(model, x, sigmas, extra_args, callback, disable, noise_sampler_type="gaussian", noise_mode="hard", noise_seed=-1, rk_type="deis_4m", eta=0.5, )
 
