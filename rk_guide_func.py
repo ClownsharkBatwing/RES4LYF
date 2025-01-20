@@ -56,9 +56,9 @@ class LatentGuide:
         self.latent_guide = None
         self.latent_guide_inv = None
 
-        self.lgw = torch.empty(0, dtype=dtype)
-        self.lgw_inv = torch.empty(0, dtype=dtype)
-        self.lgw_mask_rescale_min = LGW_MASK_RESCALE_MIN
+        self.lgw_masks = []
+        self.lgw_masks_inv = []
+        self.lgw, self.lgw_inv = [torch.full_like(sigmas, 0.) for _ in range(2)]
         
         self.guide_cossim_cutoff_, self.guide_bkg_cossim_cutoff_ = 1.0, 1.0
 
@@ -103,9 +103,9 @@ class LatentGuide:
         if latent_guide_weights_inv is not None:
             self.lgw_inv = latent_guide_weights_inv.to(x.device)
             
-        self.mask, self.lgw_mask_rescale_min = prepare_mask(x, self.mask, self.lgw_mask_rescale_min)
+        self.mask, self.lgw_mask_rescale_min = prepare_mask(x, self.mask, LGW_MASK_RESCALE_MIN)
         if self.mask_inv is not None:
-            self.mask_inv, self.lgw_mask_rescale_min = prepare_mask(x, self.mask_inv, self.lgw_mask_rescale_min)
+            self.mask_inv, self.lgw_mask_rescale_min = prepare_mask(x, self.mask_inv, LGW_MASK_RESCALE_MIN)
         elif not self.SAMPLE:
             self.mask_inv = (1-self.mask)
 
@@ -126,7 +126,7 @@ class LatentGuide:
                     print(f"Error cloning masks for test mode: {e}")
                     raise
 
-
+        gc.collect()
         return self.lgw_masks[step], self.lgw_masks_inv[step]
 
     def init_guides(self, x, noise_sampler, latent_guide=None, latent_guide_inv=None):

@@ -139,7 +139,7 @@ class SharkSampler:
             if "extra_options" in sampler.extra_options:
                 extra_options += " "
                 extra_options += sampler.extra_options['extra_options']
-            sampler.extra_options['extra_options'] = extra_options
+                sampler.extra_options['extra_options'] = extra_options
 
             batch_size = int(get_extra_options_kv("batch_size", "1", extra_options))
             if batch_size > 1:
