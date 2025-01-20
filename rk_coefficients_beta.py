@@ -8,10 +8,11 @@ from .phi_functions import *
 from itertools import permutations, combinations
 import random
 
-RK_SAMPLER_NAMES = ["none",
+RK_SAMPLER_NAMES_BETA = ["none",
                     "res_2m",
                     "res_3m",
                     "res_2s", 
+                    "pec423_2h2s",
                     "res_3s",
                     "res_3s_alt",
                     "res_3s_cox_matthews",
@@ -20,19 +21,12 @@ RK_SAMPLER_NAMES = ["none",
                     "res_4s_krogstad",
                     "res_4s_strehmel_weiner",
                     "res_4s_cox_matthews",
-                    "res_4s_munthe-kaas",
                     "res_5s",
                     "res_6s",
                     "res_8s",
                     "res_10s",
                     "res_15s",
                     "res_16s",
-                    
-                    "etdrk2_2s",
-                    "etdrk3_a_3s",
-                    "etdrk3_b_3s",
-
-                    #"etdrk4_4s"
 
                     "deis_2m",
                     "deis_3m", 
@@ -48,12 +42,6 @@ RK_SAMPLER_NAMES = ["none",
                     "dpmpp_sde_2s",
                     "dpmpp_3s",
                     
-                    "lawson4_4s",
-                    "genlawson41_4s",
-                    "modgenlawson41_4s",
-
-
-
                     "midpoint_2s",
                     "heun_2s", 
                     "heun_3s", 
@@ -609,19 +597,6 @@ rk_coeff = {
         ],
         [0, 1/5, 3/10, 4/5, 8/9, 1, 1],
     ),
-    "ssprk_4s": ( #https://link.springer.com/article/10.1007/s41980-022-00731-x
-        [
-            [],
-            [1/2],
-            [1/2, 1/2],
-            [1/6, 1/6, 1/6],
-        ],
-        [
-            [1/6, 1/6, 1/6, 1/2],
-        ],
-        [0, 1/2, 1, 1/2],
-    ),
-
     "rk4_4s": (
         [
             [],
@@ -754,30 +729,37 @@ rk_coeff = {
     ),
 }
 
-from .helper import get_extra_options_kv
+from .helper import get_extra_options_kv, extra_options_flag
 
 
 
-def get_rk_methods(rk_type, h, c1=0.0, c2=0.5, c3=1.0, h_prev=None, h_prev2=None, step=0, sigmas=None, sigma=None, sigma_next=None, sigma_down=None, extra_options=None):
+def get_rk_methods_beta(rk_type, h, c1=0.0, c2=0.5, c3=1.0, h_prev=None, step=0, sigmas=None, sigma=None, sigma_next=None, sigma_down=None, extra_options=None):
     FSAL = False
     multistep_stages = 0
+    hybrid_stages = 0
+    u, v = None, None
     
-    if rk_type.startswith(("res", "dpmpp", "ddim"   )): 
+    if rk_type.startswith(("res", "dpmpp", "ddim", "pec"   )): 
         h_no_eta = -torch.log(sigma_next/sigma)
-        h_prev_no_eta  = -torch.log(sigmas[step]  /sigmas[step-1]) if step >= 1 else None
-        h_prev2_no_eta = -torch.log(sigmas[step-1]/sigmas[step-2]) if step >= 2 else None
+        h_prev1_no_eta = -torch.log(sigmas[step]/sigmas[step-1]) if step >= 1 else None
+        h_prev2_no_eta = -torch.log(sigmas[step]/sigmas[step-2]) if step >= 2 else None
+        h_prev3_no_eta = -torch.log(sigmas[step]/sigmas[step-3]) if step >= 3 else None
+        h_prev4_no_eta = -torch.log(sigmas[step]/sigmas[step-4]) if step >= 4 else None
+
     else:
         h_no_eta = sigma_next - sigma
-        h_prev_no_eta  = sigmas[step]   - sigmas[step-1] if step >= 1 else None
-        h_prev2_no_eta = sigmas[step-1] - sigmas[step-2] if step >= 2 else None
-    
+        h_prev1_no_eta = sigmas[step] - sigmas[step-1] if step >= 1 else None
+        h_prev2_no_eta = sigmas[step] - sigmas[step-2] if step >= 2 else None
+        h_prev3_no_eta = sigmas[step] - sigmas[step-3] if step >= 3 else None
+        h_prev4_no_eta = sigmas[step] - sigmas[step-4] if step >= 4 else None
+        
     if type(c1) == torch.Tensor:
         c1 = c1.item()
     if type(c2) == torch.Tensor:
         c2 = c2.item()
     if type(c3) == torch.Tensor:
         c3 = c3.item()
-    
+
     if c1 == -1:
         c1 = random.uniform(0, 1)
     if c2 == -1:
@@ -801,23 +783,26 @@ def get_rk_methods(rk_type, h, c1=0.0, c2=0.5, c3=1.0, h_prev=None, h_prev2=None
     
     if rk_type[-2:] == "2m": #multistep method
         rk_type = rk_type[:-2] + "2s"
-        if h_prev is not None: 
+        #if h_prev is not None and step >= 1: 
+        if step >= 1:
             multistep_stages = 1
-            c2 = (-h_prev / h).item()
-            print("c2: ", c2, h_prev, h)
+            c2 = (-h_prev1_no_eta / h_no_eta).item()
             
     if rk_type[-2:] == "3m": #multistep method
         rk_type = rk_type[:-2] + "3s"
-        if h_prev2 is not None: 
+        #if h_prev2 is not None and step >= 2: 
+        if step >= 2:
             multistep_stages = 2
-            print("3m")
-            #c2 = (-h_prev2 / (h_prev + h)).item()
-            c2 = (-h_prev2 / h).item()
-            #c3 = (-h_prev / h).item()
-            c3 = (-(h_prev2 + h_prev) / h).item()
-            print(c2, h_prev2, h_prev)
-            print(c3, h_prev, h)
-    
+
+            c2 = (-h_prev1_no_eta / h_no_eta).item()
+            c3 = (-h_prev2_no_eta / h_no_eta).item()
+            
+    if rk_type[-3] == "h" and rk_type[-1] == "s": #hybrid method 
+        if step < int(rk_type[-4]):
+            rk_type = "res_" + rk_type[-2:]
+        else:
+            hybrid_stages = int(rk_type[-4])
+
     if rk_type in rk_coeff:
         a, b, ci = copy.deepcopy(rk_coeff[rk_type])
         a, b, ci = rk_coeff[rk_type]
@@ -895,6 +880,95 @@ def get_rk_methods(rk_type, h, c1=0.0, c2=0.5, c3=1.0, h_prev=None, h_prev2=None
                     [b1, b2],
             ]
 
+
+        case "pec423_2h2s":
+            
+            c1,c2 = 0,1
+            ci = [c1, c2]
+            φ = Phi(h, ci)
+            
+            b2 = (1/3)*φ(2) + φ(3) + φ(4)
+
+            a = [
+                    [0, 0],
+                    [0, 0],
+            ]
+            b = [
+                    [0, b2],
+            ]
+            
+            if extra_options_flag("h_prev_h_h_no_eta", extra_options):
+                φ1 = Phi(h_prev1_no_eta * h/h_no_eta, ci)
+                φ2 = Phi(h_prev2_no_eta * h/h_no_eta, ci)
+            elif extra_options_flag("h_only", extra_options):
+                φ1 = Phi(h, ci)
+                φ2 = Phi(h, ci)
+            else:
+                φ1 = Phi(h_prev1_no_eta, ci)
+                φ2 = Phi(h_prev2_no_eta, ci)
+                
+            u2_1 = -2*φ1(2) - 2*φ1(3)
+            u2_2 = (1/2)*φ2(2) + φ2(3)
+            
+            v1 = -φ1(2) + φ1(3) + 3*φ1(4)
+            v2 = (1/6)*φ2(2) - φ2(4)
+            
+            u = [
+                    [   0,    0],
+                    [u2_1, u2_2],
+            ]
+            v = [
+                    [v1, v2],
+            ]
+            
+            gen_first_col_exp_uv(a, b, ci, u, v, φ)
+            
+
+
+
+        case "pec433_2h3s":
+            
+            c1,c2 = 0,1
+            ci = [c1, c2]
+            φ = Phi(h, ci)
+            
+            b2 = (1/3)*φ(2) + φ(3) + φ(4)
+
+            a = [
+                    [0, 0],
+                    [0, 0],
+            ]
+            b = [
+                    [0, b2],
+            ]
+            
+            if extra_options_flag("h_prev_h_h_no_eta", extra_options):
+                φ1 = Phi(h_prev1_no_eta * h/h_no_eta, ci)
+                φ2 = Phi(h_prev2_no_eta * h/h_no_eta, ci)
+            elif extra_options_flag("h_only", extra_options):
+                φ1 = Phi(h, ci)
+                φ2 = Phi(h, ci)
+            else:
+                φ1 = Phi(h_prev1_no_eta, ci)
+                φ2 = Phi(h_prev2_no_eta, ci)
+                
+            u2_1 = -2*φ1(2) - 2*φ1(3)
+            u2_2 = (1/2)*φ2(2) + φ2(3)
+            
+            v1 = -φ1(2) + φ1(3) + 3*φ1(4)
+            v2 = (1/6)*φ2(2) - φ2(4)
+            
+            u = [
+                    [   0,    0],
+                    [u2_1, u2_2],
+            ]
+            v = [
+                    [v1, v2],
+            ]
+            
+            gen_first_col_exp_uv(a, b, ci, u, v, φ)
+
+
             
         case "res_3s":
             c2 = float(get_extra_options_kv("c2", str(c2), extra_options))
@@ -917,7 +991,7 @@ def get_rk_methods(rk_type, h, c1=0.0, c2=0.5, c3=1.0, h_prev=None, h_prev2=None
                     [b1, b2, b3],
             ]
             ci = [c1, c2, c3]
-
+            
         case "res_3s_alt":
             c2 = 1/3
             c2 = float(get_extra_options_kv("c2", str(c2), extra_options))
@@ -959,7 +1033,7 @@ def get_rk_methods(rk_type, h, c1=0.0, c2=0.5, c3=1.0, h_prev=None, h_prev2=None
             
             
         case "res_3s_cox_matthews": # Cox & Matthews; known as ETD3RK
-            c1,c2,c3 = 0,1/2,1
+            c2 = 1/2 # must be 1/2
             ci = [0,c2,1]
             φ = Phi(h, ci)
             
@@ -1003,7 +1077,9 @@ def get_rk_methods(rk_type, h, c1=0.0, c2=0.5, c3=1.0, h_prev=None, h_prev2=None
             a3_2 = c3 * φ(1,3)
             a4_1 = (1/2) * φ(1,3) * (φ(0,3) - 1) # φ(0,3) == torch.exp(-h*c3)
             a4_3 = φ(1,3)
+
             b1 = φ(1) - 3*φ(2) + 4*φ(3)
+
             b2 = 2*φ(2) - 4*φ(3)
             b3 = 2*φ(2) - 4*φ(3)
             b4 = 4*φ(3) - φ(2)
@@ -1012,28 +1088,10 @@ def get_rk_methods(rk_type, h, c1=0.0, c2=0.5, c3=1.0, h_prev=None, h_prev2=None
                     [0,    0,0,0],
                     [a2_1, 0,0,0],
                     [0, a3_2,0,0],
-                    [a4_1, 0,a4_3,0],
+                    [a4_1, 0, a4_3,0],
             ]
             b = [
                     [b1, b2, b3, b4],
-            ]
-
-        case "res_4s_munthe-kaas": # unstable RKMK4t
-            c1,c2,c3,c4 = 0, 1/2, 1/2, 1
-            ci = [c1,c2,c3,c4]
-            φ = Phi(h, ci)
-
-            a = [
-                    [0, 0,      0,        0],
-                    [c2*φ(1,2), 0,      0,        0],
-                    [(h/8)*φ(1,2), (1/2)*(1-h/4)*φ(1,2), 0,        0],
-                    [0, 0,      φ(1), 0],
-            ]
-            b = [
-                    [(1/6)*φ(1)*(1+h/2),
-                     (1/3)*φ(1),
-                     (1/3)*φ(1),
-                     (1/6)*φ(1)*(1-h/2)],
             ]
 
         case "res_4s_krogstad": # weak 4th order, Krogstad
@@ -1076,146 +1134,7 @@ def get_rk_methods(rk_type, h, c1=0.0, c2=0.5, c3=1.0, h_prev=None, h_prev2=None
             ]
             
             a, b = gen_first_col_exp(a,b,ci,φ)
-           
-        case "lawson4_4s": 
-            c1,c2,c3,c4 = 0, 1/2, 1/2, 1
-            ci = [c1,c2,c3,c4]
-            φ = Phi(h, ci)
             
-            a2_1 = c2 * φ(0,2)
-            a3_2 = 1/2
-            a4_3 = φ(0,2)
-            
-            b1 = (1/6) * φ(0)
-            b2 = (1/3) * φ(0,2)
-            b3 = (1/3) * φ(0,2)
-            b4 = 1/6
-
-            a = [
-                    [0,    0,    0,    0],
-                    [a2_1, 0,    0,    0],
-                    [0,    a3_2, 0,    0],
-                    [0,    0,    a4_3, 0],
-            ]
-            b = [
-                    [b1,b2,b3,b4],
-            ]
-
-        case "genlawson41_4s": # GenLawson4 https://ora.ox.ac.uk/objects/uuid:cc001282-4285-4ca2-ad06-31787b540c61/files/m611df1a355ca243beb09824b70e5e774
-            c1,c2,c3,c4 = 0, 1/2, 1/2, 1
-            ci = [c1,c2,c3,c4]
-            φ = Phi(h, ci)
-
-
-            a3_2 = 1/2
-            a4_3 = φ(0,2)
-            
-            b2 = (1/3) * φ(0,2)
-            b3 = (1/3) * φ(0,2)
-            b4 = 1/6
-
-            a = [
-                    [0, 0,        0, 0],
-                    [0, 0,          0,        0],
-                    [0, a3_2, 0,        0],
-                    [0, 0, a4_3, 0],
-            ]
-            b = [
-                    [0,
-                     b2,
-                     b3,
-                     b4,],
-            ]
-
-            a, b = gen_first_col_exp(a,b,ci,φ)
-
-        case "modgenlawson41_4s": # GenLawson4 https://ora.ox.ac.uk/objects/uuid:cc001282-4285-4ca2-ad06-31787b540c61/files/m611df1a355ca243beb09824b70e5e774
-            c1,c2,c3,c4 = 0, 1/2, 1/2, 1
-            ci = [c1,c2,c3,c4]
-            φ = Phi(h, ci)
-
-
-            a3_2 = 1/2
-            a4_3 = φ(0,2)
-            
-            b2 = (1/3) * φ(0,2)
-            b3 = (1/3) * φ(0,2)
-            b4 = φ(2) - (1/3)*φ(0,2)
-
-            a = [
-                    [0, 0,        0, 0],
-                    [0, 0,          0,        0],
-                    [0, a3_2, 0,        0],
-                    [0, 0, a4_3, 0],
-            ]
-            b = [
-                    [0,
-                     b2,
-                     b3,
-                     b4,],
-            ]
-
-            a, b = gen_first_col_exp(a,b,ci,φ)
-
-
-        case "etdrk2_2s": # https://arxiv.org/pdf/2402.15142v1
-            c1,c2 = 0, 1
-            ci = [c1,c2]
-            φ = Phi(h, ci)   
-                     
-            a = [
-                    [0, 0],
-                    [φ(1), 0],
-            ]
-            b = [
-                    [φ(1)-φ(2), φ(2)],
-            ]
-
-        case "etdrk3_a_3s": # https://arxiv.org/pdf/2402.15142v1
-            c1,c2,c3 = 0, 1, 2/3
-            ci = [c1,c2,c3]
-            φ = Phi(h, ci)   
-            
-            a2_1 = c2*φ(1)
-            a3_2 = (4/9)*φ(2,3)
-            a3_1 = c3*φ(1,3) - a3_2
-            
-            b2 = φ(2) - (1/2)*φ(1)
-            b3 = (3/4) * φ(1)
-            b1 = φ(1) - b2 - b3 
-                     
-            a = [
-                    [0, 0, 0],
-                    [a2_1, 0, 0],
-                    [a3_1, a3_2, 0 ]
-            ]
-            b = [
-                    [b1, b2, b3],
-            ]
-
-        case "etdrk3_b_3s": # https://arxiv.org/pdf/2402.15142v1
-            c1,c2,c3 = 0, 4/9, 2/3
-            ci = [c1,c2,c3]
-            φ = Phi(h, ci)   
-            
-            a2_1 = c2*φ(1,2)
-            a3_2 = φ(2,3)
-            a3_1 = c3*φ(1,3) - a3_2
-            
-            b2 = 0
-            b3 = (3/2) * φ(2)
-            b1 = φ(1) - b2 - b3 
-                     
-            a = [
-                    [0, 0, 0],
-                    [a2_1, 0, 0],
-                    [a3_1, a3_2, 0 ]
-            ]
-            b = [
-                    [b1, b2, b3],
-            ]
-
-
         case "dpmpp_2s":
             c2 = float(get_extra_options_kv("c2", str(c2), extra_options))
             
@@ -1355,7 +1274,7 @@ def get_rk_methods(rk_type, h, c1=0.0, c2=0.5, c3=1.0, h_prev=None, h_prev2=None
             for i in range(len(b)): 
                 b[i][0] =         φ(1)     - sum(b[i])
 
-        case "res_8s": #todo: add EKPRK5S8
+        case "res_8s":
                 
             c1, c2, c3, c4, c5, c6, c7, c8 = 0, 1/2, 1/2, 1/4,    1/2, 1/5, 2/3, 1
             ci = [c1, c2, c3, c4, c5, c6, c7, c8]
@@ -1686,7 +1605,7 @@ def get_rk_methods(rk_type, h, c1=0.0, c2=0.5, c3=1.0, h_prev=None, h_prev2=None
     if rk_type.startswith("lob") == False:
         ci.append(1)
         
-    return a, b, ci, multistep_stages, FSAL
+    return a, b, u, v, ci, multistep_stages, hybrid_stages, FSAL
 
 
 
@@ -1694,7 +1613,14 @@ def gen_first_col_exp(a, b, c, φ):
     for i in range(len(c)): 
         a[i][0] = c[i] * φ(1,i+1) - sum(a[i])
     for i in range(len(b)): 
-        b[i][0] =         φ(1)     - sum(b[i])
+        b[i][0] =        φ(1)     - sum(b[i])
+    return a, b
+
+def gen_first_col_exp_uv(a, b, c, u, v, φ):
+    for i in range(len(c)): 
+        a[i][0] = c[i] * φ(1,i+1) - sum(a[i]) - sum(u[i])
+    for i in range(len(b)): 
+        b[i][0] =        φ(1)     - sum(b[i]) - sum(v[i])
     return a, b
 
 def rho(j, ci, ck, cl):

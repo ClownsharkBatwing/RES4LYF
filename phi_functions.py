@@ -6,13 +6,13 @@ from typing import Optional
 # Remainder solution
 def _phi(j, neg_h):
     remainder = torch.zeros_like(neg_h)
-    
+
     for k in range(j): 
         remainder += (neg_h)**k / math.factorial(k)
     phi_j_h = ((neg_h).exp() - remainder) / (neg_h)**j
-    
+
     return phi_j_h
-  
+
 def calculate_gamma(c2, c3):
     return (3*(c3**3) - 2*c3) / (c2*(2 - 3*c2))
 
@@ -70,8 +70,9 @@ def phi(j: int, neg_h: float, ):
     return phi_
 
 
+
 class Phi:
-    def __init__(self, h, c, analytic_solution=True): 
+    def __init__(self, h, c, analytic_solution=False): 
         self.h = h
         self.c = c
         self.cache = {}  

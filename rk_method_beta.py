@@ -20,12 +20,12 @@ import comfy.supported_models
 
 import itertools 
 
-from .rk_coefficients import *
+from .rk_coefficients_beta import *
 from .phi_functions import *
 
 
 
-class RK_Method:
+class RK_Method_Beta:
     def __init__(self, model, name="", method="explicit", dynamic_method=False, device='cuda', dtype=torch.float64):
         self.model = model
         self.model_sampling = model.inner_model.inner_model.model_sampling
@@ -40,6 +40,8 @@ class RK_Method:
         self.ab = None
         self.a = None
         self.b = None
+        self.u = None
+        self.v = None
         self.c = None
         self.denoised = None
         self.uncond = None
@@ -65,14 +67,14 @@ class RK_Method:
     @staticmethod
     def is_exponential(rk_type):
         #if rk_type.startswith(("res", "dpmpp", "ddim", "irk_exp_diag_2s"   )): 
-        if rk_type.startswith(("res", "dpmpp", "ddim", "lawson", "genlawson")): 
+        if rk_type.startswith(("res", "dpmpp", "ddim", "pec"   )): 
             return True
         else:
             return False
 
     @staticmethod
     def create(model, rk_type, device='cuda', dtype=torch.float64, name="", method="explicit"):
-        if RK_Method.is_exponential(rk_type):
+        if RK_Method_Beta.is_exponential(rk_type):
             return RK_Method_Exponential(model, name, method, device, dtype)
         else:
             return RK_Method_Linear(model, name, method, device, dtype)
@@ -99,6 +101,7 @@ class RK_Method:
 
     def init_noise_sampler(self, x, noise_seed, noise_sampler_type, alpha, k=1., scale=0.1):
         seed = torch.initial_seed()+1 if noise_seed == -1 else noise_seed
+        print("Noise seed set to: ", seed)
         if noise_sampler_type == "fractal":
             self.noise_sampler = NOISE_GENERATOR_CLASSES.get(noise_sampler_type)(x=x, seed=seed, sigma_min=self.sigma_min, sigma_max=self.sigma_max)
             self.noise_sampler.alpha = alpha
@@ -134,23 +137,31 @@ class RK_Method:
             return x
 
 
-    def set_coeff(self, rk_type, h, c1=0.0, c2=0.5, c3=1.0, stepcount=0, sigmas=None, sigma=None, sigma_down=None, extra_options=None):
+    def set_coeff(self, rk_type, h, c1=0.0, c2=0.5, c3=1.0, step=0, sigmas=None, sigma_down=None, extra_options=None):
         if rk_type == "default": 
             return
 
-        sigma = sigmas[stepcount]
-        sigma_next = sigmas[stepcount+1]
+        sigma = sigmas[step]
+        sigma_next = sigmas[step+1]
         
-        a, b, ci, multistep_stages, FSAL = get_rk_methods(rk_type, h, c1, c2, c3, self.h_prev, self.h_prev2, stepcount, sigmas, sigma, sigma_next, sigma_down, extra_options)
+        h_prev = []
+        a, b, u, v, ci, multistep_stages, hybrid_stages, FSAL = get_rk_methods_beta(rk_type, h, c1, c2, c3, h_prev, step, sigmas, sigma, sigma_next, sigma_down, extra_options)
         
         self.multistep_stages = multistep_stages
+        self.hybrid_stages    = hybrid_stages
         
         self.a = torch.tensor(a, dtype=h.dtype, device=h.device)
         self.a = self.a.view(*self.a.shape, 1, 1, 1, 1, 1)
         
-        
         self.b = torch.tensor(b, dtype=h.dtype, device=h.device)
         self.b = self.b.view(*self.b.shape, 1, 1, 1, 1, 1)
+        
+        if u is not None and v is not None:
+            self.u = torch.tensor(u, dtype=h.dtype, device=h.device)
+            self.u = self.u.view(*self.u.shape, 1, 1, 1, 1, 1)
+            
+            self.v = torch.tensor(v, dtype=h.dtype, device=h.device)
+            self.v = self.v.view(*self.v.shape, 1, 1, 1, 1, 1)
         
         self.c = torch.tensor(ci, dtype=h.dtype, device=h.device)
         self.rows = self.a.shape[0]
@@ -185,6 +196,38 @@ class RK_Method:
             raise ValueError(f"Unexpected k shape: {k.shape}")
         return ks
 
+    def u_k_sum(self, k, row):
+        if self.u is None:
+            return 0
+        if len(k.shape) == 4:
+            u_coeff = self.u[row].squeeze(-1)
+            ks = k * u_coeff.sum(dim=0)
+        elif len(k.shape) == 5:
+            u_coeff = self.u[row].squeeze(-1)
+            ks = (k[0:self.cols] * u_coeff).sum(dim=0)
+        elif len(k.shape) == 6:
+            u_coeff = self.u[row]
+            ks = (k[0:self.cols] * u_coeff).sum(dim=0)
+        else:
+            raise ValueError(f"Unexpected k shape: {k.shape}")
+        return ks
+
+    def v_k_sum(self, k, row):
+        if self.v is None:
+            return 0
+        if len(k.shape) == 4:
+            v_coeff = self.v[row].squeeze(-1)
+            ks = k * v_coeff.sum(dim=0)
+        elif len(k.shape) == 5:
+            v_coeff = self.v[row].squeeze(-1)
+            ks = (k[0:self.cols] * v_coeff).sum(dim=0)
+        elif len(k.shape) == 6:
+            v_coeff = self.v[row]
+            ks = (k[0:self.cols] * v_coeff).sum(dim=0)
+        else:
+            raise ValueError(f"Unexpected k shape: {k.shape}")
+        return ks
+
 
     def init_cfg_channelwise(self, x, cfg_cw=1.0, **extra_args):
         self.uncond = [torch.full_like(x, 0.0)]
@@ -214,7 +257,7 @@ class RK_Method:
         
         
 
-class RK_Method_Exponential(RK_Method):
+class RK_Method_Exponential(RK_Method_Beta):
     def __init__(self, model, name="", method="explicit", device='cuda', dtype=torch.float64):
         super().__init__(model, name, method, device, dtype) 
         self.exponential = True
@@ -236,22 +279,11 @@ class RK_Method_Exponential(RK_Method):
     def h_fn(sigma_down, sigma):
         return -torch.log(sigma_down/sigma)
 
-    def __call__(self, x_0, x, sigma, h, **extra_args):
+    def __call__(self, x_0, x, sigma, **extra_args):
 
         denoised = self.model_denoised(x, sigma, **extra_args)
         epsilon = denoised - x_0
         
-        """if self.uncond == None:
-            self.uncond = [torch.zeros_like(x)]
-        denoised_u = self.uncond[0].clone()
-        if torch.all(denoised_u == 0):
-            epsilon_u = [torch.zeros_like(x_0)]
-        else:
-            epsilon_u = denoised_u[0] - x_0"""
-        if h is not None:
-            self.h_prev2 = self.h_prev
-            self.h_prev = h
-            
         return epsilon, denoised
     
     def data_to_vel(self, x, data, sigma):
@@ -282,13 +314,13 @@ class RK_Method_Exponential(RK_Method):
 
 
 
-class RK_Method_Linear(RK_Method):
+class RK_Method_Linear(RK_Method_Beta):
     def __init__(self, model, name="", method="explicit", device='cuda', dtype=torch.float64):
         super().__init__(model, name, method, device, dtype) 
         self.expanential = False
         self.eps_pred = True
         
-    @staticmethod
+    #@staticmethod
     def alpha_fn(neg_h):
         return torch.ones_like(neg_h)
 
@@ -304,21 +336,10 @@ class RK_Method_Linear(RK_Method):
     def h_fn(sigma_down, sigma):
         return sigma_down - sigma
     
-    def __call__(self, x_0, x, sigma, h, **extra_args):
+    def __call__(self, x_0, x, sigma, **extra_args):
         s_in = x.new_ones([x.shape[0]])
         
         epsilon, denoised = self.model_epsilon(x, sigma, **extra_args)
-        
-        """if self.uncond == None:
-            self.uncond = [torch.zeros_like(x)]
-        denoised_u = self.uncond[0].clone()
-        if torch.all(denoised_u[0] == 0):
-            epsilon_u = [torch.zeros_like(x_0)]
-        else:
-            epsilon_u  = (x_0 - denoised_u[0]) / (sigma * s_in).view(x.shape[0], 1, 1, 1)"""
-        if h is not None:
-            self.h_prev2 = self.h_prev
-            self.h_prev = h
             
         return epsilon, denoised
 

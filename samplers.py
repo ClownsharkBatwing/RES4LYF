@@ -2,6 +2,7 @@ from .noise_classes import *
 from .sigmas import get_sigmas
 from .rk_sampler import sample_rk
 from .rk_coefficients import RK_SAMPLER_NAMES, IRK_SAMPLER_NAMES
+import RES4LYF.rk_coefficients_beta
 
 import comfy.samplers
 import comfy.sample
@@ -537,9 +538,11 @@ class ClownSamplerAdvanced_Beta:
                     "s_noise": ("FLOAT", {"default": 1.0, "min": -10000, "max": 10000, "step":0.01, "tooltip": "Adds extra SDE noise. Values around 1.03-1.07 can lead to a moderate boost in detail and paint textures."}),
                     "d_noise": ("FLOAT", {"default": 1.0, "min": -10000, "max": 10000, "step":0.01, "tooltip": "Downscales the sigma schedule. Values around 0.98-0.95 can lead to a large boost in detail and paint textures."}),
                     "noise_seed_sde": ("INT", {"default": -1, "min": -1, "max": 0xffffffffffffffff}),
-                    "sampler_name": (RK_SAMPLER_NAMES, {"default": "res_2m"}), 
-                    "implicit_sampler_name": (IRK_SAMPLER_NAMES, {"default": "explicit_diagonal"}), 
+                    "sampler_name": (RES4LYF.rk_coefficients_beta.RK_SAMPLER_NAMES_BETA, {"default": "res_2m"}), 
+                    "implicit_sampler_name": (RES4LYF.rk_coefficients_beta.IRK_SAMPLER_NAMES, {"default": "explicit_diagonal"}), 
                     "implicit_steps": ("INT", {"default": 0, "min": 0, "max": 10000}),
+                    "implicit_substeps": ("INT", {"default": 0, "min": 0, "max": 10000}),
+
                      },
                 "optional": 
                     {
@@ -560,14 +563,14 @@ class ClownSamplerAdvanced_Beta:
     def main(self, 
              noise_type_sde="gaussian", noise_type_sde_substep="gaussian", noise_mode_sde="hard",
              eta=0.25, eta_var=0.0, d_noise=1.0, s_noise=1.0, alpha_sde=-1.0, k_sde=1.0, cfgpp=0.0, c1=0.0, c2=0.5, c3=1.0, noise_seed_sde=-1, sampler_name="res_2m", implicit_sampler_name="gauss-legendre_2s",
-                    t_fn_formula=None, sigma_fn_formula=None, implicit_steps=0,
+                    t_fn_formula=None, sigma_fn_formula=None, implicit_substeps=0, implicit_steps=0,
                     latent_guide=None, latent_guide_inv=None, guide_mode="", latent_guide_weights=None, latent_guide_weights_inv=None, latent_guide_mask=None, latent_guide_mask_inv=None, rescale_floor=True, sigmas_override=None, unsampler_type="linear",
                     guides=None, options=None, sde_noise=None,sde_noise_steps=1, 
                     extra_options="", automation=None, etas=None, s_noises=None,unsample_resample_scales=None, regional_conditioning_weights=None,frame_weights=None, eta_substep=0.5, noise_mode_sde_substep="hard",
                     ): 
-            if implicit_sampler_name == "none":
-                implicit_steps = 0 
-                implicit_sampler_name = "gauss-legendre_2s"
+            
+            implicit_steps_diag = implicit_substeps
+            implicit_steps_full = implicit_steps
 
             if noise_mode_sde == "none":
                 eta, eta_var = 0.0, 0.0
@@ -653,7 +656,7 @@ class ClownSamplerAdvanced_Beta:
 
             sampler = comfy.samplers.ksampler("rk_beta", {"eta": eta, "eta_var": eta_var, "s_noise": s_noise, "d_noise": d_noise, "alpha": alpha_sde, "k": k_sde, "c1": c1, "c2": c2, "c3": c3, "cfgpp": cfgpp, 
                                                     "noise_sampler_type": noise_type_sde, "noise_mode": noise_mode_sde, "noise_seed": noise_seed_sde, "rk_type": sampler_name, "implicit_sampler_name": implicit_sampler_name,
-                                                            "t_fn_formula": t_fn_formula, "sigma_fn_formula": sigma_fn_formula, "implicit_steps": implicit_steps,
+                                                            "t_fn_formula": t_fn_formula, "sigma_fn_formula": sigma_fn_formula, "implicit_steps_diag": implicit_steps_diag, "implicit_steps_full": implicit_steps_full,
                                                             "latent_guide": latent_guide, "latent_guide_inv": latent_guide_inv, "mask": latent_guide_mask, "mask_inv": latent_guide_mask_inv,
                                                             "latent_guide_weights": latent_guide_weights, "latent_guide_weights_inv": latent_guide_weights_inv, "guide_mode": guide_mode,
                                                             "LGW_MASK_RESCALE_MIN": rescale_floor, "sigmas_override": sigmas_override, "sde_noise": sde_noise,

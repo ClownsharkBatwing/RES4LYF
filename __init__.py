@@ -259,6 +259,18 @@ if flags["test_samplers"]:
         "res_multistep": test_samplers.sample_res_multistep,
         "rk_res_2m": test_samplers.sample_rk_res_2m,
         "rk_res_2s": test_samplers.sample_rk_res_2s,
+        "rk_crazy": test_samplers.sample_rk_crazy,
+        "rk_crazy2": test_samplers.sample_rk_crazy2,
+        "rk_crazymod43": test_samplers.sample_rk_crazymod43,
+        "rk_crazymod44": test_samplers.sample_rk_crazymod44,
+        "rk_crazymod45": test_samplers.sample_rk_crazymod45,
+        "rk_pec423": test_samplers.sample_rk_pec423,
+        "rk_pec433": test_samplers.sample_rk_pec433,
+
+        "rk_abnorsett4": test_samplers.sample_rk_abnorsett4,
+
+
+
 
         "rk_ddim_test": test_samplers.sample_rk_ddim_test,
         "rk_res_denoise_eps": test_samplers.sample_rk_res_denoise_eps,

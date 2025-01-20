@@ -260,7 +260,7 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
                     # UPDATE
                     x_[row+1] = x_0 + h_new * rk.a_k_sum(eps_, row)
                     #print("step, row, exim_iter: ", step, row, exim_iter)
-                        
+
 
                     # NOISE ADD
                     if isinstance(MODEL_SAMPLING, comfy.model_sampling.CONST) == True   or   (isinstance(MODEL_SAMPLING, comfy.model_sampling.CONST) == False and noise_mode != "hard"):
@@ -277,8 +277,8 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
                                     NOISE_SUBSTEP_COSSIM_SOURCE, NOISE_SUBSTEP_COSSIM_MODE, noise_substep_cossim_tile_size, noise_substep_cossim_iterations, extra_options)
                             else:
                                 x_[row+1] = rk.add_noise_post(x_[row+1], sub_sigma_up, sub_sigma, sub_sigma_next, sub_alpha_ratio, s_noise, substep_noise_mode, SDE_NOISE_EXTERNAL, sde_noise_t)
-                    
-                    
+
+
                     # MODEL CALL
                     if step < guide_skip_steps:
                         eps_row, eps_row_inv = get_guide_epsilon_substep(x_0, x_, y0, y0_inv, s_, row, rk_type)
@@ -308,7 +308,7 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
                                 eps_[row], data_[row] = rk(x_0, x_[row+1], s_[row+1], h, **extra_args)
                                 eps_, x_ = LG.process_guides_substep(x_0, x_, eps_, data_, row, step, sigma, sigma_next, sigma_down, s_, unsample_resample_scale, rk, rk_type, extra_options, frame_weights)
                                 x_[row+1] = x_0 + h_mini * eps_[row]
-               
+
                                 Osde = NoiseStepHandlerOSDE(x_[row+1], eps_[row], data_[row], x_init, y0, y0_inv)
                                 if Osde.check_cossim_source(NOISE_SUBSTEP_COSSIM_SOURCE):
                                     noise = rk.noise_sampler(sigma=sub_sigma, sigma_next=sub_sigma_next)
