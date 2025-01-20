@@ -89,7 +89,7 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
                 sigma_up_total += sigmas[i+1]
             eta = eta / sigma_up_total
 
-    if implicit_sampler_name not in ("explicit_full", "explicit_diagonal", "none"):
+    if implicit_sampler_name not in ("none", "use_explicit") and implicit_steps_full + implicit_steps_diag > 0:
         rk_type = implicit_sampler_name
     print("rk_type: ", rk_type)
 
@@ -163,6 +163,7 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
         for full_iter in range(implicit_steps_full + 1):
             for row in range(rk.rows - rk.multistep_stages - row_offset + 1):
                 for diag_iter in range(implicit_steps_diag+1):
+                    
                     sub_sigma_up, sub_sigma, sub_sigma_next, sub_sigma_down, sub_alpha_ratio = 0, s_[row], s_[row+1+rk.multistep_stages], s_[row+1+rk.multistep_stages], 1
                     if row > 0 or diag_iter > 0 or full_iter > 0:
                         sub_sigma_up, sub_sigma, sub_sigma_down, sub_alpha_ratio = get_res4lyf_step_with_model(model, sub_sigma, sub_sigma_next, eta_substep, eta_var, noise_mode_sde_substep)
@@ -198,9 +199,6 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
             denoised = x_0 + ((sigma / (sigma - sigma_down)) *  h_new) * (rk.b_k_sum(eps_, 0) + rk.v_k_sum(eps_prev_, 0))
             eps = x - denoised
             
-            #if implicit_steps_full > 0 and row_offset == 1:
-            #    x_[0] = denoised + sigma * eps
-
             preview_callback(x, eps, denoised, x_, eps_, data_, step, sigma, sigma_next, callback, extra_options)
 
             sde_noise_t = None

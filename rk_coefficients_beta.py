@@ -70,8 +70,7 @@ RK_SAMPLER_NAMES_BETA = ["none",
 
 
 IRK_SAMPLER_NAMES = ["none",
-                    "explicit_diagonal", 
-                    "explicit_full",
+                    "use_explicit", 
                     
                     "irk_exp_diag_2s",
                     
