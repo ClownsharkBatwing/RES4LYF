@@ -171,24 +171,32 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
                     h_new = h
 
                     if row < rk.rows   and   s_[row+row_offset+rk.multistep_stages] > 0:
-                        if row < rk.rows-row_offset-rk.multistep_stages   or   diag_iter < implicit_steps_diag:
+                        if   diag_iter > 0 and diag_iter == implicit_steps_diag and extra_options_flag("implicit_substep_skip_final_eta", extra_options):
+                            pass
+                        elif diag_iter > 0 and extra_options_flag("implicit_substep_only_first_eta", extra_options):
+                            pass
+                        elif row < rk.rows-row_offset-rk.multistep_stages   or   diag_iter < implicit_steps_diag:
                             sub_sigma_up, sub_sigma, sub_sigma_down, sub_alpha_ratio = get_res4lyf_step_with_model(model, s_[row], s_[row+row_offset+rk.multistep_stages], eta_substep, eta_var, noise_mode_sde_substep)
                             h_new = h * rk.h_fn(sub_sigma_down, sigma) / rk.h_fn(sub_sigma_next, sigma) 
                             
                     # MODEL CALL
                     if row < rk.rows: # A-tableau still
                         if full_iter > 0 and row_offset == 1 and row == 0 and sigma_next > 0: # explicit full implicit
+                            if sigma_next == 0:
+                                break
                             eps_[row], data_[row] = rk(x, sigma_next, x_0, sigma, **extra_args)   
                         elif diag_iter > 0:
                             if s_[row+row_offset+rk.multistep_stages] == 0:
                                 break
                             eps_[row], data_[row] = rk(x_[row+row_offset], s_[row+row_offset+rk.multistep_stages], x_0, sigma, **extra_args)  
-                        else:  #elif diag_iter == 0:
+                        else: 
                             eps_[row], data_[row] = rk(x_[row], s_[row], x_0, sigma, **extra_args) 
 
                         # GUIDE 
-                        eps_, x_      = LG.process_guides_substep(x_0, x_, eps_,      data_, row, step, sigma, sigma_next, sigma_down, s_, unsample_resample_scale, rk, rk_type, extra_options, frame_weights)
-                        eps_prev_, x_ = LG.process_guides_substep(x_0, x_, eps_prev_, data_, row, step, sigma, sigma_next, sigma_down, s_, unsample_resample_scale, rk, rk_type, extra_options, frame_weights)
+                        if not extra_options_flag("disable_guides_eps_substep", extra_options):
+                            eps_, x_      = LG.process_guides_substep(x_0, x_, eps_,      data_, row, step, sigma, sigma_next, sigma_down, s_, unsample_resample_scale, rk, rk_type, extra_options, frame_weights)
+                        if not extra_options_flag("disable_guides_eps_prev_substep", extra_options):
+                            eps_prev_, x_ = LG.process_guides_substep(x_0, x_, eps_prev_, data_, row, step, sigma, sigma_next, sigma_down, s_, unsample_resample_scale, rk, rk_type, extra_options, frame_weights)
 
                     # UPDATE
                     if row < rk.rows - row_offset   and   rk.multistep_stages == 0:
