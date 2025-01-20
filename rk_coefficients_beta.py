@@ -60,6 +60,11 @@ RK_SAMPLER_NAMES_BETA = ["none",
                     "lawson41-gen_4s",
                     "lawson41-gen-mod_4s",
                     
+                    "lawson42-gen-mod_1h4s",
+                    "lawson43-gen-mod_2h4s",
+                    "lawson44-gen-mod_3h4s",
+                    "lawson45-gen-mod_4h4s",
+                    
                     "midpoint_2s",
                     "heun_2s", 
                     "heun_3s", 
@@ -768,7 +773,7 @@ def get_rk_methods_beta(rk_type, h, c1=0.0, c2=0.5, c3=1.0, h_prev=None, step=0,
     u, v = None, None
     
     #if RK_Method_Beta.is_exponential(rk_type): 
-    if rk_type.startswith(("res", "dpmpp", "ddim", "pec", "etdrk")): 
+    if rk_type.startswith(("res", "dpmpp", "ddim", "pec", "etdrk", "lawson")): 
         h_no_eta = -torch.log(sigma_next/sigma)
         h_prev1_no_eta = -torch.log(sigmas[step]/sigmas[step-1]) if step >= 1 else None
         h_prev2_no_eta = -torch.log(sigmas[step]/sigmas[step-2]) if step >= 2 else None
@@ -831,6 +836,8 @@ def get_rk_methods_beta(rk_type, h, c1=0.0, c2=0.5, c3=1.0, h_prev=None, step=0,
             rk_type = "res_" + rk_type[-2:]
         else:
             hybrid_stages = int(rk_type[-4])
+        if rk_type == "res_4s":
+            rk_type = "res_4s_cox_matthews"
 
     if rk_type in rk_coeff:
         a, b, ci = copy.deepcopy(rk_coeff[rk_type])
@@ -1274,6 +1281,234 @@ def get_rk_methods_beta(rk_type, h, c1=0.0, c2=0.5, c3=1.0, h_prev=None, step=0,
             ]
 
             a, b = gen_first_col_exp(a,b,ci,φ)
+
+
+
+        case "lawson42-gen-mod_1h4s": # GenLawson4 https://ora.ox.ac.uk/objects/uuid:cc001282-4285-4ca2-ad06-31787b540c61/files/m611df1a355ca243beb09824b70e5e774
+            c1,c2,c3,c4 = 0, 1/2, 1/2, 1
+            ci = [c1,c2,c3,c4]
+            φ = Phi(h, ci)
+
+            a3_2 = 1/2
+            a4_3 = φ(0,2)
+            
+            b2 = (1/3) * φ(0,2)
+            b3 = (1/3) * φ(0,2)
+            b4 = (1/2)*φ(2) + φ(3) - (1/4)*φ(0,2)
+
+            a = [
+                    [0, 0,    0, 0],
+                    [0, 0,    0, 0],
+                    [0, a3_2, 0, 0],
+                    [0, 0, a4_3, 0],
+            ]
+            b = [
+                    [0, b2, b3, b4,],
+            ]
+
+            if extra_options_flag("h_prev_h_h_no_eta", extra_options):
+                φ1 = Phi(h_prev1_no_eta * h/h_no_eta, ci)
+            elif extra_options_flag("h_only", extra_options):
+                φ1 = Phi(h, ci)
+            else:
+                φ1 = Phi(h_prev1_no_eta, ci)
+
+            u2_1 = -φ1(2,2)
+            u3_1 = -φ1(2,2) + 1/4
+            u4_1 = -φ1(2) + (1/2)*φ1(0,2)
+            v1 = -(1/2)*φ1(2) + φ1(3) + (1/12)*φ1(0,2)
+
+            u = [
+                    [   0, 0, 0, 0],
+                    [u2_1, 0, 0, 0],
+                    [u3_1, 0, 0, 0],
+                    [u4_1, 0, 0, 0],
+            ]
+            v = [
+                    [v1, 0, 0, 0,],
+            ]
+
+            a, b = gen_first_col_exp_uv(a,b,ci,u,v,φ)
+
+
+
+        case "lawson43-gen-mod_2h4s": # GenLawson4 https://ora.ox.ac.uk/objects/uuid:cc001282-4285-4ca2-ad06-31787b540c61/files/m611df1a355ca243beb09824b70e5e774
+            c1,c2,c3,c4 = 0, 1/2, 1/2, 1
+            ci = [c1,c2,c3,c4]
+            φ = Phi(h, ci)
+
+            a3_2 = 1/2
+            a4_3 = φ(0,2)
+            
+            b3 = b2 = (1/3) * a4_3
+            b4 = (1/3)*φ(2) + φ(3) + φ(4) - (5/24)*φ(0,2)
+
+            a = [
+                    [0, 0,    0, 0],
+                    [0, 0,    0, 0],
+                    [0, a3_2, 0, 0],
+                    [0, 0, a4_3, 0],
+            ]
+            b = [
+                    [0, b2, b3, b4,],
+            ]
+
+            if extra_options_flag("h_prev_h_h_no_eta", extra_options):
+                φ1 = Phi(h_prev1_no_eta * h/h_no_eta, ci)
+                φ2 = Phi(h_prev2_no_eta * h/h_no_eta, ci)
+            elif extra_options_flag("h_only", extra_options):
+                φ1 = Phi(h, ci)
+                φ2 = Phi(h, ci)
+            else:
+                φ1 = Phi(h_prev1_no_eta, ci)
+                φ2 = Phi(h_prev2_no_eta, ci)
+
+            u2_1 = -2*φ1(2,2) - 2*φ1(3,2)
+            u3_1 = -2*φ1(2,2) - 2*φ1(3,2) + 5/8
+            u4_1 = -2*φ1(2) - 2*φ1(3) + (5/4)*φ1(0,2)
+            v1 = -φ1(2) + φ1(3) + 3*φ1(4) + (5/24)*φ1(0,2)
+            
+            u2_2 = -(1/2)*φ2(2,2) + φ2(3,2)
+            u3_2 = (1/2)*φ2(2,2) + φ2(3,2) - 3/16
+            u4_2 = (1/2)*φ2(2) + φ2(3) - (3/8)*φ2(0,2)
+            v2 = (1/6)*φ2(2) - φ2(4) - (1/24)*φ2(0,2)
+            
+            u = [
+                    [   0,    0, 0, 0],
+                    [u2_1, u2_2, 0, 0],
+                    [u3_1, u3_2, 0, 0],
+                    [u4_1, u4_2, 0, 0],
+            ]
+            v = [
+                    [v1, v2, 0, 0,],
+            ]
+
+            a, b = gen_first_col_exp_uv(a,b,ci,u,v,φ)
+
+
+        case "lawson44-gen-mod_3h4s": # GenLawson4 https://ora.ox.ac.uk/objects/uuid:cc001282-4285-4ca2-ad06-31787b540c61/files/m611df1a355ca243beb09824b70e5e774
+            c1,c2,c3,c4 = 0, 1/2, 1/2, 1
+            ci = [c1,c2,c3,c4]
+            φ = Phi(h, ci)
+
+            a3_2 = 1/2
+            a4_3 = φ(0,2)
+            
+            b3 = b2 = (1/3) * a4_3
+            b4 = (1/4)*φ(2) + (11/12)*φ(3) + (3/2)*φ(4) + φ(5) - (35/192)*φ(0,2)
+
+            a = [
+                    [0, 0,    0, 0],
+                    [0, 0,    0, 0],
+                    [0, a3_2, 0, 0],
+                    [0, 0, a4_3, 0],
+            ]
+            b = [
+                    [0, b2, b3, b4,],
+            ]
+
+            if extra_options_flag("h_prev_h_h_no_eta", extra_options):
+                φ1 = Phi(h_prev1_no_eta * h/h_no_eta, ci)
+                φ2 = Phi(h_prev2_no_eta * h/h_no_eta, ci)
+                φ3 = Phi(h_prev3_no_eta * h/h_no_eta, ci)
+            elif extra_options_flag("h_only", extra_options):
+                φ1 = Phi(h, ci)
+                φ2 = Phi(h, ci)
+                φ3 = Phi(h, ci)
+            else:
+                φ1 = Phi(h_prev1_no_eta, ci)
+                φ2 = Phi(h_prev2_no_eta, ci)
+                φ3 = Phi(h_prev3_no_eta, ci)
+                
+            u2_1 = -3*φ1(2,2) - 5*φ1(3,2) - 3*φ1(4,2)
+            u3_1 = u2_1 + 35/32
+            u4_1 = -3*φ1(2) - 5*φ1(3) - 3*φ1(4) + (35/16)*φ1(0,2)
+            v1 = -(3/2)*φ1(2) + (1/2)*φ1(3) + 6*φ1(4) + 6*φ1(5) + (35/96)*φ1(0,2)
+            
+            u2_2 = (3/2)*φ2(2,2) + 4*φ2(3,2) + 3*φ2(4,2)
+            u3_2 = u2_2 - 21/32
+            u4_2 = (3/2)*φ2(2) + 4*φ2(3) + 3*φ2(4) - (21/16)*φ2(0,2)
+            v2 = (1/2)*φ2(2) + (1/3)*φ2(3) - 3*φ2(4) - 4*φ2(5) - (7/48)*φ2(0,2)
+            
+            u2_3 = (-1/3)*φ3(2,2) - φ3(3,2) - φ3(4,2)
+            u3_3 = u2_3 + 5/32
+            u4_3 = -(1/3)*φ3(2) - φ3(3) - φ3(4) + (5/16)*φ3(0,2)
+            v3 = -(1/12)*φ3(2) - (1/12)*φ3(3) + (1/2)*φ3(4) + φ3(5) + (5/192)*φ3(0,2)
+            
+            u = [
+                    [   0,    0,    0, 0],
+                    [u2_1, u2_2, u2_3, 0],
+                    [u3_1, u3_2, u3_3, 0],
+                    [u4_1, u4_2, u4_3, 0],
+            ]
+            v = [
+                    [v1, v2, v3, 0,],
+            ]
+
+            a, b = gen_first_col_exp_uv(a,b,ci,u,v,φ)
+
+
+
+        case "lawson45-gen-mod_4h4s": # GenLawson4 https://ora.ox.ac.uk/objects/uuid:cc001282-4285-4ca2-ad06-31787b540c61/files/m611df1a355ca243beb09824b70e5e774
+            c1,c2,c3,c4 = 0, 1/2, 1/2, 1
+            ci = [c1,c2,c3,c4]
+            φ = Phi(h, ci)
+
+            a3_2 = 1/2
+            a4_3 = φ(0,2)
+            
+            b3 = b2 = (1/3) * a4_3
+            b4 = (1/4)*φ(2) + (11/12)*φ(3) + (3/2)*φ(4) + φ(5) - (35/192)*φ(0,2)
+
+            a = [
+                    [0, 0,    0, 0],
+                    [0, 0,    0, 0],
+                    [0, a3_2, 0, 0],
+                    [0, 0, a4_3, 0],
+            ]
+            b = [
+                    [0, b2, b3, b4,],
+            ]
+
+            if extra_options_flag("h_prev_h_h_no_eta", extra_options):
+                φ1 = Phi(h_prev1_no_eta * h/h_no_eta, ci)
+                φ2 = Phi(h_prev2_no_eta * h/h_no_eta, ci)
+                φ3 = Phi(h_prev3_no_eta * h/h_no_eta, ci)
+            elif extra_options_flag("h_only", extra_options):
+                φ1 = Phi(h, ci)
+                φ2 = Phi(h, ci)
+                φ3 = Phi(h, ci)
+            else:
+                φ1 = Phi(h_prev1_no_eta, ci)
+                φ2 = Phi(h_prev2_no_eta, ci)
+                φ3 = Phi(h_prev3_no_eta, ci)
+                
+            u2_1 = -3*φ1(2,2) - 5*φ1(3,2) - 3*φ1(4,2)
+            u3_1 = u2_1 + 35/32
+            u4_1 = -3*φ1(2) - 5*φ1(3) - 3*φ1(4) + (35/16)*φ1(0,2)
+            v1 = -(3/2)*φ1(2) + (1/2)*φ1(3) + 6*φ1(4) + 6*φ1(5) + (35/96)*φ1(0,2)
+            
+            u2_2 = (3/2)*φ2(2,2) + 4*φ2(3,2) + 3*φ2(4,2)
+            u3_2 = u2_2 - 21/32
+            u4_2 = (3/2)*φ2(2) + 4*φ2(3) + 3*φ2(4) - (21/16)*φ2(0,2)
+            v2 = (1/2)*φ2(2) + (1/3)*φ2(3) - 3*φ2(4) - 4*φ2(5) - (7/48)*φ2(0,2)
+            
+            u2_3 = (-1/3)*φ3(2,2) - φ3(3,2) - φ3(4,2)
+            u3_3 = u2_3 + 5/32
+            u4_3 = -(1/3)*φ3(2) - φ3(3) - φ3(4) + (5/16)*φ3(0,2)
+            v3 = -(1/12)*φ3(2) - (1/12)*φ3(3) + (1/2)*φ3(4) + φ3(5) + (5/192)*φ3(0,2)
+
+            """a = [
+                    [   0,    0,    0,    0],
+                    [u2_1, u2_2, u2_3, u2_4],
+                    [u3_1, u3_2, u3_3, u3_4],
+                    [u4_1, u4_2, u4_3, u4_4],
+            ]
+            b = [
+                    [v1, v2, v3, v4,],
+            ]"""
+
+            a, b = gen_first_col_exp_uv(a,b,ci,u,v,φ)
 
 
 
