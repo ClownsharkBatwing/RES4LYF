@@ -170,9 +170,12 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
                     sub_sigma_up, sub_sigma, sub_sigma_next, sub_sigma_down, sub_alpha_ratio = 0., s_[row], s_[row+row_offset+rk.multistep_stages], s_[row+row_offset+rk.multistep_stages], 1.
                     h_new = h
 
-                    if row < rk.rows   and   diag_iter < implicit_steps_diag   and   s_[row+row_offset+rk.multistep_stages] > 0:
-                        sub_sigma_up, sub_sigma, sub_sigma_down, sub_alpha_ratio = get_res4lyf_step_with_model(model, s_[row], s_[row+row_offset+rk.multistep_stages], eta_substep, eta_var, noise_mode_sde_substep)
-                        h_new = h * rk.h_fn(sub_sigma_down, sigma) / rk.h_fn(sub_sigma_next, sigma) 
+                    if row < rk.rows   and   s_[row+row_offset+rk.multistep_stages] > 0:
+                        if row == rk.rows - row_offset - rk.multistep_stages and diag_iter == implicit_steps_diag:
+                            pass
+                        else:
+                            sub_sigma_up, sub_sigma, sub_sigma_down, sub_alpha_ratio = get_res4lyf_step_with_model(model, s_[row], s_[row+row_offset+rk.multistep_stages], eta_substep, eta_var, noise_mode_sde_substep)
+                            h_new = h * rk.h_fn(sub_sigma_down, sigma) / rk.h_fn(sub_sigma_next, sigma) 
                         #if row == rk.rows - row_offset and diag_iter == implicit_steps_diag: 
                         """if diag_iter == implicit_steps_diag: 
                             h_new = h
