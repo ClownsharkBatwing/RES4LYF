@@ -8,7 +8,7 @@ from einops import rearrange
 from .sigmas import get_sigmas
 from .noise_classes import *
 from .latents import hard_light_blend, normalize_latent, initialize_or_scale
-from .rk_method import RK_Method
+from .rk_method_beta import RK_Method_Beta
 from .helper import get_extra_options_kv, extra_options_flag, get_cosine_similarity, get_extra_options_list
 
 
@@ -183,7 +183,7 @@ class LatentGuide:
         else:
             return eps_, x_ 
         
-        if self.UNSAMPLE and RK_Method.is_exponential(rk_type):
+        if self.UNSAMPLE and RK_Method_Beta.is_exponential(rk_type):
             if not (extra_options_flag("disable_power_unsample", extra_options) or extra_options_flag("disable_power_resample", extra_options)):
                 extra_options += "\npower_unsample\npower_resample\n"
             if not extra_options_flag("disable_lgw_scaling_substep_ch_mean_std", extra_options):
@@ -591,7 +591,7 @@ def get_guide_epsilon_substep(x_0, x_, y0, y0_inv, s_, row, rk_type, b=None, c=N
     else: 
         index = ()
 
-    if RK_Method.is_exponential(rk_type):
+    if RK_Method_Beta.is_exponential(rk_type):
         eps_row     = y0    [index] - x_0[index]
         eps_row_inv = y0_inv[index] - x_0[index]
     else:
@@ -610,7 +610,7 @@ def get_guide_epsilon(x_0, x_, y0, sigma, rk_type, b=None, c=None):
     else: 
         index = ()
 
-    if RK_Method.is_exponential(rk_type):
+    if RK_Method_Beta.is_exponential(rk_type):
         eps     = y0    [index] - x_0[index]
     else:
         eps     = (x_[index] - y0    [index]) / (sigma * s_in)
