@@ -171,7 +171,7 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
                     h_new = h
 
                     if row < rk.rows   and   s_[row+row_offset+rk.multistep_stages] > 0:
-                        if   diag_iter > 0 and diag_iter == implicit_steps_diag and extra_options_flag("implicit_substep_skip_final_eta", extra_options):
+                        if   diag_iter > 0 and diag_iter == implicit_steps_diag and not extra_options_flag("implicit_substep_use_final_eta", extra_options):
                             pass
                         elif diag_iter > 0 and extra_options_flag("implicit_substep_only_first_eta", extra_options):
                             pass
