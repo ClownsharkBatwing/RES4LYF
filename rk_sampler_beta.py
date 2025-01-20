@@ -135,7 +135,7 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
 
 
         if step == 0 or step == guide_skip_steps:
-            x_, data_, denoised_, eps_ = (torch.zeros(rk.rows+1, *x.shape, dtype=x.dtype, device=x.device) for step in range(4))
+            x_, data_, denoised_, eps_ = (torch.zeros(rk.rows+2, *x.shape, dtype=x.dtype, device=x.device) for step in range(4))
 
         sde_noise_t = None
         if SDE_NOISE_EXTERNAL:
@@ -164,7 +164,7 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
             for row in range(rk.rows - rk.multistep_stages - row_offset + 1):
                 for diag_iter in range(implicit_steps_diag+1):
                     
-                    sub_sigma_up, sub_sigma, sub_sigma_next, sub_sigma_down, sub_alpha_ratio = 0, s_[row], s_[row+1+rk.multistep_stages], s_[row+1+rk.multistep_stages], 1
+                    sub_sigma_up, sub_sigma, sub_sigma_next, sub_sigma_down, sub_alpha_ratio = 0, s_[row], s_[row+row_offset+rk.multistep_stages], s_[row+row_offset+rk.multistep_stages], 1
                     if row > 0 or diag_iter > 0 or full_iter > 0:
                         sub_sigma_up, sub_sigma, sub_sigma_down, sub_alpha_ratio = get_res4lyf_step_with_model(model, sub_sigma, sub_sigma_next, eta_substep, eta_var, noise_mode_sde_substep)
                         h_new = (rk.h_fn(sub_sigma_down, sigma) / rk.c[row+row_offset+rk.multistep_stages])[0]

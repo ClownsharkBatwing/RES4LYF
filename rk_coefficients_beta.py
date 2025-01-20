@@ -21,12 +21,18 @@ RK_SAMPLER_NAMES_BETA = ["none",
                     "res_4s_krogstad",
                     "res_4s_strehmel_weiner",
                     "res_4s_cox_matthews",
+                    "res_4s_munthe-kaas",
+
                     "res_5s",
                     "res_6s",
                     "res_8s",
                     "res_10s",
                     "res_15s",
                     "res_16s",
+                    
+                    "etdrk2_2s",
+                    "etdrk3_a_3s",
+                    "etdrk3_b_3s",
 
                     "deis_2m",
                     "deis_3m", 
@@ -42,6 +48,10 @@ RK_SAMPLER_NAMES_BETA = ["none",
                     "dpmpp_sde_2s",
                     "dpmpp_3s",
                     
+                    "lawson4_4s",
+                    "lawson41-gen_4s",
+                    "lawson41-gen-mod_4s",
+                    
                     "midpoint_2s",
                     "heun_2s", 
                     "heun_3s", 
@@ -49,6 +59,7 @@ RK_SAMPLER_NAMES_BETA = ["none",
                     "houwen-wray_3s",
                     "kutta_3s", 
                     "ssprk3_3s",
+                    "ssprk4_4s",
                     
                     "rk38_4s",
                     "rk4_4s", 
@@ -596,6 +607,18 @@ rk_coeff = {
         ],
         [0, 1/5, 3/10, 4/5, 8/9, 1, 1],
     ),
+    "ssprk4_4s": ( #https://link.springer.com/article/10.1007/s41980-022-00731-x
+        [
+            [],
+            [1/2],
+            [1/2, 1/2],
+            [1/6, 1/6, 1/6],
+        ],
+        [
+            [1/6, 1/6, 1/6, 1/2],
+        ],
+        [0, 1/2, 1, 1/2],
+    ),
     "rk4_4s": (
         [
             [],
@@ -1093,6 +1116,24 @@ def get_rk_methods_beta(rk_type, h, c1=0.0, c2=0.5, c3=1.0, h_prev=None, step=0,
                     [b1, b2, b3, b4],
             ]
 
+        case "res_4s_munthe-kaas": # unstable RKMK4t
+            c1,c2,c3,c4 = 0, 1/2, 1/2, 1
+            ci = [c1,c2,c3,c4]
+            φ = Phi(h, ci)
+
+            a = [
+                    [0, 0,      0,        0],
+                    [c2*φ(1,2), 0,      0,        0],
+                    [(h/8)*φ(1,2), (1/2)*(1-h/4)*φ(1,2), 0,        0],
+                    [0, 0,      φ(1), 0],
+            ]
+            b = [
+                    [(1/6)*φ(1)*(1+h/2),
+                     (1/3)*φ(1),
+                     (1/3)*φ(1),
+                     (1/6)*φ(1)*(1-h/2)],
+            ]
+
         case "res_4s_krogstad": # weak 4th order, Krogstad
             c1,c2,c3,c4 = 0, 1/2, 1/2, 1
             ci = [c1,c2,c3,c4]
@@ -1133,6 +1174,148 @@ def get_rk_methods_beta(rk_type, h, c1=0.0, c2=0.5, c3=1.0, h_prev=None, step=0,
             ]
             
             a, b = gen_first_col_exp(a,b,ci,φ)
+            
+
+
+        case "lawson4_4s": 
+            c1,c2,c3,c4 = 0, 1/2, 1/2, 1
+            ci = [c1,c2,c3,c4]
+            φ = Phi(h, ci)
+            
+            a2_1 = c2 * φ(0,2)
+            a3_2 = 1/2
+            a4_3 = φ(0,2)
+            
+            b1 = (1/6) * φ(0)
+            b2 = (1/3) * φ(0,2)
+            b3 = (1/3) * φ(0,2)
+            b4 = 1/6
+
+            a = [
+                    [0,    0,    0,    0],
+                    [a2_1, 0,    0,    0],
+                    [0,    a3_2, 0,    0],
+                    [0,    0,    a4_3, 0],
+            ]
+            b = [
+                    [b1,b2,b3,b4],
+            ]
+
+        case "lawson41-gen_4s": # GenLawson4 https://ora.ox.ac.uk/objects/uuid:cc001282-4285-4ca2-ad06-31787b540c61/files/m611df1a355ca243beb09824b70e5e774
+            c1,c2,c3,c4 = 0, 1/2, 1/2, 1
+            ci = [c1,c2,c3,c4]
+            φ = Phi(h, ci)
+
+
+            a3_2 = 1/2
+            a4_3 = φ(0,2)
+            
+            b2 = (1/3) * φ(0,2)
+            b3 = (1/3) * φ(0,2)
+            b4 = 1/6
+
+            a = [
+                    [0, 0,        0, 0],
+                    [0, 0,          0,        0],
+                    [0, a3_2, 0,        0],
+                    [0, 0, a4_3, 0],
+            ]
+            b = [
+                    [0,
+                     b2,
+                     b3,
+                     b4,],
+            ]
+
+            a, b = gen_first_col_exp(a,b,ci,φ)
+
+        case "lawson41-gen-mod_4s": # GenLawson4 https://ora.ox.ac.uk/objects/uuid:cc001282-4285-4ca2-ad06-31787b540c61/files/m611df1a355ca243beb09824b70e5e774
+            c1,c2,c3,c4 = 0, 1/2, 1/2, 1
+            ci = [c1,c2,c3,c4]
+            φ = Phi(h, ci)
+
+
+            a3_2 = 1/2
+            a4_3 = φ(0,2)
+            
+            b2 = (1/3) * φ(0,2)
+            b3 = (1/3) * φ(0,2)
+            b4 = φ(2) - (1/3)*φ(0,2)
+
+            a = [
+                    [0, 0,        0, 0],
+                    [0, 0,          0,        0],
+                    [0, a3_2, 0,        0],
+                    [0, 0, a4_3, 0],
+            ]
+            b = [
+                    [0,
+                     b2,
+                     b3,
+                     b4,],
+            ]
+
+            a, b = gen_first_col_exp(a,b,ci,φ)
+
+
+
+        case "etdrk2_2s": # https://arxiv.org/pdf/2402.15142v1
+            c1,c2 = 0, 1
+            ci = [c1,c2]
+            φ = Phi(h, ci)   
+                     
+            a = [
+                    [0, 0],
+                    [φ(1), 0],
+            ]
+            b = [
+                    [φ(1)-φ(2), φ(2)],
+            ]
+
+        case "etdrk3_a_3s": # https://arxiv.org/pdf/2402.15142v1
+            c1,c2,c3 = 0, 1, 2/3
+            ci = [c1,c2,c3]
+            φ = Phi(h, ci)   
+            
+            a2_1 = c2*φ(1)
+            a3_2 = (4/9)*φ(2,3)
+            a3_1 = c3*φ(1,3) - a3_2
+            
+            b2 = φ(2) - (1/2)*φ(1)
+            b3 = (3/4) * φ(1)
+            b1 = φ(1) - b2 - b3 
+                     
+            a = [
+                    [0, 0, 0],
+                    [a2_1, 0, 0],
+                    [a3_1, a3_2, 0 ]
+            ]
+            b = [
+                    [b1, b2, b3],
+            ]
+
+        case "etdrk3_b_3s": # https://arxiv.org/pdf/2402.15142v1
+            c1,c2,c3 = 0, 4/9, 2/3
+            ci = [c1,c2,c3]
+            φ = Phi(h, ci)   
+            
+            a2_1 = c2*φ(1,2)
+            a3_2 = φ(2,3)
+            a3_1 = c3*φ(1,3) - a3_2
+            
+            b2 = 0
+            b3 = (3/2) * φ(2)
+            b1 = φ(1) - b2 - b3 
+                     
+            a = [
+                    [0, 0, 0],
+                    [a2_1, 0, 0],
+                    [a3_1, a3_2, 0 ]
+            ]
+            b = [
+                    [b1, b2, b3],
+            ]
+
             
         case "dpmpp_2s":
             c2 = float(get_extra_options_kv("c2", str(c2), extra_options))
@@ -1357,9 +1540,7 @@ def get_rk_methods_beta(rk_type, h, c1=0.0, c2=0.5, c3=1.0, h_prev=None, step=0,
                 
             c1, c2, c3, c4, c5, c6, c7, c8, c9, c10 = 0, 1/2, 1/2, 1/3, 1/2,     1/3, 1/4, 3/10, 3/4, 1
             ci = [c1, c2, c3, c4, c5, c6, c7, c8, c9, c10]
-            φ = Phi(h, ci, analytic_solution=True)
-            
-            a3_2 = (c3**2 / c2) * φ(2,3)
+            φ = Phi(h, ci, analytic_solution=True)            
             
             a4_2 = (c4**2 / c2) * φ(2,4)
                         
