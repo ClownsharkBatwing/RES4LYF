@@ -5,14 +5,18 @@ import math
 from .extra_samplers_helpers import get_deis_coeff_list
 from .phi_functions import *
 
+from .helper import get_extra_options_kv, extra_options_flag
+
+
 from itertools import permutations, combinations
 import random
+
+
 
 RK_SAMPLER_NAMES_BETA = ["none",
                     "res_2m",
                     "res_3m",
                     "res_2s", 
-                    "pec423_2h2s",
                     "res_3s",
                     "res_3s_alt",
                     "res_3s_cox_matthews",
@@ -33,6 +37,10 @@ RK_SAMPLER_NAMES_BETA = ["none",
                     "etdrk2_2s",
                     "etdrk3_a_3s",
                     "etdrk3_b_3s",
+                    
+                    "pec423_2h2s",
+                    "pec433_2h3s",
+
 
                     "deis_2m",
                     "deis_3m", 
@@ -751,8 +759,6 @@ rk_coeff = {
     ),
 }
 
-from .helper import get_extra_options_kv, extra_options_flag
-
 
 
 def get_rk_methods_beta(rk_type, h, c1=0.0, c2=0.5, c3=1.0, h_prev=None, step=0, sigmas=None, sigma=None, sigma_next=None, sigma_down=None, extra_options=None):
@@ -761,7 +767,8 @@ def get_rk_methods_beta(rk_type, h, c1=0.0, c2=0.5, c3=1.0, h_prev=None, step=0,
     hybrid_stages = 0
     u, v = None, None
     
-    if rk_type.startswith(("res", "dpmpp", "ddim", "pec"   )): 
+    #if RK_Method_Beta.is_exponential(rk_type): 
+    if rk_type.startswith(("res", "dpmpp", "ddim", "pec", "etdrk")): 
         h_no_eta = -torch.log(sigma_next/sigma)
         h_prev1_no_eta = -torch.log(sigmas[step]/sigmas[step-1]) if step >= 1 else None
         h_prev2_no_eta = -torch.log(sigmas[step]/sigmas[step-2]) if step >= 2 else None
@@ -950,42 +957,53 @@ def get_rk_methods_beta(rk_type, h, c1=0.0, c2=0.5, c3=1.0, h_prev=None, step=0,
 
         case "pec433_2h3s":
             
-            c1,c2 = 0,1
-            ci = [c1, c2]
+            c1,c2,c3 = 0, 1, 1
+            ci = [c1,c2,c3]
             φ = Phi(h, ci)
             
-            b2 = (1/3)*φ(2) + φ(3) + φ(4)
+            a3_2 = (1/3)*φ(2) + φ(3) + φ(4)
+            
+            b2 = 0
+            b3 = (1/3)*φ(2) + φ(3) + φ(4)
 
             a = [
-                    [0, 0],
-                    [0, 0],
+                    [0,    0, 0],
+                    [0,    0, 0],
+                    [0, a3_2, 0],
             ]
             b = [
-                    [0, b2],
+                    [0, b2, b3],
             ]
             
             if extra_options_flag("h_prev_h_h_no_eta", extra_options):
                 φ1 = Phi(h_prev1_no_eta * h/h_no_eta, ci)
                 φ2 = Phi(h_prev2_no_eta * h/h_no_eta, ci)
+                φ3 = Phi(h_prev3_no_eta * h/h_no_eta, ci)
             elif extra_options_flag("h_only", extra_options):
                 φ1 = Phi(h, ci)
                 φ2 = Phi(h, ci)
+                φ3 = Phi(h, ci)
             else:
                 φ1 = Phi(h_prev1_no_eta, ci)
                 φ2 = Phi(h_prev2_no_eta, ci)
+                φ3 = Phi(h_prev3_no_eta, ci)
                 
-            u2_1 = -2*φ1(2) - 2*φ1(3)
-            u2_2 = (1/2)*φ2(2) + φ2(3)
+            u2_1 = -2*φ(2) - 2*φ(3)
+            u3_1 = -φ(2) + φ(3) + 3*φ(4)
+            v1 = -φ(2) + φ(3) + 3*φ(4)
             
-            v1 = -φ1(2) + φ1(3) + 3*φ1(4)
-            v2 = (1/6)*φ2(2) - φ2(4)
+            u2_2 = (1/2)*φ(2) + φ(3)
+            u3_2 = (1/6)*φ(2) - φ(4)
+            v2 = (1/6)*φ(2) - φ(4)
+
             
             u = [
-                    [   0,    0],
-                    [u2_1, u2_2],
+                    [   0,    0, 0],
+                    [u2_1, u2_2, 0],
+                    [u3_1, u3_2, 0],
             ]
             v = [
-                    [v1, v2],
+                    [v1, v2, 0],
             ]
             
             gen_first_col_exp_uv(a, b, ci, u, v, φ)

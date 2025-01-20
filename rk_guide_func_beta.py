@@ -595,7 +595,7 @@ def get_guide_epsilon_substep(x_0, x_, y0, y0_inv, s_, row, rk_type, b=None, c=N
         eps_row     = y0    [index] - x_0[index]
         eps_row_inv = y0_inv[index] - x_0[index]
     else:
-        eps_row     = (x_[row+1][index] - y0    [index]) / (s_[row] * s_in)
+        eps_row     = (x_[row+1][index] - y0    [index]) / (s_[row] * s_in) # potential issues here with x_[row+1] being rk.rows+2 with gauss-legendre_2s 1 imp step 1 imp substep
         eps_row_inv = (x_[row+1][index] - y0_inv[index]) / (s_[row] * s_in)
     
     return eps_row, eps_row_inv

@@ -24,7 +24,6 @@ from .rk_coefficients_beta import *
 from .phi_functions import *
 
 
-
 class RK_Method_Beta:
     def __init__(self, model, name="", method="explicit", dynamic_method=False, device='cuda', dtype=torch.float64):
         self.model = model
