@@ -172,7 +172,7 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
 
                     # MODEL CALL
                     if row < rk.rows:
-                        if full_iter > 0 and row_offset == 1 and row == 0:
+                        if full_iter > 0 and row_offset == 1 and row == 0 and sigma_next > 0:
                             eps_[row], data_[row] = rk(x_0, x, sigma_next, **extra_args) 
                         elif diag_iter == 0:
                             eps_[row], data_[row] = rk(x_0, x_[row], s_[row], **extra_args)   
