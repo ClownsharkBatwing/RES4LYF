@@ -526,15 +526,28 @@ class LatentGuide:
 
 
 
-def prepare_mask(x, mask, LGW_MASK_RESCALE_MIN):
+def prepare_mask(x, mask, LGW_MASK_RESCALE_MIN) -> Tuple[torch.Tensor, bool]:
     if mask is None:
         mask = torch.ones_like(x)
         LGW_MASK_RESCALE_MIN = False
-    else:
-        mask = mask.unsqueeze(1)
-        mask = mask.repeat(1, x.shape[1], 1, 1) 
-        mask = F.interpolate(mask, size=(x.shape[2], x.shape[3]), mode='bilinear', align_corners=False)
-        mask = mask.to(x.dtype).to(x.device)
+        return mask, LGW_MASK_RESCALE_MIN
+    
+    spatial_mask = mask.unsqueeze(1)
+    target_height = x.shape[-2]
+    target_width = x.shape[-1]
+    spatial_mask = F.interpolate(spatial_mask, size=(target_height, target_width), mode='bilinear', align_corners=False)
+
+    while spatial_mask.dim() < x.dim():
+        spatial_mask = spatial_mask.unsqueeze(2)
+    
+    repeat_shape = [1] #batch
+    for i in range(1, x.dim() - 2):
+        repeat_shape.append(x.shape[i])
+    repeat_shape.extend([1, 1]) #height and width
+
+    mask = spatial_mask.repeat(*repeat_shape).to(x.dtype).to(x.device)
+    
+    del spatial_mask
     return mask, LGW_MASK_RESCALE_MIN
     
 def prepare_weighted_masks(mask, mask_inv, lgw_, lgw_inv_, latent_guide, latent_guide_inv, LGW_MASK_RESCALE_MIN):
