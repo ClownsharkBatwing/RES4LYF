@@ -278,11 +278,9 @@ class RK_Method_Exponential(RK_Method_Beta):
     def h_fn(sigma_down, sigma):
         return -torch.log(sigma_down/sigma)
 
-    def __call__(self, x_0, x, sigma, **extra_args):
-
-        denoised = self.model_denoised(x, sigma, **extra_args)
+    def __call__(self, x, sub_sigma, x_0, sigma, **extra_args):
+        denoised = self.model_denoised(x, sub_sigma, **extra_args)
         epsilon = denoised - x_0
-        
         return epsilon, denoised
     
     def data_to_vel(self, x, data, sigma):
@@ -319,7 +317,7 @@ class RK_Method_Linear(RK_Method_Beta):
         self.expanential = False
         self.eps_pred = True
         
-    #@staticmethod
+    @staticmethod
     def alpha_fn(neg_h):
         return torch.ones_like(neg_h)
 
@@ -335,11 +333,9 @@ class RK_Method_Linear(RK_Method_Beta):
     def h_fn(sigma_down, sigma):
         return sigma_down - sigma
     
-    def __call__(self, x_0, x, sigma, **extra_args):
-        s_in = x.new_ones([x.shape[0]])
-        
-        epsilon, denoised = self.model_epsilon(x, sigma, **extra_args)
-            
+    def __call__(self, x, sub_sigma, x_0, sigma, **extra_args):
+        denoised = self.model_denoised(x, sub_sigma, **extra_args)
+        epsilon = (x_0 - denoised) / sigma
         return epsilon, denoised
 
     def data_to_vel(self, x, data, sigma):

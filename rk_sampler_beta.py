@@ -125,6 +125,9 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
         
         if sigma_next == 0:
             rk, rk_type, eta, eta_var, extra_args = prepare_step_to_sigma_zero(rk, rk_type, model, x, extra_options, alpha, k, noise_sampler_type, cfg_cw=cfg_cw, **extra_args)
+        if step == len(sigmas)-2:
+            print("cut noise at step: ", step)
+            eta = 0.0
 
         sigma_up, sigma, sigma_down, alpha_ratio = get_res4lyf_step_with_model(model, sigma, sigma_next, eta, eta_var, noise_mode, extra_options)
         h = h_new = rk.h_fn(sigma_down, sigma)
@@ -164,27 +167,35 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
             for row in range(rk.rows - rk.multistep_stages - row_offset + 1):
                 for diag_iter in range(implicit_steps_diag+1):
                     
-                    sub_sigma_up, sub_sigma, sub_sigma_next, sub_sigma_down, sub_alpha_ratio = 0, s_[row], s_[row+row_offset+rk.multistep_stages], s_[row+row_offset+rk.multistep_stages], 1
-                    if row > 0 or diag_iter > 0 or full_iter > 0:
-                        sub_sigma_up, sub_sigma, sub_sigma_down, sub_alpha_ratio = get_res4lyf_step_with_model(model, sub_sigma, sub_sigma_next, eta_substep, eta_var, noise_mode_sde_substep)
-                        h_new = (rk.h_fn(sub_sigma_down, sigma) / rk.c[row+row_offset+rk.multistep_stages])[0]
-                        if extra_options_flag("crude_h_new", extra_options):
-                            h_new = h * rk.h_fn(sub_sigma_down, sigma) / rk.h_fn(sub_sigma_next, sigma) 
+                    sub_sigma_up, sub_sigma, sub_sigma_next, sub_sigma_down, sub_alpha_ratio = 0., s_[row], s_[row+row_offset+rk.multistep_stages], s_[row+row_offset+rk.multistep_stages], 1.
+                    h_new = h
 
-                    # MODEL CALL
-                    if row < rk.rows:
-                        if full_iter > 0 and row_offset == 1 and row == 0 and sigma_next > 0:
-                            eps_[row], data_[row] = rk(x_0, x, sigma_next, **extra_args) 
-                        elif diag_iter == 0:
-                            eps_[row], data_[row] = rk(x_0, x_[row], s_[row], **extra_args)   
+                    if row < rk.rows   and   diag_iter < implicit_steps_diag   and   s_[row+row_offset+rk.multistep_stages] > 0:
+                        sub_sigma_up, sub_sigma, sub_sigma_down, sub_alpha_ratio = get_res4lyf_step_with_model(model, s_[row], s_[row+row_offset+rk.multistep_stages], eta_substep, eta_var, noise_mode_sde_substep)
+                        h_new = h * rk.h_fn(sub_sigma_down, sigma) / rk.h_fn(sub_sigma_next, sigma) 
+                        #if row == rk.rows - row_offset and diag_iter == implicit_steps_diag: 
+                        """if diag_iter == implicit_steps_diag: 
+                            h_new = h
                         else:
+                            sub_sigma_up, sub_sigma, sub_sigma_down, sub_alpha_ratio = get_res4lyf_step_with_model(model, s_[row], s_[row+row_offset+rk.multistep_stages], eta_substep, eta_var, noise_mode_sde_substep)
+                            h_new = h * rk.h_fn(sub_sigma_down, sigma) / rk.h_fn(sub_sigma_next, sigma) """
+                            
+                    # MODEL CALL
+                    if row < rk.rows: # A-tableau still
+                        if full_iter > 0 and row_offset == 1 and row == 0 and sigma_next > 0:
+                            eps_[row], data_[row] = rk(x, sigma_next, x_0, sigma, **extra_args) 
+                        elif diag_iter == 0:
+                            eps_[row], data_[row] = rk(x_[row], s_[row], x_0, sigma, **extra_args)   
+                        elif diag_iter > 0:
                             if s_[row+row_offset+rk.multistep_stages] == 0:
                                 break
-                            eps_[row], data_[row] = rk(x_0, x_[row+row_offset], s_[row+row_offset+rk.multistep_stages], **extra_args)   
-                    
-                    # GUIDE 
-                    eps_, x_      = LG.process_guides_substep(x_0, x_, eps_,      data_, row, step, sigma, sigma_next, sigma_down, s_, unsample_resample_scale, rk, rk_type, extra_options, frame_weights)
-                    eps_prev_, x_ = LG.process_guides_substep(x_0, x_, eps_prev_, data_, row, step, sigma, sigma_next, sigma_down, s_, unsample_resample_scale, rk, rk_type, extra_options, frame_weights)
+                            eps_[row], data_[row] = rk(x_[row+row_offset], s_[row+row_offset+rk.multistep_stages], x_0, sigma, **extra_args)  
+                        else: 
+                            print("NO MODEL CALL MADE")
+
+                        # GUIDE 
+                        eps_, x_      = LG.process_guides_substep(x_0, x_, eps_,      data_, row, step, sigma, sigma_next, sigma_down, s_, unsample_resample_scale, rk, rk_type, extra_options, frame_weights)
+                        eps_prev_, x_ = LG.process_guides_substep(x_0, x_, eps_prev_, data_, row, step, sigma, sigma_next, sigma_down, s_, unsample_resample_scale, rk, rk_type, extra_options, frame_weights)
 
                     # UPDATE
                     if row < rk.rows - row_offset   and   rk.multistep_stages == 0:
@@ -196,8 +207,8 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
 
             x = x_[rk.rows - rk.multistep_stages - row_offset + 1]
             
-            denoised = x_0 + ((sigma / (sigma - sigma_down)) *  h_new) * (rk.b_k_sum(eps_, 0) + rk.v_k_sum(eps_prev_, 0))
-            eps = x - denoised
+            denoised = x_0 + ((sigma / (sigma - sigma_down)) *  h) * (rk.b_k_sum(eps_, 0) + rk.v_k_sum(eps_prev_, 0))
+            eps = x_0 - denoised
             
             preview_callback(x, eps, denoised, x_, eps_, data_, step, sigma, sigma_next, callback, extra_options)
 
