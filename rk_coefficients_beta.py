@@ -16,6 +16,7 @@ import random
 RK_SAMPLER_NAMES_BETA = ["none",
                     "res_2m",
                     "res_3m",
+                    "res_2s_rkmk2e", 
                     "res_2s", 
                     "res_3s",
                     "res_3s_alt",
@@ -25,6 +26,9 @@ RK_SAMPLER_NAMES_BETA = ["none",
                     "res_4s_krogstad",
                     "res_4s_strehmel_weiner",
                     "res_4s_cox_matthews",
+                    "res_4s_cfree4",
+                    #"res_4s_friedli",
+
                     "res_4s_munthe-kaas",
 
                     "res_5s",
@@ -916,6 +920,23 @@ def get_rk_methods_beta(rk_type, h, c1=0.0, c2=0.5, c3=1.0, h_prev=None, step=0,
                     [b1, b2],
             ]
 
+        case "res_2s_rkmk2e":
+
+            ci = [0, 1]
+            φ = Phi(h, ci)
+            
+            b2 = φ(2)
+
+            a = [
+                    [0,0],
+                    [0, 0],
+            ]
+            b = [
+                    [0, b2],
+            ]
+
+            gen_first_col_exp(a, b, ci, φ)
+
 
         case "pec423_2h2s":
             
@@ -1130,6 +1151,33 @@ def get_rk_methods_beta(rk_type, h, c1=0.0, c2=0.5, c3=1.0, h_prev=None, step=0,
             b2 = 2*φ(2) - 4*φ(3)
             b3 = 2*φ(2) - 4*φ(3)
             b4 = 4*φ(3) - φ(2)
+
+            a = [
+                    [0,    0,0,0],
+                    [a2_1, 0,0,0],
+                    [0, a3_2,0,0],
+                    [a4_1, 0, a4_3,0],
+            ]
+            b = [
+                    [b1, b2, b3, b4],
+            ]
+            
+            
+        case "res_4s_cfree4": # weak 4th order, Cox & Matthews; unresolved issue, see below
+            c1,c2,c3,c4 = 0, 1/2, 1/2, 1
+            ci = [c1,c2,c3,c4]
+            φ = Phi(h, ci)
+            
+            a2_1 = c2 * φ(1,2)
+            a3_2 = c3 * φ(1,2)
+            a4_1 = (1/2) * φ(1,2) * (φ(0,2) - 1) # φ(0,3) == torch.exp(-h*c3)
+            a4_3 = φ(1,2)
+
+            b1 = (1/2)*φ(1) - (1/3)*φ(1,2)
+
+            b2 = (1/3)*φ(1)
+            b3 = (1/3)*φ(1)
+            b4 = -(1/6)*φ(1) + (1/3)*φ(1,2)
 
             a = [
                     [0,    0,0,0],
