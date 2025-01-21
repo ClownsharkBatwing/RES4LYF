@@ -24,6 +24,7 @@ RK_SAMPLER_NAMES = ["none",
                     "res_5s",
                     "res_6s",
                     "res_8s",
+
                     "res_10s",
                     "res_15s",
                     "res_16s",

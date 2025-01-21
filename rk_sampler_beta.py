@@ -207,11 +207,12 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
                     else: 
                         x_[row+1] = x_0 + h_new * (rk.b_k_sum(eps_, 0) + rk.v_k_sum(eps_prev_, 0))
                         x_[row+1] = rk.add_noise_post(x_[row+1], sub_sigma_up, sub_sigma, sub_sigma_next, sub_alpha_ratio, s_noise, noise_mode_sde_substep, SDE_NOISE_EXTERNAL, sde_noise_t)
-
-            x = x_[rk.rows - rk.multistep_stages - row_offset + 1]
             
             denoised = x_0 + ((sigma / (sigma - sigma_down)) *  h_new) * (rk.b_k_sum(eps_, 0) + rk.v_k_sum(eps_prev_, 0))
             eps = x_0 - denoised
+            
+            x = x_[rk.rows - rk.multistep_stages - row_offset + 1]
+            x = LG.process_guides_poststep(x, denoised, eps, step, extra_options)
             
             preview_callback(x, eps, denoised, x_, eps_, data_, step, sigma, sigma_next, callback, extra_options)
 
