@@ -281,7 +281,7 @@ class RK_Method_Exponential(RK_Method_Beta):
     def __call__(self, x, sub_sigma, x_0, sigma, **extra_args):
         denoised = self.model_denoised(x, sub_sigma, **extra_args)
         epsilon = denoised - x_0
-        print("MODEL SUB_SIGMA: ", round(float(sub_sigma),3), round(float(sigma),3))
+        #print("MODEL SUB_SIGMA: ", round(float(sub_sigma),3), round(float(sigma),3))
 
         return epsilon, denoised
     
@@ -338,7 +338,7 @@ class RK_Method_Linear(RK_Method_Beta):
     def __call__(self, x, sub_sigma, x_0, sigma, **extra_args):
         denoised = self.model_denoised(x, sub_sigma, **extra_args)
         epsilon = (x_0 - denoised) / sigma
-        print("MODEL SUB_SIGMA: ", round(float(sub_sigma),3), round(float(sigma),3))
+        #print("MODEL SUB_SIGMA: ", round(float(sub_sigma),3), round(float(sigma),3))
 
         return epsilon, denoised
 

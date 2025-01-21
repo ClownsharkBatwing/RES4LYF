@@ -393,6 +393,18 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
                         sub_sigma_2 = sub_sigma - maxmin_ratio * (sub_sigma * LG.lgw[step])
                         x_row_tmp = x_[row] + rk.h_fn(sub_sigma_2, sub_sigma) * eps_substep_guide
                         
+                    if extra_options_flag("guide_pseudoimplicit_eps_proj_substep", extra_options):
+                        
+                        if step == 0:
+                            eps_substep_guide, eps_substep_guide_inv = get_guide_epsilon_substep(x_0, x_, y0, y0_inv, s_, row, rk_type)
+                        else:
+                            eps_tmp_, x_tmp_      = LG.process_guides_substep(x_0, x_, eps_,      data_, row, step, sigma, sigma_next, sigma_down, s_, unsample_resample_scale, rk, rk_type, extra_options, frame_weights)
+                            eps_substep_guide = eps_tmp_[row]
+
+                        maxmin_ratio = (sub_sigma - rk.sigma_min) / sub_sigma
+                        sub_sigma_2 = sub_sigma - maxmin_ratio * (sub_sigma * LG.lgw[step])
+                        x_row_tmp = x_[row] + rk.h_fn(sub_sigma_2, sub_sigma) * eps_substep_guide
+                        
                     if extra_options_flag("guide_pseudoimplicit_substep", extra_options):
                         eps_substep_guide, eps_substep_guide_inv = get_guide_epsilon_substep(x_0, x_, y0, y0_inv, s_, row, rk_type)
                         sub_s2 = -torch.log(sub_sigma) + h_new * LG.lgw[step]
@@ -405,7 +417,7 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
                             if sigma_next == 0:
                                 break
                             eps_[row], data_[row] = rk(x, sigma_next, x_0, sigma, **extra_args)   
-                        elif full_iter == 0 and row_offset == 1 and (extra_options_flag("guide_pseudoimplicit_substep", extra_options) or extra_options_flag("guide_pseudoimplicit_power_substep", extra_options)): 
+                        elif full_iter == 0 and row_offset == 1 and (extra_options_flag("guide_pseudoimplicit_substep", extra_options) or extra_options_flag("guide_pseudoimplicit_power_substep", extra_options) or extra_options_flag("guide_pseudoimplicit_eps_proj_substep", extra_options)): 
                             if sub_sigma_2 == 0:
                                 break
                             eps_[row], data_[row] = rk(x_row_tmp, sub_sigma_2, x_0, sigma, **extra_args)
@@ -417,10 +429,11 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
                             eps_[row], data_[row] = rk(x_[row], s_[row], x_0, sigma, **extra_args) 
 
                         # GUIDE 
-                        if not extra_options_flag("disable_guides_eps_substep", extra_options):
-                            eps_, x_      = LG.process_guides_substep(x_0, x_, eps_,      data_, row, step, sigma, sigma_next, sigma_down, s_, unsample_resample_scale, rk, rk_type, extra_options, frame_weights)
-                        if not extra_options_flag("disable_guides_eps_prev_substep", extra_options):
-                            eps_prev_, x_ = LG.process_guides_substep(x_0, x_, eps_prev_, data_, row, step, sigma, sigma_next, sigma_down, s_, unsample_resample_scale, rk, rk_type, extra_options, frame_weights)
+                        if not extra_options_flag("guide_disable_regular_substep", extra_options):
+                            if not extra_options_flag("disable_guides_eps_substep", extra_options):
+                                eps_, x_      = LG.process_guides_substep(x_0, x_, eps_,      data_, row, step, sigma, sigma_next, sigma_down, s_, unsample_resample_scale, rk, rk_type, extra_options, frame_weights)
+                            if not extra_options_flag("disable_guides_eps_prev_substep", extra_options):
+                                eps_prev_, x_ = LG.process_guides_substep(x_0, x_, eps_prev_, data_, row, step, sigma, sigma_next, sigma_down, s_, unsample_resample_scale, rk, rk_type, extra_options, frame_weights)
 
                     # UPDATE
                     if row < rk.rows - row_offset   and   rk.multistep_stages == 0:
