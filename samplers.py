@@ -566,7 +566,7 @@ class ClownSamplerAdvanced_Beta:
                     t_fn_formula=None, sigma_fn_formula=None, implicit_substeps=0, implicit_steps=0,
                     latent_guide=None, latent_guide_inv=None, guide_mode="", latent_guide_weights=None, latent_guide_weights_inv=None, latent_guide_mask=None, latent_guide_mask_inv=None, rescale_floor=True, sigmas_override=None, unsampler_type="linear",
                     guides=None, options=None, sde_noise=None,sde_noise_steps=1, 
-                    extra_options="", automation=None, etas=None, s_noises=None,unsample_resample_scales=None, regional_conditioning_weights=None,frame_weights=None, eta_substep=0.5, noise_mode_sde_substep="hard",
+                    extra_options="", automation=None, etas=None, etas_substep=None, s_noises=None,unsample_resample_scales=None, regional_conditioning_weights=None,frame_weights=None, eta_substep=0.5, noise_mode_sde_substep="hard",
                     ): 
             
             implicit_steps_diag = implicit_substeps
@@ -604,9 +604,11 @@ class ClownSamplerAdvanced_Beta:
             rescale_floor = extra_options_flag("rescale_floor", extra_options)
 
             if automation is not None:
-                etas, s_noises, unsample_resample_scales = automation
+                etas, etas_substep, s_noises, unsample_resample_scales = automation
             etas = initialize_or_scale(etas, eta, max_steps).to(default_dtype)
             etas = F.pad(etas, (0, max_steps), value=0.0)
+            etas_substep = initialize_or_scale(etas_substep, eta_substep, max_steps).to(default_dtype)
+            etas_substep = F.pad(etas, (0, max_steps), value=0.0)
             s_noises = initialize_or_scale(s_noises, s_noise, max_steps).to(default_dtype)
             s_noises = F.pad(s_noises, (0, max_steps), value=0.0)
         
@@ -661,7 +663,7 @@ class ClownSamplerAdvanced_Beta:
                                                             "latent_guide_weights": latent_guide_weights, "latent_guide_weights_inv": latent_guide_weights_inv, "guide_mode": guide_mode,
                                                             "LGW_MASK_RESCALE_MIN": rescale_floor, "sigmas_override": sigmas_override, "sde_noise": sde_noise,
                                                             "extra_options": extra_options,
-                                                            "etas": etas, "s_noises": s_noises, "unsample_resample_scales": unsample_resample_scales, "regional_conditioning_weights": regional_conditioning_weights,
+                                                            "etas": etas, "etas_substep": etas_substep, "s_noises": s_noises, "unsample_resample_scales": unsample_resample_scales, "regional_conditioning_weights": regional_conditioning_weights,
                                                             "guides": guides, "frame_weights": frame_weights, "eta_substep": eta_substep, "noise_mode_sde_substep": noise_mode_sde_substep,
                                                             })
 

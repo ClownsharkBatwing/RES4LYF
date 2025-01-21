@@ -108,6 +108,8 @@ NODE_CLASS_MAPPINGS = {
     "ClownsharKSamplerOptions": samplers_extensions.ClownsharKSamplerOptions,
     "ClownsharKSamplerOptions_SDE_Noise": samplers_extensions.ClownsharKSamplerOptions_SDE_Noise,
     "ClownsharKSamplerAutomation": samplers_extensions.ClownsharKSamplerAutomation,
+    "ClownsharKSamplerAutomation_Beta": samplers_extensions.ClownsharKSamplerAutomation_Beta,
+
 
     "UltraSharkSampler": samplers.UltraSharkSampler,
     "UltraSharkSampler Tiled": samplers_tiled.UltraSharkSampler_Tiled,

@@ -951,45 +951,37 @@ def get_rk_methods_beta(rk_type, h, c1=0.0, c2=0.5, c3=1.0, h_prev=None, step=0,
 
 
         case "abnorsett2_1h1s":
-            
-            c1,c2 = 0,1
-            ci = [c1, c2]
+
+            c2 = 0
+            ci = [c2]
             φ = Phi(h, ci)
-            
-            a2_1 = φ(1) + φ(2)
-            
-            
+
             b1 = φ(1) + φ(2)
-            
+
             a = [
-                    [0, 0],
-                    [a2_1, 0],
+                    [0],
             ]
             b = [
-                    [b1, 0],
+                    [b1],
             ]
-            
+
             if extra_options_flag("h_prev_h_h_no_eta", extra_options):
                 φ1 = Phi(h_prev1_no_eta * h/h_no_eta, ci)
             elif extra_options_flag("h_only", extra_options):
                 φ1 = Phi(h, ci)
             else:
                 φ1 = Phi(h_prev1_no_eta, ci)
-                
-            u2_1 = -φ1(2) 
-            
-            v1 = -φ1(2) 
-            
+
+            v1 = -φ1(2)
+
             u = [
-                    [   0,    0],
-                    [u2_1, 0],
+                    [0],
             ]
             v = [
-                    [v1, 0],
+                    [v1],
             ]
-            
-            gen_first_col_exp_uv(a, b, ci, u, v, φ)
-            
+
+            gen_first_col_exp_uv(a, b, ci, u, v, φ) 
 
 
 

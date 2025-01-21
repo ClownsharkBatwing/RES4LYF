@@ -408,6 +408,35 @@ class ClownsharKSamplerAutomation:
 
 
 
+class ClownsharKSamplerAutomation_Beta:
+    @classmethod
+    def INPUT_TYPES(s):
+        return {"required":
+                    {
+                    },
+                    "optional": 
+                    {
+                        "etas": ("SIGMAS", ),
+                        "etas_substep": ("SIGMAS", ),
+                        "s_noises": ("SIGMAS", ),
+                        "unsample_resample_scales": ("SIGMAS", ),
+
+                    }  
+               }
+    RETURN_TYPES = ("AUTOMATION",)
+    RETURN_NAMES = ("automation",)
+    CATEGORY = "RES4LYF/sampler_extensions"
+    
+    FUNCTION = "main"
+
+    def main(self, etas=None, etas_substep=None, s_noises=None, unsample_resample_scales=None,):
+        automation = (etas, etas_substep, s_noises, unsample_resample_scales)
+        return (automation, )
+
+
+
+
+
 class ClownsharKSamplerOptions:
     @classmethod
     def INPUT_TYPES(s):

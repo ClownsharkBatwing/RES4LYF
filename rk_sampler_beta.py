@@ -36,6 +36,7 @@ def prepare_sigmas(model, sigmas):
 
 
 def prepare_step_to_sigma_zero(rk, rk_type, model, x, extra_options, alpha, k, noise_sampler_type, cfg_cw=1.0, **extra_args):
+    rk_type_final_step = f"euler" if rk_type in {"euler"} else rk_type
     rk_type_final_step = f"ralston_{rk_type[-2:]}" if rk_type[-2:] in {"2s", "3s"} else "ralston_3s"
     rk_type_final_step = f"deis_2m" if rk_type[-2:] in {"2m", "3m", "4m"} else rk_type_final_step
     rk_type_final_step = f"euler" if rk_type in {"ddim"} else rk_type_final_step
@@ -56,7 +57,7 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
                   latent_guide=None, latent_guide_inv=None, latent_guide_weight=0.0, latent_guide_weight_inv=0.0, latent_guide_weights=None, latent_guide_weights_inv=None, guide_mode="", 
                   GARBAGE_COLLECT=False, mask=None, mask_inv=None, LGW_MASK_RESCALE_MIN=True, sigmas_override=None, unsample_resample_scales=None,regional_conditioning_weights=None, sde_noise=[],
                   extra_options="",
-                  etas=None, s_noises=None, momentums=None, guides=None, cfgpp=0.0, cfg_cw = 1.0,regional_conditioning_floors=None, frame_weights=None, eta_substep=0.0, noise_mode_sde_substep="hard", guide_cossim_cutoff_=1.0, guide_bkg_cossim_cutoff_=1.0,
+                  etas=None, etas_substep=None, s_noises=None, momentums=None, guides=None, cfgpp=0.0, cfg_cw = 1.0,regional_conditioning_floors=None, frame_weights=None, eta_substep=0.0, noise_mode_sde_substep="hard", guide_cossim_cutoff_=1.0, guide_bkg_cossim_cutoff_=1.0,
                   ):
     extra_args = {} if extra_args is None else extra_args
 
@@ -92,6 +93,8 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
     if implicit_sampler_name not in ("none", "use_explicit") and implicit_steps_full + implicit_steps_diag > 0:
         rk_type = implicit_sampler_name
     print("rk_type: ", rk_type)
+    if implicit_sampler_name == "none":
+        implicit_steps_diag = implicit_steps_full = 0
 
     rk       = RK_Method_Beta.create(model,  rk_type, x.device)
     extra_args =  rk.init_cfg_channelwise(x, cfg_cw, **extra_args)
@@ -121,6 +124,7 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
             extra_args['model_options']['transformer_options']['regional_conditioning_floor']  = 0.0
         
         eta = eta_var = etas[step] if etas is not None else eta
+        eta_substep = eta_var_substep = etas_substep[step] if etas_substep is not None else eta_substep
         s_noise = s_noises[step] if s_noises is not None else s_noise
         
         if sigma_next == 0:
@@ -176,7 +180,7 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
                         elif diag_iter > 0 and extra_options_flag("implicit_substep_only_first_eta", extra_options):
                             pass
                         elif row < rk.rows-rk.multistep_stages   or   diag_iter < implicit_steps_diag:
-                            sub_sigma_up, sub_sigma, sub_sigma_down, sub_alpha_ratio = get_res4lyf_step_with_model(model, s_[row], s_[row+row_offset+rk.multistep_stages], eta_substep, eta_var, noise_mode_sde_substep)
+                            sub_sigma_up, sub_sigma, sub_sigma_down, sub_alpha_ratio = get_res4lyf_step_with_model(model, s_[row], s_[row+row_offset+rk.multistep_stages], eta_substep, eta_var_substep, noise_mode_sde_substep)
                             h_new = h * rk.h_fn(sub_sigma_down, sigma) / rk.h_fn(sub_sigma_next, sigma) 
                         
                     h_new = (rk.h_fn(sub_sigma_down, sigma) / rk.c[row+row_offset+rk.multistep_stages])[0]
