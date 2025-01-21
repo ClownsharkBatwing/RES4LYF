@@ -66,6 +66,7 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
     c3 = c3_ = float(get_extra_options_kv("c3", str(c3), extra_options))
     
     guide_skip_steps = int(get_extra_options_kv("guide_skip_steps", 0, extra_options))        
+    eta_substep_cutoff_step = int(get_extra_options_kv("eta_substep_cutoff_step", '10000', extra_options))
     default_dtype = getattr(torch, get_extra_options_kv("default_dtype", "float64", extra_options), torch.float64)   
 
     cfg_cw = float(get_extra_options_kv("cfg_cw", str(cfg_cw), extra_options))
@@ -104,11 +105,13 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
     LG = LatentGuide(guides, x, model, sigmas, UNSAMPLE, LGW_MASK_RESCALE_MIN, extra_options)
     x = LG.init_guides(x, rk.noise_sampler)
     
-    y0, y0_inv = LG.y0, LG.y0_inv
-
     denoised, denoised_prev, eps, eps_prev = [torch.zeros_like(x) for _ in range(4)]
-    
+    gc.collect()
+    torch.cuda.empty_cache()
+
     for step in trange(len(sigmas)-1, disable=disable):
+        if step >= eta_substep_cutoff_step:
+            eta_substep = 0.0
         sigma, sigma_next = sigmas[step], sigmas[step+1]
         
         unsample_resample_scale = float(unsample_resample_scales[step]) if unsample_resample_scales is not None else None
