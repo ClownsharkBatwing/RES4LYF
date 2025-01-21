@@ -154,7 +154,7 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
         x_0 = x_[0].clone()
         
         recycled_stages = max(rk.multistep_stages, rk.hybrid_stages)
-        for ms in range(max(rk.multistep_stages, rk.hybrid_stages)):
+        for ms in range(recycled_stages):
             if RK_Method_Beta.is_exponential(rk_type):
                 eps_ [recycled_stages - ms] = -(x_0 - denoised_ [recycled_stages - ms])
             else:
@@ -168,17 +168,19 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
                 for diag_iter in range(implicit_steps_diag+1):
                     
                     sub_sigma_up, sub_sigma, sub_sigma_next, sub_sigma_down, sub_alpha_ratio = 0., s_[row], s_[row+row_offset+rk.multistep_stages], s_[row+row_offset+rk.multistep_stages], 1.
-                    h_new = h
+                    h_new = h.clone()
 
                     if row < rk.rows   and   s_[row+row_offset+rk.multistep_stages] > 0:
-                        if   diag_iter > 0 and diag_iter == implicit_steps_diag and not extra_options_flag("implicit_substep_use_final_eta", extra_options):
+                        if   diag_iter > 0 and diag_iter == implicit_steps_diag and extra_options_flag("implicit_substep_skip_final_eta", extra_options):
                             pass
                         elif diag_iter > 0 and extra_options_flag("implicit_substep_only_first_eta", extra_options):
                             pass
                         elif row < rk.rows-row_offset-rk.multistep_stages   or   diag_iter < implicit_steps_diag:
                             sub_sigma_up, sub_sigma, sub_sigma_down, sub_alpha_ratio = get_res4lyf_step_with_model(model, s_[row], s_[row+row_offset+rk.multistep_stages], eta_substep, eta_var, noise_mode_sde_substep)
                             h_new = h * rk.h_fn(sub_sigma_down, sigma) / rk.h_fn(sub_sigma_next, sigma) 
-                            
+                        
+                    h_new = (rk.h_fn(sub_sigma_down, sigma) / rk.c[row+row_offset+rk.multistep_stages])[0]
+
                     # MODEL CALL
                     if row < rk.rows: # A-tableau still
                         if full_iter > 0 and row_offset == 1 and row == 0 and sigma_next > 0: # explicit full implicit
@@ -189,7 +191,7 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
                             if s_[row+row_offset+rk.multistep_stages] == 0:
                                 break
                             eps_[row], data_[row] = rk(x_[row+row_offset], s_[row+row_offset+rk.multistep_stages], x_0, sigma, **extra_args)  
-                        else: 
+                        else:
                             eps_[row], data_[row] = rk(x_[row], s_[row], x_0, sigma, **extra_args) 
 
                         # GUIDE 
@@ -208,7 +210,7 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
 
             x = x_[rk.rows - rk.multistep_stages - row_offset + 1]
             
-            denoised = x_0 + ((sigma / (sigma - sigma_down)) *  h) * (rk.b_k_sum(eps_, 0) + rk.v_k_sum(eps_prev_, 0))
+            denoised = x_0 + ((sigma / (sigma - sigma_down)) *  h_new) * (rk.b_k_sum(eps_, 0) + rk.v_k_sum(eps_prev_, 0))
             eps = x_0 - denoised
             
             preview_callback(x, eps, denoised, x_, eps_, data_, step, sigma, sigma_next, callback, extra_options)

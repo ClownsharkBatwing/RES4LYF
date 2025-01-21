@@ -1006,23 +1006,20 @@ def get_rk_methods_beta(rk_type, h, c1=0.0, c2=0.5, c3=1.0, h_prev=None, step=0,
             if extra_options_flag("h_prev_h_h_no_eta", extra_options):
                 φ1 = Phi(h_prev1_no_eta * h/h_no_eta, ci)
                 φ2 = Phi(h_prev2_no_eta * h/h_no_eta, ci)
-                φ3 = Phi(h_prev3_no_eta * h/h_no_eta, ci)
             elif extra_options_flag("h_only", extra_options):
                 φ1 = Phi(h, ci)
                 φ2 = Phi(h, ci)
-                φ3 = Phi(h, ci)
             else:
                 φ1 = Phi(h_prev1_no_eta, ci)
                 φ2 = Phi(h_prev2_no_eta, ci)
-                φ3 = Phi(h_prev3_no_eta, ci)
                 
-            u2_1 = -2*φ(2) - 2*φ(3)
-            u3_1 = -φ(2) + φ(3) + 3*φ(4)
-            v1 = -φ(2) + φ(3) + 3*φ(4)
+            u2_1 = -2*φ1(2) - 2*φ1(3)
+            u3_1 = -φ1(2) + φ1(3) + 3*φ1(4)
+            v1 = -φ1(2) + φ1(3) + 3*φ1(4)
             
-            u2_2 = (1/2)*φ(2) + φ(3)
-            u3_2 = (1/6)*φ(2) - φ(4)
-            v2 = (1/6)*φ(2) - φ(4)
+            u2_2 = (1/2)*φ2(2) + φ2(3)
+            u3_2 = (1/6)*φ2(2) - φ2(4)
+            v2 = (1/6)*φ2(2) - φ2(4)
 
             
             u = [
