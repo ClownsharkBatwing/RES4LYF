@@ -67,15 +67,14 @@ class LatentGuide:
         latent_guide_weights = torch.zeros_like(sigmas)
         latent_guide_weights_inv = torch.zeros_like(sigmas)
         if guides is not None:
-            self.guide_mode, latent_guide_weight, latent_guide_weight_inv, latent_guide_weights, latent_guide_weights_inv, self.latent_guide, self.latent_guide_inv, latent_guide_mask, latent_guide_mask_inv, scheduler_, scheduler_inv_, steps_, steps_inv_, denoise_, denoise_inv_ = guides
-            
-            self.mask, self.mask_inv                                 = latent_guide_mask, latent_guide_mask_inv
-            self.guide_cossim_cutoff_, self.guide_bkg_cossim_cutoff_ = denoise_, denoise_inv_
-            
-            if latent_guide_weights == None:
+            (self.guide_mode, latent_guide_weight, latent_guide_weight_inv, latent_guide_weights, latent_guide_weights_inv,
+            self.latent_guide, self.latent_guide_inv, self.mask, self.mask_inv, scheduler_, scheduler_inv_,
+            steps_, steps_inv_, self.guide_cossim_cutoff_, self.guide_bkg_cossim_cutoff_) = guides
+                        
+            if latent_guide_weights is None:
                 latent_guide_weights = get_sigmas(model, scheduler_, steps_, 1.0).to(x.dtype)
             
-            if latent_guide_weights_inv == None:
+            if latent_guide_weights_inv is None:
                 latent_guide_weights_inv = get_sigmas(model, scheduler_inv_, steps_inv_, 1.0).to(x.dtype)
                 
             latent_guide_weights     = initialize_or_scale(latent_guide_weights,     latent_guide_weight,     max_steps).to(dtype)
@@ -113,6 +112,9 @@ class LatentGuide:
                 latent_guide_samples = self.model.inner_model.inner_model.process_latent_in(latent_guide['samples']).clone().to(x.device)
             else:
                 latent_guide_samples = latent_guide
+
+            if latent_guide_samples.dim() == 5 and latent_guide_samples.shape[2] == 1:
+                latent_guide_samples = latent_guide_samples.repeat(1, 1, x.shape[2], 1, 1)
             if self.SAMPLE:
                 self.y0 = latent_guide_samples
             elif self.UNSAMPLE: # and self.mask is not None:
@@ -211,7 +213,7 @@ class LatentGuide:
             for f in range(lgw_mask.shape[2]):
                 frame_weight = frame_weights[f]
                 lgw_mask[..., f:f+1, :, :] *= frame_weight
-                if lgw_mask_inv is not None:
+                if lgw_mask_inv is not None and not extra_options_flag("disable_lgw_mask_inv_frame_weights", extra_options):
                     lgw_mask_inv[..., f:f+1, :, :] *= frame_weight
 
         if "data" == guide_mode:
@@ -526,15 +528,28 @@ class LatentGuide:
 
 
 
-def prepare_mask(x, mask, LGW_MASK_RESCALE_MIN):
+def prepare_mask(x, mask, LGW_MASK_RESCALE_MIN) -> Tuple[torch.Tensor, bool]:
     if mask is None:
         mask = torch.ones_like(x)
         LGW_MASK_RESCALE_MIN = False
-    else:
-        mask = mask.unsqueeze(1)
-        mask = mask.repeat(1, x.shape[1], 1, 1) 
-        mask = F.interpolate(mask, size=(x.shape[2], x.shape[3]), mode='bilinear', align_corners=False)
-        mask = mask.to(x.dtype).to(x.device)
+        return mask, LGW_MASK_RESCALE_MIN
+    
+    spatial_mask = mask.unsqueeze(1)
+    target_height = x.shape[-2]
+    target_width = x.shape[-1]
+    spatial_mask = F.interpolate(spatial_mask, size=(target_height, target_width), mode='bilinear', align_corners=False)
+
+    while spatial_mask.dim() < x.dim():
+        spatial_mask = spatial_mask.unsqueeze(2)
+    
+    repeat_shape = [1] #batch
+    for i in range(1, x.dim() - 2):
+        repeat_shape.append(x.shape[i])
+    repeat_shape.extend([1, 1]) #height and width
+
+    mask = spatial_mask.repeat(*repeat_shape).to(x.dtype).to(x.device)
+    
+    del spatial_mask
     return mask, LGW_MASK_RESCALE_MIN
     
 def prepare_weighted_masks(mask, mask_inv, lgw_, lgw_inv_, latent_guide, latent_guide_inv, LGW_MASK_RESCALE_MIN):

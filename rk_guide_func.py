@@ -711,56 +711,32 @@ class LatentGuide:
 
 
 
+
 def prepare_mask(x, mask, LGW_MASK_RESCALE_MIN) -> Tuple[torch.Tensor, bool]:
-    spatial_mask = None
-    result_mask = None
-    
     if mask is None:
         result_mask = torch.ones_like(x)
         LGW_MASK_RESCALE_MIN = False
-        return result_mask, LGW_MASK_RESCALE_MIN
+        return mask, LGW_MASK_RESCALE_MIN
+    
+    spatial_mask = mask.unsqueeze(1)
+    target_height = x.shape[-2]
+    target_width = x.shape[-1]
+    spatial_mask = F.interpolate(spatial_mask, size=(target_height, target_width), mode='bilinear', align_corners=False)
 
-    # First handle spatial dimensions with interpolation
-    spatial_mask = mask.unsqueeze(1)  # Add channel dim to make it 4D [B, 1, H, W]
-    target_height = x.shape[-2]  # Get target height from second-to-last dim
-    target_width = x.shape[-1]   # Get target width from last dim
-    
-    spatial_mask = F.interpolate(
-        spatial_mask, 
-        size=(target_height, target_width), 
-        mode='bilinear', 
-        align_corners=False
-    )
-    
-    dims_needed = x.dim() - spatial_mask.dim()
-    for _ in range(dims_needed):
+    while spatial_mask.dim() < x.dim():
         spatial_mask = spatial_mask.unsqueeze(2)
     
-    # Build repeat shape with validation
-    if x.dim() < 3:
-        raise ValueError(f"Input tensor must have at least 3 dimensions, got {x.dim()}")
-        
-    # Build repeat shape: [1, channels, time/depth/etc., 1, 1]
-    repeat_shape = [1]  # First 1 is for batch dimension
-    # Add the middle dimensions from x (channels, time, etc.)
-    for dim_idx in range(1, x.dim() - 2):
-        repeat_shape.append(x.shape[dim_idx])
-    # Add 1s for spatial dimensions
-    repeat_shape.extend([1, 1])  # For height and width
-    
-    result_mask = spatial_mask.repeat(*repeat_shape)
-    result_mask = result_mask.to(dtype=x.dtype, device=x.device)
-    
-    if 'spatial_mask' in locals():
-        if spatial_mask is not None and spatial_mask is not result_mask:
-            del spatial_mask
-    
-    return result_mask, LGW_MASK_RESCALE_MIN
+    repeat_shape = [1] #batch
+    for i in range(1, x.dim() - 2):
+        repeat_shape.append(x.shape[i])
+    repeat_shape.extend([1, 1]) #height and width
 
-def prepare_weighted_masks(mask, mask_inv, lgw_, lgw_inv_, latent_guide, latent_guide_inv, LGW_MASK_RESCALE_MIN) -> Tuple[torch.Tensor, torch.Tensor]:
-    lgw_mask = None
-    lgw_mask_inv = None
+    mask = spatial_mask.repeat(*repeat_shape).to(x.dtype).to(x.device)
     
+    del spatial_mask
+    return mask, LGW_MASK_RESCALE_MIN
+    
+def prepare_weighted_masks(mask, mask_inv, lgw_, lgw_inv_, latent_guide, latent_guide_inv, LGW_MASK_RESCALE_MIN):
     if LGW_MASK_RESCALE_MIN: 
         lgw_mask     =    mask  * (1-lgw_) + lgw_
         lgw_mask_inv = (1-mask) * (1-lgw_inv_) + lgw_inv_

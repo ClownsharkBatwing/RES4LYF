@@ -38,7 +38,7 @@ def prepare_sigmas(model, sigmas):
 def prepare_step_to_sigma_zero(rk, rk_type, model, x, extra_options, alpha, k, noise_sampler_type, cfg_cw=1.0, **extra_args):
     rk_type_final_step = f"ralston_{rk_type[-2:]}" if rk_type[-2:] in {"2s", "3s"} else "ralston_3s"
     rk_type_final_step = f"deis_2m" if rk_type[-2:] in {"2m", "3m", "4m"} else rk_type_final_step
-    rk_type_final_step = f"euler" if rk_type in {"ddim"} else rk_type_final_step
+    rk_type_final_step = f"euler" if rk_type in {"ddim", "euler"} else rk_type_final_step
     rk_type_final_step = get_extra_options_kv("rk_type_final_step", rk_type_final_step, extra_options)
     rk = RK_Method_Beta.create(model, rk_type_final_step, x.device)
     rk.init_noise_sampler(x, torch.initial_seed() + 1, noise_sampler_type, alpha=alpha, k=k)
@@ -183,8 +183,9 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
                             eps_[row], data_[row] = rk(x_0, x_[row+row_offset], s_[row+row_offset+rk.multistep_stages], **extra_args)   
                     
                     # GUIDE 
-                    eps_, x_      = LG.process_guides_substep(x_0, x_, eps_,      data_, row, step, sigma, sigma_next, sigma_down, s_, unsample_resample_scale, rk, rk_type, extra_options, frame_weights)
-                    eps_prev_, x_ = LG.process_guides_substep(x_0, x_, eps_prev_, data_, row, step, sigma, sigma_next, sigma_down, s_, unsample_resample_scale, rk, rk_type, extra_options, frame_weights)
+                    if LG.lgw[step] > 0:
+                        eps_, x_      = LG.process_guides_substep(x_0, x_, eps_,      data_, row, step, sigma, sigma_next, sigma_down, s_, unsample_resample_scale, rk, rk_type, extra_options, frame_weights)
+                        eps_prev_, x_ = LG.process_guides_substep(x_0, x_, eps_prev_, data_, row, step, sigma, sigma_next, sigma_down, s_, unsample_resample_scale, rk, rk_type, extra_options, frame_weights)
 
                     # UPDATE
                     if row < rk.rows - row_offset   and   rk.multistep_stages == 0:
