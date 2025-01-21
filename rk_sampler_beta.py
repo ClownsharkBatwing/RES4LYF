@@ -175,7 +175,7 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
                             pass
                         elif diag_iter > 0 and extra_options_flag("implicit_substep_only_first_eta", extra_options):
                             pass
-                        elif row < rk.rows-row_offset-rk.multistep_stages   or   diag_iter < implicit_steps_diag:
+                        elif row < rk.rows-rk.multistep_stages   or   diag_iter < implicit_steps_diag:
                             sub_sigma_up, sub_sigma, sub_sigma_down, sub_alpha_ratio = get_res4lyf_step_with_model(model, s_[row], s_[row+row_offset+rk.multistep_stages], eta_substep, eta_var, noise_mode_sde_substep)
                             h_new = h * rk.h_fn(sub_sigma_down, sigma) / rk.h_fn(sub_sigma_next, sigma) 
                         
