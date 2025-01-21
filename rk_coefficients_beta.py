@@ -48,6 +48,8 @@ RK_SAMPLER_NAMES_BETA = ["none",
                     
                     "pec423_2h2s",
                     "pec433_2h3s",
+                    
+                    "abnorsett2_1h1s",
 
 
                     "deis_2m",
@@ -64,6 +66,9 @@ RK_SAMPLER_NAMES_BETA = ["none",
                     "dpmpp_sde_2s",
                     "dpmpp_3s",
                     
+                    "lawson2a_2s",
+                    "lawson2b_2s",
+
                     "lawson4_4s",
                     "lawson41-gen_4s",
                     "lawson41-gen-mod_4s",
@@ -846,6 +851,8 @@ def get_rk_methods_beta(rk_type, h, c1=0.0, c2=0.5, c3=1.0, h_prev=None, step=0,
             hybrid_stages = int(rk_type[-4])
         if rk_type == "res_4s":
             rk_type = "res_4s_cox_matthews"
+        if rk_type == "res_1s":
+            rk_type = "res_2s"
 
     if rk_type in rk_coeff:
         a, b, ci = copy.deepcopy(rk_coeff[rk_type])
@@ -940,6 +947,50 @@ def get_rk_methods_beta(rk_type, h, c1=0.0, c2=0.5, c3=1.0, h_prev=None, step=0,
             ]
 
             gen_first_col_exp(a, b, ci, φ)
+
+
+
+        case "abnorsett2_1h1s":
+            
+            c1,c2 = 0,1
+            ci = [c1, c2]
+            φ = Phi(h, ci)
+            
+            a2_1 = φ(1) + φ(2)
+            
+            
+            b1 = φ(1) + φ(2)
+            
+            a = [
+                    [0, 0],
+                    [a2_1, 0],
+            ]
+            b = [
+                    [b1, 0],
+            ]
+            
+            if extra_options_flag("h_prev_h_h_no_eta", extra_options):
+                φ1 = Phi(h_prev1_no_eta * h/h_no_eta, ci)
+            elif extra_options_flag("h_only", extra_options):
+                φ1 = Phi(h, ci)
+            else:
+                φ1 = Phi(h_prev1_no_eta, ci)
+                
+            u2_1 = -φ1(2) 
+            
+            v1 = -φ1(2) 
+            
+            u = [
+                    [   0,    0],
+                    [u2_1, 0],
+            ]
+            v = [
+                    [v1, 0],
+            ]
+            
+            gen_first_col_exp_uv(a, b, ci, u, v, φ)
+            
+
 
 
         case "pec423_2h2s":
@@ -1302,6 +1353,39 @@ def get_rk_methods_beta(rk_type, h, c1=0.0, c2=0.5, c3=1.0, h_prev=None, step=0,
             
             a, b = gen_first_col_exp(a,b,ci,φ)
             
+        case "lawson2a_2s": # based on midpoint rule, stiff order 1 https://cds.cern.ch/record/848126/files/cer-002531460.pdf
+            c1,c2 = 0,1/2
+            ci = [c1, c2]
+            φ = Phi(h, ci)
+            
+            a2_1 = c2 * φ(0,2)
+            b2 = φ(0,2)
+            b1 = 0
+
+            a = [
+                    [0,0],
+                    [a2_1, 0],
+            ]
+            b = [
+                    [b1, b2],
+            ]
+
+        case "lawson2b_2s": # based on trapezoidal rule, stiff order 1 https://cds.cern.ch/record/848126/files/cer-002531460.pdf
+            c1,c2 = 0,1
+            ci = [c1, c2]
+            φ = Phi(h, ci)
+            
+            a2_1 = φ(0)
+            b2 = 1/2
+            b1 = (1/2)*φ(0)
+
+            a = [
+                    [0,0],
+                    [a2_1, 0],
+            ]
+            b = [
+                    [b1, b2],
+            ]
 
 
         case "lawson4_4s": 
