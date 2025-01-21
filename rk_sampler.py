@@ -347,7 +347,7 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
                     if implicit_steps > 0 and row == 0:
                         break
 
-            print("UPDATE_B: step,h: ", step, h.item())
+            #print("UPDATE_B: step,h: ", step, h.item())
             x = x_0 + h * rk.b_k_sum(eps_, 0)
                     
             denoised = x_0 + ((sigma / (sigma - sigma_down)) *  h) * rk.b_k_sum(eps_, 0) 
@@ -485,7 +485,7 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
                 
         if isinstance(MODEL_SAMPLING, comfy.model_sampling.CONST) == True   or   (isinstance(MODEL_SAMPLING, comfy.model_sampling.CONST) == False and noise_mode != "hard"):
             if sigma_up > 0:
-                print("NOISE_FULL: sigma_up, sigma, sigma_next, sigma_down, alpha_ratio: ", sigma_up.item(), sigma.item(), sigma_next.item(), sigma_down.item(), alpha_ratio.item())
+                #print("NOISE_FULL: sigma_up, sigma, sigma_next, sigma_down, alpha_ratio: ", sigma_up.item(), sigma.item(), sigma_next.item(), sigma_down.item(), alpha_ratio.item())
                 if implicit_steps==0:
                     rk_or_irk = rk
                     rk_or_irk_type = rk_type
