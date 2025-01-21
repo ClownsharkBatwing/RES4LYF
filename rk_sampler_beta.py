@@ -66,13 +66,13 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
     c3 = c3_ = float(get_extra_options_kv("c3", str(c3), extra_options))
     
     guide_skip_steps = int(get_extra_options_kv("guide_skip_steps", 0, extra_options))        
+    default_dtype = getattr(torch, get_extra_options_kv("default_dtype", "float64", extra_options), torch.float64)   
 
     cfg_cw = float(get_extra_options_kv("cfg_cw", str(cfg_cw), extra_options))
     
     MODEL_SAMPLING = model.inner_model.inner_model.model_sampling
     
     s_in, s_one = x.new_ones([x.shape[0]]), x.new_ones([1])
-    default_dtype = torch.float64
     max_steps=10000
     
     if sigmas_override is not None:
