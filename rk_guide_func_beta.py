@@ -61,7 +61,7 @@ class LatentGuide:
         self.lgw, self.lgw_inv = [torch.full_like(sigmas, 0.) for _ in range(2)]
         
         self.guide_cossim_cutoff_, self.guide_bkg_cossim_cutoff_ = 1.0, 1.0
-                
+        
         latent_guide_weight, latent_guide_weight_inv = 0.,0.
         latent_guide_weights, latent_guide_weights_inv = None, None
         latent_guide_weights = torch.zeros_like(sigmas)

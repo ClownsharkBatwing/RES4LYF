@@ -265,12 +265,19 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
                     # UPDATE
                     #print("UPDATE: step,row,h_new: ", step, row, h_new.item())
                     x_[row+1] = x_0 + h_new * rk.a_k_sum(eps_, row)
+                    if row > 0:
+                        if PRINT_DEBUG:
+                            print("A: step,row,h,h_new: \n", step, row, round(float(h.item()),3), round(float(h_new.item()),3))
+
                     #print("step, row, exim_iter: ", step, row, exim_iter)
 
 
                     # NOISE ADD
                     if isinstance(MODEL_SAMPLING, comfy.model_sampling.CONST) == True   or   (isinstance(MODEL_SAMPLING, comfy.model_sampling.CONST) == False and noise_mode != "hard"):
                         if (exim_iter < implicit_steps and sub_sigma_up > 0) or ((row > 0) and (sub_sigma_up > 0) and ((SUBSTEP_SKIP_LAST == False) or (row < rk.rows - rk.multistep_stages - 1))):
+                            if PRINT_DEBUG:
+                                print("A: sub_sigma_up, sub_sigma, sub_sigma_next, sub_sigma_down, sub_alpha_ratio: \n", round(float(sub_sigma_up),3), round(float(sub_sigma),3), round(float(sub_sigma_next),3), round(float(sub_sigma_down),3), round(float(sub_alpha_ratio),3))
+
                             data_tmp = denoised_prev if data_[row-1].sum() == 0 else data_[row-1]
                             eps_tmp  = eps_prev      if  eps_[row-1].sum() == 0 else eps_ [row-1]
                             Osde = NoiseStepHandlerOSDE(x_[row+1], eps_tmp, data_tmp, x_init, y0, y0_inv)
@@ -347,7 +354,10 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
                     if implicit_steps > 0 and row == 0:
                         break
 
-            #print("UPDATE_B: step,h: ", step, h.item())
+            if PRINT_DEBUG:
+                print("B: step,h,h_new: \n", step, round(float(h.item()),3), round(float(h_new.item()),3))
+                print("B: sub_sigma_up, sub_sigma, sub_sigma_next, sub_sigma_down, sub_alpha_ratio: \n", round(float(sub_sigma_up),3), round(float(sub_sigma),3), round(float(sub_sigma_next),3), round(float(sub_sigma_down),3), round(float(sub_alpha_ratio),3))
+
             x = x_0 + h * rk.b_k_sum(eps_, 0)
                     
             denoised = x_0 + ((sigma / (sigma - sigma_down)) *  h) * rk.b_k_sum(eps_, 0) 
