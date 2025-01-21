@@ -94,7 +94,7 @@ class LatentGuide:
         if self.mask_inv is not None:
             self.mask_inv, LGW_MASK_RESCALE_MIN = prepare_mask(x, self.mask_inv, LGW_MASK_RESCALE_MIN)
         elif not self.SAMPLE:
-            self.mask_inv = (1-self.mask)
+            self.mask_inv = (1-self.mask) #why not for all cases?
             
         for step in range(len(self.sigmas)-1):
             lgw_mask, lgw_mask_inv = prepare_weighted_masks(self.mask, self.mask_inv, self.lgw[step], self.lgw_inv[step], self.latent_guide, self.latent_guide_inv, LGW_MASK_RESCALE_MIN)
