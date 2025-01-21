@@ -61,7 +61,7 @@ class LatentGuide:
         self.lgw, self.lgw_inv = [torch.full_like(sigmas, 0.) for _ in range(2)]
         
         self.guide_cossim_cutoff_, self.guide_bkg_cossim_cutoff_ = 1.0, 1.0
-                
+        
         latent_guide_weight, latent_guide_weight_inv = 0.,0.
         latent_guide_weights, latent_guide_weights_inv = None, None
         latent_guide_weights = torch.zeros_like(sigmas)
@@ -93,7 +93,7 @@ class LatentGuide:
         if self.mask_inv is not None:
             self.mask_inv, LGW_MASK_RESCALE_MIN = prepare_mask(x, self.mask_inv, LGW_MASK_RESCALE_MIN)
         elif not self.SAMPLE:
-            self.mask_inv = (1-self.mask)
+            self.mask_inv = (1-self.mask) #why not for all cases?
             
         for step in range(len(self.sigmas)-1):
             lgw_mask, lgw_mask_inv = prepare_weighted_masks(self.mask, self.mask_inv, self.lgw[step], self.lgw_inv[step], self.latent_guide, self.latent_guide_inv, LGW_MASK_RESCALE_MIN)

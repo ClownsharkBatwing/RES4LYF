@@ -255,7 +255,7 @@ class RK_Method_Exponential(RK_Method):
         if h is not None:
             self.h_prev2 = self.h_prev
             self.h_prev = h
-            
+        #print("MODEL SIGMA: ", round(float(sigma),3))
         return epsilon, denoised
     
     def data_to_vel(self, x, data, sigma):
@@ -324,7 +324,8 @@ class RK_Method_Linear(RK_Method):
         if h is not None:
             self.h_prev2 = self.h_prev
             self.h_prev = h
-            
+        #print("MODEL SIGMA: ", round(float(sigma),3))
+
         return epsilon, denoised
 
     def data_to_vel(self, x, data, sigma):
