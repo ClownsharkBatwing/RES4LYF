@@ -608,7 +608,7 @@ class ClownSamplerAdvanced_Beta:
             etas = initialize_or_scale(etas, eta, max_steps).to(default_dtype)
             etas = F.pad(etas, (0, max_steps), value=0.0)
             etas_substep = initialize_or_scale(etas_substep, eta_substep, max_steps).to(default_dtype)
-            etas_substep = F.pad(etas, (0, max_steps), value=0.0)
+            etas_substep = F.pad(etas_substep, (0, max_steps), value=0.0)
             s_noises = initialize_or_scale(s_noises, s_noise, max_steps).to(default_dtype)
             s_noises = F.pad(s_noises, (0, max_steps), value=0.0)
         
