@@ -7,6 +7,54 @@ from comfy.model_management import module_size
 from typing import Dict, Set, Tuple
 import sys
 
+def add_tensor_debug(obj):
+    """Adds a debug_tensors() method to any object."""
+    def debug_tensors(self, threshold_mb=10, sort_by_size=False, max_depth=3):
+        def extract_tensors_from_obj(obj, tensors, visited, threshold_mb, depth, max_depth):
+            if depth > max_depth or id(obj) in visited:
+                return
+            visited.add(id(obj))
+            
+            try:
+                if torch.is_tensor(obj) and obj.is_cuda:
+                    size_mb = obj.element_size() * obj.numel() / (1024 * 1024)
+                    ref_count = sys.getrefcount(obj) - 3
+                    if size_mb > threshold_mb:
+                        tensors.append((size_mb, obj.shape, ref_count))
+                    return
+                
+                if isinstance(obj, torch.nn.Module):
+                    for param in obj.parameters():
+                        extract_tensors_from_obj(param, tensors, visited, threshold_mb, depth + 1, max_depth)
+                    for value in vars(obj).values():
+                        extract_tensors_from_obj(value, tensors, visited, threshold_mb, depth + 1, max_depth)
+                elif isinstance(obj, (list, tuple)):
+                    for item in obj:
+                        extract_tensors_from_obj(item, tensors, visited, threshold_mb, depth + 1, max_depth)
+                elif isinstance(obj, dict):
+                    for value in obj.values():
+                        extract_tensors_from_obj(value, tensors, visited, threshold_mb, depth + 1, max_depth)
+                elif hasattr(obj, '__dict__'):
+                    for value in vars(obj).values():
+                        extract_tensors_from_obj(value, tensors, visited, threshold_mb, depth + 1, max_depth)
+                        
+            except Exception as e:
+                pass
+
+        tensors = []
+        visited = set()
+        extract_tensors_from_obj(self, tensors, visited, threshold_mb, 0, max_depth)
+
+        if sort_by_size:
+            tensors.sort(reverse=True, key=lambda x: x[0])
+
+        for size_mb, shape, ref_count in tensors:
+            print(f"Size: {size_mb:.2f}MB | Shape: {shape} | RefCount: {ref_count}")
+
+    import types
+    obj.debug_tensors = types.MethodType(debug_tensors, obj)
+    return obj
+
 def print_tensors(threshold_mb=10, sort_by_size=False):
     tensors = []
     for obj in gc.get_objects():
