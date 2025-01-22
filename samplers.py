@@ -464,7 +464,7 @@ class ClownSamplerAdvanced:
                 eta, eta_var = 0.0, 0.0
                 noise_mode_sde = "hard"
         
-            default_dtype = torch.float64
+            default_dtype = getattr(torch, get_extra_options_kv("default_dtype", "float64", extra_options), torch.float64)
             max_steps = 10000
 
             unsample_resample_scales_override = unsample_resample_scales
@@ -621,7 +621,7 @@ class ClownSamplerAdvanced_Beta:
                 eta, eta_var = 0.0, 0.0
                 noise_mode_sde = "hard"
         
-            default_dtype = torch.float64
+            default_dtype = getattr(torch, get_extra_options_kv("default_dtype", "float64", extra_options), torch.float64)
             max_steps = 10000
 
             unsample_resample_scales_override = unsample_resample_scales

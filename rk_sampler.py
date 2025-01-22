@@ -16,7 +16,7 @@ from .helper import get_extra_options_kv, extra_options_flag, get_extra_options_
 from typing import Tuple, Dict
 # from .sigmas import get_sigmas
 # from .res4lyf import log
-
+PRINT_DEBUG = False
 #Debugging code:
 # from .memory_profiler import AutoMemoryTracker, print_tensors, get_module_size, get_tensor_size
 import hashlib
