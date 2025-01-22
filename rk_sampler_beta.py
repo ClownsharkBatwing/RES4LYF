@@ -492,9 +492,14 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
                 if sigma_up > 0:
                     x = rk.add_noise_post(x, sigma_up, sigma, sigma_next, alpha_ratio, s_noise, noise_mode, SDE_NOISE_EXTERNAL, sde_noise_t)
 
-        denoised_[0] = denoised
-        for ms in range(recycled_stages):
-            denoised_[recycled_stages - ms] = denoised_[recycled_stages - ms - 1]
+        if extra_options_flag("data_0_recycle", extra_options):
+            denoised_[0] = denoised
+            for ms in range(recycled_stages):
+                denoised_[recycled_stages - ms] = denoised_[recycled_stages - ms - 1]
+        else:
+            denoised_[0] = data_[0]
+            for ms in range(recycled_stages):
+                denoised_[recycled_stages - ms] = denoised_[recycled_stages - ms - 1]
         
     preview_callback(x, eps, denoised, x_, eps_, data_, step, sigma, sigma_next, callback, extra_options, FINAL_STEP=True)
     return x
