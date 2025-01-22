@@ -219,6 +219,7 @@ NODE_CLASS_MAPPINGS = {
     "Tan Scheduler": sigmas.tan_scheduler,
     "Tan Scheduler 2": sigmas.tan_scheduler_2stage,
     "Tan Scheduler 2 Simple": sigmas.tan_scheduler_2stage_simple,
+    "Constant Scheduler": sigmas.constant_cutoff_scheduler,
     
     #"VGG19StyleTransfer": images.VGG19StyleTransfer,
     "Image Channels LAB": images.Image_Channels_LAB,

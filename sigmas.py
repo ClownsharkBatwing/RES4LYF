@@ -1165,6 +1165,34 @@ class tan_scheduler_2stage_simple:
 
         return (tan_sigmas,)
 
+class constant_cutoff_scheduler:
+    def __init__(self):
+        pass
+    
+    @classmethod
+    def INPUT_TYPES(s):
+        return {
+            "required": {
+                "steps": ("INT", {"default": 40, "min": 0,"max": 100000,"step": 1}),
+                "value": ("FLOAT", {"default": 1.0, "min": 0,"max": 1,"step": 0.01}),
+                "cutoff_percent": ("FLOAT", {"default": 0.5, "min": 0,"max": 1,"step": 0.01}),
+            }
+        }
+
+    FUNCTION = "main"
+    RETURN_TYPES = ("SIGMAS",)
+    RETURN_NAMES = ("sigmas",)
+    CATEGORY = "RES4LYF/schedulers"
+
+    def main(self, steps, value, cutoff_percent):
+        sigmas = torch.linspace(1, 0, steps + 1)
+        sigmas = sigmas * value
+        cutoff_step = int(round(steps * cutoff_percent))
+        sigmas = torch.concat((sigmas[:cutoff_step], torch.zeros(steps - cutoff_step)))
+
+        return (sigmas,)
+
+
 def get_sigmas_simple_exponential(model, steps):
     s = model.model_sampling
     sigs = []
