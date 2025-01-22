@@ -106,7 +106,7 @@ RK_SAMPLER_NAMES_BETA = ["none",
                     ]
 
 
-IRK_SAMPLER_NAMES = ["none",
+IRK_SAMPLER_NAMES_BETA = ["none",
                     "use_explicit", 
                     
                     "irk_exp_diag_2s",
@@ -1997,11 +1997,8 @@ def get_rk_methods_beta(rk_type, h, c1=0.0, c2=0.5, c3=1.0, h_prev=None, step=0,
                 a[i][0] = ci[i] * φ(1,i+1) - sum(a[i])
             for i in range(len(b)): 
                 b[i][0] =         φ(1)     - sum(b[i])
-            
-            
-            
-            
-            
+
+
 
         case "res_8s_alt": # this is EXPRK5S8 https://ora.ox.ac.uk/objects/uuid:cc001282-4285-4ca2-ad06-31787b540c61/files/m611df1a355ca243beb09824b70e5e774
                 
@@ -2053,8 +2050,7 @@ def get_rk_methods_beta(rk_type, h, c1=0.0, c2=0.5, c3=1.0, h_prev=None, step=0,
 
             a, b = gen_first_col_exp(a,b,ci,φ)
 
-             
-            
+
 
         case "res_10s":
                 
@@ -2105,8 +2101,7 @@ def get_rk_methods_beta(rk_type, h, c1=0.0, c2=0.5, c3=1.0, h_prev=None, step=0,
                 a[i][0] = ci[i] * φ(1,i+1) - sum(a[i])
             for i in range(len(b)): 
                 b[i][0] =         φ(1)     - sum(b[i])
-            
-            
+
 
 
         case "res_15s":

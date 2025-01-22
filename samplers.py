@@ -539,7 +539,7 @@ class ClownSamplerAdvanced_Beta:
                     "d_noise": ("FLOAT", {"default": 1.0, "min": -10000, "max": 10000, "step":0.01, "tooltip": "Downscales the sigma schedule. Values around 0.98-0.95 can lead to a large boost in detail and paint textures."}),
                     "noise_seed_sde": ("INT", {"default": -1, "min": -1, "max": 0xffffffffffffffff}),
                     "sampler_name": (RES4LYF.rk_coefficients_beta.RK_SAMPLER_NAMES_BETA, {"default": "res_2m"}), 
-                    "implicit_sampler_name": (RES4LYF.rk_coefficients_beta.IRK_SAMPLER_NAMES, {"default": "use_explicit"}), 
+                    "implicit_sampler_name": (RES4LYF.rk_coefficients_beta.IRK_SAMPLER_NAMES_BETA, {"default": "use_explicit"}), 
                     "implicit_steps": ("INT", {"default": 0, "min": 0, "max": 10000}),
                     "implicit_substeps": ("INT", {"default": 0, "min": 0, "max": 10000}),
 
