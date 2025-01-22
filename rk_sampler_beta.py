@@ -10,7 +10,7 @@ import gc
 import comfy.model_patcher
 
 from .noise_classes import *
-from .noise_sigmas_timesteps_scaling import get_res4lyf_step_with_model, get_res4lyf_half_step3
+from .noise_sigmas_timesteps_scaling import get_res4lyf_step_with_model, get_alpha_ratio_from_sigma_down, get_res4lyf_half_step3
 
 from .rk_method_beta import RK_Method_Beta
 from .rk_guide_func_beta import *
@@ -386,8 +386,24 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
                     
                     h_new = h * rk.h_fn(sub_sigma_down, sigma) / rk.h_fn(sub_sigma_next, sigma) 
 
-                    if extra_options_flag("guide_pseudoimplicit_power_substep", extra_options):
+                    if extra_options_flag("guide_pseudoimplicit_noisy_substep", extra_options): # and (step > 0 or row > 0):
                         eps_substep_guide, eps_substep_guide_inv = get_guide_epsilon_substep(x_0, x_, y0, y0_inv, s_, row, rk_type)
+                        eps_substep_guide = LG.mask * eps_substep_guide + (1-LG.mask) * eps_substep_guide_inv
+                        
+                        maxmin_ratio = (sub_sigma - rk.sigma_min) / sub_sigma
+                        sub_sigma_2 = sub_sigma - maxmin_ratio * (sub_sigma * LG.lgw[step])
+                        x_row_tmp = x_[row] + rk.h_fn(sub_sigma_2, sub_sigma) * eps_substep_guide
+                        
+                        if sub_sigma_2 < sub_sigma: # or (step > 0 or row > 0):
+                            s2_alpha_ratio, s2_sigma_up, s2_sigma_down = get_alpha_ratio_from_sigma_down(sub_sigma_2, sub_sigma, 0.9999)
+                            #s2_alpha_ratio, s2_sigma_up, s2_sigma_down = get_alpha_ratio_from_sigma_down(sub_sigma, sub_sigma_2, None)
+                            
+                            noise = rk.noise_sampler(sigma=sub_sigma, sigma_next=sub_sigma_2)
+                            x_row_tmp = s2_alpha_ratio * x_row_tmp + s2_sigma_up * noise
+                            sub_sigma_2 = sub_sigma
+                    if extra_options_flag("guide_pseudoimplicit_power_substep", extra_options): # and (step > 0 or row > 0):
+                        eps_substep_guide, eps_substep_guide_inv = get_guide_epsilon_substep(x_0, x_, y0, y0_inv, s_, row, rk_type)
+                        eps_substep_guide = LG.mask * eps_substep_guide + (1-LG.mask) * eps_substep_guide_inv
                         
                         maxmin_ratio = (sub_sigma - rk.sigma_min) / sub_sigma
                         sub_sigma_2 = sub_sigma - maxmin_ratio * (sub_sigma * LG.lgw[step])
@@ -398,8 +414,13 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
                         if step == 0:
                             eps_substep_guide, eps_substep_guide_inv = get_guide_epsilon_substep(x_0, x_, y0, y0_inv, s_, row, rk_type)
                             eps_substep_guide = LG.mask * eps_substep_guide + (1-LG.mask) * eps_substep_guide_inv
+                        elif row > 0:
+                            eps_tmp_, x_tmp_      = LG.process_guides_substep(x_0, x_, eps_,      data_, row-1, step, sigma, sigma_next, sigma_down, s_, unsample_resample_scale, rk, rk_type, extra_options, frame_weights)
+                            eps_substep_guide = eps_tmp_[row]
                         else:
-                            eps_tmp_, x_tmp_      = LG.process_guides_substep(x_0, x_, eps_,      data_, row, step, sigma, sigma_next, sigma_down, s_, unsample_resample_scale, rk, rk_type, extra_options, frame_weights)
+                            eps_tmp_ = eps_.clone()
+                            eps_tmp_[row-1] = eps.clone()
+                            eps_tmp_, x_tmp_      = LG.process_guides_substep(x_0, x_, eps_,      data_, row-1, step, sigma, sigma_next, sigma_down, s_, unsample_resample_scale, rk, rk_type, extra_options, frame_weights)
                             eps_substep_guide = eps_tmp_[row]
 
                         maxmin_ratio = (sub_sigma - rk.sigma_min) / sub_sigma
@@ -421,6 +442,7 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
                         elif full_iter == 0 and row_offset == 1 and (extra_options_flag("guide_pseudoimplicit_substep", extra_options) or extra_options_flag("guide_pseudoimplicit_power_substep", extra_options) or extra_options_flag("guide_pseudoimplicit_eps_proj_substep", extra_options)): 
                             if sub_sigma_2 == 0:
                                 break
+                            #eps_[row], data_[row] = rk(x_row_tmp, sub_sigma_2, x_0, sigma, **extra_args)
                             eps_[row], data_[row] = rk(x_row_tmp, sub_sigma_2, x_0, sigma, **extra_args)
                         elif diag_iter > 0:
                             if s_[row+row_offset+rk.multistep_stages] == 0:
