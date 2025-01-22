@@ -118,8 +118,6 @@ def sample_rk_beta_orig(model, x, sigmas, extra_args=None, callback=None, disabl
     torch.cuda.empty_cache()
 
     for step in trange(len(sigmas)-1, disable=disable):
-        if step >= eta_substep_cutoff_step:
-            eta_substep = 0.0
         sigma, sigma_next = sigmas[step], sigmas[step+1]
         
         unsample_resample_scale = float(unsample_resample_scales[step]) if unsample_resample_scales is not None else None
@@ -133,6 +131,7 @@ def sample_rk_beta_orig(model, x, sigmas, extra_args=None, callback=None, disabl
         
         eta = eta_var = etas[step] if etas is not None else eta
         eta_substep = eta_var_substep = etas_substep[step] if etas_substep is not None else eta_substep
+        eta_substep = 0.0 if step >= eta_substep_cutoff_step else eta_substep
         s_noise = s_noises[step] if s_noises is not None else s_noise
         
         if sigma_next == 0:
@@ -324,8 +323,6 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
     torch.cuda.empty_cache()
     gc.collect()
     for step in trange(len(sigmas)-1, disable=disable):
-        if step >= eta_substep_cutoff_step:
-            eta_substep = 0.0
 
         sigma, sigma_next = sigmas[step], sigmas[step+1]
         
@@ -340,6 +337,7 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
         
         eta = eta_var = etas[step] if etas is not None else eta
         eta_substep = eta_var_substep = etas_substep[step] if etas_substep is not None else eta_substep
+        eta_substep = 0.0 if step >= eta_substep_cutoff_step else eta_substep
         s_noise = s_noises[step] if s_noises is not None else s_noise
         
         if sigma_next == 0:
