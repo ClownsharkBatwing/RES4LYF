@@ -146,7 +146,7 @@ class LatentGuide:
     
 
 
-    def process_guides_substep(self, x_0, x_, eps_, data_, row, step, sigma, sigma_next, sigma_down, s_, unsample_resample_scale, rk, rk_type, extra_options, frame_weights=None):
+    def process_guides_substep(self, x_0, x_, eps_, data_, row, step, sigma, sigma_next, sigma_down, s_, unsample_resample_scale, rk, rk_type, extra_options, frame_weights_grp=None):
 
         y0 = self.y0
         if self.y0.shape[0] > 1:
@@ -209,12 +209,9 @@ class LatentGuide:
                 y0_inv = y_inv_shift
 
 
-        if frame_weights is not None and x_0.dim() == 5:
-            for f in range(lgw_mask.shape[2]):
-                frame_weight = frame_weights[f]
-                lgw_mask[..., f:f+1, :, :] *= frame_weight
-                if lgw_mask_inv is not None and not extra_options_flag("disable_lgw_mask_inv_frame_weights", extra_options):
-                    lgw_mask_inv[..., f:f+1, :, :] *= frame_weight
+        if x_0.dim() == 5 and frame_weights_grp is not None:
+            apply_frame_weights(lgw_mask, frame_weights_grp[0])
+            apply_frame_weights(lgw_mask_inv, frame_weights_grp[1])
 
         if "data" == guide_mode:
             y0_tmp = y0.clone()
@@ -526,6 +523,11 @@ class LatentGuide:
 
 
 
+def apply_frame_weights(mask, frame_weights):
+    if frame_weights is not None:
+        for f in range(mask.shape[2]):
+            frame_weight = frame_weights[f]
+            mask[..., f:f+1, :, :] *= frame_weight
 
 
 def prepare_mask(x, mask, LGW_MASK_RESCALE_MIN) -> Tuple[torch.Tensor, bool]:

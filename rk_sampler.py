@@ -83,7 +83,7 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
                   latent_guide=None, latent_guide_inv=None, latent_guide_weight=0.0, latent_guide_weight_inv=0.0, latent_guide_weights=None, latent_guide_weights_inv=None, guide_mode="", 
                   GARBAGE_COLLECT=False, mask=None, mask_inv=None, LGW_MASK_RESCALE_MIN=True, sigmas_override=None, unsample_resample_scales=None,regional_conditioning_weights=None, sde_noise=[],
                   extra_options="",
-                  etas=None, s_noises=None, momentums=None, guides=None, cfgpp=0.0, cfg_cw = 1.0,regional_conditioning_floors=None, frame_weights=None, eta_substep=0.0, noise_mode_sde_substep="hard", guide_cossim_cutoff_=1.0, guide_bkg_cossim_cutoff_=1.0,
+                  etas=None, s_noises=None, momentums=None, guides=None, cfgpp=0.0, cfg_cw = 1.0,regional_conditioning_floors=None, frame_weights_grp=None, eta_substep=0.0, noise_mode_sde_substep="hard", guide_cossim_cutoff_=1.0, guide_bkg_cossim_cutoff_=1.0,
                   ) -> torch.Tensor:
     extra_args = {} if extra_args is None else extra_args
     # tracker = AutoMemoryTracker(model.inner_model.inner_model.diffusion_model, 1)
@@ -179,9 +179,15 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
 
 
 
-    if frame_weights is not None:
-        frame_weights = initialize_or_scale(frame_weights, 1.0, max_steps).to(default_dtype)
+    frame_weights, frame_weights_inv = None, None
+    if frame_weights_grp is not None and frame_weights_grp[0] is not None:
+        frame_weights = initialize_or_scale(frame_weights_grp[0], 1.0, max_steps).to(default_dtype)
         frame_weights = F.pad(frame_weights, (0, max_steps), value=0.0)
+    if frame_weights_grp is not None and frame_weights_grp[1] is not None:
+        frame_weights_inv = initialize_or_scale(frame_weights_grp[1], 1.0, max_steps).to(default_dtype)
+        frame_weights_inv = F.pad(frame_weights_inv, (0, max_steps), value=0.0)
+
+    frame_weights_grp = (frame_weights, frame_weights_inv)
 
     LG = LatentGuide(guides, x, model, sigmas, UNSAMPLE, LGW_MASK_RESCALE_MIN, extra_options)
     x = LG.init_guides(x, rk.noise_sampler)
@@ -350,7 +356,7 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
                             if extra_options_flag("explicit_diagonal_implicit_predictor_disable_noise", extra_options):
                                 sub_sigma_up, sub_sigma_down, sub_alpha_ratio = sub_sigma_up*0, sub_sigma_next, sub_alpha_ratio/sub_alpha_ratio
                             eps_[row], data_[row] = rk(x_0, x_[row+1], s_[row], h, **extra_args)
-                            eps_, x_ = LG.process_guides_substep(x_0, x_, eps_, data_, row, step, sigma, sigma_next, sigma_down, s_, unsample_resample_scale, rk, rk_type, extra_options, frame_weights)
+                            eps_, x_ = LG.process_guides_substep(x_0, x_, eps_, data_, row, step, sigma, sigma_next, sigma_down, s_, unsample_resample_scale, rk, rk_type, extra_options, frame_weights_grp)
                             h_mini = rk.h_fn(sub_sigma_down, sub_sigma)
                             x_[row+1] = x_0 + h_mini * eps_[row]
                             
@@ -365,7 +371,7 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
                             for inner_exim_iter in range(implicit_steps): # implicit euler update to find Yn+1
                                 #print("inner_exim: ", step, row, inner_exim_iter)
                                 eps_[row], data_[row] = rk(x_0, x_[row+1], s_[row+1], h, **extra_args)
-                                eps_, x_ = LG.process_guides_substep(x_0, x_, eps_, data_, row, step, sigma, sigma_next, sigma_down, s_, unsample_resample_scale, rk, rk_type, extra_options, frame_weights)
+                                eps_, x_ = LG.process_guides_substep(x_0, x_, eps_, data_, row, step, sigma, sigma_next, sigma_down, s_, unsample_resample_scale, rk, rk_type, extra_options, frame_weights_grp)
                                 x_[row+1] = x_0 + h_mini * eps_[row]
                                 
                                 Osde = NoiseStepHandlerOSDE(x_[row+1], eps_[row], data_[row], x_init, y0, y0_inv)
@@ -388,7 +394,7 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
                     # GUIDES
                     if (LG.guide_mode is not "none") and (LG.guide_mode is not ""):
                         eps_row_tmp, x_row_tmp = eps_[row].clone(), x_[row+1].clone()
-                        eps_, x_ = LG.process_guides_substep(x_0, x_, eps_, data_, row, step, sigma, sigma_next, sigma_down, s_, unsample_resample_scale, rk, rk_type, extra_options, frame_weights)
+                        eps_, x_ = LG.process_guides_substep(x_0, x_, eps_, data_, row, step, sigma, sigma_next, sigma_down, s_, unsample_resample_scale, rk, rk_type, extra_options, frame_weights_grp)
 
                         if extra_options_flag("explicit_diagonal_eps_proj_factors", extra_options):
                             value_str = get_extra_options_list("explicit_diagonal_eps_proj_factors", "", extra_options)
@@ -430,7 +436,7 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
                     eps_[row], data_[row] = irk(x_0, x_[row], s_irk[row], h_irk, **extra_args) 
                     
                     # GUIDES 
-                    eps_, x_ = LG.process_guides_substep(x_0, x_, eps_, data_, row, step, sigma, sigma_next, sigma_down, s_irk, unsample_resample_scale, irk, irk_type, extra_options, frame_weights)
+                    eps_, x_ = LG.process_guides_substep(x_0, x_, eps_, data_, row, step, sigma, sigma_next, sigma_down, s_irk, unsample_resample_scale, irk, irk_type, extra_options, frame_weights_grp)
                 
                 for diag_iter in range(implicit_steps):
                     h_new_irk = h.clone()
@@ -464,7 +470,7 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
                         eps_[row] = (x_0 - data_[row]) / sigma
                     
                     # GUIDES 
-                    eps_, x_ = LG.process_guides_substep(x_0, x_, eps_, data_, row, step, sigma, sigma_next, sigma_down, s_irk, unsample_resample_scale, irk, irk_type, extra_options, frame_weights)
+                    eps_, x_ = LG.process_guides_substep(x_0, x_, eps_, data_, row, step, sigma, sigma_next, sigma_down, s_irk, unsample_resample_scale, irk, irk_type, extra_options, frame_weights_grp)
                     
                     
             x = x_0 + h_irk * irk.b_k_sum(eps_, 0) 
@@ -507,7 +513,7 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
                 # EXPLICIT GUESS
                 x_mid = x
                 for i in range(len(s_all)-1):
-                    x_mid, eps_, data_ = get_explicit_rk_step(rk, rk_type, x_mid, LG, step, s_all[i], s_all[i+1], eta, eta_var, s_noise, noise_mode, c2, c3, step+i, sigmas_and, x_, eps_, data_, unsample_resample_scale, extra_options, frame_weights, 
+                    x_mid, eps_, data_ = get_explicit_rk_step(rk, rk_type, x_mid, LG, step, s_all[i], s_all[i+1], eta, eta_var, s_noise, noise_mode, c2, c3, step+i, sigmas_and, x_, eps_, data_, unsample_resample_scale, extra_options, frame_weights_grp, 
                                                               x_init, x_prenoise, NOISE_COSSIM_SOURCE, NOISE_COSSIM_MODE, noise_cossim_max_iter, noise_cossim_max_score, noise_cossim_tile_size, noise_cossim_iterations,SDE_NOISE_EXTERNAL,sde_noise_t,MODEL_SAMPLING,
                                                               **extra_args)
 
@@ -530,7 +536,7 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
                     x_[row+1] = x_0 + h_irk * irk.a_k_sum(eps2_, row)
                     eps2_[row], data_[row] = irk(x_0, x_[row+1], s_irk[row], h_irk, **extra_args)
                     if not extra_options_flag("implicit_loop_skip_guide", extra_options):
-                        eps2_, x_ = LG.process_guides_substep(x_0, x_, eps2_, data_, row, step, sigma, sigma_next, sigma_down, s_irk, unsample_resample_scale, irk, irk_type, extra_options, frame_weights)
+                        eps2_, x_ = LG.process_guides_substep(x_0, x_, eps2_, data_, row, step, sigma, sigma_next, sigma_down, s_irk, unsample_resample_scale, irk, irk_type, extra_options, frame_weights_grp)
                 x = x_0 + h_irk * irk.b_k_sum(eps2_, 0)
                 denoised = x_0 + (sigma / (sigma - sigma_down)) *  h_irk * irk.b_k_sum(eps2_, 0) 
                 eps = x - denoised
@@ -607,7 +613,7 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
 
 
 
-def get_explicit_rk_step(rk, rk_type, x, LG, step, sigma, sigma_next, eta, eta_var, s_noise, noise_mode, c2, c3, stepcount, sigmas, x_, eps_, data_, unsample_resample_scale, extra_options, frame_weights, 
+def get_explicit_rk_step(rk, rk_type, x, LG, step, sigma, sigma_next, eta, eta_var, s_noise, noise_mode, c2, c3, stepcount, sigmas, x_, eps_, data_, unsample_resample_scale, extra_options, frame_weights_grp, 
                          x_init, x_prenoise, NOISE_COSSIM_SOURCE, NOISE_COSSIM_MODE, noise_cossim_max_iter, noise_cossim_max_score, noise_cossim_tile_size, noise_cossim_iterations,SDE_NOISE_EXTERNAL,sde_noise_t,MODEL_SAMPLING,
                          **extra_args) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
 
@@ -637,7 +643,7 @@ def get_explicit_rk_step(rk, rk_type, x, LG, step, sigma, sigma_next, eta, eta_v
         x_[row+1] = x_0 + h * rk.a_k_sum(eps_, row)
         eps_[row], data_[row] = rk(x_0, x_[row+1], s_[row], h, **extra_args)
         
-        eps_, x_ = LG.process_guides_substep(x_0, x_, eps_, data_, row, step, sigma, sigma_next, sigma_down, s_, unsample_resample_scale, rk, rk_type, extra_options, frame_weights)        
+        eps_, x_ = LG.process_guides_substep(x_0, x_, eps_, data_, row, step, sigma, sigma_next, sigma_down, s_, unsample_resample_scale, rk, rk_type, extra_options, frame_weights_grp)        
         
     x = x_0 + h * rk.b_k_sum(eps_, 0)
     

@@ -173,11 +173,7 @@ class LatentGuide:
     
 
 
-    def process_guides_substep(self, x_0, x_, eps_, data_, row, step, sigma, sigma_next, sigma_down, s_, unsample_resample_scale, rk, rk_type, extra_options, frame_weights=None) -> Tuple[torch.Tensor, torch.Tensor]:
-        # Determine extra options flags
-        disable_lgw_mask_inv_frame_weights_flag = extra_options_flag("disable_lgw_mask_inv_frame_weights", extra_options)
-        disable_guide_cossim_flag = extra_options_flag("disable_guide_cossim", extra_options)
-        cuda_empty_substep_flag = extra_options_flag("cuda_empty_substep", extra_options)
+    def process_guides_substep(self, x_0, x_, eps_, data_, row, step, sigma, sigma_next, sigma_down, s_, unsample_resample_scale, rk, rk_type, extra_options, frame_weights_grp=None) -> Tuple[torch.Tensor, torch.Tensor]:
         dynamic_guides_mean_std_flag = extra_options_flag("dynamic_guides_mean_std", extra_options)
         dynamic_guides_inv_flag = extra_options_flag("dynamic_guides_inv", extra_options)
         dynamic_guides_mean_flag = extra_options_flag("dynamic_guides_mean", extra_options)
@@ -191,13 +187,9 @@ class LatentGuide:
         lgw = self.lgw[step].clone()
         lgw_inv = self.lgw_inv[step].clone()
         
-        if frame_weights is not None and x_0.dim() == 5:
-            with torch.no_grad():
-                for f in range(lgw_mask.shape[2]):
-                    frame_weight = frame_weights[f]
-                    lgw_mask[..., f:f+1, :, :] *= frame_weight
-                    if lgw_mask_inv is not None and not disable_lgw_mask_inv_frame_weights_flag:
-                        lgw_mask_inv[..., f:f+1, :, :] *= frame_weight
+        if x_0.dim() == 5 and frame_weights_grp is not None:
+            apply_frame_weights(lgw_mask, frame_weights_grp[0])
+            apply_frame_weights(lgw_mask_inv, frame_weights_grp[1])
 
         if self.guide_mode: 
             with torch.no_grad():
@@ -247,13 +239,6 @@ class LatentGuide:
             del y_shift
         if 'y_inv_shift' in locals():
             del y_inv_shift
-
-        if frame_weights is not None and x_0.dim() == 5:
-            for f in range(lgw_mask.shape[2]):
-                frame_weight = frame_weights[f]
-                lgw_mask[..., f:f+1, :, :] *= frame_weight
-                if lgw_mask_inv is not None:
-                    lgw_mask_inv[..., f:f+1, :, :] *= frame_weight
 
         if "data" == self.guide_mode:
             if self.latent_guide_inv is not None:
@@ -708,7 +693,11 @@ class LatentGuide:
 
 
 
-
+def apply_frame_weights(mask, frame_weights):
+    if frame_weights is not None:
+        for f in range(mask.shape[2]):
+            frame_weight = frame_weights[f]
+            mask[..., f:f+1, :, :] *= frame_weight
 
 
 

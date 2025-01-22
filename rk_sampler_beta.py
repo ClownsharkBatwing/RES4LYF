@@ -57,7 +57,7 @@ def sample_rk_beta_orig(model, x, sigmas, extra_args=None, callback=None, disabl
                   latent_guide=None, latent_guide_inv=None, latent_guide_weight=0.0, latent_guide_weight_inv=0.0, latent_guide_weights=None, latent_guide_weights_inv=None, guide_mode="", 
                   GARBAGE_COLLECT=False, mask=None, mask_inv=None, LGW_MASK_RESCALE_MIN=True, sigmas_override=None, unsample_resample_scales=None,regional_conditioning_weights=None, sde_noise=[],
                   extra_options="",
-                  etas=None, etas_substep=None, s_noises=None, momentums=None, guides=None, cfgpp=0.0, cfg_cw = 1.0,regional_conditioning_floors=None, frame_weights=None, eta_substep=0.0, noise_mode_sde_substep="hard", guide_cossim_cutoff_=1.0, guide_bkg_cossim_cutoff_=1.0,
+                  etas=None, etas_substep=None, s_noises=None, momentums=None, guides=None, cfgpp=0.0, cfg_cw = 1.0,regional_conditioning_floors=None, frame_weights_grp=None, eta_substep=0.0, noise_mode_sde_substep="hard", guide_cossim_cutoff_=1.0, guide_bkg_cossim_cutoff_=1.0,
                   ):
     extra_args = {} if extra_args is None else extra_args
 
@@ -100,10 +100,15 @@ def sample_rk_beta_orig(model, x, sigmas, extra_args=None, callback=None, disabl
     rk       = RK_Method_Beta.create(model,  rk_type, x.device)
     extra_args =  rk.init_cfg_channelwise(x, cfg_cw, **extra_args)
     rk. init_noise_sampler(x, noise_seed,     noise_sampler_type, alpha=alpha, k=k)
-
-    if frame_weights is not None:
-        frame_weights = initialize_or_scale(frame_weights, 1.0, max_steps).to(default_dtype)
+    
+    frame_weights, frame_weights_inv = None, None
+    if frame_weights_grp is not None and frame_weights_grp[0] is not None:
+        frame_weights = initialize_or_scale(frame_weights_grp[0], 1.0, max_steps).to(default_dtype)
         frame_weights = F.pad(frame_weights, (0, max_steps), value=0.0)
+    if frame_weights_grp is not None and frame_weights_grp[1] is not None:
+        frame_weights_inv = initialize_or_scale(frame_weights_grp[1], 1.0, max_steps).to(default_dtype)
+        frame_weights_inv = F.pad(frame_weights_inv, (0, max_steps), value=0.0)
+    frame_weights_grp = (frame_weights, frame_weights_inv)
 
     LG = LatentGuide(guides, x, model, sigmas, UNSAMPLE, LGW_MASK_RESCALE_MIN, extra_options)
     x = LG.init_guides(x, rk.noise_sampler)
@@ -207,9 +212,9 @@ def sample_rk_beta_orig(model, x, sigmas, extra_args=None, callback=None, disabl
 
                         # GUIDE 
                         if not extra_options_flag("disable_guides_eps_substep", extra_options) and (LG.lgw[step] > 0.0 or LG.lgw_inv[step] > 0.0):
-                            eps_, x_      = LG.process_guides_substep(x_0, x_, eps_,      data_, row, step, sigma, sigma_next, sigma_down, s_, unsample_resample_scale, rk, rk_type, extra_options, frame_weights)
+                            eps_, x_      = LG.process_guides_substep(x_0, x_, eps_,      data_, row, step, sigma, sigma_next, sigma_down, s_, unsample_resample_scale, rk, rk_type, extra_options, frame_weights_grp)
                         if not extra_options_flag("disable_guides_eps_prev_substep", extra_options) and (LG.lgw[step] > 0.0 or LG.lgw_inv[step] > 0.0):
-                            eps_prev_, x_ = LG.process_guides_substep(x_0, x_, eps_prev_, data_, row, step, sigma, sigma_next, sigma_down, s_, unsample_resample_scale, rk, rk_type, extra_options, frame_weights)
+                            eps_prev_, x_ = LG.process_guides_substep(x_0, x_, eps_prev_, data_, row, step, sigma, sigma_next, sigma_down, s_, unsample_resample_scale, rk, rk_type, extra_options, frame_weights_grp)
 
                     # UPDATE
                     if row < rk.rows - row_offset   and   rk.multistep_stages == 0:
@@ -258,7 +263,7 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
                   latent_guide=None, latent_guide_inv=None, latent_guide_weight=0.0, latent_guide_weight_inv=0.0, latent_guide_weights=None, latent_guide_weights_inv=None, guide_mode="", 
                   GARBAGE_COLLECT=False, mask=None, mask_inv=None, LGW_MASK_RESCALE_MIN=True, sigmas_override=None, unsample_resample_scales=None,regional_conditioning_weights=None, sde_noise=[],
                   extra_options="",
-                  etas=None, etas_substep=None, s_noises=None, momentums=None, guides=None, cfgpp=0.0, cfg_cw = 1.0,regional_conditioning_floors=None, frame_weights=None, eta_substep=0.0, noise_mode_sde_substep="hard", guide_cossim_cutoff_=1.0, guide_bkg_cossim_cutoff_=1.0,
+                  etas=None, etas_substep=None, s_noises=None, momentums=None, guides=None, cfgpp=0.0, cfg_cw = 1.0,regional_conditioning_floors=None, frame_weights_grp=None, eta_substep=0.0, noise_mode_sde_substep="hard", guide_cossim_cutoff_=1.0, guide_bkg_cossim_cutoff_=1.0,
                   ):
     extra_args = {} if extra_args is None else extra_args
 
@@ -267,13 +272,12 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
     c3 = c3_ = float(get_extra_options_kv("c3", str(c3), extra_options))
     
     guide_skip_steps = int(get_extra_options_kv("guide_skip_steps", 0, extra_options))        
-
+    default_dtype = getattr(torch, get_extra_options_kv("default_dtype", "float64", extra_options), torch.float64)   
     cfg_cw = float(get_extra_options_kv("cfg_cw", str(cfg_cw), extra_options))
     
     MODEL_SAMPLING = model.inner_model.inner_model.model_sampling
     
     s_in, s_one = x.new_ones([x.shape[0]]), x.new_ones([1])
-    default_dtype = torch.float64
     max_steps=10000
     
     if sigmas_override is not None:
@@ -300,9 +304,14 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
     extra_args =  rk.init_cfg_channelwise(x, cfg_cw, **extra_args)
     rk. init_noise_sampler(x, noise_seed,     noise_sampler_type, alpha=alpha, k=k)
 
-    if frame_weights is not None:
-        frame_weights = initialize_or_scale(frame_weights, 1.0, max_steps).to(default_dtype)
+    frame_weights, frame_weights_inv = None, None
+    if frame_weights_grp is not None and frame_weights_grp[0] is not None:
+        frame_weights = initialize_or_scale(frame_weights_grp[0], 1.0, max_steps).to(default_dtype)
         frame_weights = F.pad(frame_weights, (0, max_steps), value=0.0)
+    if frame_weights_grp is not None and frame_weights_grp[1] is not None:
+        frame_weights_inv = initialize_or_scale(frame_weights_grp[1], 1.0, max_steps).to(default_dtype)
+        frame_weights_inv = F.pad(frame_weights_inv, (0, max_steps), value=0.0)
+    frame_weights_grp = (frame_weights, frame_weights_inv)
 
     LG = LatentGuide(guides, x, model, sigmas, UNSAMPLE, LGW_MASK_RESCALE_MIN, extra_options)
     x = LG.init_guides(x, rk.noise_sampler)
@@ -402,7 +411,7 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
                             eps_substep_guide, eps_substep_guide_inv = get_guide_epsilon_substep(x_0, x_, y0, y0_inv, s_, row, rk_type)
                             eps_substep_guide = LG.mask * eps_substep_guide + (1-LG.mask) * eps_substep_guide_inv
                         else:
-                            eps_tmp_, x_tmp_      = LG.process_guides_substep(x_0, x_, eps_,      data_, row, step, sigma, sigma_next, sigma_down, s_, unsample_resample_scale, rk, rk_type, extra_options, frame_weights)
+                            eps_tmp_, x_tmp_      = LG.process_guides_substep(x_0, x_, eps_,      data_, row, step, sigma, sigma_next, sigma_down, s_, unsample_resample_scale, rk, rk_type, extra_options, frame_weights_grp)
                             eps_substep_guide = eps_tmp_[row]
 
                         maxmin_ratio = (sub_sigma - rk.sigma_min) / sub_sigma
@@ -435,9 +444,9 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
                         # GUIDE 
                         if not extra_options_flag("guide_disable_regular_substep", extra_options):
                             if not extra_options_flag("disable_guides_eps_substep", extra_options):
-                                eps_, x_      = LG.process_guides_substep(x_0, x_, eps_,      data_, row, step, sigma, sigma_next, sigma_down, s_, unsample_resample_scale, rk, rk_type, extra_options, frame_weights)
+                                eps_, x_      = LG.process_guides_substep(x_0, x_, eps_,      data_, row, step, sigma, sigma_next, sigma_down, s_, unsample_resample_scale, rk, rk_type, extra_options, frame_weights_grp)
                             if not extra_options_flag("disable_guides_eps_prev_substep", extra_options):
-                                eps_prev_, x_ = LG.process_guides_substep(x_0, x_, eps_prev_, data_, row, step, sigma, sigma_next, sigma_down, s_, unsample_resample_scale, rk, rk_type, extra_options, frame_weights)
+                                eps_prev_, x_ = LG.process_guides_substep(x_0, x_, eps_prev_, data_, row, step, sigma, sigma_next, sigma_down, s_, unsample_resample_scale, rk, rk_type, extra_options, frame_weights_grp)
 
                     # UPDATE
                     if row < rk.rows - row_offset   and   rk.multistep_stages == 0:
