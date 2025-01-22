@@ -451,15 +451,16 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
                         
                     # MODEL CALL
                     if row < rk.rows: # A-tableau still
-                        if full_iter > 0 and row_offset == 1 and row == 0: # explicit full implicit
-                            if sigma_next == 0:
-                                break
-                            eps_[row], data_[row] = rk(x, sigma_next, x_0, sigma, **extra_args)   
-                        elif full_iter == 0 and row_offset == 1 and (extra_options_flag("guide_pseudoimplicit_substep", extra_options) or extra_options_flag("guide_pseudoimplicit_power_substep", extra_options) or extra_options_flag("guide_pseudoimplicit_eps_proj_substep", extra_options)): 
+                        if (extra_options_flag("guide_pseudoimplicit_substep", extra_options) or extra_options_flag("guide_pseudoimplicit_power_substep", extra_options) or extra_options_flag("guide_pseudoimplicit_eps_proj_substep", extra_options)): 
                             if sub_sigma_2 == 0:
                                 break
                             #eps_[row], data_[row] = rk(x_row_tmp, sub_sigma_2, x_0, sigma, **extra_args)
                             eps_[row], data_[row] = rk(x_row_tmp, sub_sigma_2, x_0, sigma, **extra_args)
+                        elif full_iter > 0 and row_offset == 1 and row == 0: # explicit full implicit
+                            if sigma_next == 0:
+                                break
+                            eps_[row], data_[row] = rk(x, sigma_next, x_0, sigma, **extra_args)   
+
                         elif diag_iter > 0:
                             if s_[row+row_offset+rk.multistep_stages] == 0:
                                 break
@@ -507,9 +508,14 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
                 if sigma_up > 0:
                     x = rk.add_noise_post(x, sigma_up, sigma, sigma_next, alpha_ratio, s_noise, noise_mode, SDE_NOISE_EXTERNAL, sde_noise_t)
 
-        denoised_[0] = denoised
-        for ms in range(recycled_stages):
-            denoised_[recycled_stages - ms] = denoised_[recycled_stages - ms - 1]
+        if extra_options_flag("data_0_recycle", extra_options):
+            denoised_[0] = denoised
+            for ms in range(recycled_stages):
+                denoised_[recycled_stages - ms] = denoised_[recycled_stages - ms - 1]
+        else:
+            denoised_[0] = data_[0]
+            for ms in range(recycled_stages):
+                denoised_[recycled_stages - ms] = denoised_[recycled_stages - ms - 1]
         
     preview_callback(x, eps, denoised, x_, eps_, data_, step, sigma, sigma_next, callback, extra_options, FINAL_STEP=True)
     return x
