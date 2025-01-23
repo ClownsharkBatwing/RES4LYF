@@ -448,6 +448,7 @@ class ClownsharKSamplerAutomation_Advanced:
                         "unsample_resample_scales": ("SIGMAS", ),
                         "frame_weights": ("SIGMAS", ),
                         "frame_weights_bkg": ("SIGMAS", ),
+                        "automation": ("AUTOMATION", ),
                     }  
                }
     RETURN_TYPES = ("AUTOMATION",)
@@ -456,9 +457,19 @@ class ClownsharKSamplerAutomation_Advanced:
     
     FUNCTION = "main"
 
-    def main(self, etas=None, etas_substep=None, s_noises=None, unsample_resample_scales=None, frame_weights=None, frame_weights_bkg=None):
+    def main(self, etas=None, etas_substep=None, s_noises=None, unsample_resample_scales=None, frame_weights=None, frame_weights_bkg=None, automation=None):
+        
+        if automation is None:
+            automation = {}
+        
         frame_weights_grp = (frame_weights, frame_weights_bkg)
-        automation = (etas, etas_substep, s_noises, unsample_resample_scales, frame_weights_grp)
+
+        automation['etas'] = etas
+        automation['etas_substep'] = etas_substep
+        automation['s_noises'] = s_noises
+        automation['unsample_resample_scales'] = unsample_resample_scales
+        automation['frame_weights_grp'] = frame_weights_grp
+
         return (automation, )
 
 
