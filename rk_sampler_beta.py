@@ -191,7 +191,7 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
                 #    x_[r] = x_0 + h * (rk.a_k_sum(eps_, r) + rk.u_k_sum(eps_prev_, r))
                 for r in range(rk.rows):
                     x_[r] = x_0 + h * (rk.a_k_sum(eps_, r) + rk.u_k_sum(eps_prev_, r))
-                    data_[r] = extract_pred(x_0, x_[r], sigma, s_[r])
+                    data_[r] = get_data_from_x(x_0, x_[r], sigma, s_[r])
                     eps_[r] = get_epsilon(x_0, data_[r], s_[r], rk_type)
 
         row_offset = 1 if rk.a[0].sum() == 0 else 0          
@@ -281,7 +281,7 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
                                 #    x_[r] = x_0 + h * (rk.a_k_sum(eps_, r) + rk.u_k_sum(eps_prev_, r))
                                 for r in range(rk.rows):
                                     x_[r] = x_0 + h * (rk.a_k_sum(eps_, r) + rk.u_k_sum(eps_prev_, r))
-                                    data_[r] = extract_pred(x_0, x_[r], sigma, s_[r])
+                                    data_[r] = get_data_from_x(x_0, x_[r], sigma, s_[r])
                                     eps_[r] = get_epsilon(x_0, data_[r], s_[r], rk_type)
                                     #x_[r] = x_0 + h * (rk.a_k_sum(eps_, r) + rk.u_k_sum(eps_prev_, r))
                                 #for r in range(rk.rows):
@@ -306,7 +306,7 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
                                 #    x_[r] = x_0 + h * (rk.a_k_sum(eps_, r) + rk.u_k_sum(eps_prev_, r))
                                 for r in range(rk.rows):
                                     x_[r] = x_0 + h * (rk.a_k_sum(eps_, r) + rk.u_k_sum(eps_prev_, r))
-                                    data_[r] = extract_pred(x_0, x_[r], sigma, s_[r])
+                                    data_[r] = get_data_from_x(x_0, x_[r], sigma, s_[r])
                                     eps_[r] = get_epsilon(x_0, data_[r], s_[r], rk_type)
                             
 
