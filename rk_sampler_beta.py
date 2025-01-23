@@ -57,9 +57,8 @@ def get_epsilon(x_0, denoised, sigma, rk_type):
         eps = (x_0 - denoised) / sigma
     return eps
 
-def extract_pred(x_before, x_after, sigma_before, sigma_after):
-    alpha = sigma_after / sigma_before
-    return (x_after - alpha * x_before) / (1 - alpha)
+def get_data_from_x(x, x_next, sigma, sigma_next):
+    return (x_next - (sigma_next/sigma) * x) / (1 - sigma_next/sigma)
 
 def update_epsilons(x_0, x_, data_, eps_, rk):
     return
@@ -173,10 +172,6 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
         recycled_stages = max(rk.multistep_stages, rk.hybrid_stages)
         for ms in range(recycled_stages):
             eps_ [recycled_stages - ms] = get_epsilon(x_0, denoised_ [recycled_stages - ms], sigma, rk_type)
-            """if RK_Method_Beta.is_exponential(rk_type):
-                eps_ [recycled_stages - ms] = -(x_0 - denoised_ [recycled_stages - ms])
-            else:
-                eps_ [recycled_stages - ms] =  (x_0 - denoised_ [recycled_stages - ms]) / sigma"""
                 
         eps_prev_ = eps_.clone()
 
@@ -189,10 +184,15 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
             for row in range(rk.rows):
                 data_[row] = data_[0].clone()
                 eps_ [row] = get_epsilon(x_0, data_[row], s_[row], rk_type)
-                """if RK_Method_Beta.is_exponential(rk_type):
-                    eps_[row] = data_[row] - x_0
-                else:
-                    eps_[row] = (x_0 - data_[row]) / s_[row]"""
+                
+            newton_iter_init = int(get_extra_options_kv("newton_iter_init", str("0"), extra_options))
+            for n_iter_init in range(newton_iter_init):
+                #for r in range(row):
+                #    x_[r] = x_0 + h * (rk.a_k_sum(eps_, r) + rk.u_k_sum(eps_prev_, r))
+                for r in range(rk.rows):
+                    x_[r] = x_0 + h * (rk.a_k_sum(eps_, r) + rk.u_k_sum(eps_prev_, r))
+                    data_[r] = extract_pred(x_0, x_[r], sigma, s_[r])
+                    eps_[r] = get_epsilon(x_0, data_[r], s_[r], rk_type)
 
         row_offset = 1 if rk.a[0].sum() == 0 else 0          
         for full_iter in range(implicit_steps_full + 1):
@@ -275,21 +275,17 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
                             newton_iter_post = int(get_extra_options_kv("newton_iter_post", str("0"), extra_options))
                             
                             
-                            if step > 0: # full_iter > 0 or diag_iter > 0:
-                                for n_iter_pre in range(newton_iter_pre):
-                                    #for r in range(row):
-                                    #    x_[r] = x_0 + h * (rk.a_k_sum(eps_, r) + rk.u_k_sum(eps_prev_, r))
-                                    for r in range(row):
-                                        x_[r] = x_0 + h * (rk.a_k_sum(eps_, r) + rk.u_k_sum(eps_prev_, r))
-                                        """if r > 0:
-                                            data_[r] = extract_pred(x_[r-1], x_[r], s_[r-1], s_[r])
-                                        else: # r == 0
-                                            data_[r] = extract_pred(x_0, x_[r], sigma, s_[r])"""
-                                        data_[r] = extract_pred(x_0, x_[r], sigma, s_[r])
-                                        eps_[r] = get_epsilon(x_0, data_[r], s_[r], rk_type)
-                                        #x_[r] = x_0 + h * (rk.a_k_sum(eps_, r) + rk.u_k_sum(eps_prev_, r))
-                                    #for r in range(rk.rows):
-                                    #    x_[r] = x_0 + h * (rk.a_k_sum(eps_, r) + rk.u_k_sum(eps_prev_, r))
+                            #if step > 0: # full_iter > 0 or diag_iter > 0:
+                            for n_iter_pre in range(newton_iter_pre):
+                                #for r in range(row):
+                                #    x_[r] = x_0 + h * (rk.a_k_sum(eps_, r) + rk.u_k_sum(eps_prev_, r))
+                                for r in range(rk.rows):
+                                    x_[r] = x_0 + h * (rk.a_k_sum(eps_, r) + rk.u_k_sum(eps_prev_, r))
+                                    data_[r] = extract_pred(x_0, x_[r], sigma, s_[r])
+                                    eps_[r] = get_epsilon(x_0, data_[r], s_[r], rk_type)
+                                    #x_[r] = x_0 + h * (rk.a_k_sum(eps_, r) + rk.u_k_sum(eps_prev_, r))
+                                #for r in range(rk.rows):
+                                #    x_[r] = x_0 + h * (rk.a_k_sum(eps_, r) + rk.u_k_sum(eps_prev_, r))
                             
                             if not extra_options_flag("implicit_disable_preupdate", extra_options):
                                 x_[row] = x_0 + h * (rk.a_k_sum(eps_, row) + rk.u_k_sum(eps_prev_, row))
@@ -304,18 +300,14 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
                                     else:
                                         eps_[_] = (x_0 - data_[row]) / s_[_]
 
-                            if step > 0:
-                                for n_iter_post in range(newton_iter_post):
-                                    for r in range(rk.rows):
-                                        x_[r] = x_0 + h * (rk.a_k_sum(eps_, r) + rk.u_k_sum(eps_prev_, r))
-                                    for r in range(rk.rows):
-                                        #x_[r] = x_0 + h * (rk.a_k_sum(eps_, r) + rk.u_k_sum(eps_prev_, r))
-                                        """if r > 0:
-                                            data_[r] = extract_pred(x_[r-1], x_[r], s_[r-1], s_[r])
-                                        else: # r == 0
-                                            data_[r] = extract_pred(x_0, x_[r], sigma, s_[r])"""
-                                        data_[r] = extract_pred(x_0, x_[r], sigma, s_[r])
-                                        eps_[r] = get_epsilon(x_0, data_[r], s_[r], rk_type)
+                            #if step > 0:
+                            for n_iter_post in range(newton_iter_post):
+                                #for r in range(rk.rows):
+                                #    x_[r] = x_0 + h * (rk.a_k_sum(eps_, r) + rk.u_k_sum(eps_prev_, r))
+                                for r in range(rk.rows):
+                                    x_[r] = x_0 + h * (rk.a_k_sum(eps_, r) + rk.u_k_sum(eps_prev_, r))
+                                    data_[r] = extract_pred(x_0, x_[r], sigma, s_[r])
+                                    eps_[r] = get_epsilon(x_0, data_[r], s_[r], rk_type)
                             
 
 
