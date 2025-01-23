@@ -39,8 +39,10 @@ def normalize_inputs(x, y0, y0_inv, guide_mode,  extra_options):
 
 
 class LatentGuide:
-    def __init__(self, guides, x, model, sigmas, UNSAMPLE, LGW_MASK_RESCALE_MIN, extra_options, device='cuda', dtype=torch.float64, max_steps=10000):
+    def __init__(self, guides, x, model, sigmas, UNSAMPLE, LGW_MASK_RESCALE_MIN, extra_options, device=None, offload_device='cpu', dtype=torch.float64, max_steps=10000, frame_weights_grp=None):
         self.model    = model
+        self.device   = device if device is not None else x.device
+        self.offload_device = offload_device
         self.sigma_min = model.inner_model.inner_model.model_sampling.sigma_min.to(dtype)
         self.sigma_max = model.inner_model.inner_model.model_sampling.sigma_max.to(dtype)
         self.sigmas   = sigmas
@@ -52,6 +54,7 @@ class LatentGuide:
         self.guide_mode = ""
         self.mask = None
         self.mask_inv = None
+        self.VIDEO = True if x.dim() == 5 else False
         
         self.latent_guide = None
         self.latent_guide_inv = None
@@ -97,8 +100,16 @@ class LatentGuide:
             
         for step in range(len(self.sigmas)-1):
             lgw_mask, lgw_mask_inv = prepare_weighted_masks(self.mask, self.mask_inv, self.lgw[step], self.lgw_inv[step], self.latent_guide, self.latent_guide_inv, LGW_MASK_RESCALE_MIN)
+            if self.VIDEO and frame_weights_grp is not None:
+                apply_frame_weights(lgw_mask, frame_weights_grp[0])
+                apply_frame_weights(lgw_mask_inv, frame_weights_grp[1])
             self.lgw_masks.append(lgw_mask)
             self.lgw_masks_inv.append(lgw_mask_inv)
+
+        for i in range(len(self.lgw_masks)):
+            self.lgw_masks[i] = self.lgw_masks[i].to(offload_device)
+        for i in range(len(self.lgw_masks_inv)):
+            self.lgw_masks_inv[i] = self.lgw_masks_inv[i].to(offload_device)
 
 
     def init_guides(self, x, noise_sampler, latent_guide=None, latent_guide_inv=None):
@@ -127,6 +138,9 @@ class LatentGuide:
                 latent_guide_inv_samples = self.model.inner_model.inner_model.process_latent_in(latent_guide_inv['samples']).clone().to(x.device)
             else:
                 latent_guide_inv_samples = latent_guide_inv
+
+            if latent_guide_inv_samples.dim() == 5 and latent_guide_inv_samples.shape[2] == 1:
+                latent_guide_inv_samples = latent_guide_inv_samples.repeat(1, 1, x.shape[2], 1, 1)
             if self.SAMPLE:
                 self.y0_inv = latent_guide_inv_samples
             elif self.UNSAMPLE: # and self.mask is not None:
@@ -146,15 +160,15 @@ class LatentGuide:
     
 
 
-    def process_guides_substep(self, x_0, x_, eps_, data_, row, step, sigma, sigma_next, sigma_down, s_, unsample_resample_scale, rk, rk_type, extra_options, frame_weights_grp=None):
+    def process_guides_substep(self, x_0, x_, eps_, data_, row, step, sigma, sigma_next, sigma_down, s_, unsample_resample_scale, rk, rk_type, extra_options):
 
         y0 = self.y0
         if self.y0.shape[0] > 1:
             y0 = self.y0[min(step, self.y0.shape[0]-1)].unsqueeze(0)  
         y0_inv = self.y0_inv
         
-        lgw_mask = self.lgw_masks[step].clone()
-        lgw_mask_inv = self.lgw_masks_inv[step].clone() if self.lgw_masks_inv is not None else None
+        lgw_mask = self.lgw_masks[step].clone().to(self.device)
+        lgw_mask_inv = self.lgw_masks_inv[step].clone().to(self.device) if self.lgw_masks_inv is not None else None
         
         lgw = self.lgw[step]
         lgw_inv = self.lgw_inv[step]
@@ -193,7 +207,7 @@ class LatentGuide:
                 
 
 
-        s_in = x_0.new_ones([x_0.shape[0]])
+        # s_in = x_0.new_ones([x_0.shape[0]])
         eps_orig = eps_.clone()
         
         if extra_options_flag("dynamic_guides_mean_std", extra_options):
@@ -208,10 +222,6 @@ class LatentGuide:
             if extra_options_flag("dynamic_guides_inv", extra_options):
                 y0_inv = y_inv_shift
 
-
-        if x_0.dim() == 5 and frame_weights_grp is not None:
-            apply_frame_weights(lgw_mask, frame_weights_grp[0])
-            apply_frame_weights(lgw_mask_inv, frame_weights_grp[1])
 
         if "data" == guide_mode:
             y0_tmp = y0.clone()
@@ -384,8 +394,8 @@ class LatentGuide:
             y0 = self.y0[min(step, self.y0.shape[0]-1)].unsqueeze(0)  
         y0_inv = self.y0_inv
         
-        lgw_mask = self.lgw_masks[step].clone()
-        lgw_mask_inv = self.lgw_masks_inv[step].clone() if self.lgw_masks_inv is not None else None
+        lgw_mask = self.lgw_masks[step].clone().to(self.device)
+        lgw_mask_inv = self.lgw_masks_inv[step].clone().to(self.device) if self.lgw_masks_inv is not None else None
         mask = self.mask #needed for bitwise mask below
         
         lgw = self.lgw[step]
