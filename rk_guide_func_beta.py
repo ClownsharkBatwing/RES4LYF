@@ -95,8 +95,8 @@ class LatentGuide:
         self.mask, LGW_MASK_RESCALE_MIN = prepare_mask(x, self.mask, LGW_MASK_RESCALE_MIN)
         if self.mask_inv is not None:
             self.mask_inv, LGW_MASK_RESCALE_MIN = prepare_mask(x, self.mask_inv, LGW_MASK_RESCALE_MIN)
-        elif not self.SAMPLE:
-            self.mask_inv = (1-self.mask) #why not for all cases?
+        else:
+            self.mask_inv = (1-self.mask)
             
         for step in range(len(self.sigmas)-1):
             lgw_mask, lgw_mask_inv = prepare_weighted_masks(self.mask, self.mask_inv, self.lgw[step], self.lgw_inv[step], self.latent_guide, self.latent_guide_inv, LGW_MASK_RESCALE_MIN)
@@ -170,15 +170,7 @@ class LatentGuide:
         lgw_mask = self.lgw_masks[step].clone().to(self.device)
         lgw_mask_inv = self.lgw_masks_inv[step].clone().to(self.device) if self.lgw_masks_inv is not None else None
         
-        lgw = self.lgw[step]
-        lgw_inv = self.lgw_inv[step]
-        
-        latent_guide = self.latent_guide
-        latent_guide_inv = self.latent_guide_inv
-        guide_mode = self.guide_mode
-        UNSAMPLE = self.UNSAMPLE
-
-        if self.guide_mode: 
+        if self.guide_mode is not None: 
             data_norm   = data_[row] - data_[row].mean(dim=(-2,-1), keepdim=True)
             y0_norm     = y0         -         y0.mean(dim=(-2,-1), keepdim=True)
             y0_inv_norm = y0_inv     -     y0_inv.mean(dim=(-2,-1), keepdim=True)
@@ -223,14 +215,14 @@ class LatentGuide:
                 y0_inv = y_inv_shift
 
 
-        if "data" == guide_mode:
+        if "data" == self.guide_mode:
             y0_tmp = y0.clone()
-            if latent_guide_inv is not None:
+            if self.latent_guide_inv is not None:
                 y0_tmp = (1-lgw_mask) * data_[row] + lgw_mask * y0
                 y0_tmp = (1-lgw_mask_inv) * y0_tmp + lgw_mask_inv * y0_inv
             x_[row+1] = y0_tmp + eps_[row]
             
-        if guide_mode == "data_projection":
+        if self.guide_mode == "data_projection":
 
             d_lerp = data_[row]   +   lgw_mask * (y0-data_[row])   +   lgw_mask_inv * (y0_inv-data_[row])
             
@@ -242,11 +234,11 @@ class LatentGuide:
             x_[row+1] = data_[row] + eps_[row] * sigma
             
 
-        elif "epsilon" in guide_mode:
+        elif "epsilon" in self.guide_mode:
             if sigma > sigma_next:
                     
                 tol_value = float(get_extra_options_kv("tol", "-1.0", extra_options))
-                if tol_value >= 0 and (lgw > 0 or lgw_inv > 0):           
+                if tol_value >= 0 and (self.lgw[step] > 0 or self.lgw_inv[step] > 0):           
                     for b, c in itertools.product(range(x_0.shape[0]), range(x_0.shape[1])):
                         current_diff     = torch.norm(data_[row][b][c] - y0    [b][c])
                         current_diff_inv = torch.norm(data_[row][b][c] - y0_inv[b][c])
@@ -254,8 +246,8 @@ class LatentGuide:
                         lgw_scaled     = torch.nan_to_num(1-(tol_value/current_diff),     0)
                         lgw_scaled_inv = torch.nan_to_num(1-(tol_value/current_diff_inv), 0)
                         
-                        lgw_tmp     = min(lgw    , lgw_scaled)
-                        lgw_tmp_inv = min(lgw_inv, lgw_scaled_inv)
+                        lgw_tmp     = min(self.lgw[step]    , lgw_scaled)
+                        lgw_tmp_inv = min(self.lgw[step], lgw_scaled_inv)
 
                         lgw_mask_clamp     = torch.clamp(lgw_mask,     max=lgw_tmp)
                         lgw_mask_clamp_inv = torch.clamp(lgw_mask_inv, max=lgw_tmp_inv)
@@ -264,7 +256,7 @@ class LatentGuide:
                         eps_[row][b][c] = eps_[row][b][c] + lgw_mask_clamp[b][c] * (eps_row - eps_[row][b][c]) + lgw_mask_clamp_inv[b][c] * (eps_row_inv - eps_[row][b][c])
 
 
-                elif guide_mode == "epsilon_projection":
+                elif self.guide_mode == "epsilon_projection":
                     eps_row, eps_row_inv = get_guide_epsilon_substep(x_0, x_, y0, y0_inv, s_, row, rk_type)
 
                     if extra_options_flag("eps_proj_old_default", extra_options):
@@ -304,7 +296,7 @@ class LatentGuide:
                     eps_[row] = eps_[row]      +     lgw_mask * (eps_row - eps_[row])    +    lgw_mask_inv * (eps_row_inv - eps_[row])
                     
 
-                elif (lgw > 0 or lgw_inv > 0): # default old channelwise epsilon
+                elif (self.lgw[step] > 0 or self.lgw_inv[step] > 0): # default old channelwise epsilon
                     avg, avg_inv = 0, 0
                     for b, c in itertools.product(range(x_0.shape[0]), range(x_0.shape[1])):
                         avg     += torch.norm(data_[row][b][c] - y0    [b][c])
@@ -326,10 +318,10 @@ class LatentGuide:
 
 
 
-        elif (UNSAMPLE or guide_mode in {"resample", "unsample"}) and (lgw > 0 or lgw_inv > 0):
+        elif (self.UNSAMPLE or self.guide_mode in {"resample", "unsample"}) and (self.lgw[step] > 0 or self.lgw_inv[step] > 0):
                 
             cvf = rk.get_epsilon(x_0, x_[row+1], y0, sigma, s_[row], sigma_down, unsample_resample_scale, extra_options)
-            if UNSAMPLE and sigma > sigma_next and latent_guide_inv is not None:
+            if self.UNSAMPLE and sigma > sigma_next and self.latent_guide_inv is not None:
                 cvf_inv = rk.get_epsilon(x_0, x_[row+1], y0_inv, sigma, s_[row], sigma_down, unsample_resample_scale, extra_options)      
             else:
                 cvf_inv = torch.zeros_like(cvf)
@@ -343,8 +335,8 @@ class LatentGuide:
                     lgw_scaled     = torch.nan_to_num(1-(tol_value/current_diff),     0)
                     lgw_scaled_inv = torch.nan_to_num(1-(tol_value/current_diff_inv), 0)
                     
-                    lgw_tmp     = min(lgw    , lgw_scaled)
-                    lgw_tmp_inv = min(lgw_inv, lgw_scaled_inv)
+                    lgw_tmp     = min(self.lgw[step]    , lgw_scaled)
+                    lgw_tmp_inv = min(self.lgw_inv[step], lgw_scaled_inv)
 
                     lgw_mask_clamp     = torch.clamp(lgw_mask,     max=lgw_tmp)
                     lgw_mask_clamp_inv = torch.clamp(lgw_mask_inv, max=lgw_tmp_inv)
@@ -398,14 +390,6 @@ class LatentGuide:
         lgw_mask_inv = self.lgw_masks_inv[step].clone().to(self.device) if self.lgw_masks_inv is not None else None
         mask = self.mask #needed for bitwise mask below
         
-        lgw = self.lgw[step]
-        lgw_inv = self.lgw_inv[step]
-        
-        latent_guide = self.latent_guide
-        latent_guide_inv = self.latent_guide_inv
-        guide_mode = self.guide_mode
-        UNSAMPLE = self.UNSAMPLE
-        
         if self.guide_mode: 
             data_norm   = denoised - denoised.mean(dim=(-2,-1), keepdim=True)
             y0_norm     = y0         -         y0.mean(dim=(-2,-1), keepdim=True)
@@ -425,7 +409,7 @@ class LatentGuide:
             else:
                 return x
         
-        if guide_mode in {"epsilon_dynamic_mean_std", "epsilon_dynamic_mean", "epsilon_dynamic_std", "epsilon_dynamic_mean_from_bkg"}:
+        if self.guide_mode in {"epsilon_dynamic_mean_std", "epsilon_dynamic_mean", "epsilon_dynamic_std", "epsilon_dynamic_mean_from_bkg"}:
         
             denoised_masked     = denoised * ((mask==1)*mask)
             denoised_masked_inv = denoised * ((mask==0)*(1-mask))
@@ -437,32 +421,32 @@ class LatentGuide:
                 denoised_mask     = denoised[b][c][mask[b][c] == 1]
                 denoised_mask_inv = denoised[b][c][mask[b][c] == 0]
                 
-                if guide_mode == "epsilon_dynamic_mean_std":
+                if self.guide_mode == "epsilon_dynamic_mean_std":
                     d_shift[b][c] = (denoised_masked[b][c] - denoised_mask.mean()) / denoised_mask.std()
                     d_shift[b][c] = (d_shift[b][c] * denoised_mask_inv.std()) + denoised_mask_inv.mean()
                     
-                elif guide_mode == "epsilon_dynamic_mean":
+                elif self.guide_mode == "epsilon_dynamic_mean":
                     d_shift[b][c]     = denoised_masked[b][c]     - denoised_mask.mean()     + denoised_mask_inv.mean()
                     d_shift_inv[b][c] = denoised_masked_inv[b][c] - denoised_mask_inv.mean() + denoised_mask.mean()
 
-                elif guide_mode == "epsilon_dynamic_mean_from_bkg":
+                elif self.guide_mode == "epsilon_dynamic_mean_from_bkg":
                     d_shift[b][c] = denoised_masked[b][c] - denoised_mask.mean() + denoised_mask_inv.mean()
 
-            if guide_mode in {"epsilon_dynamic_mean_std", "epsilon_dynamic_mean_from_bkg"}:
+            if self.guide_mode in {"epsilon_dynamic_mean_std", "epsilon_dynamic_mean_from_bkg"}:
                 denoised_shifted = denoised   +   mean_weight * lgw_mask * (d_shift - denoised_masked) 
-            elif guide_mode == "epsilon_dynamic_mean":
+            elif self.guide_mode == "epsilon_dynamic_mean":
                 denoised_shifted = denoised   +   mean_weight * lgw_mask * (d_shift - denoised_masked)   +   mean_weight * lgw_mask_inv * (d_shift_inv - denoised_masked_inv)
                 
             x = denoised_shifted + eps
         
         
-        if UNSAMPLE == False and (latent_guide is not None or latent_guide_inv is not None) and guide_mode in ("hard_light", "blend", "blend_projection", "mean_std", "mean", "mean_tiled", "std"):
-            if guide_mode == "hard_light":
+        if self.UNSAMPLE == False and (self.latent_guide is not None or self.latent_guide_inv is not None) and self.guide_mode in ("hard_light", "blend", "blend_projection", "mean_std", "mean", "mean_tiled", "std"):
+            if self.guide_mode == "hard_light":
                 d_shift, d_shift_inv = hard_light_blend(y0, denoised), hard_light_blend(y0_inv, denoised)
-            elif guide_mode == "blend":
+            elif self.guide_mode == "blend":
                 d_shift, d_shift_inv = y0, y0_inv
                 
-            elif guide_mode == "blend_projection":
+            elif self.guide_mode == "blend_projection":
                 #d_shift     = get_collinear(denoised, y0) 
                 #d_shift_inv = get_collinear(denoised, y0_inv) 
                 
@@ -476,13 +460,13 @@ class LatentGuide:
                 return x
 
 
-            elif guide_mode == "mean_std":
+            elif self.guide_mode == "mean_std":
                 d_shift, d_shift_inv = normalize_latent([denoised, denoised], [y0, y0_inv])
-            elif guide_mode == "mean":
+            elif self.guide_mode == "mean":
                 d_shift, d_shift_inv = normalize_latent([denoised, denoised], [y0, y0_inv], std=False)
-            elif guide_mode == "std":
+            elif self.guide_mode == "std":
                 d_shift, d_shift_inv = normalize_latent([denoised, denoised], [y0, y0_inv], mean=False)
-            elif guide_mode == "mean_tiled":
+            elif self.guide_mode == "mean_tiled":
                 mean_tile_size = int(get_extra_options_kv("mean_tile", "8", extra_options))
                 y0_tiled       = rearrange(y0,       "b c (h t1) (w t2) -> (t1 t2) b c h w", t1=mean_tile_size, t2=mean_tile_size)
                 y0_inv_tiled   = rearrange(y0_inv,   "b c (h t1) (w t2) -> (t1 t2) b c h w", t1=mean_tile_size, t2=mean_tile_size)
@@ -494,8 +478,8 @@ class LatentGuide:
                 d_shift_inv = rearrange(d_shift_inv_tiled, "(t1 t2) b c h w -> b c (h t1) (w t2)", t1=mean_tile_size, t2=mean_tile_size)
 
 
-            if guide_mode in ("hard_light", "blend", "mean_std", "mean", "mean_tiled", "std"):
-                if latent_guide_inv is None:
+            if self.guide_mode in ("hard_light", "blend", "mean_std", "mean", "mean_tiled", "std"):
+                if self.latent_guide_inv is None:
                     denoised_shifted = denoised   +   lgw_mask * (d_shift - denoised)
                 else:
                     denoised_shifted = denoised   +   lgw_mask * (d_shift - denoised)   +   lgw_mask_inv * (d_shift_inv - denoised)
