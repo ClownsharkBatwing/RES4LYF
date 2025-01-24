@@ -284,6 +284,19 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
                         eps_substep_guide = LG.mask * eps_substep_guide + (1-LG.mask) * eps_substep_guide_inv
                         maxmin_ratio = (sub_sigma - rk.sigma_min) / sub_sigma
                         sub_sigma_2 = sub_sigma - maxmin_ratio * (sub_sigma * LG.lgw[step])
+                        s_2_ = s_.clone()
+                        s_2_[row] = sub_sigma_2
+                        if extra_options_flag("guide_pseudoimplicit_power_substep_projection", extra_options):
+                            eps_row, eps_row_inv = get_guide_epsilon_substep(x_0, x_, y0, y0_inv, s_2_, row, rk_type)
+                            eps_row_lerp = eps_[row]   +   LG.mask * (eps_row-eps_[row])   +   (1-LG.mask) * (eps_row_inv-eps_[row])
+
+                            eps_collinear_eps_lerp = get_collinear(eps_[row], eps_row_lerp)
+                            eps_lerp_ortho_eps     = get_orthogonal(eps_row_lerp, eps_[row])
+
+                            eps_sum = eps_collinear_eps_lerp + eps_lerp_ortho_eps
+
+                            eps_substep_guide = eps_[row] + LG.lgw_masks[step] * (eps_sum - eps_[row]) + LG.lgw_masks_inv[step] * (eps_sum - eps_[row])
+                                
                         if not extra_options_flag("implicit_disable_preupdate", extra_options) and rk_type in IRK_SAMPLER_NAMES_BETA: 
                             if row < rk.rows - rk.multistep_stages:
                                 x_[row] = x_0 + h * (rk.a_k_sum(eps_, row) + rk.u_k_sum(eps_prev_, row))
