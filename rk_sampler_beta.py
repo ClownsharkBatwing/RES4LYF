@@ -191,6 +191,7 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
                 eps_ [r] = get_epsilon(x_0, data_[r], s_[r], rk_type)
 
             eps_0 = eps_[0].clone()
+            data_0 = data_[0].clone()
                 
             newton_iter_init = int(get_extra_options_kv("newton_iter_init", str("0"), extra_options))
             for n_iter_init in range(newton_iter_init):
@@ -265,11 +266,11 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
                     if row < rk.rows   and   s_[row+row_offset+rk.multistep_stages] > 0:
                         if   diag_iter > 0 and diag_iter == implicit_steps_diag and extra_options_flag("implicit_substep_skip_final_eta", extra_options):
                             pass
-                        elif diag_iter > 0 and extra_options_flag("implicit_substep_only_first_eta", extra_options):
+                        elif diag_iter > 0 and                                      extra_options_flag("implicit_substep_only_first_eta", extra_options):
                             pass
                         elif full_iter > 0 and full_iter == implicit_steps_full and extra_options_flag("implicit_step_skip_final_eta", extra_options):
                             pass
-                        elif full_iter > 0 and extra_options_flag("implicit_step_only_first_eta", extra_options):
+                        elif full_iter > 0 and                                      extra_options_flag("implicit_step_only_first_eta", extra_options):
                             pass
                         elif (row < rk.rows-row_offset-rk.multistep_stages   or   diag_iter < implicit_steps_diag):
                             sub_sigma_up, sub_sigma, sub_sigma_down, sub_alpha_ratio = get_res4lyf_step_with_model(model, s_[row], s_[row+row_offset+rk.multistep_stages], eta_substep, eta_var_substep, noise_mode_sde_substep)
@@ -332,9 +333,13 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
                             if rk_type in IRK_SAMPLER_NAMES_BETA   and   not extra_options_flag("implicit_disable_full_preupdate", extra_options): 
                                 x_tmp = x_[row] = x_0 + h * (rk.a_k_sum(eps_, row) + rk.u_k_sum(eps_prev_, row))
                         
-                        if s_tmp == 0:
-                            break
-                        eps_[row], data_[row] = rk(x_tmp, s_tmp, x_0, sigma, **extra_args) 
+                        if rk_type in IRK_SAMPLER_NAMES_BETA   and   row == 0   and   s_[0] == sigma   and   extra_options_flag("implicit_recycle_first_model_call_at_start", extra_options):
+                            eps_[0] = eps_0
+                            data_[0] = data_0
+                        else:
+                            if s_tmp == 0:
+                                break
+                            eps_[row], data_[row] = rk(x_tmp, s_tmp, x_0, sigma, **extra_args) 
 
                         # GUIDE 
                         if not extra_options_flag("guide_disable_regular_substep", extra_options):
