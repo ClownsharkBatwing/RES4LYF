@@ -112,14 +112,6 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
     rk. init_noise_sampler(x, noise_seed, noise_sampler_type, alpha=alpha, k=k)
     extra_args = rk.init_cfg_channelwise(x, cfg_cw, **extra_args)
 
-    frame_weights, frame_weights_inv = None, None
-    if frame_weights_grp is not None and frame_weights_grp[0] is not None:
-        frame_weights = initialize_or_scale(frame_weights_grp[0], 1.0, max_steps).to(default_dtype)
-        frame_weights = F.pad(frame_weights, (0, max_steps), value=0.0)
-    if frame_weights_grp is not None and frame_weights_grp[1] is not None:
-        frame_weights_inv = initialize_or_scale(frame_weights_grp[1], 1.0, max_steps).to(default_dtype)
-        frame_weights_inv = F.pad(frame_weights_inv, (0, max_steps), value=0.0)
-    frame_weights_grp = (frame_weights, frame_weights_inv)
 
     LG = LatentGuide(guides, x, model, sigmas, UNSAMPLE, LGW_MASK_RESCALE_MIN, extra_options, frame_weights_grp=frame_weights_grp)
     x = LG.init_guides(x, rk.noise_sampler)
