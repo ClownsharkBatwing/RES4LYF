@@ -49,7 +49,13 @@ RK_SAMPLER_NAMES_BETA = ["none",
                     "pec423_2h2s",
                     "pec433_2h3s",
                     
-                    "abnorsett2_1h1s",
+                    "abnorsett2_1h2s",
+                    "abnorsett3_2h2s",
+                    "abnorsett4_3h2s",
+
+                    "abnorsett_2m",
+                    "abnorsett_3m",
+                    "abnorsett_4m",
 
 
                     "deis_2m",
@@ -123,10 +129,15 @@ IRK_SAMPLER_NAMES_BETA = ["none",
                     
                     "lobatto_iiia_2s",
                     "lobatto_iiia_3s",
+                    "lobatto_iiia_4s",
                     "lobatto_iiib_2s",
                     "lobatto_iiib_3s",
+                    "lobatto_iiib_4s",
+
                     "lobatto_iiic_2s",
                     "lobatto_iiic_3s",
+                    "lobatto_iiic_4s",
+
                     "lobatto_iiic_star_2s",
                     "lobatto_iiic_star_3s",
                     "lobatto_iiid_2s",
@@ -289,7 +300,42 @@ rk_coeff = {
         ],
         [0, 2/3]
     ),
-    
+    "lobatto_iiia_4s": ( #6th order
+        [    
+            [0, 0, 0, 0],
+            [(11+5**0.5)/120,   (25-5**0.5)/120, (25-13*5**0.5)/120, (-1+5**0.5)/120],
+            [(11-5**0.5)/120,   (25+13*5**0.5)/120, (25+5**0.5)/120, (-1-5**0.5)/120],
+            [1/12, 5/12, 5/12, 1/12],
+        ],
+        [
+            [1/12, 5/12, 5/12, 1/12],
+        ],
+        [0, (5-5**0.5)/10, (5+5**0.5)/10, 1]
+    ),
+    "lobatto_iiib_4s": ( #6th order
+        [    
+            [1/12, (-1-5**0.5)/24, (-1+5**0.5)/24, 0],
+            [1/12,   (25+5**0.5)/120, (25-13*5**0.5)/120, 0],
+            [1/12,   (25+13*5**0.5)/120, (25-5**0.5)/120, 0],
+            [1/12, (11-5**0.5)/24, (11+5**0.5)/24, 0],
+        ],
+        [
+            [1/12, 5/12, 5/12, 1/12],
+        ],
+        [0, (5-5**0.5)/10, (5+5**0.5)/10, 1]
+    ),
+    "lobatto_iiic_4s": ( #6th order
+        [    
+            [1/12, (-5**0.5)/12, (5**0.5)/12, -1/12],
+            [1/12,   1/4, (10-7*5**0.5)/60, (5**0.5)/60],
+            [1/12,   (10+7*5**0.5)/60, 1/4, (-5**0.5)/60],
+            [1/12, 5/12, 5/12, 1/12],
+        ],
+        [
+            [1/12, 5/12, 5/12, 1/12],
+        ],
+        [0, (5-5**0.5)/10, (5+5**0.5)/10, 1]
+    ),
     "lobatto_iiia_3s": (
         [    
             [0, 0, 0],
@@ -834,6 +880,8 @@ def get_rk_methods_beta(rk_type, h, c1=0.0, c2=0.5, c3=1.0, h_prev=None, step=0,
         if step >= 1:
             multistep_stages = 1
             c2 = (-h_prev1_no_eta / h_no_eta).item()
+        if rk_type.startswith("abnorsett"):
+            rk_type = "res_2s"
             
     if rk_type[-2:] == "3m": #multistep method
         rk_type = rk_type[:-2] + "3s"
@@ -842,7 +890,23 @@ def get_rk_methods_beta(rk_type, h, c1=0.0, c2=0.5, c3=1.0, h_prev=None, step=0,
             multistep_stages = 2
 
             c2 = (-h_prev1_no_eta / h_no_eta).item()
+            c3 = (-h_prev2_no_eta / h_no_eta).item()       
+        if rk_type.startswith("abnorsett"):
+            rk_type = "res_3s"
+            
+    if rk_type[-2:] == "4m": #multistep method
+        rk_type = rk_type[:-2] + "4s"
+        #if h_prev2 is not None and step >= 2: 
+        if step >= 3:
+            multistep_stages = 3
+
+            c2 = (-h_prev1_no_eta / h_no_eta).item()
             c3 = (-h_prev2_no_eta / h_no_eta).item()
+            # WOULD NEED A C4 (POW) TO IMPLEMENT RES_4M IF IT EXISTED
+        if rk_type == "res_4s":
+            rk_type = "res_4s_strehmel_weiner"
+        if rk_type.startswith("abnorsett"):
+            rk_type = "res_4s_strehmel_weiner"
             
     if rk_type[-3] == "h" and rk_type[-1] == "s": #hybrid method 
         if step < int(rk_type[-4]):
@@ -850,13 +914,13 @@ def get_rk_methods_beta(rk_type, h, c1=0.0, c2=0.5, c3=1.0, h_prev=None, step=0,
         else:
             hybrid_stages = int(rk_type[-4])
         if rk_type == "res_4s":
-            rk_type = "res_4s_cox_matthews"
+            rk_type = "res_4s_strehmel_weiner"
         if rk_type == "res_1s":
             rk_type = "res_2s"
 
     if rk_type in rk_coeff:
         a, b, ci = copy.deepcopy(rk_coeff[rk_type])
-        a, b, ci = rk_coeff[rk_type]
+        
         a = [row + [0] * (len(ci) - len(row)) for row in a]
 
     match rk_type:
@@ -950,19 +1014,20 @@ def get_rk_methods_beta(rk_type, h, c1=0.0, c2=0.5, c3=1.0, h_prev=None, step=0,
 
 
 
-        case "abnorsett2_1h1s":
+        case "abnorsett2_1h2s":
 
-            c2 = 0
-            ci = [c2]
+            c1, c2 = 0, 1
+            ci = [c1, c2]
             φ = Phi(h, ci)
 
-            b1 = φ(1) + φ(2)
+            b1 = φ(1) #+ φ(2)
 
             a = [
-                    [0],
+                    [0, 0],
+                    [0, 0],
             ]
             b = [
-                    [b1],
+                    [0, 0],
             ]
 
             if extra_options_flag("h_prev_h_h_no_eta", extra_options):
@@ -972,17 +1037,122 @@ def get_rk_methods_beta(rk_type, h, c1=0.0, c2=0.5, c3=1.0, h_prev=None, step=0,
             else:
                 φ1 = Phi(h_prev1_no_eta, ci)
 
+            u1 = -φ1(2)
             v1 = -φ1(2)
 
             u = [
-                    [0],
+                    [0, 0],
+                    [u1, 0],
             ]
             v = [
-                    [v1],
+                    [v1, 0],
             ]
 
             gen_first_col_exp_uv(a, b, ci, u, v, φ) 
 
+
+
+        case "abnorsett_2m":
+
+            c1, c2 = 0, 1
+            ci = [c1, c2]
+            φ = Phi(h, ci)
+
+            a = [
+                    [0, 0],
+                    [0, 0],
+            ]
+            b = [
+                    [0, -φ(2)],
+            ]
+
+            gen_first_col_exp(a, b, ci, φ) 
+
+
+        case "abnorsett_3m":
+
+            c1, c2, c3 = 0, 0, 1
+            ci = [c1, c2, c3]
+            φ = Phi(h, ci)
+
+            a = [
+                    [0, 0, 0],
+                    [0, 0, 0],
+                    [0, 0, 0],
+            ]
+            b = [
+                    [0, -2*φ(2) - 2*φ(3), (1/2)*φ(2) + φ(3)],
+            ]
+
+            gen_first_col_exp(a, b, ci, φ) 
+
+
+
+        case "abnorsett_4m":
+
+            c1, c2, c3, c4 = 0, 0, 0, 1
+            ci = [c1, c2, c3, c4]
+            φ = Phi(h, ci)
+
+            a = [
+                    [0, 0, 0, 0],
+                    [0, 0, 0, 0],
+                    [0, 0, 0, 0],
+                    [0, 0, 0, 0],
+            ]
+            b = [
+                    [0, 
+                     -3*φ(2) - 5*φ(3) - 3*φ(4),
+                     (3/2)*φ(2) + 4*φ(3) + 3*φ(4),
+                     (-1/3)*φ(2) - φ(3) - φ(4),
+                     ],
+            ]
+
+            gen_first_col_exp(a, b, ci, φ) 
+
+
+        case "abnorsett3_2h2s":
+            
+            c1,c2 = 0,1
+            ci = [c1, c2]
+            φ = Phi(h, ci)
+            
+            b2 = 0
+
+            a = [
+                    [0, 0],
+                    [0, 0],
+            ]
+            b = [
+                    [0, 0],
+            ]
+            
+            if extra_options_flag("h_prev_h_h_no_eta", extra_options):
+                φ1 = Phi(h_prev1_no_eta * h/h_no_eta, ci)
+                φ2 = Phi(h_prev2_no_eta * h/h_no_eta, ci)
+            elif extra_options_flag("h_only", extra_options):
+                φ1 = Phi(h, ci)
+                φ2 = Phi(h, ci)
+            else:
+                φ1 = Phi(h_prev1_no_eta, ci)
+                φ2 = Phi(h_prev2_no_eta, ci)
+                
+            u2_1 = -2*φ1(2) - 2*φ1(3)
+            u2_2 = (1/2)*φ2(2) + φ2(3)
+            
+            v1 = u2_1 # -φ1(2) + φ1(3) + 3*φ1(4)
+            v2 = u2_2 # (1/6)*φ2(2) - φ2(4)
+            
+            u = [
+                    [   0,    0],
+                    [u2_1, u2_2],
+            ]
+            v = [
+                    [v1, v2],
+            ]
+            
+            gen_first_col_exp_uv(a, b, ci, u, v, φ)
+            
 
 
         case "pec423_2h2s":
@@ -2298,8 +2468,8 @@ def get_rk_methods_beta(rk_type, h, c1=0.0, c2=0.5, c3=1.0, h_prev=None, step=0,
             ci = [c1, c2]
 
     ci = ci[:]
-    if rk_type.startswith("lob") == False:
-        ci.append(1)
+    #if rk_type.startswith("lob") == False:
+    ci.append(1)
         
     return a, b, u, v, ci, multistep_stages, hybrid_stages, FSAL
 
