@@ -181,7 +181,7 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
 
 
         if rk_type in IRK_SAMPLER_NAMES_BETA:
-            if extra_options_flag("implicit_skip_model_call_at_start", extra_options):
+            if extra_options_flag("implicit_skip_model_call_at_start", extra_options) and denoised.sum() + eps.sum() != 0:
                 eps_[0], data_[0] = eps.clone(), denoised.clone()
             else:
                 eps_[0], data_[0] = rk(x_[0], sigma, x_0, sigma, **extra_args) 
