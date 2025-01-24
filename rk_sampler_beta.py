@@ -1,4 +1,4 @@
-import torch
+simport torch
 import torch.nn.functional as F
 import torchvision.transforms as T
 import re
@@ -285,7 +285,7 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
                         eps_substep_guide = LG.mask * eps_substep_guide + (1-LG.mask) * eps_substep_guide_inv
                         maxmin_ratio = (sub_sigma - rk.sigma_min) / sub_sigma
                         sub_sigma_2 = sub_sigma - maxmin_ratio * (sub_sigma * LG.lgw[step])
-                        s_2_ = s_.clone()
+                        s_2_ = copy.deepcopy(s_)
                         s_2_[row] = sub_sigma_2
                         if extra_options_flag("guide_pseudoimplicit_power_substep_projection", extra_options):
                             eps_row, eps_row_inv = get_guide_epsilon_substep(x_0, x_, y0, y0_inv, s_2_, row, rk_type)
