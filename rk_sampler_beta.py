@@ -194,14 +194,13 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
                 
             newton_iter_init = int(get_extra_options_kv("newton_iter_init", str("0"), extra_options))
             for n_iter_init in range(newton_iter_init):
-                for r in range(rk.rows+1):
+                for r in range(rk.rows): #+1):
                     eps_[0] = eps_0.clone()
                     if r < rk.rows:
                         x_[r] = x_0 + h * (rk.a_k_sum(eps_, r) + rk.u_k_sum(eps_prev_, r))
                     else:
                         x_[r] = x_0 + h * (rk.b_k_sum(eps_, 0) + rk.v_k_sum(eps_prev_, 0))
-
-                    data_[r] = get_data_from_x(x_0, x_[r], sigma, s_[r])
+                    data_[r] = get_data_from_x(x_0, x_[r], sigma, s_[r])  
                     eps_[r] = get_epsilon(x_0, data_[r], s_[r], rk_type)
 
 
@@ -224,11 +223,12 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
                 x_lying_[r] = x_[r] + rk.h_fn(fully_sub_sigma_2, s_[r]) * eps_substep_guide
                 data_tmp = get_data_from_x(x_0, x_lying_[r], sigma, s_lying_[r])
                 eps_lying_[r] = get_epsilon(x_0, data_tmp, sigma, rk_type)
+                
             eps_ = eps_lying_
             
             newton_iter_lying_init = int(get_extra_options_kv("newton_iter_lying_init", str("0"), extra_options))
             for n_iter_lying_init in range(newton_iter_lying_init):
-                for r in range(rk.rows+1):
+                for r in range(rk.rows): #+1):
                     eps_[0] = eps_0.clone()
                     if r < rk.rows:
                         x_[r] = x_0 + h * (rk.a_k_sum(eps_, r) + rk.u_k_sum(eps_prev_, r))
@@ -240,7 +240,7 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
 
 
 
-        row_offset = 1 if rk.a[0].sum() == 0 else 0          
+        row_offset = 1 if rk.a[0].sum() == 0 and rk_type not in IRK_SAMPLER_NAMES_BETA else 0          
         for full_iter in range(implicit_steps_full + 1):
 
             for row in range(rk.rows - rk.multistep_stages - row_offset + 1):
@@ -277,62 +277,37 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
                                 x_[row] = x_0 + h * (rk.b_k_sum(eps_, 0) + rk.v_k_sum(eps_prev_, 0))
                         x_row_tmp = x_[row] + rk.h_fn(sub_sigma_2, sub_sigma) * eps_substep_guide
 
+
                     # MODEL CALL
                     if row < rk.rows: # A-tableau still
 
                         if extra_options_flag("guide_pseudoimplicit_power_substep", extra_options): 
-                            if sub_sigma_2 == 0:
-                                break
-                            
-                            eps_[row], data_[row] = rk(x_row_tmp, sub_sigma_2, x_0, sigma, **extra_args)
-
-                            for n_iter_post in range(newton_iter_post):
-                                for r in range(row+1, rk.rows):
-                                    x_[r] = x_0 + h * (rk.a_k_sum(eps_, r) + rk.u_k_sum(eps_prev_, r))
-                                    data_[r] = get_data_from_x(x_0, x_[r], sigma, s_[r])
-                                    eps_[r] = get_epsilon(x_0, data_[r], s_[r], rk_type)
+                            x_tmp = x_row_tmp
+                            s_tmp = sub_sigma_2
 
                         elif extra_options_flag("guide_fully_pseudoimplicit_power_substep", extra_options): 
-                            if s_lying_[row] == 0:
-                                break
-
-                            eps_[row], data_[row] = rk(x_lying_[row], s_lying_[row], x_0, sigma, **extra_args)
-
-                            for n_iter_post in range(newton_iter_post):
-                                for r in range(row+1, rk.rows):
-                                    x_[r] = x_0 + h * (rk.a_k_sum(eps_, r) + rk.u_k_sum(eps_prev_, r))
-                                    data_[r] = get_data_from_x(x_0, x_[r], sigma, s_[r])
-                                    eps_[r] = get_epsilon(x_0, data_[r], s_[r], rk_type)
-
-
+                            x_tmp = x_lying_[row]
+                            s_tmp = s_lying_[row]
 
                         elif full_iter > 0 and row_offset == 1 and row == 0: # explicit full implicit
-                            if sigma_next == 0:
-                                break
-                            eps_[row], data_[row] = rk(x, sigma_next, x_0, sigma, **extra_args)   
-
-
+                            x_tmp = x
+                            s_tmp = sigma_next
 
                         elif diag_iter > 0:
-                            if s_[row+row_offset+rk.multistep_stages] == 0:
-                                break
-                            if extra_options_flag("implicit_diag_substep_x_preopt", extra_options):
-                                if row < rk.rows - rk.multistep_stages - row_offset: #_offset == 0:
-                                    x_[row+row_offset] = x_0 + h * (rk.a_k_sum(eps_, row+row_offset) + rk.u_k_sum(eps_prev_, row+row_offset))
-                                else:
-                                    x_[row+row_offset] = x_0 + h * (rk.b_k_sum(eps_, 0) + rk.v_k_sum(eps_prev_, 0))
+                            x_tmp = x_[row+row_offset]
+                            s_tmp = s_[row+row_offset+rk.multistep_stages]
+                            if rk_type in IRK_SAMPLER_NAMES_BETA   and   not extra_options_flag("implicit_disable_diagonal_preupdate", extra_options): 
+                                 x_tmp = x_[row+row_offset] = x_0 + h * (rk.a_k_sum(eps_, row+row_offset) + rk.u_k_sum(eps_prev_, row+row_offset))
 
-                            eps_[row], data_[row] = rk(x_[row+row_offset], s_[row+row_offset+rk.multistep_stages], x_0, sigma, **extra_args)  
-
-                        elif rk_type in IRK_SAMPLER_NAMES_BETA: 
-                            if not extra_options_flag("implicit_disable_preupdate", extra_options):
-                                x_[row] = x_0 + h * (rk.a_k_sum(eps_, row) + rk.u_k_sum(eps_prev_, row))
-                            eps_[row], data_[row] = rk(x_[row], s_[row], x_0, sigma, **extra_args) 
-                            
                         else:
-                            eps_[row], data_[row] = rk(x_[row], s_[row], x_0, sigma, **extra_args) 
-
-
+                            x_tmp = x_[row]
+                            s_tmp = s_[row]
+                            if rk_type in IRK_SAMPLER_NAMES_BETA   and   not extra_options_flag("implicit_disable_full_preupdate", extra_options): 
+                                x_tmp = x_[row] = x_0 + h * (rk.a_k_sum(eps_, row) + rk.u_k_sum(eps_prev_, row))
+                        
+                        if s_tmp == 0:
+                            break
+                        eps_[row], data_[row] = rk(x_tmp, s_tmp, x_0, sigma, **extra_args) 
 
                         # GUIDE 
                         if not extra_options_flag("guide_disable_regular_substep", extra_options):
@@ -340,6 +315,14 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
                                 eps_, x_      = LG.process_guides_substep(x_0, x_, eps_,      data_, row, step, sigma, sigma_next, sigma_down, s_, unsample_resample_scale, rk, rk_type, extra_options, frame_weights)
                             if not extra_options_flag("disable_guides_eps_prev_substep", extra_options):
                                 eps_prev_, x_ = LG.process_guides_substep(x_0, x_, eps_prev_, data_, row, step, sigma, sigma_next, sigma_down, s_, unsample_resample_scale, rk, rk_type, extra_options, frame_weights)
+
+                        for n_iter_post in range(newton_iter_post):
+                            for r in range(row+1, rk.rows):
+                                x_[r] = x_0 + h * (rk.a_k_sum(eps_, r) + rk.u_k_sum(eps_prev_, r))
+                                data_[r] = get_data_from_x(x_0, x_[r], sigma, s_[r])
+                                eps_[r] = get_epsilon(x_0, data_[r], s_[r], rk_type)
+
+
 
                     # UPDATE
                     if row < rk.rows - row_offset   and   rk.multistep_stages == 0:

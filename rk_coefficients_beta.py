@@ -880,7 +880,7 @@ def get_rk_methods_beta(rk_type, h, c1=0.0, c2=0.5, c3=1.0, h_prev=None, step=0,
 
     if rk_type in rk_coeff:
         a, b, ci = copy.deepcopy(rk_coeff[rk_type])
-        a, b, ci = rk_coeff[rk_type]
+        
         a = [row + [0] * (len(ci) - len(row)) for row in a]
 
     match rk_type:
@@ -2428,8 +2428,8 @@ def get_rk_methods_beta(rk_type, h, c1=0.0, c2=0.5, c3=1.0, h_prev=None, step=0,
             ci = [c1, c2]
 
     ci = ci[:]
-    if rk_type.startswith("lob") == False:
-        ci.append(1)
+    #if rk_type.startswith("lob") == False:
+    ci.append(1)
         
     return a, b, u, v, ci, multistep_stages, hybrid_stages, FSAL
 
