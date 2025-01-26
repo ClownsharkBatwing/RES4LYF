@@ -310,11 +310,12 @@ class SharkSampler:
                     x0_output = {}
 
 
-                    if hasattr(sampler.extra_options, "cfg_cw"):
-                        sampler.extra_options['cfg_cw'] = 1.0
-                        if cfg < 0:
-                            sampler.extra_options['cfg_cw'] = -cfg
-                            cfg = 1.0
+                    if cfg < 0:
+                        sampler.extra_options['cfg_cw'] = -cfg
+                        cfg = 1.0
+                    else:
+                        sampler.extra_options.pop("cfg_cw", None) 
+                        
                     
                     if sde_noise is None:
                         sde_noise = []
