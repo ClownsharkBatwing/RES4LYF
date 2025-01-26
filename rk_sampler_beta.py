@@ -282,7 +282,7 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
             data_0 = data_[0].clone()
 
             newton_iter_init = int(get_extra_options_kv("newton_iter_init", str("0"), extra_options))
-            if step == len(sigmas)-6:
+            if step >= len(sigmas)-6:
                 newton_iter_init = 0
             for n_iter_init in range(newton_iter_init):
                 for r in range(0, rk.rows+1): #+1):
