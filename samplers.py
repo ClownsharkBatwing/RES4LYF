@@ -80,24 +80,27 @@ class SharkSampler:
                     extra_options="", 
                     ): 
             # blame comfy here
+            pos_cond = copy.deepcopy(positive)
+            neg_cond = copy.deepcopy(negative)
             
             default_dtype = getattr(torch, get_extra_options_kv("default_dtype", "float64", extra_options), torch.float64)   
                      
             model = model.clone()
-            if positive[0][1] is not None: 
-                if "regional_conditioning_weights" in positive[0][1]:
-                    sampler.extra_options['regional_conditioning_weights'] = positive[0][1]['regional_conditioning_weights']
-                    sampler.extra_options['regional_conditioning_floors']  = positive[0][1]['regional_conditioning_floors']
-                    regional_generate_conditionings_and_masks_fn = positive[0][1]['regional_generate_conditionings_and_masks_fn']
+            if pos_cond[0][1] is not None: 
+                if "regional_conditioning_weights" in pos_cond[0][1]:
+                    sampler.extra_options['regional_conditioning_weights'] = pos_cond[0][1]['regional_conditioning_weights']
+                    sampler.extra_options['regional_conditioning_floors']  = pos_cond[0][1]['regional_conditioning_floors']
+                    regional_generate_conditionings_and_masks_fn = pos_cond[0][1]['regional_generate_conditionings_and_masks_fn']
                     regional_conditioning, regional_mask = regional_generate_conditionings_and_masks_fn(latent_image['samples'])
                     regional_conditioning = copy.deepcopy(regional_conditioning)
                     regional_mask = copy.deepcopy(regional_mask)
                     model.set_model_patch(regional_conditioning, 'regional_conditioning_positive')
                     model.set_model_patch(regional_mask,         'regional_conditioning_mask')
                     
-            if "noise_seed_sde" in sampler.extra_options:
-                if sampler.extra_options['noise_seed_sde'] == -1 and noise_seed != -1:
-                    sampler.extra_options['noise_seed_sde'] = noise_seed + 1
+            if "noise_seed" in sampler.extra_options:
+                if sampler.extra_options['noise_seed'] == -1 and noise_seed != -1:
+                    sampler.extra_options['noise_seed'] = noise_seed + 1
+                    #print("Shark: setting clown noise seed to: ", sampler.extra_options['noise_seed'])
 
             if "extra_options" in sampler.extra_options:
                 extra_options += " "
@@ -140,62 +143,63 @@ class SharkSampler:
                 latent_image_dtype = latent_unbatch['samples'].dtype
 
                 if isinstance(model.model.model_config, comfy.supported_models.Flux) or isinstance(model.model.model_config, comfy.supported_models.FluxSchnell):
-                    if positive is None:
-                        positive = [[
+                    if pos_cond is None:
+                        pos_cond = [[
                             torch.zeros((1, 256, 4096)),
                             {'pooled_output': torch.zeros((1, 768))}
                             ]]
 
                     if extra_options_flag("uncond_ortho_flux", extra_options):
-                        if negative is None:
-                            negative = [[
+                        if neg_cond is None:
+                            print("uncond_ortho_flux: using random negative conditioning...")
+                            neg_cond = [[
                                 torch.randn((1, 256, 4096)),
                                 {'pooled_output': torch.randn((1, 768))}
                                 ]]
-                        #negative[0][0] = get_orthogonal(negative[0][0].to(torch.bfloat16), positive[0][0].to(torch.bfloat16))
-                        #negative[0][1]['pooled_output'] = get_orthogonal(negative[0][1]['pooled_output'].to(torch.bfloat16), positive[0][1]['pooled_output'].to(torch.bfloat16))
-                        negative[0][0] = get_orthogonal(negative[0][0], positive[0][0])
-                        negative[0][1]['pooled_output'] = get_orthogonal(negative[0][1]['pooled_output'], positive[0][1]['pooled_output'])
+                        #neg_cond[0][0] = get_orthogonal(neg_cond[0][0].to(torch.bfloat16), pos_cond[0][0].to(torch.bfloat16))
+                        #neg_cond[0][1]['pooled_output'] = get_orthogonal(neg_cond[0][1]['pooled_output'].to(torch.bfloat16), pos_cond[0][1]['pooled_output'].to(torch.bfloat16))
+                        neg_cond[0][0] = get_orthogonal(neg_cond[0][0], pos_cond[0][0])
+                        neg_cond[0][1]['pooled_output'] = get_orthogonal(neg_cond[0][1]['pooled_output'], pos_cond[0][1]['pooled_output'])
                         
-                    if negative is None:
-                        negative = [[
+                    if neg_cond is None:
+                        neg_cond = [[
                             torch.zeros((1, 256, 4096)),
                             {'pooled_output': torch.zeros((1, 768))}
                             ]]
                 else:
-                    if positive is None:
-                        positive = [[
+                    if pos_cond is None:
+                        pos_cond = [[
                             torch.zeros((1, 154, 4096)),
                             {'pooled_output': torch.zeros((1, 2048))}
                             ]]
 
                     if extra_options_flag("uncond_ortho_sd35", extra_options):
-                        if negative is None:
-                            negative = [[
+                        if neg_cond is None:
+                            neg_cond = [[
                                 torch.randn((1, 154, 4096)),
                                 {'pooled_output': torch.randn((1, 2048))}
                                 ]]
                         
-                        negative[0][0] = get_orthogonal(negative[0][0], positive[0][0])
-                        negative[0][1]['pooled_output'] = get_orthogonal(negative[0][1]['pooled_output'], positive[0][1]['pooled_output'])
+                        neg_cond[0][0] = get_orthogonal(neg_cond[0][0], pos_cond[0][0])
+                        neg_cond[0][1]['pooled_output'] = get_orthogonal(neg_cond[0][1]['pooled_output'], pos_cond[0][1]['pooled_output'])
                         
 
-                    if negative is None:
-                        negative = [[
+                    if neg_cond is None:
+                        neg_cond = [[
                             torch.zeros((1, 154, 4096)),
                             {'pooled_output': torch.zeros((1, 2048))}
                             ]]
                         
                         
                 if extra_options_flag("zero_uncond_t5", extra_options):
-                    negative[0][0] = torch.zeros_like(negative[0][0])
+                    neg_cond[0][0] = torch.zeros_like(neg_cond[0][0])
                     
                 if extra_options_flag("zero_uncond_pooled_output", extra_options):
-                    negative[0][1]['pooled_output'] = torch.zeros_like(negative[0][1]['pooled_output'])
+                    neg_cond[0][1]['pooled_output'] = torch.zeros_like(neg_cond[0][1]['pooled_output'])
                         
                 if extra_options_flag("zero_pooled_output", extra_options):
-                    positive[0][1]['pooled_output'] = torch.zeros_like(positive[0][1]['pooled_output'])
-                    negative[0][1]['pooled_output'] = torch.zeros_like(negative[0][1]['pooled_output'])
+                    pos_cond[0][1]['pooled_output'] = torch.zeros_like(pos_cond[0][1]['pooled_output'])
+                    neg_cond[0][1]['pooled_output'] = torch.zeros_like(neg_cond[0][1]['pooled_output'])
 
                 if denoise_alt < 0:
                     d_noise = denoise_alt = -denoise_alt
@@ -238,18 +242,18 @@ class SharkSampler:
 
                 truncate_conditioning = extra_options_flag("truncate_conditioning", extra_options)
                 if truncate_conditioning == "true" or truncate_conditioning == "true_and_zero_neg":
-                    if positive is not None:
-                        positive[0][0] = positive[0][0].clone().to(default_dtype)
-                        positive[0][1]["pooled_output"] = positive[0][1]["pooled_output"].clone().to(default_dtype)
-                    if negative is not None:
-                        negative[0][0] = negative[0][0].clone().to(default_dtype)
-                        negative[0][1]["pooled_output"] = negative[0][1]["pooled_output"].clone().to(default_dtype)
+                    if pos_cond is not None:
+                        pos_cond[0][0] = pos_cond[0][0].clone().to(default_dtype)
+                        pos_cond[0][1]["pooled_output"] = pos_cond[0][1]["pooled_output"].clone().to(default_dtype)
+                    if neg_cond is not None:
+                        neg_cond[0][0] = neg_cond[0][0].clone().to(default_dtype)
+                        neg_cond[0][1]["pooled_output"] = neg_cond[0][1]["pooled_output"].clone().to(default_dtype)
                     c = []
-                    for t in positive:
+                    for t in pos_cond:
                         d = t[1].copy()
                         pooled_output = d.get("pooled_output", None)
                         if pooled_output is not None:default_dtype = torch.float64
-                    for t in negative:
+                    for t in neg_cond:
                         d = t[1].copy()
                         pooled_output = d.get("pooled_output", None)
                         if pooled_output is not None:
@@ -260,7 +264,7 @@ class SharkSampler:
                                 d["pooled_output"] = d["pooled_output"][:, :2048]
                                 n = [t[0][:, :154, :4096], d]
                         c.append(n)
-                    negative = c
+                    neg_cond = c
                 
                 sigmin = model.model.model_sampling.sigma_min
                 sigmax = model.model.model_sampling.sigma_max
@@ -276,6 +280,7 @@ class SharkSampler:
                     if noise_type_init == "none":
                         noise = torch.zeros_like(x)
                     elif latent_noise is None:
+                        print("Initial latent noise seed: ", seed)
                         noise_sampler_init = NOISE_GENERATOR_CLASSES_SIMPLE.get(noise_type_init)(x=x, seed=seed, sigma_min=sigmin, sigma_max=sigmax)
                     
                         if noise_type_init == "fractal":
@@ -310,6 +315,8 @@ class SharkSampler:
                         #cfgpp = -cfg
                         sampler.extra_options['cfg_cw'] = -cfg
                         cfg = 1.0
+                    else:
+                        sampler.extra_options['cfg_cw'] = 1.0
                         
                     if sde_noise is None:
                         sde_noise = []
@@ -323,7 +330,7 @@ class SharkSampler:
                     callback = latent_preview.prepare_callback(model, sigmas.shape[-1] - 1, x0_output)
                     #disable_pbar = False
                     disable_pbar = not comfy.utils.PROGRESS_BAR_ENABLED
-                    samples = comfy.sample.sample_custom(model, noise, cfg, sampler, sigmas, positive, negative, x.clone(), noise_mask=noise_mask, callback=callback, disable_pbar=disable_pbar, seed=noise_seed)
+                    samples = comfy.sample.sample_custom(model, noise, cfg, sampler, sigmas, pos_cond, neg_cond, x.clone(), noise_mask=noise_mask, callback=callback, disable_pbar=disable_pbar, seed=noise_seed)
 
                     out = latent_unbatch.copy()
                     out["samples"] = samples
@@ -449,7 +456,7 @@ class ClownSamplerAdvanced:
                 sde_noise = options.get('sde_noise', sde_noise)
                 sde_noise_steps = options.get('sde_noise_steps', sde_noise_steps)
 
-            noise_seed_sde = torch.initial_seed()+1 if noise_seed_sde < 0 else noise_seed_sde 
+            #noise_seed_sde = torch.initial_seed()+1 if noise_seed_sde < 0 else noise_seed_sde 
 
             rescale_floor = extra_options_flag("rescale_floor", extra_options)
 
@@ -460,38 +467,6 @@ class ClownSamplerAdvanced:
             s_noises = initialize_or_scale(s_noises, s_noise, max_steps).to(default_dtype)
             s_noises = F.pad(s_noises, (0, max_steps), value=0.0)
         
-            truncate_conditioning = extra_options_flag("truncate_conditioning", extra_options)
-            if truncate_conditioning == "true" or truncate_conditioning == "true_and_zero_neg":
-                if positive is not None:
-                    positive[0][0] = positive[0][0].clone().to(default_dtype)
-                    positive[0][1]["pooled_output"] = positive[0][1]["pooled_output"].clone().to(default_dtype)
-                if negative is not None:
-                    negative[0][0] = negative[0][0].clone().to(default_dtype)
-                    negative[0][1]["pooled_output"] = negative[0][1]["pooled_output"].clone().to(default_dtype)
-                c = []
-                for t in positive:
-                    d = t[1].copy()
-                    pooled_output = d.get("pooled_output", None)
-                    if pooled_output is not None:
-                        d["pooled_output"] = d["pooled_output"][:, :2048]
-                        n = [t[0][:, :154, :4096], d]
-                    c.append(n)
-                positive = c
-                
-                c = []
-                for t in negative:
-                    d = t[1].copy()
-                    pooled_output = d.get("pooled_output", None)
-                    if pooled_output is not None:
-                        if truncate_conditioning == "true_and_zero_neg":
-                            d["pooled_output"] = torch.zeros((1,2048), dtype=t[0].dtype, device=t[0].device)
-                            n = [torch.zeros((1,154,4096), dtype=t[0].dtype, device=t[0].device), d]
-                        else:
-                            d["pooled_output"] = d["pooled_output"][:, :2048]
-                            n = [t[0][:, :154, :4096], d]
-                    c.append(n)
-                negative = c
-
             if sde_noise is None:
                 sde_noise = []
             else:
@@ -599,7 +574,7 @@ class ClownSamplerAdvanced_Beta:
                 sde_noise = options.get('sde_noise', sde_noise)
                 sde_noise_steps = options.get('sde_noise_steps', sde_noise_steps)
 
-            noise_seed_sde = torch.initial_seed()+1 if noise_seed_sde < 0 else noise_seed_sde 
+            #noise_seed_sde = torch.initial_seed()+1 if noise_seed_sde < 0 else noise_seed_sde 
 
             rescale_floor = extra_options_flag("rescale_floor", extra_options)
 
@@ -611,38 +586,6 @@ class ClownSamplerAdvanced_Beta:
             etas_substep = F.pad(etas_substep, (0, max_steps), value=0.0)
             s_noises = initialize_or_scale(s_noises, s_noise, max_steps).to(default_dtype)
             s_noises = F.pad(s_noises, (0, max_steps), value=0.0)
-        
-            truncate_conditioning = extra_options_flag("truncate_conditioning", extra_options)
-            if truncate_conditioning == "true" or truncate_conditioning == "true_and_zero_neg":
-                if positive is not None:
-                    positive[0][0] = positive[0][0].clone().to(default_dtype)
-                    positive[0][1]["pooled_output"] = positive[0][1]["pooled_output"].clone().to(default_dtype)
-                if negative is not None:
-                    negative[0][0] = negative[0][0].clone().to(default_dtype)
-                    negative[0][1]["pooled_output"] = negative[0][1]["pooled_output"].clone().to(default_dtype)
-                c = []
-                for t in positive:
-                    d = t[1].copy()
-                    pooled_output = d.get("pooled_output", None)
-                    if pooled_output is not None:
-                        d["pooled_output"] = d["pooled_output"][:, :2048]
-                        n = [t[0][:, :154, :4096], d]
-                    c.append(n)
-                positive = c
-                
-                c = []
-                for t in negative:
-                    d = t[1].copy()
-                    pooled_output = d.get("pooled_output", None)
-                    if pooled_output is not None:
-                        if truncate_conditioning == "true_and_zero_neg":
-                            d["pooled_output"] = torch.zeros((1,2048), dtype=t[0].dtype, device=t[0].device)
-                            n = [torch.zeros((1,154,4096), dtype=t[0].dtype, device=t[0].device), d]
-                        else:
-                            d["pooled_output"] = d["pooled_output"][:, :2048]
-                            n = [t[0][:, :154, :4096], d]
-                    c.append(n)
-                negative = c
 
             if sde_noise is None:
                 sde_noise = []
@@ -787,7 +730,10 @@ class ClownsharKSampler:
                     extra_options="", automation=None, etas=None, s_noises=None,unsample_resample_scales=None, regional_conditioning_weights=None,frame_weights=None,
                     ): 
 
-        noise_seed_sde = noise_seed + 1
+        if noise_seed >= 0:
+            noise_seed_sde = noise_seed + 1
+        else:
+            noise_seed_sde = -1
         
         eta_substep = eta
         noise_mode_sde_substep = noise_mode_sde
