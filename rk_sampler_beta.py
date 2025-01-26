@@ -361,8 +361,9 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
             newton_iter_lying_init = int(get_extra_options_kv("newton_iter_lying_init", str("0"), extra_options))
             for n_iter_lying_init in range(newton_iter_lying_init):
                 for r in range(0, rk.rows+1): #+1):
-                    x_tmp, eps_tmp = x_[r].clone(), eps_[r].clone()
                     eps_[0] = eps_0_lying
+                    x_tmp, eps_tmp = x_[r].clone(), eps_[r].clone()
+
                     if r < rk.rows:
                         x_[r] = x_0 + h * (rk.a_k_sum(eps_, r) + rk.u_k_sum(eps_prev_, r))
                     else:
