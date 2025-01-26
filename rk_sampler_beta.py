@@ -228,7 +228,8 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
 
                     eps_sum = eps_collinear_eps_lerp + eps_lerp_ortho_eps
 
-                    eps_substep_guide = eps_[r] + LG.lgw_masks[step] * (eps_sum - eps_[r]) + LG.lgw_masks_inv[step] * (eps_sum - eps_[r])
+                    lgw_mask, lgw_mask_inv = LG.get_masks_for_step(step)
+                    eps_substep_guide = eps_[r] + lgw_mask * (eps_sum - eps_[r]) + lgw_mask_inv * (eps_sum - eps_[r])
 
                 if not extra_options_flag("implicit_disable_preupdate", extra_options) and rk_type in IRK_SAMPLER_NAMES_BETA: 
                     if r < rk.rows - rk.multistep_stages:
@@ -296,8 +297,9 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
                             eps_lerp_ortho_eps     = get_orthogonal(eps_row_lerp, eps_[row])
 
                             eps_sum = eps_collinear_eps_lerp + eps_lerp_ortho_eps
-
-                            eps_substep_guide = eps_[row] + LG.lgw_masks[step] * (eps_sum - eps_[row]) + LG.lgw_masks_inv[step] * (eps_sum - eps_[row])
+                            
+                            lgw_mask, lgw_mask_inv = LG.get_masks_for_step(step)
+                            eps_substep_guide = eps_[row] + lgw_mask * (eps_sum - eps_[row]) + lgw_mask_inv * (eps_sum - eps_[row])
                                 
                         if not extra_options_flag("implicit_disable_preupdate", extra_options) and rk_type in IRK_SAMPLER_NAMES_BETA: 
                             if row < rk.rows - rk.multistep_stages:
