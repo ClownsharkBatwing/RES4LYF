@@ -67,7 +67,14 @@ def get_epsilon_from_step(x, x_next, sigma, sigma_next):
     h = sigma_next - sigma
     return (x - x_next) / h
 
-
+def debug_cuda_cleanup(doSync=False, doEmpty=False, doGC=False) -> None:
+    if doSync:
+        torch.cuda.synchronize()
+    if doEmpty:
+        torch.cuda.empty_cache()
+    if doGC:
+        import gc
+        gc.collect()
 
 @torch.no_grad()
 def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=None, noise_sampler_type="gaussian", noise_mode="hard", noise_seed=-1, rk_type="res_2m", implicit_sampler_name="explicit_full",
@@ -77,6 +84,14 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
                   extra_options="",
                   etas=None, etas_substep=None, s_noises=None, momentums=None, guides=None, cfgpp=0.0, cfg_cw = 1.0,regional_conditioning_floors=None, frame_weights_grp=None, eta_substep=0.0, noise_mode_sde_substep="hard",
                   ):
+    
+    cuda_sync_a_flag = extra_options_flag("cuda_sync_a", extra_options)
+    cuda_empty_a_flag = extra_options_flag("cuda_empty_a", extra_options)
+    cuda_gc_a_flag = extra_options_flag("cuda_gc_a", extra_options)
+    cuda_sync_b_flag = extra_options_flag("cuda_sync_b", extra_options)
+    cuda_empty_b_flag = extra_options_flag("cuda_empty_b", extra_options)
+    cuda_gc_b_flag = extra_options_flag("cuda_gc_b", extra_options)
+
     extra_args = {} if extra_args is None else extra_args
 
     c1 = c1_ = float(get_extra_options_kv("c1", str(c1), extra_options))
@@ -94,7 +109,7 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
     
     MODEL_SAMPLING = model.inner_model.inner_model.model_sampling
     
-    s_in, s_one = x.new_ones([x.shape[0]]), x.new_ones([1])
+    #s_in, s_one = x.new_ones([x.shape[0]]), x.new_ones([1])
     max_steps=10000
     
     if sigmas_override is not None:
@@ -127,13 +142,16 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
     
     y0, y0_inv = LG.y0, LG.y0_inv
 
-    denoised, denoised_prev, denoised_prev2, data_prev = [torch.zeros_like(x) for _ in range(4)]
-    s_prev, s_down_prev, x_down = None, None, None
-    eps_prev_lost = torch.zeros_like(x)
+    denoised = torch.zeros_like(x)
+    denoised_prev = torch.zeros_like(x)
+    denoised_prev2 = torch.zeros_like(x).to('cpu')
+    eps = torch.zeros_like(x)
+    data_prev = torch.zeros_like(x).to('cpu')
+    s_prev = None
     
-    denoised, eps = [torch.zeros_like(x) for _ in range(2)]
     torch.cuda.empty_cache()
     gc.collect()
+
     for step in trange(len(sigmas)-1, disable=disable):
 
         sigma, sigma_next = sigmas[step], sigmas[step+1]
@@ -164,11 +182,16 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
 
         rk. set_coeff(rk_type, h, c1, c2, c3, step, sigmas, sigma_down, extra_options)
 
-        s_        = [(rk.sigma_fn(rk.t_fn(sigma) +        h*c_)) * s_one for c_ in rk.c]
-        s_no_eta_ = [(rk.sigma_fn(rk.t_fn(sigma) + h_no_eta*c_)) * s_one for c_ in rk.c]
+        s_        = [(rk.sigma_fn(rk.t_fn(sigma) +        h*c_)) * x.new_ones([1]) for c_ in rk.c]
+        #s_no_eta_ = [(rk.sigma_fn(rk.t_fn(sigma) + h_no_eta*c_)) * x.new_ones([1]) for c_ in rk.c]
 
+        recycled_stages = max(rk.multistep_stages, rk.hybrid_stages)
         if step == 0 or step == guide_skip_steps:
-            x_, data_, denoised_, eps_ = (torch.zeros(rk.rows+2, *x.shape, dtype=x.dtype, device=x.device) for step in range(4))
+            #x_, data_, denoised_, eps_ = (torch.zeros(rk.rows+2, *x.shape, dtype=x.dtype, device=x.device) for step in range(4))
+            x_ = torch.zeros(rk.rows+2, *x.shape, dtype=x.dtype, device=x.device)
+            data_ = torch.zeros(min(3, rk.rows+2), *x.shape, dtype=x.dtype, device=x.device)  # Only 3 rows needed max
+            denoised_ = torch.zeros(recycled_stages+1, *x.shape, dtype=x.dtype, device=x.device)  # Only recycled_stages+1 needed
+            eps_ = torch.zeros(rk.rows+2, *x.shape, dtype=x.dtype, device=x.device)
 
         sde_noise_t = None
         if SDE_NOISE_EXTERNAL:
@@ -183,7 +206,6 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
         
         x_0 = x_[0].clone()
         
-        recycled_stages = max(rk.multistep_stages, rk.hybrid_stages)
         for ms in range(recycled_stages):
             eps_ [recycled_stages - ms] = get_epsilon(x_0, denoised_ [recycled_stages - ms], sigma, rk_type)
                 
@@ -200,6 +222,8 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
 
                 # RES_2M GUESS HERE
                 if denoised_prev2.sum() != 0 and extra_options_flag("implicit_res_2m_denoised_guess", extra_options):
+                    data_prev = data_prev.to(x.device)
+
                     h_prev1 = -torch.log(sigmas[step]/sigmas[step-1])
                     h_curr = -torch.log(s_[0]/sigma)
                                         
@@ -265,6 +289,8 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
                         #data_[1] = get_data_from_step(x_0, x_[1], sigma, s_[1]) 
                         eps_[1] = get_epsilon(x_[1], data_[1], s_[1], rk_type)
 
+                    data_prev = data_prev.to('cpu')
+
             else:
                 eps_[0], data_[0] = rk(x_[0], sigma, x_0, sigma, **extra_args) 
                 
@@ -278,16 +304,16 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
                     x_[r] = x_0 + h * (rk.a_k_sum(eps_, r) + rk.u_k_sum(eps_prev_, r))
                 for r in range(rk.rows):
                     eps_[r] = get_epsilon_from_step(x_0, x_[r], sigma, s_[r])
-
-            eps_0  = eps_ [0].clone()
-            data_0 = data_[0].clone()
+            
+            eps_0  = eps_ [0].clone().to('cpu')
+            data_0 = data_[0].clone().to('cpu') 
 
             newton_iter_init = int(get_extra_options_kv("newton_iter_init", str("0"), extra_options))
             if step >= len(sigmas)-6:
                 newton_iter_init = 0
             for n_iter_init in range(newton_iter_init):
                 for r in range(0, rk.rows+1): #+1):
-                    eps_[0] = eps_0.clone()
+                    eps_[0] = eps_0.clone().to(x.device)
                     x_tmp, eps_tmp = x_[r].clone(), eps_[r].clone()
                     if r < rk.rows:
                         x_[r] = x_0 + h * (rk.a_k_sum(eps_, r) + rk.u_k_sum(eps_prev_, r))
@@ -550,7 +576,7 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
                             print("B: step,h,h_new: \n", step, round(float(h.item()),3), round(float(h_new.item()),3))
                             print("B: sub_sigma_up, sub_sigma, sub_sigma_next, sub_sigma_down, sub_alpha_ratio: \n", round(float(sub_sigma_up),3), round(float(sub_sigma),3), round(float(sub_sigma_next),3), round(float(sub_sigma_down),3), round(float(sub_alpha_ratio),3))
                         x_[row+1] = x_0 + h_new * (rk.b_k_sum(eps_, 0) + rk.v_k_sum(eps_prev_, 0))
-                        x_down = x_[row+1]
+                        #x_down = x_[row+1]
                         x_[row+1] = rk.add_noise_post(x_[row+1], sub_sigma_up, sub_sigma, sub_sigma_next, sub_alpha_ratio, s_noise, noise_mode_sde_substep, SDE_NOISE_EXTERNAL, sde_noise_t)
             
             denoised = x_0 + ((sigma / (sigma - sigma_down)) *  h_new) * (rk.b_k_sum(eps_, 0) + rk.v_k_sum(eps_prev_, 0))
@@ -570,21 +596,23 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
         for ms in range(recycled_stages):
             denoised_[recycled_stages - ms] = denoised_[recycled_stages - ms - 1]
             
-        denoised_prev2 = denoised_prev
-        denoised_prev = denoised
+        denoised_prev2 = denoised_prev.to('cpu')
+        denoised_prev = denoised.to('cpu')
         
         data_prev2 = data_prev
         s_prev2 = s_prev
-        s_down_prev = sigma_down
+        #s_down_prev = sigma_down
         
         
         data_prev = data_[rk.rows-1]
         s_prev = s_[rk.rows-1]
         x_prev = x_[rk.rows-1]
         
-        eps_prev_lost = get_epsilon_from_step(x_0, x, sigma, sigma_next)
+        #eps_prev_lost = get_epsilon_from_step(x_0, x, sigma, sigma_next)
         
-        h_prev_last_data = rk.h_fn(s_[rk.rows-1], sigma_next)
+        #h_prev_last_data = rk.h_fn(s_[rk.rows-1], sigma_next)
+
+        debug_cuda_cleanup(cuda_sync_b_flag, cuda_empty_b_flag, cuda_gc_b_flag)
         
     preview_callback(x, eps, denoised, x_, eps_, data_, step, sigma, sigma_next, callback, extra_options, FINAL_STEP=True)
     return x
