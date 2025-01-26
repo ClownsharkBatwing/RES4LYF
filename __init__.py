@@ -270,6 +270,8 @@ if flags["test_samplers"]:
         "rk_pec433": test_samplers.sample_rk_pec433,
 
         "rk_abnorsett4": test_samplers.sample_rk_abnorsett4,
+        "rk_euler_lowranksvd": test_samplers.sample_rk_euler_lowranksvd,
+        "rk_randomized_svd": test_samplers.sample_rk_randomized_svd,
 
 
 
@@ -286,6 +288,7 @@ if flags["test_samplers"]:
         "zample_paper": test_samplers.sample_zample_paper,
         "zample_inversion": test_samplers.sample_zample_inversion,
         "sample_zample_edit": test_samplers.sample_zample_edit,
+        
     })
     
 
