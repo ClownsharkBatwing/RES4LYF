@@ -151,9 +151,13 @@ IRK_SAMPLER_NAMES_BETA = ["none",
                     
                     "crouzeix_2s",
                     "crouzeix_3s",
+                    "crouzeix_3s_alt",
+
                     ]
 
-alpha_crouzeix = (2/(3**0.5)) * math.cos(math.pi / 18)
+alpha_crouzeix  = (2/(3**0.5)) * math.cos(math.pi / 18)
+gamma_crouzeix = (1/(3**0.5)) * math.cos(math.pi / 18) + 1/2 # Crouzeix & Raviart 1980; A-stable; pg 100 in Solving Ordinary Differential Equations II
+delta_crouzeix = 1 / (6 * (2 * gamma_crouzeix - 1)**2)       # Crouzeix & Raviart 1980; A-stable; pg 100 in Solving Ordinary Differential Equations II
 
 rk_coeff = {
     "gauss-legendre_5s": (
@@ -496,6 +500,18 @@ rk_coeff = {
         [(1-2**0.5/2), 1]
     ),
 
+    "crouzeix_3s_alt": ( # Crouzeix & Raviart 1980; A-stable; pg 100 in Solving Ordinary Differential Equations II
+        [
+            [gamma_crouzeix, 0, 0],
+            [1/2 - gamma_crouzeix, gamma_crouzeix, 0],
+            [2*gamma_crouzeix, 1-4*gamma_crouzeix, gamma_crouzeix],
+        ],
+        [
+            [delta_crouzeix, 1-2*delta_crouzeix, delta_crouzeix],
+        ],
+        [gamma_crouzeix,   1/2,   1-gamma_crouzeix],
+    ),
+    
     "crouzeix_3s": (
         [
             [(1+alpha_crouzeix)/2, 0, 0],
