@@ -85,7 +85,7 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
     
     newton_iter_post = int(get_extra_options_kv("newton_iter_post", str("0"), extra_options))
     newton_iter_pre = int(get_extra_options_kv("newton_iter_pre", str("0"), extra_options))
-    newton_iter_mixing_rate = float(get_extra_options_kv("newton_iter_mixing_rate", str("0.0"), extra_options))
+    newton_iter_mixing_rate = float(get_extra_options_kv("newton_iter_mixing_rate", str("0.5"), extra_options))
 
     guide_skip_steps = int(get_extra_options_kv("guide_skip_steps", 0, extra_options))        
 
