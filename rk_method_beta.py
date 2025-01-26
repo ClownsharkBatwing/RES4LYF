@@ -99,8 +99,12 @@ class RK_Method_Beta:
 
 
     def init_noise_sampler(self, x, noise_seed, noise_sampler_type, alpha, k=1., scale=0.1):
-        seed = torch.initial_seed()+1 if noise_seed == -1 else noise_seed
-        print("Noise seed set to: ", seed)
+        if noise_seed < 0:
+            seed = torch.initial_seed()+1 
+            print("SDE noise seed: ", seed, " (set via torch.initial_seed()+1)")
+        else:
+            seed = noise_seed
+            print("SDE noise seed: ", seed)
         if noise_sampler_type == "fractal":
             self.noise_sampler = NOISE_GENERATOR_CLASSES.get(noise_sampler_type)(x=x, seed=seed, sigma_min=self.sigma_min, sigma_max=self.sigma_max)
             self.noise_sampler.alpha = alpha

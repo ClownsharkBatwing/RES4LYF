@@ -93,6 +93,10 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
     cuda_gc_b_flag = extra_options_flag("cuda_gc_b", extra_options)
 
     extra_args = {} if extra_args is None else extra_args
+    
+    if noise_seed < 0:
+        noise_seed = torch.initial_seed()+1 
+        print("Set noise_seed to: ", noise_seed, " using torch.initial_seed()+1")
 
     c1 = c1_ = float(get_extra_options_kv("c1", str(c1), extra_options))
     c2 = c2_ = float(get_extra_options_kv("c2", str(c2), extra_options))
