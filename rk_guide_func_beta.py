@@ -91,6 +91,9 @@ class LatentGuide:
                 
             latent_guide_weights     = initialize_or_scale(latent_guide_weights,     latent_guide_weight,     max_steps).to(dtype)
             latent_guide_weights_inv = initialize_or_scale(latent_guide_weights_inv, latent_guide_weight_inv, max_steps).to(dtype)
+
+            latent_guide_weights[steps_:] = 0
+            latent_guide_weights_inv[steps_inv_:] = 0
                 
         latent_guide_weights     = F.pad(latent_guide_weights,     (0, max_steps), value=0.0)
         latent_guide_weights_inv = F.pad(latent_guide_weights_inv, (0, max_steps), value=0.0)
