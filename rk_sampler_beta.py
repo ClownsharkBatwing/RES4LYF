@@ -475,7 +475,7 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
                             x_tmp = x_[row+row_offset]
                             s_tmp = s_[row+row_offset+rk.multistep_stages]
                             if rk_type in IRK_SAMPLER_NAMES_BETA   and   not extra_options_flag("implicit_disable_diagonal_preupdate", extra_options): 
-                                if row == 0:
+                                if row == 0 and not extra_options_flag("substep_eta_use_final", extra_options):
                                     x_tmp = x_[row+row_offset] = x_0 + h * (rk.a_k_sum(eps_, row+row_offset) + rk.u_k_sum(eps_prev_, row+row_offset))
                                 else:
                                     x_tmp = x_[row+row_offset] = x_0 + h_new * (rk.a_k_sum(eps_, row+row_offset) + rk.u_k_sum(eps_prev_, row+row_offset))
@@ -486,7 +486,7 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
                             x_tmp = x_[row]
                             s_tmp = s_[row]
                             if rk_type in IRK_SAMPLER_NAMES_BETA   and   not extra_options_flag("implicit_disable_full_preupdate", extra_options): 
-                                if row == 0:
+                                if row == 0 and not extra_options_flag("substep_eta_use_final", extra_options):
                                     x_tmp = x_[row] = x_0 + h * (rk.a_k_sum(eps_, row) + rk.u_k_sum(eps_prev_, row))
                                 else:
                                     x_tmp = x_[row] = x_0 + h_new * (rk.a_k_sum(eps_, row) + rk.u_k_sum(eps_prev_, row))
