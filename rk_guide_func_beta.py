@@ -12,7 +12,7 @@ from .noise_classes import *
 from .latents import hard_light_blend, normalize_latent, initialize_or_scale
 from .rk_method_beta import RK_Method_Beta
 from .helper import get_extra_options_kv, extra_options_flag, get_cosine_similarity, get_extra_options_list
-
+from .rk_coefficients_beta import IRK_SAMPLER_NAMES_BETA
 
 import itertools
 
@@ -346,10 +346,10 @@ class LatentGuide:
 
 
         elif (self.UNSAMPLE or self.guide_mode in {"resample", "unsample"}) and (self.lgw[step] > 0 or self.lgw_inv[step] > 0):
-                
-            cvf = rk.get_epsilon(x_0, x_[row+1], y0, sigma, s_[row], sigma_down, unsample_resample_scale, extra_options)
+            row_offset = 1 if rk.a[0].sum() == 0 and rk_type not in IRK_SAMPLER_NAMES_BETA else 0       
+            cvf = rk.get_epsilon(x_0, x_[row+row_offset], y0, sigma, s_[row], sigma_down, unsample_resample_scale, extra_options)
             if self.UNSAMPLE and sigma > sigma_next and self.HAS_LATENT_GUIDE is True:
-                cvf_inv = rk.get_epsilon(x_0, x_[row+1], y0_inv, sigma, s_[row], sigma_down, unsample_resample_scale, extra_options)      
+                cvf_inv = rk.get_epsilon(x_0, x_[row+row_offset], y0_inv, sigma, s_[row], sigma_down, unsample_resample_scale, extra_options)      
             else:
                 cvf_inv = torch.zeros_like(cvf)
 
