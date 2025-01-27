@@ -645,8 +645,8 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
         s_prev = s_[rk.rows-1]
         x_prev = x_[rk.rows-1]
 
-        
-    preview_callback(x, eps, denoised, x_, eps_, data_, step, sigma, sigma_next, callback, extra_options, FINAL_STEP=True)
+    if not (UNSAMPLE and sigmas[1] > sigmas[0]):
+        preview_callback(x, eps, denoised, x_, eps_, data_, step, sigma, sigma_next, callback, extra_options, FINAL_STEP=True)
     return x
 
 
