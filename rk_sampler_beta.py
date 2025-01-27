@@ -288,7 +288,7 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
             data_0 = data_[0].clone()
 
             newton_iter_init = int(get_extra_options_kv("newton_iter_init", str("0"), extra_options))
-            if step >= len(sigmas)-6:
+            if step >= len(sigmas)-4:
                 newton_iter_init = 0
             for n_iter_init in range(newton_iter_init):
                 for r in range(0, rk.rows+1): #+1):
@@ -304,11 +304,25 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
                     data_[r] = get_data_from_step(x_0, x_[r], sigma, s_[r])  
                     eps_ [r] = get_epsilon(x_0, data_[r], s_[r], rk_type)
                     
-                    if extra_options_flag("newton_iter_init_ortho", extra_options):
+                    if extra_options_flag("newton_iter_init_ortho_a", extra_options):
                         for r2 in range(0, rk.rows+1): 
                             if r != r2:
                                 eps_ [r] = get_orthogonal(eps_[r2], eps_[r])
-                    
+                                
+                    if extra_options_flag("newton_iter_init_ortho_b", extra_options):
+                        for r2 in range(0, rk.rows+1): 
+                            if r != r2:
+                                eps_ [r] = get_orthogonal(eps_[r2], eps_[r])
+                                
+                    if extra_options_flag("newton_iter_init_collin_a", extra_options):
+                        for r2 in range(0, rk.rows+1): 
+                            if r != r2:
+                                eps_ [r] = get_collinear(eps_[r2], eps_[r])
+                    if extra_options_flag("newton_iter_init_collin_b", extra_options):
+                        for r2 in range(0, rk.rows+1): 
+                            if r != r2:
+                                eps_ [r] = get_collinear(eps_[r], eps_[r2])
+                                
                     x_[r] = x_tmp + newton_iter_mixing_rate * (x_[r] - x_tmp)
                     eps_[r] = eps_tmp + newton_iter_mixing_rate * (eps_[r] - eps_tmp)
                     
@@ -385,9 +399,15 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
                     data_[r] = get_data_from_step(x_0, x_[r], sigma, s_[r])
                     eps_ [r] = get_epsilon(x_0, data_[r], s_[r], rk_type)
                     
-                    for r2 in range(0, rk.rows+1): 
-                        if r != r2:
-                            eps_ [r] = get_orthogonal(eps_[r2], eps_[r])
+                    if extra_options_flag("newton_iter_lying_init_ortho", extra_options):
+                        for r2 in range(0, rk.rows+1): 
+                            if r != r2:
+                                eps_ [r] = get_orthogonal(eps_[r2], eps_[r])
+                                
+                    if extra_options_flag("newton_iter_lying_init_collin", extra_options):
+                        for r2 in range(0, rk.rows+1): 
+                            if r != r2:
+                                eps_ [r] = get_collinear(eps_[r2], eps_[r])
                     #eps_ [r] = get_collinear(eps_[r], eps_0_lying)
                     
                     x_[r] = x_tmp + newton_iter_mixing_rate * (x_[r] - x_tmp)
@@ -538,11 +558,44 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
                                     data_[r] = get_data_from_step(x_0, x_[r], sigma, s_[r])
                                     eps_[r] = get_epsilon(x_0, data_[r], s_[r], rk_type)
                                     
-                                    if extra_options_flag("newton_iter_post_ortho", extra_options):
+                                    if extra_options_flag("newton_iter_post_ortho_a", extra_options):
                                         for r2 in range(row+1, rk.rows+1): 
                                             if r != r2:
                                                 eps_ [r] = get_orthogonal(eps_[r2], eps_[r])
-                            
+                                                
+                                    if extra_options_flag("newton_iter_post_ortho_b", extra_options):
+                                        for r2 in range(row+1, rk.rows+1): 
+                                            if r != r2:
+                                                eps_ [r] = get_orthogonal(eps_[r], eps_[r2])
+                                                                                                
+                                    if extra_options_flag("newton_iter_post_early_ortho_a", extra_options):
+                                        for r2 in range(0, row+1): 
+                                            if r != r2:
+                                                eps_ [r] = get_orthogonal(eps_[r2], eps_[r])
+
+                                    if extra_options_flag("newton_iter_post_early_ortho_b", extra_options):
+                                        for r2 in range(0, row+1): 
+                                            if r != r2:
+                                                eps_ [r] = get_orthogonal(eps_[r], eps_[r2])
+                                                
+                                    if extra_options_flag("newton_iter_post_collin_a", extra_options):
+                                        for r2 in range(row+1, rk.rows+1): 
+                                            if r != r2:
+                                                eps_ [r] = get_collinear(eps_[r2], eps_[r])
+                                    if extra_options_flag("newton_iter_post_collin_b", extra_options):
+                                        for r2 in range(row+1, rk.rows+1): 
+                                            if r != r2:
+                                                eps_ [r] = get_collinear(eps_[r], eps_[r2])
+                                                
+                                    if extra_options_flag("newton_iter_post_early_collin_a", extra_options):
+                                        for r2 in range(0, row+1): 
+                                            if r != r2:
+                                                eps_ [r] = get_collinear(eps_[r2], eps_[r])
+                                    if extra_options_flag("newton_iter_post_early_collin_b", extra_options):
+                                        for r2 in range(0, row+1): 
+                                            if r != r2:
+                                                eps_ [r] = get_collinear(eps_[r], eps_[r2])
+                                                
                             newton_yter_post = int(get_extra_options_kv("newton_yter_post", str("0"), extra_options))
                             for n_yter_post in range(newton_yter_post):
                                 for r in range(row+1, rk.rows):
