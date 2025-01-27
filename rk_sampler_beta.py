@@ -601,7 +601,7 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
 
 def reorder_tableau(rk, extra_options):
     indices = get_extra_options_list("reorder_tableau", "", extra_options).split(",")
-    if indices:
+    if indices[0]:
         indices = [int(indices[_]) for _ in range(len(indices))]
         
         rk.a = rk.a[indices]
