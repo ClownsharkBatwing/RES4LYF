@@ -83,7 +83,7 @@ class SharkSampler:
             pos_cond = copy.deepcopy(positive)
             neg_cond = copy.deepcopy(negative)
             
-            default_dtype = getattr(torch, get_extra_options_kv("default_dtype", "float64", extra_options), torch.float64)   
+            default_dtype = getattr(torch, get_extra_options_kv("default_dtype", "float64", extra_options), torch.float64)
                      
             model = model.clone()
             if pos_cond[0][1] is not None: 
@@ -252,7 +252,8 @@ class SharkSampler:
                     for t in pos_cond:
                         d = t[1].copy()
                         pooled_output = d.get("pooled_output", None)
-                        if pooled_output is not None:default_dtype = torch.float64
+                        #if pooled_output is not None:
+                        #    default_dtype = torch.float64
                     for t in neg_cond:
                         d = t[1].copy()
                         pooled_output = d.get("pooled_output", None)
@@ -327,7 +328,7 @@ class SharkSampler:
                                 sde_noise[i][0][j] = ((sde_noise[i][0][j] - sde_noise[i][0][j].mean()) / sde_noise[i][0][j].std()) #.to('cuda')
                                 
                     callback = latent_preview.prepare_callback(model, sigmas.shape[-1] - 1, x0_output)
-                    #disable_pbar = False
+
                     disable_pbar = not comfy.utils.PROGRESS_BAR_ENABLED
                     samples = comfy.sample.sample_custom(model, noise, cfg, sampler, sigmas, pos_cond, neg_cond, x.clone(), noise_mask=noise_mask, callback=callback, disable_pbar=disable_pbar, seed=noise_seed)
 
@@ -550,7 +551,7 @@ class ClownSamplerAdvanced_Beta:
                 eta, eta_var = 0.0, 0.0
                 noise_mode_sde = "hard"
         
-            default_dtype = torch.float64
+            default_dtype = getattr(torch, get_extra_options_kv("default_dtype", "float64", extra_options), torch.float64)
             max_steps = 10000
 
             unsample_resample_scales_override = unsample_resample_scales

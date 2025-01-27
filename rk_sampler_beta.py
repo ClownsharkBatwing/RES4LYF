@@ -78,14 +78,18 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
                   etas=None, etas_substep=None, s_noises=None, momentums=None, guides=None, cfgpp=0.0, cfg_cw = 1.0,regional_conditioning_floors=None, frame_weights=None, eta_substep=0.0, noise_mode_sde_substep="hard",
                   ):
     extra_args = {} if extra_args is None else extra_args
+    default_dtype = getattr(torch, get_extra_options_kv("default_dtype", "float64", extra_options), torch.float64)
+    
     
     if noise_seed < 0:
         noise_seed = torch.initial_seed()+1 
         print("Set noise_seed to: ", noise_seed, " using torch.initial_seed()+1")
 
-    c1 = c1_ = float(get_extra_options_kv("c1", str(c1), extra_options))
-    c2 = c2_ = float(get_extra_options_kv("c2", str(c2), extra_options))
-    c3 = c3_ = float(get_extra_options_kv("c3", str(c3), extra_options))
+    c1 = float(get_extra_options_kv("c1", str(c1), extra_options))
+    c2 = float(get_extra_options_kv("c2", str(c2), extra_options))
+    c3 = float(get_extra_options_kv("c3", str(c3), extra_options))
+    
+    
     
     newton_iter_post = int(get_extra_options_kv("newton_iter_post", str("0"), extra_options))
     newton_iter_pre = int(get_extra_options_kv("newton_iter_pre", str("0"), extra_options))
@@ -98,7 +102,7 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
     MODEL_SAMPLING = model.inner_model.inner_model.model_sampling
     
     s_in, s_one = x.new_ones([x.shape[0]]), x.new_ones([1])
-    default_dtype = torch.float64
+    
     max_steps=10000
     
     if sigmas_override is not None:
@@ -134,10 +138,8 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
     
     y0, y0_inv = LG.y0, LG.y0_inv
 
-    denoised, denoised_prev, denoised_prev2, data_prev, eps, eps_prev = [torch.zeros_like(x) for _ in range(6)]
-    s_prev, s_down_prev, x_down = None, None, None
-    eps_prev_lost = torch.zeros_like(x)
-    
+    denoised, denoised_prev, denoised_prev2, data_prev, eps = [torch.zeros_like(x) for _ in range(5)]
+    s_prev = None
     
     for step in trange(len(sigmas)-1, disable=disable):
         sigma, sigma_next = sigmas[step], sigmas[step+1]
@@ -168,10 +170,10 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
         rk. set_coeff(rk_type, h, c1, c2, c3, step, sigmas, sigma_down, extra_options)
 
         s_        = [(rk.sigma_fn(rk.t_fn(sigma) +        h*c_)) * s_one for c_ in rk.c]
-        s_no_eta_ = [(rk.sigma_fn(rk.t_fn(sigma) + h_no_eta*c_)) * s_one for c_ in rk.c]
 
         if step == 0 or step == guide_skip_steps:
-            x_, data_, denoised_, eps_ = (torch.zeros(rk.rows+2, *x.shape, dtype=x.dtype, device=x.device) for step in range(4))
+            x_, data_, eps_, denoised_ = (torch.zeros(rk.rows+2, *x.shape, dtype=x.dtype, device=x.device) for _ in range(4))
+            recycled_stages = len(denoised_)-1
 
         sde_noise_t = None
         if SDE_NOISE_EXTERNAL:
@@ -186,10 +188,10 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
         
         x_0 = x_[0].clone()
         
-        recycled_stages = max(rk.multistep_stages, rk.hybrid_stages)
+
         for ms in range(recycled_stages):
             eps_ [recycled_stages - ms] = get_epsilon(x_0, denoised_ [recycled_stages - ms], sigma, rk_type)
-                
+
         eps_prev_ = eps_.clone()
 
         if rk_type in IRK_SAMPLER_NAMES_BETA:
@@ -302,9 +304,10 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
                     data_[r] = get_data_from_step(x_0, x_[r], sigma, s_[r])  
                     eps_ [r] = get_epsilon(x_0, data_[r], s_[r], rk_type)
                     
-                    #for r2 in range(0, rk.rows+1): 
-                    #    if r != r2:
-                    #        eps_ [r] = get_orthogonal(eps_[r2], eps_[r])
+                    if extra_options_flag("newton_iter_init_ortho", extra_options):
+                        for r2 in range(0, rk.rows+1): 
+                            if r != r2:
+                                eps_ [r] = get_orthogonal(eps_[r2], eps_[r])
                     
                     x_[r] = x_tmp + newton_iter_mixing_rate * (x_[r] - x_tmp)
                     eps_[r] = eps_tmp + newton_iter_mixing_rate * (eps_[r] - eps_tmp)
@@ -364,7 +367,6 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
             if extra_options_flag("lying_scaling_post", extra_options):
                 for r in range(rk.rows):
                     eps_ [r] = eps_lying_ [0].clone() * sigma / s_[r]
-                    #data_[r] = data_[0].clone()
             
             eps_0_lying = eps_[0].clone()
             newton_iter_lying_init = int(get_extra_options_kv("newton_iter_lying_init", str("0"), extra_options))
@@ -385,7 +387,6 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
                     
                     for r2 in range(0, rk.rows+1): 
                         if r != r2:
-                            #eps_ [r2] = get_orthogonal(eps_[r2], eps_[r])
                             eps_ [r] = get_orthogonal(eps_[r2], eps_[r])
                     #eps_ [r] = get_collinear(eps_[r], eps_0_lying)
                     
@@ -417,12 +418,9 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
                             sigma_up *= 0
                             alpha_ratio /= alpha_ratio
                             h_new = h = h_no_eta
-                        elif (row < rk.rows-row_offset-rk.multistep_stages   or   diag_iter < implicit_steps_diag):
+                        elif (row < rk.rows-row_offset-rk.multistep_stages   or   diag_iter < implicit_steps_diag)   or   extra_options_flag("substep_eta_use_final", extra_options):
                             sub_sigma_up, sub_sigma, sub_sigma_down, sub_alpha_ratio = get_res4lyf_step_with_model(model, s_[row], s_[row+row_offset+rk.multistep_stages], eta_substep, eta_var_substep, noise_mode_sde_substep)
                             
-                        elif (row < rk.rows-rk.multistep_stages   or   diag_iter < implicit_steps_diag)   and not   extra_options_flag("substep_eta_skip_final", extra_options):
-                            sub_sigma_up, sub_sigma, sub_sigma_down, sub_alpha_ratio = get_res4lyf_step_with_model(model, s_[row], s_[row+row_offset+rk.multistep_stages], eta_substep, eta_var_substep, noise_mode_sde_substep)
-
                     h_new = h * rk.h_fn(sub_sigma_down, sigma) / rk.h_fn(sub_sigma_next, sigma) 
 
                     if extra_options_flag("guide_pseudoimplicit_power_substep", extra_options):
@@ -430,7 +428,6 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
                         eps_substep_guide = LG.mask * eps_substep_guide + (1-LG.mask) * eps_substep_guide_inv
                         maxmin_ratio = (sub_sigma - rk.sigma_min) / sub_sigma
                         sub_sigma_2 = sub_sigma - maxmin_ratio * (sub_sigma * LG.lgw[step])
-                        #s_2_ = s_.clone()
                         s_2_ = copy.deepcopy(s_)
                         s_2_[row] = sub_sigma_2
                         if extra_options_flag("guide_pseudoimplicit_power_substep_projection", extra_options):
@@ -468,31 +465,45 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
                             x_tmp = x_lying_[row]
                             s_tmp = s_lying_[row]
 
+                        # Fully implicit iteration (explicit only)
                         elif full_iter > 0 and row_offset == 1 and row == 0: # explicit full implicit
                             x_tmp = x
                             s_tmp = sigma_next
 
+                        # Diagonally implicit iteration (explicit or implicit)
                         elif diag_iter > 0:
                             x_tmp = x_[row+row_offset]
                             s_tmp = s_[row+row_offset+rk.multistep_stages]
                             if rk_type in IRK_SAMPLER_NAMES_BETA   and   not extra_options_flag("implicit_disable_diagonal_preupdate", extra_options): 
-                                 x_tmp = x_[row+row_offset] = x_0 + h * (rk.a_k_sum(eps_, row+row_offset) + rk.u_k_sum(eps_prev_, row+row_offset))
+                                if row == 0:
+                                    x_tmp = x_[row+row_offset] = x_0 + h * (rk.a_k_sum(eps_, row+row_offset) + rk.u_k_sum(eps_prev_, row+row_offset))
+                                else:
+                                    x_tmp = x_[row+row_offset] = x_0 + h_new * (rk.a_k_sum(eps_, row+row_offset) + rk.u_k_sum(eps_prev_, row+row_offset))
+                                    x_tmp = x_[row+row_offset] = rk.add_noise_post(x_[row+row_offset], sub_sigma_up, sub_sigma, sub_sigma_next, sub_alpha_ratio, s_noise, noise_mode_sde_substep, SDE_NOISE_EXTERNAL, sde_noise_t)
 
+                        # All others
                         else:
                             x_tmp = x_[row]
                             s_tmp = s_[row]
                             if rk_type in IRK_SAMPLER_NAMES_BETA   and   not extra_options_flag("implicit_disable_full_preupdate", extra_options): 
-                                x_tmp = x_[row] = x_0 + h * (rk.a_k_sum(eps_, row) + rk.u_k_sum(eps_prev_, row))
+                                if row == 0:
+                                    x_tmp = x_[row] = x_0 + h * (rk.a_k_sum(eps_, row) + rk.u_k_sum(eps_prev_, row))
+                                else:
+                                    x_tmp = x_[row] = x_0 + h_new * (rk.a_k_sum(eps_, row) + rk.u_k_sum(eps_prev_, row))
+                                    x_tmp = x_[row] = rk.add_noise_post(x_[row], sub_sigma_up, sub_sigma, sub_sigma_next, sub_alpha_ratio, s_noise, noise_mode_sde_substep, SDE_NOISE_EXTERNAL, sde_noise_t)
 
-                        if rk_type in IRK_SAMPLER_NAMES_BETA   and   extra_options_flag("implicit_recycle_first_model_call_at_start", extra_options)   and   row == 0:   #and   s_[0] == sigma:
+
+
+                        if rk_type in IRK_SAMPLER_NAMES_BETA   and   extra_options_flag("implicit_recycle_first_model_call_at_start", extra_options)   and   row == 0:
                             eps_ [0] = eps_0
                             data_[0] = data_0
 
-                        elif rk_type in IRK_SAMPLER_NAMES_BETA   and   extra_options_flag("implicit_lazy_recycle_first_model_call_at_start", extra_options)   and   row == 0:   #and   s_[0] == sigma:
+                        elif rk_type in IRK_SAMPLER_NAMES_BETA   and   extra_options_flag("implicit_lazy_recycle_first_model_call_at_start", extra_options)   and   row == 0: 
                             pass
                         else:
                             if s_tmp == 0:
                                 break
+                            
                             if sigma_next > 0:
                                 for n_iter_pre in range(newton_iter_pre):
                                     for r in range(row, rk.rows+1):
@@ -502,6 +513,7 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
                                             x_[r] = x_0 + h * (rk.b_k_sum(eps_, 0) + rk.v_k_sum(eps_prev_, 0))
                                         data_[r] = get_data_from_step(x_0, x_[r], sigma, s_[r])
                                         eps_[r] = get_epsilon(x_0, data_[r], s_[r], rk_type)
+                            
                             eps_[row], data_[row] = rk(x_tmp, s_tmp, x_0, sigma, **extra_args) 
 
 
@@ -518,19 +530,19 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
                                 newton_iter_post = 0
                             eps_orig = eps_.clone()
                             for n_iter_post in range(newton_iter_post):
-                                #for r in range(row+1):
-                                #    eps_[r] = eps_orig[r]
                                 for r in range(row+1, rk.rows+1):
-                                    #if r < row+1:
-                                    #    eps_[r] = eps_orig[r]
                                     if r < rk.rows:
                                         x_[r] = x_0 + h * (rk.a_k_sum(eps_, r) + rk.u_k_sum(eps_prev_, r))
                                     else:
                                         x_[r] = x_0 + h * (rk.b_k_sum(eps_, 0) + rk.v_k_sum(eps_prev_, 0))
                                     data_[r] = get_data_from_step(x_0, x_[r], sigma, s_[r])
                                     eps_[r] = get_epsilon(x_0, data_[r], s_[r], rk_type)
-                                    #eps_[r] = get_epsilon_from_step(x_0, x_[r], sigma, s_[r])
                                     
+                                    if extra_options_flag("newton_iter_post_ortho", extra_options):
+                                        for r2 in range(row+1, rk.rows+1): 
+                                            if r != r2:
+                                                eps_ [r] = get_orthogonal(eps_[r2], eps_[r])
+                            
                             newton_yter_post = int(get_extra_options_kv("newton_yter_post", str("0"), extra_options))
                             for n_yter_post in range(newton_yter_post):
                                 for r in range(row+1, rk.rows):
@@ -551,12 +563,10 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
                             print("B: step,h,h_new: \n", step, round(float(h.item()),3), round(float(h_new.item()),3))
                             print("B: sub_sigma_up, sub_sigma, sub_sigma_next, sub_sigma_down, sub_alpha_ratio: \n", round(float(sub_sigma_up),3), round(float(sub_sigma),3), round(float(sub_sigma_next),3), round(float(sub_sigma_down),3), round(float(sub_alpha_ratio),3))
                         x_[row+1] = x_0 + h_new * (rk.b_k_sum(eps_, 0) + rk.v_k_sum(eps_prev_, 0))
-                        x_down = x_[row+1]
                         x_[row+1] = rk.add_noise_post(x_[row+1], sub_sigma_up, sub_sigma, sub_sigma_next, sub_alpha_ratio, s_noise, noise_mode_sde_substep, SDE_NOISE_EXTERNAL, sde_noise_t)
             
             denoised = x_0 + ((sigma / (sigma - sigma_down)) *  h_new) * (rk.b_k_sum(eps_, 0) + rk.v_k_sum(eps_prev_, 0))
             eps = get_epsilon(x_0, denoised, sigma_next, rk_type)
-            #eps = x_0 - denoised
             
             x = x_[rk.rows - rk.multistep_stages - row_offset + 1]
             x = LG.process_guides_poststep(x, denoised, eps, step, extra_options)
@@ -567,25 +577,21 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
                 if sigma_up > 0:
                     x = rk.add_noise_post(x, sigma_up, sigma, sigma_next, alpha_ratio, s_noise, noise_mode, SDE_NOISE_EXTERNAL, sde_noise_t)
 
+
         denoised_[0] = data_[0]
         for ms in range(recycled_stages):
             denoised_[recycled_stages - ms] = denoised_[recycled_stages - ms - 1]
-            
+        
         denoised_prev2 = denoised_prev
         denoised_prev = denoised
         
         data_prev2 = data_prev
-        s_prev2 = s_prev
-        s_down_prev = sigma_down
-        
+        s_prev2 = s_prev        
         
         data_prev = data_[rk.rows-1]
         s_prev = s_[rk.rows-1]
         x_prev = x_[rk.rows-1]
-        
-        eps_prev_lost = get_epsilon_from_step(x_0, x, sigma, sigma_next)
-        
-        h_prev_last_data = rk.h_fn(s_[rk.rows-1], sigma_next)
+
         
     preview_callback(x, eps, denoised, x_, eps_, data_, step, sigma, sigma_next, callback, extra_options, FINAL_STEP=True)
     return x
