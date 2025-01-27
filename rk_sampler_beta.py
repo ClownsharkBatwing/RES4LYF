@@ -141,10 +141,9 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
     extra_args = rk.init_cfg_channelwise(x, cfg_cw, **extra_args)
 
 
-    LG = LatentGuide(guides, x, model, sigmas, UNSAMPLE, LGW_MASK_RESCALE_MIN, extra_options, frame_weights_grp=frame_weights_grp)
-    x = LG.init_guides(x, rk.noise_sampler)
-    
-    y0, y0_inv = LG.y0, LG.y0_inv
+    LG = LatentGuide(model, sigmas, UNSAMPLE, LGW_MASK_RESCALE_MIN, extra_options, frame_weights_grp=frame_weights_grp)
+    x = LG.init_guides(x, guides, rk.noise_sampler)
+    lg_mask = LG.mask.to(x.device)
 
     denoised = torch.zeros_like(x)
     denoised_prev = torch.zeros_like(x)
@@ -153,6 +152,7 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
     data_prev = torch.zeros_like(x).to('cpu')
     s_prev = None
     
+    torch.cuda.synchronize()
     torch.cuda.empty_cache()
     gc.collect()
 
@@ -193,8 +193,8 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
         if step == 0 or step == guide_skip_steps:
             #x_, data_, denoised_, eps_ = (torch.zeros(rk.rows+2, *x.shape, dtype=x.dtype, device=x.device) for step in range(4))
             x_ = torch.zeros(rk.rows+2, *x.shape, dtype=x.dtype, device=x.device)
-            data_ = torch.zeros(min(3, rk.rows+2), *x.shape, dtype=x.dtype, device=x.device)  # Only 3 rows needed max
-            denoised_ = torch.zeros(recycled_stages+1, *x.shape, dtype=x.dtype, device=x.device)  # Only recycled_stages+1 needed
+            data_ = torch.zeros(rk.rows+2, *x.shape, dtype=x.dtype, device=x.device)
+            denoised_ = torch.zeros(rk.rows+1, *x.shape, dtype=x.dtype, device=x.device)
             eps_ = torch.zeros(rk.rows+2, *x.shape, dtype=x.dtype, device=x.device)
 
         sde_noise_t = None
@@ -360,9 +360,14 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
             x_lying_ = x_.clone()
             s_lying_ = []
             eps_lying_ = eps_.clone()
+
             for r in range(rk.rows):
+                if LG.y0 is None:
+                    raise ValueError("LatentGuide y0 is NoneType. Guide required for guide pseudoimplicit power substep.")
+                y0 = LG.y0.to(x.device)
+                y0_inv = LG.y0_inv.to(x.device) if LG.y0_inv is not None else torch.zeros_like(LG.y0)
                 eps_substep_guide, eps_substep_guide_inv = get_guide_epsilon_substep(x_0, x_, y0, y0_inv, s_, r, rk_type)
-                eps_substep_guide = LG.mask * eps_substep_guide + (1-LG.mask) * eps_substep_guide_inv
+                eps_substep_guide = lg_mask * eps_substep_guide + (1-lg_mask) * eps_substep_guide_inv
                 
                 maxmin_ratio = (s_[r] - rk.sigma_min) / s_[r]
                 fully_sub_sigma_2 = s_[r] - maxmin_ratio * (s_[r] * LG.lgw[step])
@@ -370,7 +375,7 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
                 
                 if extra_options_flag("guide_fully_pseudoimplicit_power_substep_projection", extra_options) or extra_options_flag("inject_fully_pseudoimplicit_power_substep_projection", extra_options):
                     eps_row, eps_row_inv = get_guide_epsilon_substep(x_0, x_, y0, y0_inv, s_lying_, r, rk_type)
-                    eps_row_lerp = eps_[r]   +   LG.mask * (eps_row-eps_[r])   +   (1-LG.mask) * (eps_row_inv-eps_[r])
+                    eps_row_lerp = eps_[r]   +   lg_mask * (eps_row-eps_[r])   +   (1-lg_mask) * (eps_row_inv-eps_[r])
                     eps_collinear_eps_lerp = get_collinear(eps_[r], eps_row_lerp)
                     eps_lerp_ortho_eps     = get_orthogonal(eps_row_lerp, eps_[r])
                     eps_sum = eps_collinear_eps_lerp + eps_lerp_ortho_eps
@@ -454,8 +459,12 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
                     h_new = h * rk.h_fn(sub_sigma_down, sigma) / rk.h_fn(sub_sigma_next, sigma) 
 
                     if extra_options_flag("guide_pseudoimplicit_power_substep", extra_options):
+                        if LG.y0 is None:
+                            raise ValueError(f"LatentGuide y0 is NoneType. Latent Guide required for guide_pseudoimplicit_power_substep.")
+                        y0 = LG.y0.to(x.device)
+                        y0_inv = LG.y0_inv.to(x.device) if LG.y0_inv is not None else torch.zeros_like(LG.y0)
                         eps_substep_guide, eps_substep_guide_inv = get_guide_epsilon_substep(x_0, x_, y0, y0_inv, s_, row, rk_type)
-                        eps_substep_guide = LG.mask * eps_substep_guide + (1-LG.mask) * eps_substep_guide_inv
+                        eps_substep_guide = lg_mask * eps_substep_guide + (1-lg_mask) * eps_substep_guide_inv
                         maxmin_ratio = (sub_sigma - rk.sigma_min) / sub_sigma
                         sub_sigma_2 = sub_sigma - maxmin_ratio * (sub_sigma * LG.lgw[step])
                         #s_2_ = s_.clone()
@@ -463,7 +472,7 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
                         s_2_[row] = sub_sigma_2
                         if extra_options_flag("guide_pseudoimplicit_power_substep_projection", extra_options):
                             eps_row, eps_row_inv = get_guide_epsilon_substep(x_0, x_, y0, y0_inv, s_2_, row, rk_type)
-                            eps_row_lerp = eps_[row]   +   LG.mask * (eps_row-eps_[row])   +   (1-LG.mask) * (eps_row_inv-eps_[row])
+                            eps_row_lerp = eps_[row]   +   lg_mask * (eps_row-eps_[row])   +   (1-lg_mask) * (eps_row_inv-eps_[row])
 
                             eps_collinear_eps_lerp = get_collinear(eps_[row], eps_row_lerp)
                             eps_lerp_ortho_eps     = get_orthogonal(eps_row_lerp, eps_[row])
