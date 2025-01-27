@@ -34,6 +34,8 @@ class RK_Method_Beta:
         self.method = method
         self.dynamic_method = dynamic_method
         
+        self.rk_type = None
+        
         self.stages = 0
         self.name = name
         self.ab = None
@@ -141,8 +143,8 @@ class RK_Method_Beta:
 
 
     def set_coeff(self, rk_type, h, c1=0.0, c2=0.5, c3=1.0, step=0, sigmas=None, sigma_down=None, extra_options=None):
-        #if rk_type == "default": 
-        #    return
+
+        self.rk_type = rk_type
 
         sigma = sigmas[step]
         sigma_next = sigmas[step+1]
