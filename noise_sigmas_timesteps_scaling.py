@@ -102,13 +102,11 @@ def get_ancestral_step_RF_sqrd(sigma, sigma_next, eta, sigma_max=1.0):
     sigma_up = (sigma_hat ** 2 - sigma ** 2) ** .5
     alpha_ratio, sigma_up, sigma_down = get_alpha_ratio_from_sigma_up(sigma_up, sigma_next, eta, sigma_max)
     return sigma_up, sigma_down, alpha_ratio
-
+  
 def get_ancestral_step_RF_hard(sigma_next, eta, sigma_max=1.0):
     sigma_up = sigma_next * eta 
     alpha_ratio, sigma_up, sigma_down = get_alpha_ratio_from_sigma_up(sigma_up, sigma_next, eta, sigma_max)
     return sigma_up, sigma_down, alpha_ratio
-
-
 
 def get_res4lyf_step_with_model(model, sigma, sigma_next, eta=0.0, eta_var=1.0, noise_mode="hard", h=None):
   

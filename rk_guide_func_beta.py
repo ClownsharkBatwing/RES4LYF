@@ -160,7 +160,7 @@ class LatentGuide:
             
         x, self.y0, self.y0_inv = normalize_inputs(x, self.y0, self.y0_inv, self.guide_mode, self.extra_options)
 
-        return x
+        return x.to(self.dtype)
     
     
     def to(self, device):
