@@ -192,7 +192,9 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
     c2 = float(get_extra_options_kv("c2", str(c2), extra_options))
     c3 = float(get_extra_options_kv("c3", str(c3), extra_options))
 
-    guide_skip_steps = int(get_extra_options_kv("guide_skip_steps", 0, extra_options))        
+    guide_skip_steps = int(get_extra_options_kv("guide_skip_steps", 0, extra_options))   
+    rk_swap_threshold = float(get_extra_options_kv("rk_swap_threshold", "0.0", extra_options))
+    rk_swap_type = get_extra_options_kv("rk_swap_type", "res_3m", extra_options)     
 
     cfg_cw = float(get_extra_options_kv("cfg_cw", str(cfg_cw), extra_options))
     
@@ -233,8 +235,7 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
     
     y0, y0_inv = LG.y0, LG.y0_inv
 
-    denoised, denoised_prev, denoised_prev2, data_prev, eps = [torch.zeros_like(x) for _ in range(5)]
-    s_prev = None
+    denoised, denoised_prev, denoised_prev2, eps = [torch.zeros_like(x) for _ in range(4)]
     
     for step in trange(len(sigmas)-1, disable=disable):
         sigma, sigma_next = sigmas[step], sigmas[step+1]
@@ -270,7 +271,7 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
 
         if step == 0 or step == guide_skip_steps:
             x_, data_, eps_ = (torch.zeros(rk.rows+2, *x.shape, dtype=x.dtype, device=x.device) for _ in range(3))
-            denoised_ = torch.zeros(min(rk.rows+2, 5), *x.shape, dtype=x.dtype, device=x.device)
+            denoised_ = torch.zeros(max(rk.rows+2, 4), *x.shape, dtype=x.dtype, device=x.device)
             recycled_stages = len(denoised_)-1
 
         sde_noise_t = None
@@ -295,9 +296,9 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
             if extra_options_flag("implicit_skip_model_call_at_start", extra_options) and denoised.sum() + eps.sum() != 0:
                 eps_[0], data_[0] = eps.clone(), denoised.clone()
                 eps_[0] = get_epsilon(x_0, denoised, sigma, rk_type)
-                """if denoised_prev2.sum() != 0:
+                if denoised_prev2.sum() != 0:
                     sratio = sigma - s_[0]
-                    data_[0] = denoised + sratio * (denoised - denoised_prev2)"""
+                    data_[0] = denoised + sratio * (denoised - denoised_prev2)
             else:
                 eps_[0], data_[0] = rk(x_[0], sigma, x_0, sigma, **extra_args) 
                 
@@ -509,33 +510,22 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
                 if sigma_up > 0:
                     x = rk.add_noise_post(x, sigma_up, sigma, sigma_next, alpha_ratio, s_noise, noise_mode, SDE_NOISE_EXTERNAL, sde_noise_t)
 
-
         denoised_[0] = data_[0]
         for ms in range(recycled_stages):
             denoised_[recycled_stages - ms] = denoised_[recycled_stages - ms - 1]
         
-        if step > 2 and sigma_next > 0:
+        if step > 2 and sigma_next > 0 and rk_type != rk_swap_type:
             x_res_2m, denoised_res_2m = calculate_res_2m_step(x_0, denoised_, sigma_down, sigmas, step)
             x_res_3m, denoised_res_3m = calculate_res_3m_step(x_0, denoised_, sigma_down, sigmas, step)
-            rk_swap_threshold = float(get_extra_options_kv("rk_swap_threshold", "0.0", extra_options))
-            rk_swap_type = get_extra_options_kv("rk_swap_type", "res_3m", extra_options)
             if extra_options_flag("rk_swap_print", extra_options):
                 print("res_3m - res_2m:", torch.norm(denoised_res_3m - denoised_res_2m).item())
             if rk_swap_threshold > torch.norm(denoised_res_2m - denoised_res_3m):
-                if rk_swap_type != rk_type:
-                    print("Switching rk_type to:", rk_swap_type)
+                print("Switching rk_type to:", rk_swap_type)
                 rk_type = rk_swap_type
             
         denoised_prev2 = denoised_prev
         denoised_prev = denoised
-        
-        data_prev2 = data_prev
-        s_prev2 = s_prev        
-        
-        data_prev = data_[rk.rows-1]
-        s_prev = s_[rk.rows-1]
-        x_prev = x_[rk.rows-1]
-
+                
     if not (UNSAMPLE and sigmas[1] > sigmas[0]):
         preview_callback(x, eps, denoised, x_, eps_, data_, step, sigma, sigma_next, callback, extra_options, FINAL_STEP=True)
     return x
