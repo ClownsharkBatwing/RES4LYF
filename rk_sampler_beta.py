@@ -16,7 +16,7 @@ from .rk_method_beta import RK_Method_Beta
 from .rk_guide_func_beta import *
 
 from .latents import normalize_latent, initialize_or_scale, latent_normalize_channels
-from .helper import get_extra_options_kv, extra_options_flag, get_cosine_similarity
+from .helper import get_extra_options_kv, extra_options_flag, get_cosine_similarity, get_pearson_similarity
 from .sigmas import get_sigmas
 
 from .rk_coefficients_beta import IRK_SAMPLER_NAMES_BETA
@@ -121,13 +121,7 @@ def newton_iter(rk, x_0, x_, eps_, eps_prev_, data_, s_, row, h, sigmas, step, n
                     x_[r_] = x_0 + h * (rk.a_k_sum(eps_, r_) + rk.u_k_sum(eps_prev_, r_))
                 else:
                     x_[r_] = x_0 + h * (rk.b_k_sum(eps_, 0) + rk.v_k_sum(eps_prev_, 0))
-                
-                #if sigma == s_[r_]:
-                #    continue
-                
-            # if sigma == s_[r]:
-            #    continue
-            
+
             for r_ in range(seq_start, seq_stop):
                 if newton_iter_type == "from_data":
                     data_[r_] = get_data_from_step(x_0, x_[r_], sigma, s_[r_])  
@@ -138,7 +132,6 @@ def newton_iter(rk, x_0, x_, eps_, eps_prev_, data_, s_, row, h, sigmas, step, n
                     eps_[r_] = x_0/sigma - x_[r_]/s_[r_]
                 elif newton_iter_type == "from_epsilon":
                     eps_ [r_] = get_epsilon(x_[r_], data_[r_], s_[r_], rk.rk_type)
-                    #eps_[r_] = (x_[r_] - data_[r_]) /s_[r_]
                 
                 if extra_options_flag(newton_iter_name + "_opt", extra_options):
                     opt_timing, opt_type, opt_subtype = get_extra_options_list(newton_iter_name+"_opt", "", extra_options).split(",")
@@ -267,7 +260,7 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
 
         sigma_up, sigma, sigma_down, alpha_ratio = get_res4lyf_step_with_model(model, sigma, sigma_next, eta, eta_var, noise_mode, extra_options)
         h = h_new = rk.h_fn(sigma_down, sigma)
-        h_no_eta = rk.h_fn(sigma_next, sigma)
+        h_no_eta  = rk.h_fn(sigma_next, sigma)
 
         rk. set_coeff(rk_type, h, c1, c2, c3, step, sigmas, sigma_down, extra_options)
         if sigma_next > 0 and rk.rk_type in IRK_SAMPLER_NAMES_BETA:
@@ -276,7 +269,8 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
         s_ = [(rk.sigma_fn(rk.t_fn(sigma) + h*c_)) * x.new_ones([1]) for c_ in rk.c]
 
         if step == 0 or step == guide_skip_steps:
-            x_, data_, eps_, denoised_ = (torch.zeros(rk.rows+2, *x.shape, dtype=x.dtype, device=x.device) for _ in range(4))
+            x_, data_, eps_ = (torch.zeros(rk.rows+2, *x.shape, dtype=x.dtype, device=x.device) for _ in range(3))
+            denoised_ = torch.zeros(min(rk.rows+2, 5), *x.shape, dtype=x.dtype, device=x.device)
             recycled_stages = len(denoised_)-1
 
         sde_noise_t = None
@@ -289,11 +283,11 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
         x_[0] = x
         if sigma_up > 0:
             x_[0] = rk.add_noise_pre(x_[0], sigma_up, sigma, sigma_next, alpha_ratio, s_noise, noise_mode, SDE_NOISE_EXTERNAL, sde_noise_t) #y0, lgw, sigma_down are currently unused
-        
         x_0 = x_[0].clone()
 
-        for ms in range(recycled_stages):
-            eps_ [recycled_stages - ms] = get_epsilon(x_0, denoised_ [recycled_stages - ms], sigma, rk_type)
+        # RECYCLE STAGES FOR MULTISTEP
+        for ms in range(len(eps_)):
+            eps_[ms] = get_epsilon(x_0, denoised_[ms], sigma, rk_type)
 
         eps_prev_ = eps_.clone()
 
@@ -303,76 +297,7 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
                 eps_[0] = get_epsilon(x_0, denoised, sigma, rk_type)
                 """if denoised_prev2.sum() != 0:
                     sratio = sigma - s_[0]
-                    
                     data_[0] = denoised + sratio * (denoised - denoised_prev2)"""
-
-                # RES_2M GUESS HERE
-                if denoised_prev2.sum() != 0 and extra_options_flag("implicit_res_2m_denoised_guess", extra_options):
-                    h_prev1 = -torch.log(sigmas[step]/sigmas[step-1])
-                    h_curr = -torch.log(s_[0]/sigma)
-
-                    c1,c2 = 0, 1/2
-                    c2 = (-h_prev1 / h_curr).item()
-
-                    ci = [c1,c2]
-                    #h = -torch.log(sigma_next/sigma)
-                    φ = Phi(h_curr, ci, analytic_solution=True)
-                    
-                    a2_1 = c2 * φ(1,2)
-                    b2 = φ(2)/c2
-                    b1 = φ(1) - b2
-                    
-                    print("denoised prev c2: ", (-h_prev1 / h_curr).item(), h_curr.item(), b1.item(), b2.item())
-                    
-                    
-                    
-                    h_prev1 = -torch.log(s_prev/s_prev2)
-                    h_curr = -torch.log(s_[0]/s_prev)
-
-                    c1,c2 = 0, 1/2
-                    c2 = (-h_prev1 / h_curr).item()
-
-                    ci = [c1,c2]
-                    #h = -torch.log(sigma_next/sigma)
-                    φ = Phi(h_curr, ci)
-                    
-                    a2_1 = c2 * φ(1,2)
-                    b2 = φ(2)/c2
-                    b1 = φ(1) - b2
-                    
-                    print("data prev c2: ", (-h_prev1 / h_curr).item(), h_curr.item(), b1.item(), b2.item())
-                
-                    #x_2 = torch.exp(-h * c2) * x_0 + h * (a2_1 * denoised_prev2)
-                    if c2 < -0.25 or c2 > 0.25:
-                        x_[0] = torch.exp(-h_curr) * x_prev + h_curr * (b1 * data_prev2 + b2 * data_prev)
-                        data_[0] = get_data_from_step(x_prev, x_[0], s_prev, s_[0])  
-                        #data_[0] = get_data_from_step(x_0, x_[0], sigma, s_[0]) 
-                        eps_[0] = get_epsilon(x_[0], data_[0], s_[0], rk_type)
-                    
-                    
-                    h_prev1 = -torch.log(s_prev/s_prev2)
-                    h_curr = -torch.log(s_[1]/s_prev)
-                    
-                    c1,c2 = 0, 1/2
-                    c2 = (-h_prev1 / h_curr).item()
-
-                    ci = [c1,c2]
-                    #h = -torch.log(sigma_next/sigma)
-                    φ = Phi(h_curr, ci)
-                    
-                    a2_1 = c2 * φ(1,2)
-                    b2 = φ(2)/c2
-                    b1 = φ(1) - b2
-                    
-                    print("data prev c2 substep: ", (-h_prev1 / h_curr).item(), h_curr.item(), b1.item(), b2.item())
-                
-                    #x_2 = torch.exp(-h * c2) * x_0 + h * (a2_1 * denoised_prev2)
-                    if c2 < -0.25 or c2 > 0.25:
-                        x_[1] = torch.exp(-h_curr) * x_prev + h_curr * (b1 * data_prev2 + b2 * data_prev)
-                        data_[1] = get_data_from_step(x_prev, x_[1], s_prev, s_[1])  
-                        #data_[1] = get_data_from_step(x_0, x_[1], sigma, s_[1]) 
-                        eps_[1] = get_epsilon(x_[1], data_[1], s_[1], rk_type)
-
             else:
                 eps_[0], data_[0] = rk(x_[0], sigma, x_0, sigma, **extra_args) 
                 
@@ -589,6 +514,18 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
         for ms in range(recycled_stages):
             denoised_[recycled_stages - ms] = denoised_[recycled_stages - ms - 1]
         
+        if step > 2 and sigma_next > 0:
+            x_res_2m, denoised_res_2m = calculate_res_2m_step(x_0, denoised_, sigma_down, sigmas, step)
+            x_res_3m, denoised_res_3m = calculate_res_3m_step(x_0, denoised_, sigma_down, sigmas, step)
+            rk_swap_threshold = float(get_extra_options_kv("rk_swap_threshold", "0.0", extra_options))
+            rk_swap_type = get_extra_options_kv("rk_swap_type", "res_3m", extra_options)
+            if extra_options_flag("rk_swap_print", extra_options):
+                print("res_3m - res_2m:", torch.norm(denoised_res_3m - denoised_res_2m).item())
+            if rk_swap_threshold > torch.norm(denoised_res_2m - denoised_res_3m):
+                if rk_swap_type != rk_type:
+                    print("Switching rk_type to:", rk_swap_type)
+                rk_type = rk_swap_type
+            
         denoised_prev2 = denoised_prev
         denoised_prev = denoised
         
@@ -658,4 +595,75 @@ def preview_callback(x, eps, denoised, x_, eps_, data_, step, sigma, sigma_next,
 
 
 
+
+
+
+def calculate_res_2m_step(x_0, denoised_, sigma_down, sigmas, step,):
+    if denoised_[2].sum() == 0:
+        return None
+    
+    sigma = sigmas[step]
+    sigma_prev = sigmas[step-1]
+    
+    h_prev = -torch.log(sigma/sigma_prev)
+    h = -torch.log(sigma_down/sigma)
+
+    c1 = 0
+    c2 = (-h_prev / h).item()
+
+    ci = [c1,c2]
+    φ = Phi(h, ci, analytic_solution=True)
+
+    b2 = φ(2)/c2
+    b1 = φ(1) - b2
+    
+    eps_2 = denoised_[1] - x_0
+    eps_1 = denoised_[0] - x_0
+
+    h_a_k_sum = h * (b1 * eps_1 + b2 * eps_2)
+    
+    x = torch.exp(-h) * x_0 + h_a_k_sum
+    
+    denoised = x_0 + (sigma / (sigma - sigma_down)) * h_a_k_sum
+
+    return x, denoised
+
+
+
+def calculate_res_3m_step(x_0, denoised_, sigma_down, sigmas, step,):
+    if denoised_[3].sum() == 0:
+        return None
+    
+    sigma       = sigmas[step]
+    sigma_prev  = sigmas[step-1]
+    sigma_prev2 = sigmas[step-2]
+
+    h       = -torch.log(sigma_down/sigma)
+    h_prev  = -torch.log(sigma/sigma_prev)
+    h_prev2 = -torch.log(sigma/sigma_prev2)
+
+    c1 = 0
+    c2 = (-h_prev  / h).item()
+    c3 = (-h_prev2 / h).item()
+
+    ci = [c1,c2,c3]
+    φ = Phi(h, ci, analytic_solution=True)
+    
+    gamma = (3*(c3**3) - 2*c3) / (c2*(2 - 3*c2))
+
+    b3 = (1 / (gamma * c2 + c3)) * φ(2, -h)      
+    b2 = gamma * b3 
+    b1 = φ(1, -h) - b2 - b3    
+    
+    eps_3 = denoised_[2] - x_0
+    eps_2 = denoised_[1] - x_0
+    eps_1 = denoised_[0] - x_0
+
+    h_a_k_sum = h * (b1 * eps_1 + b2 * eps_2 + b3 * eps_3)
+    
+    x = torch.exp(-h) * x_0 + h_a_k_sum
+    
+    denoised = x_0 + (sigma / (sigma - sigma_down)) * h_a_k_sum
+
+    return x, denoised
 

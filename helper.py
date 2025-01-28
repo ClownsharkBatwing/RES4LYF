@@ -48,6 +48,14 @@ def get_cosine_similarity(a, b):
     return F.cosine_similarity(a.flatten(), b.flatten(), dim=0)
 
 
+def get_pearson_similarity(a, b):
+    a = a.mean(dim=(-2,-1))
+    b = b.mean(dim=(-2,-1))
+    if a.dim() == 5 and b.dim() == 5 and b.shape[2] == 1:
+        b = b.expand(-1, -1, a.shape[2], -1, -1)
+    return F.cosine_similarity(a.flatten(), b.flatten(), dim=0)
+
+
 
 def initialize_or_scale(tensor, value, steps):
     if tensor is None:
