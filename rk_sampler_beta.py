@@ -45,11 +45,13 @@ def prepare_step_to_sigma_zero(rk, rk_type, model, x, extra_options, alpha, k, n
             rk_type_final_step = f"gauss-legendre_{rk_type[-2:]}"
         else:
             rk_type_final_step = rk_type
+    elif rk_type in {"euler", "ddim"}:
+        rk_type_final_step = "euler"
+    elif rk_type[-2:] in {"2m", "3m", "4m"}:
+        rk_type_final_step = "deis_" + rk_type[-2:]
     else:
-        rk_type_final_step = f"euler" if rk_type in {"euler"} else rk_type
-        rk_type_final_step = f"ralston_{rk_type[-2:]}" if rk_type[-2:] in {"2s", "3s"} else "ralston_3s"
-        rk_type_final_step = f"deis_2m" if rk_type[-2:] in {"2m", "3m", "4m"} else rk_type_final_step
-        rk_type_final_step = f"euler" if rk_type in {"ddim"} else rk_type_final_step
+        rk_type_final_step = "ralston_{rk_type[-2:]}" if rk_type[-2:] in {"2s", "3s", "4s"} else "ralston_3s"
+    
     rk_type_final_step = get_extra_options_kv("rk_type_final_step", rk_type_final_step, extra_options)
     rk = RK_Method_Beta.create(model, rk_type_final_step, x.device)
     rk.init_noise_sampler(x, torch.initial_seed() + 1, noise_sampler_type, alpha=alpha, k=k) # initial_seed alert!
