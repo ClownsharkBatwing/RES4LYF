@@ -5,7 +5,7 @@ import re
 import copy
 from contextlib import contextmanager
 from typing import Dict, Any, Optional
-from dataclasses import dataclass
+from typing import Set
 
 from tqdm.auto import trange
 import gc
@@ -28,48 +28,26 @@ from .phi_functions import Phi
 
 PRINT_DEBUG=False
 
-@dataclass
-class TensorDeviceState:
-    tensor_ref: Any
-    original_device: Optional[torch.device] = None
-    condition: Optional[bool] = None
-
-class TensorDeviceManager:
+class TensorManager:
     def __init__(self):
-        self.tensor_states: Dict[str, TensorDeviceState] = {}
-    
-    def register(self, name: str, tensor_ref: Any, condition: Optional[bool] = None):
-        self.tensor_states[name] = TensorDeviceState(
-            tensor_ref=tensor_ref,
-            original_device=tensor_ref.device if isinstance(tensor_ref, torch.Tensor) else None,
-            condition=condition
-        )
-        return self
-
-    def _move_tensors(self, target_device: str):
-        for name, state in self.tensor_states.items():
-            tensor = state.tensor_ref
-            if isinstance(tensor, torch.Tensor) and (state.condition is None or state.condition):
-                # Store original device if we haven't yet
-                if state.original_device is None:
-                    state.original_device = tensor.device
-                tensor.to(target_device)
-    
-    def _restore_tensors(self):
-        for name, state in self.tensor_states.items():
-            tensor = state.tensor_ref
-            if isinstance(tensor, torch.Tensor) and state.original_device is not None:
-                if state.condition is None or state.condition:
-                    tensor.to(state.original_device)
-
+        self.saved_states: Dict[str, torch.device] = {}
+        
     @contextmanager
-    def shelve_tensors(self, target_device: str):
+    def shelve_tensors(self, target_device: str, local_vars: Dict[str, Any], exclude: Set[str] = None):
+        exclude = exclude or set()
+        self.saved_states.clear()
+        
+        for name, obj in local_vars.items():
+            if name not in exclude and isinstance(local_vars[name], torch.Tensor):
+                self.saved_states[name] = obj.device
+                local_vars[name] = obj.to(target_device)
+        
         try:
-            self._move_tensors(target_device)
             yield
         finally:
-            self._restore_tensors()
-
+            for name, original_device in self.saved_states.items():
+                if name in local_vars and isinstance(local_vars[name], torch.Tensor):
+                    local_vars[name] = local_vars[name].to(original_device)
 
 def prepare_sigmas(model, sigmas):
     if sigmas[0] == 0.0:      #remove padding used to prevent comfy from adding noise to the latent (for unsampling, etc.)
@@ -232,7 +210,7 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
                   etas=None, etas_substep=None, s_noises=None, momentums=None, guides=None, cfgpp=0.0, cfg_cw = 1.0,regional_conditioning_floors=None, frame_weights_grp=None, eta_substep=0.0, noise_mode_sde_substep="hard",
                   ):
     
-    device_manager = TensorDeviceManager()
+    tensor_manager = TensorManager()
     cuda_sync_a_flag = extra_options_flag("cuda_sync_a", extra_options)
     cuda_empty_a_flag = extra_options_flag("cuda_empty_a", extra_options)
     cuda_gc_a_flag = extra_options_flag("cuda_gc_a", extra_options)
@@ -307,20 +285,6 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
     x_lying_    = None
     s_lying_    = None
     eps_lying_  = None
-    
-    device_manager = TensorDeviceManager()
-    device_manager.register("x", x)
-    device_manager.register("x_", x_)
-    device_manager.register("eps_", eps_)
-    device_manager.register("denoised", denoised)
-    device_manager.register("denoised_", denoised_)
-    device_manager.register("denoised_prev", denoised_prev)
-    device_manager.register("denoised_prev2", denoised_prev2)
-    device_manager.register("x_prev", x_prev)
-    device_manager.register("eps_prev_", eps_prev_)
-    device_manager.register("x_lying_", x_lying_)
-    device_manager.register("s_lying_", s_lying_)
-    device_manager.register("eps_lying_", eps_lying_)
 
     torch.cuda.synchronize()
     torch.cuda.empty_cache()
@@ -392,7 +356,8 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
                     data_[0] = denoised + sratio * (denoised - denoised_prev2)
             else:
                 LG.to(LG.offload_device)
-                with device_manager.shelve_tensors('cpu'):
+                exclude_vars = {'x_tmp', 's_tmp', 'x_0', 'sigma', 'extra_args', 'rk', 'LG', 'eps_', 'data_'}
+                with tensor_manager.shelve_tensors('cpu', locals(), exclude_vars):
                     eps_[0], data_[0] = rk(x_[0], sigma, x_0, sigma, **extra_args) 
                 LG.to(LG.device)
                 
@@ -572,7 +537,8 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
                             x_, eps_ = newton_iter(rk, x_0, x_, eps_, eps_prev_, data_, s_, row, h, sigmas, step, "pre", extra_options)
 
                             LG.to(LG.offload_device)
-                            with device_manager.shelve_tensors('cpu'):
+                            exclude_vars = {'x_tmp', 's_tmp', 'x_0', 'sigma', 'extra_args', 'rk', 'LG', 'eps_', 'data_'}
+                            with tensor_manager.shelve_tensors('cpu', locals(), exclude_vars):
                                 eps_[row], data_[row] = rk(x_tmp, s_tmp, x_0, sigma, **extra_args)
                             LG.to(LG.device)
 
