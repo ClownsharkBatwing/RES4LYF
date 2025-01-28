@@ -3,6 +3,9 @@ import torch.nn.functional as F
 import torchvision.transforms as T
 import re
 import copy
+from contextlib import contextmanager
+from typing import Dict, Any, Optional
+from dataclasses import dataclass
 
 from tqdm.auto import trange
 import gc
@@ -24,6 +27,48 @@ from .phi_functions import Phi
 
 
 PRINT_DEBUG=False
+
+@dataclass
+class TensorDeviceState:
+    tensor_ref: Any
+    original_device: Optional[torch.device] = None
+    condition: Optional[bool] = None
+
+class TensorDeviceManager:
+    def __init__(self):
+        self.tensor_states: Dict[str, TensorDeviceState] = {}
+    
+    def register(self, name: str, tensor_ref: Any, condition: Optional[bool] = None):
+        self.tensor_states[name] = TensorDeviceState(
+            tensor_ref=tensor_ref,
+            original_device=tensor_ref.device if isinstance(tensor_ref, torch.Tensor) else None,
+            condition=condition
+        )
+        return self
+
+    def _move_tensors(self, target_device: str):
+        for name, state in self.tensor_states.items():
+            tensor = state.tensor_ref
+            if isinstance(tensor, torch.Tensor) and (state.condition is None or state.condition):
+                # Store original device if we haven't yet
+                if state.original_device is None:
+                    state.original_device = tensor.device
+                tensor.to(target_device)
+    
+    def _restore_tensors(self):
+        for name, state in self.tensor_states.items():
+            tensor = state.tensor_ref
+            if isinstance(tensor, torch.Tensor) and state.original_device is not None:
+                if state.condition is None or state.condition:
+                    tensor.to(state.original_device)
+
+    @contextmanager
+    def shelve_tensors(self, target_device: str):
+        try:
+            self._move_tensors(target_device)
+            yield
+        finally:
+            self._restore_tensors()
 
 
 def prepare_sigmas(model, sigmas):
@@ -85,6 +130,7 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
                   etas=None, etas_substep=None, s_noises=None, momentums=None, guides=None, cfgpp=0.0, cfg_cw = 1.0,regional_conditioning_floors=None, frame_weights_grp=None, eta_substep=0.0, noise_mode_sde_substep="hard",
                   ):
     
+    device_manager = TensorDeviceManager()
     cuda_sync_a_flag = extra_options_flag("cuda_sync_a", extra_options)
     cuda_empty_a_flag = extra_options_flag("cuda_empty_a", extra_options)
     cuda_gc_a_flag = extra_options_flag("cuda_gc_a", extra_options)
@@ -158,6 +204,15 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
     x_prev = None
     eps_prev_ = None
     
+    device_manager = TensorDeviceManager()
+    device_manager.register("x", x)
+    device_manager.register("x_", x_)
+    device_manager.register("denoised", denoised)
+    device_manager.register("denoised_", denoised_)
+    device_manager.register("x_prev", x_prev)
+    device_manager.register("eps_prev_", eps_prev_)
+    device_manager.register("data_prev", data_prev)
+
     torch.cuda.synchronize()
     torch.cuda.empty_cache()
     gc.collect()
@@ -303,7 +358,8 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
 
             else:
                 LG.to(LG.offload_device)
-                eps_[0], data_[0] = rk(x_[0], sigma, x_0, sigma, **extra_args) 
+                with device_manager.shelve_tensors('cpu'):
+                    eps_[0], data_[0] = rk(x_[0], sigma, x_0, sigma, **extra_args) 
                 LG.to(LG.device)
                 
             for r in range(rk.rows):
@@ -579,7 +635,8 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
                                         eps_[r] = get_epsilon(x_0, data_[r], s_[r], rk_type)
 
                             LG.to(LG.offload_device)
-                            eps_[row], data_[row] = rk(x_tmp, s_tmp, x_0, sigma, **extra_args)
+                            with device_manager.shelve_tensors('cpu'):
+                                eps_[row], data_[row] = rk(x_tmp, s_tmp, x_0, sigma, **extra_args)
                             LG.to(LG.device)
 
                         # GUIDE 
