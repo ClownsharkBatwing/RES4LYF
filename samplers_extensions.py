@@ -96,6 +96,7 @@ GUIDE_MODE_NAMES = ["unsample",
                     "resample_projection", 
                     "epsilon",
                     "epsilon_projection",
+                    "epsilon_projection_cw",
                     "epsilon_dynamic_mean",
                     "epsilon_dynamic_mean_std", 
                     "epsilon_dynamic_mean_from_bkg", 
@@ -157,7 +158,7 @@ class ClownInpaint: ############################################################
         
         denoise, denoise_bkg = guide_weight_scale, guide_weight_bkg_scale
         
-        if guide_mode.startswith("epsilon_") and guide_mode != "epsilon_projection" and guide_bkg == None:
+        if guide_mode.startswith("epsilon_") and not guide_mode.starts_with("epsilon_projection") and guide_bkg == None:
             print("Warning: need two latent inputs for guide_mode=",guide_mode," to work. Falling back to epsilon.")
             guide_mode = "epsilon"
         

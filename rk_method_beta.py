@@ -23,6 +23,8 @@ import itertools
 from .rk_coefficients_beta import *
 from .phi_functions import *
 
+from .helper import get_orthogonal, get_collinear, get_extra_options_list
+
 
 class RK_Method_Beta:
     def __init__(self, model, name="", method="explicit", dynamic_method=False, device='cuda', dtype=torch.float64):
@@ -115,28 +117,39 @@ class RK_Method_Beta:
         else:
             self.noise_sampler = NOISE_GENERATOR_CLASSES_SIMPLE.get(noise_sampler_type)(x=x, seed=seed, sigma_min=self.sigma_min, sigma_max=self.sigma_max)
             
-    def add_noise_pre(self, x, sigma_up, sigma, sigma_next, alpha_ratio, s_noise, noise_mode, SDE_NOISE_EXTERNAL=False, sde_noise_t=None):
+    def add_noise_pre(self, x, sigma_up, sigma, sigma_next, alpha_ratio, s_noise, noise_mode, CONSERVE_MEAN_CW=True, SDE_NOISE_EXTERNAL=False, sde_noise_t=None):
         if isinstance(self.model_sampling, comfy.model_sampling.CONST) == False and noise_mode == "hard": 
-            return self.add_noise(x, sigma_up, sigma, sigma_next, alpha_ratio, s_noise, SDE_NOISE_EXTERNAL, sde_noise_t)
+            return self.add_noise(x, sigma_up, sigma, sigma_next, alpha_ratio, s_noise, CONSERVE_MEAN_CW, SDE_NOISE_EXTERNAL, sde_noise_t)
         else:
             return x
         
-    def add_noise_post(self, x, sigma_up, sigma, sigma_next, alpha_ratio, s_noise, noise_mode, SDE_NOISE_EXTERNAL=False, sde_noise_t=None):
+    def add_noise_post(self, x, sigma_up, sigma, sigma_next, alpha_ratio, s_noise, noise_mode, CONSERVE_MEAN_CW=True, SDE_NOISE_EXTERNAL=False, sde_noise_t=None):
         if isinstance(self.model_sampling, comfy.model_sampling.CONST) == True   or   (isinstance(self.model_sampling, comfy.model_sampling.CONST) == False and noise_mode != "hard"):
-            return self.add_noise(x, sigma_up, sigma, sigma_next, alpha_ratio, s_noise, SDE_NOISE_EXTERNAL, sde_noise_t)
+            return self.add_noise(x, sigma_up, sigma, sigma_next, alpha_ratio, s_noise, CONSERVE_MEAN_CW, SDE_NOISE_EXTERNAL, sde_noise_t)
         else:
             return x
     
-    def add_noise(self, x, sigma_up, sigma, sigma_next, alpha_ratio, s_noise, SDE_NOISE_EXTERNAL, sde_noise_t):
+    def add_noise(self, x, sigma_up, sigma, sigma_next, alpha_ratio, s_noise, CONSERVE_MEAN_CW, SDE_NOISE_EXTERNAL, sde_noise_t):
 
         if sigma_next > 0.0 and sigma_up > 0.0:
             noise = self.noise_sampler(sigma=sigma, sigma_next=sigma_next)
             noise = torch.nan_to_num((noise - noise.mean()) / noise.std(), 0.0)
 
+            noise_ortho = get_orthogonal(noise, x)
+            noise_ortho = noise_ortho / noise_ortho.std()
+            
+            noise = noise_ortho
+
             if SDE_NOISE_EXTERNAL:
                 noise = (1-s_noise) * noise + s_noise * sde_noise_t
             
-            return alpha_ratio * x + noise * sigma_up * s_noise
+            x_next = alpha_ratio * x + noise * sigma_up * s_noise
+            
+            if CONSERVE_MEAN_CW:
+                for c in range(x.shape[-3]):
+                    x_next[..., c, :, :] = x_next[..., c, :, :] - x_next[..., c, :, :].mean() + x[..., c, :, :].mean()
+            
+            return x_next
         
         else:
             return x
@@ -171,6 +184,15 @@ class RK_Method_Beta:
         self.c = torch.tensor(ci, dtype=h.dtype, device=h.device)
         self.rows = self.a.shape[0]
         self.cols = self.a.shape[1]
+
+
+    def reorder_tableau(self, indices):
+        if indices[0]:
+            self.a = self.a[indices]
+            self.b[0] = self.b[0][indices]
+            self.c = self.c[indices]
+            self.c = torch.cat((self.c, self.c[-1:])) 
+        return
 
 
     def a_k_sum(self, k, row):
@@ -260,7 +282,171 @@ class RK_Method_Beta:
         else:
             return denoised
         
+
+    @staticmethod
+    def calculate_res_2m_step(x_0, denoised_, sigma_down, sigmas, step,):
+        if denoised_[2].sum() == 0:
+            return None
         
+        sigma = sigmas[step]
+        sigma_prev = sigmas[step-1]
+        
+        h_prev = -torch.log(sigma/sigma_prev)
+        h = -torch.log(sigma_down/sigma)
+
+        c1 = 0
+        c2 = (-h_prev / h).item()
+
+        ci = [c1,c2]
+        φ = Phi(h, ci, analytic_solution=True)
+
+        b2 = φ(2)/c2
+        b1 = φ(1) - b2
+        
+        eps_2 = denoised_[1] - x_0
+        eps_1 = denoised_[0] - x_0
+
+        h_a_k_sum = h * (b1 * eps_1 + b2 * eps_2)
+        
+        x = torch.exp(-h) * x_0 + h_a_k_sum
+        
+        denoised = x_0 + (sigma / (sigma - sigma_down)) * h_a_k_sum
+
+        return x, denoised
+
+
+    @staticmethod
+    def calculate_res_3m_step(x_0, denoised_, sigma_down, sigmas, step,):
+        if denoised_[3].sum() == 0:
+            return None
+        
+        sigma       = sigmas[step]
+        sigma_prev  = sigmas[step-1]
+        sigma_prev2 = sigmas[step-2]
+
+        h       = -torch.log(sigma_down/sigma)
+        h_prev  = -torch.log(sigma/sigma_prev)
+        h_prev2 = -torch.log(sigma/sigma_prev2)
+
+        c1 = 0
+        c2 = (-h_prev  / h).item()
+        c3 = (-h_prev2 / h).item()
+
+        ci = [c1,c2,c3]
+        φ = Phi(h, ci, analytic_solution=True)
+        
+        gamma = (3*(c3**3) - 2*c3) / (c2*(2 - 3*c2))
+
+        b3 = (1 / (gamma * c2 + c3)) * φ(2, -h)      
+        b2 = gamma * b3 
+        b1 = φ(1, -h) - b2 - b3    
+        
+        eps_3 = denoised_[2] - x_0
+        eps_2 = denoised_[1] - x_0
+        eps_1 = denoised_[0] - x_0
+
+        h_a_k_sum = h * (b1 * eps_1 + b2 * eps_2 + b3 * eps_3)
+        
+        x = torch.exp(-h) * x_0 + h_a_k_sum
+        
+        denoised = x_0 + (sigma / (sigma - sigma_down)) * h_a_k_sum
+
+        return x, denoised
+
+
+    def newton_iter(self, x_0, x_, eps_, eps_prev_, data_, s_, row, h, sigmas, step, newton_name, extra_options):
+        
+        newton_iter_name = "newton_iter_" + newton_name
+        
+        newton_iter                 =   int(get_extra_options_kv(newton_iter_name,                    str("100"),   extra_options))
+        newton_iter_skip_last_steps =   int(get_extra_options_kv(newton_iter_name + "_skip_last_steps", str("0"),   extra_options))
+        newton_iter_mixing_rate     = float(get_extra_options_kv(newton_iter_name + "_mixing_rate",    str("1.0"),  extra_options))
+        
+        newton_iter_anchor          =   int(get_extra_options_kv(newton_iter_name + "_anchor",          str("0"),   extra_options))
+        newton_iter_type            =       get_extra_options_kv(newton_iter_name + "_type",      "from_epsilon",   extra_options)
+        newton_iter_sequence        =       get_extra_options_kv(newton_iter_name + "_sequence",        "double",   extra_options)
+        
+        row_b_offset = 0
+        if extra_options_flag(newton_iter_name + "_include_row_b", extra_options):
+            row_b_offset = 1
+        
+        if step >= len(sigmas)-1-newton_iter_skip_last_steps   or   sigmas[step+1] == 0   or   self.rk_type not in IRK_SAMPLER_NAMES_BETA:
+            return x_, eps_
+        
+        sigma = sigmas[step]
+        
+        start, stop = 0, self.rows+row_b_offset
+        if newton_name   == "pre":
+            start = row
+        elif newton_name == "post":
+            start = row + 1
+            
+        if newton_iter_anchor >= 0:
+            eps_anchor = eps_[newton_iter_anchor].clone()
+            
+        for n_iter in range(newton_iter):
+            for r in range(start, stop):
+                if newton_iter_anchor >= 0:
+                    eps_[newton_iter_anchor] = eps_anchor.clone()
+                x_tmp, eps_tmp = x_[r].clone(), eps_[r].clone()
+                
+                seq_start, seq_stop = r, r+1
+                
+                if newton_iter_sequence == "double":
+                    seq_start, seq_stop = start, stop
+                    
+                for r_ in range(seq_start, seq_stop):
+                    if r_ < self.rows:
+                        x_[r_] = x_0 + h * (self.a_k_sum(eps_, r_) + self.u_k_sum(eps_prev_, r_))
+                    else:
+                        x_[r_] = x_0 + h * (self.b_k_sum(eps_, 0) + self.v_k_sum(eps_prev_, 0))
+
+                for r_ in range(seq_start, seq_stop):
+                    if newton_iter_type == "from_data":
+                        data_[r_] = get_data_from_step(x_0, x_[r_], sigma, s_[r_])  
+                        eps_ [r_] = get_epsilon_simple(x_0, data_[r_], s_[r_], self.rk_type)
+                    elif newton_iter_type == "from_step":
+                        eps_[r_] = get_epsilon_from_step(x_0, x_[r_], sigma, s_[r_])
+                    elif newton_iter_type == "from_alt":
+                        eps_[r_] = x_0/sigma - x_[r_]/s_[r_]
+                    elif newton_iter_type == "from_epsilon":
+                        eps_ [r_] = get_epsilon_simple(x_[r_], data_[r_], s_[r_], self.rk_type)
+                    
+                    if extra_options_flag(newton_iter_name + "_opt", extra_options):
+                        opt_timing, opt_type, opt_subtype = get_extra_options_list(newton_iter_name+"_opt", "", extra_options).split(",")
+                        
+                        opt_start, opt_stop = 0, self.rows+row_b_offset
+                        if    opt_timing == "early":
+                            opt_stop  = row + 1
+                        elif  opt_timing == "late":
+                            opt_start = row + 1
+
+                        for r2 in range(opt_start, opt_stop): 
+                            if r_ != r2:
+                                if   opt_subtype == "a":
+                                    eps_a = eps_[r2]
+                                    eps_b = eps_[r_]
+                                elif opt_subtype == "b":
+                                    eps_a = eps_[r_]
+                                    eps_b = eps_[r2]
+                                
+                                if   opt_type == "ortho":
+                                    eps_ [r_] = get_orthogonal(eps_a, eps_b)
+                                elif opt_type == "collin":
+                                    eps_ [r_] = get_collinear(eps_a, eps_b)
+                                elif opt_type == "proj":
+                                    eps_ [r_] = get_collinear(eps_a, eps_b) + get_orthogonal(eps_b, eps_a)
+                                    
+                    x_  [r_] =   x_tmp + newton_iter_mixing_rate * (x_  [r_] -   x_tmp)
+                    eps_[r_] = eps_tmp + newton_iter_mixing_rate * (eps_[r_] - eps_tmp)
+                    
+                if newton_iter_sequence == "double":
+                    break
+        
+        return x_, eps_
+
+
+
 
 class RK_Method_Exponential(RK_Method_Beta):
     def __init__(self, model, name="", method="explicit", device='cuda', dtype=torch.float64):
@@ -363,6 +549,28 @@ class RK_Method_Linear(RK_Method_Beta):
                 return (y - x) / sigma_cur
             else:
                 return (x - y) / sigma_cur
+
+
+
+
+
+
+def get_epsilon_simple(x_0, denoised, sigma, rk_type):
+    if RK_Method_Beta.is_exponential(rk_type):
+        eps = denoised - x_0
+    else:
+        eps = (x_0 - denoised) / sigma
+    return eps
+
+def get_data_from_step(x, x_next, sigma, sigma_next):
+    h = sigma_next - sigma
+    return (sigma_next * x - sigma * x_next) / h
+
+def get_epsilon_from_step(x, x_next, sigma, sigma_next):
+    h = sigma_next - sigma
+    return (x - x_next) / h
+
+
 
 
 
