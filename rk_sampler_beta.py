@@ -259,7 +259,7 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
         eta_substep = eta_var_substep = etas_substep[step] if etas_substep is not None else eta_substep
         s_noise = s_noises[step] if s_noises is not None else s_noise
         
-        if sigma_next == 0 and rk.c[-2] == 1.0:
+        if sigma_next == 0:
             rk, rk_type, eta, eta_var, extra_args = prepare_step_to_sigma_zero(rk, rk_type, model, x, extra_options, alpha, k, noise_sampler_type, cfg_cw=cfg_cw, **extra_args)
         if step == len(sigmas)-2:
             print("Cut noise at step:", step)
@@ -270,10 +270,10 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
         h_no_eta = rk.h_fn(sigma_next, sigma)
 
         rk. set_coeff(rk_type, h, c1, c2, c3, step, sigmas, sigma_down, extra_options)
-        if sigma_next > 0 or rk.c[-2] < 1.0:
+        if sigma_next > 0 and rk.rk_type in IRK_SAMPLER_NAMES_BETA:
             rk = reorder_tableau(rk, extra_options)
 
-        s_        = [(rk.sigma_fn(rk.t_fn(sigma) +        h*c_)) * x.new_ones([1]) for c_ in rk.c]
+        s_ = [(rk.sigma_fn(rk.t_fn(sigma) + h*c_)) * x.new_ones([1]) for c_ in rk.c]
 
         if step == 0 or step == guide_skip_steps:
             x_, data_, eps_, denoised_ = (torch.zeros(rk.rows+2, *x.shape, dtype=x.dtype, device=x.device) for _ in range(4))
@@ -506,6 +506,9 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
                             x_tmp = x_[row+row_offset]
                             s_tmp = s_[row+row_offset+rk.multistep_stages]
                             if rk_type in IRK_SAMPLER_NAMES_BETA: 
+                                if not extra_options_flag("implicit_guide_preproc_disable", extra_options):
+                                    eps_, x_      = LG.process_guides_substep(x_0, x_, eps_,      data_, row, step, sigma, sigma_next, sigma_down, s_, unsample_resample_scale, rk, rk_type, extra_options, frame_weights)
+                                    eps_prev_, x_ = LG.process_guides_substep(x_0, x_, eps_prev_, data_, row, step, sigma, sigma_next, sigma_down, s_, unsample_resample_scale, rk, rk_type, extra_options, frame_weights)
                                 if row == 0 and not extra_options_flag("substep_eta_use_final", extra_options):
                                     x_tmp = x_[row+row_offset] = x_0 + h * (rk.a_k_sum(eps_, row+row_offset) + rk.u_k_sum(eps_prev_, row+row_offset))
                                 else:
@@ -517,6 +520,9 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
                             x_tmp = x_[row]
                             s_tmp = s_[row]
                             if rk_type in IRK_SAMPLER_NAMES_BETA: 
+                                if not extra_options_flag("implicit_guide_preproc_disable", extra_options):
+                                    eps_, x_      = LG.process_guides_substep(x_0, x_, eps_,      data_, row, step, sigma, sigma_next, sigma_down, s_, unsample_resample_scale, rk, rk_type, extra_options, frame_weights)
+                                    eps_prev_, x_ = LG.process_guides_substep(x_0, x_, eps_prev_, data_, row, step, sigma, sigma_next, sigma_down, s_, unsample_resample_scale, rk, rk_type, extra_options, frame_weights)
                                 if row == 0 and not extra_options_flag("substep_eta_use_final", extra_options):
                                     x_tmp = x_[row] = x_0 + h * (rk.a_k_sum(eps_, row) + rk.u_k_sum(eps_prev_, row))
                                 else:
