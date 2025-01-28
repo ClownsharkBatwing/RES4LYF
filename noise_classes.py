@@ -330,7 +330,21 @@ class GaussianNoiseGenerator(NoiseGenerator):
         noise = torch.randn(self.size, dtype=self.dtype, layout=self.layout, device=self.device, generator=self.generator)
 
         return (noise - noise.mean()) / noise.std()
-        #return noise * self.std + self.mean
+
+class GaussianBackwardsNoiseGenerator(NoiseGenerator):
+    def __init__(self, x=None, size=None, dtype=None, layout=None, device=None, seed=42, generator=None, sigma_min=None, sigma_max=None, 
+                 mean=0.0, std=1.0):
+        self.update(mean=mean, std=std)
+
+        super().__init__(x, size, dtype, layout, device, seed, generator, sigma_min, sigma_max)
+
+    def __call__(self, *, mean=None, std=None, **kwargs):
+        self.update(mean=mean, std=std)
+        print("GaussianBackwards last seed:", self.generator.initial_seed())
+        self.generator.manual_seed(self.generator.initial_seed() - 1)
+        noise = torch.randn(self.size, dtype=self.dtype, layout=self.layout, device=self.device, generator=self.generator)
+
+        return (noise - noise.mean()) / noise.std()
 
 class LaplacianNoiseGenerator(NoiseGenerator):
     def __init__(self, x=None, size=None, dtype=None, layout=None, device=None, seed=42, generator=None, sigma_min=None, sigma_max=None, 
@@ -539,6 +553,7 @@ NOISE_GENERATOR_CLASSES = {
     "fractal": FractalNoiseGenerator,
 
     "gaussian": GaussianNoiseGenerator,
+    "gaussian_backwards": GaussianBackwardsNoiseGenerator,
     "uniform": UniformNoiseGenerator,
     "pyramid-cascade_B": CascadeBPyramidNoiseGenerator,
     "pyramid-interpolated": InterpolatedPyramidNoiseGenerator,
@@ -560,6 +575,7 @@ NOISE_GENERATOR_CLASSES_SIMPLE = {
     "none": GaussianNoiseGenerator,
     "brownian": BrownianNoiseGenerator,
     "gaussian": GaussianNoiseGenerator,
+    "gaussian_backwards": GaussianBackwardsNoiseGenerator,
     "laplacian": LaplacianNoiseGenerator,
     "perlin": PerlinNoiseGenerator,
     "studentt": StudentTNoiseGenerator,
