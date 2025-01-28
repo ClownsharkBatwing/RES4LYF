@@ -968,14 +968,17 @@ def get_rk_methods_beta(rk_type, h, c1=0.0, c2=0.5, c3=1.0, h_prev=None, step=0,
         order = int(rk_type[-2])
         if step < order + multistep_extra_initial_steps:
             if order == 4:
-                rk_type = "res_4s_strehmel_weiner"
+                #rk_type = "res_4s_strehmel_weiner"
+                rk_type = "ralston_4s"
                 rk_type = multistep_initial_sampler if multistep_initial_sampler else rk_type
                 order = 3
             elif order == 3:
-                rk_type = "res_3s"
+                #rk_type = "res_3s"
+                rk_type = "ralston_3s"
                 rk_type = multistep_initial_sampler if multistep_initial_sampler else rk_type
             elif order == 2:
-                rk_type = "res_2s"
+                #rk_type = "res_2s"
+                rk_type = "ralston_2s"
                 rk_type = multistep_initial_sampler if multistep_initial_sampler else rk_type
         else:
             rk_type = "deis"

@@ -317,7 +317,7 @@ class LatentGuide:
 
 
 
-        elif (UNSAMPLE or guide_mode in {"resample", "unsample"}) and (lgw > 0 or lgw_inv > 0):
+        elif (UNSAMPLE or guide_mode in {"resample", "unsample", "resample_projection", "unsample_projection"}) and (lgw > 0 or lgw_inv > 0):
             row_offset = 1 if rk.a[0].sum() == 0 and rk_type not in IRK_SAMPLER_NAMES_BETA else 0       
             
             cvf = rk.get_epsilon(x_0, x_[row+row_offset], y0, sigma, s_[row], sigma_down, unsample_resample_scale, extra_options)                
@@ -346,7 +346,7 @@ class LatentGuide:
             elif extra_options_flag("disable_lgw_scaling", extra_options):
                 eps_[row] = eps_[row] + lgw_mask * (cvf - eps_[row]) + lgw_mask_inv * (cvf_inv - eps_[row])
                 
-            elif extra_options_flag("resample_projection", extra_options) or extra_options_flag("unsample_projection", extra_options):
+            elif guide_mode in {"resample_projection", "unsample_projection"}:
                 eps_row_lerp = eps_[row]   +   self.mask * (cvf-eps_[row])   +   (1-self.mask) * (cvf_inv-eps_[row])
 
                 eps_collinear_eps_lerp = get_collinear(eps_[row], eps_row_lerp)

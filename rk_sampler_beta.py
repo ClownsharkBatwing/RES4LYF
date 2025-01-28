@@ -534,7 +534,7 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
         denoised_prev2 = denoised_prev
         denoised_prev = denoised
                 
-    if not (UNSAMPLE and sigmas[1] > sigmas[0]):
+    if not (UNSAMPLE and sigmas[1] > sigmas[0]) and not extra_options_flag("preview_last_step_always", extra_options):
         preview_callback(x, eps, denoised, x_, eps_, data_, step, sigma, sigma_next, callback, extra_options, FINAL_STEP=True)
     return x
 
