@@ -183,7 +183,8 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
     extra_args = {} if extra_args is None else extra_args
     default_dtype = getattr(torch, get_extra_options_kv("default_dtype", "float64", extra_options), torch.float64)
     
-    
+    MAX_STEPS=10000
+
     if noise_seed < 0:
         noise_seed = torch.initial_seed()+1 
         print("Set noise_seed to:", noise_seed, " using torch.initial_seed()+1")
@@ -192,15 +193,15 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
     c2 = float(get_extra_options_kv("c2", str(c2), extra_options))
     c3 = float(get_extra_options_kv("c3", str(c3), extra_options))
 
-    guide_skip_steps = int(get_extra_options_kv("guide_skip_steps", 0, extra_options))   
-    rk_swap_threshold = float(get_extra_options_kv("rk_swap_threshold", "0.0", extra_options))
-    rk_swap_type = get_extra_options_kv("rk_swap_type", "res_3m", extra_options)     
+    guide_skip_steps  =   int(get_extra_options_kv("guide_skip_steps", 0,          extra_options))   
+    rk_swap_step      =   int(get_extra_options_kv("rk_swap_step", str(MAX_STEPS), extra_options))
+    rk_swap_threshold = float(get_extra_options_kv("rk_swap_threshold", "0.0",     extra_options))
+    rk_swap_type      =       get_extra_options_kv("rk_swap_type", "res_3m",       extra_options)     
 
     cfg_cw = float(get_extra_options_kv("cfg_cw", str(cfg_cw), extra_options))
     
     MODEL_SAMPLING = model.inner_model.inner_model.model_sampling
         
-    MAX_STEPS=10000
     
     if sigmas_override is not None:
         sigmas = sigmas_override.clone()
@@ -514,7 +515,14 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
         for ms in range(recycled_stages):
             denoised_[recycled_stages - ms] = denoised_[recycled_stages - ms - 1]
         
-        if step > 2 and sigma_next > 0 and rk_type != rk_swap_type:
+        if RK_Method_Beta.is_exponential(rk.rk_type):
+            rk_swap_type = get_extra_options_kv("rk_swap_type", "res_3m", extra_options)  
+        else:
+            rk_swap_type = get_extra_options_kv("rk_swap_type", "deis_3m", extra_options)  
+        if step > rk_swap_step:
+            print("Switching rk_type to:", rk_swap_type)
+            rk_type = rk_swap_type
+        if step > 2 and sigma_next > 0 and rk_type != rk_swap_type and rk_swap_threshold > 0:
             x_res_2m, denoised_res_2m = calculate_res_2m_step(x_0, denoised_, sigma_down, sigmas, step)
             x_res_3m, denoised_res_3m = calculate_res_3m_step(x_0, denoised_, sigma_down, sigmas, step)
             if extra_options_flag("rk_swap_print", extra_options):
