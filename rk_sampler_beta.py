@@ -50,7 +50,7 @@ def prepare_step_to_sigma_zero(rk, rk_type, model, x, extra_options, alpha, k, n
     elif rk_type[-2:] in {"2m", "3m", "4m"}:
         rk_type_final_step = "deis_" + rk_type[-2:]
     else:
-        rk_type_final_step = "ralston_{rk_type[-2:]}" if rk_type[-2:] in {"2s", "3s", "4s"} else "ralston_3s"
+        rk_type_final_step = "ralston_" + rk_type[-2:] if rk_type[-2:] in {"2s", "3s", "4s"} else "ralston_3s"
     
     rk_type_final_step = get_extra_options_kv("rk_type_final_step", rk_type_final_step, extra_options)
     rk = RK_Method_Beta.create(model, rk_type_final_step, x.device)
