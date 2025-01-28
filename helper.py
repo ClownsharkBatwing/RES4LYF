@@ -38,6 +38,19 @@ def safe_get_nested(d, keys, default=None):
             return default
     return d
 
+def is_video_model(model):
+    is_video_model = False
+    if type(model) is dict:
+        if hasattr(model, 'inner_model') and \
+            hasattr(model.inner_model, 'inner_model') and \
+            hasattr(model.inner_model.inner_model, 'model_config') and \
+            hasattr(model.inner_model.inner_model.model_config, 'unet_config'):
+                if 'image_model' in model.inner_model.inner_model.model_config.unet_config:
+                    is_video_model = \
+                    'video' in model.inner_model.inner_model.model_config.unet_config['image_model'] or \
+                    'cosmos' in model.inner_model.inner_model.model_config.unet_config['image_model']
+    return is_video_model
+
 def is_RF_model(model) -> bool:
     modelsampling = model.inner_model.inner_model.model_sampling
     return isinstance(modelsampling, model_sampling.CONST)

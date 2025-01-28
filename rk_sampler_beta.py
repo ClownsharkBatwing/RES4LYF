@@ -152,8 +152,11 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
     denoised_prev = torch.zeros_like(x)
     denoised_prev2 = torch.zeros_like(x).to('cpu')
     eps = torch.zeros_like(x)
-    data_prev = torch.zeros_like(x).to('cpu')
+    data_prev = None
+    data_prev2 = None
     s_prev = None
+    x_prev = None
+    eps_prev_ = None
     
     torch.cuda.synchronize()
     torch.cuda.empty_cache()
@@ -298,10 +301,10 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
                         #data_[1] = get_data_from_step(x_0, x_[1], sigma, s_[1]) 
                         eps_[1] = get_epsilon(x_[1], data_[1], s_[1], rk_type)
 
-                    data_prev = data_prev.to('cpu')
-
             else:
+                LG.to(LG.offload_device)
                 eps_[0], data_[0] = rk(x_[0], sigma, x_0, sigma, **extra_args) 
+                LG.to(LG.device)
                 
             for r in range(rk.rows):
                 eps_ [r] = eps_ [0].clone() * sigma / s_[r]
@@ -574,10 +577,10 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
                                             x_[r] = x_0 + h * (rk.b_k_sum(eps_, 0) + rk.v_k_sum(eps_prev_, 0))
                                         data_[r] = get_data_from_step(x_0, x_[r], sigma, s_[r])
                                         eps_[r] = get_epsilon(x_0, data_[r], s_[r], rk_type)
-                            
-                            eps_[row], data_[row] = rk(x_tmp, s_tmp, x_0, sigma, **extra_args) 
 
-
+                            LG.to(LG.offload_device)
+                            eps_[row], data_[row] = rk(x_tmp, s_tmp, x_0, sigma, **extra_args)
+                            LG.to(LG.device)
 
                         # GUIDE 
                         if not extra_options_flag("guide_disable_regular_substep", extra_options):
