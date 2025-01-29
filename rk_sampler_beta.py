@@ -169,6 +169,7 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
         eta = eta_var = etas[step] if etas is not None else eta
         eta_substep = eta_var_substep = etas_substep[step] if etas_substep is not None else eta_substep
         s_noise = s_noises[step] if s_noises is not None else s_noise
+        s_noise_substep = s_noises_substep[step] if s_noises_substep is not None else s_noise_substep
         
         if sigma_next == 0:
             rk, rk_type, eta, eta_var, extra_args = prepare_step_to_sigma_zero(rk, rk_type, model, x, extra_options, alpha, k, noise_sampler_type, cfg_cw=cfg_cw, **extra_args)
