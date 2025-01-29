@@ -42,7 +42,8 @@ def prepare_sigmas(model, sigmas):
 def prepare_step_to_sigma_zero(rk, rk_type, model, x, extra_options, alpha, k, noise_sampler_type, cfg_cw=1.0, **extra_args):
     if rk_type in IRK_SAMPLER_NAMES_BETA:
         if rk.c[-2] == 1.0 and not rk_type.startswith("gauss-legendre"):
-            rk_type_final_step = f"gauss-legendre_{rk_type[-2:]}"
+            rk_type_final_step = "gauss-legendre_3s"
+            #rk_type_final_step = f"gauss-legendre_{rk_type[-2:]}" if rk_type[-2:] in {"2s", "3s", "4s"} else "ralston_3s"
         else:
             rk_type_final_step = rk_type
     elif rk_type in {"euler", "ddim"}:
