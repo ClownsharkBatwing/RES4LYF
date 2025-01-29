@@ -357,7 +357,7 @@ class LatentGuide:
             elif extra_options_flag("disable_lgw_scaling", extra_options):
                 eps_[row] = eps_[row] + lgw_mask * (cvf - eps_[row]) + lgw_mask_inv * (cvf_inv - eps_[row])
                 
-            elif guide_mode in {"resample_projection", "unsample_projection"}:
+            elif guide_mode in {"resample_projection", "unsample_projection", "resample_projection_cw", "unsample_projection_cw"}:
                 eps_row_lerp = eps_[row]   +   self.mask * (cvf-eps_[row])   +   (1-self.mask) * (cvf_inv-eps_[row])
 
                 eps_collinear_eps_lerp = get_collinear(eps_[row], eps_row_lerp)
@@ -366,7 +366,7 @@ class LatentGuide:
                 eps_sum = eps_collinear_eps_lerp + eps_lerp_ortho_eps
 
                 eps_[row] = eps_[row] + lgw_mask * (eps_sum - eps_[row]) + lgw_mask_inv * (eps_sum - eps_[row])
-                
+
             else:
                 avg, avg_inv = 0, 0
                 for b, c in itertools.product(range(x_0.shape[0]), range(x_0.shape[1])):
@@ -380,6 +380,18 @@ class LatentGuide:
                     ratio_inv = torch.nan_to_num(torch.norm(lgw_mask_inv[b][c] * data_[row][b][c] - lgw_mask_inv[b][c] * y0_inv[b][c])   /   avg_inv, 0)
                             
                     eps_[row][b][c] = eps_[row][b][c]      +     ratio * lgw_mask[b][c] * (cvf[b][c] - eps_[row][b][c])    +    ratio_inv * lgw_mask_inv[b][c] * (cvf_inv[b][c] - eps_[row][b][c])
+                    
+                    if guide_mode in {"resample_projection_cw", "unsample_projection_cw"}:
+                        eps_row_lerp = eps_[row][b][c]   +   self.mask[b][c] * (cvf-eps_[row][b][c])   +   (1-self.mask[b][c]) * (cvf_inv-eps_[row][b][c])
+
+                        eps_collinear_eps_lerp = get_collinear(eps_[row][b][c], eps_row_lerp)
+                        eps_lerp_ortho_eps     = get_orthogonal(eps_row_lerp, eps_[row][b][c])
+
+                        eps_sum = eps_collinear_eps_lerp + eps_lerp_ortho_eps
+
+                        eps_[row][b][c] = eps_[row][b][c] + ratio*lgw_mask[b][c] * (eps_sum - eps_[row][b][c]) + ratio_inv*lgw_mask_inv[b][c] * (eps_sum - eps_[row][b][c])
+                    else:
+                        eps_[row][b][c] = eps_[row][b][c]      +     ratio * lgw_mask[b][c] * (cvf[b][c] - eps_[row][b][c])    +    ratio_inv * lgw_mask_inv[b][c] * (cvf_inv[b][c] - eps_[row][b][c])
                     
         if extra_options_flag("substep_eps_ch_mean_std", extra_options):
             eps_[row] = normalize_latent(eps_[row], eps_orig[row])
