@@ -41,7 +41,7 @@ def prepare_sigmas(model, sigmas):
 
 def prepare_step_to_sigma_zero(rk, rk_type, model, x, extra_options, alpha, k, noise_sampler_type, cfg_cw=1.0, **extra_args):
     if rk_type in IRK_SAMPLER_NAMES_BETA:
-        if rk.c[-2] == 1.0:
+        if rk.c[-2] == 1.0 and not rk_type.startswith("gauss-legendre"):
             rk_type_final_step = f"gauss-legendre_{rk_type[-2:]}"
         else:
             rk_type_final_step = rk_type
@@ -169,10 +169,10 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
             extra_args['model_options']['transformer_options']['regional_conditioning_weight'] = 0.0
             extra_args['model_options']['transformer_options']['regional_conditioning_floor']  = 0.0
         
-        eta = eta_var = etas[step] if etas is not None else eta
-        eta_substep = eta_var_substep = etas_substep[step] if etas_substep is not None else eta_substep
-        s_noise = s_noises[step] if s_noises is not None else s_noise
-        s_noise_substep = s_noises_substep[step] if s_noises_substep is not None else s_noise_substep
+        eta         = eta_var         = etas            [step] if etas is not None else eta
+        eta_substep = eta_var_substep = etas_substep    [step] if etas_substep is not None else eta_substep
+        s_noise                       = s_noises        [step] if s_noises is not None else s_noise
+        s_noise_substep               = s_noises_substep[step] if s_noises_substep is not None else s_noise_substep
         
         if sigma_next == 0:
             rk, rk_type, eta, eta_var, extra_args = prepare_step_to_sigma_zero(rk, rk_type, model, x, extra_options, alpha, k, noise_sampler_type, cfg_cw=cfg_cw, **extra_args)
@@ -252,6 +252,7 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
                 s_lying_.append(fully_sub_sigma_2)
                 
                 if extra_options_flag("guide_fully_pseudoimplicit_power_substep_projection", extra_options) or extra_options_flag("inject_fully_pseudoimplicit_power_substep_projection", extra_options):
+                    #eps_substep_guide = get_masked_epsilon_projection(x_0, x_, eps_, y0, y0_inv, s_lying_, r, rk_type, LG, step)
                     eps_row, eps_row_inv = get_guide_epsilon_substep(x_0, x_, y0, y0_inv, s_lying_, r, rk_type)
                     eps_row_lerp = eps_[r]   +   LG.mask * (eps_row-eps_[r])   +   (1-LG.mask) * (eps_row_inv-eps_[r])
                     eps_collinear_eps_lerp = get_collinear(eps_[r], eps_row_lerp)
@@ -332,12 +333,13 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
                         s_2_ = copy.deepcopy(s_)
                         s_2_[row] = sub_sigma_2
                         if extra_options_flag("guide_pseudoimplicit_power_substep_projection", extra_options):
-                            eps_row, eps_row_inv = get_guide_epsilon_substep(x_0, x_, y0, y0_inv, s_2_, row, rk_type)
+                            eps_substep_guide = get_masked_epsilon_projection(x_0, x_, eps_, y0, y0_inv, s_2_, row, rk_type, LG, step)
+                            """eps_row, eps_row_inv = get_guide_epsilon_substep(x_0, x_, y0, y0_inv, s_2_, row, rk_type)
                             eps_row_lerp = eps_[row]   +   LG.mask * (eps_row-eps_[row])   +   (1-LG.mask) * (eps_row_inv-eps_[row])
                             eps_collinear_eps_lerp = get_collinear(eps_[row], eps_row_lerp)
                             eps_lerp_ortho_eps     = get_orthogonal(eps_row_lerp, eps_[row])
                             eps_sum = eps_collinear_eps_lerp + eps_lerp_ortho_eps
-                            eps_substep_guide = eps_[row] + LG.lgw_masks[step] * (eps_sum - eps_[row]) + LG.lgw_masks_inv[step] * (eps_sum - eps_[row])
+                            eps_substep_guide = eps_[row] + LG.lgw_masks[step] * (eps_sum - eps_[row]) + LG.lgw_masks_inv[step] * (eps_sum - eps_[row])"""
                                 
                         if rk_type in IRK_SAMPLER_NAMES_BETA: 
                             if row < rk.rows - rk.multistep_stages:
@@ -404,7 +406,7 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
                             if not extra_options_flag("disable_guides_eps_prev_substep", extra_options):
                                 eps_prev_, x_ = LG.process_guides_substep(x_0, x_, eps_prev_, data_, row, step, sigma, sigma_next, sigma_down, s_, unsample_resample_scale, rk, rk_type, extra_options, frame_weights)
 
-                        if sigma_next > 0:
+                        if sigma_next > 0 and (   (full_iter == 0 and diag_iter == 0)   or   extra_options_flag("newton_iter_post_use_on_implicit_steps", extra_options)   ):
                             x_, eps_ = rk.newton_iter(x_0, x_, eps_, eps_prev_, data_, s_, row, h, sigmas, step, "post", extra_options)
 
                     # UPDATE
@@ -510,5 +512,6 @@ def preview_callback(x, eps, denoised, x_, eps_, data_, step, sigma, sigma_next,
     callback({'x': x, 'i': step, 'sigma': sigma, 'sigma_next': sigma_next, 'denoised': denoised_callback.to(torch.float32)}) if callback is not None else None
     
     return
+
 
 

@@ -260,7 +260,6 @@ class LatentGuide:
 
                     if extra_options_flag("eps_proj_old_default", extra_options):
                         eps_row_lerp = eps_[row]   +   lgw_mask * (eps_row-eps_[row])   +   lgw_mask_inv * (eps_row_inv-eps_[row])
-                        #eps_row_lerp = eps_[row]   +   lgw_mask * (eps_row-eps_[row])   +   (1-lgw_mask) * (eps_row_inv-eps_[row])
                         
                         eps_collinear_eps_lerp = get_collinear(eps_[row], eps_row_lerp)  
                         eps_lerp_ortho_eps     = get_orthogonal(eps_row_lerp, eps_[row])  
@@ -488,9 +487,6 @@ class LatentGuide:
                 d_shift, d_shift_inv = y0, y0_inv
                 
             elif guide_mode == "blend_projection":
-                #d_shift     = get_collinear(denoised, y0) 
-                #d_shift_inv = get_collinear(denoised, y0_inv) 
-                
                 d_lerp = denoised   +   lgw_mask * (y0-denoised)   +   lgw_mask_inv * (y0_inv-denoised)
                 
                 d_collinear_d_lerp = get_collinear(denoised, d_lerp)  
@@ -1099,4 +1095,15 @@ def handle_tiled_etc_noise_steps(x_0, x, x_prenoise, x_init, eps, denoised, y0, 
     return x
 
 
+
+
+
+def get_masked_epsilon_projection(x_0, x_, eps_, y0, y0_inv, s_, row, rk_type, LG, step):
+    eps_row, eps_row_inv = get_guide_epsilon_substep(x_0, x_, y0, y0_inv, s_, row, rk_type)
+    eps_row_lerp = eps_[row]   +   LG.mask * (eps_row-eps_[row])   +   (1-LG.mask) * (eps_row_inv-eps_[row])
+    eps_collinear_eps_lerp = get_collinear(eps_[row], eps_row_lerp)
+    eps_lerp_ortho_eps     = get_orthogonal(eps_row_lerp, eps_[row])
+    eps_sum = eps_collinear_eps_lerp + eps_lerp_ortho_eps
+    eps_substep_guide = eps_[row] + LG.lgw_masks[step] * (eps_sum - eps_[row]) + LG.lgw_masks_inv[step] * (eps_sum - eps_[row])
+    return eps_substep_guide
 
