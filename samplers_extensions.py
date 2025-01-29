@@ -422,6 +422,7 @@ class ClownsharKSamplerAutomation_Beta:
                         "etas": ("SIGMAS", ),
                         "etas_substep": ("SIGMAS", ),
                         "s_noises": ("SIGMAS", ),
+                        "s_noises_substep": ("SIGMAS", ),
                         "unsample_resample_scales": ("SIGMAS", ),
 
                     }  
@@ -432,8 +433,8 @@ class ClownsharKSamplerAutomation_Beta:
     
     FUNCTION = "main"
 
-    def main(self, etas=None, etas_substep=None, s_noises=None, unsample_resample_scales=None,):
-        automation = (etas, etas_substep, s_noises, unsample_resample_scales)
+    def main(self, etas=None, etas_substep=None, s_noises=None, s_noises_substep=None, unsample_resample_scales=None,):
+        automation = (etas, etas_substep, s_noises, s_noises_substep, unsample_resample_scales)
         return (automation, )
 
 

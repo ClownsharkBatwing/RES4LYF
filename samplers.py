@@ -511,6 +511,7 @@ class ClownSamplerAdvanced_Beta:
                     "eta": ("FLOAT", {"default": 0.5, "min": -100.0, "max": 100.0, "step":0.01, "round": False, "tooltip": "Calculated noise amount to be added, then removed, after each step."}),
                     "eta_substep": ("FLOAT", {"default": 0.5, "min": -100.0, "max": 100.0, "step":0.01, "round": False, "tooltip": "Calculated noise amount to be added, then removed, after each step."}),
                     "s_noise": ("FLOAT", {"default": 1.0, "min": -10000, "max": 10000, "step":0.01, "tooltip": "Adds extra SDE noise. Values around 1.03-1.07 can lead to a moderate boost in detail and paint textures."}),
+                    "s_noise_substep": ("FLOAT", {"default": 1.0, "min": -10000, "max": 10000, "step":0.01, "tooltip": "Adds extra SDE noise. Values around 1.03-1.07 can lead to a moderate boost in detail and paint textures."}),
                     "d_noise": ("FLOAT", {"default": 1.0, "min": -10000, "max": 10000, "step":0.01, "tooltip": "Downscales the sigma schedule. Values around 0.98-0.95 can lead to a large boost in detail and paint textures."}),
                     "noise_seed_sde": ("INT", {"default": -1, "min": -1, "max": 0xffffffffffffffff}),
                     "sampler_name": (RES4LYF.rk_coefficients_beta.RK_SAMPLER_NAMES_BETA, {"default": "res_2m"}), 
@@ -537,20 +538,20 @@ class ClownSamplerAdvanced_Beta:
     
     def main(self, 
              noise_type_sde="gaussian", noise_type_sde_substep="gaussian", noise_mode_sde="hard",
-             eta=0.25, eta_var=0.0, d_noise=1.0, s_noise=1.0, alpha_sde=-1.0, k_sde=1.0, cfgpp=0.0, c1=0.0, c2=0.5, c3=1.0, noise_seed_sde=-1, sampler_name="res_2m", implicit_sampler_name="gauss-legendre_2s",
+             eta=0.25, eta_var=0.0, d_noise=1.0, s_noise=1.0, s_noise_substep=1.0, alpha_sde=-1.0, k_sde=1.0, cfgpp=0.0, c1=0.0, c2=0.5, c3=1.0, noise_seed_sde=-1, sampler_name="res_2m", implicit_sampler_name="gauss-legendre_2s",
                     t_fn_formula=None, sigma_fn_formula=None, implicit_substeps=0, implicit_steps=0,
                     latent_guide=None, latent_guide_inv=None, guide_mode="", latent_guide_weights=None, latent_guide_weights_inv=None, latent_guide_mask=None, latent_guide_mask_inv=None, rescale_floor=True, sigmas_override=None, unsampler_type="linear",
                     guides=None, options=None, sde_noise=None,sde_noise_steps=1, 
-                    extra_options="", automation=None, etas=None, etas_substep=None, s_noises=None,unsample_resample_scales=None, regional_conditioning_weights=None,frame_weights=None, eta_substep=0.5, noise_mode_sde_substep="hard",
+                    extra_options="", automation=None, etas=None, etas_substep=None, s_noises=None, s_noises_substep=None, unsample_resample_scales=None, regional_conditioning_weights=None,frame_weights=None, eta_substep=0.5, noise_mode_sde_substep="hard",
                     ): 
-            
+
             implicit_steps_diag = implicit_substeps
             implicit_steps_full = implicit_steps
 
             if noise_mode_sde == "none":
                 eta, eta_var = 0.0, 0.0
                 noise_mode_sde = "hard"
-        
+
             default_dtype = getattr(torch, get_extra_options_kv("default_dtype", "float64", extra_options), torch.float64)
             max_steps = 10000
 
@@ -579,7 +580,7 @@ class ClownSamplerAdvanced_Beta:
             rescale_floor = extra_options_flag("rescale_floor", extra_options)
 
             if automation is not None:
-                etas, etas_substep, s_noises, unsample_resample_scales = automation
+                etas, etas_substep, s_noises, s_noises_substep, unsample_resample_scales = automation
             etas = initialize_or_scale(etas, eta, max_steps).to(default_dtype)
             etas = F.pad(etas, (0, max_steps), value=0.0)
             etas_substep = initialize_or_scale(etas_substep, eta_substep, max_steps).to(default_dtype)
@@ -599,12 +600,12 @@ class ClownSamplerAdvanced_Beta:
             if unsample_resample_scales_override is not None:
                 unsample_resample_scales = unsample_resample_scales_override
 
-            sampler = comfy.samplers.ksampler("rk_beta", {"eta": eta, "eta_var": eta_var, "s_noise": s_noise, "d_noise": d_noise, "alpha": alpha_sde, "k": k_sde, "c1": c1, "c2": c2, "c3": c3, "cfgpp": cfgpp, 
+            sampler = comfy.samplers.ksampler("rk_beta", {"eta": eta, "eta_var": eta_var, "s_noise": s_noise, "s_noise_substep": s_noise_substep, "d_noise": d_noise, "alpha": alpha_sde, "k": k_sde, "c1": c1, "c2": c2, "c3": c3, "cfgpp": cfgpp, 
                                                     "noise_sampler_type": noise_type_sde, "noise_mode": noise_mode_sde, "noise_seed": noise_seed_sde, "rk_type": sampler_name, "implicit_sampler_name": implicit_sampler_name,
                                                             "t_fn_formula": t_fn_formula, "sigma_fn_formula": sigma_fn_formula, "implicit_steps_diag": implicit_steps_diag, "implicit_steps_full": implicit_steps_full,
                                                             "LGW_MASK_RESCALE_MIN": rescale_floor, "sigmas_override": sigmas_override, "sde_noise": sde_noise,
                                                             "extra_options": extra_options,
-                                                            "etas": etas, "etas_substep": etas_substep, "s_noises": s_noises, "unsample_resample_scales": unsample_resample_scales, "regional_conditioning_weights": regional_conditioning_weights,
+                                                            "etas": etas, "etas_substep": etas_substep, "s_noises": s_noises, "s_noises_substep": s_noises_substep, "unsample_resample_scales": unsample_resample_scales, "regional_conditioning_weights": regional_conditioning_weights,
                                                             "guides": guides, "frame_weights": frame_weights, "eta_substep": eta_substep, "noise_mode_sde_substep": noise_mode_sde_substep,
                                                             })
 

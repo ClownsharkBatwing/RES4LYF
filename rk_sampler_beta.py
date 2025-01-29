@@ -84,10 +84,10 @@ def get_epsilon_from_step(x, x_next, sigma, sigma_next):
 @torch.no_grad()
 def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=None, noise_sampler_type="gaussian", noise_mode="hard", noise_seed=-1, rk_type="res_2m", implicit_sampler_name="explicit_full",
                    sigma_fn_formula="", t_fn_formula="",
-                  eta=0.0, eta_var=0.0, s_noise=1., d_noise=1., alpha=-1.0, k=1.0, c1=0.0, c2=0.5, c3=1.0, implicit_steps_diag=0, implicit_steps_full=0, 
+                  eta=0.0, eta_var=0.0, s_noise=1., s_noise_substep=1., d_noise=1., alpha=-1.0, k=1.0, c1=0.0, c2=0.5, c3=1.0, implicit_steps_diag=0, implicit_steps_full=0, 
                   LGW_MASK_RESCALE_MIN=True, sigmas_override=None, unsample_resample_scales=None,regional_conditioning_weights=None, sde_noise=[],
                   extra_options="",
-                  etas=None, etas_substep=None, s_noises=None, momentums=None, guides=None, cfgpp=0.0, cfg_cw = 1.0,regional_conditioning_floors=None, frame_weights=None, eta_substep=0.0, noise_mode_sde_substep="hard",
+                  etas=None, etas_substep=None, s_noises=None, s_noises_substep=None, momentums=None, guides=None, cfgpp=0.0, cfg_cw = 1.0,regional_conditioning_floors=None, frame_weights=None, eta_substep=0.0, noise_mode_sde_substep="hard",
                   ):
     extra_args = {} if extra_args is None else extra_args
     default_dtype = getattr(torch, get_extra_options_kv("default_dtype", "float64", extra_options), torch.float64)
@@ -107,7 +107,7 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
     rk_swap_threshold = float(get_extra_options_kv("rk_swap_threshold", "0.0",     extra_options))
     rk_swap_type      =       get_extra_options_kv("rk_swap_type", "res_3m",       extra_options)   
     CONSERVE_MEAN_CW  =         extra_options_flag("eta_conserve_mean_cw",         extra_options)  
-    SYNC_MEAN_CW  =         extra_options_flag("eta_sync_mean_cw",         extra_options)  
+    SYNC_MEAN_CW  =             extra_options_flag("eta_sync_mean_cw",         extra_options)  
     
     reorder_tableau_indices = get_extra_options_list("reorder_tableau_indices", "", extra_options).split(",")
     if reorder_tableau_indices[0]:
@@ -259,21 +259,24 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
                         x_[r] = x_0 + h * (rk.b_k_sum(eps_, 0) + rk.v_k_sum(eps_prev_, 0))
                 x_lying_[r] = x_[r] + rk.h_fn(fully_sub_sigma_2, s_[r]) * eps_substep_guide
                 
-                if extra_options_flag("guide_fully_pseudoimplicit_alt_epsilon_a", extra_options):
+                if   extra_options_flag("guide_fully_pseudoimplicit_alt_epsilon_a", extra_options):
                     data_lying = x_[r] + rk.h_fn(0, s_[r]) * eps_substep_guide
                     eps_lying_[r] = get_epsilon(x_0, data_lying, sigma, rk_type)
-                if extra_options_flag("guide_fully_pseudoimplicit_alt_epsilon_b", extra_options):
+                elif extra_options_flag("guide_fully_pseudoimplicit_alt_epsilon_b", extra_options):
                     data_lying = x_[r] + rk.h_fn(0, s_[r]) * eps_substep_guide
                     eps_lying_[r] = get_epsilon(x_lying_[r], data_lying, s_[r], rk_type)
-                if extra_options_flag("guide_fully_pseudoimplicit_alt_epsilon_c", extra_options):
+                elif extra_options_flag("guide_fully_pseudoimplicit_alt_epsilon_c", extra_options):
                     eps_lying_[r] = get_epsilon_from_step(x_0, x_lying_[r], sigma, s_[r])
-                if extra_options_flag("guide_fully_pseudoimplicit_alt_epsilon_d", extra_options):
+                elif extra_options_flag("guide_fully_pseudoimplicit_alt_epsilon_d", extra_options):
                     data_lying = x_0 + rk.h_fn(0, sigma) * eps_substep_guide
                     eps_lying_[r] = get_epsilon(x_0, data_lying, sigma, rk_type)
-                else:
+                elif extra_options_flag("guide_fully_pseudoimplicit_old_default_epsilon", extra_options):
                     data_tmp = get_data_from_step(x_0, x_lying_[r], sigma, s_lying_[r])
                     if rk.h_fn(s_lying_[r], sigma).abs() > h.abs() / 100:           # if this ratio is too great, bad results
                         eps_lying_[r] = get_epsilon(x_0, data_tmp, sigma, rk_type)
+                else: # extra_options_flag("guide_fully_pseudoimplicit_alt_epsilon_e", extra_options):
+                    data_lying = x_0 + rk.h_fn(0, sigma) * eps_substep_guide
+                    eps_lying_[r] = get_epsilon(x_0, data_lying, s_[r], rk_type)
                 
             eps_ = eps_lying_
             
@@ -376,7 +379,7 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
                                     x_tmp = x_[row+row_offset] = x_0 + h * (rk.a_k_sum(eps_, row+row_offset) + rk.u_k_sum(eps_prev_, row+row_offset))
                                 else:
                                     x_tmp = x_[row+row_offset] = x_0 + h_new * (rk.a_k_sum(eps_, row+row_offset) + rk.u_k_sum(eps_prev_, row+row_offset))
-                                    x_tmp = x_[row+row_offset] = rk.add_noise_post(x_[row+row_offset], sub_sigma_up, sub_sigma, sub_sigma_next, sub_alpha_ratio, s_noise, noise_mode_sde_substep, SDE_NOISE_EXTERNAL, sde_noise_t)
+                                    x_tmp = x_[row+row_offset] = rk.add_noise_post(x_[row+row_offset], sub_sigma_up, sub_sigma, sub_sigma_next, sub_alpha_ratio, s_noise_substep, noise_mode_sde_substep, SDE_NOISE_EXTERNAL, sde_noise_t)
 
                         # MAKE MODEL CALL
                         if rk_type in IRK_SAMPLER_NAMES_BETA   and   extra_options_flag("implicit_lazy_recycle_first_model_call_at_start", extra_options)   and   row == 0: 
@@ -400,7 +403,7 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
                     # UPDATE
                     if row < rk.rows - row_offset   and   rk.multistep_stages == 0:
                         x_[row+row_offset] = x_row_down = x_0 + h_new * (rk.a_k_sum(eps_, row + row_offset) + rk.u_k_sum(eps_prev_, row + row_offset))
-                        x_[row+row_offset] = rk.add_noise_post(x_[row+row_offset], sub_sigma_up, sub_sigma, sub_sigma_next, sub_alpha_ratio, s_noise, noise_mode_sde_substep, CONSERVE_MEAN_CW, SDE_NOISE_EXTERNAL, sde_noise_t)
+                        x_[row+row_offset] = rk.add_noise_post(x_[row+row_offset], sub_sigma_up, sub_sigma, sub_sigma_next, sub_alpha_ratio, s_noise_substep, noise_mode_sde_substep, CONSERVE_MEAN_CW, SDE_NOISE_EXTERNAL, sde_noise_t)
                         eps_row_down = x_[row+row_offset] - x_row_down
                         
                         if SYNC_MEAN_CW:
@@ -417,7 +420,7 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
                             print("B: step,h,h_new: \n", step, round(float(h.item()),3), round(float(h_new.item()),3))
                             print("B: sub_sigma_up, sub_sigma, sub_sigma_next, sub_sigma_down, sub_alpha_ratio: \n", round(float(sub_sigma_up),3), round(float(sub_sigma),3), round(float(sub_sigma_next),3), round(float(sub_sigma_down),3), round(float(sub_alpha_ratio),3))
                         x_[row+1] = x_row_down = x_0 + h_new * (rk.b_k_sum(eps_, 0) + rk.v_k_sum(eps_prev_, 0))
-                        x_[row+1] = rk.add_noise_post(x_[row+1], sub_sigma_up, sub_sigma, sub_sigma_next, sub_alpha_ratio, s_noise, noise_mode_sde_substep, CONSERVE_MEAN_CW, SDE_NOISE_EXTERNAL, sde_noise_t)
+                        x_[row+1] = rk.add_noise_post(x_[row+1], sub_sigma_up, sub_sigma, sub_sigma_next, sub_alpha_ratio, s_noise_substep, noise_mode_sde_substep, CONSERVE_MEAN_CW, SDE_NOISE_EXTERNAL, sde_noise_t)
                         eps_row_down = x_[row+1] - x_row_down
                         if SYNC_MEAN_CW:
                             x_row_down_tmp = x_0 + h_new_orig * (rk.b_k_sum(eps_, 0) + rk.v_k_sum(eps_prev_, 0))
