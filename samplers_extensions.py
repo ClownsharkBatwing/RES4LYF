@@ -158,7 +158,7 @@ class ClownInpaint: ############################################################
         
         denoise, denoise_bkg = guide_weight_scale, guide_weight_bkg_scale
         
-        if guide_mode.startswith("epsilon_") and not guide_mode.starts_with("epsilon_projection") and guide_bkg == None:
+        if guide_mode.startswith("epsilon_") and not guide_mode.startswith("epsilon_projection") and guide_bkg == None:
             print("Warning: need two latent inputs for guide_mode=",guide_mode," to work. Falling back to epsilon.")
             guide_mode = "epsilon"
         
@@ -229,7 +229,7 @@ class ClownInpaintSimple: ######################################################
         
         denoise, denoise_bkg = guide_weight_scale, guide_weight_bkg_scale
         
-        if guide_mode.startswith("epsilon_") and not guide_mode.starts_with("epsilon_projection") and guide_bkg == None:
+        if guide_mode.startswith("epsilon_") and not guide_mode.startswith("epsilon_projection") and guide_bkg == None:
             print("Warning: need two latent inputs for guide_mode=",guide_mode," to work. Falling back to epsilon.")
             guide_mode = "epsilon"
         
@@ -306,7 +306,7 @@ class ClownsharKSamplerGuide:
         
         denoise, denoise_bkg = guide_weight_scale, guide_weight_bkg_scale
         
-        if guide_mode.startswith("epsilon_") and not guide_mode.starts_with("epsilon_projection") and guide_bkg == None:
+        if guide_mode.startswith("epsilon_") and not guide_mode.startswith("epsilon_projection") and guide_bkg == None:
             print("Warning: need two latent inputs for guide_mode=",guide_mode," to work. Falling back to epsilon.")
             guide_mode = "epsilon"
       
@@ -366,7 +366,7 @@ class ClownsharKSamplerGuides:
         
         denoise, denoise_bkg = guide_weight_scale, guide_weight_bkg_scale
         
-        if guide_mode.startswith("epsilon_") and not guide_mode.starts_with("epsilon_projection") and guide_bkg == None:
+        if guide_mode.startswith("epsilon_") and not guide_mode.startswith("epsilon_projection") and guide_bkg == None:
             print("Warning: need two latent inputs for guide_mode=",guide_mode," to work. Falling back to epsilon.")
             guide_mode = "epsilon"
         
