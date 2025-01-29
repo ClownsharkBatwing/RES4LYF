@@ -109,6 +109,9 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
     CONSERVE_MEAN_CW  =         extra_options_flag("eta_conserve_mean_cw",         extra_options)  
     SYNC_MEAN_CW  =             extra_options_flag("eta_sync_mean_cw",         extra_options)  
     
+    noise_boost_substep  = float(get_extra_options_kv("noise_boost_substep", "0.0", extra_options))
+    noise_boost_step = float(get_extra_options_kv("noise_boost_step",    "0.0", extra_options))
+    
     reorder_tableau_indices = get_extra_options_list("reorder_tableau_indices", "", extra_options).split(",")
     if reorder_tableau_indices[0]:
         reorder_tableau_indices = [int(reorder_tableau_indices[_]) for _ in range(len(reorder_tableau_indices))]
@@ -178,8 +181,11 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
             eta = 0.0
 
         sigma_up, sigma, sigma_down, alpha_ratio = get_res4lyf_step_with_model(model, sigma, sigma_next, eta, eta_var, noise_mode, extra_options)
+        
         h = h_new = rk.h_fn(sigma_down, sigma)
         h_no_eta  = rk.h_fn(sigma_next, sigma)
+        
+        h = h_new = h_new + noise_boost_step * (h_no_eta - h_new)
 
         rk. set_coeff(rk_type, h, c1, c2, c3, step, sigmas, sigma_down, extra_options)
         if sigma_next > 0 and rk.rk_type in IRK_SAMPLER_NAMES_BETA:
@@ -314,8 +320,8 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
                             
                     h_new = h * rk.h_fn(sub_sigma_down, sigma) / rk.h_fn(sub_sigma_next, sigma) 
                     h_new_orig = h_new.clone()
-                    substep_noise_scaling = float(get_extra_options_kv("substep_noise_boost", "0.0", extra_options))
-                    h_new = h_new + substep_noise_scaling * (h - h_new)
+                    
+                    h_new = h_new + noise_boost_substep * (h - h_new)
 
                     # PREPARE PSEUDOIMPLICIT GUIDES
                     if extra_options_flag("guide_pseudoimplicit_power_substep", extra_options):
