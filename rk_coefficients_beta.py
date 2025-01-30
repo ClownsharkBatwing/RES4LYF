@@ -128,10 +128,10 @@ IRK_SAMPLER_NAMES_BETA = ["none",
                     
                     "radau_ia_2s",
                     "radau_ia_3s",
-                    "radau_ia_3s_alt",
 
                     "radau_iia_2s",
                     "radau_iia_3s",
+                    "radau_iia_3s_alt",
                     "radau_iia_5s",
                     "radau_iia_7s",
                     "radau_iia_9s",

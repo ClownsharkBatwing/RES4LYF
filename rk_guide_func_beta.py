@@ -145,7 +145,8 @@ class LatentGuide:
 
 
     def process_guides_substep(self, x_0, x_, eps_, data_, row, step, sigma, sigma_next, sigma_down, s_, unsample_resample_scale, rk, rk_type, extra_options, frame_weights=None):
-
+        row_offset = 1 if rk.a[0].sum() == 0 and rk_type not in IRK_SAMPLER_NAMES_BETA else 0 
+            
         y0 = self.y0
         if self.y0.shape[0] > 1:
             y0 = self.y0[min(step, self.y0.shape[0]-1)].unsqueeze(0)  
@@ -251,12 +252,12 @@ class LatentGuide:
                         lgw_mask_clamp     = torch.clamp(lgw_mask,     max=lgw_tmp)
                         lgw_mask_clamp_inv = torch.clamp(lgw_mask_inv, max=lgw_tmp_inv)
                         
-                        eps_row, eps_row_inv = get_guide_epsilon_substep(x_0, x_, y0, y0_inv, s_, row, rk_type, b, c)
+                        eps_row, eps_row_inv = get_guide_epsilon_substep(x_0, x_, y0, y0_inv, s_, row, row_offset, rk_type, b, c)
                         eps_[row][b][c] = eps_[row][b][c] + lgw_mask_clamp[b][c] * (eps_row - eps_[row][b][c]) + lgw_mask_clamp_inv[b][c] * (eps_row_inv - eps_[row][b][c])
 
 
                 elif guide_mode == "epsilon_projection":
-                    eps_row, eps_row_inv = get_guide_epsilon_substep(x_0, x_, y0, y0_inv, s_, row, rk_type)
+                    eps_row, eps_row_inv = get_guide_epsilon_substep(x_0, x_, y0, y0_inv, s_, row, row_offset, rk_type)
 
                     if extra_options_flag("eps_proj_old_default", extra_options):
                         eps_row_lerp = eps_[row]   +   lgw_mask * (eps_row-eps_[row])   +   lgw_mask_inv * (eps_row_inv-eps_[row])
@@ -290,7 +291,7 @@ class LatentGuide:
 
 
                 elif extra_options_flag("disable_lgw_scaling", extra_options):
-                    eps_row, eps_row_inv = get_guide_epsilon_substep(x_0, x_, y0, y0_inv, s_, row, rk_type)
+                    eps_row, eps_row_inv = get_guide_epsilon_substep(x_0, x_, y0, y0_inv, s_, row, row_offset, rk_type)
                     eps_[row] = eps_[row]      +     lgw_mask * (eps_row - eps_[row])    +    lgw_mask_inv * (eps_row_inv - eps_[row])
                     
 
@@ -306,7 +307,7 @@ class LatentGuide:
                         ratio     = torch.nan_to_num(torch.norm(data_[row][b][c] - y0    [b][c])   /   avg,     0)
                         ratio_inv = torch.nan_to_num(torch.norm(data_[row][b][c] - y0_inv[b][c])   /   avg_inv, 0)
                         
-                        eps_row, eps_row_inv = get_guide_epsilon_substep(x_0, x_, y0, y0_inv, s_, row, rk_type, b, c)
+                        eps_row, eps_row_inv = get_guide_epsilon_substep(x_0, x_, y0, y0_inv, s_, row, row_offset, rk_type, b, c)
                         
                         if guide_mode == "epsilon_projection_cw":
                             eps_row_lerp = eps_[row][b][c]   +   self.mask[b][c] * (eps_row-eps_[row][b][c])   +   (1-self.mask[b][c]) * (eps_row_inv-eps_[row][b][c])
@@ -328,7 +329,6 @@ class LatentGuide:
 
 
         elif (UNSAMPLE or guide_mode in {"resample", "unsample", "resample_projection", "unsample_projection"}) and (lgw > 0 or lgw_inv > 0):
-            row_offset = 1 if rk.a[0].sum() == 0 and rk_type not in IRK_SAMPLER_NAMES_BETA else 0       
             
             cvf = rk.get_epsilon(x_0, x_[row+row_offset], y0, sigma, s_[row], sigma_down, unsample_resample_scale, extra_options)                
             if UNSAMPLE and sigma > sigma_next and latent_guide_inv is not None:
@@ -624,7 +624,7 @@ def apply_temporal_smoothing(tensor, temporal_smoothing):
 
     return data_smooth.view(b, c, h, w, f).permute(0, 1, 4, 2, 3)
 
-def get_guide_epsilon_substep(x_0, x_, y0, y0_inv, s_, row, rk_type, b=None, c=None):
+def get_guide_epsilon_substep(x_0, x_, y0, y0_inv, s_, row, row_offset, rk_type, b=None, c=None):
     s_in = x_0.new_ones([x_0.shape[0]])
     
     if b is not None and c is not None:  
@@ -638,8 +638,8 @@ def get_guide_epsilon_substep(x_0, x_, y0, y0_inv, s_, row, rk_type, b=None, c=N
         eps_row     = y0    [index] - x_0[index]
         eps_row_inv = y0_inv[index] - x_0[index]
     else:
-        eps_row     = (x_[row+1][index] - y0    [index]) / (s_[row] * s_in) # potential issues here with x_[row+1] being rk.rows+2 with gauss-legendre_2s 1 imp step 1 imp substep
-        eps_row_inv = (x_[row+1][index] - y0_inv[index]) / (s_[row] * s_in)
+        eps_row     = (x_[row+row_offset][index] - y0    [index]) / (s_[row] * s_in) # potential issues here with x_[row+1] being rk.rows+2 with gauss-legendre_2s 1 imp step 1 imp substep
+        eps_row_inv = (x_[row+row_offset][index] - y0_inv[index]) / (s_[row] * s_in)
     
     return eps_row, eps_row_inv
 
@@ -1018,8 +1018,8 @@ class NoiseStepHandlerOSDE:
 
 
 
-def handle_tiled_etc_noise_steps(x_0, x, x_prenoise, x_init, eps, denoised, y0, y0_inv, step, 
-                                 rk_type, rk, sigma_up, sigma, sigma_next, alpha_ratio, s_noise, noise_mode, SDE_NOISE_EXTERNAL, sde_noise_t,
+def handle_tiled_etc_noise_steps(x_0, x, x_prenoise, x_init, eps, denoised, y0, y0_inv, step,        # NOTE: NS AND SUBSTEP ADDED!
+                                 rk_type, rk, NS, SUBSTEP, sigma_up, sigma, sigma_next, alpha_ratio, s_noise, noise_mode, SDE_NOISE_EXTERNAL, sde_noise_t,
                                  NOISE_COSSIM_SOURCE, NOISE_COSSIM_MODE, noise_cossim_tile_size, noise_cossim_iterations,
                                  extra_options):
     
@@ -1031,7 +1031,7 @@ def handle_tiled_etc_noise_steps(x_0, x, x_prenoise, x_init, eps, denoised, y0, 
         noise_cossim_iterations   = int(get_extra_options_kv("noise_cossim_takeover_iterations", str(noise_cossim_iterations), extra_options))
         
     for i in range(noise_cossim_iterations):
-        x_tmp.append(rk.add_noise_post(x, sigma_up, sigma, sigma_next, alpha_ratio, s_noise, noise_mode, SDE_NOISE_EXTERNAL, sde_noise_t)    )#y0, lgw, sigma_down are currently unused
+        x_tmp.append(NS.add_noise_post(x, sigma_up, sigma, sigma_next, alpha_ratio, s_noise, noise_mode, SDE_NOISE_EXTERNAL, sde_noise_t)    )#y0, lgw, sigma_down are currently unused
         noise_tmp = x_tmp[i] - x
         if extra_options_flag("noise_noise_zscore_norm", extra_options):
             noise_tmp = (noise_tmp - noise_tmp.mean()) / noise_tmp.std()
@@ -1098,8 +1098,8 @@ def handle_tiled_etc_noise_steps(x_0, x, x_prenoise, x_init, eps, denoised, y0, 
 
 
 
-def get_masked_epsilon_projection(x_0, x_, eps_, y0, y0_inv, s_, row, rk_type, LG, step):
-    eps_row, eps_row_inv = get_guide_epsilon_substep(x_0, x_, y0, y0_inv, s_, row, rk_type)
+def get_masked_epsilon_projection(x_0, x_, eps_, y0, y0_inv, s_, row, row_offset, rk_type, LG, step):
+    eps_row, eps_row_inv = get_guide_epsilon_substep(x_0, x_, y0, y0_inv, s_, row, row_offset, rk_type)
     eps_row_lerp = eps_[row]   +   LG.mask * (eps_row-eps_[row])   +   (1-LG.mask) * (eps_row_inv-eps_[row])
     eps_collinear_eps_lerp = get_collinear(eps_[row], eps_row_lerp)
     eps_lerp_ortho_eps     = get_orthogonal(eps_row_lerp, eps_[row])

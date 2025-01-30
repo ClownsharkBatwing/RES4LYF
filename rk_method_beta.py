@@ -23,24 +23,21 @@ import itertools
 from .rk_coefficients_beta import *
 from .phi_functions import *
 
-from .helper import get_orthogonal, get_collinear, get_extra_options_list
+from .helper import get_orthogonal, get_collinear, get_extra_options_list, has_nested_attr
+
+MAX_STEPS = 10000
 
 
 class RK_Method_Beta:
-    def __init__(self, model, name="", method="explicit", dynamic_method=False, device='cuda', dtype=torch.float64):
+    def __init__(self, model, device='cuda', dtype=torch.float64):
         self.model = model
         self.model_sampling = model.inner_model.inner_model.model_sampling
         self.device = device
         self.dtype = dtype
-        
-        self.method = method
-        self.dynamic_method = dynamic_method
-        
+                
         self.rk_type = None
         
         self.stages = 0
-        self.name = name
-        self.ab = None
         self.a = None
         self.b = None
         self.u = None
@@ -58,29 +55,26 @@ class RK_Method_Beta:
         self.sigma_min = model.inner_model.inner_model.model_sampling.sigma_min.to(dtype)
         self.sigma_max = model.inner_model.inner_model.model_sampling.sigma_max.to(dtype)
         
-        self.noise_sampler = None
+        self.noise_sampler  = None
+        self.noise_sampler2 = None
         
-        self.h_prev = None
-        self.h_prev2 = None
         self.multistep_stages = 0
         
         self.cfg_cw = 1.0
 
-        
     @staticmethod
     def is_exponential(rk_type):
-        #if rk_type.startswith(("res", "dpmpp", "ddim", "irk_exp_diag_2s"   )): 
         if rk_type.startswith(("res", "dpmpp", "ddim", "pec", "etdrk", "lawson", "abnorsett"   )): 
             return True
         else:
             return False
 
     @staticmethod
-    def create(model, rk_type, device='cuda', dtype=torch.float64, name="", method="explicit"):
+    def create(model, rk_type, device='cuda', dtype=torch.float64):
         if RK_Method_Beta.is_exponential(rk_type):
-            return RK_Method_Exponential(model, name, method, device, dtype)
+            return RK_Method_Exponential(model, device, dtype)
         else:
-            return RK_Method_Linear(model, name, method, device, dtype)
+            return RK_Method_Linear(model, device, dtype)
                 
     def __call__(self):
         raise NotImplementedError("This method got clownsharked!")
@@ -99,60 +93,6 @@ class RK_Method_Beta:
         denoised = self.model(x, sigma * s_in, **extra_args)
         denoised = self.calc_cfg_channelwise(denoised)
         return denoised
-    
-
-
-    def init_noise_sampler(self, x, noise_seed, noise_sampler_type, alpha, k=1., scale=0.1):
-        if noise_seed < 0:
-            seed = torch.initial_seed()+1 
-            print("SDE noise seed: ", seed, " (set via torch.initial_seed()+1)")
-        else:
-            seed = noise_seed
-            print("SDE noise seed: ", seed)
-        if noise_sampler_type == "fractal":
-            self.noise_sampler = NOISE_GENERATOR_CLASSES.get(noise_sampler_type)(x=x, seed=seed, sigma_min=self.sigma_min, sigma_max=self.sigma_max)
-            self.noise_sampler.alpha = alpha
-            self.noise_sampler.k = k
-            self.noise_sampler.scale = scale
-        else:
-            self.noise_sampler = NOISE_GENERATOR_CLASSES_SIMPLE.get(noise_sampler_type)(x=x, seed=seed, sigma_min=self.sigma_min, sigma_max=self.sigma_max)
-            
-    def add_noise_pre(self, x, sigma_up, sigma, sigma_next, alpha_ratio, s_noise, noise_mode, CONSERVE_MEAN_CW=True, SDE_NOISE_EXTERNAL=False, sde_noise_t=None):
-        if isinstance(self.model_sampling, comfy.model_sampling.CONST) == False and noise_mode == "hard": 
-            return self.add_noise(x, sigma_up, sigma, sigma_next, alpha_ratio, s_noise, CONSERVE_MEAN_CW, SDE_NOISE_EXTERNAL, sde_noise_t)
-        else:
-            return x
-        
-    def add_noise_post(self, x, sigma_up, sigma, sigma_next, alpha_ratio, s_noise, noise_mode, CONSERVE_MEAN_CW=True, SDE_NOISE_EXTERNAL=False, sde_noise_t=None):
-        if isinstance(self.model_sampling, comfy.model_sampling.CONST) == True   or   (isinstance(self.model_sampling, comfy.model_sampling.CONST) == False and noise_mode != "hard"):
-            return self.add_noise(x, sigma_up, sigma, sigma_next, alpha_ratio, s_noise, CONSERVE_MEAN_CW, SDE_NOISE_EXTERNAL, sde_noise_t)
-        else:
-            return x
-    
-    def add_noise(self, x, sigma_up, sigma, sigma_next, alpha_ratio, s_noise, CONSERVE_MEAN_CW, SDE_NOISE_EXTERNAL, sde_noise_t):
-
-        if sigma_next > 0.0 and sigma_up > 0.0:
-            noise = self.noise_sampler(sigma=sigma, sigma_next=sigma_next)
-            noise = torch.nan_to_num((noise - noise.mean()) / noise.std(), 0.0)
-
-            noise_ortho = get_orthogonal(noise, x)
-            noise_ortho = noise_ortho / noise_ortho.std()
-            
-            noise = noise_ortho
-
-            if SDE_NOISE_EXTERNAL:
-                noise = (1-s_noise) * noise + s_noise * sde_noise_t
-            
-            x_next = alpha_ratio * x + noise * sigma_up * s_noise
-            
-            if CONSERVE_MEAN_CW:
-                for c in range(x.shape[-3]):
-                    x_next[..., c, :, :] = x_next[..., c, :, :] - x_next[..., c, :, :].mean() + x[..., c, :, :].mean()
-            
-            return x_next
-        
-        else:
-            return x
 
 
     def set_coeff(self, rk_type, h, c1=0.0, c2=0.5, c3=1.0, step=0, sigmas=None, sigma_down=None, extra_options=None):
@@ -449,8 +389,8 @@ class RK_Method_Beta:
 
 
 class RK_Method_Exponential(RK_Method_Beta):
-    def __init__(self, model, name="", method="explicit", device='cuda', dtype=torch.float64):
-        super().__init__(model, name, method, device, dtype) 
+    def __init__(self, model, device='cuda', dtype=torch.float64):
+        super().__init__(model, device, dtype) 
         self.exponential = True
         self.eps_pred = True
         
@@ -506,9 +446,9 @@ class RK_Method_Exponential(RK_Method_Beta):
 
 
 class RK_Method_Linear(RK_Method_Beta):
-    def __init__(self, model, name="", method="explicit", device='cuda', dtype=torch.float64):
-        super().__init__(model, name, method, device, dtype) 
-        self.expanential = False
+    def __init__(self, model, device='cuda', dtype=torch.float64):
+        super().__init__(model, device, dtype) 
+        self.exponential = False
         self.eps_pred = True
         
     @staticmethod
@@ -573,4 +513,90 @@ def get_epsilon_from_step(x, x_next, sigma, sigma_next):
 
 
 
+
+
+
+
+class RK_NoiseSampler:
+    def __init__(self, model, device='cuda', dtype=torch.float64):
+        self.device = device
+        self.dtype = dtype
+        
+        if has_nested_attr(model, "inner_model.inner_model.model_sampling"):
+            model_sampling = model.inner_model.inner_model.model_sampling
+        elif has_nested_attr(model, "model.model_sampling"):
+            model_sampling = model.model.model_sampling
+        
+        self.CONST = isinstance(model_sampling, comfy.model_sampling.CONST)
+
+        self.sigma_min = model.inner_model.inner_model.model_sampling.sigma_min.to(dtype)
+        self.sigma_max = model.inner_model.inner_model.model_sampling.sigma_max.to(dtype)
+        
+        self.noise_sampler  = None
+        self.noise_sampler2 = None
+
+    def init_noise_sampler(self, x, noise_seed, noise_sampler_type, noise_sampler_type2, alpha, alpha2, k=1., k2=1., scale=0.1, scale2=0.1):
+        if noise_seed < 0:
+            seed = torch.initial_seed()+1 
+            print("SDE noise seed: ", seed, " (set via torch.initial_seed()+1)")
+        else:
+            seed = noise_seed
+            print("SDE noise seed: ", seed)
+            
+        seed2 = seed + MAX_STEPS #for substep noise generation. offset needed to ensure seeds are not reused
+            
+        if noise_sampler_type == "fractal":
+            self.noise_sampler        = NOISE_GENERATOR_CLASSES.get(noise_sampler_type )(x=x, seed=seed,  sigma_min=self.sigma_min, sigma_max=self.sigma_max)
+            self.noise_sampler.alpha  = alpha
+            self.noise_sampler.k      = k
+            self.noise_sampler.scale  = scale
+        if noise_sampler_type2 == "fractal":
+            self.noise_sampler2       = NOISE_GENERATOR_CLASSES.get(noise_sampler_type2)(x=x, seed=seed2, sigma_min=self.sigma_min, sigma_max=self.sigma_max)
+            self.noise_sampler2.alpha = alpha2
+            self.noise_sampler2.k     = k2
+            self.noise_sampler2.scale = scale2
+        else:
+            self.noise_sampler  = NOISE_GENERATOR_CLASSES_SIMPLE.get(noise_sampler_type )(x=x, seed=seed,  sigma_min=self.sigma_min, sigma_max=self.sigma_max)
+            self.noise_sampler2 = NOISE_GENERATOR_CLASSES_SIMPLE.get(noise_sampler_type2)(x=x, seed=seed2, sigma_min=self.sigma_min, sigma_max=self.sigma_max)
+            
+    def add_noise_pre(self, x, sigma_up, sigma, sigma_next, alpha_ratio, s_noise, noise_mode, CONSERVE_MEAN_CW=True, SDE_NOISE_EXTERNAL=False, sde_noise_t=None, SUBSTEP=False, ):
+        if not self.CONST and noise_mode == "hard": 
+            return self.add_noise(x, sigma_up, sigma, sigma_next, alpha_ratio, s_noise, SUBSTEP, CONSERVE_MEAN_CW, SDE_NOISE_EXTERNAL, sde_noise_t)
+        else:
+            return x
+        
+    def add_noise_post(self, x, sigma_up, sigma, sigma_next, alpha_ratio, s_noise, noise_mode, CONSERVE_MEAN_CW=True, SDE_NOISE_EXTERNAL=False, sde_noise_t=None, SUBSTEP=False, ):
+        if self.CONST   or   (not self.CONST and noise_mode != "hard"):
+            return self.add_noise(x, sigma_up, sigma, sigma_next, alpha_ratio, s_noise, CONSERVE_MEAN_CW, SDE_NOISE_EXTERNAL, sde_noise_t, SUBSTEP, )
+        else:
+            return x
+    
+    def add_noise(self, x, sigma_up, sigma, sigma_next, alpha_ratio, s_noise, CONSERVE_MEAN_CW, SDE_NOISE_EXTERNAL, sde_noise_t, SUBSTEP, ):
+
+        if sigma_next > 0.0 and sigma_up > 0.0:
+            if not SUBSTEP:
+                noise = self.noise_sampler (sigma=sigma, sigma_next=sigma_next)
+            else:
+                noise = self.noise_sampler2(sigma=sigma, sigma_next=sigma_next)
+                
+            noise = torch.nan_to_num((noise - noise.mean()) / noise.std(), 0.0)
+
+            noise_ortho = get_orthogonal(noise, x)
+            noise_ortho = noise_ortho / noise_ortho.std()
+            
+            noise = noise_ortho
+
+            if SDE_NOISE_EXTERNAL:
+                noise = (1-s_noise) * noise + s_noise * sde_noise_t
+            
+            x_next = alpha_ratio * x + noise * sigma_up * s_noise
+            
+            if CONSERVE_MEAN_CW:
+                for c in range(x.shape[-3]):
+                    x_next[..., c, :, :] = x_next[..., c, :, :] - x_next[..., c, :, :].mean() + x[..., c, :, :].mean()
+            
+            return x_next
+        
+        else:
+            return x
 
