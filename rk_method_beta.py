@@ -145,9 +145,11 @@ class RK_Method_Beta:
         return
 
     def update_substep(self, x_0, x_, eps_, eps_prev_, row, row_offset, h, h_new, h_new_orig, sub_sigma_up, sub_sigma, sub_sigma_next, sub_alpha_ratio, s_noise_substep, noise_mode_sde_substep, NS, \
-                       SYNC_MEAN_CW, CONSERVE_MEAN_CW, SDE_NOISE_EXTERNAL, sde_noise_t, extra_options, SUBSTEP=True, ):
+                       SYNC_MEAN_CW, CONSERVE_MEAN_CW, SDE_NOISE_EXTERNAL, sde_noise_t, extra_options, IMPLICIT_PREDICTOR=False,):
+        if extra_options_flag("guide_fully_pseudoimplicit_use_post_substep_eta", extra_options):
+            IMPLICIT_PREDICTOR=True
         if row < self.rows - row_offset   and   self.multistep_stages == 0:
-            if self.IMPLICIT and not extra_options_flag("guide_fully_pseudoimplicit_use_post_substep_eta", extra_options): 
+            if (self.IMPLICIT and not IMPLICIT_PREDICTOR) or (self.IMPLICIT and row == 0):
                 x_[row+row_offset] = x_row_down = x_0 + h     * (self.a_k_sum(eps_, row + row_offset) + self.u_k_sum(eps_prev_, row + row_offset))
             else:
                 x_[row+row_offset] = x_row_down = x_0 + h_new * (self.a_k_sum(eps_, row + row_offset) + self.u_k_sum(eps_prev_, row + row_offset))
@@ -161,7 +163,7 @@ class RK_Method_Beta:
                     x_[row+row_offset][..., c, :, :] = x_[row+row_offset][..., c, :, :] - x_[row+row_offset][..., c, :, :].mean() + x_row_tmp[..., c, :, :].mean()
                 
         else: 
-            if self.IMPLICIT and not extra_options_flag("guide_fully_pseudoimplicit_use_post_substep_eta", extra_options): 
+            if (self.IMPLICIT and not IMPLICIT_PREDICTOR) or (self.IMPLICIT and row == 0):
                 x_[row+1] = x_row_down = x_0 + h     * (self.b_k_sum(eps_, 0) + self.v_k_sum(eps_prev_, 0))
             else:
                 x_[row+1] = x_row_down = x_0 + h_new * (self.b_k_sum(eps_, 0) + self.v_k_sum(eps_prev_, 0))
