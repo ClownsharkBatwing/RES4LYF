@@ -176,7 +176,7 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
         frame_weights = F.pad(frame_weights, (0, MAX_STEPS), value=0.0)
 
     LG = LatentGuide(guides, x, model, sigmas, UNSAMPLE, LGW_MASK_RESCALE_MIN, extra_options)
-    x = LG.init_guides(x, RK.noise_sampler)
+    x = LG.init_guides(x, NS.noise_sampler)
     
     y0, y0_inv = LG.y0, LG.y0_inv
 
@@ -389,9 +389,9 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
                     fully_sub_sigma_2 = sub_sigma - maxmin_ratio * (sub_sigma * pseudoimplicit_step_weights[full_iter] * LG.lgw[step])
                     s_lying_.append(fully_sub_sigma_2)
 
-                    h_new = h * RK.h_fn(sub_sigma_down, sigma) / RK.h_fn(sub_sigma_next, sigma) 
+                    h_new      = h * RK.h_fn(sub_sigma_down, sigma) / RK.h_fn(sub_sigma_next, sigma) 
                     h_new_orig = h_new.clone()
-                    h_new = h_new + noise_boost_substep * (h - h_new)
+                    h_new      = h_new + noise_boost_substep * (h - h_new)
                     
                     if RK.IMPLICIT:
                         x_ = RK.update_substep(x_0, x_, eps_, eps_prev_, r, row_offset, h, h_new, h_new_orig, sub_sigma_up, sub_sigma, sub_sigma_next, sub_alpha_ratio, s_noise_substep, noise_mode_sde_substep, NS, \
@@ -420,7 +420,7 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
 
                             eps_sum = eps_collinear_eps_lerp + eps_lerp_ortho_eps
 
-                            eps_[r][b][c] = eps_[r][b][c] + ratio*LG.lgw_masks[step][b][c] * (eps_sum - eps_[r][b][c]) + ratio_inv*LG.lgw_masks_inv[step][b][c] * (eps_sum - eps_[r][b][c])
+                            eps_[r][b][c] = eps_[r][b][c]      +     ratio * LG.lgw_masks[step][b][c] * (eps_sum - eps_[r][b][c])    +    ratio_inv * LG.lgw_masks_inv[step][b][c] * (eps_sum     - eps_[r][b][c])
                         else:
                             eps_[r][b][c] = eps_[r][b][c]      +     ratio * LG.lgw_masks[step][b][c] * (eps_row - eps_[r][b][c])    +    ratio_inv * LG.lgw_masks_inv[step][b][c] * (eps_row_inv - eps_[r][b][c])
                             

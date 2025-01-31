@@ -150,31 +150,31 @@ class RK_Method_Beta:
             IMPLICIT_PREDICTOR=True
         if row < self.rows - row_offset   and   self.multistep_stages == 0:
             if (self.IMPLICIT and not IMPLICIT_PREDICTOR) or (self.IMPLICIT and row == 0):
-                x_[row+row_offset] = x_row_down = x_0 + h     * (self.a_k_sum(eps_, row + row_offset) + self.u_k_sum(eps_prev_, row + row_offset))
+                x_[row+row_offset] = x_0 + h     * (self.a_k_sum(eps_, row + row_offset) + self.u_k_sum(eps_prev_, row + row_offset))
             else:
                 x_[row+row_offset] = x_row_down = x_0 + h_new * (self.a_k_sum(eps_, row + row_offset) + self.u_k_sum(eps_prev_, row + row_offset))
                 x_[row+row_offset] = NS.add_noise_post(x_[row+row_offset], sub_sigma_up, sub_sigma, sub_sigma_next, sub_alpha_ratio, s_noise_substep, noise_mode_sde_substep, CONSERVE_MEAN_CW, SDE_NOISE_EXTERNAL, sde_noise_t, SUBSTEP=True)
-            eps_row_down = x_[row+row_offset] - x_row_down
-            
-            if SYNC_MEAN_CW:
-                x_row_down_tmp = x_0 + h_new_orig * (self.a_k_sum(eps_, row + row_offset) + self.u_k_sum(eps_prev_, row + row_offset))
-                x_row_tmp = x_row_down_tmp + eps_row_down
-                for c in range(x_[0].shape[-3]):
-                    x_[row+row_offset][..., c, :, :] = x_[row+row_offset][..., c, :, :] - x_[row+row_offset][..., c, :, :].mean() + x_row_tmp[..., c, :, :].mean()
+                
+                if SYNC_MEAN_CW and h_new != h_new_orig:
+                    eps_row_down = x_[row+row_offset] - x_row_down
+                    x_row_down_tmp = x_0 + h_new_orig * (self.a_k_sum(eps_, row + row_offset) + self.u_k_sum(eps_prev_, row + row_offset))
+                    x_row_tmp = x_row_down_tmp + eps_row_down
+                    for c in range(x_[0].shape[-3]):
+                        x_[row+row_offset][..., c, :, :] = x_[row+row_offset][..., c, :, :] - x_[row+row_offset][..., c, :, :].mean() + x_row_tmp[..., c, :, :].mean()
                 
         else: 
             if (self.IMPLICIT and not IMPLICIT_PREDICTOR) or (self.IMPLICIT and row == 0) or row_offset == 1:
-                x_[row+1] = x_row_down = x_0 + h     * (self.b_k_sum(eps_, 0) + self.v_k_sum(eps_prev_, 0))
+                x_[row+1] = x_0 + h     * (self.b_k_sum(eps_, 0) + self.v_k_sum(eps_prev_, 0))
             else:
                 x_[row+1] = x_row_down = x_0 + h_new * (self.b_k_sum(eps_, 0) + self.v_k_sum(eps_prev_, 0))
                 x_[row+1] = NS.add_noise_post(x_[row+1], sub_sigma_up, sub_sigma, sub_sigma_next, sub_alpha_ratio, s_noise_substep, noise_mode_sde_substep, CONSERVE_MEAN_CW, SDE_NOISE_EXTERNAL, sde_noise_t, SUBSTEP=True)
-            eps_row_down = x_[row+1] - x_row_down
-            
-            if SYNC_MEAN_CW:
-                x_row_down_tmp = x_0 + h_new_orig * (self.b_k_sum(eps_, 0) + self.v_k_sum(eps_prev_, 0))
-                x_row_tmp = x_row_down_tmp + eps_row_down
-                for c in range(x_[0].shape[-3]):
-                    x_[row+1][..., c, :, :] = x_[row+1][..., c, :, :] - x_[row+1][..., c, :, :].mean() + x_row_tmp[..., c, :, :].mean()
+                
+                if SYNC_MEAN_CW and h_new != h_new_orig:
+                    eps_row_down = x_[row+1] - x_row_down
+                    x_row_down_tmp = x_0 + h_new_orig * (self.b_k_sum(eps_, 0) + self.v_k_sum(eps_prev_, 0))
+                    x_row_tmp = x_row_down_tmp + eps_row_down
+                    for c in range(x_[0].shape[-3]):
+                        x_[row+1][..., c, :, :] = x_[row+1][..., c, :, :] - x_[row+1][..., c, :, :].mean() + x_row_tmp[..., c, :, :].mean()
         return x_
 
     def a_k_sum(self, k, row):
