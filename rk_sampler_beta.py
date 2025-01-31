@@ -6,6 +6,7 @@ import copy
 from contextlib import contextmanager
 from typing import Dict, Any, Optional
 from typing import Set
+import itertools
 
 from tqdm.auto import trange
 import gc
@@ -121,6 +122,7 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
                   LGW_MASK_RESCALE_MIN=True, sigmas_override=None, unsample_resample_scales=None,regional_conditioning_weights=None, sde_noise=[],
                   extra_options="",
                   etas=None, etas_substep=None, s_noises=None, s_noises_substep=None, momentums=None, guides=None, cfgpp=0.0, cfg_cw = 1.0,regional_conditioning_floors=None, frame_weights_grp=None, eta_substep=0.0, noise_mode_sde_substep="hard",
+                  noise_boost_step=0.0, noise_boost_substep=0.0,
                   ):
     
     tensor_manager = TensorManager()
@@ -152,8 +154,8 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
     CONSERVE_MEAN_CW  =         extra_options_flag("eta_conserve_mean_cw",         extra_options)  
     SYNC_MEAN_CW  =         not extra_options_flag("eta_sync_mean_cw_disable",     extra_options)  
     
-    noise_boost_substep  = float(get_extra_options_kv("noise_boost_substep", "0.0", extra_options))
-    noise_boost_step = float(get_extra_options_kv("noise_boost_step",    "0.0", extra_options))
+    #noise_boost_substep  = float(get_extra_options_kv("noise_boost_substep", "0.0", extra_options))
+    #noise_boost_step = float(get_extra_options_kv("noise_boost_step",    "0.0", extra_options))
     
     reorder_tableau_indices = get_extra_options_list("reorder_tableau_indices", "", extra_options).split(",")
     if reorder_tableau_indices[0]:
@@ -165,8 +167,17 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
     else:
         pseudoimplicit_step_weights = [1. for _ in range(max(implicit_steps_diag, implicit_steps_full)+1)]
 
+    pseudoimplicit_row_weights = get_extra_options_list("pseudoimplicit_row_weights", "", extra_options).split(",")
+    if pseudoimplicit_row_weights[0]:
+        pseudoimplicit_row_weights = [float(pseudoimplicit_row_weights[_]) for _ in range(len(pseudoimplicit_row_weights))]
+    else:
+        pseudoimplicit_row_weights = [1. for _ in range(100)]
+
     cfg_cw = float(get_extra_options_kv("cfg_cw", str(cfg_cw), extra_options))
-    
+
+
+
+    # SETUP SIGMAS
     if sigmas_override is not None:
         sigmas = sigmas_override.clone()
     sigmas = sigmas.clone() * d_noise
@@ -181,6 +192,9 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
                 sigma_up_total += sigmas[i+1]
             eta = eta / sigma_up_total
 
+
+
+    # SETUP SAMPLER
     if implicit_sampler_name not in ("use_explicit", "none"): # and implicit_steps_full + implicit_steps_diag > 0:
         rk_type = implicit_sampler_name
     print("rk_type:", rk_type)
@@ -194,8 +208,10 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
     extra_args = RK.init_cfg_channelwise(x, cfg_cw, **extra_args)
 
 
+
+    # SETUP GUIDES
     LG = LatentGuide(model, sigmas, UNSAMPLE, LGW_MASK_RESCALE_MIN, extra_options, dtype=default_dtype, frame_weights_grp=frame_weights_grp)
-    x = LG.init_guides(x, guides, RK.noise_sampler)
+    x = LG.init_guides(x, guides, NS.noise_sampler)
     lg_mask = LG.mask.to(x.device)
     if LG.y0 is not None:
         y0 = LG.y0.to(x.device)
@@ -203,7 +219,6 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
 
     data_           = None
     eps_            = None
-    
     eps             = torch.zeros_like(x)
     denoised        = torch.zeros_like(x)
     denoised_prev   = torch.zeros_like(x)
@@ -285,7 +300,7 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
         eps_prev_ = eps_.clone()
 
 
-
+        # INITIALIZE IMPLICIT SAMPLING
         if rk_type in IRK_SAMPLER_NAMES_BETA:
             if extra_options_flag("implicit_skip_model_call_at_start", extra_options) and denoised.sum() + eps.sum() != 0:
                 eps_[0], data_[0] = eps.clone(), denoised.clone()
@@ -306,7 +321,8 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
 
             x_, eps_ = RK.newton_iter(x_0, x_, eps_, eps_prev_, data_, s_, 0, h, sigmas, step, "init", extra_options)
 
-       
+
+        # BEGIN FULLY IMPLICIT LOOP
         for full_iter in range(implicit_steps_full + 1):
             
             if rk_type in IRK_SAMPLER_NAMES_BETA and extra_options_flag("fully_implicit_newton_iter", extra_options):
@@ -386,7 +402,7 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
                     sub_sigma_up, sub_sigma, sub_sigma_down, sub_alpha_ratio = get_res4lyf_step_with_model(model, s_[r], s_[r], eta_substep, noise_mode_sde_substep)
                     
                     maxmin_ratio = (sub_sigma - RK.sigma_min) / sub_sigma
-                    fully_sub_sigma_2 = sub_sigma - maxmin_ratio * (sub_sigma * pseudoimplicit_step_weights[full_iter] * LG.lgw[step])
+                    fully_sub_sigma_2 = sub_sigma - maxmin_ratio * (sub_sigma * pseudoimplicit_row_weights[r] * pseudoimplicit_step_weights[full_iter] * LG.lgw[step])
                     s_lying_.append(fully_sub_sigma_2)
 
                     h_new = h * RK.h_fn(sub_sigma_down, sigma) / RK.h_fn(sub_sigma_next, sigma) 
@@ -408,6 +424,72 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
                     
                     data_lying = x_[r] + RK.h_fn(0, s_[r]) * eps_substep_guide
                     eps_lying_[r] = get_epsilon(x_0, data_lying, s_[r], rk_type)
+                    
+                if not extra_options_flag("pseudoimplicit_disable_eps_lying", extra_options):
+                    eps_ = eps_lying_
+                
+                if not extra_options_flag("pseudoimplicit_disable_newton_iter", extra_options):
+                    x_, eps_ = RK.newton_iter(x_0, x_, eps_, eps_prev_, data_, s_, 0, h, sigmas, step, "lying", extra_options)
+
+
+
+            # PREPARE FULLY PSEUDOIMPLICIT GUIDES
+            elif LG.guide_mode in {"fully_pseudoimplicit_cw", "fully_pseudoimplicit_projection_cw"} and (LG.lgw[step] > 0 or LG.lgw_inv[step] > 0) and sigma_next > 0:
+                x_lying_ = x_.clone()
+                s_lying_ = []
+                eps_lying_ = eps_.clone()
+                data_lying = torch.zeros_like(x)
+                for r in range(RK.rows):
+                    
+                    sub_sigma_next = s_[r]
+                    sub_sigma_up, sub_sigma, sub_sigma_down, sub_alpha_ratio = get_res4lyf_step_with_model(model, s_[r], s_[r], eta_substep, noise_mode_sde_substep)
+                    
+                    maxmin_ratio = (sub_sigma - RK.sigma_min) / sub_sigma
+                    fully_sub_sigma_2 = sub_sigma - maxmin_ratio * (sub_sigma * pseudoimplicit_step_weights[full_iter] * LG.lgw[step])
+                    s_lying_.append(fully_sub_sigma_2)
+
+                    h_new      = h * RK.h_fn(sub_sigma_down, sigma) / RK.h_fn(sub_sigma_next, sigma) 
+                    h_new_orig = h_new.clone()
+                    h_new      = h_new + noise_boost_substep * (h - h_new)
+                    
+                    if RK.IMPLICIT:
+                        x_ = RK.update_substep(x_0, x_, eps_, eps_prev_, r, row_offset, h, h_new, h_new_orig, sub_sigma_up, sub_sigma, sub_sigma_next, sub_alpha_ratio, s_noise_substep, noise_mode_sde_substep, NS, \
+                            SYNC_MEAN_CW, CONSERVE_MEAN_CW, SDE_NOISE_EXTERNAL, sde_noise_t, extra_options, IMPLICIT_PREDICTOR=True, )
+                    
+                    avg, avg_inv = 0, 0
+                    for b, c in itertools.product(range(x_0.shape[0]), range(x_0.shape[1])):
+                        avg     += torch.norm(data_[r][b][c] - y0    [b][c])
+                        avg_inv += torch.norm(data_[r][b][c] - y0_inv[b][c])
+                    avg     /= x_0.shape[1]
+                    avg_inv /= x_0.shape[1]
+                    
+                    for b, c in itertools.product(range(x_0.shape[0]), range(x_0.shape[1])):
+                        ratio     = torch.nan_to_num(torch.norm(data_[r][b][c] - y0    [b][c])   /   avg,     0)
+                        ratio_inv = torch.nan_to_num(torch.norm(data_[r][b][c] - y0_inv[b][c])   /   avg_inv, 0)
+                        
+                    
+                        eps_row, eps_row_inv = get_guide_epsilon_substep(x_0, x_, y0, y0_inv, s_, r, row_offset, rk_type, b, c)
+                        #eps_substep_guide = LG.mask * eps_substep_guide + (1-LG.mask) * eps_substep_guide_inv
+
+                        if LG.guide_mode == "fully_pseudoimplicit_projection_cw":
+                            eps_row_lerp = eps_[r][b][c]   +   LG.mask[b][c] * (eps_row-eps_[r][b][c])   +   (1-LG.mask[b][c]) * (eps_row_inv-eps_[r][b][c])
+
+                            eps_collinear_eps_lerp = get_collinear(eps_[r][b][c], eps_row_lerp)
+                            eps_lerp_ortho_eps     = get_orthogonal(eps_row_lerp, eps_[r][b][c])
+
+                            eps_sum = eps_collinear_eps_lerp + eps_lerp_ortho_eps
+
+                            eps_[r][b][c] = eps_[r][b][c]      +     ratio * LG.lgw_masks[step][b][c] * (eps_sum - eps_[r][b][c])    +    ratio_inv * LG.lgw_masks_inv[step][b][c] * (eps_sum     - eps_[r][b][c])
+                        else:
+                            eps_[r][b][c] = eps_[r][b][c]      +     ratio * LG.lgw_masks[step][b][c] * (eps_row - eps_[r][b][c])    +    ratio_inv * LG.lgw_masks_inv[step][b][c] * (eps_row_inv - eps_[r][b][c])
+                            
+                            #eps_substep_guide = get_masked_epsilon_projection(x_0, x_, eps_, y0, y0_inv, s_, r, row_offset, rk_type, LG, step)
+                            #eps_substep_guide = get_masked_epsilon_projection(x_0, x_, eps_, y0, y0_inv, s_lying_, r, row_offset, rk_type, LG, step)
+
+                        x_lying_[r][b][c] = x_[r][b][c] + RK.h_fn(fully_sub_sigma_2, sub_sigma) * eps_[r][b][c] #eps_substep_guide
+                        
+                        data_lying[b][c] = x_[r][b][c] + RK.h_fn(0, s_[r]) * eps_[r][b][c] # eps_substep_guide
+                        eps_lying_[r][b][c] = get_epsilon(x_0[b][c], data_lying[b][c], s_[r], rk_type)
                     
                 if not extra_options_flag("pseudoimplicit_disable_eps_lying", extra_options):
                     eps_ = eps_lying_
@@ -455,7 +537,7 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
                         elif extra_options_flag("guide_pseudoimplicit_power_substep_maxmin_scaling", extra_options):
                             maxmin_ratio *= row / RK.rows
                         
-                        sub_sigma_2 = sub_sigma - maxmin_ratio * (sub_sigma * pseudoimplicit_step_weights[full_iter] * LG.lgw[step])
+                        sub_sigma_2 = sub_sigma - maxmin_ratio * (sub_sigma * pseudoimplicit_row_weights[row] * pseudoimplicit_step_weights[full_iter] * LG.lgw[step])
                         s_2_ = copy.deepcopy(s_)
                         s_2_[row] = sub_sigma_2
 
@@ -498,7 +580,7 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
                                 x_tmp = x_[row]
                                 s_tmp = s_[row]
 
-                            if rk_type in IRK_SAMPLER_NAMES_BETA: 
+                            if RK.IMPLICIT: 
                                 if not extra_options_flag("implicit_guide_preproc_disable", extra_options):
                                     eps_, x_      = LG.process_guides_substep(x_0, x_, eps_,      data_, row, step, sigma, sigma_next, sigma_down, s_, unsample_resample_scale, RK, rk_type, extra_options)
                                     eps_prev_, x_ = LG.process_guides_substep(x_0, x_, eps_prev_, data_, row, step, sigma, sigma_next, sigma_down, s_, unsample_resample_scale, RK, rk_type, extra_options)
@@ -515,10 +597,13 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
                             x_, eps_ = RK.newton_iter(x_0, x_, eps_, eps_prev_, data_, s_, row, h, sigmas, step, "pre", extra_options)
 
                             LG.to(LG.offload_device)
-                            exclude_vars = {'x_tmp', 's_tmp', 'x_0', 'sigma', 'extra_args', 'rk', 'LG', 'eps_', 'data_'}
+                            exclude_vars = {'x_tmp', 's_tmp', 'x_0', 'sigma', 'extra_args', 'RK', 'NS, 'LG', 'eps_', 'data_'}
                             with tensor_manager.shelve_tensors('cpu', locals(), exclude_vars):
                                 eps_[row], data_[row] = RK(x_tmp, s_tmp, x_0, sigma, **extra_args)
                             LG.to(LG.device)
+
+                            if extra_options_flag("preview_substeps", extra_options):
+                                callback({'x': x, 'i': step, 'sigma': sigma, 'sigma_next': sigma_next, 'denoised': data_[row].to(torch.float32)}) if callback is not None else None
 
                         # GUIDE 
                         if not extra_options_flag("guide_disable_regular_substep", extra_options):
