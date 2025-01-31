@@ -378,6 +378,7 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
                 x_lying_ = x_.clone()
                 s_lying_ = []
                 eps_lying_ = eps_.clone()
+                data_lying = torch.zeros_like(x)
                 for r in range(RK.rows):
                     
                     sub_sigma_next = s_[r]
@@ -425,10 +426,10 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
                             #eps_substep_guide = get_masked_epsilon_projection(x_0, x_, eps_, y0, y0_inv, s_, r, row_offset, rk_type, LG, step)
                             #eps_substep_guide = get_masked_epsilon_projection(x_0, x_, eps_, y0, y0_inv, s_lying_, r, row_offset, rk_type, LG, step)
 
-                    x_lying_[r] = x_[r] + RK.h_fn(fully_sub_sigma_2, sub_sigma) * eps_[r] #eps_substep_guide
-                    
-                    data_lying = x_[r] + RK.h_fn(0, s_[r]) * eps_[r] # eps_substep_guide
-                    eps_lying_[r] = get_epsilon(x_0, data_lying, s_[r], rk_type)
+                        x_lying_[r][b][c] = x_[r][b][c] + RK.h_fn(fully_sub_sigma_2, sub_sigma) * eps_[r][b][c] #eps_substep_guide
+                        
+                        data_lying[b][c] = x_[r][b][c] + RK.h_fn(0, s_[r]) * eps_[r][b][c] # eps_substep_guide
+                        eps_lying_[r][b][c] = get_epsilon(x_0[b][c], data_lying[b][c], s_[r], rk_type)
                     
                 if not extra_options_flag("pseudoimplicit_disable_eps_lying", extra_options):
                     eps_ = eps_lying_
@@ -535,6 +536,8 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
                                 break
                             x_, eps_ = RK.newton_iter(x_0, x_, eps_, eps_prev_, data_, s_, row, h, sigmas, step, "pre", extra_options)
                             eps_[row], data_[row] = RK(x_tmp, s_tmp, x_0, sigma, **extra_args) 
+                            if extra_options_flag("preview_substeps", extra_options):
+                                callback({'x': x, 'i': step, 'sigma': sigma, 'sigma_next': sigma_next, 'denoised': data_[row].to(torch.float32)}) if callback is not None else None
 
                         # GUIDE 
                         if not extra_options_flag("guide_disable_regular_substep", extra_options):

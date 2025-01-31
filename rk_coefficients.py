@@ -805,19 +805,19 @@ def get_rk_methods(rk_type, h, c1=0.0, c2=0.5, c3=1.0, h_prev=None, h_prev2=None
         if h_prev is not None: 
             multistep_stages = 1
             c2 = (-h_prev / h).item()
-            print("c2: ", c2, h_prev, h)
+            #print("c2: ", c2, h_prev, h)
             
     if rk_type[-2:] == "3m": #multistep method
         rk_type = rk_type[:-2] + "3s"
         if h_prev2 is not None: 
             multistep_stages = 2
-            print("3m")
+            #print("3m")
             #c2 = (-h_prev2 / (h_prev + h)).item()
             c2 = (-h_prev2 / h).item()
             #c3 = (-h_prev / h).item()
             c3 = (-(h_prev2 + h_prev) / h).item()
-            print(c2, h_prev2, h_prev)
-            print(c3, h_prev, h)
+            #print(c2, h_prev2, h_prev)
+            #print(c3, h_prev, h)
     
     if rk_type in rk_coeff:
         a, b, ci = copy.deepcopy(rk_coeff[rk_type])
@@ -1581,8 +1581,8 @@ def get_rk_methods(rk_type, h, c1=0.0, c2=0.5, c3=1.0, h_prev=None, h_prev2=None
                     
             for i in selected_permutations:
                 theta_value, permutation = selected_permutations[i]
-                print(f"i={i}")
-                print(f"  Selected Theta: {theta_value:.6f}, Permutation: {permutation}")
+                #print(f"i={i}")
+                #print(f"  Selected Theta: {theta_value:.6f}, Permutation: {permutation}")
              
              
              

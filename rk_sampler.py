@@ -178,7 +178,7 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
         if sigma_next == 0:
             rk, irk, rk_type, irk_type, eta, eta_var, extra_args = prepare_step_to_sigma_zero(rk, irk, rk_type, irk_type, model, x, extra_options, alpha, k, noise_sampler_type, cfg_cw=cfg_cw, **extra_args)
 
-        sigma_up, sigma, sigma_down, alpha_ratio = get_res4lyf_step_with_model(model, sigma, sigma_next, eta, eta_var, noise_mode, extra_options)
+        sigma_up, sigma, sigma_down, alpha_ratio = get_res4lyf_step_with_model(model, sigma, sigma_next, eta, noise_mode)
         h     =  rk.h_fn(sigma_down, sigma)
         h_irk = irk.h_fn(sigma_down, sigma)
         
@@ -235,10 +235,10 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
                         nsef_list = [float(item.strip()) for item in value_str.split(',') if item.strip()]
                         nsef = nsef_list[row]
                     if exim_iter > 0 and rk_type.endswith("m") and step >= int(rk_type[-2]): 
-                        sub_sigma_up, sub_sigma, sub_sigma_down, sub_alpha_ratio = get_res4lyf_step_with_model(model, sigma, sigma_next, substep_eta*edsef*nsef, eta_var, substep_noise_mode)
+                        sub_sigma_up, sub_sigma, sub_sigma_down, sub_alpha_ratio = get_res4lyf_step_with_model(model, sigma, sigma_next, substep_eta*edsef*nsef, substep_noise_mode)
                         sub_sigma_next = sigma_next
                     if (row > 0 and not extra_options_flag("disable_rough_noise", extra_options)): # and s_[row-1] >= s_[row]:
-                        sub_sigma_up, sub_sigma, sub_sigma_down, sub_alpha_ratio = get_res4lyf_step_with_model(model, s_[row-1], s_[row], substep_eta*edsef*nsef, eta_var, substep_noise_mode)
+                        sub_sigma_up, sub_sigma, sub_sigma_down, sub_alpha_ratio = get_res4lyf_step_with_model(model, s_[row-1], s_[row], substep_eta*edsef*nsef, substep_noise_mode)
                         sub_sigma_next = s_[row]
                         
                     if row > 0 and substep_eta*edsef*nsef > 0 and row < rk.rows and ((SUBSTEP_SKIP_LAST == False) or (row < rk.rows - rk.multistep_stages - 1))   and   (sub_sigma_down > 0) and sigma_next > 0:
@@ -375,7 +375,7 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
                 
                 sub_sigma_up, sub_sigma, sub_sigma_next, sub_sigma_down, sub_alpha_ratio = 0.0, s_irk[row], s_irk[row+1], s_irk[row+1], 1.0
                 if irk.c[row] > 0:
-                    sub_sigma_up, sub_sigma, sub_sigma_down, sub_alpha_ratio = get_res4lyf_step_with_model(model, s_irk[row], s_irk[row+1], substep_eta, eta_var, substep_noise_mode)
+                    sub_sigma_up, sub_sigma, sub_sigma_down, sub_alpha_ratio = get_res4lyf_step_with_model(model, s_irk[row], s_irk[row+1], substep_eta, substep_noise_mode)
                 
                 if not extra_options_flag("diagonal_implicit_skip_initial", extra_options):
                     # MODEL CALL
@@ -547,7 +547,7 @@ def get_explicit_rk_step(rk, rk_type, x, LG, step, sigma, sigma_next, eta, eta_v
     
     eta = float(get_extra_options_kv("implicit_substep_eta", eta, extra_options))
 
-    sigma_up, sigma, sigma_down, alpha_ratio = get_res4lyf_step_with_model(rk.model, sigma, sigma_next, eta, eta_var, noise_mode)
+    sigma_up, sigma, sigma_down, alpha_ratio = get_res4lyf_step_with_model(rk.model, sigma, sigma_next, eta, noise_mode)
     h = rk.h_fn(sigma_down, sigma)
     c2, c3 = get_res4lyf_half_step3(sigma, sigma_down, c2, c3, t_fn=rk.t_fn, sigma_fn=rk.sigma_fn)
     
