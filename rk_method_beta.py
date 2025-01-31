@@ -144,7 +144,7 @@ class RK_Method_Beta:
             self.c = torch.cat((self.c, self.c[-1:])) 
         return
 
-    def update_substep(self, x_0, x_, eps_, eps_prev_, row, row_offset, h, h_new, h_new_orig, sub_sigma_up, sub_sigma, sub_sigma_next, sub_alpha_ratio, s_noise_substep, noise_mode_sde_substep, \
+    def update_substep(self, x_0, x_, eps_, eps_prev_, row, row_offset, h, h_new, h_new_orig, sub_sigma_up, sub_sigma, sub_sigma_next, sub_alpha_ratio, s_noise_substep, noise_mode_sde_substep, NS, \
                        SYNC_MEAN_CW, CONSERVE_MEAN_CW, SDE_NOISE_EXTERNAL, sde_noise_t, extra_options, SUBSTEP=True, ):
         if row < self.rows - row_offset   and   self.multistep_stages == 0:
             if self.IMPLICIT and not extra_options_flag("guide_fully_pseudoimplicit_use_post_substep_eta", extra_options): 
