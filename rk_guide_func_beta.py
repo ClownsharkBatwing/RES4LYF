@@ -356,7 +356,7 @@ class LatentGuide:
             elif extra_options_flag("disable_lgw_scaling", extra_options):
                 eps_[row] = eps_[row] + lgw_mask * (cvf - eps_[row]) + lgw_mask_inv * (cvf_inv - eps_[row])
                 
-            elif guide_mode in {"resample_projection", "unsample_projection", "resample_projection_cw", "unsample_projection_cw"}:
+            elif guide_mode in {"resample_projection", "unsample_projection"}:
                 eps_row_lerp = eps_[row]   +   self.mask * (cvf-eps_[row])   +   (1-self.mask) * (cvf_inv-eps_[row])
 
                 eps_collinear_eps_lerp = get_collinear(eps_[row], eps_row_lerp)
