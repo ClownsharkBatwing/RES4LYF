@@ -92,6 +92,8 @@ class SamplerOptions_GarbageCollection:
 
 GUIDE_MODE_NAMES = ["unsample", 
                     "resample", 
+                    "unsample_projection", 
+                    "resample_projection", 
                     "epsilon",
                     "epsilon_projection",
                     "epsilon_dynamic_mean",

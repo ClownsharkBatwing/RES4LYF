@@ -129,7 +129,7 @@ class RK_Method_Beta:
     
     def add_noise(self, x, sigma_up, sigma, sigma_next, alpha_ratio, s_noise, SDE_NOISE_EXTERNAL, sde_noise_t):
 
-        if sigma_next > 0.0:
+        if sigma_next > 0.0 and sigma_up > 0.0:
             noise = self.noise_sampler(sigma=sigma, sigma_next=sigma_next)
             noise = torch.nan_to_num((noise - noise.mean()) / noise.std(), 0.0)
 

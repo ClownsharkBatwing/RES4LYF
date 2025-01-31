@@ -89,8 +89,8 @@ class LatentGuide:
             latent_guide_weights     = initialize_or_scale(latent_guide_weights,     latent_guide_weight,     self.max_steps).to(self.dtype)
             latent_guide_weights_inv = initialize_or_scale(latent_guide_weights_inv, latent_guide_weight_inv, self.max_steps).to(self.dtype)
 
-            latent_guide_weights[steps_:] = 0
-            latent_guide_weights_inv[steps_inv_:] = 0
+            latent_guide_weights[steps_ - 1:] = 0
+            latent_guide_weights_inv[steps_inv_ - 1:] = 0
                 
         self.lgw        = F.pad(latent_guide_weights,     (0, self.max_steps), value=0.0).to(self.device)
         self.lgw_inv    = F.pad(latent_guide_weights_inv, (0, self.max_steps), value=0.0).to(self.device)
@@ -348,9 +348,10 @@ class LatentGuide:
 
 
 
-        elif (self.UNSAMPLE or self.guide_mode in {"resample", "unsample"}) and (self.lgw[step] > 0 or self.lgw_inv[step] > 0):
+        elif (self.UNSAMPLE or self.guide_mode in {"resample", "unsample", "resample_projection", "unsample_projection"}) and (self.lgw[step] > 0 or self.lgw_inv[step] > 0):
             row_offset = 1 if rk.a[0].sum() == 0 and rk_type not in IRK_SAMPLER_NAMES_BETA else 0       
-            cvf = rk.get_epsilon(x_0, x_[row+row_offset], y0, sigma, s_[row], sigma_down, unsample_resample_scale, extra_options)
+            
+            cvf = rk.get_epsilon(x_0, x_[row+row_offset], y0, sigma, s_[row], sigma_down, unsample_resample_scale, extra_options)                
             if self.UNSAMPLE and sigma > sigma_next and self.HAS_LATENT_GUIDE:
                 cvf_inv = rk.get_epsilon(x_0, x_[row+row_offset], y0_inv, sigma, s_[row], sigma_down, unsample_resample_scale, extra_options)      
             else:
@@ -375,6 +376,16 @@ class LatentGuide:
                     
             elif extra_options_flag("disable_lgw_scaling", extra_options):
                 eps_[row] = eps_[row] + lgw_mask * (cvf - eps_[row]) + lgw_mask_inv * (cvf_inv - eps_[row])
+                
+            elif self.guide_mode in {"resample_projection", "unsample_projection"}:
+                eps_row_lerp = eps_[row]   +   self.mask * (cvf-eps_[row])   +   (1-self.mask) * (cvf_inv-eps_[row])
+
+                eps_collinear_eps_lerp = get_collinear(eps_[row], eps_row_lerp)
+                eps_lerp_ortho_eps     = get_orthogonal(eps_row_lerp, eps_[row])
+
+                eps_sum = eps_collinear_eps_lerp + eps_lerp_ortho_eps
+
+                eps_[row] = eps_[row] + lgw_mask * (eps_sum - eps_[row]) + lgw_mask_inv * (eps_sum - eps_[row])
                 
             else:
                 avg, avg_inv = 0, 0
