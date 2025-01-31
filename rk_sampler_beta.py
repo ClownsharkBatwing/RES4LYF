@@ -521,7 +521,7 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
                                 x_tmp = x_[row]
                                 s_tmp = s_[row]
 
-                            if rk_type in IRK_SAMPLER_NAMES_BETA: 
+                            if RK.IMPLICIT: 
                                 if not extra_options_flag("implicit_guide_preproc_disable", extra_options):
                                     eps_, x_      = LG.process_guides_substep(x_0, x_, eps_,      data_, row, step, sigma, sigma_next, sigma_down, s_, unsample_resample_scale, RK, rk_type, extra_options, frame_weights)
                                     eps_prev_, x_ = LG.process_guides_substep(x_0, x_, eps_prev_, data_, row, step, sigma, sigma_next, sigma_down, s_, unsample_resample_scale, RK, rk_type, extra_options, frame_weights)

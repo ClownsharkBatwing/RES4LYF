@@ -163,7 +163,7 @@ class RK_Method_Beta:
                     x_[row+row_offset][..., c, :, :] = x_[row+row_offset][..., c, :, :] - x_[row+row_offset][..., c, :, :].mean() + x_row_tmp[..., c, :, :].mean()
                 
         else: 
-            if (self.IMPLICIT and not IMPLICIT_PREDICTOR) or (self.IMPLICIT and row == 0):
+            if (self.IMPLICIT and not IMPLICIT_PREDICTOR) or (self.IMPLICIT and row == 0) or row_offset == 1:
                 x_[row+1] = x_row_down = x_0 + h     * (self.b_k_sum(eps_, 0) + self.v_k_sum(eps_prev_, 0))
             else:
                 x_[row+1] = x_row_down = x_0 + h_new * (self.b_k_sum(eps_, 0) + self.v_k_sum(eps_prev_, 0))
