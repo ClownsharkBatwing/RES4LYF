@@ -385,7 +385,7 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
                     h_new = h_new + noise_boost_substep * (h - h_new)
 
                     # PREPARE PSEUDOIMPLICIT GUIDES
-                    if LG.guide_mode in {"pseudoimplicit", "pseudoimplicit_projection"}  and (full_iter > 0 or diag_iter > 0):
+                    if LG.guide_mode in {"pseudoimplicit", "pseudoimplicit_projection"}: #  and (full_iter > 0 or diag_iter > 0):
                         maxmin_ratio = (sub_sigma - RK.sigma_min) / sub_sigma
                         
                         if extra_options_flag("guide_pseudoimplicit_power_substep_flip_maxmin_scaling", extra_options):
