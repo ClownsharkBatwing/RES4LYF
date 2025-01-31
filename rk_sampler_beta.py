@@ -124,7 +124,7 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
     if pseudoimplicit_step_weights[0]:
         pseudoimplicit_step_weights = [float(pseudoimplicit_step_weights[_]) for _ in range(len(pseudoimplicit_step_weights))]
     else:
-        pseudoimplicit_step_weights = [1. for _ in range(max(implicit_steps_diag, implicit_steps_full))]
+        pseudoimplicit_step_weights = [1. for _ in range(max(implicit_steps_diag, implicit_steps_full)+1)]
 
     cfg_cw = float(get_extra_options_kv("cfg_cw", str(cfg_cw), extra_options))
     
@@ -339,7 +339,8 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
                     eps_substep_guide = LG.mask * eps_substep_guide + (1-LG.mask) * eps_substep_guide_inv
 
                     if LG.guide_mode == "fully_pseudoimplicit_projection":
-                        eps_substep_guide = get_masked_epsilon_projection(x_0, x_, eps_, y0, y0_inv, s_lying_, r, row_offset, rk_type, LG, step)
+                        eps_substep_guide = get_masked_epsilon_projection(x_0, x_, eps_, y0, y0_inv, s_, r, row_offset, rk_type, LG, step)
+                        #eps_substep_guide = get_masked_epsilon_projection(x_0, x_, eps_, y0, y0_inv, s_lying_, r, row_offset, rk_type, LG, step)
 
                     x_lying_[r] = x_[r] + RK.h_fn(fully_sub_sigma_2, sub_sigma) * eps_substep_guide
                     
@@ -405,7 +406,8 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
                         eps_substep_guide = LG.mask * eps_substep_guide + (1-LG.mask) * eps_substep_guide_inv
 
                         if LG.guide_mode == "pseudoimplicit_projection":
-                            eps_substep_guide = get_masked_epsilon_projection(x_0, x_, eps_, y0, y0_inv, s_2_, row, row_offset, rk_type, LG, step)
+                            eps_substep_guide = get_masked_epsilon_projection(x_0, x_, eps_, y0, y0_inv, s_, row, row_offset, rk_type, LG, step)
+                            #eps_substep_guide = get_masked_epsilon_projection(x_0, x_, eps_, y0, y0_inv, s_2_, row, row_offset, rk_type, LG, step)
 
                         x_row_tmp = x_[row] + RK.h_fn(sub_sigma_2, sub_sigma) * eps_substep_guide
 
