@@ -92,7 +92,8 @@ def get_ancestral_step_RF_soft_linear(sigma, sigma_next, eta, sigma_max=1.0):
 
     return sigma_up, sigma_down, alpha_ratio
 
-def get_ancestral_step_RF_exp(sigma_next, eta, h=None, sigma_max=1.0): # TODO: fix black image issue with linear RK
+def get_ancestral_step_RF_exp(sigma, sigma_next, eta, sigma_max=1.0): # TODO: fix black image issue with linear RK
+    h = -torch.log(sigma_next/sigma)
     sigma_up = sigma_next * (1 - (-2*eta*h).exp())**0.5 
     alpha_ratio, sigma_up, sigma_down = get_alpha_ratio_from_sigma_up(sigma_up, sigma_next, eta, sigma_max)
     return sigma_up, sigma_down, alpha_ratio
@@ -108,9 +109,8 @@ def get_ancestral_step_RF_hard(sigma_next, eta, sigma_max=1.0):
     alpha_ratio, sigma_up, sigma_down = get_alpha_ratio_from_sigma_up(sigma_up, sigma_next, eta, sigma_max)
     return sigma_up, sigma_down, alpha_ratio
 
-def get_res4lyf_step_with_model(model, sigma, sigma_next, eta=0.0, eta_var=1.0, noise_mode="hard", h=None):
+def get_res4lyf_step_with_model(model, sigma, sigma_next, eta=0.0, noise_mode="hard"):
   
-  h = -torch.log(sigma_next/sigma)
   su, sd, alpha_ratio = torch.zeros_like(sigma), sigma_next.clone(), torch.ones_like(sigma)
   
   if has_nested_attr(model, "inner_model.inner_model.model_sampling"):
@@ -120,26 +120,24 @@ def get_res4lyf_step_with_model(model, sigma, sigma_next, eta=0.0, eta_var=1.0, 
   
   if isinstance(model_sampling, comfy.model_sampling.CONST):
     sigma_var = (-1 + torch.sqrt(1 + 4 * sigma)) / 2
-    if noise_mode == "hard_var" and eta_var > 0.0 and sigma_next > sigma_var:
-      su, sd, alpha_ratio = get_ancestral_step_RF_var(sigma, sigma_next, eta_var)
+    if noise_mode == "hard_var" and eta > 0.0 and sigma_next > sigma_var:
+      su, sd, alpha_ratio = get_ancestral_step_RF_var(sigma, sigma_next, eta)
     else:
       if   noise_mode == "soft":
         su, sd, alpha_ratio = get_ancestral_step_RF_soft(sigma, sigma_next, eta)
       elif noise_mode == "softer":
         su, sd, alpha_ratio = get_ancestral_step_RF_softer(sigma, sigma_next, eta)
-      elif noise_mode == "hard":
-        su, sd, alpha_ratio = get_ancestral_step_RF_hard(sigma_next, eta)
       elif noise_mode == "hard_sq": 
         su, sd, alpha_ratio = get_ancestral_step_RF_sqrd(sigma, sigma_next, eta)
       elif noise_mode == "sinusoidal":
         su, sd, alpha_ratio = get_ancestral_step_RF_sinusoidal(sigma_next, eta)
       elif noise_mode == "exp": 
-        su, sd, alpha_ratio = get_ancestral_step_RF_exp(sigma_next, eta, h)
+        su, sd, alpha_ratio = get_ancestral_step_RF_exp(sigma, sigma_next, eta)
       elif noise_mode == "soft-linear": 
-        su, sd, alpha_ratio = get_ancestral_step_RF_soft_linear(sigma, sigma_next, eta, h)
+        su, sd, alpha_ratio = get_ancestral_step_RF_soft_linear(sigma, sigma_next, eta) 
       elif noise_mode == "lorentzian":
         su, sd, alpha_ratio = get_ancestral_step_RF_lorentzian(sigma, sigma_next, eta)
-      else: #fall back to hard noise from hard_var
+      else: #elif noise_mode == "hard": #fall back to hard noise from hard_var
         su, sd, alpha_ratio = get_ancestral_step_RF_hard(sigma_next, eta)
   else:
     alpha_ratio = torch.full_like(sigma, 1.0)
