@@ -92,6 +92,7 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
                   LGW_MASK_RESCALE_MIN=True, sigmas_override=None, unsample_resample_scales=None,regional_conditioning_weights=None, sde_noise=[],
                   extra_options="",
                   etas=None, etas_substep=None, s_noises=None, s_noises_substep=None, momentums=None, guides=None, cfgpp=0.0, cfg_cw = 1.0,regional_conditioning_floors=None, frame_weights=None, eta_substep=0.0, noise_mode_sde_substep="hard",
+                  noise_boost_step=0.0, noise_boost_substep=0.0,
                   ):
     extra_args = {} if extra_args is None else extra_args
     default_dtype = getattr(torch, get_extra_options_kv("default_dtype", "float64", extra_options), torch.float64)
@@ -114,8 +115,8 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
     CONSERVE_MEAN_CW  =         extra_options_flag("eta_conserve_mean_cw",         extra_options)  
     SYNC_MEAN_CW  =         not extra_options_flag("eta_sync_mean_cw_disable",     extra_options)  
     
-    noise_boost_substep  = float(get_extra_options_kv("noise_boost_substep", "0.0", extra_options))
-    noise_boost_step = float(get_extra_options_kv("noise_boost_step",    "0.0", extra_options))
+    #noise_boost_substep  = float(get_extra_options_kv("noise_boost_substep", "0.0", extra_options))
+    #noise_boost_step = float(get_extra_options_kv("noise_boost_step",    "0.0", extra_options))
     
     reorder_tableau_indices = get_extra_options_list("reorder_tableau_indices", "", extra_options).split(",")
     if reorder_tableau_indices[0]:

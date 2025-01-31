@@ -510,6 +510,8 @@ class ClownSamplerAdvanced_Beta:
                     "noise_mode_sde_substep": (NOISE_MODE_NAMES, {"default": 'hard', "tooltip": "How noise scales with the sigma schedule. Hard is the most aggressive, the others start strong and drop rapidly."}),
                     "eta": ("FLOAT", {"default": 0.5, "min": -100.0, "max": 100.0, "step":0.01, "round": False, "tooltip": "Calculated noise amount to be added, then removed, after each step."}),
                     "eta_substep": ("FLOAT", {"default": 0.5, "min": -100.0, "max": 100.0, "step":0.01, "round": False, "tooltip": "Calculated noise amount to be added, then removed, after each step."}),
+                    "noise_boost_step": ("FLOAT", {"default": 0.0, "min": -100.0, "max": 100.0, "step":0.01, "round": False, "tooltip": "Set to positive values to create a sharper, grittier, more detailed image. Set to negative values to soften and deepen the colors."}),
+                    "noise_boost_substep": ("FLOAT", {"default": 0.0, "min": -100.0, "max": 100.0, "step":0.01, "round": False, "tooltip": "Set to positive values to create a sharper, grittier, more detailed image. Set to negative values to soften and deepen the colors."}),
                     "s_noise": ("FLOAT", {"default": 1.0, "min": -10000, "max": 10000, "step":0.01, "tooltip": "Adds extra SDE noise. Values around 1.03-1.07 can lead to a moderate boost in detail and paint textures."}),
                     "s_noise_substep": ("FLOAT", {"default": 1.0, "min": -10000, "max": 10000, "step":0.01, "tooltip": "Adds extra SDE noise. Values around 1.03-1.07 can lead to a moderate boost in detail and paint textures."}),
                     "d_noise": ("FLOAT", {"default": 1.0, "min": -10000, "max": 10000, "step":0.01, "tooltip": "Downscales the sigma schedule. Values around 0.98-0.95 can lead to a large boost in detail and paint textures."}),
@@ -518,7 +520,6 @@ class ClownSamplerAdvanced_Beta:
                     "implicit_sampler_name": (RES4LYF.rk_coefficients_beta.IRK_SAMPLER_NAMES_BETA, {"default": "use_explicit"}), 
                     "implicit_steps": ("INT", {"default": 0, "min": 0, "max": 10000}),
                     "implicit_substeps": ("INT", {"default": 0, "min": 0, "max": 10000}),
-
                      },
                 "optional": 
                     {
@@ -543,6 +544,7 @@ class ClownSamplerAdvanced_Beta:
                     latent_guide=None, latent_guide_inv=None, guide_mode="", latent_guide_weights=None, latent_guide_weights_inv=None, latent_guide_mask=None, latent_guide_mask_inv=None, rescale_floor=True, sigmas_override=None, unsampler_type="linear",
                     guides=None, options=None, sde_noise=None,sde_noise_steps=1, 
                     extra_options="", automation=None, etas=None, etas_substep=None, s_noises=None, s_noises_substep=None, unsample_resample_scales=None, regional_conditioning_weights=None,frame_weights=None, eta_substep=0.5, noise_mode_sde_substep="hard",
+                    noise_boost_step=0.0, noise_boost_substep=0.0,
                     ): 
 
             implicit_steps_diag = implicit_substeps
@@ -606,7 +608,7 @@ class ClownSamplerAdvanced_Beta:
                                                             "LGW_MASK_RESCALE_MIN": rescale_floor, "sigmas_override": sigmas_override, "sde_noise": sde_noise,
                                                             "extra_options": extra_options,
                                                             "etas": etas, "etas_substep": etas_substep, "s_noises": s_noises, "s_noises_substep": s_noises_substep, "unsample_resample_scales": unsample_resample_scales, "regional_conditioning_weights": regional_conditioning_weights,
-                                                            "guides": guides, "frame_weights": frame_weights, "eta_substep": eta_substep, "noise_mode_sde_substep": noise_mode_sde_substep,
+                                                            "guides": guides, "frame_weights": frame_weights, "eta_substep": eta_substep, "noise_mode_sde_substep": noise_mode_sde_substep, "noise_boost_step": noise_boost_step, "noise_boost_substep": noise_boost_substep,
                                                             })
 
 
