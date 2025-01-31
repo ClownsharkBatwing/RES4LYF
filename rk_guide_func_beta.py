@@ -144,8 +144,8 @@ class LatentGuide:
     
 
 
-    def process_guides_substep(self, x_0, x_, eps_, data_, row, step, sigma, sigma_next, sigma_down, s_, unsample_resample_scale, rk, rk_type, extra_options, frame_weights=None):
-        row_offset = 1 if rk.a[0].sum() == 0 and rk_type not in IRK_SAMPLER_NAMES_BETA else 0 
+    def process_guides_substep(self, x_0, x_, eps_, data_, row, step, sigma, sigma_next, sigma_down, s_, unsample_resample_scale, RK, rk_type, extra_options, frame_weights=None):
+        row_offset = 1 if RK.a[0].sum() == 0 and rk_type not in IRK_SAMPLER_NAMES_BETA else 0 
             
         y0 = self.y0
         if self.y0.shape[0] > 1:
@@ -328,11 +328,11 @@ class LatentGuide:
 
 
 
-        elif (UNSAMPLE or guide_mode in {"resample", "unsample", "resample_projection", "unsample_projection"}) and (lgw > 0 or lgw_inv > 0):
+        elif (UNSAMPLE or guide_mode in {"resample", "unsample", "resample_projection", "unsample_projection", "resample_projection_cw", "unsample_projection_cw"}) and (lgw > 0 or lgw_inv > 0):
             
-            cvf = rk.get_epsilon(x_0, x_[row+row_offset], y0, sigma, s_[row], sigma_down, unsample_resample_scale, extra_options)                
+            cvf = RK.get_epsilon(x_0, x_[row+row_offset], y0, sigma, s_[row], sigma_down, unsample_resample_scale, extra_options)                
             if UNSAMPLE and sigma > sigma_next and latent_guide_inv is not None:
-                cvf_inv = rk.get_epsilon(x_0, x_[row+row_offset], y0_inv, sigma, s_[row], sigma_down, unsample_resample_scale, extra_options)      
+                cvf_inv = RK.get_epsilon(x_0, x_[row+row_offset], y0_inv, sigma, s_[row], sigma_down, unsample_resample_scale, extra_options)      
             else:
                 cvf_inv = torch.zeros_like(cvf)
 
@@ -638,7 +638,7 @@ def get_guide_epsilon_substep(x_0, x_, y0, y0_inv, s_, row, row_offset, rk_type,
         eps_row     = y0    [index] - x_0[index]
         eps_row_inv = y0_inv[index] - x_0[index]
     else:
-        eps_row     = (x_[row+row_offset][index] - y0    [index]) / (s_[row] * s_in) # potential issues here with x_[row+1] being rk.rows+2 with gauss-legendre_2s 1 imp step 1 imp substep
+        eps_row     = (x_[row+row_offset][index] - y0    [index]) / (s_[row] * s_in) # potential issues here with x_[row+1] being RK.rows+2 with gauss-legendre_2s 1 imp step 1 imp substep
         eps_row_inv = (x_[row+row_offset][index] - y0_inv[index]) / (s_[row] * s_in)
     
     return eps_row, eps_row_inv
@@ -1019,7 +1019,7 @@ class NoiseStepHandlerOSDE:
 
 
 def handle_tiled_etc_noise_steps(x_0, x, x_prenoise, x_init, eps, denoised, y0, y0_inv, step,        # NOTE: NS AND SUBSTEP ADDED!
-                                 rk_type, rk, NS, SUBSTEP, sigma_up, sigma, sigma_next, alpha_ratio, s_noise, noise_mode, SDE_NOISE_EXTERNAL, sde_noise_t,
+                                 rk_type, RK, NS, SUBSTEP, sigma_up, sigma, sigma_next, alpha_ratio, s_noise, noise_mode, SDE_NOISE_EXTERNAL, sde_noise_t,
                                  NOISE_COSSIM_SOURCE, NOISE_COSSIM_MODE, noise_cossim_tile_size, noise_cossim_iterations,
                                  extra_options):
     

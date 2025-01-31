@@ -101,6 +101,9 @@ NODE_CLASS_MAPPINGS = {
     "ClownsharKSamplerGuides": samplers_extensions.ClownsharKSamplerGuides,
     "ClownsharKSamplerGuide": samplers_extensions.ClownsharKSamplerGuide,
     
+    "ClownsharKSamplerGuides_Beta": samplers_extensions.ClownsharKSamplerGuides_Beta,
+    "ClownsharKSamplerGuide_Beta": samplers_extensions.ClownsharKSamplerGuide_Beta,
+    
     "ClownInpaint": samplers_extensions.ClownInpaint,
     "ClownInpaintSimple": samplers_extensions.ClownInpaintSimple,
 
@@ -305,4 +308,6 @@ __all__ = ["NODE_CLASS_MAPPINGS",  "WEB_DIRECTORY"]
 
 
 add_samplers()
+
+
 
