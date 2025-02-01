@@ -630,7 +630,7 @@ class ClownSamplerAdvanced_Beta:
                 etas = automation['etas'] if 'etas' in automation else None
                 etas_substep = automation['etas_substep'] if 'etas_substep' in automation else None
                 s_noises = automation['s_noises'] if 's_noises' in automation else None
-                s_noise_substep = automation['s_noise_substep'] if 's_noise_substep' in automation else None
+                s_noises_substep = automation['s_noise_substep'] if 's_noise_substep' in automation else None
                 unsample_resample_scales = automation['unsample_resample_scales'] if 'unsample_resample_scales' in automation else None
                 frame_weights_grp = automation['frame_weights_grp'] if 'frame_weights_grp' in automation else None
 
@@ -640,6 +640,8 @@ class ClownSamplerAdvanced_Beta:
             etas_substep = F.pad(etas_substep, (0, max_steps), value=0.0)
             s_noises = initialize_or_scale(s_noises, s_noise, max_steps).to(default_dtype)
             s_noises = F.pad(s_noises, (0, max_steps), value=0.0)
+            s_noises_substep = initialize_or_scale(s_noises_substep, s_noise_substep, max_steps).to(default_dtype)
+            s_noises_substep = F.pad(s_noises_substep, (0, max_steps), value=0.0)
 
             if sde_noise is None:
                 sde_noise = []
