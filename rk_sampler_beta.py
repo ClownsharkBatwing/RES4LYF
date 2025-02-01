@@ -201,8 +201,8 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
     if implicit_sampler_name == "none":
         implicit_steps_diag = implicit_steps_full = 0
 
-    RK = RK_Method_Beta.create(model,  rk_type, x.device, x.dtype)
-    NS = RK_NoiseSampler(model, x.device, x.dtype)
+    RK = RK_Method_Beta.create(model,  rk_type, x.device, default_dtype)
+    NS = RK_NoiseSampler(model, x.device, default_dtype)
     NS.init_noise_sampler(x, noise_seed, noise_sampler_type, noise_sampler_type_substep, alpha, alpha_substep, k, k_substep)
     
     extra_args = RK.init_cfg_channelwise(x, cfg_cw, **extra_args)
@@ -221,7 +221,7 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
     eps_            = None
     eps             = torch.zeros_like(x)
     denoised        = torch.zeros_like(x)
-    denoised_prev   = torch.zeros_like(x)
+    denoised_prev   = torch.zeros_like(x).to('cpu')
     denoised_prev2  = torch.zeros_like(x)
     denoised_   = None
     s_prev      = None
@@ -310,8 +310,9 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
                     data_[0] = denoised + sratio * (denoised - denoised_prev2)
             else:
                 LG.to(LG.offload_device)
-                exclude_vars = {'x_tmp', 's_tmp', 'x_0', 'sigma', 'extra_args', 'rk', 'LG', 'eps_', 'data_'}
+                exclude_vars = {'x_tmp', 's_tmp', 'x_0'}
                 with tensor_manager.shelve_tensors('cpu', locals(), exclude_vars):
+                    debug_cuda_cleanup(cuda_sync_a_flag, cuda_empty_a_flag, cuda_gc_a_flag)
                     eps_[0], data_[0] = RK(x_[0], sigma, x_0, sigma, **extra_args) 
                 LG.to(LG.device)
                 
@@ -597,8 +598,9 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
                             x_, eps_ = RK.newton_iter(x_0, x_, eps_, eps_prev_, data_, s_, row, h, sigmas, step, "pre", extra_options)
 
                             LG.to(LG.offload_device)
-                            exclude_vars = {'x_tmp', 's_tmp', 'x_0', 'sigma', 'extra_args', 'RK', 'NS, 'LG', 'eps_', 'data_'}
+                            exclude_vars = {'x_tmp', 's_tmp', 'x_0', 'sigma'}
                             with tensor_manager.shelve_tensors('cpu', locals(), exclude_vars):
+                                debug_cuda_cleanup(cuda_sync_b_flag, cuda_empty_b_flag, cuda_gc_b_flag)
                                 eps_[row], data_[row] = RK(x_tmp, s_tmp, x_0, sigma, **extra_args)
                             LG.to(LG.device)
 
@@ -637,10 +639,8 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
         rk_type = RK.swap_rk_type_at_step_or_threshold(x_0, data_prev_, sigma_down, sigmas, step, RK, rk_swap_step, rk_swap_threshold, rk_swap_type, rk_swap_print)
         
 
-        denoised_prev2 = denoised_prev
-        denoised_prev = denoised
-
-        debug_cuda_cleanup(cuda_sync_b_flag, cuda_empty_b_flag, cuda_gc_b_flag)
+        denoised_prev2 = denoised_prev.to(denoised_prev2.device)
+        denoised_prev = denoised.to(denoised_prev.device)
 
     if not (UNSAMPLE and sigmas[1] > sigmas[0]) and not extra_options_flag("preview_last_step_always", extra_options):
         preview_callback(x, eps, denoised, x_, eps_, data_, step, sigma, sigma_next, callback, extra_options, FINAL_STEP=True)

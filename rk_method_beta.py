@@ -589,9 +589,10 @@ def get_epsilon_from_step(x, x_next, sigma, sigma_next):
 
 
 class RK_NoiseSampler:
-    def __init__(self, model, device='cuda', dtype=torch.float64):
+    def __init__(self, model, device='cuda', offload_device='cpu', dtype=torch.float64):
         self.device = device
         self.dtype = dtype
+        self.offload_device = offload_device
         
         if has_nested_attr(model, "inner_model.inner_model.model_sampling"):
             model_sampling = model.inner_model.inner_model.model_sampling
@@ -600,8 +601,8 @@ class RK_NoiseSampler:
         
         self.CONST = isinstance(model_sampling, comfy.model_sampling.CONST)
 
-        self.sigma_min = model.inner_model.inner_model.model_sampling.sigma_min.to(dtype)
-        self.sigma_max = model.inner_model.inner_model.model_sampling.sigma_max.to(dtype)
+        self.sigma_min = model.inner_model.inner_model.model_sampling.sigma_min.to(self.dtype).to(self.offload_device)
+        self.sigma_max = model.inner_model.inner_model.model_sampling.sigma_max.to(self.dtype).to(self.offload_device)
         
         self.noise_sampler  = None
         self.noise_sampler2 = None
@@ -617,18 +618,18 @@ class RK_NoiseSampler:
         seed2 = seed + MAX_STEPS #for substep noise generation. offset needed to ensure seeds are not reused
             
         if noise_sampler_type == "fractal":
-            self.noise_sampler        = NOISE_GENERATOR_CLASSES.get(noise_sampler_type )(x=x, seed=seed,  sigma_min=self.sigma_min, sigma_max=self.sigma_max)
+            self.noise_sampler        = NOISE_GENERATOR_CLASSES.get(noise_sampler_type )(x=x.to(self.offload_device), seed=seed,  sigma_min=self.sigma_min, sigma_max=self.sigma_max)
             self.noise_sampler.alpha  = alpha
             self.noise_sampler.k      = k
             self.noise_sampler.scale  = scale
         if noise_sampler_type2 == "fractal":
-            self.noise_sampler2       = NOISE_GENERATOR_CLASSES.get(noise_sampler_type2)(x=x, seed=seed2, sigma_min=self.sigma_min, sigma_max=self.sigma_max)
+            self.noise_sampler2       = NOISE_GENERATOR_CLASSES.get(noise_sampler_type2)(x=x.to(self.offload_device), seed=seed2, sigma_min=self.sigma_min, sigma_max=self.sigma_max)
             self.noise_sampler2.alpha = alpha2
             self.noise_sampler2.k     = k2
             self.noise_sampler2.scale = scale2
         else:
-            self.noise_sampler  = NOISE_GENERATOR_CLASSES_SIMPLE.get(noise_sampler_type )(x=x, seed=seed,  sigma_min=self.sigma_min, sigma_max=self.sigma_max)
-            self.noise_sampler2 = NOISE_GENERATOR_CLASSES_SIMPLE.get(noise_sampler_type2)(x=x, seed=seed2, sigma_min=self.sigma_min, sigma_max=self.sigma_max)
+            self.noise_sampler  = NOISE_GENERATOR_CLASSES_SIMPLE.get(noise_sampler_type )(x=x.to(self.offload_device), seed=seed,  sigma_min=self.sigma_min, sigma_max=self.sigma_max)
+            self.noise_sampler2 = NOISE_GENERATOR_CLASSES_SIMPLE.get(noise_sampler_type2)(x=x.to(self.offload_device), seed=seed2, sigma_min=self.sigma_min, sigma_max=self.sigma_max)
             
     def add_noise_pre(self, x, sigma_up, sigma, sigma_next, alpha_ratio, s_noise, noise_mode, CONSERVE_MEAN_CW=True, SDE_NOISE_EXTERNAL=False, sde_noise_t=None, SUBSTEP=False, ):
         if not self.CONST and noise_mode == "hard": 
