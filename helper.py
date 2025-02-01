@@ -1,11 +1,14 @@
 import re
 import torch
 from comfy.samplers import SCHEDULER_NAMES
+from comfy import model_sampling
 import torch.nn.functional as F
 
+def filter_comments(extra_options):
+    return "\n".join(line for line in extra_options.splitlines() if not line.strip().startswith("#"))
 
 def get_extra_options_kv(key, default, extra_options):
-
+    extra_options = filter_comments(extra_options)
     match = re.search(rf"{key}\s*=\s*([a-zA-Z0-9_.+-]+)", extra_options)
     if match:
         value = match.group(1)
@@ -23,8 +26,8 @@ def get_extra_options_list(key, default, extra_options):
     return value
 
 def extra_options_flag(flag, extra_options):
+    extra_options = filter_comments(extra_options)
     return bool(re.search(rf"{flag}", extra_options))
-
 
 
 def safe_get_nested(d, keys, default=None):
@@ -35,14 +38,27 @@ def safe_get_nested(d, keys, default=None):
             return default
     return d
 
+def is_video_model(model):
+    is_video_model = False
+    
+    try :
+        is_video_model = 'video' in model.inner_model.inner_model.model_config.unet_config['image_model'] or \
+                         'cosmos' in model.inner_model.inner_model.model_config.unet_config['image_model']
+    except:
+        pass
 
+    return is_video_model
 
-def get_cosine_similarity_manual(a, b):
+def is_RF_model(model) -> bool:
+    modelsampling = model.inner_model.inner_model.model_sampling
+    return isinstance(modelsampling, model_sampling.CONST)
+
+def get_cosine_similarity_manual(a, b) -> torch.Tensor:
     return (a * b).sum() / (torch.norm(a) * torch.norm(b))
 
 
 
-def get_cosine_similarity(a, b):
+def get_cosine_similarity(a, b) -> torch.Tensor:
     if a.dim() == 5 and b.dim() == 5 and b.shape[2] == 1:
         b = b.expand(-1, -1, a.shape[2], -1, -1)
     return F.cosine_similarity(a.flatten(), b.flatten(), dim=0)
@@ -57,14 +73,14 @@ def get_pearson_similarity(a, b):
 
 
 
-def initialize_or_scale(tensor, value, steps):
+def initialize_or_scale(tensor, value, steps) -> torch.Tensor:
     if tensor is None:
         return torch.full((steps,), value)
     else:
         return value * tensor
 
 
-def has_nested_attr(obj, attr_path):
+def has_nested_attr(obj, attr_path) -> bool:
     attrs = attr_path.split('.')
     for attr in attrs:
         if not hasattr(obj, attr):
@@ -72,13 +88,13 @@ def has_nested_attr(obj, attr_path):
         obj = getattr(obj, attr)
     return True
 
-def get_res4lyf_scheduler_list():
+def get_res4lyf_scheduler_list() -> list:
     scheduler_names = SCHEDULER_NAMES.copy()
     if "beta57" not in scheduler_names:
         scheduler_names.append("beta57")
     return scheduler_names
 
-def conditioning_set_values(conditioning, values={}):
+def conditioning_set_values(conditioning, values={}) -> list:
     c = []
     for t in conditioning:
         n = [t[0], t[1].copy()]
@@ -134,7 +150,7 @@ from torch.linalg import norm
 #         t:  torch.Size([4,1,1]), 
 #       )
 #   - this makes it interface-compatible with lerp()
-def slerp(v0: FloatTensor, v1: FloatTensor, t: float|FloatTensor, DOT_THRESHOLD=0.9995):
+def slerp(v0: FloatTensor, v1: FloatTensor, t: float|FloatTensor, DOT_THRESHOLD=0.9995) -> FloatTensor:
   '''
   Spherical linear interpolation
   Args:

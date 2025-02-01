@@ -7,15 +7,12 @@ import itertools
 
 import torch
 import math
+import torch.nn.functional as F
+from typing import Tuple
 
-from .noise_classes import *
+from .helper import initialize_or_scale
+from .noise_classes import prepare_noise, NOISE_GENERATOR_NAMES, NOISE_GENERATOR_CLASSES, precision_tool
 
-def initialize_or_scale(tensor, value, steps):
-    if tensor is None:
-        return torch.full((steps,), value)
-    else:
-        return value * tensor
-    
 def latent_normalize_channels(x):
     mean = x.mean(dim=(2, 3), keepdim=True)
     std  = x.std (dim=(2, 3), keepdim=True)
@@ -30,12 +27,27 @@ def latent_meancenter_channels(x):
     return  x - mean
 
 
-def initialize_or_scale(tensor, value, steps):
-    if tensor is None:
-        return torch.full((steps,), value)
-    else:
-        return value * tensor
+def normalize_inputs(x, y0, y0_inv, guide_mode,  extra_options) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    
+    if guide_mode == "epsilon_guide_mean_std_from_bkg":
+        y0 = normalize_latent(y0, y0_inv)
+        
+    # input_norm = get_extra_options_kv("input_norm", "", extra_options)
+    # input_std = float(get_extra_options_kv("input_std", "1.0", extra_options))
+    
+    # if input_norm == "input_ch_mean_set_std_to":
+    #     x = normalize_latent(x, set_std=input_std)
 
+    # if input_norm == "input_ch_set_std_to":
+    #     x = normalize_latent(x, set_std=input_std, mean=False)
+            
+    # if input_norm == "input_mean_set_std_to":
+    #     x = normalize_latent(x, set_std=input_std, channelwise=False)
+        
+    # if input_norm == "input_std_set_std_to":
+    #     x = normalize_latent(x, set_std=input_std, mean=False, channelwise=False)
+    
+    return x, y0, y0_inv
 
 def normalize_latent(target, source=None, mean=True, std=True, set_mean=None, set_std=None, channelwise=True):
     target = target.clone()

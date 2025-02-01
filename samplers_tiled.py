@@ -462,7 +462,9 @@ def sample_common(model, x, noise, noise_mask, noise_seed, tile_width, tile_heig
                     tiled_latent_batch = torch.cat(tiled_latent_list[start_idx:end_idx])
                     tiled_mask_batch   = torch.cat(tiled_mask_list  [start_idx:end_idx])
                     
-                    print("Tiled batch size: ", tiled_latent_batch.shape[0])
+                    # Only print on first iteration
+                    if start_idx == 0:
+                        print("\nTiled batch size: ", tiled_latent_batch.shape[0])
 
                     pos[0][1]['stable_cascade_prior'] = torch.cat(effnet_slices[start_idx:end_idx])
                     neg[0][1]['stable_cascade_prior'] = torch.cat(effnet_slices[start_idx:end_idx])
