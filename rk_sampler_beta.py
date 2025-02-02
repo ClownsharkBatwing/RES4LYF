@@ -283,7 +283,7 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
                 x_[0] = x_next_pred
                 eps_[0], data_[0] = RK(x_[0], s_[0], x_0, sigma, **extra_args) 
                 for r in range(RK.rows):
-                    eps_ [r] = (x_0 - data_[r]) / s_[r]
+                    eps_ [r] = (x_0 - data_[0]) / s_[r]
                     data_[r] = data_[0].clone()
 
             else:
