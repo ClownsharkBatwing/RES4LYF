@@ -36,6 +36,45 @@ def safe_get_nested(d, keys, default=None):
     return d
 
 
+def lagrange_interpolation(x_values, y_values, x_new):
+
+    if not isinstance(x_values, torch.Tensor):
+        x_values = torch.tensor(x_values, dtype=torch.get_default_dtype())
+    if x_values.ndim != 1:
+        raise ValueError("x_values must be a 1D tensor or a list of scalars.")
+
+    if not isinstance(x_new, torch.Tensor):
+        x_new = torch.tensor(x_new, dtype=x_values.dtype, device=x_values.device)
+    if x_new.ndim == 0:
+        x_new = x_new.unsqueeze(0)
+
+    if isinstance(y_values, list):
+        y_values = torch.stack(y_values, dim=0)
+    if y_values.ndim < 1:
+        raise ValueError("y_values must have at least one dimension (the sample dimension).")
+
+    n = x_values.shape[0]
+    if y_values.shape[0] != n:
+        raise ValueError(f"Mismatch: x_values has length {n} but y_values has {y_values.shape[0]} samples.")
+
+    m = x_new.shape[0]
+    result_shape = (m,) + y_values.shape[1:]
+    result = torch.zeros(result_shape, dtype=y_values.dtype, device=y_values.device)
+
+    for i in range(n):
+        Li = torch.ones_like(x_new, dtype=y_values.dtype, device=y_values.device)
+        xi = x_values[i]
+        for j in range(n):
+            if i == j:
+                continue
+            xj = x_values[j]
+            Li = Li * ((x_new - xj) / (xi - xj))
+        extra_dims = (1,) * (y_values.ndim - 1)
+        Li = Li.view(m, *extra_dims)
+        result = result + Li * y_values[i]
+
+    return result
+
 
 def get_cosine_similarity_manual(a, b):
     return (a * b).sum() / (torch.norm(a) * torch.norm(b))

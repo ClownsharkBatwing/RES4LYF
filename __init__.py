@@ -271,6 +271,22 @@ if flags["test_samplers"]:
         "rk_crazymod45": test_samplers.sample_rk_crazymod45,
         "rk_pec423": test_samplers.sample_rk_pec423,
         "rk_pec433": test_samplers.sample_rk_pec433,
+        "rk_gausslang": test_samplers.sample_rk_gausslang,
+        "rk_gausslangeps": test_samplers.sample_rk_gausslangeps,
+        "rk_ralradau": test_samplers.sample_rk_ralradau,
+
+
+        "rk_gausscycle": test_samplers.sample_rk_gausscycle,
+        "rk_gausscycle2": test_samplers.sample_rk_gausscycle2,
+
+        "rk_radaucycle": test_samplers.sample_rk_radaucycle,
+        "rk_radaucycle_ia": test_samplers.sample_rk_radaucycle_ia,
+        "rk_radaucycle_3s": test_samplers.sample_rk_radaucycle_3s,
+
+
+        "rk_radau_iia_2s": test_samplers.sample_rk_radau_iia_2s,
+        "rk_radau_iia_3s": test_samplers.sample_rk_radau_iia_3s,
+
 
         "rk_abnorsett4": test_samplers.sample_rk_abnorsett4,
         "rk_euler_lowranksvd": test_samplers.sample_rk_euler_lowranksvd,

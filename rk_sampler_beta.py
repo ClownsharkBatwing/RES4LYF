@@ -17,7 +17,7 @@ from .rk_method_beta import RK_Method_Beta, RK_NoiseSampler
 from .rk_guide_func_beta import *
 
 from .latents import normalize_latent, initialize_or_scale, latent_normalize_channels
-from .helper import get_extra_options_kv, extra_options_flag, get_cosine_similarity, get_pearson_similarity
+from .helper import get_extra_options_kv, extra_options_flag, get_cosine_similarity, get_pearson_similarity, lagrange_interpolation
 from .sigmas import get_sigmas
 
 from .rk_coefficients_beta import IRK_SAMPLER_NAMES_BETA
@@ -163,10 +163,11 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
         implicit_steps_diag = implicit_steps_full = 0
 
     RK = RK_Method_Beta.create(model,  rk_type, x.device, x.dtype)
+    extra_args = RK.init_cfg_channelwise(x, cfg_cw, **extra_args)
+    
     NS = RK_NoiseSampler(model, x.device, x.dtype)
     NS.init_noise_sampler(x, noise_seed, noise_sampler_type, noise_sampler_type_substep, alpha, alpha_substep, k, k_substep)
     
-    extra_args = RK.init_cfg_channelwise(x, cfg_cw, **extra_args)
 
 
 
@@ -210,7 +211,7 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
 
         sigma_up, sigma, sigma_down, alpha_ratio = get_res4lyf_step_with_model(model, sigma, sigma_next, eta, noise_mode)
         
-        h = RK.h_fn(sigma_down, sigma)
+        h         = RK.h_fn(sigma_down, sigma)
         h_no_eta  = RK.h_fn(sigma_next, sigma)
         h = h + noise_boost_step * (h_no_eta - h)
 
@@ -222,8 +223,8 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
         s_ = [(RK.sigma_fn(RK.t_fn(sigma) + h*c_)) * x.new_ones([1]) for c_ in RK.c]
 
         if step == 0 or step == guide_skip_steps:
-            x_, data_, eps_ = (torch.zeros(RK.rows+2, *x.shape, dtype=x.dtype, device=x.device) for _ in range(3))
-            data_prev_ = torch.zeros(max(RK.rows+2, 4), *x.shape, dtype=x.dtype, device=x.device)
+            x_, data_, eps_ = (torch.zeros(    RK.rows+2,     *x.shape, dtype=x.dtype, device=x.device) for _ in range(3))
+            data_prev_      =  torch.zeros(max(RK.rows+2, 4), *x.shape, dtype=x.dtype, device=x.device)
             recycled_stages = len(data_prev_)-1
 
         sde_noise_t = None
@@ -236,7 +237,7 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
         x_[0] = NS.add_noise_pre(x, sigma_up, sigma, sigma_next, alpha_ratio, s_noise, noise_mode, CONSERVE_MEAN_CW, SDE_NOISE_EXTERNAL, sde_noise_t)
         x_0 = x_[0].clone()
 
-
+        eps_orig_ = eps_.clone()
 
         # RECYCLE STAGES FOR MULTISTEP
         for ms in range(len(eps_)):
@@ -246,19 +247,53 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
 
 
         # INITIALIZE IMPLICIT SAMPLING
-        if rk_type in IRK_SAMPLER_NAMES_BETA:
+        if RK.IMPLICIT:
             if extra_options_flag("implicit_skip_model_call_at_start", extra_options) and denoised.sum() + eps.sum() != 0:
                 eps_[0], data_[0] = eps.clone(), denoised.clone()
                 eps_[0] = get_epsilon(x_0, denoised, sigma, rk_type)
                 if denoised_prev2.sum() != 0:
                     sratio = sigma - s_[0]
                     data_[0] = denoised + sratio * (denoised - denoised_prev2)
+            elif extra_options_flag("implicit_lagrange_init", extra_options) and denoised.sum() + eps.sum() != 0:
+                sigma_prev = sigmas[step-1]
+                h_prev = sigma - sigma_prev
+                w = h / h_prev
+                substeps_prev = len(RK.c[:-1])
+                
+                """z_prev_ = eps_.clone()
+                for r in range (substeps_prev):
+                    z_prev_[r] = h_prev * RK.a_k_sum(eps_orig_, r) #+ RK.u_k_sum(eps_prev_, r)) # u,v not implemented for lagrange guess for implicit
+                zi_1 = lagrange_interpolation(RK.c[:-1], z_prev_[:substeps_prev], 1 + w*c1).squeeze(0) + x_prev - x_0"""
+                
+                z_prev_ = eps_.clone()
+                for r in range (substeps_prev):
+                    z_prev_[r] = h * RK.a_k_sum(eps_, r) #+ RK.u_k_sum(eps_prev_, r)) # u,v not implemented for lagrange guess for implicit
+                #zi_1 = lagrange_interpolation(RK.c[:-1], z_prev_[:substeps_prev], 1 + w*c1).squeeze(0) + x_prev - x_0
+                zi_1 = lagrange_interpolation(RK.c[:-1], z_prev_[:substeps_prev], c1).squeeze(0) # + x_prev - x_0"""
+                x_[0] = x_0 + zi_1
+                
+                #eps_backup_ = eps_.clone()
+                #for r in range(RK.rows):
+                #    eps_[r] = lagrange_interpolation(RK.c[:-1], eps_backup_[:substeps_prev], RK.c[r]).squeeze(0) #+ x_prev - x_0
+                
+                #for r in range(RK.rows):
+                #    eps_[r] = lagrange_interpolation(RK.c[:-1], eps_orig_[:substeps_prev], 1 + w*RK.c[r]).squeeze(0) + x_prev - x_0
+                
+            elif rk_type in {"radau_ia_2s", "radau_iia_2s", "radau_ia_3s", "radau_iia_3s"} and step > 0 and extra_options_flag("radaucycle", extra_options):
+                x_[0] = x_next_pred
+                eps_[0], data_[0] = RK(x_[0], s_[0], x_0, sigma, **extra_args) 
+                for r in range(RK.rows):
+                    eps_ [r] = (x_0 - data_[r]) / s_[r]
+                    data_[r] = data_[0].clone()
+
             else:
                 eps_[0], data_[0] = RK(x_[0], sigma, x_0, sigma, **extra_args) 
+            
+            if not extra_options_flag("implicit_lagrange_init", extra_options) and not extra_options_flag("radaucycle", extra_options):
+                for r in range(RK.rows):
+                    eps_ [r] = eps_ [0].clone() * sigma / s_[r]
+                    data_[r] = data_[0].clone()
                 
-            for r in range(RK.rows):
-                eps_ [r] = eps_ [0].clone() * sigma / s_[r]
-                data_[r] = data_[0].clone()
 
             x_, eps_ = RK.newton_iter(x_0, x_, eps_, eps_prev_, data_, s_, 0, h, sigmas, step, "init", extra_options)
 
@@ -266,7 +301,7 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
         # BEGIN FULLY IMPLICIT LOOP
         for full_iter in range(implicit_steps_full + 1):
             
-            if rk_type in IRK_SAMPLER_NAMES_BETA and extra_options_flag("fully_implicit_newton_iter", extra_options):
+            if RK.IMPLICIT and extra_options_flag("fully_implicit_newton_iter", extra_options):
                 x_, eps_ = RK.newton_iter(x_0, x_, eps_, eps_prev_, data_, s_, 0, h, sigmas, step, "init", extra_options)
             
             if extra_options_flag("BLARGHWTF", extra_options) and sigma_next > 0 and (LG.lgw[step] > 0 or LG.lgw_inv[step] > 0):
@@ -447,7 +482,6 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
                     # PREPARE SIGMAS, STEP SIZE
                     sub_sigma_up, sub_sigma, sub_sigma_next, sub_sigma_down, sub_alpha_ratio = 0., s_[row], s_[row+row_offset+RK.multistep_stages], s_[row+row_offset+RK.multistep_stages], 1.
 
-
                     if row < RK.rows   and   s_[row+row_offset+RK.multistep_stages] > 0:
                         if   diag_iter > 0 and diag_iter == implicit_steps_diag and extra_options_flag("implicit_substep_skip_final_eta", extra_options):
                             pass
@@ -468,6 +502,8 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
                     h_new = h * RK.h_fn(sub_sigma_down, sigma) / RK.h_fn(sub_sigma_next, sigma) 
                     h_new_orig = h_new.clone()
                     h_new = h_new + noise_boost_substep * (h - h_new)
+
+
 
                     # PREPARE PSEUDOIMPLICIT GUIDES
                     if LG.guide_mode in {"pseudoimplicit", "pseudoimplicit_projection"}: #  and (full_iter > 0 or diag_iter > 0):
@@ -525,17 +561,24 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
                                 if not extra_options_flag("implicit_guide_preproc_disable", extra_options):
                                     eps_, x_      = LG.process_guides_substep(x_0, x_, eps_,      data_, row, step, sigma, sigma_next, sigma_down, s_, unsample_resample_scale, RK, rk_type, extra_options, frame_weights)
                                     eps_prev_, x_ = LG.process_guides_substep(x_0, x_, eps_prev_, data_, row, step, sigma, sigma_next, sigma_down, s_, unsample_resample_scale, RK, rk_type, extra_options, frame_weights)
-                                if row == 0 and not extra_options_flag("substep_eta_use_final", extra_options):
+                                if row == 0 and (extra_options_flag("implicit_lagrange_init", extra_options)  or   extra_options_flag("radaucycle", extra_options)):
+                                    pass
+                                elif row == 0 and not extra_options_flag("substep_eta_use_final", extra_options):
                                     x_tmp = x_[row+row_offset] = x_0 + h     * (RK.a_k_sum(eps_, row+row_offset) + RK.u_k_sum(eps_prev_, row+row_offset))
                                 else:
                                     x_tmp = x_[row+row_offset] = x_0 + h_new * (RK.a_k_sum(eps_, row+row_offset) + RK.u_k_sum(eps_prev_, row+row_offset))
                                     x_tmp = x_[row+row_offset] = NS.add_noise_post(x_[row+row_offset], sub_sigma_up, sub_sigma, sub_sigma_next, sub_alpha_ratio, s_noise_substep, noise_mode_sde_substep, SDE_NOISE_EXTERNAL, sde_noise_t, SUBSTEP=True)
 
+
+                        if RK.IMPLICIT   and   row == 0   and   extra_options_flag("radaucycle", extra_options):
+                            pass
                         # MAKE MODEL CALL
-                        if not RK.IMPLICIT   or not   row == 0   or not   extra_options_flag("implicit_lazy_recycle_first_model_call_at_start", extra_options):
+                        elif RK.IMPLICIT   and   row == 0   and   extra_options_flag("implicit_lazy_recycle_first_model_call_at_start", extra_options):
+                            pass
+                        else: #elif not RK.IMPLICIT   or not   row == 0   or not   extra_options_flag("implicit_lazy_recycle_first_model_call_at_start", extra_options):
                             if s_tmp == 0:
                                 break
-                            x_, eps_ = RK.newton_iter(x_0, x_, eps_, eps_prev_, data_, s_, row, h, sigmas, step, "pre", extra_options)
+                            x_, eps_ = RK.newton_iter(x_0, x_, eps_, eps_prev_, data_, s_, row, h, sigmas, step, "pre", extra_options) # will this do anything? not x_tmp
                             eps_[row], data_[row] = RK(x_tmp, s_tmp, x_0, sigma, **extra_args) 
                             if extra_options_flag("preview_substeps", extra_options):
                                 callback({'x': x, 'i': step, 'sigma': sigma, 'sigma_next': sigma_next, 'denoised': data_[row].to(torch.float32)}) if callback is not None else None
@@ -558,13 +601,48 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
             denoised = x_0 + ((sigma / (sigma - sigma_down)) *  h_new) * (RK.b_k_sum(eps_, 0) + RK.v_k_sum(eps_prev_, 0))
             eps = get_epsilon(x_0, denoised, sigma_next, rk_type)
             
+            x_prev = x_0.clone()
             x = x_[RK.rows - RK.multistep_stages - row_offset + 1]
             x = LG.process_guides_poststep(x, denoised, eps, step, extra_options)
             
             preview_callback(x, eps, denoised, x_, eps_, data_, step, sigma, sigma_next, callback, extra_options)
 
             x = NS.add_noise_post(x, sigma_up, sigma, sigma_next, alpha_ratio, s_noise, noise_mode, SDE_NOISE_EXTERNAL, sde_noise_t)
+            
+            if rk_type == "radau_iia_2s":
+                x_next_pred = x_0 + h * ((1/4) * eps_[0] + (3/4) * eps_[1])
+            elif rk_type == "radau_ia_2s":
+                x_next_pred = x_0 + h * ((3/4) * eps_[0] + (1/4) * eps_[1])
+                
+            elif rk_type == "radau_iia_3s":
+                x_next_pred = x_0 + h * ((1/9) * eps_[0] + (4/9 + 6**0.5/36) * eps_[1] + (4/9 - 6**0.5/36) * eps_[2])
+            elif rk_type == "radau_ia_3s":
+                x_next_pred = x_0 + h * ((4/9 - 6**0.5 / 36) * eps_[0] + (4/9 + 6**0.5 / 36) * eps_[1] + (1/9) * eps_[2])
+                
+                
+            if sigma_next > 0 and extra_options_flag("radaucycle", extra_options) and rk_type == "radau_iia_2s":
+                b1, b2 = 1/4, 3/4
+                c1 = 1/3
+                h_next = sigmas[step+2] - sigmas[step+1]
+                sigma_3 = sigma_next + h_next * c1
+                sigma_3_down = sigma + h      * (1+c1)
+                
+                if sigma_3_down >= sigma_3:
+                    h = sigma_3_down - sigma
+                    h = h / (1+c1)
+                
+                x_next_pred   = x_0 + h     * (b1 * eps_[0] + b2 * eps_[1])
+                denoised_prev = x_0 - sigma * (b1 * eps_[0] + b2 * eps_[1])
+                
+                noise = NS.noise_sampler2(sigma=sigma, sigma_next=sigma_next)
+                
+                if sigma_3_down < sigma_3:
+                    alpha_ratio_3, sigma_up_3, sigma_down_3 = get_alpha_ratio_from_sigma_down(sigma_3_down, sigma_3, eta)
+                    
+                    if extra_options_flag("solve_2m", extra_options):
+                        x_next_pred, denoised_prev = res_2m_predictor_step(x_0, denoised_1, denoised_2, sigma_1, sigma_2, sigma_3_down)
 
+                    x_next_pred = alpha_ratio_3 * x_next_pred + noise * sigma_up_3
         data_prev_[0] = data_[0]
         for ms in range(recycled_stages):
             data_prev_[recycled_stages - ms] = data_prev_[recycled_stages - ms - 1]
