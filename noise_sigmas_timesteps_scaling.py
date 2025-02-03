@@ -22,7 +22,7 @@ def get_alpha_ratio_from_sigma_down(sigma_down, sigma_next, eta, sigma_max=1.0):
     alpha_ratio = (1 - sigma_next) / (1 - sigma_down) 
     sigma_up = (sigma_next ** 2 - sigma_down ** 2 * alpha_ratio ** 2) ** 0.5 
     
-    if sigma_up >= sigma_next:
+    if sigma_up >= sigma_next: # "clamp" noise level to max if max exceeded
       alpha_ratio, sigma_up, sigma_down = get_alpha_ratio_from_sigma_up(sigma_up, sigma_next, eta, sigma_max)
       
     return alpha_ratio, sigma_up, sigma_down
