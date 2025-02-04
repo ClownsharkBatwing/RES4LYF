@@ -328,7 +328,7 @@ class LatentGuide:
 
 
 
-        elif (UNSAMPLE or guide_mode is {"resample", "unsample", "resample_projection", "unsample_projection", "resample_projection_cw", "unsample_projection_cw"}) and (lgw > 0 or lgw_inv > 0):
+        elif (UNSAMPLE or guide_mode in {"resample", "unsample", "resample_projection", "unsample_projection", "resample_projection_cw", "unsample_projection_cw"}) and (lgw > 0 or lgw_inv > 0):
             
             cvf = RK.get_epsilon(x_0, x_[row+row_offset], y0, sigma, s_[row], sigma_down, unsample_resample_scale, extra_options)                
             if UNSAMPLE and sigma > sigma_next and latent_guide_inv is not None:
