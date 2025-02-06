@@ -392,7 +392,7 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
                     debug_cuda_cleanup(cuda_sync_b_flag, cuda_empty_b_flag, cuda_gc_b_flag)
 
                     # GUIDES
-                    if (LG.guide_mode is not "none") and (LG.guide_mode is not ""):
+                    if (LG.guide_mode != "none") and (LG.guide_mode != ""):
                         eps_row_tmp, x_row_tmp = eps_[row].clone(), x_[row+1].clone()
                         eps_, x_ = LG.process_guides_substep(x_0, x_, eps_, data_, row, step, sigma, sigma_next, sigma_down, s_, unsample_resample_scale, rk, rk_type, extra_options, frame_weights_grp)
 
