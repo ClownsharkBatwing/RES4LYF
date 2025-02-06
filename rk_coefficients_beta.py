@@ -465,7 +465,6 @@ rk_coeff = {
     "radau_iia_3s_alt": ( # https://www.unige.ch/~hairer/preprints/coimbra.pdf (page 7) Ehle [Eh69] and Axelsson [Ax69]
         [    
             [(88 - 7*6**0.5) / 360, (296 - 169*6**0.5) / 1800, (-2 + 3 * 6**0.5) / 225],
-            
             [(296 + 169*6**0.5) / 1800, (88 + 7*6**0.5) / 360, (-2 - 3*6**0.5) / 225],
             [(16 - 6**0.5) / 36, (16 + 6**0.5) / 36, 1/9],
         ],
@@ -1497,9 +1496,14 @@ def get_rk_methods_beta(rk_type, h, c1=0.0, c2=0.5, c3=1.0, h_prev=None, step=0,
             c3 = float(get_extra_options_kv("c3", str(c3), extra_options))
             
             gamma = calculate_gamma(c2, c3)
-            a2_1 = c2 * phi(1, -h*c2)
-            a3_2 = gamma * c2 * phi(2, -h*c2) + (c3 ** 2 / c2) * phi(2, -h*c3) #phi_2_c3_h  # a32 from k2 to k3
-            a3_1 = c3 * phi(1, -h*c3) - a3_2 # a31 from k1 to k3
+            #a2_1 = c2 * phi(1, -h*c2)
+            #a3_2 = gamma * c2 * phi(2, -h*c2) + (c3 ** 2 / c2) * phi(2, -h*c3) #phi_2_c3_h  # a32 from k2 to k3
+            #a3_1 = c3 * phi(1, -h*c3) - a3_2 # a31 from k1 to k3
+            
+            a2_1 = c2 * φ(1,2)
+            a3_2 = gamma * c2 * φ(2,2) + (c3 ** 2 / c2) * φ(2, 3)
+            a3_1 = c3 * φ(1,3) - a3_2
+            
             b3 = (1 / (gamma * c2 + c3)) * phi(2, -h)      
             b2 = gamma * b3  #simplified version of: b2 = (gamma / (gamma * c2 + c3)) * phi_2_h  
             b1 = phi(1, -h) - b2 - b3     

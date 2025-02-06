@@ -182,6 +182,8 @@ NODE_CLASS_MAPPINGS = {
     "LatentPhaseMagnitudeMultiply": latents.LatentPhaseMagnitudeMultiply,
     "LatentPhaseMagnitudeOffset": latents.LatentPhaseMagnitudeOffset,
     "LatentPhaseMagnitudePower": latents.LatentPhaseMagnitudePower,
+    
+    "MaskToggle": latents.MaskToggle,
 
     "Sigmas Recast": sigmas.set_precision_sigmas,
     "Sigmas Noise Inversion": sigmas.sigmas_noise_inversion,
@@ -271,6 +273,13 @@ if flags["test_samplers"]:
         "rk_crazymod45": test_samplers.sample_rk_crazymod45,
         "rk_pec423": test_samplers.sample_rk_pec423,
         "rk_pec433": test_samplers.sample_rk_pec433,
+        "rk_gausslang_full": test_samplers.sample_rk_gausslang_full,
+        "rk_gausslang_3s_full": test_samplers.sample_rk_gausslang_3s_full,
+        "rk_gausslang_3s_full_guide": test_samplers.sample_rk_gausslang_3s_full_guide,
+        "rk_radau_iia_alt_lang_3s_full": test_samplers.sample_rk_radau_iia_alt_lang_3s_full,
+        "rk_implicit": test_samplers.sample_rk_implicit,
+
+
         "rk_gausslang": test_samplers.sample_rk_gausslang,
         "rk_gausslangeps": test_samplers.sample_rk_gausslangeps,
         "rk_ralradau": test_samplers.sample_rk_ralradau,
@@ -282,7 +291,17 @@ if flags["test_samplers"]:
         "rk_radaucycle": test_samplers.sample_rk_radaucycle,
         "rk_radaucycle_ia": test_samplers.sample_rk_radaucycle_ia,
         "rk_radaucycle_3s": test_samplers.sample_rk_radaucycle_3s,
+        "rk_radaucycle_retry": test_samplers.sample_rk_radaucycle_retry,
+        "rk_radaucycle_staggered": test_samplers.sample_rk_radaucycle_staggered,
+        
+        "rk_implicit_euler_von_svd": test_samplers.sample_rk_implicit_euler_von_svd,
 
+
+        "rk_radau_iia_2s_BS": test_samplers.sample_rk_radau_iia_2s_BS,
+
+        "rk_radau_ia_2s_lang_full": test_samplers.sample_rk_radau_ia_2s_lang_full,
+
+        "rk_radau_iia_2s_lang_full": test_samplers.sample_rk_radau_iia_2s_lang_full,
 
         "rk_radau_iia_2s": test_samplers.sample_rk_radau_iia_2s,
         "rk_radau_iia_3s": test_samplers.sample_rk_radau_iia_3s,
