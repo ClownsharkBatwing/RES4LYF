@@ -183,7 +183,7 @@ NODE_CLASS_MAPPINGS = {
     "LatentPhaseMagnitudeOffset": latents.LatentPhaseMagnitudeOffset,
     "LatentPhaseMagnitudePower": latents.LatentPhaseMagnitudePower,
     
-    "MaskToggle": latents.MaskToggle,
+    #"MaskToggle": latents.MaskToggle,
 
     "Sigmas Recast": sigmas.set_precision_sigmas,
     "Sigmas Noise Inversion": sigmas.sigmas_noise_inversion,
