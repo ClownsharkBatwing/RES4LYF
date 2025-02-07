@@ -1499,7 +1499,8 @@ def get_rk_methods_beta(rk_type, h, c1=0.0, c2=0.5, c3=1.0, h_prev=None, step=0,
             #a2_1 = c2 * phi(1, -h*c2)
             #a3_2 = gamma * c2 * phi(2, -h*c2) + (c3 ** 2 / c2) * phi(2, -h*c3) #phi_2_c3_h  # a32 from k2 to k3
             #a3_1 = c3 * phi(1, -h*c3) - a3_2 # a31 from k1 to k3
-            
+            ci = [0,c2,c3]
+            φ = Phi(h, ci)
             a2_1 = c2 * φ(1,2)
             a3_2 = gamma * c2 * φ(2,2) + (c3 ** 2 / c2) * φ(2, 3)
             a3_1 = c3 * φ(1,3) - a3_2
