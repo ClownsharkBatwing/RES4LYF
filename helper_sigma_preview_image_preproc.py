@@ -404,7 +404,7 @@ class SigmasSchedulePreview(SaveImage):
             sigma = sigmas[i]
             sigma_next = sigmas[i + 1]
             
-            su, sigma_hat, sd, alpha_ratio = get_res4lyf_step_with_model(model, sigma, sigma_next, eta, eta_var, noise_mode)
+            su, sigma_hat, sd, alpha_ratio = get_res4lyf_step_with_model(model, sigma, sigma_next, eta, noise_mode)
 
             su = su * s_noise
             
