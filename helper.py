@@ -128,6 +128,15 @@ def conditioning_set_values(conditioning, values={}):
     return c
 
 
+def get_collinear_alt(x, y):
+
+    y_flat = y.view(y.size(0), -1).clone()
+    x_flat = x.view(x.size(0), -1).clone()
+
+    y_flat /= y_flat.norm(dim=-1, keepdim=True)
+    x_proj_y = torch.sum(x_flat * y_flat, dim=-1, keepdim=True) * y_flat
+
+    return x_proj_y.view_as(x)
 
 
 def get_collinear(x, y):

@@ -183,7 +183,7 @@ NODE_CLASS_MAPPINGS = {
     "LatentPhaseMagnitudeOffset": latents.LatentPhaseMagnitudeOffset,
     "LatentPhaseMagnitudePower": latents.LatentPhaseMagnitudePower,
     
-    #"MaskToggle": latents.MaskToggle,
+    "MaskToggle": latents.MaskToggle,
 
     "Sigmas Recast": sigmas.set_precision_sigmas,
     "Sigmas Noise Inversion": sigmas.sigmas_noise_inversion,
@@ -295,6 +295,7 @@ if flags["test_samplers"]:
         "rk_radaucycle_staggered": test_samplers.sample_rk_radaucycle_staggered,
         
         "rk_implicit_euler_von_svd": test_samplers.sample_rk_implicit_euler_von_svd,
+        "rk_implicit_cycloeuler": test_samplers.sample_rk_implicit_cycloeuler,
 
 
         "rk_radau_iia_2s_BS": test_samplers.sample_rk_radau_iia_2s_BS,
@@ -310,6 +311,7 @@ if flags["test_samplers"]:
         "rk_abnorsett4": test_samplers.sample_rk_abnorsett4,
         "rk_euler_lowranksvd": test_samplers.sample_rk_euler_lowranksvd,
         "rk_randomized_svd": test_samplers.sample_rk_randomized_svd,
+        "rk_implicit_euler_fd": test_samplers.sample_rk_implicit_euler_fd,
 
 
 

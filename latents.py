@@ -196,6 +196,30 @@ class LatentNoised:
 
 
 
+class MaskToggle:
+    def __init__(self):
+        pass
+    @classmethod
+    def INPUT_TYPES(s):
+        return {
+            "required": {
+                    "enable": ("BOOLEAN", {"default": True}),    
+                    "mask": ("MASK", ),
+                     },
+                }
+
+    RETURN_TYPES = ("MASK",)
+    RETURN_NAMES = ("mask",)
+    CATEGORY = "RES4LYF/masks"
+
+    FUNCTION = "main"
+
+    def main(self, enable=True, mask=None):
+        if enable == False:
+            mask = None
+        return (mask, )
+
+
 
 class set_precision:
     def __init__(self):
