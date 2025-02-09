@@ -135,7 +135,7 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
 
     extra_args = {} if extra_args is None else extra_args
     default_dtype = getattr(torch, get_extra_options_kv("default_dtype", "", extra_options), x.dtype)
-    
+    x = x.to(default_dtype)
     MAX_STEPS=10000
 
     if noise_seed < 0:

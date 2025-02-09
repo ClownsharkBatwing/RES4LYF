@@ -63,15 +63,15 @@ class LatentGuide:
         self.LGW_MASK_RESCALE_MIN   = LGW_MASK_RESCALE_MIN
         self.HAS_LATENT_GUIDE       = False
         self.HAS_LATENT_GUIDE_INV   = False
-        self.lgw, self.lgw_inv      = [torch.full_like(sigmas, 0.) for _ in range(2)]
+        self.lgw, self.lgw_inv      = [torch.full_like(sigmas, 0., dtype=self.dtype) for _ in range(2)]
         self.guide_cossim_cutoff_, self.guide_bkg_cossim_cutoff_ = 1.0, 1.0
         self.frame_weights = frame_weights_grp[0] if frame_weights_grp is not None else None
         self.frame_weights_inv = frame_weights_grp[1] if frame_weights_grp is not None else None
 
     def init_guides(self, x, guides, noise_sampler):
         latent_guide_weight, latent_guide_weight_inv = 0.,0.
-        latent_guide_weights = torch.zeros_like(self.sigmas)
-        latent_guide_weights_inv = torch.zeros_like(self.sigmas)
+        latent_guide_weights = torch.zeros_like(self.sigmas, dtype=self.dtype)
+        latent_guide_weights_inv = torch.zeros_like(self.sigmas, dtype=self.dtype)
         latent_guide = None
         latent_guide_inv = None
 
@@ -81,10 +81,10 @@ class LatentGuide:
             steps_, steps_inv_, self.guide_cossim_cutoff_, self.guide_bkg_cossim_cutoff_) = guides
                         
             if latent_guide_weights is None:
-                latent_guide_weights = get_sigmas(self.model, scheduler_, steps_, 1.0).to(x.dtype)
+                latent_guide_weights = get_sigmas(self.model, scheduler_, steps_, 1.0).to(self.dtype)
             
             if latent_guide_weights_inv is None:
-                latent_guide_weights_inv = get_sigmas(self.model, scheduler_inv_, steps_inv_, 1.0).to(x.dtype)
+                latent_guide_weights_inv = get_sigmas(self.model, scheduler_inv_, steps_inv_, 1.0).to(self.dtype)
                 
             latent_guide_weights     = initialize_or_scale(latent_guide_weights,     latent_guide_weight,     self.max_steps).to(self.dtype)
             latent_guide_weights_inv = initialize_or_scale(latent_guide_weights_inv, latent_guide_weight_inv, self.max_steps).to(self.dtype)
@@ -92,8 +92,8 @@ class LatentGuide:
             latent_guide_weights[steps_ - 1:] = 0
             latent_guide_weights_inv[steps_inv_ - 1:] = 0
                 
-        self.lgw        = F.pad(latent_guide_weights,     (0, self.max_steps), value=0.0).to(self.device)
-        self.lgw_inv    = F.pad(latent_guide_weights_inv, (0, self.max_steps), value=0.0).to(self.device)
+        self.lgw        = F.pad(latent_guide_weights,     (0, self.max_steps), value=0.0).to(self.dtype)
+        self.lgw_inv    = F.pad(latent_guide_weights_inv, (0, self.max_steps), value=0.0).to(self.dtype)
         
         self.mask, self.LGW_MASK_RESCALE_MIN = prepare_mask(x, self.mask, self.LGW_MASK_RESCALE_MIN)
         if self.mask_inv is not None:
@@ -160,6 +160,8 @@ class LatentGuide:
             
         x, self.y0, self.y0_inv = normalize_inputs(x, self.y0, self.y0_inv, self.guide_mode, self.extra_options)
 
+        self.to(self.device)
+
         return x.to(self.dtype)
     
     
@@ -172,10 +174,36 @@ class LatentGuide:
         self.y0_inv = self.y0_inv.to(device) if self.y0_inv is not None else None
         self.frame_weights = self.frame_weights.to(device) if self.frame_weights is not None else None
         self.frame_weights_inv = self.frame_weights_inv.to(device) if self.frame_weights_inv is not None else None
-        
+
+
+    def prepare_weighted_masks(self, step):
+        lgw_ = self.lgw[step]
+        lgw_inv_ = self.lgw_inv[step]
+        mask = torch.ones_like(self.y0) if self.mask is None else self.mask
+        mask_inv = torch.zeros_like(mask) if self.mask_inv is None else self.mask_inv
+
+        if self.LGW_MASK_RESCALE_MIN: 
+            lgw_mask     =    mask  * (1-lgw_)     + lgw_
+            lgw_mask_inv = (1-mask) * (1-lgw_inv_) + lgw_inv_
+        else:
+            if self.HAS_LATENT_GUIDE:
+                lgw_mask = mask * lgw_
+            else:
+                lgw_mask = torch.zeros_like(mask)
+            
+            if self.HAS_LATENT_GUIDE_INV:
+                if mask_inv is not None:
+                    lgw_mask_inv = torch.minimum(1-mask_inv, (1-mask) * lgw_inv_)
+                else:
+                    lgw_mask_inv = (1-mask) * lgw_inv_
+            else:
+                lgw_mask_inv = torch.zeros_like(mask)
+
+        return lgw_mask, lgw_mask_inv
+
 
     def get_masks_for_step(self, step):
-        lgw_mask, lgw_mask_inv = prepare_weighted_masks(self.mask, self.mask_inv, self.lgw[step], self.lgw_inv[step], self.HAS_LATENT_GUIDE, self.HAS_LATENT_GUIDE_INV, self.LGW_MASK_RESCALE_MIN)
+        lgw_mask, lgw_mask_inv = self.prepare_weighted_masks(step)
         if self.VIDEO:
             if self.frame_weights is not None:
                 apply_frame_weights(lgw_mask, self.frame_weights)
@@ -609,24 +637,6 @@ def prepare_mask(x, mask, LGW_MASK_RESCALE_MIN) -> Tuple[torch.Tensor, bool]:
     del spatial_mask
     return mask, LGW_MASK_RESCALE_MIN
     
-def prepare_weighted_masks(mask, mask_inv, lgw_, lgw_inv_, HAS_LATENT_GUIDE, HAS_LATENT_GUIDE_INV, LGW_MASK_RESCALE_MIN):
-    if LGW_MASK_RESCALE_MIN: 
-        lgw_mask     =    mask  * (1-lgw_) + lgw_
-        lgw_mask_inv = (1-mask) * (1-lgw_inv_) + lgw_inv_
-    else:
-        if HAS_LATENT_GUIDE:
-            lgw_mask = mask * lgw_
-        else:
-            lgw_mask = torch.zeros_like(mask)
-        if HAS_LATENT_GUIDE_INV:
-            if mask_inv is not None:
-                lgw_mask_inv = torch.minimum(1-mask_inv, (1-mask) * lgw_inv_)
-            else:
-                lgw_mask_inv = (1-mask) * lgw_inv_
-        else:
-            lgw_mask_inv = torch.zeros_like(mask)
-    return lgw_mask, lgw_mask_inv
-
 def apply_temporal_smoothing(tensor, temporal_smoothing):
     if temporal_smoothing <= 0 or tensor.dim() != 5:
         return tensor
