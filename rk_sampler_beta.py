@@ -201,10 +201,10 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
     if implicit_sampler_name == "none":
         implicit_steps_diag = implicit_steps_full = 0
 
-    RK = RK_Method_Beta.create(model,  rk_type, x.device, default_dtype)
+    RK = RK_Method_Beta.create(model, rk_type, device=x.device, dtype=default_dtype)
     extra_args = RK.init_cfg_channelwise(x, cfg_cw, **extra_args)
     
-    NS = RK_NoiseSampler(model, x.device, default_dtype)
+    NS = RK_NoiseSampler(model, device=x.device, dtype=default_dtype)
     NS.init_noise_sampler(x, noise_seed, noise_sampler_type, noise_sampler_type_substep, alpha, alpha_substep, k, k_substep)
     
 
@@ -213,7 +213,6 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
     # SETUP GUIDES
     LG = LatentGuide(model, sigmas, UNSAMPLE, LGW_MASK_RESCALE_MIN, extra_options, dtype=default_dtype, frame_weights_grp=frame_weights_grp)
     x = LG.init_guides(x, guides, NS.noise_sampler)
-    lg_mask = LG.mask.to(x.device)
     if LG.y0 is not None:
         y0 = LG.y0.to(x.device)
         y0_inv = LG.y0_inv.to(x.device) if LG.y0_inv is not None else torch.zeros_like(LG.y0)
@@ -671,7 +670,7 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
             x = x_[RK.rows - RK.multistep_stages - row_offset + 1]
             x = LG.process_guides_poststep(x, denoised, eps, step, extra_options)
             
-            preview_callback(x, eps, denoised, x_, eps_, data_, step, sigma, sigma_next, callback, extra_options)
+            preview_callback(x, eps, denoised, x_, eps_, data_, step + 1, sigma, sigma_next, callback, extra_options)
 
             x = NS.add_noise_post(x, sigma_up, sigma, sigma_next, alpha_ratio, s_noise, noise_mode, SDE_NOISE_EXTERNAL, sde_noise_t)
             
@@ -720,7 +719,7 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
         denoised_prev = denoised.to(denoised_prev.device)
 
     if not (UNSAMPLE and sigmas[1] > sigmas[0]) and not extra_options_flag("preview_last_step_always", extra_options):
-        preview_callback(x, eps, denoised, x_, eps_, data_, step, sigma, sigma_next, callback, extra_options, FINAL_STEP=True)
+        preview_callback(x, eps, denoised, x_, eps_, data_, step + 1, sigma, sigma_next, callback, extra_options, FINAL_STEP=True)
     return x
 
 

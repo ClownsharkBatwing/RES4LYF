@@ -592,7 +592,7 @@ def get_epsilon_from_step(x, x_next, sigma, sigma_next):
 
 
 class RK_NoiseSampler:
-    def __init__(self, model, device='cuda', offload_device='cpu', dtype=torch.float64):
+    def __init__(self, model, device='cuda', dtype=torch.float64, offload_device='cpu', ):
         self.device = device
         self.dtype = dtype
         self.offload_device = offload_device
@@ -650,9 +650,9 @@ class RK_NoiseSampler:
 
         if sigma_next > 0.0 and sigma_up > 0.0:
             if not SUBSTEP:
-                noise = self.noise_sampler (sigma=sigma, sigma_next=sigma_next)
+                noise = self.noise_sampler (sigma=sigma, sigma_next=sigma_next).to(x.device)
             else:
-                noise = self.noise_sampler2(sigma=sigma, sigma_next=sigma_next)
+                noise = self.noise_sampler2(sigma=sigma, sigma_next=sigma_next).to(x.device)
                 
             noise = torch.nan_to_num((noise - noise.mean()) / noise.std(), 0.0)
 

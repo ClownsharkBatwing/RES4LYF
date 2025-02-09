@@ -81,11 +81,12 @@ def normalize(x):
      return (x - x.mean())/ x.std()
 
 class NoiseGenerator:
-    def __init__(self, x=None, size=None, dtype=None, layout=None, device=None, seed=42, generator=None, sigma_min=None, sigma_max=None):
+    def __init__(self, x=None, size=None, dtype=None, layout=None, device=None, seed=42, generator=None, sigma_min=None, sigma_max=None, offload_device='cpu'):
         self.seed = seed
 
         self.sigma_min = sigma_min
         self.sigma_max = sigma_max
+        self.offload_device = offload_device
 
         if x is not None:
             self.x      = x
