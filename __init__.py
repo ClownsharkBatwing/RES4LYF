@@ -313,7 +313,11 @@ if flags["test_samplers"]:
         "rk_randomized_svd": test_samplers.sample_rk_randomized_svd,
         "rk_implicit_euler_fd": test_samplers.sample_rk_implicit_euler_fd,
 
+        "rk_euler_banana_alphaupdown_test": test_samplers.sample_rk_euler_banana_alphaupdown_test,
+
         "rk_euler_banana": test_samplers.sample_rk_euler_banana,
+        "rk_res_2s_banana": test_samplers.sample_rk_res_2s_banana,
+        "rk_res_3s_banana": test_samplers.sample_rk_res_3s_banana,
 
 
 
