@@ -1193,7 +1193,7 @@ class linear_quadratic_advanced:
         return (sigmas, )
 
 
-class constant_cutoff_scheduler:
+class constant_scheduler:
     def __init__(self):
         pass
     
@@ -1204,7 +1204,7 @@ class constant_cutoff_scheduler:
                 "steps": ("INT", {"default": 40, "min": 0,"max": 100000,"step": 1}),
                 "value_start": ("FLOAT", {"default": 1.0, "min": -100000,"max": 100000,"step": 0.01}),
                 "value_end": ("FLOAT", {"default": 0.0, "min": -100000,"max": 100000,"step": 0.01}),
-                "cutoff_percent": ("FLOAT", {"default": 0.5, "min": 0,"max": 1,"step": 0.01}),
+                "cutoff_percent": ("FLOAT", {"default": 1.0, "min": 0,"max": 1,"step": 0.01}),
             }
         }
 
