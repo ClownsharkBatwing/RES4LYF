@@ -113,7 +113,7 @@ class LatentGuide:
 
     def get_guide_masks(self, step):
         if len(self.lgw_masks) <= step:
-            lgw_mask, lgw_mask_inv = prepare_weighted_masks(self.mask, self.mask_inv, self.lgw[step], self.lgw_inv[step], self.latent_guide, self.latent_guide_inv, self.lgw_mask_rescale_min)
+            lgw_mask, lgw_mask_inv = self.prepare_weighted_masks(step)
             self.lgw_masks.append(lgw_mask.to(self.device))
             self.lgw_masks_inv.append(lgw_mask_inv.to(self.device) if lgw_mask_inv is not None else None)
 
@@ -128,6 +128,34 @@ class LatentGuide:
 
         gc.collect()
         return self.lgw_masks[step], self.lgw_masks_inv[step]
+    
+    def prepare_weighted_masks(self, step):
+        lgw_ = self.lgw[step]
+        lgw_inv_ = self.lgw_inv[step]
+        mask = torch.ones_like(self.y0) if self.mask is None else self.mask
+        mask_inv = torch.zeros_like(mask) if self.mask_inv is None else self.mask_inv
+        if self.lgw_mask_rescale_min:
+            lgw_mask     =    mask  * (1-lgw_) + lgw_
+            lgw_mask_inv = (1-mask) * (1-lgw_inv_) + lgw_inv_
+        else:
+            if self.latent_guide is not None:
+                lgw_mask = mask * lgw_
+            else:
+                lgw_mask = torch.zeros_like(mask)
+                
+            if self.latent_guide_inv is not None:
+                if mask_inv is not None:
+                    inv_mask = 1-mask_inv
+                    scaled_mask = (1-mask) * lgw_inv_
+                    lgw_mask_inv = torch.minimum(inv_mask, scaled_mask)
+                    del inv_mask, scaled_mask
+                else:
+                    lgw_mask_inv = (1-mask) * lgw_inv_
+            else:
+                lgw_mask_inv = torch.zeros_like(mask)
+                
+        return lgw_mask, lgw_mask_inv
+
 
     def init_guides(self, x, noise_sampler, latent_guide=None, latent_guide_inv=None):
         x_ = x.clone().to(self.device)
@@ -725,29 +753,6 @@ def prepare_mask(x, mask, LGW_MASK_RESCALE_MIN) -> Tuple[torch.Tensor, bool]:
     del spatial_mask
     return mask, LGW_MASK_RESCALE_MIN
     
-def prepare_weighted_masks(mask, mask_inv, lgw_, lgw_inv_, latent_guide, latent_guide_inv, LGW_MASK_RESCALE_MIN):
-    if LGW_MASK_RESCALE_MIN: 
-        lgw_mask     =    mask  * (1-lgw_) + lgw_
-        lgw_mask_inv = (1-mask) * (1-lgw_inv_) + lgw_inv_
-    else:
-        if latent_guide is not None:
-            lgw_mask = mask * lgw_
-        else:
-            lgw_mask = torch.zeros_like(mask)
-            
-        if latent_guide_inv is not None:
-            if mask_inv is not None:
-                inv_mask = 1-mask_inv
-                scaled_mask = (1-mask) * lgw_inv_
-                lgw_mask_inv = torch.minimum(inv_mask, scaled_mask)
-                del inv_mask, scaled_mask
-            else:
-                lgw_mask_inv = (1-mask) * lgw_inv_
-        else:
-            lgw_mask_inv = torch.zeros_like(mask)
-            
-    return lgw_mask, lgw_mask_inv
-
 def apply_temporal_smoothing(tensor, temporal_smoothing) -> torch.Tensor:
     if temporal_smoothing <= 0:
         return tensor
