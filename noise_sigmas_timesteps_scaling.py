@@ -6,6 +6,11 @@ from .helper import has_nested_attr
 def get_alpha_ratio_from_sigma_up(sigma_up, sigma_next, eta, sigma_max=1.0):
     if sigma_up >= sigma_next and sigma_next > 0:
         print("Maximum VPSDE noise level exceeded: falling back to hard noise mode.")
+        # Values below are the theoretical max, but break with exponential integrator stepsize calcs:
+        #sigma_up = sigma_next
+        #alpha_ratio = sigma_max - sigma_next
+        #sigma_down = 0 * sigma_next
+        #return alpha_ratio, sigma_up, sigma_down
         if eta >= 1:
             sigma_up = sigma_next * 0.9999 #avoid sqrt(neg_num) later 
         else:
@@ -111,6 +116,13 @@ def get_vpsde_step_RF(sigma, sigma_next, eta, sigma_max=1.0):
     alpha_ratio = 1 - dt * (eta**2/4) * (1 + sigma)
     sigma_down = sigma_next - (eta/4)*sigma*(1-sigma)*(sigma - sigma_next)
     return sigma_up, sigma_down, alpha_ratio
+  
+def get_fuckery_step_RF(sigma, sigma_next, eta, sigma_max=1.0):
+    sigma_down = (1-eta) * sigma_next
+    sigma_up = torch.sqrt(sigma_next**2 - sigma_down**2)
+    alpha_ratio = torch.ones_like(sigma_next)
+    return sigma_up, sigma_down, alpha_ratio
+
 
 def get_res4lyf_step_with_model(model, sigma, sigma_next, eta=0.0, noise_mode="hard"):
   
@@ -142,6 +154,8 @@ def get_res4lyf_step_with_model(model, sigma, sigma_next, eta=0.0, noise_mode="h
                 su, sd, alpha_ratio = get_ancestral_step_RF_lorentzian(sigma, sigma_next, eta)
             elif noise_mode == "vpsde":
                 su, sd, alpha_ratio = get_vpsde_step_RF(sigma, sigma_next, eta)
+            elif noise_mode == "fuckery":
+                su, sd, alpha_ratio = get_fuckery_step_RF(sigma, sigma_next, eta)
             else: #elif noise_mode == "hard": #fall back to hard noise from hard_var
                 su, sd, alpha_ratio = get_ancestral_step_RF_hard(sigma_next, eta)
     else:
@@ -172,6 +186,7 @@ NOISE_MODE_NAMES = ["none",
                     "sinusoidal",
                     "exp", 
                     "vpsde",
+                    "fuckery",
                     "hard_var", 
                     ]
 

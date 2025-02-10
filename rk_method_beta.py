@@ -648,6 +648,8 @@ class RK_NoiseSampler:
     def add_noise(self, x, sigma_up, sigma, sigma_next, alpha_ratio, s_noise, CONSERVE_MEAN_CW, SDE_NOISE_EXTERNAL, sde_noise_t, SUBSTEP, ):
 
         if sigma_next > 0.0 and sigma_up > 0.0:
+            if sigma == sigma_next:
+                sigma_next = sigma * 0.9999
             if not SUBSTEP:
                 noise = self.noise_sampler (sigma=sigma, sigma_next=sigma_next)
             else:
