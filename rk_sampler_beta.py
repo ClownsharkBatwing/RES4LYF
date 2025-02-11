@@ -16,7 +16,7 @@ import comfy.model_patcher
 from .noise_classes import *
 from .noise_sigmas_timesteps_scaling import get_res4lyf_step_with_model, get_alpha_ratio_from_sigma_down, get_res4lyf_half_step3
 
-from .rk_method_beta import RK_Method_Beta, RK_NoiseSampler
+from .rk_method_beta import RK_Method_Beta, RK_NoiseSampler, vpsde_noise_add
 from .rk_guide_func_beta import *
 
 from .latents import normalize_latent, initialize_or_scale, latent_normalize_channels
@@ -262,6 +262,9 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
             eta = 0.0
 
         sigma_up, sigma, sigma_down, alpha_ratio = get_res4lyf_step_with_model(model, sigma, sigma_next, eta, noise_mode)
+        real_sigma_down = sigma_down.clone()
+        if extra_options_flag("lock_h_scale", extra_options):
+            sigma_down = sigma_next
         
         h         = RK.h_fn(sigma_down, sigma)
         h_no_eta  = RK.h_fn(sigma_next, sigma)
@@ -422,8 +425,10 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
                     h_2_new = h_2_new + noise_boost_substep * (h_2 - h_2_new)
                     
                     if RK.IMPLICIT:
-                        x_ = RK.update_substep(x_0, x_, eps_, eps_prev_, r, row_offset, h_2, h_2_new, h_2_new_orig, sub_sigma_up, sub_sigma, sub_sigma_next, sub_alpha_ratio, s_noise_substep, noise_mode_sde_substep, NS, \
+                        x_ = RK.update_substep(x_0, x_, eps_, eps_prev_, r, row_offset, h_2, h_2_new, h_2_new_orig, sigma, real_sub_sigma_down, sub_sigma_up, sub_sigma, sub_sigma_next, sub_alpha_ratio, s_noise_substep, noise_mode_sde_substep, NS, \
                             SYNC_MEAN_CW, CONSERVE_MEAN_CW, SDE_NOISE_EXTERNAL, sde_noise_t, extra_options)
+                        #if extra_options_flag("lock_h_scale", extra_options):
+                        #    x_[row+row_offset] = vpsde_noise_add(x_0, x_[row+row_offset], sigma, sub_sigma_next, real_sub_sigma_down, sub_sigma_up, sub_alpha_ratio, NS.noise_sampler2)
 
                     if full_iter > 0:
                         #eps_substep_guide, eps_substep_guide_inv = get_guide_epsilon_substep(x_[r], x_, data_[r], data_[r], s_2, r, row_offset, rk_type)
@@ -461,8 +466,10 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
                     h_new = h_new + noise_boost_substep * (h - h_new)
                     
                     if RK.IMPLICIT:
-                        x_ = RK.update_substep(x_0, x_, eps_, eps_prev_, r, row_offset, h, h_new, h_new_orig, sub_sigma_up, sub_sigma, sub_sigma_next, sub_alpha_ratio, s_noise_substep, noise_mode_sde_substep, NS, \
+                        x_ = RK.update_substep(x_0, x_, eps_, eps_prev_, r, row_offset, h, h_new, h_new_orig, sigma, real_sub_sigma_down, sub_sigma_up, sub_sigma, sub_sigma_next, sub_alpha_ratio, s_noise_substep, noise_mode_sde_substep, NS, \
                             SYNC_MEAN_CW, CONSERVE_MEAN_CW, SDE_NOISE_EXTERNAL, sde_noise_t, extra_options, IMPLICIT_PREDICTOR=True, )
+                        #if extra_options_flag("lock_h_scale", extra_options):
+                        #    x_[row+row_offset] = vpsde_noise_add(x_0, x_[row+row_offset], sigma, sub_sigma_next, real_sub_sigma_down, sub_sigma_up, sub_alpha_ratio, NS.noise_sampler2)
                     
                     eps_substep_guide, eps_substep_guide_inv = get_guide_epsilon_substep(x_0, x_, y0, y0_inv, s_, r, row_offset, rk_type)
                     eps_substep_guide = LG.mask * eps_substep_guide + (1-LG.mask) * eps_substep_guide_inv
@@ -503,8 +510,11 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
                     h_new      = h_new + noise_boost_substep * (h - h_new)
                     
                     if RK.IMPLICIT:
-                        x_ = RK.update_substep(x_0, x_, eps_, eps_prev_, r, row_offset, h, h_new, h_new_orig, sub_sigma_up, sub_sigma, sub_sigma_next, sub_alpha_ratio, s_noise_substep, noise_mode_sde_substep, NS, \
+                        x_ = RK.update_substep(x_0, x_, eps_, eps_prev_, r, row_offset, h, h_new, h_new_orig, sigma, real_sub_sigma_down, sub_sigma_up, sub_sigma, sub_sigma_next, sub_alpha_ratio, s_noise_substep, noise_mode_sde_substep, NS, \
                             SYNC_MEAN_CW, CONSERVE_MEAN_CW, SDE_NOISE_EXTERNAL, sde_noise_t, extra_options, IMPLICIT_PREDICTOR=True, )
+                        
+                        #if extra_options_flag("lock_h_scale", extra_options):
+                        #    x_[row+row_offset] = vpsde_noise_add(x_0, x_[row+row_offset], sigma, sub_sigma_next, real_sub_sigma_down, sub_sigma_up, sub_alpha_ratio, NS.noise_sampler2)
                     
                     avg, avg_inv = 0, 0
                     for b, c in itertools.product(range(x_0.shape[0]), range(x_0.shape[1])):
@@ -573,6 +583,10 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
                         elif (row < RK.rows-row_offset-RK.multistep_stages   or   diag_iter < implicit_steps_diag)   or   extra_options_flag("substep_eta_use_final", extra_options):
                             sub_sigma_up, sub_sigma, sub_sigma_down, sub_alpha_ratio = get_res4lyf_step_with_model(model, s_[row], s_[row+row_offset+RK.multistep_stages], eta_substep, noise_mode_sde_substep)
                             
+                    real_sub_sigma_down = sub_sigma_down.clone()
+                    if extra_options_flag("lock_h_scale", extra_options):
+                        sub_sigma_down = sub_sigma_next
+                        
                     h_new = h * RK.h_fn(sub_sigma_down, sigma) / RK.h_fn(sub_sigma_next, sigma) 
                     h_new_orig = h_new.clone()
                     h_new = h_new + noise_boost_substep * (h - h_new)
@@ -593,8 +607,10 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
                         s_2_[row] = sub_sigma_2
 
                         if RK.IMPLICIT:
-                            x_ = RK.update_substep(x_0, x_, eps_, eps_prev_, row, row_offset, h, h_new, h_new_orig, sub_sigma_up, sub_sigma, sub_sigma_next, sub_alpha_ratio, s_noise_substep, noise_mode_sde_substep, NS, \
+                            x_ = RK.update_substep(x_0, x_, eps_, eps_prev_, row, row_offset, h, h_new, h_new_orig, sigma, real_sub_sigma_down, sub_sigma_up, sub_sigma, sub_sigma_next, sub_alpha_ratio, s_noise_substep, noise_mode_sde_substep, NS, \
                                 SYNC_MEAN_CW, CONSERVE_MEAN_CW, SDE_NOISE_EXTERNAL, sde_noise_t, extra_options, IMPLICIT_PREDICTOR=True, )
+                            #if extra_options_flag("lock_h_scale", extra_options):
+                            #    x_[row+row_offset] = vpsde_noise_add(x_0, x_[row+row_offset], sigma, sub_sigma_next, real_sub_sigma_down, sub_sigma_up, sub_alpha_ratio, NS.noise_sampler2)
 
                         eps_substep_guide, eps_substep_guide_inv = get_guide_epsilon_substep(x_0, x_, y0, y0_inv, s_, row, row_offset, rk_type)
                         eps_substep_guide = LG.mask * eps_substep_guide + (1-LG.mask) * eps_substep_guide_inv
@@ -646,7 +662,10 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
                                     x_tmp = x_[row+row_offset] = x_0 + h     * (RK.a_k_sum(eps_, row+row_offset) + RK.u_k_sum(eps_prev_, row+row_offset))
                                 else:
                                     x_tmp = x_[row+row_offset] = x_0 + h_new * (RK.a_k_sum(eps_, row+row_offset) + RK.u_k_sum(eps_prev_, row+row_offset))
-                                    x_tmp = x_[row+row_offset] = NS.add_noise_post(x_[row+row_offset], sub_sigma_up, sub_sigma, sub_sigma_next, sub_alpha_ratio, s_noise_substep, noise_mode_sde_substep, SDE_NOISE_EXTERNAL, sde_noise_t, SUBSTEP=True)
+                                    if extra_options_flag("lock_h_scale", extra_options):
+                                        x_tmp = x_[row+row_offset] = vpsde_noise_add(x_0, x_[row+row_offset], sigma, sub_sigma_next, real_sub_sigma_down, sub_sigma_up, sub_alpha_ratio, NS.noise_sampler2)
+                                    else:
+                                        x_tmp = x_[row+row_offset] = NS.add_noise_post(x_[row+row_offset], sub_sigma_up, sub_sigma, sub_sigma_next, sub_alpha_ratio, s_noise_substep, noise_mode_sde_substep, SDE_NOISE_EXTERNAL, sde_noise_t, SUBSTEP=True)
 
 
                         if RK.IMPLICIT   and   row == 0   and   extra_options_flag("radaucycle", extra_options):
@@ -680,8 +699,10 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
                             x_, eps_ = RK.newton_iter(x_0, x_, eps_, eps_prev_, data_, s_, row, h, sigmas, step, "post", extra_options)
 
                     # UPDATE
-                    x_ = RK.update_substep(x_0, x_, eps_, eps_prev_, row, row_offset, h, h_new, h_new_orig, sub_sigma_up, sub_sigma, sub_sigma_next, sub_alpha_ratio, s_noise_substep, noise_mode_sde_substep, NS, \
+                    x_ = RK.update_substep(x_0, x_, eps_, eps_prev_, row, row_offset, h, h_new, h_new_orig, sigma, real_sub_sigma_down, sub_sigma_up, sub_sigma, sub_sigma_next, sub_alpha_ratio, s_noise_substep, noise_mode_sde_substep, NS, \
                                            SYNC_MEAN_CW, CONSERVE_MEAN_CW, SDE_NOISE_EXTERNAL, sde_noise_t, extra_options)
+                    #if extra_options_flag("lock_h_scale", extra_options):
+                    #    x_[row+row_offset] = vpsde_noise_add(x_0, x_[row+row_offset], sigma, sub_sigma_next, real_sub_sigma_down, sub_sigma_up, sub_alpha_ratio, NS.noise_sampler2)
 
 
             denoised = x_0 + ((sigma / (sigma - sigma_down)) *  h_new) * (RK.b_k_sum(eps_, 0) + RK.v_k_sum(eps_prev_, 0))
@@ -693,7 +714,10 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
             
             preview_callback(x, eps, denoised, x_, eps_, data_, step + 1, sigma, sigma_next, callback, extra_options)
 
-            x = NS.add_noise_post(x, sigma_up, sigma, sigma_next, alpha_ratio, s_noise, noise_mode, SDE_NOISE_EXTERNAL, sde_noise_t)
+            if extra_options_flag("lock_h_scale", extra_options):
+                x = vpsde_noise_add(x_0, x, sigma, sigma_next, real_sigma_down, sigma_up, alpha_ratio, NS.noise_sampler)
+            else:
+                x = NS.add_noise_post(x, sigma_up, sigma, sigma_next, alpha_ratio, s_noise, noise_mode, SDE_NOISE_EXTERNAL, sde_noise_t)
 
                     
         data_prev_[0] = data_[0]
@@ -752,7 +776,6 @@ def preview_callback(x, eps, denoised, x_, eps_, data_, step, sigma, sigma_next,
     callback({'x': x, 'i': step, 'sigma': sigma, 'sigma_next': sigma_next, 'denoised': denoised_callback.to(torch.float32)}) if callback is not None else None
     
     return
-
 
 
 
