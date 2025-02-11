@@ -153,7 +153,9 @@ class RK_Method_Beta:
                 x_[row+row_offset] = x_0 + h     * (self.a_k_sum(eps_, row + row_offset) + self.u_k_sum(eps_prev_, row + row_offset))
             else:
                 x_[row+row_offset] = x_row_down = x_0 + h_new * (self.a_k_sum(eps_, row + row_offset) + self.u_k_sum(eps_prev_, row + row_offset))
-                x_[row+row_offset] = NS.add_noise_post(x_[row+row_offset], sub_sigma_up, sub_sigma, sub_sigma_next, sub_alpha_ratio, s_noise_substep, noise_mode_sde_substep, CONSERVE_MEAN_CW, SDE_NOISE_EXTERNAL, sde_noise_t, SUBSTEP=True)
+                
+                if not extra_options_flag("lock_h_scale", extra_options):
+                    x_[row+row_offset] = NS.add_noise_post(x_[row+row_offset], sub_sigma_up, sub_sigma, sub_sigma_next, sub_alpha_ratio, s_noise_substep, noise_mode_sde_substep, CONSERVE_MEAN_CW, SDE_NOISE_EXTERNAL, sde_noise_t, SUBSTEP=True)
                 
                 if (SYNC_MEAN_CW and h_new != h_new_orig) or extra_options_flag("sync_mean_noise", extra_options):
                     eps_row_down = x_[row+row_offset] - x_row_down
@@ -168,7 +170,8 @@ class RK_Method_Beta:
                 x_[row+1] = x_0 + h     * (self.b_k_sum(eps_, 0) + self.v_k_sum(eps_prev_, 0))
             else:
                 x_[row+1] = x_row_down = x_0 + h_new * (self.b_k_sum(eps_, 0) + self.v_k_sum(eps_prev_, 0))
-                x_[row+1] = NS.add_noise_post(x_[row+1], sub_sigma_up, sub_sigma, sub_sigma_next, sub_alpha_ratio, s_noise_substep, noise_mode_sde_substep, CONSERVE_MEAN_CW, SDE_NOISE_EXTERNAL, sde_noise_t, SUBSTEP=True)
+                if not extra_options_flag("lock_h_scale", extra_options):
+                    x_[row+1] = NS.add_noise_post(x_[row+1], sub_sigma_up, sub_sigma, sub_sigma_next, sub_alpha_ratio, s_noise_substep, noise_mode_sde_substep, CONSERVE_MEAN_CW, SDE_NOISE_EXTERNAL, sde_noise_t, SUBSTEP=True)
                 
                 if (SYNC_MEAN_CW and h_new != h_new_orig) or extra_options_flag("sync_mean_noise", extra_options):
                     eps_row_down = x_[row+1] - x_row_down
@@ -675,4 +678,15 @@ class RK_NoiseSampler:
         
         else:
             return x
+
+def vpsde_noise_add(x_0, x_next, sigma, sigma_next, sigma_down, sigma_up, alpha_ratio, noise_sampler):
+    if sigma_next == 0:
+        return x
+    if sigma == sigma_next:
+        sigma_next *= 0.999
+    eps_next = (x_0 - x_next) / (sigma - sigma_next)
+    denoised_next = x_0 - sigma * eps_next
+    noise = noise_sampler(sigma=sigma, sigma_next=sigma_next)
+    x = alpha_ratio * (denoised_next + sigma_down * eps_next) + sigma_up * noise    
+    return x
 

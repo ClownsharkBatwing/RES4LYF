@@ -266,6 +266,13 @@ if flags["test_samplers"]:
         "res_multistep": test_samplers.sample_res_multistep,
         "rk_res_2m": test_samplers.sample_rk_res_2m,
         "rk_res_2s": test_samplers.sample_rk_res_2s,
+        "rk_res_2s_prenoise": test_samplers.sample_rk_res_2s_prenoise,
+        "rk_ralston_2s_prenoise": test_samplers.sample_rk_ralston_2s_prenoise,
+
+        "rk_ralston_2s_prenoise_alt": test_samplers.sample_rk_ralston_2s_prenoise_alt,
+        "rk_res_2s_prenoise_alt": test_samplers.sample_rk_res_2s_prenoise_alt,
+
+        
         "rk_crazy": test_samplers.sample_rk_crazy,
         "rk_crazy2": test_samplers.sample_rk_crazy2,
         "rk_crazymod43": test_samplers.sample_rk_crazymod43,
@@ -321,6 +328,9 @@ if flags["test_samplers"]:
         "rk_res_2s_banana": test_samplers.sample_rk_res_2s_banana,
         "rk_res_3s_banana": test_samplers.sample_rk_res_3s_banana,
 
+        "rk_euler": test_samplers.sample_rk_euler,
+
+        "rk_euler_prenoise": test_samplers.sample_rk_euler_prenoise,
 
 
         "rk_ddim_test": test_samplers.sample_rk_ddim_test,
