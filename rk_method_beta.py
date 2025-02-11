@@ -681,7 +681,7 @@ class RK_NoiseSampler:
 
 def vpsde_noise_add(x_0, x_next, sigma, sigma_next, sigma_down, sigma_up, alpha_ratio, noise_sampler):
     if sigma_next == 0:
-        return x
+        return x_next
     if sigma == sigma_next:
         sigma_next *= 0.999
     eps_next = (x_0 - x_next) / (sigma - sigma_next)
