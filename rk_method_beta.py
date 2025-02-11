@@ -144,7 +144,7 @@ class RK_Method_Beta:
             self.c = torch.cat((self.c, self.c[-1:])) 
         return
 
-    def update_substep(self, x_0, x_, eps_, eps_prev_, row, row_offset, h, h_new, h_new_orig, sub_sigma_up, sub_sigma, sub_sigma_next, sub_alpha_ratio, s_noise_substep, noise_mode_sde_substep, NS, \
+    def update_substep(self, x_0, x_, eps_, eps_prev_, row, row_offset, h, h_new, h_new_orig, sigma, real_sub_sigma_down, sub_sigma_up, sub_sigma, sub_sigma_next, sub_alpha_ratio, s_noise_substep, noise_mode_sde_substep, NS, \
                        SYNC_MEAN_CW, CONSERVE_MEAN_CW, SDE_NOISE_EXTERNAL, sde_noise_t, extra_options, IMPLICIT_PREDICTOR=False,):
         if extra_options_flag("guide_fully_pseudoimplicit_use_post_substep_eta", extra_options):
             IMPLICIT_PREDICTOR=True
@@ -156,6 +156,8 @@ class RK_Method_Beta:
                 
                 if not extra_options_flag("lock_h_scale", extra_options):
                     x_[row+row_offset] = NS.add_noise_post(x_[row+row_offset], sub_sigma_up, sub_sigma, sub_sigma_next, sub_alpha_ratio, s_noise_substep, noise_mode_sde_substep, CONSERVE_MEAN_CW, SDE_NOISE_EXTERNAL, sde_noise_t, SUBSTEP=True)
+                else:
+                    x_[row+row_offset] = vpsde_noise_add(x_0, x_[row+row_offset], sigma, sub_sigma_next, real_sub_sigma_down, sub_sigma_up, sub_alpha_ratio, NS.noise_sampler2)
                 
                 if (SYNC_MEAN_CW and h_new != h_new_orig) or extra_options_flag("sync_mean_noise", extra_options):
                     eps_row_down = x_[row+row_offset] - x_row_down
@@ -172,6 +174,8 @@ class RK_Method_Beta:
                 x_[row+1] = x_row_down = x_0 + h_new * (self.b_k_sum(eps_, 0) + self.v_k_sum(eps_prev_, 0))
                 if not extra_options_flag("lock_h_scale", extra_options):
                     x_[row+1] = NS.add_noise_post(x_[row+1], sub_sigma_up, sub_sigma, sub_sigma_next, sub_alpha_ratio, s_noise_substep, noise_mode_sde_substep, CONSERVE_MEAN_CW, SDE_NOISE_EXTERNAL, sde_noise_t, SUBSTEP=True)
+                else:
+                     x_[row+1] = vpsde_noise_add(x_0, x_[row+1], sigma, sub_sigma_next, real_sub_sigma_down, sub_sigma_up, sub_alpha_ratio, NS.noise_sampler2)
                 
                 if (SYNC_MEAN_CW and h_new != h_new_orig) or extra_options_flag("sync_mean_noise", extra_options):
                     eps_row_down = x_[row+1] - x_row_down
