@@ -110,9 +110,10 @@ NODE_CLASS_MAPPINGS = {
     
     "ClownsharKSamplerOptions": samplers_extensions.ClownsharKSamplerOptions,
     "ClownsharKSamplerOptions_SDE_Noise": samplers_extensions.ClownsharKSamplerOptions_SDE_Noise,
+    "ClownsharkSamplerOptions_FrameWeights": samplers_extensions.ClownsharKSamplerOptions_FrameWeights,
     "ClownsharKSamplerAutomation": samplers_extensions.ClownsharKSamplerAutomation,
     "ClownsharKSamplerAutomation_Beta": samplers_extensions.ClownsharKSamplerAutomation_Beta,
-
+    "ClownsharKSamplerAutomation_Advanced": samplers_extensions.ClownsharKSamplerAutomation_Advanced,
 
     "UltraSharkSampler": samplers.UltraSharkSampler,
     "UltraSharkSampler Tiled": samplers_tiled.UltraSharkSampler_Tiled,
@@ -223,6 +224,8 @@ NODE_CLASS_MAPPINGS = {
     "Tan Scheduler": sigmas.tan_scheduler,
     "Tan Scheduler 2": sigmas.tan_scheduler_2stage,
     "Tan Scheduler 2 Simple": sigmas.tan_scheduler_2stage_simple,
+    "Constant Scheduler": sigmas.constant_scheduler,
+    "Linear Quadratic Advanced": sigmas.linear_quadratic_advanced,
     
     #"VGG19StyleTransfer": images.VGG19StyleTransfer,
     "Image Channels LAB": images.Image_Channels_LAB,
@@ -244,8 +247,6 @@ NODE_CLASS_MAPPINGS = {
     
     "ReFluxPatcher": models.ReFluxPatcher,
     "FluxOrthoCFGPatcher": models.FluxOrthoCFGPatcher,
-    
-    "ClownsharkSamplerOptions_FrameWeights": samplers_extensions.ClownsharKSamplerOptions_FrameWeights,
 }
 
 if flags["test_samplers"]:

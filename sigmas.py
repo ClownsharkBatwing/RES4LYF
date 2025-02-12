@@ -1164,6 +1164,62 @@ class tan_scheduler_2stage_simple:
         tan_sigmas = torch.tensor(tan_sigmas_1 + tan_sigmas_2)
 
         return (tan_sigmas,)
+    
+class linear_quadratic_advanced:
+    def __init__(self):
+        pass
+    
+    @classmethod
+    def INPUT_TYPES(s):
+        return {
+            "required": {
+                "model": ("MODEL",),
+                "steps": ("INT", {"default": 40, "min": 0,"max": 100000,"step": 1}),
+                "denoise": ("FLOAT", {"default": 1.0, "min": -100000,"max": 100000,"step": 0.01}),
+                "inflection_percent": ("FLOAT", {"default": 0.5, "min": 0,"max": 1,"step": 0.01}),
+            },
+            # "optional": {
+            # }
+        }
+
+    FUNCTION = "main"
+    RETURN_TYPES = ("SIGMAS",)
+    RETURN_NAMES = ("sigmas",)
+    CATEGORY = "RES4LYF/schedulers"
+
+    def main(self, steps, denoise, inflection_percent, model=None):
+        sigmas = get_sigmas(model, "linear_quadratic", steps, denoise, inflection_percent)
+
+        return (sigmas, )
+
+
+class constant_scheduler:
+    def __init__(self):
+        pass
+    
+    @classmethod
+    def INPUT_TYPES(s):
+        return {
+            "required": {
+                "steps": ("INT", {"default": 40, "min": 0,"max": 100000,"step": 1}),
+                "value_start": ("FLOAT", {"default": 1.0, "min": -100000,"max": 100000,"step": 0.01}),
+                "value_end": ("FLOAT", {"default": 0.0, "min": -100000,"max": 100000,"step": 0.01}),
+                "cutoff_percent": ("FLOAT", {"default": 1.0, "min": 0,"max": 1,"step": 0.01}),
+            }
+        }
+
+    FUNCTION = "main"
+    RETURN_TYPES = ("SIGMAS",)
+    RETURN_NAMES = ("sigmas",)
+    CATEGORY = "RES4LYF/schedulers"
+
+    def main(self, steps, value_start, value_end, cutoff_percent):
+        sigmas = torch.ones(steps + 1) * value_start
+        cutoff_step = int(round(steps * cutoff_percent)) + 1
+        sigmas = torch.concat((sigmas[:cutoff_step], torch.ones(steps + 1 - cutoff_step) * value_end), dim=0)
+
+        return (sigmas,)
+
 
 def get_sigmas_simple_exponential(model, steps):
     s = model.model_sampling
@@ -1183,7 +1239,7 @@ extra_schedulers = {
 
 
 
-def get_sigmas(model, scheduler, steps, denoise): #adapted from comfyui
+def get_sigmas(model, scheduler, steps, denoise, lq_inflection_percent=0.5): #adapted from comfyui
     total_steps = steps
     if denoise < 1.0:
         if denoise <= 0.0:
@@ -1197,6 +1253,9 @@ def get_sigmas(model, scheduler, steps, denoise): #adapted from comfyui
         model_sampling = model.inner_model.inner_model.model_sampling
     if scheduler == "beta57":
         sigmas = comfy.samplers.beta_scheduler(model_sampling, total_steps, alpha=0.5, beta=0.7)
+    elif scheduler == "linear_quadratic":
+        linear_steps = int(total_steps * lq_inflection_percent)
+        sigmas = comfy.samplers.linear_quadratic_schedule(model_sampling, total_steps, threshold_noise=0.025, linear_steps=linear_steps)
     else:
         sigmas = comfy.samplers.calculate_sigmas(model_sampling, scheduler, total_steps).cpu()
     
