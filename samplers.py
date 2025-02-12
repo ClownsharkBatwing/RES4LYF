@@ -2,7 +2,7 @@ from .noise_classes import *
 from .sigmas import get_sigmas
 from .rk_sampler import sample_rk
 from .rk_coefficients import RK_SAMPLER_NAMES, IRK_SAMPLER_NAMES
-import RES4LYF.rk_coefficients_beta
+from .rk_coefficients_beta import RK_SAMPLER_NAMES_BETA, IRK_SAMPLER_NAMES_BETA
 
 import comfy.samplers
 import comfy.sample
@@ -82,7 +82,12 @@ class SharkSampler:
             # blame comfy here
             pos_cond = copy.deepcopy(positive)
             neg_cond = copy.deepcopy(negative)
-            
+
+            if sampler is None:
+                raise ValueError("sampler is required")
+            else:
+                sampler = copy.deepcopy(sampler)
+
             default_dtype = getattr(torch, get_extra_options_kv("default_dtype", "float64", extra_options), torch.float64)
                      
             model = model.clone()
@@ -423,7 +428,7 @@ class ClownSamplerAdvanced:
                     t_fn_formula=None, sigma_fn_formula=None, implicit_steps=0,
                     latent_guide=None, latent_guide_inv=None, guide_mode="", latent_guide_weights=None, latent_guide_weights_inv=None, latent_guide_mask=None, latent_guide_mask_inv=None, rescale_floor=True, sigmas_override=None, unsampler_type="linear",
                     guides=None, options=None, sde_noise=None,sde_noise_steps=1, 
-                    extra_options="", automation=None, etas=None, s_noises=None,unsample_resample_scales=None, regional_conditioning_weights=None,frame_weights=None, eta_substep=0.5, noise_mode_sde_substep="hard",
+                    extra_options="", automation=None, etas=None, s_noises=None,unsample_resample_scales=None, regional_conditioning_weights=None,frame_weights_grp=None, eta_substep=0.5, noise_mode_sde_substep="hard",
                     ): 
             if implicit_sampler_name == "none":
                 implicit_steps = 0 
@@ -433,7 +438,7 @@ class ClownSamplerAdvanced:
                 eta, eta_var = 0.0, 0.0
                 noise_mode_sde = "hard"
         
-            default_dtype = torch.float64
+            default_dtype = getattr(torch, get_extra_options_kv("default_dtype", "float64", extra_options), torch.float64)
             max_steps = 10000
 
             unsample_resample_scales_override = unsample_resample_scales
@@ -452,7 +457,7 @@ class ClownSamplerAdvanced:
                 t_fn_formula = options.get('t_fn_formula', t_fn_formula)
                 sigma_fn_formula = options.get('sigma_fn_formula', sigma_fn_formula)
                 unsampler_type = options.get('unsampler_type', unsampler_type)
-                frame_weights = options.get('frame_weights', frame_weights)
+                frame_weights_grp = options.get('frame_weights_grp', frame_weights_grp)
                 sde_noise = options.get('sde_noise', sde_noise)
                 sde_noise_steps = options.get('sde_noise_steps', sde_noise_steps)
 
@@ -461,7 +466,11 @@ class ClownSamplerAdvanced:
             rescale_floor = extra_options_flag("rescale_floor", extra_options)
 
             if automation is not None:
-                etas, s_noises, unsample_resample_scales = automation
+                etas = automation['etas'] if 'etas' in automation else None
+                s_noises = automation['s_noises'] if 's_noises' in automation else None
+                unsample_resample_scales = automation['unsample_resample_scales'] if 'unsample_resample_scales' in automation else None
+                frame_weights_grp = automation['frame_weights_grp'] if 'frame_weights_grp' in automation else None
+
             etas = initialize_or_scale(etas, eta, max_steps).to(default_dtype)
             etas = F.pad(etas, (0, max_steps), value=0.0)
             s_noises = initialize_or_scale(s_noises, s_noise, max_steps).to(default_dtype)
@@ -487,7 +496,7 @@ class ClownSamplerAdvanced:
                                                             "LGW_MASK_RESCALE_MIN": rescale_floor, "sigmas_override": sigmas_override, "sde_noise": sde_noise,
                                                             "extra_options": extra_options,
                                                             "etas": etas, "s_noises": s_noises, "unsample_resample_scales": unsample_resample_scales, "regional_conditioning_weights": regional_conditioning_weights,
-                                                            "guides": guides, "frame_weights": frame_weights, "eta_substep": eta_substep, "noise_mode_sde_substep": noise_mode_sde_substep,
+                                                            "guides": guides, "frame_weights_grp": frame_weights_grp, "eta_substep": eta_substep, "noise_mode_sde_substep": noise_mode_sde_substep,
                                                             })
 
             return (sampler, )
@@ -516,8 +525,8 @@ class ClownSamplerAdvanced_Beta:
                     "s_noise_substep": ("FLOAT", {"default": 1.0, "min": -10000, "max": 10000, "step":0.01, "tooltip": "Adds extra SDE noise. Values around 1.03-1.07 can lead to a moderate boost in detail and paint textures."}),
                     "d_noise": ("FLOAT", {"default": 1.0, "min": -10000, "max": 10000, "step":0.01, "tooltip": "Downscales the sigma schedule. Values around 0.98-0.95 can lead to a large boost in detail and paint textures."}),
                     "noise_seed_sde": ("INT", {"default": -1, "min": -1, "max": 0xffffffffffffffff}),
-                    "sampler_name": (RES4LYF.rk_coefficients_beta.RK_SAMPLER_NAMES_BETA, {"default": "res_2m"}), 
-                    "implicit_sampler_name": (RES4LYF.rk_coefficients_beta.IRK_SAMPLER_NAMES_BETA, {"default": "use_explicit"}), 
+                    "sampler_name": (RK_SAMPLER_NAMES_BETA, {"default": "res_2m"}), 
+                    "implicit_sampler_name": (IRK_SAMPLER_NAMES_BETA, {"default": "use_explicit"}), 
                     "implicit_steps": ("INT", {"default": 0, "min": 0, "max": 10000}),
                     "implicit_substeps": ("INT", {"default": 0, "min": 0, "max": 10000}),
                      },
@@ -543,7 +552,7 @@ class ClownSamplerAdvanced_Beta:
                     t_fn_formula=None, sigma_fn_formula=None, implicit_substeps=0, implicit_steps=0,
                     latent_guide=None, latent_guide_inv=None, guide_mode="", latent_guide_weights=None, latent_guide_weights_inv=None, latent_guide_mask=None, latent_guide_mask_inv=None, rescale_floor=True, sigmas_override=None, unsampler_type="linear",
                     guides=None, options=None, sde_noise=None,sde_noise_steps=1, 
-                    extra_options="", automation=None, etas=None, etas_substep=None, s_noises=None, s_noises_substep=None, unsample_resample_scales=None, regional_conditioning_weights=None,frame_weights=None, eta_substep=0.5, noise_mode_sde_substep="hard",
+                    extra_options="", automation=None, etas=None, etas_substep=None, s_noises=None, s_noises_substep=None, unsample_resample_scales=None, regional_conditioning_weights=None,frame_weights_grp=None, eta_substep=0.5, noise_mode_sde_substep="hard",
                     noise_boost_step=0.0, noise_boost_substep=0.0,
                     ): 
 
@@ -573,7 +582,7 @@ class ClownSamplerAdvanced_Beta:
                 t_fn_formula = options.get('t_fn_formula', t_fn_formula)
                 sigma_fn_formula = options.get('sigma_fn_formula', sigma_fn_formula)
                 unsampler_type = options.get('unsampler_type', unsampler_type)
-                frame_weights = options.get('frame_weights', frame_weights)
+                frame_weights_grp = options.get('frame_weights_grp', frame_weights_grp)
                 sde_noise = options.get('sde_noise', sde_noise)
                 sde_noise_steps = options.get('sde_noise_steps', sde_noise_steps)
 
@@ -582,13 +591,21 @@ class ClownSamplerAdvanced_Beta:
             rescale_floor = extra_options_flag("rescale_floor", extra_options)
 
             if automation is not None:
-                etas, etas_substep, s_noises, s_noises_substep, unsample_resample_scales = automation
+                etas = automation['etas'] if 'etas' in automation else None
+                etas_substep = automation['etas_substep'] if 'etas_substep' in automation else None
+                s_noises = automation['s_noises'] if 's_noises' in automation else None
+                s_noises_substep = automation['s_noise_substep'] if 's_noise_substep' in automation else None
+                unsample_resample_scales = automation['unsample_resample_scales'] if 'unsample_resample_scales' in automation else None
+                frame_weights_grp = automation['frame_weights_grp'] if 'frame_weights_grp' in automation else None
+
             etas = initialize_or_scale(etas, eta, max_steps).to(default_dtype)
             etas = F.pad(etas, (0, max_steps), value=0.0)
             etas_substep = initialize_or_scale(etas_substep, eta_substep, max_steps).to(default_dtype)
             etas_substep = F.pad(etas_substep, (0, max_steps), value=0.0)
             s_noises = initialize_or_scale(s_noises, s_noise, max_steps).to(default_dtype)
             s_noises = F.pad(s_noises, (0, max_steps), value=0.0)
+            s_noises_substep = initialize_or_scale(s_noises_substep, s_noise_substep, max_steps).to(default_dtype)
+            s_noises_substep = F.pad(s_noises_substep, (0, max_steps), value=0.0)
 
             if sde_noise is None:
                 sde_noise = []
@@ -608,7 +625,7 @@ class ClownSamplerAdvanced_Beta:
                                                             "LGW_MASK_RESCALE_MIN": rescale_floor, "sigmas_override": sigmas_override, "sde_noise": sde_noise,
                                                             "extra_options": extra_options,
                                                             "etas": etas, "etas_substep": etas_substep, "s_noises": s_noises, "s_noises_substep": s_noises_substep, "unsample_resample_scales": unsample_resample_scales, "regional_conditioning_weights": regional_conditioning_weights,
-                                                            "guides": guides, "frame_weights": frame_weights, "eta_substep": eta_substep, "noise_mode_sde_substep": noise_mode_sde_substep, "noise_boost_step": noise_boost_step, "noise_boost_substep": noise_boost_substep,
+                                                            "guides": guides, "frame_weights_grp": frame_weights_grp, "eta_substep": eta_substep, "noise_mode_sde_substep": noise_mode_sde_substep, "noise_boost_step": noise_boost_step, "noise_boost_substep": noise_boost_substep,
                                                             })
 
 
@@ -653,7 +670,7 @@ class ClownSampler:
                     t_fn_formula=None, sigma_fn_formula=None, implicit_steps=0,
                     latent_guide=None, latent_guide_inv=None, guide_mode="", latent_guide_weights=None, latent_guide_weights_inv=None, latent_guide_mask=None, latent_guide_mask_inv=None, rescale_floor=True, sigmas_override=None, unsampler_type="linear",
                     guides=None, options=None, sde_noise=None,sde_noise_steps=1, 
-                    extra_options="", automation=None, etas=None, s_noises=None,unsample_resample_scales=None, regional_conditioning_weights=None,frame_weights=None,eta_substep=0.0, noise_mode_sde_substep="hard",
+                    extra_options="", automation=None, etas=None, s_noises=None,unsample_resample_scales=None, regional_conditioning_weights=None,frame_weights_grp=None,eta_substep=0.0, noise_mode_sde_substep="hard",
                     ): 
 
         eta_substep = eta
@@ -666,7 +683,7 @@ class ClownSampler:
                     t_fn_formula=t_fn_formula, sigma_fn_formula=sigma_fn_formula, implicit_steps=implicit_steps,
                     latent_guide=latent_guide, latent_guide_inv=latent_guide_inv, guide_mode=guide_mode, latent_guide_weights=latent_guide_weights, latent_guide_weights_inv=latent_guide_weights_inv, latent_guide_mask=latent_guide_mask, latent_guide_mask_inv=latent_guide_mask_inv, rescale_floor=rescale_floor, sigmas_override=sigmas_override, unsampler_type=unsampler_type,
                     guides=guides, options=options, sde_noise=sde_noise,sde_noise_steps=sde_noise_steps, 
-                    extra_options=extra_options, automation=automation, etas=etas, s_noises=s_noises,unsample_resample_scales=unsample_resample_scales, regional_conditioning_weights=regional_conditioning_weights,frame_weights=frame_weights, eta_substep=eta_substep, noise_mode_sde_substep=noise_mode_sde_substep,
+                    extra_options=extra_options, automation=automation, etas=etas, s_noises=s_noises,unsample_resample_scales=unsample_resample_scales, regional_conditioning_weights=regional_conditioning_weights,frame_weights_grp=frame_weights_grp, eta_substep=eta_substep, noise_mode_sde_substep=noise_mode_sde_substep,
                     )
         
         return sampler
@@ -730,7 +747,7 @@ class ClownsharKSampler:
                     t_fn_formula=None, sigma_fn_formula=None, implicit_steps=0,
                     latent_guide=None, latent_guide_inv=None, guide_mode="blend", latent_guide_weights=None, latent_guide_weights_inv=None, latent_guide_mask=None, latent_guide_mask_inv=None, rescale_floor=True, sigmas_override=None, unsampler_type="linear",
                     shift=3.0, base_shift=0.85, guides=None, options=None, sde_noise=None,sde_noise_steps=1, shift_scaling="exponential",
-                    extra_options="", automation=None, etas=None, s_noises=None,unsample_resample_scales=None, regional_conditioning_weights=None,frame_weights=None,
+                    extra_options="", automation=None, etas=None, s_noises=None,unsample_resample_scales=None, regional_conditioning_weights=None,frame_weights_grp=None,
                     ): 
 
         if noise_seed >= 0:
@@ -748,7 +765,7 @@ class ClownsharKSampler:
                     t_fn_formula=t_fn_formula, sigma_fn_formula=sigma_fn_formula, implicit_steps=implicit_steps,
                     latent_guide=latent_guide, latent_guide_inv=latent_guide_inv, guide_mode=guide_mode, latent_guide_weights=latent_guide_weights, latent_guide_weights_inv=latent_guide_weights_inv, latent_guide_mask=latent_guide_mask, latent_guide_mask_inv=latent_guide_mask_inv, rescale_floor=rescale_floor, sigmas_override=sigmas_override, unsampler_type=unsampler_type,
                     guides=guides, options=options, sde_noise=sde_noise,sde_noise_steps=sde_noise_steps, 
-                    extra_options=extra_options, automation=automation, etas=etas, s_noises=s_noises,unsample_resample_scales=unsample_resample_scales, regional_conditioning_weights=regional_conditioning_weights,frame_weights=frame_weights, eta_substep=eta_substep, noise_mode_sde_substep=noise_mode_sde_substep,
+                    extra_options=extra_options, automation=automation, etas=etas, s_noises=s_noises,unsample_resample_scales=unsample_resample_scales, regional_conditioning_weights=regional_conditioning_weights,frame_weights_grp=frame_weights_grp, eta_substep=eta_substep, noise_mode_sde_substep=noise_mode_sde_substep,
                     )
 
         return SharkSampler().main(
