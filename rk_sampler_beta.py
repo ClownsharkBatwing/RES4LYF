@@ -66,7 +66,12 @@ def prepare_step_to_sigma_zero(RK, rk_type, model, x, extra_options, alpha, k, n
     print("rk_type set to:", rk_type_final_step, " for step to zero.")
     return RK, rk_type_final_step, eta, extra_args
 
-
+def get_epsilon2(x_0, x, denoised, sigma, rk_type):
+    if RK_Method_Beta.is_exponential(rk_type):
+        eps = denoised - x_0
+    else:
+        eps = (x - denoised) / sigma
+    return eps
 
 def get_epsilon(x_0, denoised, sigma, rk_type):
     if RK_Method_Beta.is_exponential(rk_type):
@@ -655,6 +660,16 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
                     # UPDATE
                     x_ = RK.update_substep(x_0, x_, eps_, eps_prev_, row, row_offset, h, h_new, h_new_orig, sigma, real_sub_sigma_down, sub_sigma_up, sub_sigma, sub_sigma_next, sub_alpha_ratio, s_noise_substep, noise_mode_sde_substep, NS, \
                                            SYNC_MEAN_CW, CONSERVE_MEAN_CW, SDE_NOISE_EXTERNAL, sde_noise_t, extra_options)
+                    if extra_options_flag("use_bong", extra_options) and sigma_next > 0:
+                        if row < RK.rows - row_offset   and   RK.multistep_stages == 0:
+                            bong_iter = int(get_extra_options_kv("use_bong", "100", extra_options))
+                            for i in range(bong_iter):
+                                x_0 = x_[0] = x_[row+row_offset] - h_new * (RK.a_k_sum(eps_, row + row_offset) + RK.u_k_sum(eps_prev_, row + row_offset))
+                                eps_[0] = get_epsilon2(x_0, x_0, data_[0], s_[0], rk_type)
+                                for rr in range(row+row_offset):
+                                    x_[rr] = x_0 + h_new * (RK.a_k_sum(eps_, rr) + RK.u_k_sum(eps_prev_, rr))
+                                for rr in range(1,row+row_offset):
+                                    eps_[rr] = get_epsilon2(x_0, x_[rr], data_[rr], s_[rr], rk_type)
                     #if extra_options_flag("lock_h_scale", extra_options):
                     #    x_[row+row_offset] = vpsde_noise_add(x_0, x_[row+row_offset], sigma, sub_sigma_next, real_sub_sigma_down, sub_sigma_up, sub_alpha_ratio, NS.noise_sampler2)
 
