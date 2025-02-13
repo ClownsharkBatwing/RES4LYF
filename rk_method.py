@@ -305,7 +305,7 @@ class RK_Method_Linear(RK_Method):
         return sigma_down - sigma
     
     def __call__(self, x_0, x, sigma, h, **extra_args):
-        #s_in = x.new_ones([x.shape[0]])
+        s_in = x.new_ones([x.shape[0]])
         
         epsilon, denoised = self.model_epsilon(x, sigma, **extra_args)
         

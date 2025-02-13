@@ -599,43 +599,6 @@ class ClownsharKSamplerAutomation_Beta:
         return (automation, )
 
 
-class ClownsharKSamplerAutomation_Advanced:
-    @classmethod
-    def INPUT_TYPES(s):
-        return {"required":
-                    {
-                    },
-                    "optional": 
-                    {
-                        "automation": ("AUTOMATION", ),
-                        "etas": ("SIGMAS", ),
-                        "etas_substep": ("SIGMAS", ),
-                        "s_noises": ("SIGMAS", ),
-                        "unsample_resample_scales": ("SIGMAS", ),
-                        "frame_weights": ("SIGMAS", ),
-                        "frame_weights_bkg": ("SIGMAS", ),
-                    }  
-               }
-    RETURN_TYPES = ("AUTOMATION",)
-    RETURN_NAMES = ("automation",)
-    CATEGORY = "RES4LYF/sampler_extensions"
-    
-    FUNCTION = "main"
-
-    def main(self, automation=None, etas=None, etas_substep=None, s_noises=None, unsample_resample_scales=None, frame_weights=None, frame_weights_bkg=None):
-        
-        if automation is None:
-            automation = {}
-        
-        frame_weights_grp = (frame_weights, frame_weights_bkg)
-
-        automation['etas'] = etas
-        automation['etas_substep'] = etas_substep
-        automation['s_noises'] = s_noises
-        automation['unsample_resample_scales'] = unsample_resample_scales
-        automation['frame_weights_grp'] = frame_weights_grp
-
-        return (automation, )
 
 
 
@@ -750,8 +713,7 @@ class ClownsharKSamplerOptions_FrameWeights:
                 "options": ("OPTIONS",),
             }
         }
-    
-    DEPRECATED = True
+
     RETURN_TYPES = ("OPTIONS",)
     RETURN_NAMES = ("options",)
     CATEGORY = "sampling/custom_sampling/samplers"
@@ -763,8 +725,7 @@ class ClownsharKSamplerOptions_FrameWeights:
         if options is None:
             options = {}
 
-        frame_weights_grp = (frame_weights, frame_weights)
-        options['frame_weights_grp'] = frame_weights_grp
+        options['frame_weights'] = frame_weights
 
         return (options,)
 
