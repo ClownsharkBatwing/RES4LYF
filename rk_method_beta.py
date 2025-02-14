@@ -612,8 +612,8 @@ class RK_NoiseSampler:
         
         self.CONST = isinstance(model_sampling, comfy.model_sampling.CONST)
 
-        self.sigma_min = model.inner_model.inner_model.model_sampling.sigma_min.to(dtype)
-        self.sigma_max = model.inner_model.inner_model.model_sampling.sigma_max.to(dtype)
+        self.sigma_min = model.inner_model.inner_model.model_sampling.sigma_min.to(self.dtype)
+        self.sigma_max = model.inner_model.inner_model.model_sampling.sigma_max.to(self.dtype)
         
         self.noise_sampler  = None
         self.noise_sampler2 = None

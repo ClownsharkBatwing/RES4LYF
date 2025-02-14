@@ -97,12 +97,12 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
                   eta=0.0, eta_var=0.0, s_noise=1., s_noise_substep=1., d_noise=1., alpha=-1.0, alpha_substep=-1.0, k=1.0, k_substep=1.0, c1=0.0, c2=0.5, c3=1.0, implicit_steps_diag=0, implicit_steps_full=0, 
                   LGW_MASK_RESCALE_MIN=True, sigmas_override=None, unsample_resample_scales=None,regional_conditioning_weights=None, sde_noise=[],
                   extra_options="",
-                  etas=None, etas_substep=None, s_noises=None, s_noises_substep=None, momentums=None, guides=None, cfgpp=0.0, cfg_cw = 1.0,regional_conditioning_floors=None, frame_weights=None, eta_substep=0.0, noise_mode_sde_substep="hard",
+                  etas=None, etas_substep=None, s_noises=None, s_noises_substep=None, momentums=None, guides=None, cfgpp=0.0, cfg_cw = 1.0,regional_conditioning_floors=None, frame_weights_grp=None, eta_substep=0.0, noise_mode_sde_substep="hard",
                   noise_boost_step=0.0, noise_boost_substep=0.0,
                   ):
     extra_args = {} if extra_args is None else extra_args
-    default_dtype = getattr(torch, get_extra_options_kv("default_dtype", "float64", extra_options), torch.float64)
-    
+    default_dtype = getattr(torch, get_extra_options_kv("default_dtype", "", extra_options), x.dtype)
+    x = x.to(default_dtype)
     MAX_STEPS=10000
 
     if noise_seed < 0:
@@ -173,29 +173,41 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
     if implicit_sampler_name == "none":
         implicit_steps_diag = implicit_steps_full = 0
 
-    RK = RK_Method_Beta.create(model,  rk_type, x.device, x.dtype)
+    RK = RK_Method_Beta.create(model, rk_type, device=x.device, dtype=default_dtype)
     extra_args = RK.init_cfg_channelwise(x, cfg_cw, **extra_args)
     
-    NS = RK_NoiseSampler(model, x.device, x.dtype)
+    NS = RK_NoiseSampler(model, device=x.device, dtype=default_dtype)
     NS.init_noise_sampler(x, noise_seed, noise_sampler_type, noise_sampler_type_substep, alpha, alpha_substep, k, k_substep)
     
 
 
 
     # SETUP GUIDES
-    if frame_weights is not None:
-        frame_weights = initialize_or_scale(frame_weights, 1.0, MAX_STEPS).to(default_dtype)
-        frame_weights = F.pad(frame_weights, (0, MAX_STEPS), value=0.0)
+    LG = LatentGuide(model, sigmas, UNSAMPLE, LGW_MASK_RESCALE_MIN, extra_options, dtype=default_dtype, frame_weights_grp=frame_weights_grp)
+    x = LG.init_guides(x, guides, NS.noise_sampler)
+    if LG.y0 is not None:
+        y0 = LG.y0.to(x.device)
+        y0_inv = LG.y0_inv.to(x.device) if LG.y0_inv is not None else torch.zeros_like(LG.y0)
 
-    LG = LatentGuide(guides, x, model, sigmas, UNSAMPLE, LGW_MASK_RESCALE_MIN, extra_options)
-    x = LG.init_guides(x, NS.noise_sampler)
-    
-    y0, y0_inv = LG.y0, LG.y0_inv
+    data_           = None
+    eps_            = None
+    eps             = torch.zeros_like(x)
+    denoised        = torch.zeros_like(x)
+    denoised_prev   = torch.zeros_like(x).to('cpu')
+    denoised_prev2  = torch.zeros_like(x)
+    denoised_   = None
+    s_prev      = None
+    x_prev      = None
+    x_          = None
+    eps_prev_   = None
+    x_lying_    = None
+    s_lying_    = None
+    eps_lying_  = None
 
+    torch.cuda.synchronize()
+    torch.cuda.empty_cache()
+    gc.collect()
 
-
-    denoised, denoised_prev, denoised_prev2, eps = [torch.zeros_like(x) for _ in range(4)]
-    
     # BEGIN SAMPLING LOOP
     for step in trange(len(sigmas)-1, disable=disable):
         sigma, sigma_next = sigmas[step], sigmas[step+1]
@@ -236,9 +248,10 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
 
         s_ = [(RK.sigma_fn(RK.t_fn(sigma) + h*c_)) * x.new_ones([1]) for c_ in RK.c]
 
+        recycled_stages = max(RK.multistep_stages, RK.hybrid_stages)
         if step == 0 or step == guide_skip_steps:
-            x_, data_, eps_ = (torch.zeros(    RK.rows+2,     *x.shape, dtype=x.dtype, device=x.device) for _ in range(3))
-            data_prev_      =  torch.zeros(max(RK.rows+2, 4), *x.shape, dtype=x.dtype, device=x.device)
+            x_, data_, eps_ = (torch.zeros(    RK.rows+2,     *x.shape, dtype=default_dtype, device=x.device) for _ in range(3))
+            data_prev_      =  torch.zeros(max(RK.rows+2, 4), *x.shape, dtype=default_dtype, device=x.device)
             recycled_stages = len(data_prev_)-1
 
         sde_noise_t = None
@@ -321,7 +334,9 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
                 x_[0] = x_0 + zi_1
                 
             else:
+                LG.to(LG.offload_device)
                 eps_[0], data_[0] = RK(x_[0], sigma, x_0, sigma, **extra_args) 
+                LG.to(LG.device)
             
             if not extra_options_flag("implicit_lagrange_init", extra_options) and not extra_options_flag("radaucycle", extra_options) and not extra_options_flag("implicit_full_skip_model_call_at_start", extra_options) and not extra_options_flag("implicit_lagrange_skip_model_call_at_start", extra_options):
                 for r in range(RK.rows):
@@ -620,8 +635,8 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
 
                             if RK.IMPLICIT: 
                                 if not extra_options_flag("implicit_guide_preproc_disable", extra_options):
-                                    eps_, x_      = LG.process_guides_substep(x_0, x_, eps_,      data_, row, step, sigma, sigma_next, sigma_down, s_, unsample_resample_scale, RK, rk_type, extra_options, frame_weights)
-                                    eps_prev_, x_ = LG.process_guides_substep(x_0, x_, eps_prev_, data_, row, step, sigma, sigma_next, sigma_down, s_, unsample_resample_scale, RK, rk_type, extra_options, frame_weights)
+                                    eps_, x_      = LG.process_guides_substep(x_0, x_, eps_,      data_, row, step, sigma, sigma_next, sigma_down, s_, unsample_resample_scale, RK, rk_type, extra_options)
+                                    eps_prev_, x_ = LG.process_guides_substep(x_0, x_, eps_prev_, data_, row, step, sigma, sigma_next, sigma_down, s_, unsample_resample_scale, RK, rk_type, extra_options)
                                 if row == 0 and (extra_options_flag("implicit_lagrange_init", extra_options)  or   extra_options_flag("radaucycle", extra_options)):
                                     pass
                                 elif row == 0 and not extra_options_flag("substep_eta_use_final", extra_options):
@@ -643,16 +658,20 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
                             if s_tmp == 0:
                                 break
                             x_, eps_ = RK.newton_iter(x_0, x_, eps_, eps_prev_, data_, s_, row, h, sigmas, step, "pre", extra_options) # will this do anything? not x_tmp
-                            eps_[row], data_[row] = RK(x_tmp, s_tmp, x_0, sigma, **extra_args) 
+
+                            LG.to(LG.offload_device)
+                            eps_[row], data_[row] = RK(x_tmp, s_tmp, x_0, sigma, **extra_args)
+                            LG.to(LG.device)
+
                             if extra_options_flag("preview_substeps", extra_options):
                                 callback({'x': x, 'i': step, 'sigma': sigma, 'sigma_next': sigma_next, 'denoised': data_[row].to(torch.float32)}) if callback is not None else None
 
                         # GUIDE 
                         if not extra_options_flag("guide_disable_regular_substep", extra_options):
                             if not extra_options_flag("disable_guides_eps_substep", extra_options):
-                                eps_, x_      = LG.process_guides_substep(x_0, x_, eps_,      data_, row, step, sigma, sigma_next, sigma_down, s_, unsample_resample_scale, RK, rk_type, extra_options, frame_weights)
+                                eps_, x_      = LG.process_guides_substep(x_0, x_, eps_,      data_, row, step, sigma, sigma_next, sigma_down, s_, unsample_resample_scale, RK, rk_type, extra_options)
                             if not extra_options_flag("disable_guides_eps_prev_substep", extra_options):
-                                eps_prev_, x_ = LG.process_guides_substep(x_0, x_, eps_prev_, data_, row, step, sigma, sigma_next, sigma_down, s_, unsample_resample_scale, RK, rk_type, extra_options, frame_weights)
+                                eps_prev_, x_ = LG.process_guides_substep(x_0, x_, eps_prev_, data_, row, step, sigma, sigma_next, sigma_down, s_, unsample_resample_scale, RK, rk_type, extra_options)
 
                         if (full_iter == 0 and diag_iter == 0)   or   extra_options_flag("newton_iter_post_use_on_implicit_steps", extra_options):
                             x_, eps_ = RK.newton_iter(x_0, x_, eps_, eps_prev_, data_, s_, row, h, sigmas, step, "post", extra_options)
@@ -745,16 +764,17 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
         
         rk_type = RK.swap_rk_type_at_step_or_threshold(x_0, data_prev_, sigma_down, sigmas, step, RK, rk_swap_step, rk_swap_threshold, rk_swap_type, rk_swap_print)
 
-        denoised_prev2 = denoised_prev
-        denoised_prev = denoised
         h_prev = h
-        sigma_down_prev = sigma_down
-        x_0_prev = x_0
-        x_row_down_prev = x_0 + h_new * RK.b_k_sum(eps_, 0)
-        eps_row_down_prev = x - x_row_down_prev
-        noise_prev = (eps_row_down_prev - eps_row_down_prev.mean()) / eps_row_down_prev.std()
-        s_0_prev = s_[0]
-        x_row0_prev = x_0 + h * RK.b_k_sum(eps_, 0)
+        #sigma_down_prev = sigma_down
+        #x_0_prev = x_0
+        #x_row_down_prev = x_0 + h_new * RK.b_k_sum(eps_, 0)
+        #eps_row_down_prev = x - x_row_down_prev
+        #noise_prev = (eps_row_down_prev - eps_row_down_prev.mean()) / eps_row_down_prev.std()
+        #s_0_prev = s_[0]
+        #x_row0_prev = x_0 + h * RK.b_k_sum(eps_, 0)
+
+        denoised_prev2 = denoised_prev.to(denoised_prev2.device)
+        denoised_prev = denoised.to(denoised_prev.device)
 
     if not (UNSAMPLE and sigmas[1] > sigmas[0]) and not extra_options_flag("preview_last_step_always", extra_options):
         preview_callback(x, eps, denoised, x_, eps_, data_, step, sigma, sigma_next, callback, extra_options, FINAL_STEP=True)

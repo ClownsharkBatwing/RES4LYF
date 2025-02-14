@@ -5,11 +5,13 @@ import re
 
 from einops import rearrange
 
+from comfy.model_management import get_torch_device, unet_offload_device
+
 from .sigmas import get_sigmas
 from .noise_classes import *
 from .latents import hard_light_blend, normalize_latent, initialize_or_scale
 from .rk_method_beta import RK_Method_Beta
-from .helper import get_extra_options_kv, extra_options_flag, get_cosine_similarity, get_extra_options_list
+from .helper import get_extra_options_kv, extra_options_flag, get_cosine_similarity, get_extra_options_list, is_video_model
 from .rk_coefficients_beta import IRK_SAMPLER_NAMES_BETA
 
 import itertools
@@ -39,99 +41,115 @@ def normalize_inputs(x, y0, y0_inv, guide_mode,  extra_options):
 
 
 class LatentGuide:
-    def __init__(self, guides, x, model, sigmas, UNSAMPLE, LGW_MASK_RESCALE_MIN, extra_options, device='cuda', dtype=torch.float64, max_steps=10000):
-        self.model    = model
-        self.sigma_min = model.inner_model.inner_model.model_sampling.sigma_min.to(dtype)
-        self.sigma_max = model.inner_model.inner_model.model_sampling.sigma_max.to(dtype)
-        self.sigmas   = sigmas
-        self.UNSAMPLE = UNSAMPLE
-        self.SAMPLE = (sigmas[0] > sigmas[1])
-        self.extra_options = extra_options
-        self.y0     = torch.zeros_like(x)
-        self.y0_inv = torch.zeros_like(x)
-        self.guide_mode = ""
-        self.mask = None
-        self.mask_inv = None
-        
-        self.latent_guide = None
-        self.latent_guide_inv = None
-
-        self.lgw_masks = []
-        self.lgw_masks_inv = []
-        self.lgw, self.lgw_inv = [torch.full_like(sigmas, 0.) for _ in range(2)]
-        
+    def __init__(self, model, sigmas, UNSAMPLE, LGW_MASK_RESCALE_MIN, extra_options, device=None, offload_device='cpu', dtype=torch.float64, max_steps=10000, frame_weights_grp=None):
+        self.model          = model
+        self.dtype          = dtype
+        self.device         = device if device is not None else get_torch_device()
+        self.offload_device = offload_device if offload_device is not None else unet_offload_device()
+        self.sigma_min      = model.inner_model.inner_model.model_sampling.sigma_min.to(dtype)
+        self.sigma_max      = model.inner_model.inner_model.model_sampling.sigma_max.to(dtype)
+        self.sigmas         = sigmas
+        self.UNSAMPLE       = UNSAMPLE
+        self.VIDEO          = is_video_model(model)
+        self.SAMPLE         = (sigmas[0] > sigmas[1])
+        self.extra_options  = extra_options
+        self.y0             = None
+        self.y0_inv         = None
+        self.guide_mode     = ""
+        self.max_steps      = max_steps
+        self.sigmas         = sigmas
+        self.mask           = None
+        self.mask_inv       = None
+        self.LGW_MASK_RESCALE_MIN   = LGW_MASK_RESCALE_MIN
+        self.HAS_LATENT_GUIDE       = False
+        self.HAS_LATENT_GUIDE_INV   = False
+        self.lgw, self.lgw_inv      = [torch.full_like(sigmas, 0., dtype=self.dtype) for _ in range(2)]
         self.guide_cossim_cutoff_, self.guide_bkg_cossim_cutoff_ = 1.0, 1.0
-        
+        self.frame_weights = frame_weights_grp[0] if frame_weights_grp is not None else None
+        self.frame_weights_inv = frame_weights_grp[1] if frame_weights_grp is not None else None
+
+    def init_guides(self, x, guides, noise_sampler):
         latent_guide_weight, latent_guide_weight_inv = 0.,0.
-        latent_guide_weights, latent_guide_weights_inv = None, None
-        latent_guide_weights = torch.zeros_like(sigmas)
-        latent_guide_weights_inv = torch.zeros_like(sigmas)
+        latent_guide_weights = torch.zeros_like(self.sigmas, dtype=self.dtype)
+        latent_guide_weights_inv = torch.zeros_like(self.sigmas, dtype=self.dtype)
+        latent_guide = None
+        latent_guide_inv = None
+
         if guides is not None:
-            self.guide_mode, latent_guide_weight, latent_guide_weight_inv, latent_guide_weights, latent_guide_weights_inv, self.latent_guide, self.latent_guide_inv, latent_guide_mask, latent_guide_mask_inv, scheduler_, scheduler_inv_, steps_, steps_inv_, denoise_, denoise_inv_ = guides
+            (self.guide_mode, latent_guide_weight, latent_guide_weight_inv, latent_guide_weights, latent_guide_weights_inv, latent_guide, latent_guide_inv, self.mask, self.mask_inv, scheduler_, scheduler_inv_, steps_, steps_inv_, self.guide_cossim_cutoff_, self.guide_bkg_cossim_cutoff_) = guides
+                        
+            if latent_guide_weights is None:
+                latent_guide_weights = get_sigmas(self.model, scheduler_, steps_, 1.0).to(self.dtype)
             
-            self.mask, self.mask_inv                                 = latent_guide_mask, latent_guide_mask_inv
-            self.guide_cossim_cutoff_, self.guide_bkg_cossim_cutoff_ = denoise_, denoise_inv_
-            
-            if latent_guide_weights == None:
-                latent_guide_weights = get_sigmas(model, scheduler_, steps_, 1.0).to(x.dtype)
-            
-            if latent_guide_weights_inv == None:
-                latent_guide_weights_inv = get_sigmas(model, scheduler_inv_, steps_inv_, 1.0).to(x.dtype)
+            if latent_guide_weights_inv is None:
+                latent_guide_weights_inv = get_sigmas(self.model, scheduler_inv_, steps_inv_, 1.0).to(self.dtype)
                 
-            latent_guide_weights     = initialize_or_scale(latent_guide_weights,     latent_guide_weight,     max_steps).to(dtype)
-            latent_guide_weights_inv = initialize_or_scale(latent_guide_weights_inv, latent_guide_weight_inv, max_steps).to(dtype)
+            latent_guide_weights     = initialize_or_scale(latent_guide_weights,     latent_guide_weight,     self.max_steps).to(self.dtype)
+            latent_guide_weights_inv = initialize_or_scale(latent_guide_weights_inv, latent_guide_weight_inv, self.max_steps).to(self.dtype)
+
+            latent_guide_weights[steps_ - 1:] = 0
+            latent_guide_weights_inv[steps_inv_ - 1:] = 0
                 
-        latent_guide_weights     = F.pad(latent_guide_weights,     (0, max_steps), value=0.0)
-        latent_guide_weights_inv = F.pad(latent_guide_weights_inv, (0, max_steps), value=0.0)
+        self.lgw        = F.pad(latent_guide_weights,     (0, self.max_steps), value=0.0).to(self.dtype)
+        self.lgw_inv    = F.pad(latent_guide_weights_inv, (0, self.max_steps), value=0.0).to(self.dtype)
         
-        
-        if latent_guide_weights is not None:
-            self.lgw = latent_guide_weights.to(x.device)
-        if latent_guide_weights_inv is not None:
-            self.lgw_inv = latent_guide_weights_inv.to(x.device)
-            
-        self.mask, LGW_MASK_RESCALE_MIN = prepare_mask(x, self.mask, LGW_MASK_RESCALE_MIN)
+        self.mask, self.LGW_MASK_RESCALE_MIN = prepare_mask(x, self.mask, self.LGW_MASK_RESCALE_MIN)
         if self.mask_inv is not None:
-            self.mask_inv, LGW_MASK_RESCALE_MIN = prepare_mask(x, self.mask_inv, LGW_MASK_RESCALE_MIN)
-        elif not self.SAMPLE:
-            self.mask_inv = (1-self.mask) #why not for all cases?
-            
-        for step in range(len(self.sigmas)-1):
-            lgw_mask, lgw_mask_inv = prepare_weighted_masks(self.mask, self.mask_inv, self.lgw[step], self.lgw_inv[step], self.latent_guide, self.latent_guide_inv, LGW_MASK_RESCALE_MIN)
-            self.lgw_masks.append(lgw_mask)
-            self.lgw_masks_inv.append(lgw_mask_inv)
-
-
-    def init_guides(self, x, noise_sampler, latent_guide=None, latent_guide_inv=None):
-        self.y0, self.y0_inv = torch.zeros_like(x), torch.zeros_like(x)
-        latent_guide = self.latent_guide if latent_guide is None else latent_guide
-        latent_guide_inv = self.latent_guide_inv if latent_guide_inv is None else latent_guide_inv
-
-
+            self.mask_inv, self.LGW_MASK_RESCALE_MIN = prepare_mask(x, self.mask_inv, self.LGW_MASK_RESCALE_MIN)
+        else:
+            self.mask_inv = (1-self.mask)
+    
         if latent_guide is not None:
-            if type(latent_guide) == dict:
-                latent_guide_samples = self.model.inner_model.inner_model.process_latent_in(latent_guide['samples']).clone().to(x.device)
-            else:
+            self.HAS_LATENT_GUIDE = True
+            if type(latent_guide) is dict:
+                latent_guide_samples = self.model.inner_model.inner_model.process_latent_in(latent_guide['samples']).clone()
+            elif type(latent_guide) is torch.Tensor:
                 latent_guide_samples = latent_guide
+            else:
+                raise ValueError(f"Invalid latent type: {type(latent_guide)}")
+
+            if self.VIDEO and latent_guide_samples.shape[2] == 1:
+                latent_guide_samples = latent_guide_samples.repeat(1, 1, x.shape[2], 1, 1)
+
             if self.SAMPLE:
                 self.y0 = latent_guide_samples
             elif self.UNSAMPLE: # and self.mask is not None:
-                x = (1-self.mask) * x + self.mask * latent_guide_samples
+                mask = self.mask.to(x.device)
+                x = (1-mask) * x + mask * latent_guide_samples.to(x.device)
             else:
-                x = latent_guide_samples
+                x = latent_guide_samples.to(x.device)
+        else:
+            self.y0 = torch.zeros_like(x)
 
         if latent_guide_inv is not None:
-            if type(latent_guide_inv) == dict:
-                latent_guide_inv_samples = self.model.inner_model.inner_model.process_latent_in(latent_guide_inv['samples']).clone().to(x.device)
-            else:
+            self.HAS_LATENT_GUIDE_INV = True
+            if type(latent_guide_inv) is dict:
+                latent_guide_inv_samples = self.model.inner_model.inner_model.process_latent_in(latent_guide_inv['samples']).clone()
+            elif type(latent_guide_inv) is torch.Tensor:
                 latent_guide_inv_samples = latent_guide_inv
+            else:
+                raise ValueError(f"Invalid latent type: {type(latent_guide_inv)}")
+
+            if self.VIDEO and latent_guide_inv_samples.shape[2] == 1:
+                latent_guide_inv_samples = latent_guide_inv_samples.repeat(1, 1, x.shape[2], 1, 1)
+
             if self.SAMPLE:
                 self.y0_inv = latent_guide_inv_samples
             elif self.UNSAMPLE: # and self.mask is not None:
-                x = (1-self.mask_inv) * x + self.mask_inv * latent_guide_inv_samples #fixed old approach, which was mask, (1-mask)
+                mask_inv = self.mask_inv.to(x.device)
+                x = (1-mask_inv) * x + mask_inv * latent_guide_inv_samples.to(x.device) #fixed old approach, which was mask, (1-mask)
             else:
-                x = latent_guide_inv_samples   #THIS COULD LEAD TO WEIRD BEHAVIOR! OVERWRITING X WITH LG_INV AFTER SETTING TO LG above!
-                
+                x = latent_guide_inv_samples.to(x.device)   #THIS COULD LEAD TO WEIRD BEHAVIOR! OVERWRITING X WITH LG_INV AFTER SETTING TO LG above!
+        else:
+            self.y0_inv = torch.zeros_like(x)
+
+        if self.frame_weights is not None:
+            self.frame_weights = initialize_or_scale(self.frame_weights, 1.0, self.max_steps).to(self.dtype)
+            self.frame_weights = F.pad(self.frame_weights, (0, self.max_steps), value=0.0)
+        if self.frame_weights_inv is not None:
+            self.frame_weights_inv = initialize_or_scale(self.frame_weights_inv, 1.0, self.max_steps).to(self.dtype)
+            self.frame_weights_inv = F.pad(self.frame_weights_inv, (0, self.max_steps), value=0.0)
+
         if self.UNSAMPLE and not self.SAMPLE: #sigma_next > sigma:
             self.y0 = noise_sampler(sigma=self.sigma_max, sigma_next=self.sigma_min)
             self.y0 = (self.y0 - self.y0.mean()) / self.y0.std()
@@ -140,45 +158,91 @@ class LatentGuide:
             
         x, self.y0, self.y0_inv = normalize_inputs(x, self.y0, self.y0_inv, self.guide_mode, self.extra_options)
 
-        return x
+        self.to(self.device)
+
+        return x.to(self.dtype)
     
+    
+    def to(self, device):
+        self.lgw = self.lgw.to(device) if self.lgw is not None else None
+        self.lgw_inv = self.lgw_inv.to(device) if self.lgw_inv is not None else None
+        self.mask = self.mask.to(device) if self.mask is not None else None
+        self.mask_inv = self.mask_inv.to(device) if self.mask_inv is not None else None
+        self.y0 = self.y0.to(device) if self.y0 is not None else None
+        self.y0_inv = self.y0_inv.to(device) if self.y0_inv is not None else None
+        self.frame_weights = self.frame_weights.to(device) if self.frame_weights is not None else None
+        self.frame_weights_inv = self.frame_weights_inv.to(device) if self.frame_weights_inv is not None else None
 
 
-    def process_guides_substep(self, x_0, x_, eps_, data_, row, step, sigma, sigma_next, sigma_down, s_, unsample_resample_scale, RK, rk_type, extra_options, frame_weights=None):
+    def prepare_weighted_masks(self, step):
+        lgw_ = self.lgw[step]
+        lgw_inv_ = self.lgw_inv[step]
+        mask = torch.ones_like(self.y0) if self.mask is None else self.mask
+        mask_inv = torch.zeros_like(mask) if self.mask_inv is None else self.mask_inv
+
+        if self.LGW_MASK_RESCALE_MIN: 
+            lgw_mask     =    mask  * (1-lgw_)     + lgw_
+            lgw_mask_inv = (1-mask) * (1-lgw_inv_) + lgw_inv_
+        else:
+            if self.HAS_LATENT_GUIDE:
+                lgw_mask = mask * lgw_
+            else:
+                lgw_mask = torch.zeros_like(mask)
+            
+            if self.HAS_LATENT_GUIDE_INV:
+                if mask_inv is not None:
+                    lgw_mask_inv = torch.minimum(1-mask_inv, (1-mask) * lgw_inv_)
+                else:
+                    lgw_mask_inv = (1-mask) * lgw_inv_
+            else:
+                lgw_mask_inv = torch.zeros_like(mask)
+
+        return lgw_mask, lgw_mask_inv
+
+
+    def get_masks_for_step(self, step):
+        lgw_mask, lgw_mask_inv = self.prepare_weighted_masks(step)
+        if self.VIDEO:
+            if self.frame_weights is not None:
+                apply_frame_weights(lgw_mask, self.frame_weights)
+            if self.frame_weights_inv is not None:
+                apply_frame_weights(lgw_mask_inv, self.frame_weights_inv)
+
+        return lgw_mask.to(self.device), lgw_mask_inv.to(self.device)
+
+
+    @torch.no_grad
+    def process_guides_substep(self, x_0, x_, eps_, data_, row, step, sigma, sigma_next, sigma_down, s_, unsample_resample_scale, RK, rk_type, extra_options):
         row_offset = 1 if RK.a[0].sum() == 0 and rk_type not in IRK_SAMPLER_NAMES_BETA else 0 
             
-        y0 = self.y0
-        if self.y0.shape[0] > 1:
-            y0 = self.y0[min(step, self.y0.shape[0]-1)].unsqueeze(0)  
-        y0_inv = self.y0_inv
-        
-        lgw_mask = self.lgw_masks[step].clone()
-        lgw_mask_inv = self.lgw_masks_inv[step].clone() if self.lgw_masks_inv is not None else None
-        
-        lgw = self.lgw[step]
-        lgw_inv = self.lgw_inv[step]
-        
-        latent_guide = self.latent_guide
-        latent_guide_inv = self.latent_guide_inv
-        guide_mode = self.guide_mode
-        UNSAMPLE = self.UNSAMPLE
+        y0 = self.y0.clone().to(self.device)
+        if self.HAS_LATENT_GUIDE_INV:
+            y0_inv = self.y0_inv.clone().to(self.device)
+        else:
+            y0_inv = torch.zeros_like(y0)
 
-        if self.guide_mode: 
+        if y0.shape[0] > 1:
+            y0 = y0[min(step, y0.shape[0]-1)].unsqueeze(0)
+        
+        lgw_mask, lgw_mask_inv = self.get_masks_for_step(step)
+        mask = self.mask.to(x_0.device)
+
+        if self.guide_mode is not None: 
             data_norm   = data_[row] - data_[row].mean(dim=(-2,-1), keepdim=True)
             y0_norm     = y0         -         y0.mean(dim=(-2,-1), keepdim=True)
-            y0_inv_norm = y0_inv     -     y0_inv.mean(dim=(-2,-1), keepdim=True)
-
             y0_cossim     = get_cosine_similarity(data_norm*lgw_mask,     y0_norm    *lgw_mask)
-            y0_cossim_inv = get_cosine_similarity(data_norm*lgw_mask_inv, y0_inv_norm*lgw_mask_inv)
+            
+            if self.HAS_LATENT_GUIDE_INV:
+                y0_inv_norm = y0_inv     -     y0_inv.mean(dim=(-2,-1), keepdim=True)
+                y0_cossim_inv = get_cosine_similarity(data_norm*lgw_mask_inv, y0_inv_norm*lgw_mask_inv)
+            else:
+                y0_cossim_inv = 1.0
             
             if y0_cossim < self.guide_cossim_cutoff_ or y0_cossim_inv < self.guide_bkg_cossim_cutoff_:
-                lgw_mask_cossim, lgw_mask_cossim_inv = lgw_mask, lgw_mask_inv
                 if y0_cossim     >= self.guide_cossim_cutoff_:
-                    lgw_mask_cossim     = torch.zeros_like(lgw_mask)
+                    lgw_mask *= 0
                 if y0_cossim_inv >= self.guide_bkg_cossim_cutoff_:
-                    lgw_mask_cossim_inv = torch.zeros_like(lgw_mask_inv)
-                lgw_mask = lgw_mask_cossim
-                lgw_mask_inv = lgw_mask_cossim_inv
+                    lgw_mask_inv *= 0
             else:
                 return eps_, x_ 
         else:
@@ -192,7 +256,7 @@ class LatentGuide:
                 
 
 
-        s_in = x_0.new_ones([x_0.shape[0]])
+        # s_in = x_0.new_ones([x_0.shape[0]])
         eps_orig = eps_.clone()
         
         if extra_options_flag("dynamic_guides_mean_std", extra_options):
@@ -208,21 +272,14 @@ class LatentGuide:
                 y0_inv = y_inv_shift
 
 
-        if frame_weights is not None and x_0.dim() == 5:
-            for f in range(lgw_mask.shape[2]):
-                frame_weight = frame_weights[f]
-                lgw_mask[..., f:f+1, :, :] *= frame_weight
-                if lgw_mask_inv is not None:
-                    lgw_mask_inv[..., f:f+1, :, :] *= frame_weight
-
-        if "data" == guide_mode:
+        if "data" == self.guide_mode:
             y0_tmp = y0.clone()
-            if latent_guide_inv is not None:
+            if self.HAS_LATENT_GUIDE:
                 y0_tmp = (1-lgw_mask) * data_[row] + lgw_mask * y0
                 y0_tmp = (1-lgw_mask_inv) * y0_tmp + lgw_mask_inv * y0_inv
             x_[row+1] = y0_tmp + eps_[row]
             
-        if guide_mode == "data_projection":
+        if self.guide_mode == "data_projection":
 
             d_lerp = data_[row]   +   lgw_mask * (y0-data_[row])   +   lgw_mask_inv * (y0_inv-data_[row])
             
@@ -234,11 +291,11 @@ class LatentGuide:
             x_[row+1] = data_[row] + eps_[row] * sigma
             
 
-        elif "epsilon" in guide_mode:
+        elif "epsilon" in self.guide_mode:
             if sigma > sigma_next:
                     
                 tol_value = float(get_extra_options_kv("tol", "-1.0", extra_options))
-                if tol_value >= 0 and (lgw > 0 or lgw_inv > 0):           
+                if tol_value >= 0 and (self.lgw[step] > 0 or self.lgw_inv[step] > 0):           
                     for b, c in itertools.product(range(x_0.shape[0]), range(x_0.shape[1])):
                         current_diff     = torch.norm(data_[row][b][c] - y0    [b][c])
                         current_diff_inv = torch.norm(data_[row][b][c] - y0_inv[b][c])
@@ -246,8 +303,8 @@ class LatentGuide:
                         lgw_scaled     = torch.nan_to_num(1-(tol_value/current_diff),     0)
                         lgw_scaled_inv = torch.nan_to_num(1-(tol_value/current_diff_inv), 0)
                         
-                        lgw_tmp     = min(lgw    , lgw_scaled)
-                        lgw_tmp_inv = min(lgw_inv, lgw_scaled_inv)
+                        lgw_tmp     = min(self.lgw[step]    , lgw_scaled)
+                        lgw_tmp_inv = min(self.lgw[step], lgw_scaled_inv)
 
                         lgw_mask_clamp     = torch.clamp(lgw_mask,     max=lgw_tmp)
                         lgw_mask_clamp_inv = torch.clamp(lgw_mask_inv, max=lgw_tmp_inv)
@@ -256,7 +313,7 @@ class LatentGuide:
                         eps_[row][b][c] = eps_[row][b][c] + lgw_mask_clamp[b][c] * (eps_row - eps_[row][b][c]) + lgw_mask_clamp_inv[b][c] * (eps_row_inv - eps_[row][b][c])
 
 
-                elif guide_mode == "epsilon_projection":
+                elif self.guide_mode == "epsilon_projection":
                     eps_row, eps_row_inv = get_guide_epsilon_substep(x_0, x_, y0, y0_inv, s_, row, row_offset, rk_type)
 
                     if extra_options_flag("eps_proj_old_default", extra_options):
@@ -280,7 +337,7 @@ class LatentGuide:
                             float_list = [float(item.strip()) for item in value_str.split(',') if item.strip()]
                             lgw_mask_factor = float_list[row]
                         
-                        eps_row_lerp = eps_[row]   +   self.mask * (eps_row-eps_[row])   +   (1-self.mask) * (eps_row_inv-eps_[row])
+                        eps_row_lerp = eps_[row]   +   mask * (eps_row-eps_[row])   +   (1-mask) * (eps_row_inv-eps_[row])
 
                         eps_collinear_eps_lerp = get_collinear(eps_[row], eps_row_lerp)
                         eps_lerp_ortho_eps     = get_orthogonal(eps_row_lerp, eps_[row])
@@ -295,7 +352,7 @@ class LatentGuide:
                     eps_[row] = eps_[row]      +     lgw_mask * (eps_row - eps_[row])    +    lgw_mask_inv * (eps_row_inv - eps_[row])
                     
 
-                elif guide_mode == "epsilon_projection_cw" or (lgw > 0 or lgw_inv > 0): # default old channelwise epsilon
+                elif self.guide_mode == "epsilon_projection_cw" or (self.lgw[step] > 0 or self.lgw_inv[step] > 0): # default old channelwise epsilon
                     avg, avg_inv = 0, 0
                     for b, c in itertools.product(range(x_0.shape[0]), range(x_0.shape[1])):
                         avg     += torch.norm(data_[row][b][c] - y0    [b][c])
@@ -309,7 +366,7 @@ class LatentGuide:
                         
                         eps_row, eps_row_inv = get_guide_epsilon_substep(x_0, x_, y0, y0_inv, s_, row, row_offset, rk_type, b, c)
                         
-                        if guide_mode == "epsilon_projection_cw":
+                        if self.guide_mode == "epsilon_projection_cw":
                             eps_row_lerp = eps_[row][b][c]   +   self.mask[b][c] * (eps_row-eps_[row][b][c])   +   (1-self.mask[b][c]) * (eps_row_inv-eps_[row][b][c])
 
                             eps_collinear_eps_lerp = get_collinear(eps_[row][b][c], eps_row_lerp)
@@ -321,17 +378,14 @@ class LatentGuide:
                         else:
                             eps_[row][b][c] = eps_[row][b][c]      +     ratio * lgw_mask[b][c] * (eps_row - eps_[row][b][c])    +    ratio_inv * lgw_mask_inv[b][c] * (eps_row_inv - eps_[row][b][c])
                         
-                temporal_smoothing = float(get_extra_options_kv("temporal_smoothing", "0.0", extra_options))
-                if temporal_smoothing > 0:
-                    eps_[row] = apply_temporal_smoothing(eps_[row], temporal_smoothing)
                 
 
 
 
-        elif (UNSAMPLE or guide_mode in {"resample", "unsample", "resample_projection", "unsample_projection", "resample_projection_cw", "unsample_projection_cw"}) and (lgw > 0 or lgw_inv > 0):
+        elif (self.UNSAMPLE or self.guide_mode in {"resample", "unsample", "resample_projection", "unsample_projection", "resample_projection_cw", "unsample_projection_cw"}) and (self.lgw[step] > 0 or self.lgw_inv[step] > 0):
             
-            cvf = RK.get_epsilon(x_0, x_[row+row_offset], y0, sigma, s_[row], sigma_down, unsample_resample_scale, extra_options)                
-            if UNSAMPLE and sigma > sigma_next and latent_guide_inv is not None:
+            cvf = RK.get_epsilon(x_0, x_[row+row_offset], y0, sigma, s_[row], sigma_down, unsample_resample_scale, extra_options)                                
+            if self.UNSAMPLE and sigma > sigma_next and self.HAS_LATENT_GUIDE:
                 cvf_inv = RK.get_epsilon(x_0, x_[row+row_offset], y0_inv, sigma, s_[row], sigma_down, unsample_resample_scale, extra_options)      
             else:
                 cvf_inv = torch.zeros_like(cvf)
@@ -345,8 +399,8 @@ class LatentGuide:
                     lgw_scaled     = torch.nan_to_num(1-(tol_value/current_diff),     0)
                     lgw_scaled_inv = torch.nan_to_num(1-(tol_value/current_diff_inv), 0)
                     
-                    lgw_tmp     = min(lgw    , lgw_scaled)
-                    lgw_tmp_inv = min(lgw_inv, lgw_scaled_inv)
+                    lgw_tmp     = min(self.lgw[step]    , lgw_scaled)
+                    lgw_tmp_inv = min(self.lgw_inv[step], lgw_scaled_inv)
 
                     lgw_mask_clamp     = torch.clamp(lgw_mask,     max=lgw_tmp)
                     lgw_mask_clamp_inv = torch.clamp(lgw_mask_inv, max=lgw_tmp_inv)
@@ -356,7 +410,7 @@ class LatentGuide:
             elif extra_options_flag("disable_lgw_scaling", extra_options):
                 eps_[row] = eps_[row] + lgw_mask * (cvf - eps_[row]) + lgw_mask_inv * (cvf_inv - eps_[row])
                 
-            elif guide_mode in {"resample_projection", "unsample_projection"}:
+            elif self.guide_mode in {"resample_projection", "unsample_projection"}:
                 eps_row_lerp = eps_[row]   +   self.mask * (cvf-eps_[row])   +   (1-self.mask) * (cvf_inv-eps_[row])
 
                 eps_collinear_eps_lerp = get_collinear(eps_[row], eps_row_lerp)
@@ -365,7 +419,7 @@ class LatentGuide:
                 eps_sum = eps_collinear_eps_lerp + eps_lerp_ortho_eps
 
                 eps_[row] = eps_[row] + lgw_mask * (eps_sum - eps_[row]) + lgw_mask_inv * (eps_sum - eps_[row])
-
+                
             else:
                 avg, avg_inv = 0, 0
                 for b, c in itertools.product(range(x_0.shape[0]), range(x_0.shape[1])):
@@ -380,7 +434,7 @@ class LatentGuide:
                             
                     eps_[row][b][c] = eps_[row][b][c]      +     ratio * lgw_mask[b][c] * (cvf[b][c] - eps_[row][b][c])    +    ratio_inv * lgw_mask_inv[b][c] * (cvf_inv[b][c] - eps_[row][b][c])
                     
-                    if guide_mode in {"resample_projection_cw", "unsample_projection_cw"}:
+                    if self.guide_mode in {"resample_projection_cw", "unsample_projection_cw"}:
                         eps_row_lerp = eps_[row][b][c]   +   self.mask[b][c] * (cvf-eps_[row][b][c])   +   (1-self.mask[b][c]) * (cvf_inv-eps_[row][b][c])
 
                         eps_collinear_eps_lerp = get_collinear(eps_[row][b][c], eps_row_lerp)
@@ -391,7 +445,11 @@ class LatentGuide:
                         eps_[row][b][c] = eps_[row][b][c] + ratio*lgw_mask[b][c] * (eps_sum - eps_[row][b][c]) + ratio_inv*lgw_mask_inv[b][c] * (eps_sum - eps_[row][b][c])
                     else:
                         eps_[row][b][c] = eps_[row][b][c]      +     ratio * lgw_mask[b][c] * (cvf[b][c] - eps_[row][b][c])    +    ratio_inv * lgw_mask_inv[b][c] * (cvf_inv[b][c] - eps_[row][b][c])
-                    
+        
+        temporal_smoothing = float(get_extra_options_kv("temporal_smoothing", "0.0", extra_options))
+        if temporal_smoothing > 0:
+            eps_[row] = apply_temporal_smoothing(eps_[row], temporal_smoothing)
+            
         if extra_options_flag("substep_eps_ch_mean_std", extra_options):
             eps_[row] = normalize_latent(eps_[row], eps_orig[row])
         if extra_options_flag("substep_eps_ch_mean", extra_options):
@@ -413,22 +471,17 @@ class LatentGuide:
         x_orig = x.clone()
         mean_weight = float(get_extra_options_kv("mean_weight", "0.01", extra_options))
         
-        y0 = self.y0
-        if self.y0.shape[0] > 1:
-            y0 = self.y0[min(step, self.y0.shape[0]-1)].unsqueeze(0)  
-        y0_inv = self.y0_inv
+        y0 = self.y0.clone().to(self.device)
+        if self.HAS_LATENT_GUIDE_INV:
+            y0_inv = self.y0_inv.clone().to(self.device)
+        else:
+            y0_inv = torch.zeros_like(y0)
+
+        if y0.shape[0] > 1:
+            y0 = y0[min(step, y0.shape[0]-1)].unsqueeze(0)
         
-        lgw_mask = self.lgw_masks[step].clone()
-        lgw_mask_inv = self.lgw_masks_inv[step].clone() if self.lgw_masks_inv is not None else None
-        mask = self.mask #needed for bitwise mask below
-        
-        lgw = self.lgw[step]
-        lgw_inv = self.lgw_inv[step]
-        
-        latent_guide = self.latent_guide
-        latent_guide_inv = self.latent_guide_inv
-        guide_mode = self.guide_mode
-        UNSAMPLE = self.UNSAMPLE
+        lgw_mask, lgw_mask_inv = self.get_masks_for_step(step)
+        mask = self.mask.to(x.device) #needed for bitwise mask below
         
         if self.guide_mode: 
             data_norm   = denoised - denoised.mean(dim=(-2,-1), keepdim=True)
@@ -449,7 +502,7 @@ class LatentGuide:
             else:
                 return x
         
-        if guide_mode in {"epsilon_dynamic_mean_std", "epsilon_dynamic_mean", "epsilon_dynamic_std", "epsilon_dynamic_mean_from_bkg"}:
+        if self.guide_mode in {"epsilon_dynamic_mean_std", "epsilon_dynamic_mean", "epsilon_dynamic_std", "epsilon_dynamic_mean_from_bkg"}:
         
             denoised_masked     = denoised * ((mask==1)*mask)
             denoised_masked_inv = denoised * ((mask==0)*(1-mask))
@@ -461,32 +514,32 @@ class LatentGuide:
                 denoised_mask     = denoised[b][c][mask[b][c] == 1]
                 denoised_mask_inv = denoised[b][c][mask[b][c] == 0]
                 
-                if guide_mode == "epsilon_dynamic_mean_std":
+                if self.guide_mode == "epsilon_dynamic_mean_std":
                     d_shift[b][c] = (denoised_masked[b][c] - denoised_mask.mean()) / denoised_mask.std()
                     d_shift[b][c] = (d_shift[b][c] * denoised_mask_inv.std()) + denoised_mask_inv.mean()
                     
-                elif guide_mode == "epsilon_dynamic_mean":
+                elif self.guide_mode == "epsilon_dynamic_mean":
                     d_shift[b][c]     = denoised_masked[b][c]     - denoised_mask.mean()     + denoised_mask_inv.mean()
                     d_shift_inv[b][c] = denoised_masked_inv[b][c] - denoised_mask_inv.mean() + denoised_mask.mean()
 
-                elif guide_mode == "epsilon_dynamic_mean_from_bkg":
+                elif self.guide_mode == "epsilon_dynamic_mean_from_bkg":
                     d_shift[b][c] = denoised_masked[b][c] - denoised_mask.mean() + denoised_mask_inv.mean()
 
-            if guide_mode in {"epsilon_dynamic_mean_std", "epsilon_dynamic_mean_from_bkg"}:
+            if self.guide_mode in {"epsilon_dynamic_mean_std", "epsilon_dynamic_mean_from_bkg"}:
                 denoised_shifted = denoised   +   mean_weight * lgw_mask * (d_shift - denoised_masked) 
-            elif guide_mode == "epsilon_dynamic_mean":
+            elif self.guide_mode == "epsilon_dynamic_mean":
                 denoised_shifted = denoised   +   mean_weight * lgw_mask * (d_shift - denoised_masked)   +   mean_weight * lgw_mask_inv * (d_shift_inv - denoised_masked_inv)
                 
             x = denoised_shifted + eps
         
         
-        if UNSAMPLE == False and (latent_guide is not None or latent_guide_inv is not None) and guide_mode in ("hard_light", "blend", "blend_projection", "mean_std", "mean", "mean_tiled", "std"):
-            if guide_mode == "hard_light":
+        if self.UNSAMPLE is False and (self.HAS_LATENT_GUIDE or self.HAS_LATENT_GUIDE_INV) and self.guide_mode in ("hard_light", "blend", "blend_projection", "mean_std", "mean", "mean_tiled", "std"):
+            if self.guide_mode == "hard_light":
                 d_shift, d_shift_inv = hard_light_blend(y0, denoised), hard_light_blend(y0_inv, denoised)
-            elif guide_mode == "blend":
+            elif self.guide_mode == "blend":
                 d_shift, d_shift_inv = y0, y0_inv
                 
-            elif guide_mode == "blend_projection":
+            elif self.guide_mode == "blend_projection":
                 d_lerp = denoised   +   lgw_mask * (y0-denoised)   +   lgw_mask_inv * (y0_inv-denoised)
                 
                 d_collinear_d_lerp = get_collinear(denoised, d_lerp)  
@@ -497,13 +550,13 @@ class LatentGuide:
                 return x
 
 
-            elif guide_mode == "mean_std":
+            elif self.guide_mode == "mean_std":
                 d_shift, d_shift_inv = normalize_latent([denoised, denoised], [y0, y0_inv])
-            elif guide_mode == "mean":
+            elif self.guide_mode == "mean":
                 d_shift, d_shift_inv = normalize_latent([denoised, denoised], [y0, y0_inv], std=False)
-            elif guide_mode == "std":
+            elif self.guide_mode == "std":
                 d_shift, d_shift_inv = normalize_latent([denoised, denoised], [y0, y0_inv], mean=False)
-            elif guide_mode == "mean_tiled":
+            elif self.guide_mode == "mean_tiled":
                 mean_tile_size = int(get_extra_options_kv("mean_tile", "8", extra_options))
                 y0_tiled       = rearrange(y0,       "b c (h t1) (w t2) -> (t1 t2) b c h w", t1=mean_tile_size, t2=mean_tile_size)
                 y0_inv_tiled   = rearrange(y0_inv,   "b c (h t1) (w t2) -> (t1 t2) b c h w", t1=mean_tile_size, t2=mean_tile_size)
@@ -515,8 +568,8 @@ class LatentGuide:
                 d_shift_inv = rearrange(d_shift_inv_tiled, "(t1 t2) b c h w -> b c (h t1) (w t2)", t1=mean_tile_size, t2=mean_tile_size)
 
 
-            if guide_mode in ("hard_light", "blend", "mean_std", "mean", "mean_tiled", "std"):
-                if latent_guide_inv is None:
+            if self.guide_mode in ("hard_light", "blend", "mean_std", "mean", "mean_tiled", "std"):
+                if self.HAS_LATENT_GUIDE_INV:
                     denoised_shifted = denoised   +   lgw_mask * (d_shift - denoised)
                 else:
                     denoised_shifted = denoised   +   lgw_mask * (d_shift - denoised)   +   lgw_mask_inv * (d_shift_inv - denoised)
@@ -551,9 +604,11 @@ class LatentGuide:
         return x
 
 
-
-
-
+def apply_frame_weights(mask, frame_weights):
+    if frame_weights is not None:
+        for f in range(mask.shape[2]):
+            frame_weight = frame_weights[f]
+            mask[..., f:f+1, :, :] *= frame_weight
 
 
 def prepare_mask(x, mask, LGW_MASK_RESCALE_MIN) -> Tuple[torch.Tensor, bool]:
@@ -580,24 +635,6 @@ def prepare_mask(x, mask, LGW_MASK_RESCALE_MIN) -> Tuple[torch.Tensor, bool]:
     del spatial_mask
     return mask, LGW_MASK_RESCALE_MIN
     
-def prepare_weighted_masks(mask, mask_inv, lgw_, lgw_inv_, latent_guide, latent_guide_inv, LGW_MASK_RESCALE_MIN):
-    if LGW_MASK_RESCALE_MIN: 
-        lgw_mask     =    mask  * (1-lgw_) + lgw_
-        lgw_mask_inv = (1-mask) * (1-lgw_inv_) + lgw_inv_
-    else:
-        if latent_guide is not None:
-            lgw_mask = mask * lgw_
-        else:
-            lgw_mask = torch.zeros_like(mask)
-        if latent_guide_inv is not None:
-            if mask_inv is not None:
-                lgw_mask_inv = torch.minimum(1-mask_inv, (1-mask) * lgw_inv_)
-            else:
-                lgw_mask_inv = (1-mask) * lgw_inv_
-        else:
-            lgw_mask_inv = torch.zeros_like(mask)
-    return lgw_mask, lgw_mask_inv
-
 def apply_temporal_smoothing(tensor, temporal_smoothing):
     if temporal_smoothing <= 0 or tensor.dim() != 5:
         return tensor
@@ -1104,6 +1141,7 @@ def get_masked_epsilon_projection(x_0, x_, eps_, y0, y0_inv, s_, row, row_offset
     eps_collinear_eps_lerp = get_collinear(eps_[row], eps_row_lerp)
     eps_lerp_ortho_eps     = get_orthogonal(eps_row_lerp, eps_[row])
     eps_sum = eps_collinear_eps_lerp + eps_lerp_ortho_eps
-    eps_substep_guide = eps_[row] + LG.lgw_masks[step] * (eps_sum - eps_[row]) + LG.lgw_masks_inv[step] * (eps_sum - eps_[row])
+    lgw_mask, lgw_mask_inv = LG.get_masks_for_step(step)
+    eps_substep_guide = eps_[row] + lgw_mask * (eps_sum - eps_[row]) + lgw_mask_inv * (eps_sum - eps_[row])
     return eps_substep_guide
 
