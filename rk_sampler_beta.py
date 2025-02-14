@@ -373,6 +373,11 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
                     
                     sub_sigma_next = s_2[r]
                     sub_sigma_up, sub_sigma, sub_sigma_down, sub_alpha_ratio = get_res4lyf_step_with_model(model, s_2[r], s_2[r], eta_substep, noise_mode_sde_substep)
+                    
+                    real_sub_sigma_down = sub_sigma_down.clone()
+                    if extra_options_flag("lock_h_scale", extra_options):
+                        sub_sigma_down = sub_sigma_next
+                    
                     h_2_new = h_2 * RK.h_fn(sub_sigma_down, sigma) / RK.h_fn(sub_sigma_next, sigma) 
                     h_2_new_orig = h_2_new.clone()
                     h_2_new = h_2_new + noise_boost_substep * (h_2 - h_2_new)
@@ -409,6 +414,10 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
                     
                     sub_sigma_next = s_[r]
                     sub_sigma_up, sub_sigma, sub_sigma_down, sub_alpha_ratio = get_res4lyf_step_with_model(model, s_[r], s_[r], eta_substep, noise_mode_sde_substep)
+                    
+                    real_sub_sigma_down = sub_sigma_down.clone()
+                    if extra_options_flag("lock_h_scale", extra_options):
+                        sub_sigma_down = sub_sigma_next
                     
                     maxmin_ratio = (sub_sigma - RK.sigma_min) / sub_sigma
                     fully_sub_sigma_2 = sub_sigma - maxmin_ratio * (sub_sigma * pseudoimplicit_row_weights[r] * pseudoimplicit_step_weights[full_iter] * LG.lgw[step])
@@ -453,6 +462,10 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
                     
                     sub_sigma_next = s_[r]
                     sub_sigma_up, sub_sigma, sub_sigma_down, sub_alpha_ratio = get_res4lyf_step_with_model(model, s_[r], s_[r], eta_substep, noise_mode_sde_substep)
+                    
+                    real_sub_sigma_down = sub_sigma_down.clone()
+                    if extra_options_flag("lock_h_scale", extra_options):
+                        sub_sigma_down = sub_sigma_next
                     
                     maxmin_ratio = (sub_sigma - RK.sigma_min) / sub_sigma
                     fully_sub_sigma_2 = sub_sigma - maxmin_ratio * (sub_sigma * pseudoimplicit_step_weights[full_iter] * LG.lgw[step])
