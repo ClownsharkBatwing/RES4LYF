@@ -73,6 +73,7 @@ def get_epsilon2(x_0, x, denoised, sigma, rk_type):
         eps = (x - denoised) / sigma
     return eps
 
+
 def get_epsilon(x_0, denoised, sigma, rk_type):
     if RK_Method_Beta.is_exponential(rk_type):
         eps = denoised - x_0
@@ -119,6 +120,11 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
     rk_swap_type      =       get_extra_options_kv("rk_swap_type",         "",     extra_options)   
     CONSERVE_MEAN_CW  =         extra_options_flag("eta_conserve_mean_cw",         extra_options)  
     SYNC_MEAN_CW  =         not extra_options_flag("eta_sync_mean_cw_disable",     extra_options)  
+    
+    brownian_sub_start = get_extra_options_kv("brownian_sub_start", "sub_sigma",    extra_options)
+    brownian_sub_stop  = get_extra_options_kv("brownian_sub_stop",  "sub_sigma_next", extra_options)
+    brownian_main_start = get_extra_options_kv("brownian_main_start", "sigma",    extra_options)
+    brownian_main_stop  = get_extra_options_kv("brownian_main_stop",  "sigma_next", extra_options)
     
     #noise_boost_substep  = float(get_extra_options_kv("noise_boost_substep", "0.0", extra_options))
     #noise_boost_step = float(get_extra_options_kv("noise_boost_step",    "0.0", extra_options))
@@ -638,7 +644,7 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
                                 else:
                                     x_tmp = x_[row+row_offset] = x_0 + h_new * (RK.a_k_sum(eps_, row+row_offset) + RK.u_k_sum(eps_prev_, row+row_offset))
                                     if extra_options_flag("lock_h_scale", extra_options):
-                                        x_tmp = x_[row+row_offset] = vpsde_noise_add(x_0, x_[row+row_offset], sigma, sub_sigma_next, real_sub_sigma_down, sub_sigma_up, sub_alpha_ratio, NS.noise_sampler2)
+                                        x_tmp = x_[row+row_offset] = vpsde_noise_add(x_0, x_[row+row_offset], sigma, sub_sigma_next, real_sub_sigma_down, sub_sigma_up, sub_alpha_ratio, s_noise_substep, NS.noise_sampler2)
                                     else:
                                         x_tmp = x_[row+row_offset] = NS.add_noise_post(x_[row+row_offset], sub_sigma_up, sub_sigma, sub_sigma_next, sub_alpha_ratio, s_noise_substep, noise_mode_sde_substep, SDE_NOISE_EXTERNAL, sde_noise_t, SUBSTEP=True)
 
@@ -671,21 +677,71 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
                             x_, eps_ = RK.newton_iter(x_0, x_, eps_, eps_prev_, data_, s_, row, h, sigmas, step, "post", extra_options)
 
                     # UPDATE
-                    x_ = RK.update_substep(x_0, x_, eps_, eps_prev_, row, row_offset, h, h_new, h_new_orig, sigma, real_sub_sigma_down, sub_sigma_up, sub_sigma, sub_sigma_next, sub_alpha_ratio, s_noise_substep, noise_mode_sde_substep, NS, \
+                    s_dict = {"sigma": sigma, "sigma_next": sigma_next, "sigma_down": sigma_down, "sigma_up": sigma_up, "sub_sigma": sub_sigma, "sub_sigma_next": sub_sigma_next, "sub_sigma_up": sub_sigma_up, "sub_sigma_down": sub_sigma_down}
+                    if row < RK.rows - row_offset   and   RK.multistep_stages == 0:
+                        
+                        if brownian_sub_stop == "proportional" or brownian_sub_start == "proportional":
+                            sigma_brownian = sigma - row * (sigma - sigma_next) / RK.rows
+                            sigma_next_brownian = sigma - (row+1) * (sigma - sigma_next) / RK.rows
+                        else:
+                            sigma_brownian = s_dict[brownian_sub_start]
+                            sigma_next_brownian = s_dict[brownian_sub_stop]
+                        
+                    else:
+                        sigma_brownian = s_dict[brownian_main_start]
+                        sigma_next_brownian = s_dict[brownian_main_stop]
+                        
+                    x_ = RK.update_substep(x_0, x_, eps_, eps_prev_, row, row_offset, h, h_new, h_new_orig, sigma, real_sub_sigma_down, sub_sigma_up, sigma_brownian, sigma_next_brownian, sub_alpha_ratio, s_noise_substep, noise_mode_sde_substep, NS, \
                                            SYNC_MEAN_CW, CONSERVE_MEAN_CW, SDE_NOISE_EXTERNAL, sde_noise_t, extra_options)
+                        
+                    #x_ = RK.update_substep(x_0, x_, eps_, eps_prev_, row, row_offset, h, h_new, h_new_orig, sigma, real_sub_sigma_down, sub_sigma_up, sub_sigma, sub_sigma_next, sub_alpha_ratio, s_noise_substep, noise_mode_sde_substep, NS, \
+                    #                       SYNC_MEAN_CW, CONSERVE_MEAN_CW, SDE_NOISE_EXTERNAL, sde_noise_t, extra_options)
                     if extra_options_flag("use_bong", extra_options) and sigma_next > 0:
                         if row < RK.rows - row_offset   and   RK.multistep_stages == 0:
                             bong_iter = int(get_extra_options_kv("use_bong", "100", extra_options))
                             for i in range(bong_iter):
-                                x_0 = x_[0] = x_[row+row_offset] - h_new * (RK.a_k_sum(eps_, row + row_offset) + RK.u_k_sum(eps_prev_, row + row_offset))
+                                x_0 = x_[0] = x_[row+row_offset] - h * (RK.a_k_sum(eps_, row + row_offset) + RK.u_k_sum(eps_prev_, row + row_offset))
                                 eps_[0] = get_epsilon2(x_0, x_0, data_[0], s_[0], rk_type)
                                 for rr in range(row+row_offset):
-                                    x_[rr] = x_0 + h_new * (RK.a_k_sum(eps_, rr) + RK.u_k_sum(eps_prev_, rr))
+                                    x_[rr] = x_0 + h * (RK.a_k_sum(eps_, rr) + RK.u_k_sum(eps_prev_, rr))
                                 for rr in range(1,row+row_offset):
                                     eps_[rr] = get_epsilon2(x_0, x_[rr], data_[rr], s_[rr], rk_type)
-                    #if extra_options_flag("lock_h_scale", extra_options):
-                    #    x_[row+row_offset] = vpsde_noise_add(x_0, x_[row+row_offset], sigma, sub_sigma_next, real_sub_sigma_down, sub_sigma_up, sub_alpha_ratio, NS.noise_sampler2)
-
+                    if extra_options_flag("use_alt1_bong", extra_options) and sigma_next > 0:
+                        if row < RK.rows - row_offset   and   RK.multistep_stages == 0:
+                            bong_iter = int(get_extra_options_kv("use_alt1_bong", "100", extra_options))
+                            for i in range(bong_iter):
+                                x_0 = x_[row+row_offset] - h * (RK.a_k_sum(eps_, row + row_offset) + RK.u_k_sum(eps_prev_, row + row_offset))
+                                eps_[0] = get_epsilon2(x_0, x_0, data_[0], s_[0], rk_type)
+                                for rr in range(row+row_offset):
+                                    x_[rr] = x_0 + h * (RK.a_k_sum(eps_, rr) + RK.u_k_sum(eps_prev_, rr))
+                                for rr in range(1,row+row_offset):
+                                    eps_[rr] = get_epsilon2(x_0, x_[rr], data_[rr], s_[rr], rk_type)
+                    if extra_options_flag("use_alt2_bong", extra_options) and sigma_next > 0:
+                        if row < RK.rows - row_offset   and   RK.multistep_stages == 0:
+                            bong_iter = int(get_extra_options_kv("use_alt2_bong", "100", extra_options))
+                            for i in range(bong_iter):
+                                x_0 = x_[row+row_offset] - h * (RK.a_k_sum(eps_, row + row_offset) + RK.u_k_sum(eps_prev_, row + row_offset))
+                                for rr in range(row+row_offset):
+                                    x_[rr] = x_0 + h * (RK.a_k_sum(eps_, rr) + RK.u_k_sum(eps_prev_, rr))
+                                for rr in range(row+row_offset):
+                                    eps_[rr] = get_epsilon2(x_0, x_[rr], data_[rr], s_[rr], rk_type)
+                    if extra_options_flag("use_alt3_bong", extra_options) and sigma_next > 0 and step < len(sigmas)-4:
+                        if row == RK.rows - row_offset - 1  and   RK.multistep_stages == 0:
+                            bong_iter = int(get_extra_options_kv("use_alt3_bong", "100", extra_options))
+                            for i in range(bong_iter):
+                                for rr in range(row+row_offset):
+                                    x_0 = x_[row+row_offset] - h * (RK.a_k_sum(eps_, row + row_offset) + RK.u_k_sum(eps_prev_, row + row_offset))
+                                    x_[rr] = x_0 + h * (RK.a_k_sum(eps_, rr) + RK.u_k_sum(eps_prev_, rr))
+                                    eps_[rr] = get_epsilon2(x_0, x_[rr], data_[rr], s_[rr], rk_type)
+                                #for rr in range(row+row_offset):
+                                #    eps_[rr] = get_epsilon2(x_0, x_[rr], data_[rr], s_[rr], rk_type)
+                        """else:
+                            for i in range(bong_iter):
+                                x_0 = x_[row+1] - h_new * (RK.b_k_sum(eps_, 0) + RK.v_k_sum(eps_prev_, 0))
+                                for rr in range(row+row_offset):
+                                    x_[rr] = x_0 + h_new * (RK.a_k_sum(eps_, rr) + RK.u_k_sum(eps_prev_, rr))
+                                for rr in range(row+row_offset):
+                                    eps_[rr] = get_epsilon2(x_0, x_[rr], data_[rr], s_[rr], rk_type)"""
 
             denoised = x_0 + ((sigma / (sigma - sigma_down)) *  h_new) * (RK.b_k_sum(eps_, 0) + RK.v_k_sum(eps_prev_, 0))
             eps = get_epsilon(x_0, denoised, sigma_next, rk_type)
@@ -697,11 +753,11 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
             preview_callback(x, eps, denoised, x_, eps_, data_, step, sigma, sigma_next, callback, extra_options)
 
             if extra_options_flag("lock_h_scale", extra_options):
-                x = vpsde_noise_add(x_0, x, sigma, sigma_next, real_sigma_down, sigma_up, alpha_ratio, NS.noise_sampler)
+                x = vpsde_noise_add(x_0, x, sigma, sigma_next, real_sigma_down, sigma_up, alpha_ratio, s_noise, NS.noise_sampler)
             else:
                 x = NS.add_noise_post(x, sigma_up, sigma, sigma_next, alpha_ratio, s_noise, noise_mode, SDE_NOISE_EXTERNAL, sde_noise_t)
 
-                    
+        
         data_prev_[0] = data_[0]
         for ms in range(recycled_stages):
             data_prev_[recycled_stages - ms] = data_prev_[recycled_stages - ms - 1]
