@@ -1141,6 +1141,7 @@ def get_masked_epsilon_projection(x_0, x_, eps_, y0, y0_inv, s_, row, row_offset
     eps_collinear_eps_lerp = get_collinear(eps_[row], eps_row_lerp)
     eps_lerp_ortho_eps     = get_orthogonal(eps_row_lerp, eps_[row])
     eps_sum = eps_collinear_eps_lerp + eps_lerp_ortho_eps
-    eps_substep_guide = eps_[row] + LG.lgw_masks[step] * (eps_sum - eps_[row]) + LG.lgw_masks_inv[step] * (eps_sum - eps_[row])
+    lgw_mask, lgw_mask_inv = LG.get_masks_for_step(step)
+    eps_substep_guide = eps_[row] + lgw_mask * (eps_sum - eps_[row]) + lgw_mask_inv * (eps_sum - eps_[row])
     return eps_substep_guide
 
