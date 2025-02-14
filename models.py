@@ -198,6 +198,7 @@ class ModelSamplingAdvanced:
         self.timestep_shift = shift
         self.multiplier = 1000
         timesteps = 1000
+        sampling_base = None
         
         if isinstance(m.model.model_config, comfy.supported_models.Flux) or isinstance(m.model.model_config, comfy.supported_models.FluxSchnell):
             self.multiplier = 1
@@ -234,6 +235,9 @@ class ModelSamplingAdvanced:
             timesteps = 1000
             sampling_base = comfy.model_sampling.ModelSamplingDiscreteFlow
             sampling_type = comfy.model_sampling.CONST
+
+        if sampling_base is None:
+            raise ValueError("Model not supported by ModelSamplingAdvanced")
 
         class ModelSamplingAdvanced(sampling_base, sampling_type):
             pass
