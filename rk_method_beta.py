@@ -157,7 +157,7 @@ class RK_Method_Beta:
                 if not extra_options_flag("lock_h_scale", extra_options):
                     x_[row+row_offset] = NS.add_noise_post(x_[row+row_offset], sub_sigma_up, sub_sigma, sub_sigma_next, sub_alpha_ratio, s_noise_substep, noise_mode_sde_substep, CONSERVE_MEAN_CW, SDE_NOISE_EXTERNAL, sde_noise_t, SUBSTEP=True)
                 else:
-                    x_[row+row_offset] = vpsde_noise_add(x_0, x_[row+row_offset], sigma, sub_sigma_next, real_sub_sigma_down, sub_sigma_up, sub_alpha_ratio, s_noise_substep, NS.noise_sampler2, brownian_sigma=sub_sigma, brownian_sigma_next=sub_sigma_next)
+                    x_[row+row_offset] = vpsde_noise_add(x_0, x_[row+row_offset], sigma, sub_sigma_next, real_sub_sigma_down, sub_sigma_up, sub_alpha_ratio, NS.noise_sampler2)
                 
                 if (SYNC_MEAN_CW and h_new != h_new_orig) or extra_options_flag("sync_mean_noise", extra_options):
                     eps_row_down = x_[row+row_offset] - x_row_down
@@ -173,9 +173,9 @@ class RK_Method_Beta:
             else:
                 x_[row+1] = x_row_down = x_0 + h_new * (self.b_k_sum(eps_, 0) + self.v_k_sum(eps_prev_, 0))
                 if not extra_options_flag("lock_h_scale", extra_options):
-                    x_[row+1] = NS.add_noise_post(x_[row+1], sub_sigma_up, sub_sigma, sub_sigma_next, sub_alpha_ratio, s_noise_substep, noise_mode_sde_substep, CONSERVE_MEAN_CW, SDE_NOISE_EXTERNAL, sde_noise_t, SUBSTEP=False)
+                    x_[row+1] = NS.add_noise_post(x_[row+1], sub_sigma_up, sub_sigma, sub_sigma_next, sub_alpha_ratio, s_noise_substep, noise_mode_sde_substep, CONSERVE_MEAN_CW, SDE_NOISE_EXTERNAL, sde_noise_t, SUBSTEP=True)
                 else:
-                     x_[row+1] = vpsde_noise_add(x_0, x_[row+1], sigma, sub_sigma_next, real_sub_sigma_down, sub_sigma_up, sub_alpha_ratio, s_noise_substep, NS.noise_sampler) # brownian sigma?
+                     x_[row+1] = vpsde_noise_add(x_0, x_[row+1], sigma, sub_sigma_next, real_sub_sigma_down, sub_sigma_up, sub_alpha_ratio, NS.noise_sampler2)
                 
                 if (SYNC_MEAN_CW and h_new != h_new_orig) or extra_options_flag("sync_mean_noise", extra_options):
                     eps_row_down = x_[row+1] - x_row_down
@@ -184,8 +184,7 @@ class RK_Method_Beta:
                     x_row_tmp = x_row_down_tmp + eps_row_down
                     for c in range(x_[0].shape[-3]):
                         #x_[row+1][..., c, :, :] = x_[row+1][..., c, :, :] - x_[row+1][..., c, :, :].mean() + x_row_tmp[..., c, :, :].mean()
-                        x_[row+1][..., c, :, :] = x_[row+1][..., c, :, :] - x_[row+1][..., c, :, :].mean() + x_row_next_tmp[..., c, :, :].mean()
-
+                        x_[row+1][..., c, :, :] = x_[row+1][..., c, :, :] - x_[row+1][..., c, :, :].mean() + x_row_next_tmp[..., c, :, :].mean() 
         return x_
 
     def a_k_sum(self, k, row):
@@ -551,8 +550,7 @@ class RK_Method_Linear(RK_Method_Beta):
     
     def __call__(self, x, sub_sigma, x_0, sigma, **extra_args):
         denoised = self.model_denoised(x, sub_sigma, **extra_args)
-        #epsilon = (x_0 - denoised) / sigma
-        epsilon = (x - denoised) / sub_sigma
+        epsilon = (x_0 - denoised) / sigma
         #print("MODEL SUB_SIGMA: ", round(float(sub_sigma),3), round(float(sigma),3))
 
         return epsilon, denoised
@@ -612,8 +610,8 @@ class RK_NoiseSampler:
         
         self.CONST = isinstance(model_sampling, comfy.model_sampling.CONST)
 
-        self.sigma_min = model.inner_model.inner_model.model_sampling.sigma_min.to(dtype)
-        self.sigma_max = model.inner_model.inner_model.model_sampling.sigma_max.to(dtype)
+        self.sigma_min = model.inner_model.inner_model.model_sampling.sigma_min.to(self.dtype)
+        self.sigma_max = model.inner_model.inner_model.model_sampling.sigma_max.to(self.dtype)
         
         self.noise_sampler  = None
         self.noise_sampler2 = None
@@ -657,11 +655,6 @@ class RK_NoiseSampler:
     def add_noise(self, x, sigma_up, sigma, sigma_next, alpha_ratio, s_noise, CONSERVE_MEAN_CW, SDE_NOISE_EXTERNAL, sde_noise_t, SUBSTEP, ):
 
         if sigma_next > 0.0 and sigma_up > 0.0:
-            if sigma_next > sigma:
-                s_tmp = sigma
-                sigma = sigma_next
-                sigma_next = s_tmp
-            
             if sigma == sigma_next:
                 sigma_next = sigma * 0.9999
             if not SUBSTEP:
@@ -669,12 +662,12 @@ class RK_NoiseSampler:
             else:
                 noise = self.noise_sampler2(sigma=sigma, sigma_next=sigma_next)
                 
-            #noise = torch.nan_to_num((noise - noise.mean()) / noise.std(), 0.0)
+            noise = torch.nan_to_num((noise - noise.mean()) / noise.std(), 0.0)
 
-            #noise_ortho = get_orthogonal(noise, x)
-            #noise_ortho = noise_ortho / noise_ortho.std()
-            #noise = noise_ortho
-            print("noise :", noise.std().item(), noise.mean().item(), noise.sum().item(), noise.abs().sum().item())
+            noise_ortho = get_orthogonal(noise, x)
+            noise_ortho = noise_ortho / noise_ortho.std()
+            
+            noise = noise_ortho
 
             if SDE_NOISE_EXTERNAL:
                 noise = (1-s_noise) * noise + s_noise * sde_noise_t
@@ -690,24 +683,14 @@ class RK_NoiseSampler:
         else:
             return x
 
-def vpsde_noise_add(x_0, x_next, sigma, sigma_next, sigma_down, sigma_up, alpha_ratio, s_noise, noise_sampler, brownian_sigma=None, brownian_sigma_next=None):
-    if brownian_sigma is None:
-        brownian_sigma = sigma
-    if brownian_sigma_next is None:
-        brownian_sigma_next = sigma_next
+def vpsde_noise_add(x_0, x_next, sigma, sigma_next, sigma_down, sigma_up, alpha_ratio, noise_sampler):
     if sigma_next == 0:
         return x_next
-    if brownian_sigma == brownian_sigma_next:
-        brownian_sigma_next *= 0.999
+    if sigma == sigma_next:
+        sigma_next *= 0.999
     eps_next = (x_0 - x_next) / (sigma - sigma_next)
     denoised_next = x_0 - sigma * eps_next
-    
-    if brownian_sigma_next > brownian_sigma:
-        s_tmp = brownian_sigma
-        brownian_sigma = brownian_sigma_next
-        brownian_sigma_next = s_tmp
-            
-    noise = noise_sampler(sigma=brownian_sigma, sigma_next=brownian_sigma_next)
-    x = alpha_ratio * (denoised_next + sigma_down * eps_next) + sigma_up * noise * s_noise
+    noise = noise_sampler(sigma=sigma, sigma_next=sigma_next)
+    x = alpha_ratio * (denoised_next + sigma_down * eps_next) + sigma_up * noise    
     return x
 
