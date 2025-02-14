@@ -210,6 +210,24 @@ class ModelSamplingAdvanced:
             timesteps = 1000
             sampling_base = comfy.model_sampling.ModelSamplingDiscreteFlow
             sampling_type = comfy.model_sampling.CONST
+
+        elif isinstance(m.model.model_config, comfy.supported_models.HunyuanVideo):
+            self.multiplier = 1000
+            timesteps = 1000
+            sampling_base = comfy.model_sampling.ModelSamplingDiscreteFlow
+            sampling_type = comfy.model_sampling.CONST
+
+        elif isinstance(m.model.model_config, comfy.supported_models.CosmosT2V) or isinstance(m.model.model_config, comfy.supported_models.CosmosI2V):
+            self.multiplier = 1
+            timesteps = 1000
+            sampling_base = comfy.model_sampling.ModelSamplingContinuousEDM
+            sampling_type = comfy.model_sampling.CONST
+
+        elif isinstance(m.model.model_config, comfy.supported_models.LTXV):
+            self.multiplier = 1000
+            timesteps = 1000
+            sampling_base = comfy.model_sampling.ModelSamplingFlux
+            sampling_type = comfy.model_sampling.CONST
             
         elif isinstance(m.model.model_config, comfy.supported_models.SD3):
             self.multiplier = 1000
