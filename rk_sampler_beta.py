@@ -698,6 +698,23 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
                     #                       SYNC_MEAN_CW, CONSERVE_MEAN_CW, SDE_NOISE_EXTERNAL, sde_noise_t, extra_options)
                     if extra_options_flag("use_bong", extra_options) and sigma_next > 0:
                         if row < RK.rows - row_offset   and   RK.multistep_stages == 0:
+                            bong_strength = float(get_extra_options_kv("use_bong", "1.0", extra_options))
+                            x_0_tmp = x_0.clone()
+                            x_tmp_ = x_.clone()
+                            eps_tmp_ = eps_.clone()
+                            for i in range(100):
+                                x_0 = x_[0] = x_[row+row_offset] - h * (RK.a_k_sum(eps_, row + row_offset) + RK.u_k_sum(eps_prev_, row + row_offset))
+                                eps_[0] = get_epsilon2(x_0, x_0, data_[0], s_[0], rk_type)
+                                for rr in range(row+row_offset):
+                                    x_[rr] = x_0 + h * (RK.a_k_sum(eps_, rr) + RK.u_k_sum(eps_prev_, rr))
+                                for rr in range(1,row+row_offset):
+                                    eps_[rr] = get_epsilon2(x_0, x_[rr], data_[rr], s_[rr], rk_type)
+                            x_0  = x_0_tmp  + bong_strength * (x_0  - x_0_tmp)
+                            x_   = x_tmp_   + bong_strength * (x_   - x_tmp_)
+                            eps_ = eps_tmp_ + bong_strength * (eps_ - eps_tmp_)
+                                    
+                    if extra_options_flag("use_alt0_bong", extra_options) and sigma_next > 0:
+                        if row < RK.rows - row_offset   and   RK.multistep_stages == 0:
                             bong_iter = int(get_extra_options_kv("use_bong", "100", extra_options))
                             for i in range(bong_iter):
                                 x_0 = x_[0] = x_[row+row_offset] - h * (RK.a_k_sum(eps_, row + row_offset) + RK.u_k_sum(eps_prev_, row + row_offset))
@@ -706,6 +723,7 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
                                     x_[rr] = x_0 + h * (RK.a_k_sum(eps_, rr) + RK.u_k_sum(eps_prev_, rr))
                                 for rr in range(1,row+row_offset):
                                     eps_[rr] = get_epsilon2(x_0, x_[rr], data_[rr], s_[rr], rk_type)
+                                    
                     if extra_options_flag("use_alt1_bong", extra_options) and sigma_next > 0:
                         if row < RK.rows - row_offset   and   RK.multistep_stages == 0:
                             bong_iter = int(get_extra_options_kv("use_alt1_bong", "100", extra_options))
