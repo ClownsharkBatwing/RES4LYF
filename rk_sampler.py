@@ -278,7 +278,7 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
 
 
                     # NOISE ADD
-                    if is_RF_model(model) == True   or   noise_mode != "hard":
+                    if is_RF_model(model) == True   or   (is_RF_model(model) == False and noise_mode != "hard"):
                         if (exim_iter < implicit_steps and sub_sigma_up > 0) or ((row > 0) and (sub_sigma_up > 0) and ((SUBSTEP_SKIP_LAST == False) or (row < rk.rows - rk.multistep_stages - 1))):
                             if PRINT_DEBUG:
                                 print("A: sub_sigma_up, sub_sigma, sub_sigma_next, sub_sigma_down, sub_alpha_ratio: \n", round(float(sub_sigma_up),3), round(float(sub_sigma),3), round(float(sub_sigma_next),3), round(float(sub_sigma_down),3), round(float(sub_alpha_ratio),3))

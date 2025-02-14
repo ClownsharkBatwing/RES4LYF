@@ -71,6 +71,7 @@ class RK_Method_Beta:
         self.multistep_stages = 0
         
         self.cfg_cw = 1.0
+        self.extra_args = None
 
     @staticmethod
     def is_exponential(rk_type):
@@ -494,8 +495,8 @@ class RK_Method_Exponential(RK_Method_Beta):
     def h_fn(sigma_down, sigma):
         return -torch.log(sigma_down/sigma)
 
-    def __call__(self, x, sub_sigma, x_0, sigma, **extra_args):
-        denoised = self.model_denoised(x, sub_sigma, **extra_args)
+    def __call__(self, x, sub_sigma, x_0, sigma): 
+        denoised = self.model_denoised(x, sub_sigma, **self.extra_args)
         epsilon = denoised - x_0
         #print("MODEL SUB_SIGMA: ", round(float(sub_sigma),3), round(float(sigma),3))
 
@@ -549,8 +550,8 @@ class RK_Method_Linear(RK_Method_Beta):
     def h_fn(sigma_down, sigma):
         return sigma_down - sigma
     
-    def __call__(self, x, sub_sigma, x_0, sigma, **extra_args):
-        denoised = self.model_denoised(x, sub_sigma, **extra_args)
+    def __call__(self, x, sub_sigma, x_0, sigma): 
+        denoised = self.model_denoised(x, sub_sigma, **self.extra_args)
         #epsilon = (x_0 - denoised) / sigma
         epsilon = (x - denoised) / sub_sigma
         #print("MODEL SUB_SIGMA: ", round(float(sub_sigma),3), round(float(sigma),3))
@@ -669,6 +670,9 @@ class RK_NoiseSampler:
             else:
                 noise = self.noise_sampler2(sigma=sigma, sigma_next=sigma_next)
                 
+            #for b in range(noise.shape[-4]):
+            #    for c in range(noise.shape[-3]):
+            #        noise[b][c] = (noise[b][c] - noise[b][c].mean()) / noise[b][c].std()
             #noise = torch.nan_to_num((noise - noise.mean()) / noise.std(), 0.0)
 
             #noise_ortho = get_orthogonal(noise, x)
@@ -691,6 +695,9 @@ class RK_NoiseSampler:
             return x
 
 def vpsde_noise_add(x_0, x_next, sigma, sigma_next, sigma_down, sigma_up, alpha_ratio, s_noise, noise_sampler, brownian_sigma=None, brownian_sigma_next=None):
+    if sigma_up == 0:
+        return x_next
+    
     if brownian_sigma is None:
         brownian_sigma = sigma
     if brownian_sigma_next is None:
@@ -708,6 +715,8 @@ def vpsde_noise_add(x_0, x_next, sigma, sigma_next, sigma_down, sigma_up, alpha_
         brownian_sigma_next = s_tmp
             
     noise = noise_sampler(sigma=brownian_sigma, sigma_next=brownian_sigma_next)
+    noise = (noise - noise.mean(dim=(-2, -1), keepdim=True)) / noise.std(dim=(-2, -1), keepdim=True)
+
     x = alpha_ratio * (denoised_next + sigma_down * eps_next) + sigma_up * noise * s_noise
     return x
 
