@@ -271,8 +271,17 @@ if flags["test_samplers"]:
         "rk_ralston_2s_prenoise": test_samplers.sample_rk_ralston_2s_prenoise,
 
         "rk_ralston_2s_prenoise_alt": test_samplers.sample_rk_ralston_2s_prenoise_alt,
-        "rk_res_2s_prenoise_alt": test_samplers.sample_rk_res_2s_prenoise_alt,
+        "rk_ralston_2s_prenoise_alt2": test_samplers.sample_rk_ralston_2s_prenoise_alt2,
+        "rk_ralston_3s_prenoise_alt2": test_samplers.sample_rk_ralston_3s_prenoise_alt2,
 
+        "rk_res_2m_nonstandard_prenoise_alt": test_samplers.sample_rk_res_2m_nonstandard_prenoise_alt,
+
+        "rk_res_2m_prenoise_alt": test_samplers.sample_rk_res_2m_prenoise_alt,
+        "rk_res_2s_prenoise_alt": test_samplers.sample_rk_res_2s_prenoise_alt,
+        "rk_res_2s_prenoise_data": test_samplers.sample_rk_res_2s_prenoise_data,
+
+        "rk_res_2s_overstep": test_samplers.sample_rk_res_2s_overstep,
+        
         
         "rk_crazy": test_samplers.sample_rk_crazy,
         "rk_crazy2": test_samplers.sample_rk_crazy2,
