@@ -207,7 +207,7 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
                 sigma_up_total += sigmas[i+1]
             #eta = eta / sigma_up_total    # no effect anymore... eta set later
             
-    sigma_min = model.inner_model.inner_model.model_sampling.sigma_min.to(default_dtype)
+    sigma_min = model.inner_model.inner_model.model_sampling.sigma_min.to(default_dtype).to(x.device)
     if sigmas[-1] == 0:
         if sigmas[-2] < sigma_min:
             sigmas[-2] = sigma_min
@@ -274,14 +274,16 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
         s_noise         = s_noises        [step] if s_noises         is not None else s_noise
         s_noise_substep = s_noises_substep[step] if s_noises_substep is not None else s_noise_substep
 
-        sigma_up, sigma, sigma_down, alpha_ratio = get_res4lyf_step_with_model(model, sigma, sigma_next, eta, noise_mode)
+        #sigma_up_overstep, sigma_overstep, sigma_down_overstep, alpha_ratio_overstep = get_res4lyf_step_with_model(model, sigma, real_sigma_down, overstep_eta, overstep_mode)
+        sigma_up_overstep, sigma_overstep, sigma_down_overstep, alpha_ratio_overstep = get_res4lyf_step_with_model(model, sigma, sigma_next, overstep_eta, overstep_mode)
+
+        #sigma_up, sigma, sigma_down, alpha_ratio = get_res4lyf_step_with_model(model, sigma, sigma_next, eta, noise_mode)
+        sigma_up, sigma, sigma_down, alpha_ratio = get_res4lyf_step_with_model(model, sigma, sigma_down_overstep, eta, noise_mode)
         real_sigma_down = sigma_down.clone()
 
-        #sigma_up_overstep, sigma_overstep, sigma_down_overstep, alpha_ratio_overstep = get_res4lyf_step_with_model(model, sigma, real_sigma_down, overstep_eta, overstep_mode)
-        #sigma_up_overstep, sigma_overstep, sigma_down_overstep, alpha_ratio_overstep = get_res4lyf_step_with_model(model, sigma, sigma_next, overstep_eta, overstep_mode)
-
         if extra_options_flag("lock_h_scale", extra_options):
-            sigma_down = sigma_next
+            sigma_down = sigma_down_overstep
+            #sigma_down = sigma_next
             
         #sigma_down = sigma_down_overstep
         
@@ -378,7 +380,15 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
                         if LG.guide_mode in {"pseudoimplicit", "pseudoimplicit_projection", "fully_pseudoimplicit", "fully_pseudoimplicit_projection"} and (LG.lgw[step] > 0 or LG.lgw_inv[step] > 0) and x_row_pseudoimplicit is not None:
                             x_tmp =     x_row_pseudoimplicit 
                             s_tmp = sub_sigma_pseudoimplicit 
-
+                            
+                        # Fully implicit iteration (explicit only)                   # Fully implicit iteration (implicit only... not standard)
+                        elif (full_iter > 0 and row_offset == 1 and row == 0)   and   extra_options_flag("fully_explicit_pogostick_eta", extra_options): 
+                            #sigma_up_pogo, sigma_pogo, sigma_down_pogo, alpha_ratio_pogo = get_res4lyf_step_with_model(model, sigma, sigma_next, eta, noise_mode)  
+                            super_alpha_ratio, super_sigma_up, super_sigma_down = get_alpha_ratio_from_sigma_down(sigma_next, sigma, eta)
+                            x = super_alpha_ratio * x + super_sigma_up * NS.noise_sampler(sigma=sigma, sigma_next=sigma_next)
+                            x_tmp = x
+                            s_tmp = sigma
+                            
                         # Fully implicit iteration (explicit only)                   # Fully implicit iteration (implicit only... not standard)
                         elif (full_iter > 0 and row_offset == 1 and row == 0)   or   (full_iter > 0 and row_offset == 0 and row == 0 and extra_options_flag("fully_implicit_update_x", extra_options)): 
                             x_tmp = x
@@ -474,23 +484,25 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
             
             x = x_[RK.rows - RK.multistep_stages - row_offset + 1]
             
-            #eps = (x_0 - x) / (sigma - sigma_down)
-            #denoised = x_0 - sigma * eps
-            #eps = (x_0 - denoised) / sigma
-            #x = denoised + real_sigma_down * eps
+            if extra_options_flag("overstep", extra_options):
+                eps = (x_0 - x) / (sigma - sigma_down_overstep)
+                denoised = x_0 - sigma * eps
+                #eps = (x_0 - denoised) / sigma
+                x = denoised + sigma_down * eps
             
             x = LG.process_guides_poststep(x, denoised, eps, step, extra_options)
-            
-            #if overstep_eta != 0.0:
-            #    noise = NS.noise_sampler(sigma=sigma, sigma_next=sigma_next)
-            #    x = alpha_ratio_overstep * x + sigma_up_overstep * noise
             
             preview_callback(x, eps, denoised, x_, eps_, data_, step, sigma, sigma_next, callback, extra_options)
 
             if extra_options_flag("lock_h_scale", extra_options):
+                #x = vpsde_noise_add(x_0, x, sigma, sigma_down_overstep, real_sigma_down, sigma_up, alpha_ratio, s_noise, NS.noise_sampler)
                 x = vpsde_noise_add(x_0, x, sigma, sigma_next, real_sigma_down, sigma_up, alpha_ratio, s_noise, NS.noise_sampler)
             else:
                 x = NS.add_noise_post(x, sigma_up, sigma, sigma_next, alpha_ratio, s_noise, noise_mode, SDE_NOISE_EXTERNAL, sde_noise_t)
+        
+            #if overstep_eta != 0.0:
+            #    noise = NS.noise_sampler(sigma=sigma, sigma_next=sigma_next)
+            #    x = alpha_ratio_overstep * x + sigma_up_overstep * noise
         
         data_prev_[0] = data_[0]
         for ms in range(recycled_stages):
