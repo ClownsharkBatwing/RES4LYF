@@ -145,6 +145,7 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
                   ):
     extra_args = {} if extra_args is None else extra_args
     default_dtype = getattr(torch, get_extra_options_kv("default_dtype", "", extra_options), x.dtype)
+    default_device = x.device
     x = x.to(default_dtype)
     MAX_STEPS=10000
 
@@ -207,11 +208,11 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
                 sigma_up_total += sigmas[i+1]
             #eta = eta / sigma_up_total    # no effect anymore... eta set later
             
-    sigma_min = model.inner_model.inner_model.model_sampling.sigma_min.to(default_dtype).to(x.device)
+    sigma_min = model.inner_model.inner_model.model_sampling.sigma_min.to(default_dtype).to(default_device)
     if sigmas[-1] == 0:
         if sigmas[-2] < sigma_min:
             sigmas[-2] = sigma_min
-        else:
+        elif sigmas[-2] > sigma_min:
             sigmas = torch.cat((sigmas[:-1], sigma_min.unsqueeze(0), sigmas[-1:]))
 
 
