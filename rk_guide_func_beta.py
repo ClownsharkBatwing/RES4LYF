@@ -82,13 +82,13 @@ class LatentGuide:
             (self.guide_mode, latent_guide_weight, latent_guide_weight_inv, latent_guide_weights, latent_guide_weights_inv, latent_guide, latent_guide_inv, self.mask, self.mask_inv, scheduler_, scheduler_inv_, steps_, steps_inv_, self.guide_cossim_cutoff_, self.guide_bkg_cossim_cutoff_) = guides
                         
             if latent_guide_weights is None:
-                latent_guide_weights = get_sigmas(self.model, scheduler_, steps_, 1.0).to(self.dtype)
+                latent_guide_weights = get_sigmas(self.model, scheduler_, steps_, 1.0).to(self.dtype).to(self.device) / self.sigma_max
             
             if latent_guide_weights_inv is None:
-                latent_guide_weights_inv = get_sigmas(self.model, scheduler_inv_, steps_inv_, 1.0).to(self.dtype)
+                latent_guide_weights_inv = get_sigmas(self.model, scheduler_inv_, steps_inv_, 1.0).to(self.dtype).to(self.device) / self.sigma_max
                 
-            latent_guide_weights     = initialize_or_scale(latent_guide_weights,     latent_guide_weight,     self.max_steps).to(self.dtype)
-            latent_guide_weights_inv = initialize_or_scale(latent_guide_weights_inv, latent_guide_weight_inv, self.max_steps).to(self.dtype)
+            latent_guide_weights     = initialize_or_scale(latent_guide_weights,     latent_guide_weight,     self.max_steps).to(self.dtype).to(self.device)
+            latent_guide_weights_inv = initialize_or_scale(latent_guide_weights_inv, latent_guide_weight_inv, self.max_steps).to(self.dtype).to(self.device)
 
             latent_guide_weights[steps_ - 1:] = 0
             latent_guide_weights_inv[steps_inv_ - 1:] = 0
