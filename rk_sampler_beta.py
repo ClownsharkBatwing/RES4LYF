@@ -90,11 +90,11 @@ def init_implicit_sampling(RK, x_0, x_, eps_, eps_prev_, data_, eps, denoised, d
             sigma_prev = sigmas[step-1]
             h_prev = sigma - sigma_prev
             w = h / h_prev
-            substeps_prev = len(RK.c[:-1])
+            substeps_prev = len(RK.C[:-1])
             
             for r in range(RK.rows):
                 sratio = sigma - s_[r]
-                data_[r] = lagrange_interpolation([0,1], [denoised_prev2, denoised], 1 + w*RK.c[r]).squeeze(0) + denoised_prev2 - denoised
+                data_[r] = lagrange_interpolation([0,1], [denoised_prev2, denoised], 1 + w*RK.C[r]).squeeze(0) + denoised_prev2 - denoised
                 eps_[r]  = get_epsilon(x_0, data_[r], s_[r], RK.rk_type)      
                 
             if extra_options_flag("implicit_lagrange_skip_model_call_at_start_0_only", extra_options):
@@ -110,12 +110,12 @@ def init_implicit_sampling(RK, x_0, x_, eps_, eps_prev_, data_, eps, denoised, d
         sigma_prev = sigmas[step-1]
         h_prev = sigma - sigma_prev
         w = h / h_prev
-        substeps_prev = len(RK.c[:-1])
+        substeps_prev = len(RK.C[:-1])
 
         z_prev_ = eps_.clone()
         for r in range (substeps_prev):
-            z_prev_[r] = h * RK.a_k_sum(eps_, r) #+ RK.u_k_sum(eps_prev_, r)) # u,v not implemented for lagrange guess for implicit
-        zi_1 = lagrange_interpolation(RK.c[:-1], z_prev_[:substeps_prev], RK.c[0]).squeeze(0) # + x_prev - x_0"""         had at the end before c1
+            z_prev_[r] = h * RK.zum(r, eps_) # u,v not implemented for lagrange guess for implicit
+        zi_1 = lagrange_interpolation(RK.C[:-1], z_prev_[:substeps_prev], RK.C[0]).squeeze(0) # + x_prev - x_0"""
         x_[0] = x_0 + zi_1
         
     else:
@@ -144,8 +144,8 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
                   noise_boost_step=0.0, noise_boost_substep=0.0,
                   ):
     extra_args = {} if extra_args is None else extra_args
-    default_dtype = getattr(torch, get_extra_options_kv("default_dtype", "", extra_options), x.dtype)
     default_device = x.device
+    default_dtype = getattr(torch, get_extra_options_kv("default_dtype", "", extra_options), x.dtype)
     x = x.to(default_dtype)
     MAX_STEPS=10000
 
@@ -282,9 +282,9 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
         RK.set_coeff(rk_type, h, c1, c2, c3, step, sigmas, sigma_down, extra_options)
         if RK.IMPLICIT:
             RK.reorder_tableau(reorder_tableau_indices)
-        row_offset = 1 if not RK.IMPLICIT and RK.a[0].sum() == 0 else 0   
+        row_offset = 1 if not RK.IMPLICIT and RK.A[0].sum() == 0 else 0   
 
-        s_ = [(RK.sigma_fn(RK.t_fn(sigma) + h*c_)) * x.new_ones([1]) for c_ in RK.c]
+        s_ = [(RK.sigma_fn(RK.t_fn(sigma) + h*c_)) * x.new_ones([1]) for c_ in RK.C]
 
         recycled_stages = max(RK.multistep_stages, RK.hybrid_stages)
         if step == 0 or step == guide_skip_steps:
@@ -369,7 +369,7 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
                             x_tmp =     x_row_pseudoimplicit 
                             s_tmp = sub_sigma_pseudoimplicit 
                             
-                        # Fully implicit iteration (explicit only)                   # Fully implicit iteration (implicit only... not standard) 
+                        # Fully implicit iteration (explicit only)                   # or... Fully implicit iteration (implicit only... not standard) 
                         elif (full_iter > 0 and row_offset == 1 and row == 0)   or   (full_iter > 0 and row_offset == 0 and row == 0 and extra_options_flag("fully_implicit_update_x", extra_options)):
                             if extra_options_flag("fully_explicit_pogostick_eta", extra_options): 
                                 super_alpha_ratio, super_sigma_up, super_sigma_down = get_alpha_ratio_from_sigma_down(sigma_next, sigma, eta)
@@ -397,9 +397,9 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
                                 if row == 0 and (extra_options_flag("implicit_lagrange_init", extra_options)  or   extra_options_flag("radaucycle", extra_options)):
                                     pass
                                 elif row == 0 and not extra_options_flag("substep_eta_use_final", extra_options):
-                                    x_tmp = x_[row+row_offset] = x_0 + h     * (RK.a_k_sum(eps_, row+row_offset) + RK.u_k_sum(eps_prev_, row+row_offset))
+                                    x_tmp = x_[row+row_offset] = x_0 + h     * RK.zum(row+row_offset, eps_, eps_prev_)
                                 else:
-                                    x_tmp = x_[row+row_offset] = x_0 + h_new * (RK.a_k_sum(eps_, row+row_offset) + RK.u_k_sum(eps_prev_, row+row_offset))
+                                    x_tmp = x_[row+row_offset] = x_0 + h_new * RK.zum(row+row_offset, eps_, eps_prev_)
                                     x_tmp = x_[row+row_offset] = NS.add_noise_post(x_0, x_[row+row_offset], sub_sigma_up, sigma, sub_sigma, sub_sigma_next, real_sub_sigma_down, sub_alpha_ratio, s_noise_substep, noise_mode_sde_substep, SDE_NOISE_EXTERNAL, sde_noise_t, SUBSTEP=True)
 
                         # MAKE MODEL CALL
@@ -451,16 +451,16 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
                             x_tmp_ = x_.clone()
                             eps_tmp_ = eps_.clone()
                             for i in range(100):
-                                x_0 = x_[row+row_offset] - h * (RK.a_k_sum(eps_, row + row_offset) + RK.u_k_sum(eps_prev_, row + row_offset))
+                                x_0 = x_[row+row_offset] - h * RK.zum(row+row_offset, eps_, eps_prev_)
                                 for rr in range(row+row_offset):
-                                    x_[rr] = x_0 + h * (RK.a_k_sum(eps_, rr) + RK.u_k_sum(eps_prev_, rr))
+                                    x_[rr] = x_0 + h * RK.zum(rr, eps_, eps_prev_)
                                 for rr in range(row+row_offset):
                                     eps_[rr] = get_epsilon2(x_0, x_[rr], data_[rr], s_[rr], rk_type)
                             x_0  = x_0_tmp  + bong_strength * (x_0  - x_0_tmp)
                             x_   = x_tmp_   + bong_strength * (x_   - x_tmp_)
                             eps_ = eps_tmp_ + bong_strength * (eps_ - eps_tmp_)
 
-            denoised = x_0 + ((sigma / (sigma - sigma_down)) *  h_new) * (RK.b_k_sum(eps_, 0) + RK.v_k_sum(eps_prev_, 0))
+            denoised = x_0 + ((sigma / (sigma - sigma_down)) *  h_new) * RK.zum(RK.rows, eps_, eps_prev_)
             eps = get_epsilon(x_0, denoised, sigma_next, rk_type)
             
             x = x_[RK.rows - RK.multistep_stages - row_offset + 1]

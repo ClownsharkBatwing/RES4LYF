@@ -48,6 +48,11 @@ class RK_Method_Beta:
             self.EXPONENTIAL = False
         
         self.stages = 0
+        self.A = None
+        self.B = None
+        self.U = None
+        self.V = None
+        
         self.a = None
         self.b = None
         self.u = None
@@ -119,7 +124,16 @@ class RK_Method_Beta:
         self.multistep_stages = multistep_stages
         self.hybrid_stages    = hybrid_stages
         
-        self.a = torch.tensor(a, dtype=h.dtype, device=h.device)
+        self.A = torch.tensor(a, dtype=h.dtype, device=h.device)
+        self.B = torch.tensor(b, dtype=h.dtype, device=h.device)
+        self.C = torch.tensor(ci, dtype=h.dtype, device=h.device)
+
+        
+        if u is not None and v is not None:
+            self.U = torch.tensor(u, dtype=h.dtype, device=h.device)
+            self.V = torch.tensor(v, dtype=h.dtype, device=h.device)
+        
+        """self.a = torch.tensor(a, dtype=h.dtype, device=h.device)
         self.a = self.a.view(*self.a.shape, 1, 1, 1, 1, 1)
         
         self.b = torch.tensor(b, dtype=h.dtype, device=h.device)
@@ -130,118 +144,79 @@ class RK_Method_Beta:
             self.u = self.u.view(*self.u.shape, 1, 1, 1, 1, 1)
             
             self.v = torch.tensor(v, dtype=h.dtype, device=h.device)
-            self.v = self.v.view(*self.v.shape, 1, 1, 1, 1, 1)
+            self.v = self.v.view(*self.v.shape, 1, 1, 1, 1, 1)"""
         
-        self.c = torch.tensor(ci, dtype=h.dtype, device=h.device)
-        self.rows = self.a.shape[0]
-        self.cols = self.a.shape[1]
+        self.rows = self.A.shape[0]
+        self.cols = self.A.shape[1]
 
 
     def reorder_tableau(self, indices):
         if indices[0]:
-            self.a    = self.a   [indices]
-            self.b[0] = self.b[0][indices]
-            self.c    = self.c   [indices]
-            self.c = torch.cat((self.c, self.c[-1:])) 
+            self.A    = self.A   [indices]
+            self.B[0] = self.B[0][indices]
+            self.C    = self.C   [indices]
+            self.C = torch.cat((self.C, self.C[-1:])) 
         return
 
     def update_substep(self, x_0, x_, eps_, eps_prev_, row, row_offset, h, h_new, h_new_orig, sigma, real_sub_sigma_down, sub_sigma_up, sub_sigma, sub_sigma_next, sub_alpha_ratio, s_noise_substep, noise_mode_sde_substep, NS, \
                        SYNC_MEAN_CW, CONSERVE_MEAN_CW, SDE_NOISE_EXTERNAL, sde_noise_t, extra_options, IMPLICIT_PREDICTOR=False,):
         if extra_options_flag("guide_fully_pseudoimplicit_use_post_substep_eta", extra_options):
             IMPLICIT_PREDICTOR=True
+        zr = self.zum(row+row_offset, eps_, eps_prev_)
         if row < self.rows - row_offset   and   self.multistep_stages == 0:
             if (self.IMPLICIT and not IMPLICIT_PREDICTOR) or (self.IMPLICIT and row == 0):
-                x_[row+row_offset] = x_0 + h     * (self.a_k_sum(eps_, row + row_offset) + self.u_k_sum(eps_prev_, row + row_offset))
+                x_[row+row_offset] = x_0 + h * zr
             else:
-                x_[row+row_offset] = x_row_down = x_0 + h_new * (self.a_k_sum(eps_, row + row_offset) + self.u_k_sum(eps_prev_, row + row_offset))
-                x_[row+row_offset] = NS.add_noise_post(x_0, x_[row+row_offset], sub_sigma_up, sigma, sub_sigma, sub_sigma_next, real_sub_sigma_down, sub_alpha_ratio, s_noise_substep, noise_mode_sde_substep, CONSERVE_MEAN_CW, SDE_NOISE_EXTERNAL, sde_noise_t, SUBSTEP=True)
+                x_row_down = x_0 + h_new * self.zum(row+row_offset, eps_, eps_prev_)
+                x_[row+row_offset] = NS.add_noise_post(x_0, x_row_down, sub_sigma_up, sigma, sub_sigma, sub_sigma_next, real_sub_sigma_down, sub_alpha_ratio, s_noise_substep, noise_mode_sde_substep, CONSERVE_MEAN_CW, SDE_NOISE_EXTERNAL, sde_noise_t, SUBSTEP=True)
 
                 if (SYNC_MEAN_CW and h_new != h_new_orig) or extra_options_flag("sync_mean_noise", extra_options):
                     eps_row_down = x_[row+row_offset] - x_row_down
-                    x_row_next_tmp = x_0 + h * (self.a_k_sum(eps_, row + row_offset) + self.u_k_sum(eps_prev_, row + row_offset))
-                    x_row_down_tmp = x_0 + h_new_orig * (self.a_k_sum(eps_, row + row_offset) + self.u_k_sum(eps_prev_, row + row_offset))
+                    x_row_next_tmp = x_0 + h          * zr
+                    x_row_down_tmp = x_0 + h_new_orig * zr
                     x_row_tmp = x_row_down_tmp + eps_row_down
-                    for c in range(x_[0].shape[-3]):
-                        #x_[row+row_offset][..., c, :, :] = x_[row+row_offset][..., c, :, :] - x_[row+row_offset][..., c, :, :].mean() + x_row_tmp[..., c, :, :].mean()
-                        x_[row+row_offset][..., c, :, :] = x_[row+row_offset][..., c, :, :] - x_[row+row_offset][..., c, :, :].mean() + x_row_next_tmp[..., c, :, :].mean() 
+                    x_[row+row_offset] = x_[row+row_offset] - x_[row+row_offset].mean(dim=(-2,-1), keepdim=True) + x_row_next_tmp.mean(dim=(-2,-1), keepdim=True)
+
         else: 
             if (self.IMPLICIT and not IMPLICIT_PREDICTOR) or (self.IMPLICIT and row == 0) or row_offset == 1:
-                x_[row+1] = x_0 + h     * (self.b_k_sum(eps_, 0) + self.v_k_sum(eps_prev_, 0))
+                x_[row+1] = x_0 + h * zr
             else:
-                x_[row+1] = x_row_down = x_0 + h_new * (self.b_k_sum(eps_, 0) + self.v_k_sum(eps_prev_, 0))
-                x_[row+1] = NS.add_noise_post(x_0, x_[row+1], sub_sigma_up, sigma, sub_sigma, sub_sigma_next, real_sub_sigma_down, sub_alpha_ratio, s_noise_substep, noise_mode_sde_substep, CONSERVE_MEAN_CW, SDE_NOISE_EXTERNAL, sde_noise_t, SUBSTEP=False)
+                x_row_down = x_0 + h_new * zr
+                x_[row+1] = NS.add_noise_post(x_0, x_row_down, sub_sigma_up, sigma, sub_sigma, sub_sigma_next, real_sub_sigma_down, sub_alpha_ratio, s_noise_substep, noise_mode_sde_substep, CONSERVE_MEAN_CW, SDE_NOISE_EXTERNAL, sde_noise_t, SUBSTEP=False)
 
                 if (SYNC_MEAN_CW and h_new != h_new_orig) or extra_options_flag("sync_mean_noise", extra_options):
                     eps_row_down = x_[row+1] - x_row_down
-                    x_row_next_tmp = x_0 + h * (self.b_k_sum(eps_, 0) + self.v_k_sum(eps_prev_, 0))
-                    x_row_down_tmp = x_0 + h_new_orig * (self.b_k_sum(eps_, 0) + self.v_k_sum(eps_prev_, 0))
+                    x_row_next_tmp = x_0 + h          * zr
+                    x_row_down_tmp = x_0 + h_new_orig * zr
                     x_row_tmp = x_row_down_tmp + eps_row_down
-                    for c in range(x_[0].shape[-3]):
-                        #x_[row+1][..., c, :, :] = x_[row+1][..., c, :, :] - x_[row+1][..., c, :, :].mean() + x_row_tmp[..., c, :, :].mean()
-                        x_[row+1][..., c, :, :] = x_[row+1][..., c, :, :] - x_[row+1][..., c, :, :].mean() + x_row_next_tmp[..., c, :, :].mean()
+                    x_[row+1] = x_[row+1] - x_[row+1].mean(dim=(-2,-1), keepdim=True) + x_row_next_tmp.mean(dim=(-2,-1), keepdim=True)
 
         return x_
-
-    def a_k_sum(self, k, row):
-        if len(k.shape) == 4:
-            a_coeff = self.a[row].squeeze(-1)
-            ks = k * a_coeff.sum(dim=0)
-        elif len(k.shape) == 5:
-            a_coeff = self.a[row].squeeze(-1)
-            ks = (k[0:self.cols] * a_coeff).sum(dim=0)
-        elif len(k.shape) == 6:
-            a_coeff = self.a[row]
-            ks = (k[0:self.cols] * a_coeff).sum(dim=0)
+    
+    def a_k_einsum(self, row, k):
+        return torch.einsum('i, i... -> ...', self.A[row], k[:self.cols])
+    
+    def b_k_einsum(self, row, k):
+        return torch.einsum('i, i... -> ...', self.B[row], k[:self.cols])
+    
+    def u_k_einsum(self, row, k_prev):
+        return torch.einsum('i, i... -> ...', self.U[row], k_prev[:self.cols]) if (self.U is not None and k_prev is not None) else 0
+    
+    def v_k_einsum(self, row, k_prev):
+        return torch.einsum('i, i... -> ...', self.V[row], k_prev[:self.cols]) if (self.V is not None and k_prev is not None) else 0
+    
+    def zum(self, row, k, k_prev=None,):
+        if row < self.rows:
+            return self.a_k_einsum(row, k) + self.u_k_einsum(row, k_prev)
         else:
-            raise ValueError(f"Unexpected k shape: {k.shape}")
-        return ks
-
-    def b_k_sum(self, k, row):
-        if len(k.shape) == 4:
-            b_coeff = self.b[row].squeeze(-1)
-            ks = k * b_coeff.sum(dim=0)
-        elif len(k.shape) == 5:
-            b_coeff = self.b[row].squeeze(-1)
-            ks = (k[0:self.cols] * b_coeff).sum(dim=0)
-        elif len(k.shape) == 6:
-            b_coeff = self.b[row]
-            ks = (k[0:self.cols] * b_coeff).sum(dim=0)
-        else:
-            raise ValueError(f"Unexpected k shape: {k.shape}")
-        return ks
-
-    def u_k_sum(self, k, row):
-        if self.u is None:
-            return 0
-        if len(k.shape) == 4:
-            u_coeff = self.u[row].squeeze(-1)
-            ks = k * u_coeff.sum(dim=0)
-        elif len(k.shape) == 5:
-            u_coeff = self.u[row].squeeze(-1)
-            ks = (k[0:self.cols] * u_coeff).sum(dim=0)
-        elif len(k.shape) == 6:
-            u_coeff = self.u[row]
-            ks = (k[0:self.cols] * u_coeff).sum(dim=0)
-        else:
-            raise ValueError(f"Unexpected k shape: {k.shape}")
-        return ks
-
-    def v_k_sum(self, k, row):
-        if self.v is None:
-            return 0
-        if len(k.shape) == 4:
-            v_coeff = self.v[row].squeeze(-1)
-            ks = k * v_coeff.sum(dim=0)
-        elif len(k.shape) == 5:
-            v_coeff = self.v[row].squeeze(-1)
-            ks = (k[0:self.cols] * v_coeff).sum(dim=0)
-        elif len(k.shape) == 6:
-            v_coeff = self.v[row]
-            ks = (k[0:self.cols] * v_coeff).sum(dim=0)
-        else:
-            raise ValueError(f"Unexpected k shape: {k.shape}")
-        return ks
-
+            row = row - self.rows
+            return self.b_k_einsum(row, k) + self.v_k_einsum(row, k_prev)
+        
+    def zum_tableau(self, k, k_prev=None,):
+        a_k_sum = torch.einsum('ij, j... -> i...', self.A, k[:self.cols])
+        u_k_sum = torch.einsum('ij, j... -> i...', self.U, k_prev[:self.cols]) if (self.U is not None and k_prev is not None) else 0
+        return a_k_sum + u_k_sum
+        
 
     def init_cfg_channelwise(self, x, cfg_cw=1.0, **extra_args):
         self.uncond = [torch.full_like(x, 0.0)]
@@ -416,10 +391,11 @@ class RK_Method_Beta:
                     seq_start, seq_stop = start, stop
                     
                 for r_ in range(seq_start, seq_stop):
-                    if r_ < self.rows:
-                        x_[r_] = x_0 + h * (self.a_k_sum(eps_, r_) + self.u_k_sum(eps_prev_, r_))
-                    else:
-                        x_[r_] = x_0 + h * (self.b_k_sum(eps_, 0) + self.v_k_sum(eps_prev_, 0))
+                    x_[r_] = x_0 + h * self.zum(r_, eps_, eps_prev_)
+                    #if r_ < self.rows:
+                    #    x_[r_] = x_0 + h * (self.a_k_sum(eps_, r_) + self.u_k_sum(eps_prev_, r_))
+                    #else:
+                    #    x_[r_] = x_0 + h * (self.b_k_sum(eps_, 0) + self.v_k_sum(eps_prev_, 0))
 
                 for r_ in range(seq_start, seq_stop):
                     if newton_iter_type == "from_data":
@@ -764,7 +740,7 @@ class RK_NoiseSampler:
         sigma_up = eta * sigma * dt**0.5
         alpha_ratio = 1 - dt * (eta**2/4) * (1 + sigma)
         sigma_down = sigma_next - (eta/4)*sigma*(1-sigma)*(sigma - sigma_next)
-        return alpha_ratio, sigma_down, sigma_up
+        return sigma_up, sigma_down, alpha_ratio
         
     def get_vpsde_step(self, sigma, sigma_next, eta):
         dt = sigma - sigma_next

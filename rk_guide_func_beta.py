@@ -238,7 +238,6 @@ class LatentGuide:
             y0 = y0[min(step, y0.shape[0]-1)].unsqueeze(0)
         
         lgw_mask, lgw_mask_inv = self.get_masks_for_step(step)
-        mask = self.mask.to(x_0.device)
         
         
         
@@ -261,7 +260,7 @@ class LatentGuide:
             return None, None #eps_, x_      #deactivate, too similar
         
         
-                
+
         if "fully_pseudoimplicit" in self.guide_mode:
             if self.x_lying_ is None:
                 return None, None
@@ -315,7 +314,6 @@ class LatentGuide:
             y0 = y0[min(step, y0.shape[0]-1)].unsqueeze(0)
         
         lgw_mask, lgw_mask_inv = self.get_masks_for_step(step)
-        mask = self.mask.to(x_0.device)
         
         
         
@@ -465,7 +463,7 @@ class LatentGuide:
 
     @torch.no_grad
     def process_guides_substep(self, x_0, x_, eps_, data_, row, step, sigma, sigma_next, sigma_down, s_, unsample_resample_scale, RK, rk_type, extra_options):
-        row_offset = 1 if RK.a[0].sum() == 0 and rk_type not in IRK_SAMPLER_NAMES_BETA else 0 
+        row_offset = 1 if RK.A[0].sum() == 0 and not RK.IMPLICIT else 0 #rk_type not in IRK_SAMPLER_NAMES_BETA else 0 
             
         y0 = self.y0.clone().to(self.device)
         if self.HAS_LATENT_GUIDE_INV:
@@ -506,9 +504,6 @@ class LatentGuide:
             if not extra_options_flag("disable_lgw_scaling_substep_ch_mean_std", extra_options):
                 extra_options += "\nsubstep_eps_ch_mean_std\n"
                 
-
-
-        # s_in = x_0.new_ones([x_0.shape[0]])
         eps_orig = eps_.clone()
         
         if extra_options_flag("dynamic_guides_mean_std", extra_options):
