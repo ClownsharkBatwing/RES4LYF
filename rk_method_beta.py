@@ -764,11 +764,16 @@ class RK_NoiseSampler:
         sigma_up = eta * sigma * dt**0.5
         alpha_ratio = 1 - dt * (eta**2/4) * (1 + sigma)
         sigma_down = sigma_next - (eta/4)*sigma*(1-sigma)*(sigma - sigma_next)
+        return alpha_ratio, sigma_down, sigma_up
+        
+    def get_vpsde_step(self, sigma, sigma_next, eta):
+        dt = sigma - sigma_next
+        sigma_up = eta * sigma * dt**0.5
+        alpha_ratio = 1 - dt * (eta**2/4) * (1 + sigma)
+        sigma_down = sigma_next - (eta/4)*sigma*(1-sigma)*(sigma - sigma_next)
         return sigma_up, sigma_down, alpha_ratio
                 
-            
-            
-            
+        
     def add_noise_pre(self, x_0, x, sigma_up, sigma_0, sigma, sigma_next, real_sigma_down, alpha_ratio, s_noise, noise_mode, CONSERVE_MEAN_CW=True, SDE_NOISE_EXTERNAL=False, sde_noise_t=None, SUBSTEP=False):
         if not self.CONST and noise_mode == "hard_sq": 
             if self.LOCK_H_SCALE:
