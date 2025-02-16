@@ -167,6 +167,10 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
     rk_swap_type      =       get_extra_options_kv("rk_swap_type",         "",     extra_options)   
     CONSERVE_MEAN_CW  =         extra_options_flag("eta_conserve_mean_cw",         extra_options)  
     SYNC_MEAN_CW  =         not extra_options_flag("eta_sync_mean_cw_disable",     extra_options)  
+    LOCK_H_SCALE      =         extra_options_flag("lock_h_scale",                 extra_options)  
+    
+    DOWN_SUBSTEP      =         extra_options_flag("down_substep",                 extra_options)  
+    DOWN_STEP         =         extra_options_flag("down_step",                    extra_options)  
     
     brownian_sub_start = get_extra_options_kv("brownian_sub_start", "sub_sigma",    extra_options)
     brownian_sub_stop  = get_extra_options_kv("brownian_sub_stop",  "sub_sigma_next", extra_options)
@@ -206,7 +210,7 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
             sigma_up_total = torch.zeros_like(sigmas[0])
             for i in range(len(sde_noise)-1):
                 sigma_up_total += sigmas[i+1]
-            #eta = eta / sigma_up_total    # no effect anymore... eta set later
+            etas = torch.full_like(sigmas, eta / sigma_up_total)
             
     sigma_min = model.inner_model.inner_model.model_sampling.sigma_min.to(default_dtype).to(default_device)
     if sigmas[-1] == 0:
@@ -215,7 +219,6 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
         elif sigmas[-2] > sigma_min:
             sigmas = torch.cat((sigmas[:-1], sigma_min.unsqueeze(0), sigmas[-1:]))
 
-
     # SETUP SAMPLER
     if implicit_sampler_name not in ("use_explicit", "none"):
         rk_type = implicit_sampler_name
@@ -223,23 +226,19 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
     if implicit_sampler_name == "none":
         implicit_steps_diag = implicit_steps_full = 0
 
-    RK = RK_Method_Beta.create(model, rk_type, device=x.device, dtype=default_dtype)
+    RK = RK_Method_Beta.create(model, rk_type, device=default_device, dtype=default_dtype)
     RK.extra_args = RK.init_cfg_channelwise(x, cfg_cw, **extra_args)
     RK.extra_args['model_options']['transformer_options']['regional_conditioning_weight'] = 0.0
     RK.extra_args['model_options']['transformer_options']['regional_conditioning_floor']  = 0.0
     
-    NS = RK_NoiseSampler(model, device=x.device, dtype=default_dtype)
-    NS.init_noise_sampler(x, noise_seed, noise_sampler_type, noise_sampler_type_substep, alpha, alpha_substep, k, k_substep)
+    NS = RK_NoiseSampler(model, sigmas, device=default_device, dtype=default_dtype)
+    NS.init_noise_samplers(x, noise_seed, noise_sampler_type, noise_sampler_type_substep, noise_mode, noise_mode_sde_substep, alpha, alpha_substep, k, k_substep)
+    NS.LOCK_H_SCALE = LOCK_H_SCALE
     
-
-
 
     # SETUP GUIDES
     LG = LatentGuide(model, sigmas, UNSAMPLE, LGW_MASK_RESCALE_MIN, extra_options, dtype=default_dtype, frame_weights_grp=frame_weights_grp)
     x = LG.init_guides(x, guides, NS.noise_sampler)
-    if LG.y0 is not None:
-        y0 = LG.y0.to(x.device)
-        y0_inv = LG.y0_inv.to(x.device) if LG.y0_inv is not None else torch.zeros_like(LG.y0)
 
     data_           = None
     eps_            = None
@@ -247,14 +246,8 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
     denoised        = torch.zeros_like(x)
     denoised_prev   = torch.zeros_like(x).to('cpu')
     denoised_prev2  = torch.zeros_like(x)
-    denoised_   = None
-    s_prev      = None
-    x_prev      = None
     x_          = None
     eps_prev_   = None
-    x_lying_    = None
-    s_lying_    = None
-    eps_lying_  = None
 
     torch.cuda.synchronize()
     torch.cuda.empty_cache()
@@ -275,19 +268,13 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
         s_noise         = s_noises        [step] if s_noises         is not None else s_noise
         s_noise_substep = s_noises_substep[step] if s_noises_substep is not None else s_noise_substep
 
-        #sigma_up_overstep, sigma_overstep, sigma_down_overstep, alpha_ratio_overstep = get_res4lyf_step_with_model(model, sigma, real_sigma_down, overstep_eta, overstep_mode)
-        sigma_up_overstep, sigma_overstep, sigma_down_overstep, alpha_ratio_overstep = get_res4lyf_step_with_model(model, sigma, sigma_next, overstep_eta, overstep_mode)
-
-        #sigma_up, sigma, sigma_down, alpha_ratio = get_res4lyf_step_with_model(model, sigma, sigma_next, eta, noise_mode)
-        sigma_up, sigma, sigma_down, alpha_ratio = get_res4lyf_step_with_model(model, sigma, sigma_down_overstep, eta, noise_mode)
+        sigma_up_overstep, sigma_overstep, sigma_down_overstep, alpha_ratio_overstep = NS.get_sde_step(sigma, sigma_next, overstep_eta, overstep_mode, DOWN=DOWN_STEP)
+        sigma_up, sigma, sigma_down, alpha_ratio = NS.get_sde_step(sigma, sigma_down_overstep, eta, DOWN=DOWN_STEP)
+        
         real_sigma_down = sigma_down.clone()
-
         if extra_options_flag("lock_h_scale", extra_options):
             sigma_down = sigma_down_overstep
-            #sigma_down = sigma_next
-            
-        #sigma_down = sigma_down_overstep
-        
+
         h         = RK.h_fn(sigma_down, sigma)
         h_no_eta  = RK.h_fn(sigma_next, sigma)
         h = h + noise_boost_step * (h_no_eta - h)
@@ -312,7 +299,7 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
             else:
                 sde_noise_t = sde_noise[step]
         
-        x_[0] = NS.add_noise_pre(x, sigma_up, sigma, sigma_next, alpha_ratio, s_noise, noise_mode, CONSERVE_MEAN_CW, SDE_NOISE_EXTERNAL, sde_noise_t)
+        x_[0] = NS.add_noise_pre(x, x, sigma_up, sigma, sigma_next, real_sigma_down, alpha_ratio, s_noise, noise_mode, CONSERVE_MEAN_CW, SDE_NOISE_EXTERNAL, sde_noise_t)
         x_0 = x_[0].clone()
 
         # RECYCLE STAGES FOR MULTISTEP
@@ -358,7 +345,7 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
                             alpha_ratio /= alpha_ratio
                             h_new = h = h_no_eta
                         elif (row < RK.rows-row_offset-RK.multistep_stages   or   diag_iter < implicit_steps_diag)   or   extra_options_flag("substep_eta_use_final", extra_options):
-                            sub_sigma_up, sub_sigma, sub_sigma_down, sub_alpha_ratio = get_res4lyf_step_with_model(model, s_[row], s_[row+row_offset+RK.multistep_stages], eta_substep, noise_mode_sde_substep)
+                            sub_sigma_up, sub_sigma, sub_sigma_down, sub_alpha_ratio = NS.get_sde_substep(s_[row], s_[row+row_offset+RK.multistep_stages], eta_substep, DOWN=DOWN_SUBSTEP)
                             
                     real_sub_sigma_down = sub_sigma_down.clone()
                     if extra_options_flag("lock_h_scale", extra_options):
@@ -368,11 +355,11 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
                     h_new_orig = h_new.clone()
                     h_new = h_new + noise_boost_substep * (h - h_new)
 
-
-
                     # PREPARE PSEUDOIMPLICIT GUIDES
                     x_row_pseudoimplicit, sub_sigma_pseudoimplicit = LG.process_pseudoimplicit_guides_substep(model, x_0, x_, eps_, eps_prev_, data_, row, row_offset, h, h_new, h_new_orig, step, sigmas, s_, real_sub_sigma_down, sub_sigma_up, sub_sigma, sub_sigma_next, sub_alpha_ratio, s_noise_substep, noise_mode_sde_substep, NS, \
                                                     noise_boost_substep, eta_substep, SYNC_MEAN_CW, CONSERVE_MEAN_CW, SDE_NOISE_EXTERNAL, sde_noise_t, RK, rk_type, pseudoimplicit_row_weights, pseudoimplicit_step_weights, full_iter, extra_options)
+
+                    x_[row] = NS.add_noise_pre(x_0, x_[row], sub_sigma_up, sub_sigma, sub_sigma_next, real_sub_sigma_down, sub_alpha_ratio, s_noise_substep, noise_mode_sde_substep, CONSERVE_MEAN_CW, SDE_NOISE_EXTERNAL, sde_noise_t)
 
                     # MODEL CALL
                     if row < RK.rows: # A-tableau still
@@ -382,19 +369,18 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
                             x_tmp =     x_row_pseudoimplicit 
                             s_tmp = sub_sigma_pseudoimplicit 
                             
-                        # Fully implicit iteration (explicit only)                   # Fully implicit iteration (implicit only... not standard)
-                        elif (full_iter > 0 and row_offset == 1 and row == 0)   and   extra_options_flag("fully_explicit_pogostick_eta", extra_options): 
-                            #sigma_up_pogo, sigma_pogo, sigma_down_pogo, alpha_ratio_pogo = get_res4lyf_step_with_model(model, sigma, sigma_next, eta, noise_mode)  
-                            super_alpha_ratio, super_sigma_up, super_sigma_down = get_alpha_ratio_from_sigma_down(sigma_next, sigma, eta)
-                            x = super_alpha_ratio * x + super_sigma_up * NS.noise_sampler(sigma=sigma, sigma_next=sigma_next)
-                            x_tmp = x
-                            s_tmp = sigma
+                        # Fully implicit iteration (explicit only)                   # Fully implicit iteration (implicit only... not standard) 
+                        elif (full_iter > 0 and row_offset == 1 and row == 0)   or   (full_iter > 0 and row_offset == 0 and row == 0 and extra_options_flag("fully_implicit_update_x", extra_options)):
+                            if extra_options_flag("fully_explicit_pogostick_eta", extra_options): 
+                                super_alpha_ratio, super_sigma_up, super_sigma_down = get_alpha_ratio_from_sigma_down(sigma_next, sigma, eta)
+                                x = super_alpha_ratio * x + super_sigma_up * NS.noise_sampler(sigma=sigma, sigma_next=sigma_next)
+                                
+                                x_tmp = x
+                                s_tmp = sigma
+                            else:
+                                x_tmp = x
+                                s_tmp = sigma_next
                             
-                        # Fully implicit iteration (explicit only)                   # Fully implicit iteration (implicit only... not standard)
-                        elif (full_iter > 0 and row_offset == 1 and row == 0)   or   (full_iter > 0 and row_offset == 0 and row == 0 and extra_options_flag("fully_implicit_update_x", extra_options)): 
-                            x_tmp = x
-                            s_tmp = sigma_next
-
                         # All others
                         else:
                             if diag_iter > 0: # Diagonally implicit iteration (explicit or implicit)
@@ -402,7 +388,7 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
                                 s_tmp = s_[row+row_offset+RK.multistep_stages]
                             else:
                                 x_tmp = x_[row]
-                                s_tmp = s_[row]
+                                s_tmp = sub_sigma #s_[row]
 
                             if RK.IMPLICIT: 
                                 if not extra_options_flag("implicit_guide_preproc_disable", extra_options):
@@ -414,15 +400,10 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
                                     x_tmp = x_[row+row_offset] = x_0 + h     * (RK.a_k_sum(eps_, row+row_offset) + RK.u_k_sum(eps_prev_, row+row_offset))
                                 else:
                                     x_tmp = x_[row+row_offset] = x_0 + h_new * (RK.a_k_sum(eps_, row+row_offset) + RK.u_k_sum(eps_prev_, row+row_offset))
-                                    if extra_options_flag("lock_h_scale", extra_options):
-                                        x_tmp = x_[row+row_offset] = vpsde_noise_add(x_0, x_[row+row_offset], sigma, sub_sigma_next, real_sub_sigma_down, sub_sigma_up, sub_alpha_ratio, s_noise_substep, NS.noise_sampler2)
-                                    else:
-                                        x_tmp = x_[row+row_offset] = NS.add_noise_post(x_[row+row_offset], sub_sigma_up, sub_sigma, sub_sigma_next, sub_alpha_ratio, s_noise_substep, noise_mode_sde_substep, SDE_NOISE_EXTERNAL, sde_noise_t, SUBSTEP=True)
+                                    x_tmp = x_[row+row_offset] = NS.add_noise_post(x_0, x_[row+row_offset], sub_sigma_up, sigma, sub_sigma, sub_sigma_next, real_sub_sigma_down, sub_alpha_ratio, s_noise_substep, noise_mode_sde_substep, SDE_NOISE_EXTERNAL, sde_noise_t, SUBSTEP=True)
 
                         # MAKE MODEL CALL
-                        if RK.IMPLICIT   and   row == 0   and   extra_options_flag("radaucycle", extra_options):
-                            pass
-                        elif RK.IMPLICIT   and   row == 0   and   extra_options_flag("implicit_lazy_recycle_first_model_call_at_start", extra_options):
+                        if RK.IMPLICIT   and   row == 0   and   (extra_options_flag("implicit_lazy_recycle_first_model_call_at_start", extra_options)   or   extra_options_flag("radaucycle", extra_options)):
                             pass
                         else: 
                             if s_tmp == 0:
@@ -437,11 +418,10 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
                                 callback({'x': x, 'i': step, 'sigma': sigma, 'sigma_next': sigma_next, 'denoised': data_[row].to(torch.float32)}) if callback is not None else None
 
                         # GUIDE 
-                        if not extra_options_flag("guide_disable_regular_substep", extra_options):
-                            if not extra_options_flag("disable_guides_eps_substep", extra_options):
-                                eps_, x_      = LG.process_guides_substep(x_0, x_, eps_,      data_, row, step, sigma, sigma_next, sigma_down, s_, unsample_resample_scale, RK, rk_type, extra_options)
-                            if not extra_options_flag("disable_guides_eps_prev_substep", extra_options):
-                                eps_prev_, x_ = LG.process_guides_substep(x_0, x_, eps_prev_, data_, row, step, sigma, sigma_next, sigma_down, s_, unsample_resample_scale, RK, rk_type, extra_options)
+                        if not extra_options_flag("disable_guides_eps_substep", extra_options):
+                            eps_, x_      = LG.process_guides_substep(x_0, x_, eps_,      data_, row, step, sigma, sigma_next, sigma_down, s_, unsample_resample_scale, RK, rk_type, extra_options)
+                        if not extra_options_flag("disable_guides_eps_prev_substep", extra_options):
+                            eps_prev_, x_ = LG.process_guides_substep(x_0, x_, eps_prev_, data_, row, step, sigma, sigma_next, sigma_down, s_, unsample_resample_scale, RK, rk_type, extra_options)
 
                         if (full_iter == 0 and diag_iter == 0)   or   extra_options_flag("newton_iter_post_use_on_implicit_steps", extra_options):
                             x_, eps_ = RK.newton_iter(x_0, x_, eps_, eps_prev_, data_, s_, row, h, sigmas, step, "post", extra_options)
@@ -488,23 +468,18 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
             if extra_options_flag("overstep", extra_options):
                 eps = (x_0 - x) / (sigma - sigma_down_overstep)
                 denoised = x_0 - sigma * eps
-                #eps = (x_0 - denoised) / sigma
                 x = denoised + sigma_down * eps
             
             x = LG.process_guides_poststep(x, denoised, eps, step, extra_options)
             
             preview_callback(x, eps, denoised, x_, eps_, data_, step, sigma, sigma_next, callback, extra_options)
 
-            if extra_options_flag("lock_h_scale", extra_options):
-                #x = vpsde_noise_add(x_0, x, sigma, sigma_down_overstep, real_sigma_down, sigma_up, alpha_ratio, s_noise, NS.noise_sampler)
-                x = vpsde_noise_add(x_0, x, sigma, sigma_next, real_sigma_down, sigma_up, alpha_ratio, s_noise, NS.noise_sampler)
-            else:
-                x = NS.add_noise_post(x, sigma_up, sigma, sigma_next, alpha_ratio, s_noise, noise_mode, SDE_NOISE_EXTERNAL, sde_noise_t)
-        
-            #if overstep_eta != 0.0:
-            #    noise = NS.noise_sampler(sigma=sigma, sigma_next=sigma_next)
-            #    x = alpha_ratio_overstep * x + sigma_up_overstep * noise
-        
+            x = NS.add_noise_post(x_0, x, sigma_up, sigma, sigma, sigma_next, real_sigma_down, alpha_ratio, s_noise, noise_mode, SDE_NOISE_EXTERNAL, sde_noise_t)
+            
+            if overstep_eta != 0.0:
+                noise = NS.noise_sampler(sigma=sigma, sigma_next=sigma_next)
+                x = alpha_ratio_overstep * x + sigma_up_overstep * noise
+
         data_prev_[0] = data_[0]
         for ms in range(recycled_stages):
             data_prev_[recycled_stages - ms] = data_prev_[recycled_stages - ms - 1]

@@ -154,12 +154,8 @@ class RK_Method_Beta:
                 x_[row+row_offset] = x_0 + h     * (self.a_k_sum(eps_, row + row_offset) + self.u_k_sum(eps_prev_, row + row_offset))
             else:
                 x_[row+row_offset] = x_row_down = x_0 + h_new * (self.a_k_sum(eps_, row + row_offset) + self.u_k_sum(eps_prev_, row + row_offset))
-                
-                if not extra_options_flag("lock_h_scale", extra_options):
-                    x_[row+row_offset] = NS.add_noise_post(x_[row+row_offset], sub_sigma_up, sub_sigma, sub_sigma_next, sub_alpha_ratio, s_noise_substep, noise_mode_sde_substep, CONSERVE_MEAN_CW, SDE_NOISE_EXTERNAL, sde_noise_t, SUBSTEP=True)
-                else:
-                    x_[row+row_offset] = vpsde_noise_add(x_0, x_[row+row_offset], sigma, sub_sigma_next, real_sub_sigma_down, sub_sigma_up, sub_alpha_ratio, s_noise_substep, NS.noise_sampler2, brownian_sigma=sub_sigma, brownian_sigma_next=sub_sigma_next)
-                
+                x_[row+row_offset] = NS.add_noise_post(x_0, x_[row+row_offset], sub_sigma_up, sigma, sub_sigma, sub_sigma_next, real_sub_sigma_down, sub_alpha_ratio, s_noise_substep, noise_mode_sde_substep, CONSERVE_MEAN_CW, SDE_NOISE_EXTERNAL, sde_noise_t, SUBSTEP=True)
+
                 if (SYNC_MEAN_CW and h_new != h_new_orig) or extra_options_flag("sync_mean_noise", extra_options):
                     eps_row_down = x_[row+row_offset] - x_row_down
                     x_row_next_tmp = x_0 + h * (self.a_k_sum(eps_, row + row_offset) + self.u_k_sum(eps_prev_, row + row_offset))
@@ -173,11 +169,8 @@ class RK_Method_Beta:
                 x_[row+1] = x_0 + h     * (self.b_k_sum(eps_, 0) + self.v_k_sum(eps_prev_, 0))
             else:
                 x_[row+1] = x_row_down = x_0 + h_new * (self.b_k_sum(eps_, 0) + self.v_k_sum(eps_prev_, 0))
-                if not extra_options_flag("lock_h_scale", extra_options):
-                    x_[row+1] = NS.add_noise_post(x_[row+1], sub_sigma_up, sub_sigma, sub_sigma_next, sub_alpha_ratio, s_noise_substep, noise_mode_sde_substep, CONSERVE_MEAN_CW, SDE_NOISE_EXTERNAL, sde_noise_t, SUBSTEP=False)
-                else:
-                     x_[row+1] = vpsde_noise_add(x_0, x_[row+1], sigma, sub_sigma_next, real_sub_sigma_down, sub_sigma_up, sub_alpha_ratio, s_noise_substep, NS.noise_sampler) # brownian sigma?
-                
+                x_[row+1] = NS.add_noise_post(x_0, x_[row+1], sub_sigma_up, sigma, sub_sigma, sub_sigma_next, real_sub_sigma_down, sub_alpha_ratio, s_noise_substep, noise_mode_sde_substep, CONSERVE_MEAN_CW, SDE_NOISE_EXTERNAL, sde_noise_t, SUBSTEP=False)
+
                 if (SYNC_MEAN_CW and h_new != h_new_orig) or extra_options_flag("sync_mean_noise", extra_options):
                     eps_row_down = x_[row+1] - x_row_down
                     x_row_next_tmp = x_0 + h * (self.b_k_sum(eps_, 0) + self.v_k_sum(eps_prev_, 0))
@@ -602,9 +595,23 @@ def get_epsilon_from_step(x, x_next, sigma, sigma_next):
 
 
 class RK_NoiseSampler:
-    def __init__(self, model, device='cuda', dtype=torch.float64):
+    def __init__(self, model, sigmas, step=0, device='cuda', dtype=torch.float64):
         self.device = device
         self.dtype = dtype
+        
+        self.sigmas = sigmas
+        self.step   = step
+        
+        self.sigma_max = model.inner_model.inner_model.model_sampling.sigma_max.to(self.dtype)
+        self.sigma_min = model.inner_model.inner_model.model_sampling.sigma_min.to(self.dtype)
+        
+        self.noise_sampler  = None
+        self.noise_sampler2 = None
+        
+        self.noise_mode_sde         = None
+        self.noise_mode_substep_sde = None
+        
+        self.LOCK_H_SCALE = False
         
         if has_nested_attr(model, "inner_model.inner_model.model_sampling"):
             model_sampling = model.inner_model.inner_model.model_sampling
@@ -612,14 +619,14 @@ class RK_NoiseSampler:
             model_sampling = model.model.model_sampling
         
         self.CONST = isinstance(model_sampling, comfy.model_sampling.CONST)
+        self.VARIANCE_PRESERVING = isinstance(model_sampling, comfy.model_sampling.CONST)
 
-        self.sigma_min = model.inner_model.inner_model.model_sampling.sigma_min.to(self.dtype)
-        self.sigma_max = model.inner_model.inner_model.model_sampling.sigma_max.to(self.dtype)
+
+
+    def init_noise_samplers(self, x, noise_seed, noise_sampler_type, noise_sampler_type2, noise_mode_sde, noise_mode_substep_sde, alpha, alpha2, k=1., k2=1., scale=0.1, scale2=0.1):
+        self.noise_mode_sde         = noise_mode_sde
+        self.noise_mode_substep_sde = noise_mode_substep_sde
         
-        self.noise_sampler  = None
-        self.noise_sampler2 = None
-
-    def init_noise_sampler(self, x, noise_seed, noise_sampler_type, noise_sampler_type2, alpha, alpha2, k=1., k2=1., scale=0.1, scale2=0.1):
         if noise_seed < 0:
             seed = torch.initial_seed()+1 
             print("SDE noise seed: ", seed, " (set via torch.initial_seed()+1)")
@@ -643,18 +650,141 @@ class RK_NoiseSampler:
             self.noise_sampler  = NOISE_GENERATOR_CLASSES_SIMPLE.get(noise_sampler_type )(x=x, seed=seed,  sigma_min=self.sigma_min, sigma_max=self.sigma_max)
             self.noise_sampler2 = NOISE_GENERATOR_CLASSES_SIMPLE.get(noise_sampler_type2)(x=x, seed=seed2, sigma_min=self.sigma_min, sigma_max=self.sigma_max)
             
-    def add_noise_pre(self, x, sigma_up, sigma, sigma_next, alpha_ratio, s_noise, noise_mode, CONSERVE_MEAN_CW=True, SDE_NOISE_EXTERNAL=False, sde_noise_t=None, SUBSTEP=False, ):
-        if not self.CONST and noise_mode == "hard": 
-            return self.add_noise(x, sigma_up, sigma, sigma_next, alpha_ratio, s_noise, SUBSTEP, CONSERVE_MEAN_CW, SDE_NOISE_EXTERNAL, sde_noise_t)
-        else:
-            return x
-        
-    def add_noise_post(self, x, sigma_up, sigma, sigma_next, alpha_ratio, s_noise, noise_mode, CONSERVE_MEAN_CW=True, SDE_NOISE_EXTERNAL=False, sde_noise_t=None, SUBSTEP=False, ):
-        if self.CONST   or   (not self.CONST and noise_mode != "hard"):
-            return self.add_noise(x, sigma_up, sigma, sigma_next, alpha_ratio, s_noise, CONSERVE_MEAN_CW, SDE_NOISE_EXTERNAL, sde_noise_t, SUBSTEP, )
-        else:
-            return x
+
     
+    def get_sde_coeff(self, sigma_next, sigma_down=None, sigma_up=None, eta=0.0):
+        if self.VARIANCE_PRESERVING:
+            if sigma_down is not None:
+                alpha_ratio = (1 - sigma_next) / (1 - sigma_down)
+                sigma_up = (sigma_next ** 2 - sigma_down ** 2 * alpha_ratio ** 2) ** 0.5 
+                
+            elif sigma_up is not None:
+                if sigma_up >= sigma_next:
+                    print("Maximum VPSDE noise level exceeded: falling back to hard noise mode.")
+                    if eta >= 1:
+                        sigma_up = sigma_next * 0.9999 #avoid sqrt(neg_num) later 
+                    else:
+                        sigma_up = sigma_next * eta 
+                    
+                sigma_signal   = self.sigma_max - sigma_next
+                sigma_residual = (sigma_next ** 2 - sigma_up ** 2) ** .5
+                alpha_ratio    = sigma_signal + sigma_residual
+                sigma_down     = sigma_residual / alpha_ratio     
+                
+        else:
+            alpha_ratio = torch.ones_like(sigma_next)
+            
+            if sigma_down is not None:
+                sigma_up   = (sigma_next ** 2 - sigma_down ** 2) ** .5   # not sure this is correct
+            elif sigma_up is not None:
+                sigma_down = (sigma_next ** 2 - sigma_up   ** 2) ** .5    
+        
+        return alpha_ratio, sigma_down, sigma_up
+
+    def get_sde_substep(self, sigma, sigma_next, eta=0.0, noise_mode_override=None, DOWN=False, ):
+        return self.get_sde_step(sigma, sigma_next, eta, noise_mode_override=noise_mode_override, DOWN=DOWN, SUBSTEP=True, )
+
+    def get_sde_step(self, sigma, sigma_next, eta=0.0, noise_mode_override=None, DOWN=False, SUBSTEP=False, ):
+            
+        if noise_mode_override is not None:
+            noise_mode = noise_mode_override
+        elif SUBSTEP:
+            noise_mode = self.noise_mode_substep_sde
+        else:
+            noise_mode = self.noise_mode_sde
+        
+        if DOWN:
+            eta_fn = lambda eta_scale: 1-eta_scale
+            sud_fn = lambda sd: (sd, None)
+        else:
+            eta_fn = lambda eta_scale:   eta_scale
+            sud_fn = lambda su: (None, su)
+        
+        su, sd, sud = None, None, None
+        eta_ratio   = None
+        sigma_base  = sigma_next
+        
+        match noise_mode:
+            case "hard":
+                eta_ratio = eta
+            case "exp": 
+                h = -(sigma_next/sigma).log()
+                eta_ratio = (1 - (-2*eta*h).exp())**.5
+            case "soft":
+                eta_ratio = 1-(1 - eta) + eta * ((sigma_next) / sigma)
+            case "softer":
+                eta_ratio = 1-torch.sqrt(1 - (eta**2 * (sigma**2 - sigma_next**2)) / sigma**2)
+            case "soft-linear":
+                eta_ratio = 1-eta * (sigma_next - sigma)
+            case "sinusoidal":
+                eta_ratio = torch.sin(torch.pi * sigma_next) ** 2
+            case "eps":
+                eta_ratio = eta * torch.sqrt((sigma_next/sigma) ** 2 * (sigma ** 2 - sigma_next ** 2) ) 
+                
+            case "lorentzian":
+                eta_ratio  = eta
+                alpha      = 1 / ((sigma_next.to(torch.float64))**2 + 1)
+                sigma_base = ((1 - alpha) ** 0.5).to(sigma.dtype)
+                
+            case "hard_var":
+                sigma_var = (-1 + torch.sqrt(1 + 4 * sigma)) / 2
+                if sigma_next > sigma_var:
+                    eta_ratio  = 0
+                    sigma_base = sigma_next
+                else:
+                    eta_ratio  = eta
+                    sigma_base = torch.sqrt((sigma - sigma_next).abs() + 1e-10)
+                    
+            case "hard_sq":
+                sigma_hat = sigma * (1 + eta)
+                su        = (sigma_hat ** 2 - sigma ** 2) ** .5    #su
+                
+                if self.VARIANCE_PRESERVING:
+                    alpha_ratio, sd, su = self.get_sde_coeff(sigma_next, None, su, eta)
+                else:
+                    sd        = sigma_next
+                    sigma     = sigma_hat
+                    alpha_ratio = torch.ones_like(sigma)
+                    
+            case "vpsde":
+                alpha_ratio, sd, su = self.get_vpsde_step_RF(sigma, sigma_next, eta)
+                
+        if eta_ratio is not None:
+            sud = sigma_base * eta_fn(eta_ratio)
+            alpha_ratio, sd, su = self.get_sde_coeff(sigma_next, *sud_fn(sud), eta)
+        
+        su = torch.nan_to_num(su, 0.0)
+        sd = torch.nan_to_num(sd, float(sigma_next))
+        alpha_ratio = torch.nan_to_num(alpha_ratio, 1.0)
+
+        return su, sigma, sd, alpha_ratio
+    
+    def get_vpsde_step_RF(self, sigma, sigma_next, eta):
+        dt = sigma - sigma_next
+        sigma_up = eta * sigma * dt**0.5
+        alpha_ratio = 1 - dt * (eta**2/4) * (1 + sigma)
+        sigma_down = sigma_next - (eta/4)*sigma*(1-sigma)*(sigma - sigma_next)
+        return sigma_up, sigma_down, alpha_ratio
+                
+            
+            
+            
+    def add_noise_pre(self, x_0, x, sigma_up, sigma_0, sigma, sigma_next, real_sigma_down, alpha_ratio, s_noise, noise_mode, CONSERVE_MEAN_CW=True, SDE_NOISE_EXTERNAL=False, sde_noise_t=None, SUBSTEP=False):
+        if not self.CONST and noise_mode == "hard_sq": 
+            if self.LOCK_H_SCALE:
+                x = self.swap_noise(x_0, x, sigma, sigma_0, sigma_next, real_sigma_down, sigma_up, alpha_ratio, s_noise, SUBSTEP, )
+            else:
+                x = self.add_noise(x, sigma_up, sigma, sigma_next, alpha_ratio, s_noise, CONSERVE_MEAN_CW, SDE_NOISE_EXTERNAL, sde_noise_t, SUBSTEP, )
+        return x
+        
+    def add_noise_post(self, x_0, x, sigma_up, sigma_0, sigma, sigma_next, real_sigma_down, alpha_ratio, s_noise, noise_mode, CONSERVE_MEAN_CW=True, SDE_NOISE_EXTERNAL=False, sde_noise_t=None, SUBSTEP=False):
+        if self.CONST   or   (not self.CONST and noise_mode != "hard_sq"):
+            if self.LOCK_H_SCALE:
+                x = self.swap_noise(x_0, x, sigma_0, sigma, sigma_next, real_sigma_down, sigma_up, alpha_ratio, s_noise, SUBSTEP, )
+            else:
+                x = self.add_noise(x, sigma_up, sigma, sigma_next, alpha_ratio, s_noise, CONSERVE_MEAN_CW, SDE_NOISE_EXTERNAL, sde_noise_t, SUBSTEP, )
+        return x
+
     def add_noise(self, x, sigma_up, sigma, sigma_next, alpha_ratio, s_noise, CONSERVE_MEAN_CW, SDE_NOISE_EXTERNAL, sde_noise_t, SUBSTEP, ):
 
         if sigma_next > 0.0 and sigma_up > 0.0:
@@ -669,16 +799,12 @@ class RK_NoiseSampler:
                 noise = self.noise_sampler (sigma=sigma, sigma_next=sigma_next)
             else:
                 noise = self.noise_sampler2(sigma=sigma, sigma_next=sigma_next)
-                
-            #for b in range(noise.shape[-4]):
-            #    for c in range(noise.shape[-3]):
-            #        noise[b][c] = (noise[b][c] - noise[b][c].mean()) / noise[b][c].std()
-            #noise = torch.nan_to_num((noise - noise.mean()) / noise.std(), 0.0)
 
             #noise_ortho = get_orthogonal(noise, x)
             #noise_ortho = noise_ortho / noise_ortho.std()
             #noise = noise_ortho
-            print("noise :", noise.std().item(), noise.mean().item(), noise.sum().item(), noise.abs().sum().item())
+            noise = (noise - noise.mean(dim=(-2, -1), keepdim=True)) / noise.std(dim=(-2, -1), keepdim=True)
+            noise = torch.nan_to_num(noise, 0.0)
 
             if SDE_NOISE_EXTERNAL:
                 noise = (1-s_noise) * noise + s_noise * sde_noise_t
@@ -686,13 +812,57 @@ class RK_NoiseSampler:
             x_next = alpha_ratio * x + noise * sigma_up * s_noise
             
             if CONSERVE_MEAN_CW:
-                for c in range(x.shape[-3]):
-                    x_next[..., c, :, :] = x_next[..., c, :, :] - x_next[..., c, :, :].mean() + x[..., c, :, :].mean()
+                #for c in range(x.shape[-3]):
+                #    x_next[..., c, :, :] = x_next[..., c, :, :] - x_next[..., c, :, :].mean() + x[..., c, :, :].mean()
+                x_next = x_next - x_next.mean(dim=(-2,-1), keepdim=True) + x.mean(dim=(-2,-1), keepdim=True)
             
             return x_next
         
         else:
             return x
+
+    def swap_noise(self, x_0, x_next, sigma_0, sigma, sigma_next, sigma_down, sigma_up, alpha_ratio, s_noise, SUBSTEP=False, brownian_sigma=None, brownian_sigma_next=None, ):
+        if sigma_up == 0:
+            return x_next
+        
+        if brownian_sigma is None:
+            brownian_sigma = sigma
+        if brownian_sigma_next is None:
+            brownian_sigma_next = sigma_next
+        if sigma_next == 0:
+            return x_next
+        if brownian_sigma == brownian_sigma_next:
+            brownian_sigma_next *= 0.999
+        eps_next = (x_0 - x_next) / (sigma_0 - sigma_next)
+        denoised_next = x_0 - sigma_0 * eps_next
+        
+        if brownian_sigma_next > brownian_sigma:
+            s_tmp = brownian_sigma
+            brownian_sigma = brownian_sigma_next
+            brownian_sigma_next = s_tmp
+        
+        if not SUBSTEP:
+            noise = self.noise_sampler(sigma=brownian_sigma, sigma_next=brownian_sigma_next)
+        else:
+            noise = self.noise_sampler2(sigma=brownian_sigma, sigma_next=brownian_sigma_next)
+            
+        noise = (noise - noise.mean(dim=(-2, -1), keepdim=True)) / noise.std(dim=(-2, -1), keepdim=True)
+
+        x = alpha_ratio * (denoised_next + sigma_down * eps_next) + sigma_up * noise * s_noise
+        return x
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 def vpsde_noise_add(x_0, x_next, sigma, sigma_next, sigma_down, sigma_up, alpha_ratio, s_noise, noise_sampler, brownian_sigma=None, brownian_sigma_next=None):
     if sigma_up == 0:
@@ -713,7 +883,7 @@ def vpsde_noise_add(x_0, x_next, sigma, sigma_next, sigma_down, sigma_up, alpha_
         s_tmp = brownian_sigma
         brownian_sigma = brownian_sigma_next
         brownian_sigma_next = s_tmp
-            
+    
     noise = noise_sampler(sigma=brownian_sigma, sigma_next=brownian_sigma_next)
     noise = (noise - noise.mean(dim=(-2, -1), keepdim=True)) / noise.std(dim=(-2, -1), keepdim=True)
 

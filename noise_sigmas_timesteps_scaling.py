@@ -160,13 +160,22 @@ def get_res4lyf_step_with_model(model, sigma, sigma_next, eta=0.0, noise_mode="h
                 su, sd, alpha_ratio = get_ancestral_step_RF_hard(sigma_next, eta)
     else:
         alpha_ratio = torch.full_like(sigma, 1.0)
-        if noise_mode == "hard":
+        if noise_mode == "hard_sq":
             sd = sigma_next
             sigma_hat = sigma * (1 + eta)
             su = (sigma_hat ** 2 - sigma ** 2) ** .5
             sigma = sigma_hat
+        elif noise_mode == "hard":
+            su = eta * sigma_next
+            sd = (sigma_next ** 2 - su ** 2) ** 0.5
+        elif noise_mode == "exp":
+            h = -torch.log(sigma_next/sigma)
+            su = sigma_next * (1 - (-2*eta*h).exp())**0.5 
+            sd = (sigma_next ** 2 - su ** 2) ** 0.5
         else: #if noise_mode == "soft" or noise_mode == "softer": 
-            su, sd, alpha_ratio = get_ancestral_step_EPS(sigma, sigma_next, eta)
+            su = min(sigma_next, eta * (sigma_next ** 2 * (sigma ** 2 - sigma_next ** 2) / sigma ** 2) ** 0.5)
+            #su, sd, alpha_ratio = get_ancestral_step_EPS(sigma, sigma_next, eta)
+            
     
     su = torch.nan_to_num(su, 0.0)
     sd = torch.nan_to_num(sd, float(sigma_next))
@@ -179,14 +188,16 @@ def get_res4lyf_step_with_model(model, sigma, sigma_next, eta=0.0, noise_mode="h
 NOISE_MODE_NAMES = ["none",
                     "hard_sq",
                     "hard",
+                    #"hard_down",
                     "lorentzian", 
                     "soft", 
                     "soft-linear",
                     "softer",
+                    "eps",
                     "sinusoidal",
                     "exp", 
                     "vpsde",
-                    "fuckery",
+                    #"fuckery",
                     "hard_var", 
                     ]
 
