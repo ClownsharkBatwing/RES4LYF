@@ -217,7 +217,7 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
     if sigmas[-1] == 0:
         if sigmas[-2] < sigma_min:
             sigmas[-2] = sigma_min
-        elif sigmas[-2] > sigma_min:
+        elif (sigmas[-2] - sigma_min).abs() > 1e-4:
             sigmas = torch.cat((sigmas[:-1], sigma_min.unsqueeze(0), sigmas[-1:]))
 
     # SETUP SAMPLER
