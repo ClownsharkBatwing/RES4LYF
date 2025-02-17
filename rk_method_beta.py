@@ -37,15 +37,8 @@ class RK_Method_Beta:
                 
         self.rk_type = rk_type
              
-        if rk_type in IRK_SAMPLER_NAMES_BETA:
-            self.IMPLICIT = True
-        else:
-            self.IMPLICIT = False
-            
-        if RK_Method_Beta.is_exponential(rk_type):
-            self.EXPONENTIAL = True
-        else:
-            self.EXPONENTIAL = False
+        self.IMPLICIT = rk_type in IRK_SAMPLER_NAMES_BETA
+        self.EXPONENTIAL = RK_Method_Beta.is_exponential(rk_type)
         
         self.stages = 0
         self.A = None
@@ -53,11 +46,6 @@ class RK_Method_Beta:
         self.U = None
         self.V = None
         
-        self.a = None
-        self.b = None
-        self.u = None
-        self.v = None
-        self.c = None
         self.denoised = None
         self.uncond = None
         
@@ -124,27 +112,12 @@ class RK_Method_Beta:
         self.multistep_stages = multistep_stages
         self.hybrid_stages    = hybrid_stages
         
-        self.A = torch.tensor(a, dtype=h.dtype, device=h.device)
-        self.B = torch.tensor(b, dtype=h.dtype, device=h.device)
+        self.A = torch.tensor(a,  dtype=h.dtype, device=h.device)
+        self.B = torch.tensor(b,  dtype=h.dtype, device=h.device)
         self.C = torch.tensor(ci, dtype=h.dtype, device=h.device)
 
-        
-        if u is not None and v is not None:
-            self.U = torch.tensor(u, dtype=h.dtype, device=h.device)
-            self.V = torch.tensor(v, dtype=h.dtype, device=h.device)
-        
-        """self.a = torch.tensor(a, dtype=h.dtype, device=h.device)
-        self.a = self.a.view(*self.a.shape, 1, 1, 1, 1, 1)
-        
-        self.b = torch.tensor(b, dtype=h.dtype, device=h.device)
-        self.b = self.b.view(*self.b.shape, 1, 1, 1, 1, 1)
-        
-        if u is not None and v is not None:
-            self.u = torch.tensor(u, dtype=h.dtype, device=h.device)
-            self.u = self.u.view(*self.u.shape, 1, 1, 1, 1, 1)
-            
-            self.v = torch.tensor(v, dtype=h.dtype, device=h.device)
-            self.v = self.v.view(*self.v.shape, 1, 1, 1, 1, 1)"""
+        self.U = torch.tensor(u,  dtype=h.dtype, device=h.device) if u is not None else None
+        self.V = torch.tensor(v,  dtype=h.dtype, device=h.device) if v is not None else None
         
         self.rows = self.A.shape[0]
         self.cols = self.A.shape[1]
@@ -162,36 +135,36 @@ class RK_Method_Beta:
                        SYNC_MEAN_CW, CONSERVE_MEAN_CW, SDE_NOISE_EXTERNAL, sde_noise_t, extra_options, IMPLICIT_PREDICTOR=False,):
         if extra_options_flag("guide_fully_pseudoimplicit_use_post_substep_eta", extra_options):
             IMPLICIT_PREDICTOR=True
-        zr = self.zum(row+row_offset, eps_, eps_prev_)
+            
+        ADD_NOISE = True
+
         if row < self.rows - row_offset   and   self.multistep_stages == 0:
+            row_tmp_offset = row + row_offset
             if (self.IMPLICIT and not IMPLICIT_PREDICTOR) or (self.IMPLICIT and row == 0):
-                x_[row+row_offset] = x_0 + h * zr
-            else:
-                x_row_down = x_0 + h_new * self.zum(row+row_offset, eps_, eps_prev_)
-                x_[row+row_offset] = NS.add_noise_post(x_0, x_row_down, sub_sigma_up, sigma, sub_sigma, sub_sigma_next, real_sub_sigma_down, sub_alpha_ratio, s_noise_substep, noise_mode_sde_substep, CONSERVE_MEAN_CW, SDE_NOISE_EXTERNAL, sde_noise_t, SUBSTEP=True)
-
-                if (SYNC_MEAN_CW and h_new != h_new_orig) or extra_options_flag("sync_mean_noise", extra_options):
-                    eps_row_down = x_[row+row_offset] - x_row_down
-                    x_row_next_tmp = x_0 + h          * zr
-                    x_row_down_tmp = x_0 + h_new_orig * zr
-                    x_row_tmp = x_row_down_tmp + eps_row_down
-                    x_[row+row_offset] = x_[row+row_offset] - x_[row+row_offset].mean(dim=(-2,-1), keepdim=True) + x_row_next_tmp.mean(dim=(-2,-1), keepdim=True)
-
-        else: 
+                ADD_NOISE = False
+        else:
+            row_tmp_offset = row + 1
             if (self.IMPLICIT and not IMPLICIT_PREDICTOR) or (self.IMPLICIT and row == 0) or row_offset == 1:
-                x_[row+1] = x_0 + h * zr
-            else:
-                x_row_down = x_0 + h_new * zr
-                x_[row+1] = NS.add_noise_post(x_0, x_row_down, sub_sigma_up, sigma, sub_sigma, sub_sigma_next, real_sub_sigma_down, sub_alpha_ratio, s_noise_substep, noise_mode_sde_substep, CONSERVE_MEAN_CW, SDE_NOISE_EXTERNAL, sde_noise_t, SUBSTEP=False)
+                ADD_NOISE = False
+                
+        zr = self.zum(row+row_offset+self.multistep_stages, eps_, eps_prev_)
+                        
+        if not ADD_NOISE:
+            x_[row_tmp_offset] = x_0 + h * zr
+        else:
+            x_row_down = x_0 + h_new * zr
+            x_[row_tmp_offset] = NS.add_noise_post(x_0, x_row_down, sub_sigma_up, sigma, sub_sigma, sub_sigma_next, real_sub_sigma_down, sub_alpha_ratio, s_noise_substep, noise_mode_sde_substep, CONSERVE_MEAN_CW, SDE_NOISE_EXTERNAL, sde_noise_t, SUBSTEP=True)
 
-                if (SYNC_MEAN_CW and h_new != h_new_orig) or extra_options_flag("sync_mean_noise", extra_options):
-                    eps_row_down = x_[row+1] - x_row_down
-                    x_row_next_tmp = x_0 + h          * zr
-                    x_row_down_tmp = x_0 + h_new_orig * zr
-                    x_row_tmp = x_row_down_tmp + eps_row_down
-                    x_[row+1] = x_[row+1] - x_[row+1].mean(dim=(-2,-1), keepdim=True) + x_row_next_tmp.mean(dim=(-2,-1), keepdim=True)
+            if (SYNC_MEAN_CW and h_new != h_new_orig) or extra_options_flag("sync_mean_noise", extra_options):
+                eps_row_down = x_[row_tmp_offset] - x_row_down
+                x_row_next_tmp = x_0 + h          * zr
+                x_row_down_tmp = x_0 + h_new_orig * zr
+                x_row_tmp = x_row_down_tmp + eps_row_down
+                x_[row_tmp_offset] = x_[row_tmp_offset] - x_[row_tmp_offset].mean(dim=(-2,-1), keepdim=True) + x_row_next_tmp.mean(dim=(-2,-1), keepdim=True)
 
         return x_
+
+
     
     def a_k_einsum(self, row, k):
         return torch.einsum('i, i... -> ...', self.A[row], k[:self.cols])
@@ -337,6 +310,28 @@ class RK_Method_Beta:
         return self.rk_type
 
 
+    def bong_iter(self, x_0, x_, eps_, eps_prev_, data_, s_, row, row_offset, h, extra_options):
+        if row < self.rows - row_offset   and   self.multistep_stages == 0:
+            bong_strength = float(get_extra_options_kv("use_bong", "1.0", extra_options))
+            
+            if bong_strength != 1.0:
+                x_0_tmp = x_0.clone()
+                x_tmp_ = x_.clone()
+                eps_tmp_ = eps_.clone()
+                
+            for i in range(100):
+                x_0 = x_[row+row_offset] - h * self.zum(row+row_offset, eps_, eps_prev_)
+                for rr in range(row+row_offset):
+                    x_[rr] = x_0 + h * self.zum(rr, eps_, eps_prev_)
+                for rr in range(row+row_offset):
+                    eps_[rr] = get_epsilon2(x_0, x_[rr], data_[rr], s_[rr], self.rk_type)
+                    
+            if bong_strength != 1.0:
+                x_0  = x_0_tmp  + bong_strength * (x_0  - x_0_tmp)
+                x_   = x_tmp_   + bong_strength * (x_   - x_tmp_)
+                eps_ = eps_tmp_ + bong_strength * (eps_ - eps_tmp_)
+        
+        return x_0, x_, eps_
 
 
     def newton_iter(self, x_0, x_, eps_, eps_prev_, data_, s_, row, h, sigmas, step, newton_name, extra_options):
@@ -839,6 +834,13 @@ class RK_NoiseSampler:
 
 
 
+
+def get_epsilon2(x_0, x, denoised, sigma, rk_type):
+    if RK_Method_Beta.is_exponential(rk_type):
+        eps = denoised - x_0
+    else:
+        eps = (x - denoised) / sigma
+    return eps
 
 
 

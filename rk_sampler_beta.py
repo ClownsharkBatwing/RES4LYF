@@ -146,7 +146,8 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
     extra_args = {} if extra_args is None else extra_args
     default_device = x.device
     default_dtype = getattr(torch, get_extra_options_kv("default_dtype", "", extra_options), x.dtype)
-    x = x.to(default_dtype)
+    x      = x.to(default_dtype)
+    sigmas = sigmas.to(default_dtype)
     MAX_STEPS=10000
 
     if noise_seed < 0:
@@ -443,22 +444,9 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
                         
                     x_ = RK.update_substep(x_0, x_, eps_, eps_prev_, row, row_offset, h, h_new, h_new_orig, sigma, real_sub_sigma_down, sub_sigma_up, sigma_brownian, sigma_next_brownian, sub_alpha_ratio, s_noise_substep, noise_mode_sde_substep, NS, \
                                            SYNC_MEAN_CW, CONSERVE_MEAN_CW, SDE_NOISE_EXTERNAL, sde_noise_t, extra_options)
-                        
-                    if extra_options_flag("use_bong", extra_options) and sigma_next > sigma_min:
-                        if row < RK.rows - row_offset   and   RK.multistep_stages == 0:
-                            bong_strength = float(get_extra_options_kv("use_bong", "1.0", extra_options))
-                            x_0_tmp = x_0.clone()
-                            x_tmp_ = x_.clone()
-                            eps_tmp_ = eps_.clone()
-                            for i in range(100):
-                                x_0 = x_[row+row_offset] - h * RK.zum(row+row_offset, eps_, eps_prev_)
-                                for rr in range(row+row_offset):
-                                    x_[rr] = x_0 + h * RK.zum(rr, eps_, eps_prev_)
-                                for rr in range(row+row_offset):
-                                    eps_[rr] = get_epsilon2(x_0, x_[rr], data_[rr], s_[rr], rk_type)
-                            x_0  = x_0_tmp  + bong_strength * (x_0  - x_0_tmp)
-                            x_   = x_tmp_   + bong_strength * (x_   - x_tmp_)
-                            eps_ = eps_tmp_ + bong_strength * (eps_ - eps_tmp_)
+                    
+                    if extra_options_flag("use_bong", extra_options) and step < sigmas.shape[0]-3:
+                        x_0, x_, eps_ = RK.bong_iter(x_0, x_, eps_, eps_prev_, data_, s_, row, row_offset, h, extra_options)
 
             denoised = x_0 + ((sigma / (sigma - sigma_down)) *  h_new) * RK.zum(RK.rows, eps_, eps_prev_)
             eps = get_epsilon(x_0, denoised, sigma_next, rk_type)
