@@ -328,14 +328,20 @@ class LatentGuide:
             s_2_[row] = sub_sigma_2
 
             if RK.IMPLICIT:
-                x_ = RK.update_substep(x_0, x_, eps_, eps_prev_, row, row_offset,    h_new, h_new_orig, extra_options) # bring noise addition back here! 
+                """x_ = RK.update_substep(x_0, x_, eps_, eps_prev_, row, row_offset,    h_new, h_new_orig, extra_options) # bring noise addition back here! 
                 
                 if oversubstep_eta != 0:
                     sub_eps = (x_0 - x_[row]) / (sigma - sub_sigma_down)
                     sub_denoised = x_0 - sigma * sub_eps
                     x_[row] = sub_denoised + sub_sigma_next * sub_eps
                 
-                x_[row] = NS.swap_noise(x_0, x_[row], sigma, sub_sigma_eta, sub_sigma_next, sub_sigma_down_eta, sub_sigma_up_eta, sub_alpha_ratio_eta, s_noise_substep, SUBSTEP=True)
+                x_[row] = NS.swap_noise(x_0, x_[row], sigma, sub_sigma_eta, sub_sigma_next, sub_sigma_down_eta, sub_sigma_up_eta, sub_alpha_ratio_eta, s_noise_substep, SUBSTEP=True)"""
+                
+                x_ = RK.update_substep(x_0, x_, eps_, eps_prev_, row, RK.row_offset, NS.h_new, NS.h_new_orig, extra_options)
+                x_[row+RK.row_offset] = NS.rebound_overshoot_substep(x_0, x_[row+RK.row_offset])
+                if not RK.IMPLICIT and NS.noise_mode_sde_substep != "hard_sq":
+                    x_[row+RK.row_offset] = NS.swap_noise_substep(x_0, x_[row+RK.row_offset])
+                
 
             eps_substep_guide, eps_substep_guide_inv = get_guide_epsilon_substep(x_0, x_, y0, y0_inv, s_, row, row_offset, rk_type)   # should this also be s_2_ ?
             eps_substep_guide = self.mask * eps_substep_guide + (1-self.mask) * eps_substep_guide_inv
