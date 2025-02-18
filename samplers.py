@@ -107,6 +107,9 @@ class SharkSampler:
                     sampler.extra_options['noise_seed'] = noise_seed + 1
                     #print("Shark: setting clown noise seed to: ", sampler.extra_options['noise_seed'])
 
+            if "sampler_mode" in sampler.extra_options:
+                sampler.extra_options['sampler_mode'] = sampler_mode
+
             if "extra_options" in sampler.extra_options:
                 extra_options += " "
                 extra_options += sampler.extra_options['extra_options']
@@ -384,10 +387,6 @@ class SharkSampler:
 
 
 
-from .rk_method import RK_Method
-
-
-
 class ClownSamplerAdvanced:
     @classmethod
     def INPUT_TYPES(s):
@@ -517,8 +516,12 @@ class ClownSamplerAdvanced_Beta:
                     "noise_type_sde_substep": (NOISE_GENERATOR_NAMES_SIMPLE, {"default": "gaussian"}),
                     "noise_mode_sde": (NOISE_MODE_NAMES, {"default": 'hard', "tooltip": "How noise scales with the sigma schedule. Hard is the most aggressive, the others start strong and drop rapidly."}),
                     "noise_mode_sde_substep": (NOISE_MODE_NAMES, {"default": 'hard', "tooltip": "How noise scales with the sigma schedule. Hard is the most aggressive, the others start strong and drop rapidly."}),
+                    "overshoot_mode": (NOISE_MODE_NAMES, {"default": 'hard', "tooltip": "How step size overshoot scales with the sigma schedule. Hard is the most aggressive, the others start strong and drop rapidly."}),
+                    "overshoot_mode_substep": (NOISE_MODE_NAMES, {"default": 'hard', "tooltip": "How substep size overshoot scales with the sigma schedule. Hard is the most aggressive, the others start strong and drop rapidly."}),
                     "eta": ("FLOAT", {"default": 0.5, "min": -100.0, "max": 100.0, "step":0.01, "round": False, "tooltip": "Calculated noise amount to be added, then removed, after each step."}),
                     "eta_substep": ("FLOAT", {"default": 0.5, "min": -100.0, "max": 100.0, "step":0.01, "round": False, "tooltip": "Calculated noise amount to be added, then removed, after each step."}),
+                    "overshoot": ("FLOAT", {"default": 0.5, "min": -100.0, "max": 100.0, "step":0.01, "round": False, "tooltip": "Boost the size of each denoising step, then rescale to match the original. Has a softening effect."}),
+                    "overshoot_substep": ("FLOAT", {"default": 0.5, "min": -100.0, "max": 100.0, "step":0.01, "round": False, "tooltip": "Boost the size of each denoising substep, then rescale to match the original. Has a softening effect."}),
                     "noise_boost_step": ("FLOAT", {"default": 0.0, "min": -100.0, "max": 100.0, "step":0.01, "round": False, "tooltip": "Set to positive values to create a sharper, grittier, more detailed image. Set to negative values to soften and deepen the colors."}),
                     "noise_boost_substep": ("FLOAT", {"default": 0.0, "min": -100.0, "max": 100.0, "step":0.01, "round": False, "tooltip": "Set to positive values to create a sharper, grittier, more detailed image. Set to negative values to soften and deepen the colors."}),
                     "s_noise": ("FLOAT", {"default": 1.0, "min": -10000, "max": 10000, "step":0.01, "tooltip": "Adds extra SDE noise. Values around 1.03-1.07 can lead to a moderate boost in detail and paint textures."}),
@@ -529,6 +532,7 @@ class ClownSamplerAdvanced_Beta:
                     "implicit_sampler_name": (IRK_SAMPLER_NAMES_BETA, {"default": "use_explicit"}), 
                     "implicit_steps": ("INT", {"default": 0, "min": 0, "max": 10000}),
                     "implicit_substeps": ("INT", {"default": 0, "min": 0, "max": 10000}),
+                    "bongmath": ("BOOLEAN", {"default": True}),
                      },
                 "optional": 
                     {
@@ -547,13 +551,13 @@ class ClownSamplerAdvanced_Beta:
     CATEGORY = "RES4LYF/samplers"
     
     def main(self, 
-             noise_type_sde="gaussian", noise_type_sde_substep="gaussian", noise_mode_sde="hard",
-             eta=0.25, eta_var=0.0, d_noise=1.0, s_noise=1.0, s_noise_substep=1.0, alpha_sde=-1.0, k_sde=1.0, cfgpp=0.0, c1=0.0, c2=0.5, c3=1.0, noise_seed_sde=-1, sampler_name="res_2m", implicit_sampler_name="gauss-legendre_2s",
+             noise_type_sde="gaussian", noise_type_sde_substep="gaussian", noise_mode_sde="hard",overshoot_mode="hard", overshoot_mode_substep="hard",
+             eta=0.25, d_noise=1.0, s_noise=1.0, s_noise_substep=1.0, alpha_sde=-1.0, k_sde=1.0, cfgpp=0.0, c1=0.0, c2=0.5, c3=1.0, noise_seed_sde=-1, sampler_name="res_2m", implicit_sampler_name="gauss-legendre_2s",
                     t_fn_formula=None, sigma_fn_formula=None, implicit_substeps=0, implicit_steps=0,
                     latent_guide=None, latent_guide_inv=None, guide_mode="", latent_guide_weights=None, latent_guide_weights_inv=None, latent_guide_mask=None, latent_guide_mask_inv=None, rescale_floor=True, sigmas_override=None, unsampler_type="linear",
                     guides=None, options=None, sde_noise=None,sde_noise_steps=1, 
                     extra_options="", automation=None, etas=None, etas_substep=None, s_noises=None, s_noises_substep=None, unsample_resample_scales=None, regional_conditioning_weights=None,frame_weights_grp=None, eta_substep=0.5, noise_mode_sde_substep="hard",
-                    noise_boost_step=0.0, noise_boost_substep=0.0,
+                    overshoot=0.0, overshoot_substep=0.0, noise_boost_step=0.0, noise_boost_substep=0.0, bongmath=True,
                     ): 
 
             implicit_steps_diag = implicit_substeps
@@ -619,13 +623,14 @@ class ClownSamplerAdvanced_Beta:
             if unsample_resample_scales_override is not None:
                 unsample_resample_scales = unsample_resample_scales_override
 
-            sampler = comfy.samplers.ksampler("rk_beta", {"eta": eta, "eta_var": eta_var, "s_noise": s_noise, "s_noise_substep": s_noise_substep, "d_noise": d_noise, "alpha": alpha_sde, "k": k_sde, "c1": c1, "c2": c2, "c3": c3, "cfgpp": cfgpp, 
-                                                    "noise_sampler_type": noise_type_sde, "noise_sampler_type_substep": noise_type_sde_substep, "noise_mode": noise_mode_sde, "noise_seed": noise_seed_sde, "rk_type": sampler_name, "implicit_sampler_name": implicit_sampler_name,
+            sampler = comfy.samplers.ksampler("rk_beta", {"eta": eta, "s_noise": s_noise, "s_noise_substep": s_noise_substep, "d_noise": d_noise, "alpha": alpha_sde, "k": k_sde, "c1": c1, "c2": c2, "c3": c3, "cfgpp": cfgpp, 
+                                                    "noise_sampler_type": noise_type_sde, "noise_sampler_type_substep": noise_type_sde_substep, "noise_mode_sde": noise_mode_sde, "noise_seed": noise_seed_sde, "rk_type": sampler_name, "implicit_sampler_name": implicit_sampler_name,
                                                             "implicit_steps_diag": implicit_steps_diag, "implicit_steps_full": implicit_steps_full,
                                                             "LGW_MASK_RESCALE_MIN": rescale_floor, "sigmas_override": sigmas_override, "sde_noise": sde_noise,
                                                             "extra_options": extra_options,
                                                             "etas": etas, "etas_substep": etas_substep, "s_noises": s_noises, "s_noises_substep": s_noises_substep, "unsample_resample_scales": unsample_resample_scales, "regional_conditioning_weights": regional_conditioning_weights,
                                                             "guides": guides, "frame_weights_grp": frame_weights_grp, "eta_substep": eta_substep, "noise_mode_sde_substep": noise_mode_sde_substep, "noise_boost_step": noise_boost_step, "noise_boost_substep": noise_boost_substep,
+                                                            "overshoot_mode": overshoot_mode, "overshoot_mode_substep": overshoot_mode_substep, "overshoot": overshoot, "overshoot_substep": overshoot_substep, "BONGMATH": bongmath,
                                                             })
 
 

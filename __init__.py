@@ -281,7 +281,8 @@ if flags["test_samplers"]:
         "rk_res_2s_prenoise_data": test_samplers.sample_rk_res_2s_prenoise_data,
 
         "rk_res_2s_overstep": test_samplers.sample_rk_res_2s_overstep,
-        
+        "rk_res_2s_downswap": test_samplers.sample_rk_res_2s_downswap,
+
         
         "rk_crazy": test_samplers.sample_rk_crazy,
         "rk_crazy2": test_samplers.sample_rk_crazy2,

@@ -49,6 +49,8 @@ def is_RF_model(model):
     modelsampling = model.inner_model.inner_model.model_sampling
     return isinstance(modelsampling, model_sampling.CONST)
 
+
+
 def lagrange_interpolation(x_values, y_values, x_new):
 
     if not isinstance(x_values, torch.Tensor):
