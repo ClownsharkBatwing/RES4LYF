@@ -574,8 +574,8 @@ class RK_NoiseSampler:
         
         self.step   = step
         
-        self.sigma_max = model.inner_model.inner_model.model_sampling.sigma_max.to(self.dtype)
-        self.sigma_min = model.inner_model.inner_model.model_sampling.sigma_min.to(self.dtype)
+        self.sigma_max = model.inner_model.inner_model.model_sampling.sigma_max.to(self.dtype).to(self.device)
+        self.sigma_min = model.inner_model.inner_model.model_sampling.sigma_min.to(self.dtype).to(self.device)
         
         self.noise_sampler  = None
         self.noise_sampler2 = None
