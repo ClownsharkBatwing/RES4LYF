@@ -230,9 +230,9 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
                     # PREPARE PSEUDOIMPLICIT GUIDES
                     x_0, x_row_pseudoimplicit, sub_sigma_pseudoimplicit = LG.process_pseudoimplicit_guides_substep(x_0, x_, eps_, eps_prev_, data_, row, step, sigmas, NS, RK, pseudoimplicit_row_weights, pseudoimplicit_step_weights, full_iter, BONGMATH, extra_options)
                     
-                    if BONGMATH and step < sigmas.shape[0]-1 and not extra_options_flag("disable_pseudobongmath", extra_options) and (LG.lgw[step] > 0 or LG.lgw_inv[step] > 0):
-                        x_0, x_, eps_ = RK.bong_iter(x_0, x_, eps_, eps_prev_, data_, sigma, NS.s_, row, RK.row_offset, NS.h_new, extra_options)
-                    
+                    if BONGMATH and step < sigmas.shape[0]-1 and extra_options_flag("enable_pseudobongmath", extra_options) and (LG.lgw[step] > 0 or LG.lgw_inv[step] > 0):
+                        x_0, x_, eps_ = RK.bong_iter(x_0, x_, eps_, eps_prev_, data_, sigma, NS.s_, row, 0, NS.h_new, extra_options)
+                        #x_0, x_, eps_ = RK.bong_iter(x_0, x_, eps_, eps_prev_, data_, sigma, NS.s_, row, RK.row_offset, NS.h_new, extra_options) 
                     # PRENOISE METHOD HERE!
                     
                     # A-TABLEAU
@@ -247,7 +247,7 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
                         elif (full_iter > 0 and RK.row_offset == 1 and row == 0)   or   (full_iter > 0 and RK.row_offset == 0 and row == 0 and extra_options_flag("fully_implicit_update_x", extra_options)):
                             if extra_options_flag("fully_explicit_pogostick_eta", extra_options): 
                                 super_alpha_ratio, super_sigma_down, super_sigma_up = NS.get_sde_coeff(sigma, sigma_next, None, eta)
-                                x = super_alpha_ratio * x + super_sigma_up * NS.noise_sampler(sigma=sigma, sigma_next=sigma_next)
+                                x = super_alpha_ratio * x + super_sigma_up * NS.noise_sampler(sigma=sigma_next, sigma_next=sigma)
                                 
                                 x_tmp = x
                                 s_tmp = sigma
@@ -262,8 +262,15 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
                         # All others
                         else:
                             if diag_iter > 0: # Diagonally implicit iteration (explicit or implicit)
+                                if extra_options_flag("diag_explicit_pogostick_eta", extra_options): 
+                                    super_alpha_ratio, super_sigma_down, super_sigma_up = NS.get_sde_coeff(NS.s_[row], NS.s_[row+RK.row_offset+RK.multistep_stages], None, eta)
+                                    x_[row+RK.row_offset] = super_alpha_ratio * x_[row+RK.row_offset] + super_sigma_up * NS.noise_sampler(sigma=NS.s_[row+RK.row_offset+RK.multistep_stages], sigma_next=NS.s_[row])
+                                    
+                                    x_tmp = x_[row+RK.row_offset]
+                                    s_tmp = sigma
                                 if extra_options_flag("diag_explicit_rebound", extra_options):
-                                    x_tmp = NS.rebound_overshoot(x_0, x_[row+RK.row_offset], sigma, NS.s_[row], NS.s_[row+RK.row_offset+RK.multistep_stages])
+                                    x_[row+RK.row_offset] = NS.rebound_overshoot(x_0, x_[row+RK.row_offset], sigma, NS.s_[row], NS.s_[row+RK.row_offset+RK.multistep_stages])
+                                    x_tmp = x_[row+RK.row_offset]
                                     s_tmp = NS.s_[row]
                                 else: 
                                     x_tmp =    x_[row+RK.row_offset]
@@ -317,7 +324,7 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
                     if not RK.IMPLICIT and NS.noise_mode_sde_substep != "hard_sq":
                         x_[row+RK.row_offset] = NS.swap_noise_substep(x_0, x_[row+RK.row_offset])
 
-                    if BONGMATH and step < sigmas.shape[0]-1:
+                    if BONGMATH and step < sigmas.shape[0]-1 and diag_iter == implicit_steps_diag:
                         x_0, x_, eps_ = RK.bong_iter(x_0, x_, eps_, eps_prev_, data_, sigma, NS.s_, row, RK.row_offset, NS.h, extra_options)
 
             denoised = x_0 + ((sigma / (sigma - NS.sigma_down)) *  NS.h_new) * RK.zum(RK.rows, eps_, eps_prev_)
