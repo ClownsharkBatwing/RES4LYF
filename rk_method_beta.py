@@ -638,7 +638,8 @@ class RK_NoiseSampler:
         self.multistep_stages = RK.multistep_stages
         self.rows = RK.rows
         self.C    = RK.C
-        self.s_ = [(self.sigma_fn(self.t_fn(self.sigma) + self.h*c_)) * self.s_in for c_ in self.C]
+        #self.s_ = [(self.sigma_fn(self.t_fn(self.sigma) + self.h*c_)) * self.s_in for c_ in self.C]
+        self.s_ = self.sigma_fn(self.t_fn(self.sigma) + self.h * self.C)
     
     
     

@@ -319,7 +319,7 @@ class LatentGuide:
                 if not RK.IMPLICIT and NS.noise_mode_sde_substep != "hard_sq":
                     x_[row+RK.row_offset] = NS.swap_noise_substep(x_0, x_[row+RK.row_offset])
                 if BONGMATH and step < sigmas.shape[0]-1 and extra_options_flag("pseudoimplicit_bongmath", extra_options):
-                    x_0, x_, eps_ = RK.bong_iter(x_0, x_, eps_, eps_prev_, data_, sigma, NS.s_, row, RK.row_offset, NS.h_new, extra_options)
+                    x_0, x_, eps_ = RK.bong_iter(x_0, x_, eps_, eps_prev_, data_, sigma, NS.s_, row, RK.row_offset, NS.h, extra_options)   # h_new?
             
             eps_substep_guide, eps_substep_guide_inv = get_guide_epsilon_substep(x_0, x_, y0, y0_inv, s_, row, row_offset, rk_type)   # should this also be s_2_ ?
             eps_substep_guide = self.mask * eps_substep_guide + (1-self.mask) * eps_substep_guide_inv
@@ -401,6 +401,8 @@ class LatentGuide:
                 h_new_orig = h_new.clone()
                 h_new      = h_new + noise_boost_substep * (h - h_eta)
                 
+                s_new_ = RK.sigma_fn(RK.t_fn(sigma) + h_new * RK.C)
+                
                 if RK.IMPLICIT:
                     x_ = RK.update_substep(x_0, x_, eps_, eps_prev_, r, row_offset,    h_new, h_new_orig, extra_options)   # bring noise addition back here!
                     
@@ -412,7 +414,7 @@ class LatentGuide:
                     x_[row] = NS.swap_noise(x_0, x_[row], sigma, sub_sigma_eta, sub_sigma_next, sub_sigma_down_eta, sub_sigma_up_eta, sub_alpha_ratio_eta, s_noise_substep, SUBSTEP=True)
                     
                     if BONGMATH and step < sigmas.shape[0]-1 and extra_options_flag("fully_pseudoimplicit_bongmath", extra_options):
-                        x_0, x_, eps_ = RK.bong_iter(x_0, x_, eps_, eps_prev_, data_, sigma, NS.s_, row, RK.row_offset, NS.h_new, extra_options)
+                        x_0, x_, eps_ = RK.bong_iter(x_0, x_, eps_, eps_prev_, data_, sigma, s_new_, row, RK.row_offset, h_new, extra_options)    # h_new?
                 
                 eps_substep_guide, eps_substep_guide_inv = get_guide_epsilon_substep(x_0, x_, y0, y0_inv, s_, r, row_offset, RK.rk_type)
                 eps_substep_guide = self.mask * eps_substep_guide + (1-self.mask) * eps_substep_guide_inv
@@ -470,7 +472,7 @@ class LatentGuide:
                     x_[row] = NS.swap_noise(x_0, x_[row], sigma, sub_sigma_eta, sub_sigma_next, sub_sigma_down_eta, sub_sigma_up_eta, sub_alpha_ratio_eta, s_noise_substep, SUBSTEP=True)
                     
                     if BONGMATH and step < sigmas.shape[0]-1 and extra_options_flag("fully_pseudoimplicit_bongmath", extra_options):
-                        x_0, x_, eps_ = RK.bong_iter(x_0, x_, eps_, eps_prev_, data_, sigma, NS.s_, row, RK.row_offset, NS.h_new, extra_options)
+                        x_0, x_, eps_ = RK.bong_iter(x_0, x_, eps_, eps_prev_, data_, sigma, NS.s_, row, RK.row_offset, NS.h, extra_options)
                 
                 avg, avg_inv = 0, 0
                 for b, c in itertools.product(range(x_0.shape[0]), range(x_0.shape[1])):
