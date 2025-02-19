@@ -251,7 +251,7 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
                                 
                                 x_tmp = x
                                 s_tmp = sigma
-                            if extra_options_flag("fully_explicit_rebound", extra_options): 
+                            elif not extra_options_flag("disable_fully_explicit_rebound", extra_options): 
                                 x = NS.rebound_overshoot(x_0, x, sigma, sigma, sigma_next)
                                 x_tmp = x
                                 s_tmp = sigma
@@ -268,7 +268,7 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
                                     
                                     x_tmp = x_[row+RK.row_offset]
                                     s_tmp = sigma
-                                if extra_options_flag("diag_explicit_rebound", extra_options):
+                                elif not extra_options_flag("disable_diag_explicit_rebound", extra_options):
                                     x_[row+RK.row_offset] = NS.rebound_overshoot(x_0, x_[row+RK.row_offset], sigma, NS.s_[row], NS.s_[row+RK.row_offset+RK.multistep_stages])
                                     x_tmp = x_[row+RK.row_offset]
                                     s_tmp = NS.s_[row]
