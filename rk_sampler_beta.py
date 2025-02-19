@@ -230,6 +230,9 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
                     # PREPARE PSEUDOIMPLICIT GUIDES
                     x_0, x_row_pseudoimplicit, sub_sigma_pseudoimplicit = LG.process_pseudoimplicit_guides_substep(x_0, x_, eps_, eps_prev_, data_, row, step, sigmas, NS, RK, pseudoimplicit_row_weights, pseudoimplicit_step_weights, full_iter, BONGMATH, extra_options)
                     
+                    if BONGMATH and step < sigmas.shape[0]-1 and not extra_options_flag("disable_pseudobongmath", extra_options) and (LG.lgw[step] > 0 or LG.lgw_inv[step] > 0):
+                        x_0, x_, eps_ = RK.bong_iter(x_0, x_, eps_, eps_prev_, data_, sigma, NS.s_, row, RK.row_offset, NS.h_new, extra_options)
+                    
                     # PRENOISE METHOD HERE!
                     
                     # A-TABLEAU
