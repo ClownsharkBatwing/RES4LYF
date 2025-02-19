@@ -341,14 +341,6 @@ class LatentGuide:
         if "fully_pseudoimplicit" not in self.guide_mode or (self.lgw[step] == 0 and self.lgw_inv[step] == 0):
             return x_0, x_, eps_ 
         
-        row_offset = RK.row_offset
-        rk_type    = RK.rk_type
-        noise_boost_substep = NS.noise_boost_substep
-        oversubstep_mode = NS.overshoot_mode_substep
-        
-        s_ = NS.s_
-        h = NS.h
-        
         sigma = sigmas[step]
         
         y0 = self.y0.clone().to(self.device)
@@ -438,7 +430,7 @@ class LatentGuide:
             lgw_mask, lgw_mask_inv = self.get_masks_for_step(step)
             
             for r in range(RK.rows):
-                NS.set_sde_substep(row, RK.multistep_stages, eta_substep, overshoot_substep, s_noise_substep)
+                NS.set_sde_substep(r, RK.multistep_stages, eta_substep, overshoot_substep, s_noise_substep)
 
                 maxmin_ratio = (NS.sub_sigma - RK.sigma_min) / NS.sub_sigma
                 fully_sub_sigma_2 = NS.sub_sigma - maxmin_ratio * (NS.sub_sigma * pseudoimplicit_row_weights[r] * pseudoimplicit_step_weights[full_iter] * self.lgw[step])
@@ -446,12 +438,12 @@ class LatentGuide:
 
                 if RK.IMPLICIT:
                     x_ = RK.update_substep(x_0, x_, eps_, eps_prev_, r, RK.row_offset, NS.h_new, NS.h_new_orig, extra_options) # add noise back here!
-                    x_[row+RK.row_offset] = NS.rebound_overshoot_substep(x_0, x_[row+RK.row_offset])
+                    x_[r+RK.row_offset] = NS.rebound_overshoot_substep(x_0, x_[r+RK.row_offset])
 
-                    if row > 0:
-                        x_[row+RK.row_offset] = NS.swap_noise_substep(x_0, x_[row+RK.row_offset])
+                    if r > 0:
+                        x_[r+RK.row_offset] = NS.swap_noise_substep(x_0, x_[r+RK.row_offset])
                         if BONGMATH and step < sigmas.shape[0]-1 and not extra_options_flag("disable_fully_pseudoimplicit_bongmath", extra_options):
-                            x_0, x_, eps_ = RK.bong_iter(x_0, x_, eps_, eps_prev_, data_, sigma, NS.s_, row, RK.row_offset, NS.h, extra_options)
+                            x_0, x_, eps_ = RK.bong_iter(x_0, x_, eps_, eps_prev_, data_, sigma, NS.s_, r, RK.row_offset, NS.h, extra_options)
                 
                 avg, avg_inv = 0, 0
                 for b, c in itertools.product(range(x_0.shape[0]), range(x_0.shape[1])):
