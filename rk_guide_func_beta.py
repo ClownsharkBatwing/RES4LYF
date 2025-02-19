@@ -71,7 +71,7 @@ class LatentGuide:
         self.frame_weights = frame_weights_grp[0] if frame_weights_grp is not None else None
         self.frame_weights_inv = frame_weights_grp[1] if frame_weights_grp is not None else None
 
-    def init_guides(self, x, guides, noise_sampler):
+    def init_guides(self, x, guides, RK_IMPLICIT, noise_sampler):
         latent_guide_weight, latent_guide_weight_inv = 0.,0.
         latent_guide_weights = torch.zeros_like(self.sigmas, dtype=self.dtype)
         latent_guide_weights_inv = torch.zeros_like(self.sigmas, dtype=self.dtype)
@@ -80,7 +80,10 @@ class LatentGuide:
 
         if guides is not None:
             (self.guide_mode, latent_guide_weight, latent_guide_weight_inv, latent_guide_weights, latent_guide_weights_inv, latent_guide, latent_guide_inv, self.mask, self.mask_inv, scheduler_, scheduler_inv_, steps_, steps_inv_, self.guide_cossim_cutoff_, self.guide_bkg_cossim_cutoff_) = guides
-                        
+
+            if self.guide_mode.startswith("fully_") and not RK_IMPLICIT:
+                self.guide_mode = self.guide_mode[6:]   # fully_pseudoimplicit is only supported for implicit samplers, default back to pseudoimplicit
+            
             if latent_guide_weights is None:
                 latent_guide_weights = get_sigmas(self.model, scheduler_, steps_, 1.0).to(self.dtype).to(self.device) / self.sigma_max
             

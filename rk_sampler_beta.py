@@ -150,7 +150,7 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
 
     # SETUP GUIDES
     LG = LatentGuide(model, sigmas, UNSAMPLE, LGW_MASK_RESCALE_MIN, extra_options, device=default_device, dtype=default_dtype, frame_weights_grp=frame_weights_grp)
-    x = LG.init_guides(x, guides, NS.noise_sampler)
+    x = LG.init_guides(x, guides, RK.IMPLICIT, NS.noise_sampler)
 
     data_           = None
     eps_            = None
