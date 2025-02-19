@@ -14,29 +14,22 @@ PRINT_DEBUG=False
 
 def init_implicit_sampling(RK, x_0, x_, eps_, eps_prev_, data_, eps, denoised, denoised_prev, denoised_prev2, step, sigmas, h, s_, extra_options):
     
-    def get_epsilon(x_0, denoised, sigma, rk_type):
-        if RK_Method_Beta.is_exponential(rk_type):
-            eps = denoised - x_0
-        else:
-            eps = (x_0 - denoised) / sigma
-        return eps
-    
     sigma = sigmas[step]
     if extra_options_flag("implicit_skip_model_call_at_start", extra_options) and denoised.sum() + eps.sum() != 0:
         eps_[0], data_[0] = eps.clone(), denoised.clone()
-        eps_[0] = get_epsilon(x_0, denoised, sigma, RK.rk_type)
+        eps_[0] = RK.get_epsilon_anchored(x_0, denoised, sigma)
         if denoised_prev2.sum() != 0:
             sratio = sigma - s_[0]
             data_[0] = denoised + sratio * (denoised - denoised_prev2)
             
     elif extra_options_flag("implicit_full_skip_model_call_at_start", extra_options) and denoised.sum() + eps.sum() != 0:
         eps_[0], data_[0] = eps.clone(), denoised.clone()
-        eps_[0] = get_epsilon(x_0, denoised, sigma, RK.rk_type)
+        eps_[0] = RK.get_epsilon_anchored(x_0, denoised, sigma)
         if denoised_prev2.sum() != 0:
             for r in range(RK.rows):
                 sratio = sigma - s_[r]
                 data_[r] = denoised + sratio * (denoised - denoised_prev2)
-                eps_[r] = get_epsilon(x_0, data_[r], s_[r], RK.rk_type)
+                eps_[r] = RK.get_epsilon_anchored(x_0, data_[r], s_[r])
 
     elif extra_options_flag("implicit_lagrange_skip_model_call_at_start", extra_options) and denoised.sum() + eps.sum() != 0:
         if denoised_prev2.sum() != 0:
@@ -48,7 +41,7 @@ def init_implicit_sampling(RK, x_0, x_, eps_, eps_prev_, data_, eps, denoised, d
             for r in range(RK.rows):
                 sratio = sigma - s_[r]
                 data_[r] = lagrange_interpolation([0,1], [denoised_prev2, denoised], 1 + w*RK.C[r]).squeeze(0) + denoised_prev2 - denoised
-                eps_[r]  = get_epsilon(x_0, data_[r], s_[r], RK.rk_type)      
+                eps_[r]  = RK.get_epsilon_anchored(x_0, data_[r], s_[r])      
                 
             if extra_options_flag("implicit_lagrange_skip_model_call_at_start_0_only", extra_options):
                 for r in range(RK.rows):
@@ -57,7 +50,7 @@ def init_implicit_sampling(RK, x_0, x_, eps_, eps_prev_, data_, eps, denoised, d
 
         else:
             eps_[0], data_[0] = eps.clone(), denoised.clone()
-            eps_[0] = get_epsilon(x_0, denoised, sigma, RK.rk_type)      
+            eps_[0] = RK.get_epsilon_anchored(x_0, denoised, sigma)      
 
     elif extra_options_flag("implicit_lagrange_init", extra_options) and denoised.sum() + eps.sum() != 0:
         sigma_prev = sigmas[step-1]
@@ -226,7 +219,7 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
                 x_, eps_ = RK.newton_iter(x_0, x_, eps_, eps_prev_, data_, NS.s_, 0, NS.h, sigmas, step, "init", extra_options)
 
             # PREPARE FULLY PSEUDOIMPLICIT GUIDES
-            x_, eps_ = LG.prepare_fully_pseudoimplicit_guides_substep(x_0, x_, eps_, eps_prev_, data_, 0, step, sigmas, eta_substep, overshoot_substep, s_noise_substep, NS, RK, pseudoimplicit_row_weights, pseudoimplicit_step_weights, full_iter, extra_options)
+            x_, eps_ = LG.prepare_fully_pseudoimplicit_guides_substep(x_0, x_, eps_, eps_prev_, data_, 0, step, sigmas, eta_substep, overshoot_substep, s_noise_substep, NS, RK, pseudoimplicit_row_weights, pseudoimplicit_step_weights, full_iter, BONGMATH, extra_options)
 
             # TABLEAU LOOP
             for row in range(RK.rows - RK.multistep_stages - RK.row_offset + 1):
@@ -235,7 +228,7 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
                     NS.set_sde_substep(row, RK.multistep_stages, eta_substep, overshoot_substep, s_noise_substep, full_iter, diag_iter, implicit_steps_full, implicit_steps_diag)
 
                     # PREPARE PSEUDOIMPLICIT GUIDES
-                    x_row_pseudoimplicit, sub_sigma_pseudoimplicit = LG.process_pseudoimplicit_guides_substep(x_0, x_, eps_, eps_prev_, data_, row, step, sigmas, NS, RK, pseudoimplicit_row_weights, pseudoimplicit_step_weights, full_iter, extra_options)
+                    x_0, x_row_pseudoimplicit, sub_sigma_pseudoimplicit = LG.process_pseudoimplicit_guides_substep(x_0, x_, eps_, eps_prev_, data_, row, step, sigmas, NS, RK, pseudoimplicit_row_weights, pseudoimplicit_step_weights, full_iter, BONGMATH, extra_options)
                     
                     # PRENOISE METHOD HERE!
                     
