@@ -336,7 +336,7 @@ class LatentGuide:
     def prepare_fully_pseudoimplicit_guides_substep(self, x_0, x_, eps_, eps_prev_, data_, row, step, sigmas, eta_substep, oversubstep_eta, s_noise_substep, NS, \
                                                     RK, pseudoimplicit_row_weights, pseudoimplicit_step_weights, full_iter, BONGMATH, extra_options):
         if "fully_pseudoimplicit" not in self.guide_mode or (self.lgw[step] == 0 and self.lgw_inv[step] == 0):
-            return x_, eps_ 
+            return x_0, x_, eps_ 
         
         row_offset = RK.row_offset
         rk_type    = RK.rk_type
