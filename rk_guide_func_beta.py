@@ -751,8 +751,8 @@ class LatentGuide:
                     lgw_mask_clamp_inv = torch.clamp(lgw_mask_inv, max=lgw_tmp_inv)
 
                     eps_[row][b][c] = eps_[row][b][c] + lgw_mask_clamp[b][c] * (cvf[b][c] - eps_[row][b][c]) + lgw_mask_clamp_inv[b][c] * (cvf_inv[b][c] - eps_[row][b][c])
-                    
-            elif extra_options_flag("disable_lgw_scaling", extra_options):
+            
+            elif self.guide_mode in {"unsample", "resample"}: # extra_options_flag("disable_lgw_scaling", extra_options):
                 eps_[row] = eps_[row] + lgw_mask * (cvf - eps_[row]) + lgw_mask_inv * (cvf_inv - eps_[row])
                 
             elif self.guide_mode in {"resample_projection", "unsample_projection"}:
@@ -765,7 +765,7 @@ class LatentGuide:
 
                 eps_[row] = eps_[row] + lgw_mask * (eps_sum - eps_[row]) + lgw_mask_inv * (eps_sum - eps_[row])
                 
-            else:
+            elif self.guide_mode in {"unsample_cw", "resample_cw", "resample_projection_cw", "unsample_projection_cw"}:
                 avg, avg_inv = 0, 0
                 for b, c in itertools.product(range(x_0.shape[0]), range(x_0.shape[1])):
                     avg     += torch.norm(lgw_mask    [b][c] * data_[row][b][c]   -   lgw_mask    [b][c] * y0    [b][c])
