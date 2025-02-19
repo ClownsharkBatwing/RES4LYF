@@ -247,18 +247,13 @@ class LatentGuide:
     @torch.no_grad
     def process_pseudoimplicit_guides_substep(self, x_0, x_, eps_, eps_prev_, data_, row, step, sigmas, NS, RK, pseudoimplicit_row_weights, pseudoimplicit_step_weights, full_iter, BONGMATH, extra_options,):
         if "pseudoimplicit" not in self.guide_mode or (self.lgw[step] == 0 and self.lgw_inv[step] == 0):
-            return x_0, None, None
+            return x_0, x_, eps_, None, None
         
-        s_ = NS.s_
-        sub_sigma = NS.sub_sigma
         sigma = sigmas[step]
 
-        row_offset = RK.row_offset
-        rk_type = RK.rk_type
-        
         if self.s_lying_ is not None:
             if row >= len(self.s_lying_):
-                return x_0, None, None
+                return x_0, x_, eps_, None, None
         
         y0 = self.y0.clone().to(self.device)
         if self.HAS_LATENT_GUIDE_INV:
@@ -289,51 +284,59 @@ class LatentGuide:
             if y0_cossim_inv >= self.guide_bkg_cossim_cutoff_:
                 lgw_mask_inv *= 0
         else:
-            return x_0, None, None #eps_, x_      #deactivate, too similar
+            return x_0, x_, eps_, None, None         #eps_, x_      #deactivate, too similar
         
         
 
         if "fully_pseudoimplicit" in self.guide_mode:
             if self.x_lying_ is None:
-                return x_0, None, None
+                return x_0, x_, eps_, None, None        
             else:
-                return x_0, self.x_lying_[row], self.s_lying_[row]
-        
+                x_row_pseudoimplicit = self.x_lying_[row]
+                sub_sigma_pseudoimplicit = self.s_lying_[row]
+ 
 
         
         if self.guide_mode in {"pseudoimplicit", "pseudoimplicit_projection"}:
-            maxmin_ratio = (sub_sigma - RK.sigma_min) / sub_sigma
+            maxmin_ratio = (NS.sub_sigma - RK.sigma_min) / NS.sub_sigma
             
             if extra_options_flag("guide_pseudoimplicit_power_substep_flip_maxmin_scaling", extra_options):
                 maxmin_ratio *= (RK.rows-row) / RK.rows
             elif extra_options_flag("guide_pseudoimplicit_power_substep_maxmin_scaling", extra_options):
                 maxmin_ratio *= row / RK.rows
             
-            sub_sigma_2 = sub_sigma - maxmin_ratio * (sub_sigma * pseudoimplicit_row_weights[row] * pseudoimplicit_step_weights[full_iter] * self.lgw[step])
-            s_2_ = copy.deepcopy(s_)
+            sub_sigma_2 = NS.sub_sigma - maxmin_ratio * (NS.sub_sigma * pseudoimplicit_row_weights[row] * pseudoimplicit_step_weights[full_iter] * self.lgw[step])
+            s_2_ = NS.s_.clone()
             s_2_[row] = sub_sigma_2
 
             if RK.IMPLICIT:
                 x_ = RK.update_substep(x_0, x_, eps_, eps_prev_, row, RK.row_offset, NS.h_new, NS.h_new_orig, extra_options)
                 x_[row+RK.row_offset] = NS.rebound_overshoot_substep(x_0, x_[row+RK.row_offset])
-                if not RK.IMPLICIT and NS.noise_mode_sde_substep != "hard_sq":
+                
+                if row > 0:
                     x_[row+RK.row_offset] = NS.swap_noise_substep(x_0, x_[row+RK.row_offset])
-                if BONGMATH and step < sigmas.shape[0]-1 and extra_options_flag("pseudoimplicit_bongmath", extra_options):
-                    x_0, x_, eps_ = RK.bong_iter(x_0, x_, eps_, eps_prev_, data_, sigma, NS.s_, row, RK.row_offset, NS.h, extra_options)   # h_new?
-            
-            eps_substep_guide, eps_substep_guide_inv = get_guide_epsilon_substep(x_0, x_, y0, y0_inv, s_, row, row_offset, rk_type)   # should this also be s_2_ ?
+                    if BONGMATH and step < sigmas.shape[0]-1 and not extra_options_flag("disable_pseudoimplicit_bongmath", extra_options):
+                        x_0, x_, eps_ = RK.bong_iter(x_0, x_, eps_, eps_prev_, data_, sigma, NS.s_, row, RK.row_offset, NS.h, extra_options)
+                
+            eps_substep_guide, eps_substep_guide_inv = get_guide_epsilon_substep(x_0, x_, y0, y0_inv, NS.s_, row, RK.row_offset, RK.rk_type)   # should this also be s_2_ ?
             eps_substep_guide = self.mask * eps_substep_guide + (1-self.mask) * eps_substep_guide_inv
 
             if self.guide_mode == "pseudoimplicit_projection":
-                eps_substep_guide = get_masked_epsilon_projection(x_0, x_, eps_, y0, y0_inv, s_2_, row, row_offset, rk_type, self, step)
+                eps_substep_guide = get_masked_epsilon_projection(x_0, x_, eps_, y0, y0_inv, s_2_, row, RK.row_offset, RK.rk_type, self, step)
 
-            x_row_tmp = x_[row] + RK.h_fn(sub_sigma_2, sub_sigma) * eps_substep_guide
-            return x_0, x_row_tmp, sub_sigma_2 #eps_[row]
+            x_row_tmp = x_[row] + RK.h_fn(sub_sigma_2, NS.sub_sigma) * eps_substep_guide
+            
+            x_row_pseudoimplicit = x_row_tmp
+            sub_sigma_pseudoimplicit = sub_sigma_2
 
-
+        if RK.IMPLICIT and BONGMATH and step < sigmas.shape[0]-1 and not extra_options_flag("disable_pseudobongmath", extra_options):
+            x_[row] = NS.sigma_from_to(x_0, x_row_pseudoimplicit, sigma, sub_sigma_pseudoimplicit, NS.s_[row])
+            x_0, x_, eps_ = RK.bong_iter(x_0, x_, eps_, eps_prev_, data_, sigma, NS.s_, row, RK.row_offset, NS.h, extra_options) 
+            
+        return x_0, x_, eps_, x_row_pseudoimplicit, sub_sigma_pseudoimplicit
 
     @torch.no_grad
-    def prepare_fully_pseudoimplicit_guides_substep(self, x_0, x_, eps_, eps_prev_, data_, row, step, sigmas, eta_substep, oversubstep_eta, s_noise_substep, NS, \
+    def prepare_fully_pseudoimplicit_guides_substep(self, x_0, x_, eps_, eps_prev_, data_, row, step, sigmas, eta_substep, overshoot_substep, s_noise_substep, NS, \
                                                     RK, pseudoimplicit_row_weights, pseudoimplicit_step_weights, full_iter, BONGMATH, extra_options):
         if "fully_pseudoimplicit" not in self.guide_mode or (self.lgw[step] == 0 and self.lgw_inv[step] == 0):
             return x_0, x_, eps_ 
@@ -388,50 +391,38 @@ class LatentGuide:
             eps_lying_ = eps_.clone()
             for r in range(RK.rows):
                 
-                sub_sigma_next = s_[r]
-                sub_sigma_up,     sub_sigma, sub_sigma_down, sub_alpha_ratio             = NS.get_sde_substep(s_[r], s_[r], oversubstep_eta, noise_mode_override=oversubstep_mode)
-                sub_sigma_up_eta, sub_sigma_eta, sub_sigma_down_eta, sub_alpha_ratio_eta = NS.get_sde_substep(s_[r], s_[r], eta_substep)
+                NS.set_sde_substep(r, RK.multistep_stages, eta_substep, overshoot_substep, s_noise_substep)
 
-                maxmin_ratio = (sub_sigma - RK.sigma_min) / sub_sigma
-                fully_sub_sigma_2 = sub_sigma - maxmin_ratio * (sub_sigma * pseudoimplicit_row_weights[r] * pseudoimplicit_step_weights[full_iter] * self.lgw[step])
+                maxmin_ratio = (NS.sub_sigma - RK.sigma_min) / NS.sub_sigma
+                fully_sub_sigma_2 = NS.sub_sigma - maxmin_ratio * (NS.sub_sigma * pseudoimplicit_row_weights[r] * pseudoimplicit_step_weights[full_iter] * self.lgw[step])
                 s_lying_.append(fully_sub_sigma_2)
 
-                h_new      = h * RK.h_fn(sub_sigma_down,     sigma) / RK.h_fn(sub_sigma_next, sigma) 
-                h_eta      = h * RK.h_fn(sub_sigma_down_eta, sigma) / RK.h_fn(sub_sigma_next, sigma) 
-                h_new_orig = h_new.clone()
-                h_new      = h_new + noise_boost_substep * (h - h_eta)
-                
-                s_new_ = RK.sigma_fn(RK.t_fn(sigma) + h_new * RK.C)
-                
                 if RK.IMPLICIT:
-                    x_ = RK.update_substep(x_0, x_, eps_, eps_prev_, r, row_offset,    h_new, h_new_orig, extra_options)   # bring noise addition back here!
+                    x_ = RK.update_substep(x_0, x_, eps_, eps_prev_, r, RK.row_offset, NS.h_new, NS.h_new_orig, extra_options) 
                     
-                    if oversubstep_eta != 0:
-                        sub_eps = (x_0 - x_[row]) / (sigma - sub_sigma_down)
-                        sub_denoised = x_0 - sigma * sub_eps
-                        x_[row] = sub_denoised + sub_sigma_next * sub_eps
-                    
-                    x_[row] = NS.swap_noise(x_0, x_[row], sigma, sub_sigma_eta, sub_sigma_next, sub_sigma_down_eta, sub_sigma_up_eta, sub_alpha_ratio_eta, s_noise_substep, SUBSTEP=True)
-                    
-                    if BONGMATH and step < sigmas.shape[0]-1 and extra_options_flag("fully_pseudoimplicit_bongmath", extra_options):
-                        x_0, x_, eps_ = RK.bong_iter(x_0, x_, eps_, eps_prev_, data_, sigma, s_new_, row, RK.row_offset, h_new, extra_options)    # h_new?
+                    x_[r+RK.row_offset] = NS.rebound_overshoot_substep(x_0, x_[r+RK.row_offset])
+
+                    if r > 0:
+                        x_[r+RK.row_offset] = NS.swap_noise_substep(x_0, x_[r+RK.row_offset])
+                        if BONGMATH and step < sigmas.shape[0]-1 and not extra_options_flag("disable_fully_pseudoimplicit_bongmath", extra_options):
+                            x_0, x_, eps_ = RK.bong_iter(x_0, x_, eps_, eps_prev_, data_, sigma, NS.s_, r, RK.row_offset, NS.h, extra_options)
                 
-                eps_substep_guide, eps_substep_guide_inv = get_guide_epsilon_substep(x_0, x_, y0, y0_inv, s_, r, row_offset, RK.rk_type)
+                eps_substep_guide, eps_substep_guide_inv = get_guide_epsilon_substep(x_0, x_, y0, y0_inv, NS.s_, r, RK.row_offset, RK.rk_type)
                 eps_substep_guide = self.mask * eps_substep_guide + (1-self.mask) * eps_substep_guide_inv
 
                 if self.guide_mode == "fully_pseudoimplicit_projection":
-                    eps_substep_guide = get_masked_epsilon_projection(x_0, x_, eps_, y0, y0_inv, s_, r, row_offset, RK.rk_type, self, step)
+                    eps_substep_guide = get_masked_epsilon_projection(x_0, x_, eps_, y0, y0_inv, NS.s_, r, RK.row_offset, RK.rk_type, self, step)
 
-                x_lying_[r] = x_[r] + RK.h_fn(fully_sub_sigma_2, sub_sigma) * eps_substep_guide
+                x_lying_[r] = x_[r] + RK.h_fn(fully_sub_sigma_2, NS.sub_sigma) * eps_substep_guide
                 
-                data_lying = x_[r] + RK.h_fn(0, s_[r]) * eps_substep_guide
-                eps_lying_[r] = RK.get_epsilon_anchored(x_0, data_lying, s_[r])
+                data_lying = x_[r] + RK.h_fn(0, NS.s_[r]) * eps_substep_guide
+                eps_lying_[r] = RK.get_epsilon_anchored(x_0, data_lying, NS.s_[r])
                 
             if not extra_options_flag("pseudoimplicit_disable_eps_lying", extra_options):
                 eps_ = eps_lying_
             
             if not extra_options_flag("pseudoimplicit_disable_newton_iter", extra_options):
-                x_, eps_ = RK.newton_iter(x_0, x_, eps_, eps_prev_, data_, s_, 0, h, sigmas, step, "lying", extra_options)
+                x_, eps_ = RK.newton_iter(x_0, x_, eps_, eps_prev_, data_, NS.s_, 0, NS.h, sigmas, step, "lying", extra_options)
             
             self.x_lying_ = x_lying_
             self.s_lying_ = s_lying_
@@ -447,32 +438,20 @@ class LatentGuide:
             lgw_mask, lgw_mask_inv = self.get_masks_for_step(step)
             
             for r in range(RK.rows):
-                
-                sub_sigma_next = s_[r]
-                sub_sigma_up,     sub_sigma, sub_sigma_down, sub_alpha_ratio             = NS.get_sde_substep(s_[r], s_[r], oversubstep_eta, noise_mode_override=oversubstep_mode)
-                sub_sigma_up_eta, sub_sigma_eta, sub_sigma_down_eta, sub_alpha_ratio_eta = NS.get_sde_substep(s_[r], s_[r], eta_substep)
-                
-                maxmin_ratio = (sub_sigma - RK.sigma_min) / sub_sigma
-                fully_sub_sigma_2 = sub_sigma - maxmin_ratio * (sub_sigma * pseudoimplicit_step_weights[full_iter] * self.lgw[step])
+                NS.set_sde_substep(row, RK.multistep_stages, eta_substep, overshoot_substep, s_noise_substep)
+
+                maxmin_ratio = (NS.sub_sigma - RK.sigma_min) / NS.sub_sigma
+                fully_sub_sigma_2 = NS.sub_sigma - maxmin_ratio * (NS.sub_sigma * pseudoimplicit_row_weights[r] * pseudoimplicit_step_weights[full_iter] * self.lgw[step])
                 s_lying_.append(fully_sub_sigma_2)
 
-                h_new      = h * RK.h_fn(sub_sigma_down,     sigma) / RK.h_fn(sub_sigma_next, sigma) 
-                h_eta      = h * RK.h_fn(sub_sigma_down_eta, sigma) / RK.h_fn(sub_sigma_next, sigma) 
-                h_new_orig = h_new.clone()
-                h_new      = h_new + noise_boost_substep * (h - h_eta)
-                
                 if RK.IMPLICIT:
-                    x_ = RK.update_substep(x_0, x_, eps_, eps_prev_, r, row_offset,    h_new, h_new_orig, extra_options) # add noise back here!
-                    
-                    if oversubstep_eta != 0:
-                        sub_eps = (x_0 - x_[row]) / (sigma - sub_sigma_down)
-                        sub_denoised = x_0 - sigma * sub_eps
-                        x_[row] = sub_denoised + sub_sigma_next * sub_eps
-                    
-                    x_[row] = NS.swap_noise(x_0, x_[row], sigma, sub_sigma_eta, sub_sigma_next, sub_sigma_down_eta, sub_sigma_up_eta, sub_alpha_ratio_eta, s_noise_substep, SUBSTEP=True)
-                    
-                    if BONGMATH and step < sigmas.shape[0]-1 and extra_options_flag("fully_pseudoimplicit_bongmath", extra_options):
-                        x_0, x_, eps_ = RK.bong_iter(x_0, x_, eps_, eps_prev_, data_, sigma, NS.s_, row, RK.row_offset, NS.h, extra_options)
+                    x_ = RK.update_substep(x_0, x_, eps_, eps_prev_, r, RK.row_offset, NS.h_new, NS.h_new_orig, extra_options) # add noise back here!
+                    x_[row+RK.row_offset] = NS.rebound_overshoot_substep(x_0, x_[row+RK.row_offset])
+
+                    if row > 0:
+                        x_[row+RK.row_offset] = NS.swap_noise_substep(x_0, x_[row+RK.row_offset])
+                        if BONGMATH and step < sigmas.shape[0]-1 and not extra_options_flag("disable_fully_pseudoimplicit_bongmath", extra_options):
+                            x_0, x_, eps_ = RK.bong_iter(x_0, x_, eps_, eps_prev_, data_, sigma, NS.s_, row, RK.row_offset, NS.h, extra_options)
                 
                 avg, avg_inv = 0, 0
                 for b, c in itertools.product(range(x_0.shape[0]), range(x_0.shape[1])):
@@ -485,7 +464,7 @@ class LatentGuide:
                     ratio     = torch.nan_to_num(torch.norm(data_[r][b][c] - y0    [b][c])   /   avg,     0)
                     ratio_inv = torch.nan_to_num(torch.norm(data_[r][b][c] - y0_inv[b][c])   /   avg_inv, 0)
                 
-                    eps_row, eps_row_inv = get_guide_epsilon_substep(x_0, x_, y0, y0_inv, s_, r, row_offset, rk_type, b, c)
+                    eps_row, eps_row_inv = get_guide_epsilon_substep(x_0, x_, y0, y0_inv, NS.s_, r, RK.row_offset, RK.rk_type, b, c)
 
                     if self.guide_mode == "fully_pseudoimplicit_projection_cw":
                         eps_row_lerp = eps_[r][b][c]   +   self.mask[b][c] * (eps_row-eps_[r][b][c])   +   (1-self.mask[b][c]) * (eps_row_inv-eps_[r][b][c])
@@ -499,17 +478,16 @@ class LatentGuide:
                     else:
                         eps_[r][b][c] = eps_[r][b][c]      +     ratio * lgw_mask[b][c] * (eps_row - eps_[r][b][c])    +    ratio_inv * lgw_mask_inv[b][c] * (eps_row_inv - eps_[r][b][c])
 
-                    x_lying_[r][b][c] = x_[r][b][c] + RK.h_fn(fully_sub_sigma_2, sub_sigma) * eps_[r][b][c] #eps_substep_guide
+                    x_lying_[r][b][c] = x_[r][b][c] + RK.h_fn(fully_sub_sigma_2, NS.sub_sigma) * eps_[r][b][c] #eps_substep_guide
                     
-                    data_lying[b][c] = x_[r][b][c] + RK.h_fn(0, s_[r]) * eps_[r][b][c] # eps_substep_guide
-                    #eps_lying_[r][b][c] = get_epsilon1(x_0[b][c], data_lying[b][c], s_[r], rk_type)
-                    eps_lying_[r][b][c] = RK.get_epsilon_anchored(x_0[b][c], data_lying[b][c], s_[r])
+                    data_lying[b][c] = x_[r][b][c] + RK.h_fn(0, NS.s_[r]) * eps_[r][b][c] # eps_substep_guide
+                    eps_lying_[r][b][c] = RK.get_epsilon_anchored(x_0[b][c], data_lying[b][c], NS.s_[r])
                 
             if not extra_options_flag("pseudoimplicit_disable_eps_lying", extra_options):
                 eps_ = eps_lying_
             
             if not extra_options_flag("pseudoimplicit_disable_newton_iter", extra_options):
-                x_, eps_ = RK.newton_iter(x_0, x_, eps_, eps_prev_, data_, s_, 0, h, sigmas, step, "lying", extra_options)
+                x_, eps_ = RK.newton_iter(x_0, x_, eps_, eps_prev_, data_, NS.s_, 0, NS.h, sigmas, step, "lying", extra_options)
 
             self.x_lying_ = x_lying_
             self.s_lying_ = s_lying_

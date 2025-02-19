@@ -695,7 +695,7 @@ class RK_NoiseSampler:
         
         
         
-    def set_sde_substep(self, row, multistep_stages, eta_substep, overshoot_substep, s_noise_substep, full_iter, diag_iter, implicit_steps_full, implicit_steps_diag):    
+    def set_sde_substep(self, row, multistep_stages, eta_substep, overshoot_substep, s_noise_substep, full_iter=0, diag_iter=0, implicit_steps_full=0, implicit_steps_diag=0):    
         self.sub_sigma_up, self.sub_sigma, self.sub_sigma_next, self.sub_sigma_down, self.sub_alpha_ratio \
             = 0., self.s_[row], self.s_[row+self.row_offset+multistep_stages], self.s_[row+self.row_offset+multistep_stages], 1.
             
@@ -946,11 +946,11 @@ class RK_NoiseSampler:
         else:
             return x
     
-    def rebound_overshoot(self, x_0, x, sigma, sigma_next, sigma_down):   #sigma, sigma_to, sigma_from
-        eps = (x_0 - x) / (sigma - sigma_down)
+    def sigma_from_to(self, x_0, x_down, sigma, sigma_down, sigma_next):   #sigma, sigma_from, sigma_to
+        eps = (x_0 - x_down) / (sigma - sigma_down)
         denoised = x_0 - sigma * eps
-        x = denoised + sigma_next * eps
-        return x
+        x_next = denoised + sigma_next * eps
+        return x_next
 
     def rebound_overshoot_step(self, x_0, x):
         eps = (x_0 - x) / (self.sigma - self.sigma_down)

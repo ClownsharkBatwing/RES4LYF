@@ -227,21 +227,21 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
                     
                     NS.set_sde_substep(row, RK.multistep_stages, eta_substep, overshoot_substep, s_noise_substep, full_iter, diag_iter, implicit_steps_full, implicit_steps_diag)
 
-                    # PREPARE PSEUDOIMPLICIT GUIDES
-                    x_0, x_row_pseudoimplicit, sub_sigma_pseudoimplicit = LG.process_pseudoimplicit_guides_substep(x_0, x_, eps_, eps_prev_, data_, row, step, sigmas, NS, RK, pseudoimplicit_row_weights, pseudoimplicit_step_weights, full_iter, BONGMATH, extra_options)
-                    
-                    if BONGMATH and step < sigmas.shape[0]-1 and extra_options_flag("enable_pseudobongmath", extra_options) and (LG.lgw[step] > 0 or LG.lgw_inv[step] > 0):
-                        x_0, x_, eps_ = RK.bong_iter(x_0, x_, eps_, eps_prev_, data_, sigma, NS.s_, row, 0, NS.h_new, extra_options)
-                        #x_0, x_, eps_ = RK.bong_iter(x_0, x_, eps_, eps_prev_, data_, sigma, NS.s_, row, RK.row_offset, NS.h_new, extra_options) 
                     # PRENOISE METHOD HERE!
                     
                     # A-TABLEAU
                     if row < RK.rows:
 
+                        # PREPARE PSEUDOIMPLICIT GUIDES
+                        x_0, x_, eps_, x_row_pseudoimplicit, sub_sigma_pseudoimplicit = LG.process_pseudoimplicit_guides_substep(x_0, x_, eps_, eps_prev_, data_, row, step, sigmas, NS, RK, pseudoimplicit_row_weights, pseudoimplicit_step_weights, full_iter, BONGMATH, extra_options)
+                        
                         # PREPARE MODEL CALL
                         if LG.guide_mode in {"pseudoimplicit", "pseudoimplicit_projection", "fully_pseudoimplicit", "fully_pseudoimplicit_projection","fully_pseudoimplicit_cw", "fully_pseudoimplicit_projection_cw"} and (LG.lgw[step] > 0 or LG.lgw_inv[step] > 0) and x_row_pseudoimplicit is not None:
+
                             x_tmp =     x_row_pseudoimplicit 
                             s_tmp = sub_sigma_pseudoimplicit 
+                            
+                            
                             
                         # Fully implicit iteration (explicit only)                   # or... Fully implicit iteration (implicit only... not standard) 
                         elif (full_iter > 0 and RK.row_offset == 1 and row == 0)   or   (full_iter > 0 and RK.row_offset == 0 and row == 0 and extra_options_flag("fully_implicit_update_x", extra_options)):
@@ -252,7 +252,7 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
                                 x_tmp = x
                                 s_tmp = sigma
                             elif not extra_options_flag("disable_fully_explicit_rebound", extra_options): 
-                                x = NS.rebound_overshoot(x_0, x, sigma, sigma, sigma_next)
+                                x = NS.sigma_from_to(x_0, x, sigma, sigma_next, sigma)
                                 x_tmp = x
                                 s_tmp = sigma
                             else:
@@ -269,7 +269,7 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
                                     x_tmp = x_[row+RK.row_offset]
                                     s_tmp = sigma
                                 elif not extra_options_flag("disable_diag_explicit_rebound", extra_options):
-                                    x_[row+RK.row_offset] = NS.rebound_overshoot(x_0, x_[row+RK.row_offset], sigma, NS.s_[row], NS.s_[row+RK.row_offset+RK.multistep_stages])
+                                    x_[row+RK.row_offset] = NS.sigma_from_to(x_0, x_[row+RK.row_offset], sigma, NS.s_[row+RK.row_offset+RK.multistep_stages], NS.s_[row])
                                     x_tmp = x_[row+RK.row_offset]
                                     s_tmp = NS.s_[row]
                                 else: 
@@ -286,12 +286,15 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
                                 if row == 0 and (extra_options_flag("implicit_lagrange_init", extra_options)  or   extra_options_flag("radaucycle", extra_options)):
                                     pass
                                 else:
-                                    x_tmp = x_[row+RK.row_offset] = x_0 + NS.h_new * RK.zum(row+RK.row_offset, eps_, eps_prev_)
+                                    x_[row+RK.row_offset] = x_0 + NS.h_new * RK.zum(row+RK.row_offset, eps_, eps_prev_)
+                                    x_[row+RK.row_offset] = NS.rebound_overshoot_substep(x_0, x_[row+RK.row_offset])
                                     if row > 0:
-                                        x_tmp = x_[row+RK.row_offset] = NS.swap_noise_substep(x_0, x_[row+RK.row_offset])
-                                    if BONGMATH and step < sigmas.shape[0]-1:
-                                        x_0, x_, eps_ = RK.bong_iter(x_0, x_, eps_, eps_prev_, data_, sigma, NS.s_, row, RK.row_offset, NS.h, extra_options)
-                                        x_tmp = x_[row+RK.row_offset]
+                                        x_[row+RK.row_offset] = NS.swap_noise_substep(x_0, x_[row+RK.row_offset])
+                                        if BONGMATH and step < sigmas.shape[0]-1 and not extra_options_flag("disable_implicit_prebong", extra_options):
+                                            x_0, x_, eps_ = RK.bong_iter(x_0, x_, eps_, eps_prev_, data_, sigma, NS.s_, row, RK.row_offset, NS.h, extra_options)     # TRY WITH h_new ??
+                                    x_tmp = x_[row+RK.row_offset]
+
+
 
                         # MODEL CALL
                         if RK.IMPLICIT   and   row == 0   and   (extra_options_flag("implicit_lazy_recycle_first_model_call_at_start", extra_options)   or   extra_options_flag("radaucycle", extra_options)):
@@ -308,6 +311,8 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
                             if extra_options_flag("preview_substeps", extra_options):
                                 callback({'x': x, 'i': step, 'sigma': sigma, 'sigma_next': sigma_next, 'denoised': data_[row].to(torch.float32)}) if callback is not None else None
 
+
+
                         # GUIDE 
                         if not extra_options_flag("disable_guides_eps_substep", extra_options):
                             eps_, x_      = LG.process_guides_substep(x_0, x_, eps_,      data_, row, step, NS.sigma, NS.sigma_next, NS.sigma_down, NS.s_, unsample_resample_scale, RK, extra_options)
@@ -317,6 +322,8 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
                         if (full_iter == 0 and diag_iter == 0)   or   extra_options_flag("newton_iter_post_use_on_implicit_steps", extra_options):
                             x_, eps_ = RK.newton_iter(x_0, x_, eps_, eps_prev_, data_, NS.s_, row, NS.h, sigmas, step, "post", extra_options)
 
+
+
                     # UPDATE
                     x_ = RK.update_substep(x_0, x_, eps_, eps_prev_, row, RK.row_offset, NS.h_new, NS.h_new_orig, extra_options)
                     
@@ -324,8 +331,10 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
                     if not RK.IMPLICIT and NS.noise_mode_sde_substep != "hard_sq":
                         x_[row+RK.row_offset] = NS.swap_noise_substep(x_0, x_[row+RK.row_offset])
 
-                    if BONGMATH and step < sigmas.shape[0]-1 and diag_iter == implicit_steps_diag:
+                    if BONGMATH and step < sigmas.shape[0]-1 and diag_iter == implicit_steps_diag and not extra_options_flag("disable_terminal_bongmath", extra_options):
                         x_0, x_, eps_ = RK.bong_iter(x_0, x_, eps_, eps_prev_, data_, sigma, NS.s_, row, RK.row_offset, NS.h, extra_options)
+
+
 
             denoised = x_0 + ((sigma / (sigma - NS.sigma_down)) *  NS.h_new) * RK.zum(RK.rows, eps_, eps_prev_)
             eps = RK.get_epsilon_anchored(x_0, denoised, sigma_next)
@@ -334,10 +343,11 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
 
             x = NS.rebound_overshoot_step(x_0, x)
             x = LG.process_guides_poststep(x, denoised, eps, step, extra_options)
+            x = NS.swap_noise_step(x_0, x)
             
             preview_callback(x, eps, denoised, x_, eps_, data_, step, sigma, sigma_next, callback, extra_options)
-            
-            x = NS.swap_noise_step(x_0, x)
+
+
 
         data_prev_[0] = data_[0]
         for ms in range(recycled_stages):
