@@ -236,7 +236,7 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
                         x_0, x_, eps_, x_row_pseudoimplicit, sub_sigma_pseudoimplicit = LG.process_pseudoimplicit_guides_substep(x_0, x_, eps_, eps_prev_, data_, row, step, sigmas, NS, RK, pseudoimplicit_row_weights, pseudoimplicit_step_weights, full_iter, BONGMATH, extra_options)
                         
                         # PREPARE MODEL CALL
-                        if LG.guide_mode in {"pseudoimplicit", "pseudoimplicit_projection", "fully_pseudoimplicit", "fully_pseudoimplicit_projection","fully_pseudoimplicit_cw", "fully_pseudoimplicit_projection_cw"} and (LG.lgw[step] > 0 or LG.lgw_inv[step] > 0) and x_row_pseudoimplicit is not None:
+                        if LG.guide_mode in {"pseudoimplicit","pseudoimplicit_cw", "pseudoimplicit_projection", "pseudoimplicit_projection_cw","fully_pseudoimplicit", "fully_pseudoimplicit_projection","fully_pseudoimplicit_cw", "fully_pseudoimplicit_projection_cw"} and (LG.lgw[step] > 0 or LG.lgw_inv[step] > 0) and x_row_pseudoimplicit is not None:
 
                             x_tmp =     x_row_pseudoimplicit 
                             s_tmp = sub_sigma_pseudoimplicit 

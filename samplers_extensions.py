@@ -87,37 +87,6 @@ class SamplerOptions_GarbageCollection:
         return (sampler, )
 
 
-GUIDE_MODE_NAMES_BETA = ["unsample", 
-                    "resample", 
-                    "unsample_projection", 
-                    "resample_projection", 
-                    "unsample_projection_cw", 
-                    "resample_projection_cw", 
-                    "pseudoimplicit",
-                    "pseudoimplicit_projection",
-                    "fully_pseudoimplicit",
-                    "fully_pseudoimplicit_cw",
-                    "fully_pseudoimplicit_projection",
-                    "fully_pseudoimplicit_projection_cw",
-                    "epsilon",
-                    "epsilon_projection",
-                    "epsilon_projection_cw",
-                    "epsilon_dynamic_mean",
-                    "epsilon_dynamic_mean_std", 
-                    "epsilon_dynamic_mean_from_bkg", 
-                    "epsilon_guide_mean_std_from_bkg",
-                    "hard_light", 
-                    "blend", 
-                    "blend_projection",
-                    "mean_std", 
-                    "mean", 
-                    "mean_tiled",
-                    "std", 
-                    "data",
-                    #"data_projection",
-                    "none",
-]
-
 
 GUIDE_MODE_NAMES = ["unsample", 
                     "resample", 
@@ -412,33 +381,125 @@ class ClownsharKSamplerGuides:
 
 
 
+GUIDE_MODE_NAMES_BETA_MASTER_LIST = ["unsample", 
+                    "resample", 
+                    "unsample_projection", 
+                    "resample_projection", 
+                    "unsample_projection_cw", 
+                    "resample_projection_cw", 
+                    "pseudoimplicit",
+                    "pseudoimplicit_cw",
+                    "pseudoimplicit_projection",
+                    "pseudoimplicit_projection_cw",
+                    "fully_pseudoimplicit",
+                    "fully_pseudoimplicit_cw",
+                    "fully_pseudoimplicit_projection",
+                    "fully_pseudoimplicit_projection_cw",
+                    "epsilon",
+                    "epsilon_cw",
+                    "epsilon_projection",
+                    "epsilon_projection_cw",
+                    "epsilon_dynamic_mean",
+                    "epsilon_dynamic_mean_std", 
+                    "epsilon_dynamic_mean_from_bkg", 
+                    "epsilon_guide_mean_std_from_bkg",
+                    "hard_light", 
+                    "blend", 
+                    "blend_projection",
+                    "mean_std", 
+                    "mean", 
+                    "mean_tiled",
+                    "std", 
+                    "data",
+                    #"data_projection",
+                    "none",
+]
+
+
+
+GUIDE_MODE_NAMES_BETA_MISC = [
+                    "hard_light", 
+                    "blend", 
+                    "blend_projection",
+                    "mean_std", 
+                    "mean", 
+                    "mean_tiled",
+                    "std", 
+                    "data",
+                    #"data_projection",
+                    "none",
+]
 
 
 
 
+GUIDE_MODE_NAMES_BETA = ["unsample", 
+                    "resample", 
+                    "unsample_projection", 
+                    "resample_projection", 
+                    "epsilon",
+                    "epsilon_projection",
+                    "pseudoimplicit",
+                    "pseudoimplicit_projection",
+                    "fully_pseudoimplicit",
+                    "fully_pseudoimplicit_projection",
+                    "epsilon_dynamic_mean",
+                    "epsilon_dynamic_mean_std", 
+                    "epsilon_dynamic_mean_from_bkg", 
+                    "epsilon_guide_mean_std_from_bkg",
+                    "hard_light", 
+                    "blend", 
+                    "blend_projection",
+                    "mean_std", 
+                    "mean", 
+                    "mean_tiled",
+                    "std", 
+                    "data",
+                    #"data_projection",
+                    "none",
+]
 
-class ClownsharKSamplerGuide_Beta:
+
+
+GUIDE_MODE_NAMES_BETA_SIMPLE = ["unsample", 
+                    "resample", 
+                    "epsilon",
+                    "pseudoimplicit",
+                    "fully_pseudoimplicit",
+                    "none",
+]
+
+
+
+GUIDE_MODE_NAMES_BETA_CHANNELWISE_SUPPORTED = [                    
+                    "unsample_projection", 
+                    "resample_projection", 
+                    "pseudoimplicit",
+                    "pseudoimplicit_projection",
+                    "fully_pseudoimplicit",
+                    "fully_pseudoimplicit_projection",
+                    "epsilon",
+                    "epsilon_projection",
+                    ]
+
+
+
+
+class ClownsharKSamplerGuideMisc_Beta:
     @classmethod
     def INPUT_TYPES(s):
         return {"required":
-                    {"guide_mode": (GUIDE_MODE_NAMES_BETA, {"default": 'epsilon_projection', "tooltip": "Recommended: epsilon or mean/mean_std with sampler_mode = standard, and unsample/resample with sampler_mode = unsample/resample. Epsilon_dynamic_mean, etc. are only used with two latent inputs and a mask. Blend/hard_light/mean/mean_std etc. require low strengths, start with 0.01-0.02."}),
-                     "guide_weight": ("FLOAT", {"default": 0.75, "min": -100.0, "max": 100.0, "step":0.01, "round": False, "tooltip": "Set the strength of the guide."}),
-                     #"guide_weight_bkg": ("FLOAT", {"default": 0.75, "min": -100.0, "max": 100.0, "step":0.01, "round": False, "tooltip": "Set the strength of the guide_bkg."}),
-                     "guide_weight_scale": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 1.0, "step":0.01, "round": False, "tooltip": "Disables the guide for the next step when the denoised image is similar to the guide. Higher values will strengthen the effect."}),
-                     #"guide_weight_bkg_scale": ("FLOAT", {"default": 1.0, "min": -100.0, "max": 100.0, "step":0.01, "round": False, "tooltip": "Disables the guide for the next step when the denoised image is similar to the guide. Higher values will strengthen the effect."}),
+                    {"guide_mode": (GUIDE_MODE_NAMES_BETA_MISC, {"default": 'blend', "tooltip": "Blend/hard_light/mean/mean_std etc. require low strengths, start with 0.01-0.02."}),
+                     "guide_weight": ("FLOAT", {"default": 0.05, "min": -100.0, "max": 100.0, "step":0.01, "round": False, "tooltip": "Set the strength of the guide."}),
+                     "guide_weight_cutoff": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 1.0, "step":0.01, "round": False, "tooltip": "Disables the guide for the next step when the denoised image is similar to the guide. Higher values will strengthen the effect."}),
                     "guide_weight_scheduler":     (["constant"] + get_res4lyf_scheduler_list(), {"default": "beta57"},),
-                    #"guide_weight_scheduler_bkg": (["constant"] + comfy.samplers.SCHEDULER_NAMES + ["beta57"], {"default": "beta57"},),
                     "guide_end_step": ("INT", {"default": 15, "min": 1, "max": 10000}),
-                    #"guide_bkg_end_step": ("INT", {"default": 15, "min": 1, "max": 10000}),
                     },
                     "optional": 
                     {
                         "guide": ("LATENT", ),
-                        #"guide_bkg": ("LATENT", ),
                         "guide_mask": ("MASK", ),
-                        #"guide_mask_bkg": ("MASK", ),
                         "guide_weights": ("SIGMAS", ),
-                        #"guide_weights_bkg": ("SIGMAS", ),
                     }  
                }
     RETURN_TYPES = ("GUIDES",)
@@ -447,29 +508,27 @@ class ClownsharKSamplerGuide_Beta:
 
     FUNCTION = "main"
 
-    def main(self, guide_weight_scheduler="constant", guide_weight_scheduler_bkg="constant", guide_end_step=30, guide_bkg_end_step=30, guide_weight_scale=1.0, guide_weight_bkg_scale=1.0, guide=None, guide_bkg=None, guide_weight=0.0, guide_weight_bkg=0.0, 
+    def main(self, guide_weight_scheduler="constant", guide_weight_scheduler_bkg="constant", guide_end_step=30, guide_bkg_end_step=30, guide_weight_cutoff=1.0, guide_weight_bkg_cutoff=1.0, guide=None, guide_bkg=None, guide_weight=0.0, guide_weight_bkg=0.0, 
                     guide_mode="blend", guide_weights=None, guide_weights_bkg=None, guide_mask=None, guide_mask_bkg=None,
                     ):
         default_dtype = torch.float64
         
         max_steps = 10000
         
-        denoise, denoise_bkg = guide_weight_scale, guide_weight_bkg_scale
+        denoise, denoise_bkg = guide_weight_cutoff, guide_weight_bkg_cutoff
         
         if guide_mode.startswith("epsilon_") and not guide_mode.startswith("epsilon_projection") and guide_bkg == None:
             print("Warning: need two latent inputs for guide_mode=",guide_mode," to work. Falling back to epsilon.")
             guide_mode = "epsilon"
-      
+        
         if guide_weight_scheduler == "constant" and guide_weights == None: 
             guide_weights = initialize_or_scale(None, 1.0, guide_end_step).to(default_dtype)
-            #guide_weights = initialize_or_scale(None, guide_weight, guide_end_step).to(default_dtype)
             guide_weights = F.pad(guide_weights, (0, max_steps), value=0.0)
         
         if guide_weight_scheduler_bkg == "constant": 
             guide_weights_bkg = initialize_or_scale(None, 0.0, guide_bkg_end_step).to(default_dtype)
-            #guide_weights_bkg = initialize_or_scale(None, guide_weight_bkg, guide_bkg_end_step).to(default_dtype)
             guide_weights_bkg = F.pad(guide_weights_bkg, (0, max_steps), value=0.0)
-            
+        
         guides = (guide_mode, guide_weight, guide_weight_bkg, guide_weights, guide_weights_bkg, guide, guide_bkg, guide_mask, guide_mask_bkg,
                   guide_weight_scheduler, guide_weight_scheduler_bkg, guide_end_step, guide_bkg_end_step, denoise, denoise_bkg)
         return (guides, )
@@ -477,15 +536,15 @@ class ClownsharKSamplerGuide_Beta:
 
 
 
-class ClownsharKSamplerGuides_Beta:
+class ClownsharKSamplerGuidesMisc_Beta:
     @classmethod
     def INPUT_TYPES(s):
         return {"required":
-                    {"guide_mode": (GUIDE_MODE_NAMES_BETA, {"default": 'epsilon_projection', "tooltip": "Recommended: epsilon or mean/mean_std with sampler_mode = standard, and unsample/resample with sampler_mode = unsample/resample. Epsilon_dynamic_mean, etc. are only used with two latent inputs and a mask. Blend/hard_light/mean/mean_std etc. require low strengths, start with 0.01-0.02."}),
-                     "guide_weight": ("FLOAT", {"default": 0.75, "min": -100.0, "max": 100.0, "step":0.01, "round": False, "tooltip": "Set the strength of the guide."}),
+                    {"guide_mode": (GUIDE_MODE_NAMES_BETA_MISC, {"default": 'blend', "tooltip": "Blend/hard_light/mean/mean_std etc. require low strengths, start with 0.01-0.02."}),
+                     "guide_weight": ("FLOAT", {"default": 0.05, "min": -100.0, "max": 100.0, "step":0.01, "round": False, "tooltip": "Set the strength of the guide."}),
                      "guide_weight_bkg": ("FLOAT", {"default": 0.75, "min": -100.0, "max": 100.0, "step":0.01, "round": False, "tooltip": "Set the strength of the guide_bkg."}),
-                     "guide_weight_scale": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 1.0, "step":0.01, "round": False, "tooltip": "Disables the guide for the next step when the denoised image is similar to the guide. Higher values will strengthen the effect."}),
-                     "guide_weight_bkg_scale": ("FLOAT", {"default": 1.0, "min": -100.0, "max": 100.0, "step":0.01, "round": False, "tooltip": "Disables the guide for the next step when the denoised image is similar to the guide. Higher values will strengthen the effect."}),
+                     "guide_weight_cutoff": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 1.0, "step":0.01, "round": False, "tooltip": "Disables the guide for the next step when the denoised image is similar to the guide. Higher values will strengthen the effect."}),
+                     "guide_weight_bkg_cutoff": ("FLOAT", {"default": 1.0, "min": -100.0, "max": 100.0, "step":0.01, "round": False, "tooltip": "Disables the guide for the next step when the denoised image is similar to the guide. Higher values will strengthen the effect."}),
                     "guide_weight_scheduler":     (["constant"] + get_res4lyf_scheduler_list(), {"default": "beta57"},),
                     "guide_weight_scheduler_bkg": (["constant"] + get_res4lyf_scheduler_list(), {"default": "constant"},),
                     "guide_end_step": ("INT", {"default": 15, "min": 1, "max": 10000}),
@@ -507,14 +566,152 @@ class ClownsharKSamplerGuides_Beta:
 
     FUNCTION = "main"
 
-    def main(self, guide_weight_scheduler="constant", guide_weight_scheduler_bkg="constant", guide_end_step=30, guide_bkg_end_step=30, guide_weight_scale=1.0, guide_weight_bkg_scale=1.0, guide=None, guide_bkg=None, guide_weight=0.0, guide_weight_bkg=0.0, 
+    def main(self, guide_weight_scheduler="constant", guide_weight_scheduler_bkg="constant", guide_end_step=30, guide_bkg_end_step=30, guide_weight_cutoff=1.0, guide_weight_bkg_cutoff=1.0, guide=None, guide_bkg=None, guide_weight=0.0, guide_weight_bkg=0.0, 
                     guide_mode="blend", guide_weights=None, guide_weights_bkg=None, guide_mask=None, guide_mask_bkg=None,
                     ):
         default_dtype = torch.float64
         
         max_steps = 10000
         
-        denoise, denoise_bkg = guide_weight_scale, guide_weight_bkg_scale
+        denoise, denoise_bkg = guide_weight_cutoff, guide_weight_bkg_cutoff
+        
+        if guide_mode.startswith("epsilon_") and not guide_mode.startswith("epsilon_projection") and guide_bkg == None:
+            print("Warning: need two latent inputs for guide_mode=",guide_mode," to work. Falling back to epsilon.")
+            guide_mode = "epsilon"
+        
+        if guide_weight_scheduler == "constant" and guide_weights == None: 
+            guide_weights = initialize_or_scale(None, 1.0, guide_end_step).to(default_dtype)
+            guide_weights = F.pad(guide_weights, (0, max_steps), value=0.0)
+        
+        if guide_weight_scheduler_bkg == "constant" and guide_weights_bkg == None: 
+            guide_weights_bkg = initialize_or_scale(None, 1.0, guide_bkg_end_step).to(default_dtype)
+            guide_weights_bkg = F.pad(guide_weights_bkg, (0, max_steps), value=0.0)
+    
+        guides = (guide_mode, guide_weight, guide_weight_bkg, guide_weights, guide_weights_bkg, guide, guide_bkg, guide_mask, guide_mask_bkg,
+                  guide_weight_scheduler, guide_weight_scheduler_bkg, guide_end_step, guide_bkg_end_step, denoise, denoise_bkg)
+        return (guides, )
+
+
+
+
+
+
+
+class ClownsharKSamplerGuide_Beta:
+    @classmethod
+    def INPUT_TYPES(s):
+        return {"required":
+                    {"guide_mode": (GUIDE_MODE_NAMES_BETA_SIMPLE, {"default": 'epsilon', "tooltip": "Recommended: epsilon or mean/mean_std with sampler_mode = standard, and unsample/resample with sampler_mode = unsample/resample. Epsilon_dynamic_mean, etc. are only used with two latent inputs and a mask. Blend/hard_light/mean/mean_std etc. require low strengths, start with 0.01-0.02."}),
+                     "channelwise_mode": ("BOOLEAN", {"default": False}),
+                     "projection_mode": ("BOOLEAN", {"default": False}),
+                     "guide_weight": ("FLOAT", {"default": 0.75, "min": -100.0, "max": 100.0, "step":0.01, "round": False, "tooltip": "Set the strength of the guide."}),
+                     "guide_weight_cutoff": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 1.0, "step":0.01, "round": False, "tooltip": "Disables the guide for the next step when the denoised image is similar to the guide. Higher values will strengthen the effect."}),
+                    "guide_weight_scheduler":     (["constant"] + get_res4lyf_scheduler_list(), {"default": "beta57"},),
+                    "guide_end_step": ("INT", {"default": 15, "min": 1, "max": 10000}),
+                    },
+                    "optional": 
+                    {
+                        "guide": ("LATENT", ),
+                        "guide_mask": ("MASK", ),
+                        "guide_weights": ("SIGMAS", ),
+                    }  
+               }
+    RETURN_TYPES = ("GUIDES",)
+    RETURN_NAMES = ("guides",)
+    CATEGORY = "RES4LYF/sampler_extensions"
+
+    FUNCTION = "main"
+
+    def main(self, guide_weight_scheduler="constant", guide_weight_scheduler_bkg="constant", guide_end_step=30, guide_bkg_end_step=30, guide_weight_cutoff=1.0, guide_weight_bkg_cutoff=1.0, guide=None, guide_bkg=None, guide_weight=0.0, guide_weight_bkg=0.0, 
+                    guide_mode="blend", channelwise_mode=False, projection_mode=False, guide_weights=None, guide_weights_bkg=None, guide_mask=None, guide_mask_bkg=None,
+                    ):
+        default_dtype = torch.float64
+        
+        max_steps = 10000
+        
+        denoise, denoise_bkg = guide_weight_cutoff, guide_weight_bkg_cutoff
+        
+        if projection_mode:
+            guide_mode = guide_mode + "_projection"
+        
+        if channelwise_mode:
+            guide_mode = guide_mode + "_cw"
+            
+        if guide_mode == "unsample_cw":
+            guide_mode = "unsample"
+        if guide_mode == "resample_cw":
+            guide_mode = "resample"
+        
+        if guide_mode.startswith("epsilon_") and not guide_mode.startswith("epsilon_projection") and guide_bkg == None:
+            print("Warning: need two latent inputs for guide_mode=",guide_mode," to work. Falling back to epsilon.")
+            guide_mode = "epsilon"
+        
+        if guide_weight_scheduler == "constant" and guide_weights == None: 
+            guide_weights = initialize_or_scale(None, 1.0, guide_end_step).to(default_dtype)
+            guide_weights = F.pad(guide_weights, (0, max_steps), value=0.0)
+        
+        if guide_weight_scheduler_bkg == "constant": 
+            guide_weights_bkg = initialize_or_scale(None, 0.0, guide_bkg_end_step).to(default_dtype)
+            guide_weights_bkg = F.pad(guide_weights_bkg, (0, max_steps), value=0.0)
+        
+        guides = (guide_mode, guide_weight, guide_weight_bkg, guide_weights, guide_weights_bkg, guide, guide_bkg, guide_mask, guide_mask_bkg,
+                  guide_weight_scheduler, guide_weight_scheduler_bkg, guide_end_step, guide_bkg_end_step, denoise, denoise_bkg)
+        return (guides, )
+
+
+
+
+class ClownsharKSamplerGuides_Beta:
+    @classmethod
+    def INPUT_TYPES(s):
+        return {"required":
+                    {"guide_mode": (GUIDE_MODE_NAMES_BETA_SIMPLE, {"default": 'epsilon_projection', "tooltip": "Recommended: epsilon or mean/mean_std with sampler_mode = standard, and unsample/resample with sampler_mode = unsample/resample. Epsilon_dynamic_mean, etc. are only used with two latent inputs and a mask. Blend/hard_light/mean/mean_std etc. require low strengths, start with 0.01-0.02."}),
+                     "channelwise_mode": ("BOOLEAN", {"default": False}),
+                     "projection_mode": ("BOOLEAN", {"default": False}),
+                     "guide_weight": ("FLOAT", {"default": 0.75, "min": -100.0, "max": 100.0, "step":0.01, "round": False, "tooltip": "Set the strength of the guide."}),
+                     "guide_weight_bkg": ("FLOAT", {"default": 0.75, "min": -100.0, "max": 100.0, "step":0.01, "round": False, "tooltip": "Set the strength of the guide_bkg."}),
+                     "guide_weight_cutoff": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 1.0, "step":0.01, "round": False, "tooltip": "Disables the guide for the next step when the denoised image is similar to the guide. Higher values will strengthen the effect."}),
+                     "guide_weight_bkg_cutoff": ("FLOAT", {"default": 1.0, "min": -100.0, "max": 100.0, "step":0.01, "round": False, "tooltip": "Disables the guide for the next step when the denoised image is similar to the guide. Higher values will strengthen the effect."}),
+                    "guide_weight_scheduler":     (["constant"] + get_res4lyf_scheduler_list(), {"default": "beta57"},),
+                    "guide_weight_scheduler_bkg": (["constant"] + get_res4lyf_scheduler_list(), {"default": "constant"},),
+                    "guide_end_step": ("INT", {"default": 15, "min": 1, "max": 10000}),
+                    "guide_bkg_end_step": ("INT", {"default": 15, "min": 1, "max": 10000}),
+                    },
+                    "optional": 
+                    {
+                        "guide": ("LATENT", ),
+                        "guide_bkg": ("LATENT", ),
+                        "guide_mask": ("MASK", ),
+                        "guide_mask_bkg": ("MASK", ),
+                        "guide_weights": ("SIGMAS", ),
+                        "guide_weights_bkg": ("SIGMAS", ),
+                    }  
+               }
+    RETURN_TYPES = ("GUIDES",)
+    RETURN_NAMES = ("guides",)
+    CATEGORY = "RES4LYF/sampler_extensions"
+
+    FUNCTION = "main"
+
+    def main(self, guide_weight_scheduler="constant", guide_weight_scheduler_bkg="constant", guide_end_step=30, guide_bkg_end_step=30, guide_weight_cutoff=1.0, guide_weight_bkg_cutoff=1.0, guide=None, guide_bkg=None, guide_weight=0.0, guide_weight_bkg=0.0, 
+                    guide_mode="blend", channelwise_mode=False, projection_mode=False, guide_weights=None, guide_weights_bkg=None, guide_mask=None, guide_mask_bkg=None,
+                    ):
+        default_dtype = torch.float64
+        
+        max_steps = 10000
+        
+        denoise, denoise_bkg = guide_weight_cutoff, guide_weight_bkg_cutoff
+        
+        if projection_mode:
+            guide_mode = guide_mode + "_projection"
+        
+        if channelwise_mode:
+            guide_mode = guide_mode + "_cw"
+            
+        if guide_mode == "unsample_cw":
+            guide_mode = "unsample"
+        if guide_mode == "resample_cw":
+            guide_mode = "resample"
         
         if guide_mode.startswith("epsilon_") and not guide_mode.startswith("epsilon_projection") and guide_bkg == None:
             print("Warning: need two latent inputs for guide_mode=",guide_mode," to work. Falling back to epsilon.")

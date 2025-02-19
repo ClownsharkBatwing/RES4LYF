@@ -104,6 +104,9 @@ NODE_CLASS_MAPPINGS = {
     "ClownsharKSamplerGuides_Beta": samplers_extensions.ClownsharKSamplerGuides_Beta,
     "ClownsharKSamplerGuide_Beta": samplers_extensions.ClownsharKSamplerGuide_Beta,
     
+    "ClownsharKSamplerGuidesMisc_Beta": samplers_extensions.ClownsharKSamplerGuidesMisc_Beta,
+    "ClownsharKSamplerGuideMisc_Beta": samplers_extensions.ClownsharKSamplerGuideMisc_Beta,
+    
     "ClownInpaint": samplers_extensions.ClownInpaint,
     "ClownInpaintSimple": samplers_extensions.ClownInpaintSimple,
 

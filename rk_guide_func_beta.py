@@ -306,8 +306,6 @@ class LatentGuide:
                 maxmin_ratio *= row / RK.rows
             
             sub_sigma_2 = NS.sub_sigma - maxmin_ratio * (NS.sub_sigma * pseudoimplicit_row_weights[row] * pseudoimplicit_step_weights[full_iter] * self.lgw[step])
-            s_2_ = NS.s_.clone()
-            s_2_[row] = sub_sigma_2
 
             if RK.IMPLICIT:
                 x_ = RK.update_substep(x_0, x_, eps_, eps_prev_, row, RK.row_offset, NS.h_new, NS.h_new_orig, extra_options)
@@ -322,18 +320,85 @@ class LatentGuide:
             eps_substep_guide = self.mask * eps_substep_guide + (1-self.mask) * eps_substep_guide_inv
 
             if self.guide_mode == "pseudoimplicit_projection":
-                eps_substep_guide = get_masked_epsilon_projection(x_0, x_, eps_, y0, y0_inv, s_2_, row, RK.row_offset, RK.rk_type, self, step)
+                eps_substep_guide = get_masked_epsilon_projection(x_0, x_, eps_, y0, y0_inv, NS.s_, row, RK.row_offset, RK.rk_type, self, step) # this was s_2_
 
             x_row_tmp = x_[row] + RK.h_fn(sub_sigma_2, NS.sub_sigma) * eps_substep_guide
             
             x_row_pseudoimplicit = x_row_tmp
             sub_sigma_pseudoimplicit = sub_sigma_2
+            
+            
+            
+            
+        if self.guide_mode in {"pseudoimplicit_cw", "pseudoimplicit_projection_cw"}:
+            maxmin_ratio = (NS.sub_sigma - RK.sigma_min) / NS.sub_sigma
+            
+            if extra_options_flag("guide_pseudoimplicit_power_substep_flip_maxmin_scaling", extra_options):
+                maxmin_ratio *= (RK.rows-row) / RK.rows
+            elif extra_options_flag("guide_pseudoimplicit_power_substep_maxmin_scaling", extra_options):
+                maxmin_ratio *= row / RK.rows
+            
+            sub_sigma_2 = NS.sub_sigma - maxmin_ratio * (NS.sub_sigma * pseudoimplicit_row_weights[row] * pseudoimplicit_step_weights[full_iter] * self.lgw[step])
+            x_row_tmp = torch.zeros_like(x_[row])
+            eps_tmp_ = eps_.clone()
+
+            if RK.IMPLICIT:
+                x_ = RK.update_substep(x_0, x_, eps_, eps_prev_, row, RK.row_offset, NS.h_new, NS.h_new_orig, extra_options)
+                x_[row+RK.row_offset] = NS.rebound_overshoot_substep(x_0, x_[row+RK.row_offset])
+                
+                if row > 0:
+                    x_[row+RK.row_offset] = NS.swap_noise_substep(x_0, x_[row+RK.row_offset])
+                    if BONGMATH and step < sigmas.shape[0]-1 and not extra_options_flag("disable_pseudoimplicit_bongmath", extra_options):
+                        x_0, x_, eps_ = RK.bong_iter(x_0, x_, eps_, eps_prev_, data_, sigma, NS.s_, row, RK.row_offset, NS.h, extra_options)
+                
+            avg, avg_inv = 0, 0
+            for b, c in itertools.product(range(x_0.shape[0]), range(x_0.shape[1])):
+                avg     += torch.norm(data_[row][b][c] - y0    [b][c])
+                avg_inv += torch.norm(data_[row][b][c] - y0_inv[b][c])
+            avg     /= x_0.shape[1]
+            avg_inv /= x_0.shape[1]
+                
+            for b, c in itertools.product(range(x_0.shape[0]), range(x_0.shape[1])):
+                ratio     = torch.nan_to_num(torch.norm(data_[row][b][c] - y0    [b][c])   /   avg,     0)
+                ratio_inv = torch.nan_to_num(torch.norm(data_[row][b][c] - y0_inv[b][c])   /   avg_inv, 0)
+            
+                eps_row, eps_row_inv = get_guide_epsilon_substep(x_0, x_, y0, y0_inv, NS.s_, row, RK.row_offset, RK.rk_type, b, c)
+
+                if self.guide_mode == "pseudoimplicit_projection_cw":
+                    eps_row_lerp = eps_[row][b][c]   +   self.mask[b][c] * (eps_row-eps_[row][b][c])   +   (1-self.mask[b][c]) * (eps_row_inv-eps_[row][b][c])
+
+                    eps_collinear_eps_lerp = get_collinear(eps_[row][b][c], eps_row_lerp)
+                    eps_lerp_ortho_eps     = get_orthogonal(eps_row_lerp, eps_[row][b][c])
+
+                    eps_sum = eps_collinear_eps_lerp + eps_lerp_ortho_eps
+
+                    eps_[row][b][c] = eps_[row][b][c]      +     ratio * lgw_mask[b][c] * (eps_sum - eps_[row][b][c])    +    ratio_inv * lgw_mask_inv[b][c] * (eps_sum     - eps_[row][b][c])
+                else:
+                    eps_[row][b][c] = eps_[row][b][c]      +     ratio * lgw_mask[b][c] * (eps_row - eps_[row][b][c])    +    ratio_inv * lgw_mask_inv[b][c] * (eps_row_inv - eps_[row][b][c])
+
+                x_row_tmp[b][c] = x_[row][b][c] + RK.h_fn(sub_sigma_2, NS.sub_sigma) * eps_[row][b][c] #eps_substep_guide
+                
+            #eps_substep_guide, eps_substep_guide_inv = get_guide_epsilon_substep(x_0, x_, y0, y0_inv, NS.s_, row, RK.row_offset, RK.rk_type)   # should this also be s_2_ ?
+            #eps_substep_guide = self.mask * eps_substep_guide + (1-self.mask) * eps_substep_guide_inv
+
+            #if self.guide_mode == "pseudoimplicit_projection":
+            #    eps_substep_guide = get_masked_epsilon_projection(x_0, x_, eps_, y0, y0_inv, NS.s_, row, RK.row_offset, RK.rk_type, self, step) # this was s_2_
+
+            #x_row_tmp = x_[row] + RK.h_fn(sub_sigma_2, NS.sub_sigma) * eps_substep_guide
+            
+            eps_ = eps_tmp_
+            x_row_pseudoimplicit = x_row_tmp
+            sub_sigma_pseudoimplicit = sub_sigma_2
+            
+            
 
         if RK.IMPLICIT and BONGMATH and step < sigmas.shape[0]-1 and not extra_options_flag("disable_pseudobongmath", extra_options):
             x_[row] = NS.sigma_from_to(x_0, x_row_pseudoimplicit, sigma, sub_sigma_pseudoimplicit, NS.s_[row])
             x_0, x_, eps_ = RK.bong_iter(x_0, x_, eps_, eps_prev_, data_, sigma, NS.s_, row, RK.row_offset, NS.h, extra_options) 
             
         return x_0, x_, eps_, x_row_pseudoimplicit, sub_sigma_pseudoimplicit
+
+
 
     @torch.no_grad
     def prepare_fully_pseudoimplicit_guides_substep(self, x_0, x_, eps_, eps_prev_, data_, row, step, sigmas, eta_substep, overshoot_substep, s_noise_substep, NS, \
@@ -391,7 +456,6 @@ class LatentGuide:
 
                 if RK.IMPLICIT:
                     x_ = RK.update_substep(x_0, x_, eps_, eps_prev_, r, RK.row_offset, NS.h_new, NS.h_new_orig, extra_options) 
-                    
                     x_[r+RK.row_offset] = NS.rebound_overshoot_substep(x_0, x_[r+RK.row_offset])
 
                     if r > 0:
@@ -624,12 +688,13 @@ class LatentGuide:
                         eps_[row] = eps_[row] + lgw_mask_factor*lgw_mask * (eps_sum - eps_[row]) + lgw_mask_factor*lgw_mask_inv * (eps_sum - eps_[row])
 
 
-                elif extra_options_flag("disable_lgw_scaling", extra_options):
+                #elif extra_options_flag("disable_lgw_scaling", extra_options):
+                elif self.guide_mode == "epsilon":
                     eps_row, eps_row_inv = get_guide_epsilon_substep(x_0, x_, y0, y0_inv, s_, row, row_offset, rk_type)
                     eps_[row] = eps_[row]      +     lgw_mask * (eps_row - eps_[row])    +    lgw_mask_inv * (eps_row_inv - eps_[row])
                     
 
-                elif self.guide_mode == "epsilon_projection_cw" or (self.lgw[step] > 0 or self.lgw_inv[step] > 0): # default old channelwise epsilon
+                elif self.guide_mode in {"epsilon_cw", "epsilon_projection_cw"} or (self.lgw[step] > 0 or self.lgw_inv[step] > 0): # default old channelwise epsilon
                     avg, avg_inv = 0, 0
                     for b, c in itertools.product(range(x_0.shape[0]), range(x_0.shape[1])):
                         avg     += torch.norm(data_[row][b][c] - y0    [b][c])
