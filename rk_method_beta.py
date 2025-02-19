@@ -945,7 +945,7 @@ class RK_NoiseSampler:
         else:
             return x
         
-    def rebound_overshoot(self, x_0, x, sigma, sigma_next, sigma_down):
+    def rebound_overshoot(self, x_0, x, sigma, sigma_next, sigma_down):   #sigma, sigma_to, sigma_from
         eps = (x_0 - x) / (sigma - sigma_down)
         denoised = x_0 - sigma * eps
         x = denoised + sigma_next * eps

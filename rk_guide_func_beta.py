@@ -341,14 +341,10 @@ class LatentGuide:
         row_offset = RK.row_offset
         rk_type    = RK.rk_type
         noise_boost_substep = NS.noise_boost_substep
-        #eta_substep = NS.eta_substep
-        #oversubstep_eta = NS.overshoot_substep
         oversubstep_mode = NS.overshoot_mode_substep
         
-        #s_noise_substep = NS.s_noise_substep
         s_ = NS.s_
         h = NS.h
-        
         
         sigma = sigmas[step]
         
