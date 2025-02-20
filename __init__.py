@@ -230,9 +230,11 @@ NODE_CLASS_MAPPINGS = {
     "Constant Scheduler": sigmas.constant_scheduler,
     "Linear Quadratic Advanced": sigmas.linear_quadratic_advanced,
     
-    #"VGG19StyleTransfer": images.VGG19StyleTransfer,
+    "Image Sharpen FS": images.ImageSharpenFS,
     "Image Channels LAB": images.Image_Channels_LAB,
     "Image Median Blur": images.ImageMedianBlur,
+    "Image Gaussian Blur": images.ImageGaussianBlur,
+
     "Image Pair Split": images.Image_Pair_Split,
     "Image Crop Location Exact": images.Image_Crop_Location_Exact,
     "Film Grain": images.Film_Grain,
