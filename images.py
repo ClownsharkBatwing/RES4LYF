@@ -53,12 +53,21 @@ def color_burn_blend(base, blend):
     return torch.clamp(1 - (1 - base) / (blend + 1e-8), 0, 1)
 
 def hard_light_blend(base, blend):
-    return torch.where(blend <= 0.5, 2 * base * blend, 1 - 2 * (1 - base) * (1 - blend))
+    return torch.where(blend <= 0.5, 
+                       2 * base * blend, 
+                       1 - 2 * (1 - base) * (1 - blend))
 
 def hard_light_freq_sep(original, low_pass):
     high_pass = (color_burn_blend(original, (1 - low_pass)) + divide_blend(original, low_pass)) / 2
     return high_pass
 
+def linear_light_blend(base, blend):
+    return torch.where(blend <= 0.5,
+                       base + 2 *  blend - 1,
+                       base + 2 * (blend - 0.5))
+
+def linear_light_freq_sep(base, blend):
+    return (base + (1-blend)) / 2
 
 def scale_to_range(value, min_old, max_old, min_new, max_new):
     return (value - min_old) / (max_old - min_old) * (max_new - min_new) + min_new
@@ -363,6 +372,7 @@ class Frequency_Separation_Linear_Light:
             "required": {
             },
         }
+        
     RETURN_TYPES = ("IMAGE","IMAGE","IMAGE",)
     RETURN_NAMES = ("high_pass", "original", "low_pass",)
     FUNCTION = "main"
@@ -372,12 +382,13 @@ class Frequency_Separation_Linear_Light:
     def main(self, high_pass=None, original=None, low_pass=None):
 
         if high_pass is None:
-            high_pass = hard_light_freq_sep(original, low_pass)
+            high_pass = linear_light_freq_sep(original.to(torch.float64).to('cuda'), low_pass.to(torch.float64).to('cuda'))
         
         if original is None:
-            original = hard_light_blend(low_pass, high_pass)
+            original = linear_light_blend(low_pass.to(torch.float64).to('cuda'), high_pass.to(torch.float64).to('cuda'))
 
         return (high_pass, original, low_pass,)
+
 
 class Frequency_Separation_FFT:
     def __init__(self):
@@ -396,6 +407,7 @@ class Frequency_Separation_FFT:
                 "sigma": ("FLOAT", {"default": 5.0, "min": -10000.0, "max": 10000.0, "step": 0.01}),
             },
         }
+        
     RETURN_TYPES = ("IMAGE","IMAGE","IMAGE",)
     RETURN_NAMES = ("high_pass", "original", "low_pass",)
     FUNCTION = "main"
@@ -448,7 +460,9 @@ class ImageSharpenFS:
         match method:
             case "hard":
                 FS = Frequency_Separation_Hard_Light()
-        
+            case "linear":
+                FS = Frequency_Separation_Linear_Light()
+                
         img_lp = IB.main(images, intensity)
         
         fs_hp, fs_orig, fs_lp = FS.main(None, images, *img_lp)

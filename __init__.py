@@ -238,6 +238,7 @@ NODE_CLASS_MAPPINGS = {
     "Image Pair Split": images.Image_Pair_Split,
     "Image Crop Location Exact": images.Image_Crop_Location_Exact,
     "Film Grain": images.Film_Grain,
+    "Frequency Separation Linear Light": images.Frequency_Separation_Linear_Light,
     "Frequency Separation Hard Light": images.Frequency_Separation_Hard_Light,
     "Frequency Separation Hard Light LAB": images.Frequency_Separation_Hard_Light_LAB,
     
