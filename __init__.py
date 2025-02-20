@@ -280,6 +280,8 @@ if flags["test_samplers"]:
         "rk_res_2m_nonstandard_prenoise_alt": test_samplers.sample_rk_res_2m_nonstandard_prenoise_alt,
 
         "rk_res_2m_prenoise_alt": test_samplers.sample_rk_res_2m_prenoise_alt,
+        "rk_res_2m_prenoise_alt2": test_samplers.sample_rk_res_2m_prenoise_alt2,
+
         "rk_res_2s_prenoise_alt": test_samplers.sample_rk_res_2s_prenoise_alt,
         "rk_res_2s_prenoise_data": test_samplers.sample_rk_res_2s_prenoise_data,
 

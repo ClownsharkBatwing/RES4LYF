@@ -6,6 +6,7 @@ from .noise_classes import *
 from .rk_method_beta import RK_Method_Beta, RK_NoiseSampler
 from .rk_guide_func_beta import *
 from .helper import get_extra_options_kv, extra_options_flag, lagrange_interpolation
+from .phi_functions import Phi
 
 MAX_STEPS=10000
 PRINT_DEBUG=False
@@ -156,7 +157,7 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
     eps_            = None
     eps             = torch.zeros_like(x)
     denoised        = torch.zeros_like(x)
-    denoised_prev   = torch.zeros_like(x).to('cpu')
+    denoised_prev   = torch.zeros_like(x)
     denoised_prev2  = torch.zeros_like(x)
     x_          = None
     eps_prev_   = None
@@ -240,9 +241,9 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
 
                             x_tmp =     x_row_pseudoimplicit 
                             s_tmp = sub_sigma_pseudoimplicit 
-                            
-                            
-                            
+                        
+                        
+                        
                         # Fully implicit iteration (explicit only)                   # or... Fully implicit iteration (implicit only... not standard) 
                         elif (full_iter > 0 and RK.row_offset == 1 and row == 0)   or   (full_iter > 0 and RK.row_offset == 0 and row == 0 and extra_options_flag("fully_implicit_update_x", extra_options)):
                             if extra_options_flag("fully_explicit_pogostick_eta", extra_options): 
@@ -311,8 +312,25 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
                             if extra_options_flag("preview_substeps", extra_options):
                                 callback({'x': x, 'i': step, 'sigma': sigma, 'sigma_next': sigma_next, 'denoised': data_[row].to(torch.float32)}) if callback is not None else None
 
-
-
+                        if extra_options_flag("bong2m", extra_options) and RK.multistep_stages > 0 and step < len(sigmas)-4:
+                            #eps_tmp = eps_[0]
+                            #eps_[0] = eps_[1]
+                            #eps_[1] = eps_tmp
+                            c2_prev = -h_prev / NS.h
+                            eps_prev = denoised_data_prev - x_0
+                            
+                            φ = Phi(h_prev, [0.,c2_prev])
+                            a2_1 = c2_prev * φ(1,2)
+                            for i in range(100):
+                                x_prev = x_0 - h_prev * (a2_1 * eps_prev)
+                                eps_prev = denoised_data_prev - x_prev
+                                
+                            #eps_[0] = eps_[1]
+                            eps_[1] = eps_prev
+                            
+                            #eps_[1] = eps_[0]
+                            #eps_[0] = eps_prev
+                            
                         # GUIDE 
                         if not extra_options_flag("disable_guides_eps_substep", extra_options):
                             eps_, x_      = LG.process_guides_substep(x_0, x_, eps_,      data_, row, step, NS.sigma, NS.sigma_next, NS.sigma_down, NS.s_, unsample_resample_scale, RK, extra_options)
@@ -346,7 +364,9 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
             x = NS.swap_noise_step(x_0, x)
             
             preview_callback(x, eps, denoised, x_, eps_, data_, step, sigma, sigma_next, callback, extra_options)
-
+            
+            h_prev = NS.h
+            x_prev = x_0
 
 
         data_prev_[0] = data_[0]
@@ -355,8 +375,9 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
         
         rk_type = RK.swap_rk_type_at_step_or_threshold(x_0, data_prev_, NS.sigma_down, sigmas, step, RK, rk_swap_step, rk_swap_threshold, rk_swap_type, rk_swap_print)
 
-        denoised_prev2 = denoised_prev.to(denoised_prev2.device)
-        denoised_prev  = denoised.to(denoised_prev.device)
+        denoised_prev2 = denoised_prev
+        denoised_prev  = denoised
+        denoised_data_prev = data_[0]
 
     if sigmas[-1] == 0 and sigmas[-2] == NS.sigma_min:
         eps, denoised = RK(x, NS.sigma_min, x, NS.sigma_min)
