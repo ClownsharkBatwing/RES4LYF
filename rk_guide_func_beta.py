@@ -79,16 +79,23 @@ class LatentGuide:
         latent_guide_inv = None
 
         if guides is not None:
-            (self.guide_mode, latent_guide_weight, latent_guide_weight_inv, latent_guide_weights, latent_guide_weights_inv, latent_guide, latent_guide_inv, self.mask, self.mask_inv, scheduler_, scheduler_inv_, steps_, steps_inv_, self.guide_cossim_cutoff_, self.guide_bkg_cossim_cutoff_) = guides
+            (self.guide_mode, latent_guide_weight, latent_guide_weight_inv, latent_guide_weights, latent_guide_weights_inv, latent_guide, latent_guide_inv, self.mask, self.mask_inv, scheduler_, scheduler_inv_, start_steps_, start_steps_inv_, steps_, steps_inv_, self.guide_cossim_cutoff_, self.guide_bkg_cossim_cutoff_) = guides
 
             if self.guide_mode.startswith("fully_") and not RK_IMPLICIT:
                 self.guide_mode = self.guide_mode[6:]   # fully_pseudoimplicit is only supported for implicit samplers, default back to pseudoimplicit
             
             if latent_guide_weights is None:
-                latent_guide_weights = get_sigmas(self.model, scheduler_, steps_, 1.0).to(self.dtype).to(self.device) / self.sigma_max
+                total_steps = steps_ - start_steps_
+                latent_guide_weights = get_sigmas(self.model, scheduler_, total_steps, 1.0).to(self.dtype).to(self.device) / self.sigma_max
+                prepend = torch.zeros(start_steps_, dtype=latent_guide_weights.dtype, device=latent_guide_weights.device)
+                latent_guide_weights = torch.cat((prepend, latent_guide_weights), dim=0)
+                
             
             if latent_guide_weights_inv is None:
-                latent_guide_weights_inv = get_sigmas(self.model, scheduler_inv_, steps_inv_, 1.0).to(self.dtype).to(self.device) / self.sigma_max
+                total_steps = steps_inv_ - start_steps_inv_
+                latent_guide_weights_inv = get_sigmas(self.model, scheduler_inv_, total_steps, 1.0).to(self.dtype).to(self.device) / self.sigma_max
+                prepend = torch.zeros(start_steps_inv_, dtype=latent_guide_weights_inv.dtype, device=latent_guide_weights_inv.device)
+                latent_guide_weights = torch.cat((prepend, latent_guide_weights_inv), dim=0)
                 
             latent_guide_weights     = initialize_or_scale(latent_guide_weights,     latent_guide_weight,     self.max_steps).to(self.dtype).to(self.device)
             latent_guide_weights_inv = initialize_or_scale(latent_guide_weights_inv, latent_guide_weight_inv, self.max_steps).to(self.dtype).to(self.device)

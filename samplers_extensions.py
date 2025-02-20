@@ -710,6 +710,7 @@ class ClownGuide_Beta:
                      "weight": ("FLOAT", {"default": 0.75, "min": -100.0, "max": 100.0, "step":0.01, "round": False, "tooltip": "Set the strength of the guide."}),
                      "cutoff": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 1.0, "step":0.01, "round": False, "tooltip": "Disables the guide for the next step when the denoised image is similar to the guide. Higher values will strengthen the effect."}),
                     "weight_scheduler":     (["constant"] + get_res4lyf_scheduler_list(), {"default": "beta57"},),
+                    "start_step": ("INT", {"default": 0, "min": 0, "max": 10000}),
                     "end_step": ("INT", {"default": 15, "min": 1, "max": 10000}),
                     },
                     "optional": 
@@ -725,53 +726,17 @@ class ClownGuide_Beta:
 
     FUNCTION = "main"
 
-    def main(self, weight_scheduler="constant", weight_scheduler_unmasked="constant", end_step=30, end_step_unmasked=30, cutoff=1.0, cutoff_unmasked=1.0, guide=None, guide_unmasked=None, weight=0.0, weight_unmasked=0.0, 
+    def main(self, weight_scheduler="constant", weight_scheduler_unmasked="constant", start_step=0, start_step_unmasked=0, end_step=30, end_step_unmasked=30, cutoff=1.0, cutoff_unmasked=1.0, guide=None, guide_unmasked=None, weight=0.0, weight_unmasked=0.0, 
                     guide_mode="epsilon", channelwise_mode=False, projection_mode=False, weights=None, weights_unmasked=None, mask=None, unmask=None,
                     ):
         CG = ClownGuides_Beta()
         mask = 1-mask if mask is not None else None
-        guides = CG.main(weight_scheduler, weight_scheduler_unmasked, end_step, end_step_unmasked, cutoff, cutoff_unmasked, guide, guide_unmasked, weight, weight_unmasked, 
+        guides = CG.main(weight_scheduler, weight_scheduler_unmasked, start_step, start_step_unmasked, end_step, end_step_unmasked, cutoff, cutoff_unmasked, guide, guide_unmasked, weight, weight_unmasked, 
                     guide_mode, channelwise_mode, projection_mode, weights, weights_unmasked, mask, unmask,
                     )
         return (guides[0], )
 
 
-
-
-
-"""class ClownGuide_Beta:
-    @classmethod
-    def INPUT_TYPES(s):
-        return {"required":
-                    {"guide_mode": (GUIDE_MODE_NAMES_BETA_SIMPLE, {"default": 'epsilon', "tooltip": "Recommended: epsilon or mean/mean_std with sampler_mode = standard, and unsample/resample with sampler_mode = unsample/resample. Epsilon_dynamic_mean, etc. are only used with two latent inputs and a mask. Blend/hard_light/mean/mean_std etc. require low strengths, start with 0.01-0.02."}),
-                     "channelwise_mode": ("BOOLEAN", {"default": False}),
-                     "projection_mode": ("BOOLEAN", {"default": False}),
-                     "weight_unmasked": ("FLOAT", {"default": 0.75, "min": -100.0, "max": 100.0, "step":0.01, "round": False, "tooltip": "Set the strength of the guide."}),
-                     "cutoff_unmasked": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 1.0, "step":0.01, "round": False, "tooltip": "Disables the guide for the next step when the denoised image is similar to the guide. Higher values will strengthen the effect."}),
-                    "weight_scheduler_unmasked":     (["constant"] + get_res4lyf_scheduler_list(), {"default": "beta57"},),
-                    "end_step_unmasked": ("INT", {"default": 15, "min": 1, "max": 10000}),
-                    },
-                    "optional": 
-                    {
-                        "guide_unmasked": ("LATENT", ),
-                        "mask": ("MASK", ),
-                        "weights_unmasked": ("SIGMAS", ),
-                    }  
-               }
-    RETURN_TYPES = ("GUIDES",)
-    RETURN_NAMES = ("guides",)
-    CATEGORY = "RES4LYF/sampler_extensions"
-
-    FUNCTION = "main"
-
-    def main(self, weight_scheduler_masked="constant", weight_scheduler_unmasked="constant", end_step_masked=30, end_step_unmasked=30, cutoff_masked=1.0, cutoff_unmasked=1.0, guide_masked=None, guide_unmasked=None, weight_masked=0.0, weight_unmasked=0.0, 
-                    guide_mode="epsilon", channelwise_mode=False, projection_mode=False, weights_masked=None, weights_unmasked=None, mask=None, unmask=None,
-                    ):
-        CG = ClownGuides_Beta()
-        guides = CG.main(weight_scheduler_masked, weight_scheduler_unmasked, end_step_masked, end_step_unmasked, cutoff_masked, cutoff_unmasked, guide_masked, guide_unmasked, weight_masked, weight_unmasked, 
-                    guide_mode, channelwise_mode, projection_mode, weights_masked, weights_unmasked, mask, unmask,
-                    )
-        return (guides[0], )"""
 
 
 
@@ -789,6 +754,8 @@ class ClownGuides_Beta:
                      "cutoff_unmasked": ("FLOAT", {"default": 1.0, "min": -100.0, "max": 100.0, "step":0.01, "round": False, "tooltip": "Disables the guide for the next step when the denoised image is similar to the guide. Higher values will strengthen the effect."}),
                     "weight_scheduler_masked":     (["constant"] + get_res4lyf_scheduler_list(), {"default": "beta57"},),
                     "weight_scheduler_unmasked": (["constant"] + get_res4lyf_scheduler_list(), {"default": "constant"},),
+                    "start_step_masked": ("INT", {"default": 0, "min": 0, "max": 10000}),
+                    "start_step_unmasked": ("INT", {"default": 0, "min": 0, "max": 10000}),
                     "end_step_masked": ("INT", {"default": 15, "min": 1, "max": 10000}),
                     "end_step_unmasked": ("INT", {"default": 15, "min": 1, "max": 10000}),
                     },
@@ -807,7 +774,7 @@ class ClownGuides_Beta:
 
     FUNCTION = "main"
 
-    def main(self, weight_scheduler_masked="constant", weight_scheduler_unmasked="constant", end_step_masked=30, end_step_unmasked=30, cutoff_masked=1.0, cutoff_unmasked=1.0, guide_masked=None, guide_unmasked=None, weight_masked=0.0, weight_unmasked=0.0, 
+    def main(self, weight_scheduler_masked="constant", weight_scheduler_unmasked="constant", start_step_masked=0, start_step_unmasked=0, end_step_masked=30, end_step_unmasked=30, cutoff_masked=1.0, cutoff_unmasked=1.0, guide_masked=None, guide_unmasked=None, weight_masked=0.0, weight_unmasked=0.0, 
                     guide_mode="epsilon", channelwise_mode=False, projection_mode=False, weights_masked=None, weights_unmasked=None, mask=None, unmask=None,
                     ):
         default_dtype = torch.float64
@@ -834,7 +801,7 @@ class ClownGuides_Beta:
             weights_unmasked = F.pad(weights_unmasked, (0, max_steps), value=0.0)
     
         guides = (guide_mode, weight_masked, weight_unmasked, weights_masked, weights_unmasked, guide_masked, guide_unmasked, mask, unmask,
-                  weight_scheduler_masked, weight_scheduler_unmasked, end_step_masked, end_step_unmasked, cutoff_masked, cutoff_unmasked)
+                  weight_scheduler_masked, weight_scheduler_unmasked, start_step_masked, start_step_unmasked, end_step_masked, end_step_unmasked, cutoff_masked, cutoff_unmasked)
         return (guides, )
 
 
@@ -859,6 +826,8 @@ class ClownGuidesAB_Beta:
                      "cutoff_B": ("FLOAT", {"default": 1.0, "min": -100.0, "max": 100.0, "step":0.01, "round": False, "tooltip": "Disables the guide for the next step when the denoised image is similar to the guide. Higher values will strengthen the effect."}),
                     "weight_scheduler_A":     (["constant"] + get_res4lyf_scheduler_list(), {"default": "beta57"},),
                     "weight_scheduler_B": (["constant"] + get_res4lyf_scheduler_list(), {"default": "constant"},),
+                    "start_step_A": ("INT", {"default": 0, "min": 0, "max": 10000}),
+                    "start_step_B": ("INT", {"default": 0, "min": 0, "max": 10000}),
                     "end_step_A": ("INT", {"default": 15, "min": 1, "max": 10000}),
                     "end_step_B": ("INT", {"default": 15, "min": 1, "max": 10000}),
                     },
@@ -878,7 +847,7 @@ class ClownGuidesAB_Beta:
 
     FUNCTION = "main"
 
-    def main(self, weight_scheduler_A="constant", weight_scheduler_B="constant", end_step_A=30, end_step_B=30, cutoff_A=1.0, cutoff_B=1.0, guide_A=None, guide_B=None, weight_A=0.0, weight_B=0.0, 
+    def main(self, weight_scheduler_A="constant", weight_scheduler_B="constant", start_step_A=0, start_step_B=0, end_step_A=30, end_step_B=30, cutoff_A=1.0, cutoff_B=1.0, guide_A=None, guide_B=None, weight_A=0.0, weight_B=0.0, 
                     guide_mode="epsilon", channelwise_mode=False, projection_mode=False, weights_A=None, weights_B=None, mask_A=None, mask_B=None,
                     ):
         default_dtype = torch.float64
@@ -905,7 +874,7 @@ class ClownGuidesAB_Beta:
             weights_B = F.pad(weights_B, (0, max_steps), value=0.0)
     
         guides = (guide_mode, weight_A, weight_B, weights_A, weights_B, guide_A, guide_B, mask_A, mask_B,
-                  weight_scheduler_A, weight_scheduler_B, end_step_A, end_step_B, cutoff_A, cutoff_B)
+                  weight_scheduler_A, weight_scheduler_B, start_step_A, start_step_B, end_step_A, end_step_B, cutoff_A, cutoff_B)
         return (guides, )
 
 
