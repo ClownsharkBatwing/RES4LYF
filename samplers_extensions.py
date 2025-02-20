@@ -467,14 +467,6 @@ GUIDE_MODE_NAMES_BETA_SIMPLE = ["unsample",
                     "pseudoimplicit",
                     "fully_pseudoimplicit",
                     "none",
-                    "blah/a",
-                    "blah/b",
-                    "blah/c",
-                    "blah/d",
-                    "blah/e",
-                    "blah/f",
-                    "blah/g",
-                    "blah/h",
 ]
 
 
