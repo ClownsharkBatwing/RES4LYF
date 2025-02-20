@@ -101,11 +101,16 @@ NODE_CLASS_MAPPINGS = {
     "ClownsharKSamplerGuides": samplers_extensions.ClownsharKSamplerGuides,
     "ClownsharKSamplerGuide": samplers_extensions.ClownsharKSamplerGuide,
     
-    "ClownsharKSamplerGuides_Beta": samplers_extensions.ClownsharKSamplerGuides_Beta,
-    "ClownsharKSamplerGuide_Beta": samplers_extensions.ClownsharKSamplerGuide_Beta,
+    "ClownGuidesAB_Beta": samplers_extensions.ClownGuidesAB_Beta,
+
+    "ClownGuides_Beta": samplers_extensions.ClownGuides_Beta,
+    "ClownGuide_Beta": samplers_extensions.ClownGuide_Beta,
     
     "ClownsharKSamplerGuidesMisc_Beta": samplers_extensions.ClownsharKSamplerGuidesMisc_Beta,
     "ClownsharKSamplerGuideMisc_Beta": samplers_extensions.ClownsharKSamplerGuideMisc_Beta,
+    
+    "ClownGuidesFluxAdvanced_Beta": samplers_extensions.ClownGuidesFluxAdvanced_Beta,
+    "ClownRegionalConditioningFlux": conditioning.ClownRegionalConditioningFlux,
     
     "ClownInpaint": samplers_extensions.ClownInpaint,
     "ClownInpaintSimple": samplers_extensions.ClownInpaintSimple,

@@ -197,7 +197,8 @@ class LatentGuide:
             
             if self.HAS_LATENT_GUIDE_INV:
                 if mask_inv is not None:
-                    lgw_mask_inv = torch.minimum(1-mask_inv, (1-mask) * lgw_inv_)
+                    lgw_mask_inv = torch.minimum(mask_inv, (1-mask) * lgw_inv_)
+                    #lgw_mask_inv = torch.minimum(1-mask_inv, (1-mask) * lgw_inv_)
                 else:
                     lgw_mask_inv = (1-mask) * lgw_inv_
             else:
@@ -215,35 +216,6 @@ class LatentGuide:
                 apply_frame_weights(lgw_mask_inv, self.frame_weights_inv)
 
         return lgw_mask.to(self.device), lgw_mask_inv.to(self.device)
-
-
-
-    """def get_masked_epsilon_projection_cw(self, x_0, x_, eps_, y0, y0_inv, s_, row, row_offset, rk_type, LG, step):
-        avg, avg_inv = 0, 0
-        for b, c in itertools.product(range(x_0.shape[0]), range(x_0.shape[1])):
-            avg     += torch.norm(data_[r][b][c] - y0    [b][c])
-            avg_inv += torch.norm(data_[r][b][c] - y0_inv[b][c])
-        avg     /= x_0.shape[1]
-        avg_inv /= x_0.shape[1]
-        
-        for b, c in itertools.product(range(x_0.shape[0]), range(x_0.shape[1])):
-            ratio     = torch.nan_to_num(torch.norm(data_[r][b][c] - y0    [b][c])   /   avg,     0)
-            ratio_inv = torch.nan_to_num(torch.norm(data_[r][b][c] - y0_inv[b][c])   /   avg_inv, 0)
-        
-            eps_row, eps_row_inv = get_guide_epsilon_substep(x_0, x_, y0, y0_inv, s_, r, row_offset, rk_type, b, c)
-
-            if self.guide_mode == "fully_pseudoimplicit_projection_cw":
-                eps_row_lerp = eps_[r][b][c]   +   self.mask[b][c] * (eps_row-eps_[r][b][c])   +   (1-self.mask[b][c]) * (eps_row_inv-eps_[r][b][c])
-
-                eps_collinear_eps_lerp = get_collinear(eps_[r][b][c], eps_row_lerp)
-                eps_lerp_ortho_eps     = get_orthogonal(eps_row_lerp, eps_[r][b][c])
-
-                eps_sum = eps_collinear_eps_lerp + eps_lerp_ortho_eps
-
-                eps_[r][b][c] = eps_[r][b][c]      +     ratio * lgw_mask[b][c] * (eps_sum - eps_[r][b][c])    +    ratio_inv * lgw_mask_inv[b][c] * (eps_sum     - eps_[r][b][c])
-            else:
-                eps_[r][b][c] = eps_[r][b][c]      +     ratio * lgw_mask[b][c] * (eps_row - eps_[r][b][c])    +    ratio_inv * lgw_mask_inv[b][c] * (eps_row_inv - eps_[r][b][c])
-        return eps_substep_guide"""
 
 
 
@@ -380,15 +352,7 @@ class LatentGuide:
                     eps_[row][b][c] = eps_[row][b][c]      +     ratio * lgw_mask[b][c] * (eps_row - eps_[row][b][c])    +    ratio_inv * lgw_mask_inv[b][c] * (eps_row_inv - eps_[row][b][c])
 
                 x_row_tmp[b][c] = x_[row][b][c] + RK.h_fn(sub_sigma_2, NS.sub_sigma) * eps_[row][b][c] #eps_substep_guide
-                
-            #eps_substep_guide, eps_substep_guide_inv = get_guide_epsilon_substep(x_0, x_, y0, y0_inv, NS.s_, row, RK.row_offset, RK.rk_type)   # should this also be s_2_ ?
-            #eps_substep_guide = self.mask * eps_substep_guide + (1-self.mask) * eps_substep_guide_inv
 
-            #if self.guide_mode == "pseudoimplicit_projection":
-            #    eps_substep_guide = get_masked_epsilon_projection(x_0, x_, eps_, y0, y0_inv, NS.s_, row, RK.row_offset, RK.rk_type, self, step) # this was s_2_
-
-            #x_row_tmp = x_[row] + RK.h_fn(sub_sigma_2, NS.sub_sigma) * eps_substep_guide
-            
             eps_ = eps_tmp_
             x_row_pseudoimplicit = x_row_tmp
             sub_sigma_pseudoimplicit = sub_sigma_2
