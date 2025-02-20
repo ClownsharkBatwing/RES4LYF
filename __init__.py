@@ -103,6 +103,8 @@ NODE_CLASS_MAPPINGS = {
     
     "ClownGuidesAB_Beta": samplers_extensions.ClownGuidesAB_Beta,
 
+    #"ClownGuidesSimple_Beta": samplers_extensions.ClownGuidesSimple_Beta,
+
     "ClownGuides_Beta": samplers_extensions.ClownGuides_Beta,
     "ClownGuide_Beta": samplers_extensions.ClownGuide_Beta,
     
