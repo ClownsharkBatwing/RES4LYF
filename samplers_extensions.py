@@ -705,8 +705,8 @@ class ClownGuide_Beta:
     def INPUT_TYPES(s):
         return {"required":
                     {"guide_mode": (GUIDE_MODE_NAMES_BETA_SIMPLE, {"default": 'epsilon', "tooltip": "Recommended: epsilon or mean/mean_std with sampler_mode = standard, and unsample/resample with sampler_mode = unsample/resample. Epsilon_dynamic_mean, etc. are only used with two latent inputs and a mask. Blend/hard_light/mean/mean_std etc. require low strengths, start with 0.01-0.02."}),
-                     "channelwise_mode": ("BOOLEAN", {"default": False}),
-                     "projection_mode": ("BOOLEAN", {"default": False}),
+                     "channelwise_mode": ("BOOLEAN", {"default": True}),
+                     "projection_mode": ("BOOLEAN", {"default": True}),
                      "weight": ("FLOAT", {"default": 0.75, "min": -100.0, "max": 100.0, "step":0.01, "round": False, "tooltip": "Set the strength of the guide."}),
                      "cutoff": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 1.0, "step":0.01, "round": False, "tooltip": "Disables the guide for the next step when the denoised image is similar to the guide. Higher values will strengthen the effect."}),
                     "weight_scheduler":     (["constant"] + get_res4lyf_scheduler_list(), {"default": "beta57"},),
@@ -781,8 +781,8 @@ class ClownGuides_Beta:
     def INPUT_TYPES(s):
         return {"required":
                     {"guide_mode": (GUIDE_MODE_NAMES_BETA_SIMPLE, {"default": 'epsilon', "tooltip": "Recommended: epsilon or mean/mean_std with sampler_mode = standard, and unsample/resample with sampler_mode = unsample/resample. Epsilon_dynamic_mean, etc. are only used with two latent inputs and a mask. Blend/hard_light/mean/mean_std etc. require low strengths, start with 0.01-0.02."}),
-                     "channelwise_mode": ("BOOLEAN", {"default": False}),
-                     "projection_mode": ("BOOLEAN", {"default": False}),
+                     "channelwise_mode": ("BOOLEAN", {"default": True}),
+                     "projection_mode": ("BOOLEAN", {"default": True}),
                      "weight_masked": ("FLOAT", {"default": 0.75, "min": -100.0, "max": 100.0, "step":0.01, "round": False, "tooltip": "Set the strength of the guide."}),
                      "weight_unmasked": ("FLOAT", {"default": 0.75, "min": -100.0, "max": 100.0, "step":0.01, "round": False, "tooltip": "Set the strength of the guide_bkg."}),
                      "cutoff_masked": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 1.0, "step":0.01, "round": False, "tooltip": "Disables the guide for the next step when the denoised image is similar to the guide. Higher values will strengthen the effect."}),

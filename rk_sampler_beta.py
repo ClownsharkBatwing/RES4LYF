@@ -152,6 +152,14 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
     # SETUP GUIDES
     LG = LatentGuide(model, sigmas, UNSAMPLE, LGW_MASK_RESCALE_MIN, extra_options, device=default_device, dtype=default_dtype, frame_weights_grp=frame_weights_grp)
     x = LG.init_guides(x, guides, RK.IMPLICIT, NS.noise_sampler)
+    if torch.norm(LG.mask - torch.ones_like(LG.mask)) != 0   and   (LG.y0.sum() == 0 or LG.y0_inv.sum() == 0):
+        SKIP_PSEUDO = True
+        if LG.y0.sum() == 0:
+            SKIP_PSEUDO_Y = "y0"
+        elif LG.y0_inv.sum() == 0:
+            SKIP_PSEUDO_Y = "y0_inv"
+    else:
+        SKIP_PSEUDO = False
 
     data_           = None
     eps_            = None
@@ -220,7 +228,8 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
                 x_, eps_ = RK.newton_iter(x_0, x_, eps_, eps_prev_, data_, NS.s_, 0, NS.h, sigmas, step, "init", extra_options)
 
             # PREPARE FULLY PSEUDOIMPLICIT GUIDES
-            x_0, x_, eps_ = LG.prepare_fully_pseudoimplicit_guides_substep(x_0, x_, eps_, eps_prev_, data_, 0, step, sigmas, eta_substep, overshoot_substep, s_noise_substep, NS, RK, pseudoimplicit_row_weights, pseudoimplicit_step_weights, full_iter, BONGMATH, extra_options)
+            if step > 0 or not SKIP_PSEUDO:
+                x_0, x_, eps_ = LG.prepare_fully_pseudoimplicit_guides_substep(x_0, x_, eps_, eps_prev_, data_, 0, step, sigmas, eta_substep, overshoot_substep, s_noise_substep, NS, RK, pseudoimplicit_row_weights, pseudoimplicit_step_weights, full_iter, BONGMATH, extra_options)
 
             # TABLEAU LOOP
             for row in range(RK.rows - RK.multistep_stages - RK.row_offset + 1):
@@ -234,10 +243,11 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
                     if row < RK.rows:
 
                         # PREPARE PSEUDOIMPLICIT GUIDES
-                        x_0, x_, eps_, x_row_pseudoimplicit, sub_sigma_pseudoimplicit = LG.process_pseudoimplicit_guides_substep(x_0, x_, eps_, eps_prev_, data_, row, step, sigmas, NS, RK, pseudoimplicit_row_weights, pseudoimplicit_step_weights, full_iter, BONGMATH, extra_options)
+                        if step > 0 or not SKIP_PSEUDO:
+                            x_0, x_, eps_, x_row_pseudoimplicit, sub_sigma_pseudoimplicit = LG.process_pseudoimplicit_guides_substep(x_0, x_, eps_, eps_prev_, data_, row, step, sigmas, NS, RK, pseudoimplicit_row_weights, pseudoimplicit_step_weights, full_iter, BONGMATH, extra_options)
                         
                         # PREPARE MODEL CALL
-                        if LG.guide_mode in {"pseudoimplicit","pseudoimplicit_cw", "pseudoimplicit_projection", "pseudoimplicit_projection_cw","fully_pseudoimplicit", "fully_pseudoimplicit_projection","fully_pseudoimplicit_cw", "fully_pseudoimplicit_projection_cw"} and (LG.lgw[step] > 0 or LG.lgw_inv[step] > 0) and x_row_pseudoimplicit is not None:
+                        if LG.guide_mode in {"pseudoimplicit","pseudoimplicit_cw", "pseudoimplicit_projection", "pseudoimplicit_projection_cw","fully_pseudoimplicit", "fully_pseudoimplicit_projection","fully_pseudoimplicit_cw", "fully_pseudoimplicit_projection_cw"} and (step > 0 or not SKIP_PSEUDO) and (LG.lgw[step] > 0 or LG.lgw_inv[step] > 0) and x_row_pseudoimplicit is not None:
 
                             x_tmp =     x_row_pseudoimplicit 
                             s_tmp = sub_sigma_pseudoimplicit 
@@ -378,6 +388,14 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
         denoised_prev2 = denoised_prev
         denoised_prev  = denoised
         denoised_data_prev = data_[0]
+        
+        if SKIP_PSEUDO:
+            if SKIP_PSEUDO_Y == "y0":
+                LG.y0 = denoised
+                LG.HAS_LATENT_GUIDE_INV = True
+            else:
+                LG.y0_inv = denoised
+                LG.HAS_LATENT_GUIDE_INV = True
 
     if sigmas[-1] == 0 and sigmas[-2] == NS.sigma_min:
         eps, denoised = RK(x, NS.sigma_min, x, NS.sigma_min)
