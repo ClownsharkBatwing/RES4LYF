@@ -625,7 +625,7 @@ class ClownSamplerAdvanced_Beta:
                                                     "noise_sampler_type": noise_type_sde, "noise_sampler_type_substep": noise_type_sde_substep, "noise_mode_sde": noise_mode_sde, "noise_seed": noise_seed_sde, "rk_type": sampler_name, "implicit_sampler_name": implicit_sampler_name,
                                                             "implicit_steps_diag": implicit_steps_diag, "implicit_steps_full": implicit_steps_full,
                                                             "LGW_MASK_RESCALE_MIN": rescale_floor, "sigmas_override": sigmas_override, "sde_noise": sde_noise,
-                                                            "extra_options": extra_options,
+                                                            "extra_options": extra_options, "sampler_mode": "standard",
                                                             "etas": etas, "etas_substep": etas_substep, "s_noises": s_noises, "s_noises_substep": s_noises_substep, "unsample_resample_scales": unsample_resample_scales, "regional_conditioning_weights": regional_conditioning_weights,
                                                             "guides": guides, "frame_weights_grp": frame_weights_grp, "eta_substep": eta_substep, "noise_mode_sde_substep": noise_mode_sde_substep, "noise_boost_step": noise_boost_step, "noise_boost_substep": noise_boost_substep,
                                                             "overshoot_mode": overshoot_mode, "overshoot_mode_substep": overshoot_mode_substep, "overshoot": overshoot, "overshoot_substep": overshoot_substep, "BONGMATH": bongmath,
