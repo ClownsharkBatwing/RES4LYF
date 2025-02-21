@@ -70,7 +70,6 @@ class LatentGuide:
         self.frame_weights_inv = frame_weights_grp[1] if frame_weights_grp is not None else None
 
     def init_guides(self, x : torch.Tensor, RK_IMPLICIT, guides=None, noise_sampler=None):
-        x_working = x.clone().to(dtype=self.dtype, device=self.device)
         latent_guide_weight, latent_guide_weight_inv = 0.,0.
         latent_guide_weights = torch.zeros_like(self.sigmas, dtype=self.dtype, device=self.device)
         latent_guide_weights_inv = torch.zeros_like(self.sigmas, dtype=self.dtype, device=self.device)

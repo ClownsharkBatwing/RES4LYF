@@ -152,7 +152,7 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
 
     # SETUP GUIDES
     LG = LatentGuide(model, sigmas, UNSAMPLE, LGW_MASK_RESCALE_MIN, extra_options, device=work_device, dtype=default_dtype, frame_weights_grp=frame_weights_grp)
-    x = LG.init_guides(x, guides, RK.IMPLICIT, NS.noise_sampler)
+    x = LG.init_guides(x, RK.IMPLICIT, guides, NS.noise_sampler)
     if torch.norm(LG.mask - torch.ones_like(LG.mask)) != 0   and   (LG.y0.sum() == 0 or LG.y0_inv.sum() == 0):
         SKIP_PSEUDO = True
         if LG.y0.sum() == 0:
