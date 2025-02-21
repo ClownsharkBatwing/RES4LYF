@@ -115,9 +115,9 @@ class LatentGuide:
         if latent_guide is not None:
             self.HAS_LATENT_GUIDE = True
             if type(latent_guide) is dict:
-                latent_guide_samples = self.model.inner_model.inner_model.process_latent_in(latent_guide['samples']).clone()
+                latent_guide_samples = self.model.inner_model.inner_model.process_latent_in(latent_guide['samples']).clone().to(x.dtype)
             elif type(latent_guide) is torch.Tensor:
-                latent_guide_samples = latent_guide
+                latent_guide_samples = latent_guide.to(x.dtype)
             else:
                 raise ValueError(f"Invalid latent type: {type(latent_guide)}")
 
@@ -137,9 +137,9 @@ class LatentGuide:
         if latent_guide_inv is not None:
             self.HAS_LATENT_GUIDE_INV = True
             if type(latent_guide_inv) is dict:
-                latent_guide_inv_samples = self.model.inner_model.inner_model.process_latent_in(latent_guide_inv['samples']).clone()
+                latent_guide_inv_samples = self.model.inner_model.inner_model.process_latent_in(latent_guide_inv['samples']).clone().to(x.dtype)
             elif type(latent_guide_inv) is torch.Tensor:
-                latent_guide_inv_samples = latent_guide_inv
+                latent_guide_inv_samples = latent_guide_inv.to(x.dtype)
             else:
                 raise ValueError(f"Invalid latent type: {type(latent_guide_inv)}")
 

@@ -695,6 +695,84 @@ class ClownSampler:
 
 
 
+class ClownsharkUnsampler:
+    @classmethod
+    def INPUT_TYPES(s):
+        return {"required":
+                    {"model": ("MODEL",),
+                    "noise_type_init": (NOISE_GENERATOR_NAMES_SIMPLE, {"default": "gaussian"}),
+                    "noise_type_sde": (NOISE_GENERATOR_NAMES_SIMPLE, {"default": "gaussian"}),
+                    "noise_mode_sde": (NOISE_MODE_NAMES, {"default": 'hard', "tooltip": "How noise scales with the sigma schedule. Hard is the most aggressive, the others start strong and drop rapidly."}),
+                    "eta": ("FLOAT", {"default": 0.5, "min": -100.0, "max": 100.0, "step":0.01, "round": False, "tooltip": "Calculated noise amount to be added, then removed, after each step."}),
+                    "noise_seed": ("INT", {"default": 0, "min": -1, "max": 0xffffffffffffffff}),
+                    "sampler_mode": (['standard', 'unsample', 'resample'],),
+                    "sampler_name": (RK_SAMPLER_NAMES, {"default": "res_2m"}), 
+                    "implicit_sampler_name": (IRK_SAMPLER_NAMES, {"default": "explicit_diagonal"}), 
+                    "scheduler": (get_res4lyf_scheduler_list(), {"default": "beta57"},),
+                    "steps": ("INT", {"default": 30, "min": 1, "max": 10000}),
+                    "implicit_steps": ("INT", {"default": 0, "min": 0, "max": 10000}),
+                    "denoise": ("FLOAT", {"default": 1.0, "min": -10000, "max": 10000, "step":0.01}),
+                    "denoise_alt": ("FLOAT", {"default": 1.0, "min": -10000, "max": 10000, "step":0.01}),
+                    "cfg": ("FLOAT", {"default": 3.0, "min": -100.0, "max": 100.0, "step":0.01, "round": False, }),
+                    "extra_options": ("STRING", {"default": "", "multiline": True}),   
+                     },
+                "optional": 
+                    {
+                    "positive": ("CONDITIONING", ),
+                    "negative": ("CONDITIONING", ),
+                    "sigmas": ("SIGMAS", ),
+                    "latent_image": ("LATENT", ),     
+                    "guides": ("GUIDES", ),     
+                    "options": ("OPTIONS", ),   
+                    "automation": ("AUTOMATION", ),
+                    }
+                }
+
+    RETURN_TYPES = ("LATENT","LATENT", "LATENT",)
+    RETURN_NAMES = ("output", "denoised","sde_noise",) 
+
+    FUNCTION = "main"
+
+    CATEGORY = "RES4LYF/samplers"
+    
+    def main(self, model, cfg, sampler_mode, scheduler, steps, denoise=1.0, denoise_alt=1.0,
+             noise_type_init="gaussian", noise_type_sde="gaussian", noise_mode_sde="hard", latent_image=None, 
+             positive=None, negative=None, sigmas=None, latent_noise=None, latent_noise_match=None,
+             noise_stdev=1.0, noise_mean=0.0, noise_normalize=True, noise_is_latent=False, 
+             eta=0.25, eta_var=0.0, d_noise=1.0, s_noise=1.0, alpha_init=-1.0, k_init=1.0, alpha_sde=-1.0, k_sde=1.0, cfgpp=0.0, c1=0.0, c2=0.5, c3=1.0, noise_seed=-1, sampler_name="res_2m", implicit_sampler_name="default",
+                    t_fn_formula=None, sigma_fn_formula=None, implicit_steps=0,
+                    latent_guide=None, latent_guide_inv=None, guide_mode="blend", latent_guide_weights=None, latent_guide_weights_inv=None, latent_guide_mask=None, latent_guide_mask_inv=None, rescale_floor=True, sigmas_override=None, unsampler_type="linear",
+                    shift=3.0, base_shift=0.85, guides=None, options=None, sde_noise=None,sde_noise_steps=1, shift_scaling="exponential",
+                    extra_options="", automation=None, etas=None, s_noises=None,unsample_resample_scales=None, regional_conditioning_weights=None,frame_weights_grp=None,
+                    ): 
+
+        if noise_seed >= 0:
+            noise_seed_sde = noise_seed + 1
+        else:
+            noise_seed_sde = -1
+        
+        eta_substep = eta
+        noise_mode_sde_substep = noise_mode_sde
+        noise_type_sde_substep = noise_type_sde 
+
+        sampler = ClownSamplerAdvanced().main(
+                noise_type_sde=noise_type_sde, noise_type_sde_substep=noise_type_sde_substep, noise_mode_sde=noise_mode_sde,
+             eta=eta, eta_var=eta_var, d_noise=d_noise, s_noise=s_noise, alpha_sde=alpha_sde, k_sde=k_sde, cfgpp=cfgpp, c1=c1, c2=c2, c3=c3, noise_seed_sde=noise_seed_sde, sampler_name=sampler_name, implicit_sampler_name=implicit_sampler_name,
+                    t_fn_formula=t_fn_formula, sigma_fn_formula=sigma_fn_formula, implicit_steps=implicit_steps,
+                    latent_guide=latent_guide, latent_guide_inv=latent_guide_inv, guide_mode=guide_mode, latent_guide_weights=latent_guide_weights, latent_guide_weights_inv=latent_guide_weights_inv, latent_guide_mask=latent_guide_mask, latent_guide_mask_inv=latent_guide_mask_inv, rescale_floor=rescale_floor, sigmas_override=sigmas_override, unsampler_type=unsampler_type,
+                    guides=guides, options=options, sde_noise=sde_noise,sde_noise_steps=sde_noise_steps, 
+                    extra_options=extra_options, automation=automation, etas=etas, s_noises=s_noises,unsample_resample_scales=unsample_resample_scales, regional_conditioning_weights=regional_conditioning_weights,frame_weights_grp=frame_weights_grp, eta_substep=eta_substep, noise_mode_sde_substep=noise_mode_sde_substep,
+                    )
+
+        return SharkSampler().main(
+            model, cfg, sampler_mode, scheduler, steps, denoise, denoise_alt,
+            noise_type_init, latent_image, 
+            positive, negative, sampler[0], sigmas, latent_noise, latent_noise_match,
+            noise_stdev, noise_mean, noise_normalize, noise_is_latent, 
+            d_noise, alpha_init, k_init, cfgpp, noise_seed,
+            shift, base_shift, options, sde_noise, sde_noise_steps, shift_scaling,
+            extra_options)
+
 
 
 

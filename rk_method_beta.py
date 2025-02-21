@@ -332,7 +332,11 @@ class RK_Method_Beta:
                 for rr in range(row+row_offset):
                     x_[rr] = x_0 + h * self.zum(rr, eps_, eps_prev_)
                 for rr in range(row+row_offset):
-                    eps_[rr] = self.get_epsilon(x_0, x_[rr], data_[rr], sigma, s_[rr])
+                    if extra_options_flag("zonkytar", extra_options):
+                        #eps_[rr] = self.get_unsample_epsilon(x_[rr], x_0, data_[rr], sigma, s_[rr])
+                        eps_[rr] = self.get_epsilon(x_[rr], x_0, data_[rr], sigma, s_[rr])
+                    else:
+                        eps_[rr] = self.get_epsilon(x_0, x_[rr], data_[rr], sigma, s_[rr])
                     
             if bong_strength != 1.0:
                 x_0  = x_0_tmp  + bong_strength * (x_0  - x_0_tmp)
@@ -481,24 +485,22 @@ class RK_Method_Exponential(RK_Method_Beta):
             sigma_cur = self.sigma_max - sigma_cur.clone()
         sigma_cur = unsample_resample_scale if unsample_resample_scale is not None else sigma_cur
 
-        if extra_options is not None:
-            #if re.search(r"\bpower_unsample\b", extra_options) or re.search(r"\bpower_resample\b", extra_options):
-            if extra_options_flag("power_unsample", extra_options)   or   extra_options_flag("power_resample", extra_options):
-                if sigma_down is None:
-                    return y - x_0
-                else:
-                    if sigma_down > sigma:
-                        return (x_0 - y) * sigma_cur
-                    else:
-                        return (y - x_0) * sigma_cur
+        if (extra_options_flag("power_unsample", extra_options)   or   extra_options_flag("power_resample", extra_options))   and not extra_options_flag("disable_power_", extra_options):
+            if sigma_down is None:
+                return y - x_0
             else:
-                if sigma_down is None:
-                    return (y - x_0) / sigma_cur
+                if sigma_down > sigma:
+                    return (x_0 - y) * sigma_cur
                 else:
-                    if sigma_down > sigma:
-                        return (x_0 - y) / sigma_cur
-                    else:
-                        return (y - x_0) / sigma_cur
+                    return (y - x_0) * sigma_cur
+        else:
+            if sigma_down is None:
+                return (y - x_0) #/ sigma_cur
+            else:
+                if sigma_down > sigma:
+                    return (x_0 - y) #/ sigma_cur
+                else:
+                    return (y - x_0) #/ sigma_cur
 
 
 
@@ -601,6 +603,8 @@ class RK_NoiseSampler:
 
 
     def init_noise_samplers(self, x, noise_seed, noise_sampler_type, noise_sampler_type2, noise_mode_sde, noise_mode_sde_substep, overshoot_mode, overshoot_mode_substep, noise_boost_step, noise_boost_substep, alpha, alpha2, k=1., k2=1., scale=0.1, scale2=0.1):
+        self.noise_sampler_type     = noise_sampler_type
+        self.noise_sampler_type2    = noise_sampler_type2
         self.noise_mode_sde         = noise_mode_sde
         self.noise_mode_sde_substep = noise_mode_sde_substep
         self.overshoot_mode         = overshoot_mode
@@ -714,6 +718,8 @@ class RK_NoiseSampler:
                 pass
             elif full_iter > 0 and                                      extra_options_flag("implicit_step_only_first_eta",     self.extra_options):
                 pass
+            elif (full_iter > 0 or diag_iter > 0)                   and self.noise_sampler_type2 == "brownian":
+                pass # brownian noise does not increment its seed when generated, deactivate on implicit repeats to avoid burn
             elif full_iter > 0 and                                      extra_options_flag("implicit_step_only_first_all_eta", self.extra_options):
                 self.sigma_down = self.sigma_next
                 self.sigma_up *= 0

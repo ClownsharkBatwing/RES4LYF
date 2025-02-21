@@ -242,7 +242,14 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
             for row in range(RK.rows - RK.multistep_stages - RK.row_offset + 1):
                 for diag_iter in range(implicit_steps_diag+1):
                     
+                    if noise_sampler_type_substep == "brownian" and (full_iter > 0 or diag_iter > 0):
+                        eta_substep = 0.
+                    
                     NS.set_sde_substep(row, RK.multistep_stages, eta_substep, overshoot_substep, s_noise_substep, full_iter, diag_iter, implicit_steps_full, implicit_steps_diag)
+                    if not BONGMATH and eta_substep > 0:
+                        RK.LINEAR_ANCHOR_X_0 = True
+                    else:
+                        RK.LINEAR_ANCHOR_X_0 = False
 
                     # PRENOISE METHOD HERE!
                     
@@ -400,7 +407,10 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
                         x_[row+RK.row_offset] = NS.swap_noise_substep(x_0, x_[row+RK.row_offset])
 
                     if BONGMATH and step < sigmas.shape[0]-1 and diag_iter == implicit_steps_diag and not extra_options_flag("disable_terminal_bongmath", extra_options):
-                        x_0, x_, eps_ = RK.bong_iter(x_0, x_, eps_, eps_prev_, data_, sigma, NS.s_, row, RK.row_offset, NS.h, extra_options)
+                        if step == 0 and UNSAMPLE:
+                            pass
+                        else:
+                            x_0, x_, eps_ = RK.bong_iter(x_0, x_, eps_, eps_prev_, data_, sigma, NS.s_, row, RK.row_offset, NS.h, extra_options)
 
 
 

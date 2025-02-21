@@ -24,6 +24,9 @@ from .noise_sigmas_timesteps_scaling import NOISE_MODE_NAMES
 from .sigmas import get_sigmas
 import comfy.samplers
 
+import copy
+
+
 
 class SaveImage:
     def __init__(self):
@@ -265,6 +268,11 @@ class VAEEncodeAdvanced:
     def main(self, width, height, resize_to_input="false", image_1=None, image_2=None, mask=None, invert_mask=False, method="stretch", interpolation="lanczos", condition="always", multiple_of=0, keep_proportion=False, mask_channel="red", latent=None, latent_type="16_channels", vae=None):
         #NOTE: VAE encode with comyfui is *non-deterministic* in that each success encode will return slightly different latent images! The difference is visible after decoding.
         ratio = 8 # latent compression factor
+        torch.manual_seed(42)
+        torch.cuda.manual_seed_all(42)
+
+        image_1 = image_1.clone()
+        image_2 = image_2.clone()
 
         if latent is not None and resize_to_input == "latent":
             height, width = latent['samples'].shape[2:4]
