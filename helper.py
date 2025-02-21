@@ -3,6 +3,78 @@ import torch
 from comfy.samplers import SCHEDULER_NAMES
 import torch.nn.functional as F
 
+import inspect
+
+def print_torch_tensors_info(obj=None):
+    """
+    Prints a clean listing of all torch.Tensor objects found.
+    The function inspects:
+      - Dictionary items and one level into their sub-items,
+      - List elements and one level into their sub-elements,
+      - Attributes of objects and one level into their nested dicts or lists.
+    If no object is provided, it inspects the caller's local variables.
+    """
+
+    def get_tensor_size_mb(tensor: torch.Tensor) -> float:
+        return tensor.element_size() * tensor.nelement() / 1024 / 1024
+
+    def print_tensor_info(tensor: torch.Tensor, prefix="") -> None:
+        prefix = f"{prefix} | " if prefix else ""
+        tensor_size_mb = get_tensor_size_mb(tensor)
+        print(f"{prefix}Shape: {tuple(tensor.shape)} | Dtype: {tensor.dtype} | Size: {tensor_size_mb:.2f} MB | Device: {tensor.device}")
+
+    def check_and_print(identifier, value):
+        if isinstance(value, torch.Tensor):
+            print_tensor_info(value, identifier)
+        elif isinstance(value, dict):
+            for key, sub_value in value.items():
+                new_identifier = f"{identifier}[{key!r}]"
+                if isinstance(sub_value, torch.Tensor):
+                    print_tensor_info(sub_value, new_identifier)
+                    print(f"{new_identifier} | Shape: {tuple(sub_value.shape)} | Dtype: {sub_value.dtype}")
+                elif isinstance(sub_value, (dict, list)):
+                    for sub_id, sub_sub_value in (sub_value.items() if isinstance(sub_value, dict) else enumerate(sub_value)):
+                        deeper_identifier = f"{new_identifier}[{sub_id!r}]"
+                        if isinstance(sub_sub_value, torch.Tensor):
+                            print_tensor_info(sub_sub_value, deeper_identifier)
+        elif isinstance(value, list):
+            for idx, item in enumerate(value):
+                new_identifier = f"{identifier}[{idx}]"
+                if isinstance(item, torch.Tensor):
+                    print_tensor_info(item, new_identifier)
+                elif isinstance(item, (dict, list)):
+                    for sub_id, sub_item in (item.items() if isinstance(item, dict) else enumerate(item)):
+                        deeper_identifier = f"{new_identifier}[{sub_id!r}]"
+                        if isinstance(sub_item, torch.Tensor):
+                            print_tensor_info(sub_item, deeper_identifier)
+
+    if obj is None:
+        # Get the locals from the caller's frame.
+        caller_locals = inspect.currentframe().f_back.f_locals
+        obj = caller_locals
+        location = 'locals'
+    elif isinstance(obj, dict):
+        location = 'dict items'
+    elif isinstance(obj, list):
+        location = 'list elements'
+    else:
+        location = f'{obj.__class__.__name__} attributes'
+
+    print(f"Listing PyTorch tensors in {location}:")
+
+    if isinstance(obj, dict):
+        for name, value in obj.items():
+            check_and_print(f"Variable: {name}", value)
+    elif isinstance(obj, list):
+        for idx, value in enumerate(obj):
+            check_and_print(f"List index: {idx}", value)
+    else:
+        for attr in dir(obj):
+            try:
+                value = getattr(obj, attr)
+                check_and_print(f"Attribute: {attr}", value)
+            except Exception:
+                continue
 
 def get_extra_options_kv(key, default, extra_options):
 

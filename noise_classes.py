@@ -84,9 +84,6 @@ class NoiseGenerator:
     def __init__(self, x=None, size=None, dtype=None, layout=None, device=None, seed=42, generator=None, sigma_min=None, sigma_max=None):
         self.seed = seed
 
-        self.sigma_min = sigma_min
-        self.sigma_max = sigma_max
-
         if x is not None:
             self.x      = x
             self.size   = x.shape
@@ -105,6 +102,9 @@ class NoiseGenerator:
             self.layout = layout
         if device is not None:
             self.device = device
+
+        self.sigma_max = sigma_max.to(device)
+        self.sigma_min = sigma_min.to(device)
 
         if generator is None:
             self.generator = torch.Generator(device=self.device).manual_seed(seed)
@@ -412,7 +412,7 @@ class WaveletNoiseGenerator(NoiseGenerator):
         orig_h, orig_w = h, w
 
         # noise for spatial dimensions only
-        coeffs = pywt.wavedecn(torch.randn(self.size, dtype=self.dtype, layout=self.layout, device=self.device, generator=self.generator).to('cpu'), wavelet=self.wavelet, mode='periodization')
+        coeffs = pywt.wavedecn(torch.randn(self.size, dtype=self.dtype, layout=self.layout, device=self.device, generator=self.generator).to(self.device), wavelet=self.wavelet, mode='periodization')
         noise = pywt.waverecn(coeffs, wavelet=self.wavelet, mode='periodization')
         noise_tensor = torch.tensor(noise, dtype=self.dtype, device=self.device)
 
