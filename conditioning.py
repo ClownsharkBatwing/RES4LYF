@@ -744,6 +744,7 @@ class ClownRegionalConditioningFlux:
             "start_percent": ("FLOAT", {"default": 0,   "min": 0.0, "max": 1.0, "step": 0.01}),
             "end_percent":   ("FLOAT", {"default": 1.0, "min": 0.0, "max": 1.0, "step": 0.01}),
             "mask_type": (["gradient"], {"default": "gradient"}),
+            "invert_mask": ("BOOLEAN", {"default": False}),
         }, 
             "optional": {
                 "model":             ("MODEL", ),
@@ -760,13 +761,15 @@ class ClownRegionalConditioningFlux:
 
     CATEGORY = "RES4LYF/conditioning"
 
-    def main(self, model, regional_model, mask_weight=1.0, start_percent=0.0, end_percent=1.0, positive_masked=None, positive_unmasked=None, mask_weights=None, region_bleeds=None, region_bleed=0.0, mask_type="gradient", mask=None):
+    def main(self, model, regional_model, mask_weight=1.0, start_percent=0.0, end_percent=1.0, positive_masked=None, positive_unmasked=None, mask_weights=None, region_bleeds=None, region_bleed=0.0, mask_type="gradient", mask=None, invert_mask=False):
         if regional_model == "auto":
             reflux_enable = True
         else:
             model, = ReFluxPatcher().main(model, enable=False)
             return (model, positive_masked,)
             
+        if invert_mask and mask is not None:
+            mask = 1-mask
 
         weight, weights = mask_weight, mask_weights
         floor, floors = region_bleed, region_bleeds
