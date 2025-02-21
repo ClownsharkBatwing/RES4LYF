@@ -160,6 +160,9 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
             SKIP_PSEUDO_Y = "y0_inv"
     else:
         SKIP_PSEUDO = False
+    if extra_options_flag("pseudo_mix_strength", extra_options):
+        orig_y0 = LG.y0.clone()
+        orig_y0_inv = LG.y0_inv.clone()
 
     data_           = None
     eps_            = None
@@ -396,6 +399,12 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
             else:
                 LG.y0_inv = denoised
                 LG.HAS_LATENT_GUIDE_INV = True
+                
+        if extra_options_flag("pseudo_mix_strength", extra_options):
+            pseudo_mix_strength = float(get_extra_options_kv("pseudo_mix_strength", "0.0", extra_options))
+            LG.y0 = orig_y0 + pseudo_mix_strength * (denoised - orig_y0)
+            LG.y0_inv = orig_y0_inv + pseudo_mix_strength * (denoised - orig_y0_inv)
+
 
     if sigmas[-1] == 0 and sigmas[-2] == NS.sigma_min:
         eps, denoised = RK(x, NS.sigma_min, x, NS.sigma_min)
