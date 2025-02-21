@@ -172,7 +172,11 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
     denoised_prev2  = torch.zeros_like(x)
     x_          = None
     eps_prev_   = None
-
+    denoised_data_prev = None
+    denoised_data_prev2 = None
+    h_prev = None
+    h_prev2 = None
+    
     torch.cuda.synchronize()
     torch.cuda.empty_cache()
     gc.collect()
@@ -326,10 +330,10 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
                                 callback({'x': x, 'i': step, 'sigma': sigma, 'sigma_next': sigma_next, 'denoised': data_[row].to(torch.float32)}) if callback is not None else None
 
                         if extra_options_flag("bong2m", extra_options) and RK.multistep_stages > 0 and step < len(sigmas)-4:
-                            #eps_tmp = eps_[0]
-                            #eps_[0] = eps_[1]
-                            #eps_[1] = eps_tmp
-                            c2_prev = -h_prev / NS.h
+                            h_no_eta       = -torch.log(sigmas[step+1]/sigmas[step])
+                            h_prev1_no_eta = -torch.log(sigmas[step]/sigmas[step-1])
+                            c2_prev = (-h_prev1_no_eta / h_no_eta).item()
+                            #c2_prev = -h_prev / NS.h
                             eps_prev = denoised_data_prev - x_0
                             
                             φ = Phi(h_prev, [0.,c2_prev])
@@ -338,12 +342,45 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
                                 x_prev = x_0 - h_prev * (a2_1 * eps_prev)
                                 eps_prev = denoised_data_prev - x_prev
                                 
-                            #eps_[0] = eps_[1]
                             eps_[1] = eps_prev
                             
-                            #eps_[1] = eps_[0]
-                            #eps_[0] = eps_prev
+                        if extra_options_flag("bong3m", extra_options) and RK.multistep_stages > 0 and step < len(sigmas)-10:
+                            h_no_eta       = -torch.log(sigmas[step+1]/sigmas[step])
+                            h_prev1_no_eta = -torch.log(sigmas[step]/sigmas[step-1])
+                            h_prev2_no_eta = -torch.log(sigmas[step]/sigmas[step-2])
+                            c2_prev = (-h_prev1_no_eta / h_no_eta).item()
+                            c3_prev = (-h_prev2_no_eta / h_no_eta).item()      
                             
+                            eps_prev2 = denoised_data_prev2 - x_0
+                            eps_prev  = denoised_data_prev  - x_0
+                            
+                            φ = Phi(h_prev1_no_eta, [0.,c2_prev, c3_prev])
+                            a2_1 = c2_prev * φ(1,2)
+                            for i in range(100):
+                                x_prev = x_0 - h_prev1_no_eta * (a2_1 * eps_prev)
+                                eps_prev = denoised_data_prev2 - x_prev
+                                
+                            eps_[1] = eps_prev
+                            
+                            φ = Phi(h_prev2_no_eta, [0.,c3_prev, c3_prev])
+                            
+                            def calculate_gamma(c2_prev, c3_prev):
+                                return (3*(c3_prev**3) - 2*c3_prev) / (c2_prev*(2 - 3*c2_prev))
+                            gamma = calculate_gamma(c2_prev, c3_prev)
+                            
+                            a2_1 = c2_prev * φ(1,2)
+                            a3_2 = gamma * c2_prev * φ(2,2) + (c3_prev ** 2 / c2_prev) * φ(2, 3)
+                            a3_1 = c3_prev * φ(1,3) - a3_2
+                            
+                            for i in range(100):
+                                x_prev2 = x_0 - h_prev2_no_eta * (a3_1 * eps_prev + a3_2 * eps_prev2)
+                                x_prev = x_prev2 + h_prev2_no_eta * (a2_1 * eps_prev)
+                                
+                                eps_prev2 = denoised_data_prev - x_prev2
+                                eps_prev  = denoised_data_prev2 - x_prev
+                                
+                            eps_[2] = eps_prev2
+
                         # GUIDE 
                         if not extra_options_flag("disable_guides_eps_substep", extra_options):
                             eps_, x_      = LG.process_guides_substep(x_0, x_, eps_,      data_, row, step, NS.sigma, NS.sigma_next, NS.sigma_down, NS.s_, unsample_resample_scale, RK, extra_options)
@@ -378,6 +415,7 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
             
             preview_callback(x, eps, denoised, x_, eps_, data_, step, sigma, sigma_next, callback, extra_options)
             
+            h_prev2 = h_prev
             h_prev = NS.h
             x_prev = x_0
 
@@ -390,6 +428,8 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
 
         denoised_prev2 = denoised_prev
         denoised_prev  = denoised
+        
+        denoised_data_prev2 = denoised_data_prev
         denoised_data_prev = data_[0]
         
         if SKIP_PSEUDO:

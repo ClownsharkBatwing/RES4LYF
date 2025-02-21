@@ -712,6 +712,7 @@ class ClownGuide_Beta:
                     "weight_scheduler":     (["constant"] + get_res4lyf_scheduler_list(), {"default": "beta57"},),
                     "start_step": ("INT", {"default": 0, "min": 0, "max": 10000}),
                     "end_step": ("INT", {"default": 15, "min": 1, "max": 10000}),
+                    "invert_mask": ("BOOLEAN", {"default": False}),
                     },
                     "optional": 
                     {
@@ -727,12 +728,12 @@ class ClownGuide_Beta:
     FUNCTION = "main"
 
     def main(self, weight_scheduler="constant", weight_scheduler_unmasked="constant", start_step=0, start_step_unmasked=0, end_step=30, end_step_unmasked=30, cutoff=1.0, cutoff_unmasked=1.0, guide=None, guide_unmasked=None, weight=0.0, weight_unmasked=0.0, 
-                    guide_mode="epsilon", channelwise_mode=False, projection_mode=False, weights=None, weights_unmasked=None, mask=None, unmask=None,
+                    guide_mode="epsilon", channelwise_mode=False, projection_mode=False, weights=None, weights_unmasked=None, mask=None, unmask=None, invert_mask=False,
                     ):
         CG = ClownGuides_Beta()
         mask = 1-mask if mask is not None else None
         guides = CG.main(weight_scheduler, weight_scheduler_unmasked, start_step, start_step_unmasked, end_step, end_step_unmasked, cutoff, cutoff_unmasked, guide, guide_unmasked, weight, weight_unmasked, 
-                    guide_mode, channelwise_mode, projection_mode, weights, weights_unmasked, mask, unmask,
+                    guide_mode, channelwise_mode, projection_mode, weights, weights_unmasked, mask, unmask, invert_mask,
                     )
         return (guides[0], )
 
@@ -758,6 +759,7 @@ class ClownGuides_Beta:
                     "start_step_unmasked": ("INT", {"default": 0, "min": 0, "max": 10000}),
                     "end_step_masked": ("INT", {"default": 15, "min": 1, "max": 10000}),
                     "end_step_unmasked": ("INT", {"default": 15, "min": 1, "max": 10000}),
+                    "invert_mask": ("BOOLEAN", {"default": False}),
                     },
                     "optional": 
                     {
@@ -775,11 +777,14 @@ class ClownGuides_Beta:
     FUNCTION = "main"
 
     def main(self, weight_scheduler_masked="constant", weight_scheduler_unmasked="constant", start_step_masked=0, start_step_unmasked=0, end_step_masked=30, end_step_unmasked=30, cutoff_masked=1.0, cutoff_unmasked=1.0, guide_masked=None, guide_unmasked=None, weight_masked=0.0, weight_unmasked=0.0, 
-                    guide_mode="epsilon", channelwise_mode=False, projection_mode=False, weights_masked=None, weights_unmasked=None, mask=None, unmask=None,
+                    guide_mode="epsilon", channelwise_mode=False, projection_mode=False, weights_masked=None, weights_unmasked=None, mask=None, unmask=None, invert_mask=False,
                     ):
         default_dtype = torch.float64
         
         max_steps = 10000
+        
+        if invert_mask and mask is not None:
+            mask = 1-mask
                 
         if projection_mode:
             guide_mode = guide_mode + "_projection"
