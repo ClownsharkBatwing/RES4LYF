@@ -4,6 +4,8 @@ let ENABLE_WIDGET_HIDING = false;
 let RESDEBUG = false;
 let ENABLE_UPDATED_TIMESTEP_SCALING = true;
 let TOP_CLOWNDOG = true;
+let DEFAULT_WIDGET_STATES = {};
+const widgetToggleStates = new Map();
 
 const originalGetNodeTypesCategories = typeof LiteGraph.getNodeTypesCategories === 'function' ? LiteGraph.getNodeTypesCategories : null;
 
@@ -61,10 +63,11 @@ const nodeConfigs = {};
 
 /**
  * Dynamic Widget Management Configuration
- * This system manages two types of widget visibility:
+ * This system manages three types of widget visibility:
  * 1. Widget Dependencies: Widgets that show/hide based on other widgets' values
  * 2. Optional Input Dependencies: Widgets that show/hide based on input connections
- */
+ * 3. User-Set Hidden Widgets: Widgets that the user can choose to hide or show, with default states configurable in settings
+**/
 
 // 1. Widget Dependencies - These are common configurations that are shared across multiple nodes
 const commonDependentWidgets = {
@@ -75,7 +78,7 @@ const commonDependentWidgets = {
             widgetsToShow: ["alpha", "k"]                        // Widgets to show/hide
         },
         {
-            inputWidgetNames: ["rk_type"],
+            inputWidgetNames: ["rk_type", "sampler_name"],
             independentValues: [
                 "dormand-prince_6s", 
                 "dormand-prince_7s", 
@@ -106,31 +109,43 @@ const commonDependentWidgets = {
 // Names of nodes that will use commonDependentWidgets config
 const nodesWithCommonConfig = [
     "AdvancedNoise",
+    "Legacy_ClownSampler",
     "ClownSampler",
-    "ClownSamplerLegacy",
-    "KSamplerSelectAdvanced",
-    "LatentNoised",
-    "SamplerCorona",
-    "SamplerDEIS_SDE",
-    "SamplerDPMPP_2M_SDE_Advanced",
-    "SamplerDPMPP_2S_Ancestral_Advanced",
-    "SamplerDPMPP_3M_SDE_Advanced",
-    "SamplerDPMPP_DualSDE_Advanced",
-    "SamplerDPMPP_SDE_Advanced",
-    "SamplerDPMPP_SDE_CFG++_Advanced",
-    "SamplerEulerAncestral_Advanced",
-    "SamplerNoiseInversion",
-    "SamplerRES_Implicit",
-    "SamplerRES3_Implicit_Automation",
-    "SamplerRK",
-    "SamplerRK_Test",
+    "ClownSamplerAdvanced",
+    "ClownSamplerAdvanced_Beta",
+    "ClownsharKSampler",
+    "ClownsharKSamplerGuides",
+    "ClownsharKSamplerGuide",
+    //"ClownGuide_Beta",
+    "ClownGuides_Beta",
+    "ClownGuidesAB_Beta",
+    "ClownGuidesFluxAdvanced_Beta",
+    "Legacy_ClownSampler",
+    "Legacy_SharkSampler",
+    "Legacy_ClownsharKSampler",
     "SharkSampler",
     "UltraSharkSampler",
-    "UltraSharkSampler Tiled"
+    "UltraSharkSampler Tiled",
 ];
 
 // 2. Optional Input Dependencies - These are unique configurations for specific nodes
-nodeConfigs["ClownSampler"] = createNodeConfig("ClownSampler", {
+nodeConfigs["ClownsharKSamplerGuides"] = createNodeConfig("ClownsharKSamplerGuides", {
+    optionalInputWidgets: {
+        // Define groups of widgets that should be shown/hidden based on input connections
+        groups: [
+            {
+                inputs: ["guide",],   // Show widgets if ANY of these inputs are connected
+                widgets: ["guide_weight", "guide_weight_bkg", "guide_weight_scale", "guide_weight_scheduler", "guide_end_step"]  // Widgets to show/hide
+            },
+            {
+                inputs: ["guide_bkg"],
+                widgets: ["guide_weight_bkg", "guide_weight_bkg_scale", "guide_weight_scheduler_bkg", "guide_bkg_end_step"]
+            }
+        ]
+    }
+});
+
+nodeConfigs["Legacy_ClownSampler"] = createNodeConfig("Legacy_ClownSampler", {
     optionalInputWidgets: {
         // Define groups of widgets that should be shown/hidden based on input connections
         groups: [
@@ -146,16 +161,36 @@ nodeConfigs["ClownSampler"] = createNodeConfig("ClownSampler", {
     }
 });
 
-nodeConfigs["SamplerRK"] = createNodeConfig("SamplerRK", {
+nodeConfigs["Legacy_ClownsharKSampler"] = createNodeConfig("Legacy_ClownsharKSampler", {
     optionalInputWidgets: {
+        // Define groups of widgets that should be shown/hidden based on input connections
         groups: [
             {
-                inputs: ["latent_guide", "latent_guide_inv"],
-                widgets: ["latent_guide_weight", "guide_mode"]
+                inputs: ["latent_guide", "latent_guide_inv"],   // Show widgets if ANY of these inputs are connected
+                widgets: ["latent_guide_weight", "guide_mode"]  // Widgets to show/hide
+            },
+            {
+                inputs: ["latent_guide_mask"],
+                widgets: ["rescale_floor"]
             }
         ]
     }
 });
+
+// 3. User-Set Hidden Widgets - These are widgets that the user can choose to hide or show
+const TOGGLEABLE_WIDGETS = {
+    "extra_options": {
+        settingId: "RES4LYF.defaultHideExtraOptions",
+        settingName: "RES4LYF: Hide extra_options widget by default",
+        defaultValue: false
+    },
+    "denoise_alt": {
+        settingId: "RES4LYF.defaultHide_denoise_alt",
+        settingName: "RES4LYF: Hide denoise_alt widget by default",
+        defaultValue: false
+    },
+};
+
 
 // Function to create node configurations
 function createNodeConfig(nodeName, uniqueConfig = {}) {
@@ -184,33 +219,58 @@ nodesWithCommonConfig.forEach(nodeName => {
 function toggleWidget(node, widget, shouldShow = false) {
     if (!widget) return;
 
-    resDebugLog(`Toggling widget ${widget.name} in ${node.comfyClass}: shouldShow=${shouldShow}, ENABLE_WIDGET_HIDING=${ENABLE_WIDGET_HIDING}`);
-    
     if (!origProps[widget.name]) {
-        origProps[widget.name] = { 
+        origProps[widget.name] = {
             origType: widget.type,
-            origComputeSize: widget.computeSize 
+            origComputeSize: widget.computeSize,
+            origSerializeValue: widget.serializeValue
         };
     }
-    
-    const origSize = node.size;
 
     widget._RES4LYF_hidden = !shouldShow;
-    widget.type = shouldShow || !ENABLE_WIDGET_HIDING ? origProps[widget.name].origType : HIDDEN_TAG;
-    widget.computeSize = shouldShow || !ENABLE_WIDGET_HIDING ? 
-        origProps[widget.name].origComputeSize : 
-        () => [0, -4];
 
-    if (shouldShow || !ENABLE_WIDGET_HIDING)
-        delete widget.computedHeight;
-    else
-        widget.computedHeight = 0;
+    if (shouldShow) {
+        showWidget(widget);
+    } else {
+        hideWidget(node, widget);
+    }
 
+    // Force node refresh so new computeSize is applied.
     const newSize = node.computeSize();
-    const height = shouldShow || !ENABLE_WIDGET_HIDING ? 
-        Math.max(newSize[1], origSize[1]) : 
-        newSize[1];
-    node.setSize([node.size[0], height]);
+    node.setSize([node.size[0], Math.max(newSize[1], node.size[1])]);
+    if (node.update) node.update();
+    app.graph.setDirtyCanvas(true);
+}
+
+/**
+ * Hides a widget
+ * @param {object} node - The node object
+ * @param {object} widget - The widget to hide
+ */
+function hideWidget(node, widget) {
+    widget.type = "hidden";
+    widget.computeSize = () => [0, 0];
+    widget.serializeValue = () => null;
+    if (widget.element) {
+        widget.element.style.display = "none";
+        widget.element.style.height = "0px";
+        widget.element.style.overflow = "hidden";
+    }
+}
+
+/**
+ * Shows a widget
+ * @param {object} widget - The widget to show
+ */
+function showWidget(widget) {
+    widget.type = origProps[widget.name].origType;
+    widget.computeSize = origProps[widget.name].origComputeSize;
+    widget.serializeValue = origProps[widget.name].origSerializeValue;
+    if (widget.element) {
+        widget.element.style.display = "";
+        widget.element.style.height = "";
+        widget.element.style.overflow = "";
+    }
 }
 
 /**
@@ -245,9 +305,21 @@ function createGenericHandler(node, dependentWidgetsConfig) {
  * @param {array} dependentWidgets - Array of relevant widget names
  */
 function setupDynamicWidgets(node, dependentWidgetsConfig) {
-    resDebugLog("Setting up dynamic widgets for", node.comfyClass);
-    const onNodeChange = createGenericHandler(node, dependentWidgetsConfig);
 
+    // Initialize toggleable widgets with their default states
+    Object.keys(TOGGLEABLE_WIDGETS).forEach(widgetName => {
+        const widget = node.widgets.find(w => w.name === widgetName);
+        if (widget) {
+            const stateKey = `${node.id}_${widgetName}`;
+            // Only apply default if user hasn't set a specific state
+            if (!widgetToggleStates.has(stateKey)) {
+                const defaultHidden = DEFAULT_WIDGET_STATES[widgetName];
+                toggleWidget(node, widget, !defaultHidden);
+            }
+        }
+    });
+
+    const onNodeChange = createGenericHandler(node, dependentWidgetsConfig);
     onNodeChange();
 
     if (dependentWidgetsConfig?.groups) {
@@ -300,16 +372,36 @@ function setupDynamicWidgets(node, dependentWidgetsConfig) {
         onNodeChange();
     };
 
-    // Add refresh option to context menu
+    // Add options to context menu
     if (!node._RES4LYF_menuWrapped) {
         const originalGetExtraMenuOptions = node.getExtraMenuOptions;
         node.getExtraMenuOptions = function(_, options) {
             if (originalGetExtraMenuOptions) {
                 originalGetExtraMenuOptions.apply(this, arguments);
             }
+    
             options.push({
                 content: "Refresh RES4LYF widgets",
                 callback: onNodeChange
+            });
+    
+            // Add toggle options for each toggleable widget
+            Object.keys(TOGGLEABLE_WIDGETS).forEach(widgetName => {
+                const widget = node.widgets.find(w => w.name === widgetName);
+                if (widget) {
+                    const stateKey = `${node.id}_${widgetName}`;
+                    const isHidden = widgetToggleStates.get(stateKey) ?? DEFAULT_WIDGET_STATES[widgetName];
+    
+                    options.push({
+                        content: `${isHidden ? "Show" : "Hide"} ${widgetName}`,
+                        callback: () => {
+                            const newState = !isHidden;
+                            widgetToggleStates.set(stateKey, newState);
+                            toggleWidget(node, widget, !newState);
+                            app.graph.setDirtyCanvas(true);
+                        }
+                    });
+                }
             });
         };
         node._RES4LYF_menuWrapped = true;
@@ -340,6 +432,41 @@ app.registerExtension({
     name: "Comfy.RES4LYF.DynamicWidgets",
 
     async setup(app) {
+        Object.entries(TOGGLEABLE_WIDGETS).forEach(([widgetName, config]) => {
+            app.ui.settings.addSetting({
+                id: config.settingId,
+                name: config.settingName,
+                defaultValue: config.defaultValue,
+                type: "boolean",
+                options: [
+                    { value: true, text: "Hidden" },
+                    { value: false, text: "Shown" },
+                ],
+                onChange: (value) => {
+                    DEFAULT_WIDGET_STATES[widgetName] = value;
+                    resDebugLog(`Default state for ${widgetName} set to ${value ? "hidden" : "shown"}`);
+                    
+                    // Update all existing nodes
+                    for (const node of app.graph._nodes) {
+                        if (nodeConfigs[node.comfyClass]) {
+                            const widget = node.widgets.find(w => w.name === widgetName);
+                            if (widget) {
+                                // Only update if user hasn't set a specific state for this instance
+                                const stateKey = `${node.id}_${widgetName}`;
+                                if (!widgetToggleStates.has(stateKey)) {
+                                    toggleWidget(node, widget, !value);
+                                }
+                            }
+                        }
+                    }
+                },
+            });
+
+            // Initialize default state
+            DEFAULT_WIDGET_STATES[widgetName] = config.defaultValue;
+
+        });
+
         app.ui.settings.addSetting({
             id: "RES4LYF.topClownDog",
             name: "RES4LYF: Top ClownDog",
