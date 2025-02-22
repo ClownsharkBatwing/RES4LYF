@@ -250,6 +250,8 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
                         RK.LINEAR_ANCHOR_X_0 = True
                     else:
                         RK.LINEAR_ANCHOR_X_0 = False
+                    if extra_options_flag("disable_linear_anchor_x_0", extra_options):
+                        RK.LINEAR_ANCHOR_X_0 = False
 
                     # PRENOISE METHOD HERE!
                     
