@@ -564,6 +564,8 @@ class RK_Method_Linear(RK_Method_Beta):
 
         if sigma_down > sigma:
             sigma_ratio = self.sigma_max - sigma_cur.clone()
+        else:
+            sigma_ratio = sigma_cur.clone()
         sigma_ratio = unsample_resample_scale if unsample_resample_scale is not None else sigma_ratio
 
         if sigma_down is None:

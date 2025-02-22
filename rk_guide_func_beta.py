@@ -298,7 +298,13 @@ class LatentGuide:
                     if BONGMATH and step < sigmas.shape[0]-1 and not extra_options_flag("disable_pseudoimplicit_bongmath", extra_options):
                         x_0, x_, eps_ = RK.bong_iter(x_0, x_, eps_, eps_prev_, data_, sigma, NS.s_, row, RK.row_offset, NS.h, extra_options)
                 
-            eps_substep_guide, eps_substep_guide_inv = get_guide_epsilon_substep(x_0, x_, y0, y0_inv, NS.s_, row, RK.row_offset, RK.rk_type)   # should this also be s_2_ ?
+            eps_substep_guide, eps_substep_guide_inv = [torch.zeros_like(x_0) for _ in range(2)]
+            if self.HAS_LATENT_GUIDE:
+                eps_substep_guide = RK.get_guide_epsilon(x_0, x_[row], y0, sigma, NS.s_[row], NS.sigma_down, None, extra_options)  
+            if self.HAS_LATENT_GUIDE_INV:
+                eps_substep_guide_inv = RK.get_guide_epsilon(x_0, x_[row], y0_inv, sigma, NS.s_[row], NS.sigma_down, None, extra_options)  
+            
+            #eps_substep_guide, eps_substep_guide_inv = get_guide_epsilon_substep(x_0, x_, y0, y0_inv, NS.s_, row, RK.row_offset, RK.rk_type)   # should this also be s_2_ ?
             eps_substep_guide = self.mask * eps_substep_guide + (1-self.mask) * eps_substep_guide_inv
 
             if self.guide_mode == "pseudoimplicit_projection":
@@ -437,7 +443,14 @@ class LatentGuide:
                         if BONGMATH and step < sigmas.shape[0]-1 and not extra_options_flag("disable_fully_pseudoimplicit_bongmath", extra_options):
                             x_0, x_, eps_ = RK.bong_iter(x_0, x_, eps_, eps_prev_, data_, sigma, NS.s_, r, RK.row_offset, NS.h, extra_options)
                 
-                eps_substep_guide, eps_substep_guide_inv = get_guide_epsilon_substep(x_0, x_, y0, y0_inv, NS.s_, r, RK.row_offset, RK.rk_type)
+                eps_substep_guide, eps_substep_guide_inv = [torch.zeros_like(x_0) for _ in range(2)]
+                if self.HAS_LATENT_GUIDE:
+                    eps_substep_guide = RK.get_guide_epsilon(x_0, x_[row], y0, sigma, NS.s_[row], NS.sigma_down, None, extra_options)  
+                if self.HAS_LATENT_GUIDE_INV:
+                    eps_substep_guide_inv = RK.get_guide_epsilon(x_0, x_[row], y0_inv, sigma, NS.s_[row], NS.sigma_down, None, extra_options)  
+                
+                
+                #eps_substep_guide, eps_substep_guide_inv = get_guide_epsilon_substep(x_0, x_, y0, y0_inv, NS.s_, r, RK.row_offset, RK.rk_type)
                 eps_substep_guide = self.mask * eps_substep_guide + (1-self.mask) * eps_substep_guide_inv
 
                 if self.guide_mode == "fully_pseudoimplicit_projection":
@@ -530,9 +543,7 @@ class LatentGuide:
 
     @torch.no_grad
     def process_guides_substep(self, x_0, x_, eps_, data_, row, step, sigma, sigma_next, sigma_down, s_, unsample_resample_scale, RK, extra_options):
-        row_offset = RK.row_offset
-        rk_type    = RK.rk_type 
-            
+
         y0 = self.y0.clone().to(self.device)
         if self.HAS_LATENT_GUIDE_INV:
             y0_inv = self.y0_inv.clone().to(self.device)
@@ -1359,6 +1370,7 @@ def handle_tiled_etc_noise_steps(x_0, x, x_prenoise, x_init, eps, denoised, y0, 
 
 
 def get_masked_epsilon_projection(x_0, x_, eps_, y0, y0_inv, s_, row, row_offset, rk_type, LG, step):
+    
     eps_row, eps_row_inv = get_guide_epsilon_substep(x_0, x_, y0, y0_inv, s_, row, row_offset, rk_type)
     eps_row_lerp = eps_[row]   +   LG.mask * (eps_row-eps_[row])   +   (1-LG.mask) * (eps_row_inv-eps_[row])
     eps_collinear_eps_lerp = get_collinear(eps_[row], eps_row_lerp)
@@ -1367,9 +1379,6 @@ def get_masked_epsilon_projection(x_0, x_, eps_, y0, y0_inv, s_, row, row_offset
     lgw_mask, lgw_mask_inv = LG.get_masks_for_step(step)
     eps_substep_guide = eps_[row] + lgw_mask * (eps_sum - eps_[row]) + lgw_mask_inv * (eps_sum - eps_[row])
     return eps_substep_guide
-
-
-
 
 
 
