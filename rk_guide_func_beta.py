@@ -566,12 +566,7 @@ class LatentGuide:
         else:
             return eps_, x_ 
         
-        if self.UNSAMPLE and RK_Method_Beta.is_exponential(rk_type):
-            if not (extra_options_flag("disable_power_unsample", extra_options) or extra_options_flag("disable_power_resample", extra_options)):
-                extra_options += "\npower_unsample\npower_resample\n"
-            if not extra_options_flag("disable_lgw_scaling_substep_ch_mean_std", extra_options):
-                extra_options += "\nsubstep_eps_ch_mean_std\n"
-                
+
         eps_orig = eps_.clone()
         
         if extra_options_flag("dynamic_guides_mean_std", extra_options):
@@ -606,84 +601,63 @@ class LatentGuide:
             x_[row+1] = data_[row] + eps_[row] * sigma
             
 
-        elif "epsilon" in self.guide_mode:
-            if sigma > sigma_next:
+
+        elif (self.UNSAMPLE or self.guide_mode in {"epsilon", "epsilon_cw", "epsilon_projection", "epsilon_projection_cw"}) and (self.lgw[step] > 0 or self.lgw_inv[step] > 0):
+            if sigma_down < sigma   or   s_[row] < RK.sigma_max:
+                cvf, cvf_inv = [torch.zeros_like(x_0) for _ in range(2)]
+                
+                if self.HAS_LATENT_GUIDE:
+                    cvf = RK.get_guide_epsilon(x_0, x_[row], y0, sigma, s_[row], sigma_down, unsample_resample_scale, extra_options)  
                     
+                if self.HAS_LATENT_GUIDE_INV:
+                    cvf_inv = RK.get_guide_epsilon(x_0, x_[row], y0_inv, sigma, s_[row], sigma_down, unsample_resample_scale, extra_options)  
+
                 tol_value = float(get_extra_options_kv("tol", "-1.0", extra_options))
-                if tol_value >= 0 and (self.lgw[step] > 0 or self.lgw_inv[step] > 0):           
+                if tol_value >= 0:
                     for b, c in itertools.product(range(x_0.shape[0]), range(x_0.shape[1])):
-                        current_diff     = torch.norm(data_[row][b][c] - y0    [b][c])
-                        current_diff_inv = torch.norm(data_[row][b][c] - y0_inv[b][c])
+                        current_diff     = torch.norm(data_[row][b][c] - y0    [b][c]) 
+                        current_diff_inv = torch.norm(data_[row][b][c] - y0_inv[b][c]) 
                         
                         lgw_scaled     = torch.nan_to_num(1-(tol_value/current_diff),     0)
                         lgw_scaled_inv = torch.nan_to_num(1-(tol_value/current_diff_inv), 0)
                         
                         lgw_tmp     = min(self.lgw[step]    , lgw_scaled)
-                        lgw_tmp_inv = min(self.lgw[step], lgw_scaled_inv)
+                        lgw_tmp_inv = min(self.lgw_inv[step], lgw_scaled_inv)
 
                         lgw_mask_clamp     = torch.clamp(lgw_mask,     max=lgw_tmp)
                         lgw_mask_clamp_inv = torch.clamp(lgw_mask_inv, max=lgw_tmp_inv)
-                        
-                        eps_row, eps_row_inv = get_guide_epsilon_substep(x_0, x_, y0, y0_inv, s_, row, row_offset, rk_type, b, c)
-                        eps_[row][b][c] = eps_[row][b][c] + lgw_mask_clamp[b][c] * (eps_row - eps_[row][b][c]) + lgw_mask_clamp_inv[b][c] * (eps_row_inv - eps_[row][b][c])
 
-
-                elif self.guide_mode == "epsilon_projection":
-                    eps_row, eps_row_inv = get_guide_epsilon_substep(x_0, x_, y0, y0_inv, s_, row, row_offset, rk_type)
-
-                    if extra_options_flag("eps_proj_old_default", extra_options):
-                        eps_row_lerp = eps_[row]   +   lgw_mask * (eps_row-eps_[row])   +   lgw_mask_inv * (eps_row_inv-eps_[row])
-                        
-                        eps_collinear_eps_lerp = get_collinear(eps_[row], eps_row_lerp)  
-                        eps_lerp_ortho_eps     = get_orthogonal(eps_row_lerp, eps_[row])  
-                        
-                        eps_[row] = eps_collinear_eps_lerp + eps_lerp_ortho_eps
-                        
-                    else: 
-                        #if row > 0:
-                            #lgw_mask_factor = float(get_extra_options_kv("substep_lgw_mask_factor", "1.0", extra_options))
-                            #lgw_mask_inv_factor = float(get_extra_options_kv("substep_lgw_mask_inv_factor", "1.0", extra_options))
-                        lgw_mask_factor = 1
-                        if extra_options_flag("substep_eps_proj_scaling", extra_options):
-                            lgw_mask_factor = 1/(row+1)
-                            
-                        if extra_options_flag("substep_eps_proj_factors", extra_options):
-                            value_str = get_extra_options_list("substep_eps_proj_factors", "", extra_options)
-                            float_list = [float(item.strip()) for item in value_str.split(',') if item.strip()]
-                            lgw_mask_factor = float_list[row]
-                        
-                        eps_row_lerp = eps_[row]   +   mask * (eps_row-eps_[row])   +   (1-mask) * (eps_row_inv-eps_[row])
-
-                        eps_collinear_eps_lerp = get_collinear(eps_[row], eps_row_lerp)
-                        eps_lerp_ortho_eps     = get_orthogonal(eps_row_lerp, eps_[row])
-
-                        eps_sum = eps_collinear_eps_lerp + eps_lerp_ortho_eps
-
-                        eps_[row] = eps_[row] + lgw_mask_factor*lgw_mask * (eps_sum - eps_[row]) + lgw_mask_factor*lgw_mask_inv * (eps_sum - eps_[row])
-
-
-                #elif extra_options_flag("disable_lgw_scaling", extra_options):
-                elif self.guide_mode == "epsilon":
-                    eps_row, eps_row_inv = get_guide_epsilon_substep(x_0, x_, y0, y0_inv, s_, row, row_offset, rk_type)
-                    eps_[row] = eps_[row]      +     lgw_mask * (eps_row - eps_[row])    +    lgw_mask_inv * (eps_row_inv - eps_[row])
+                        eps_[row][b][c] = eps_[row][b][c] + lgw_mask_clamp[b][c] * (cvf[b][c] - eps_[row][b][c]) + lgw_mask_clamp_inv[b][c] * (cvf_inv[b][c] - eps_[row][b][c])
+                
+                elif self.guide_mode in {"epsilon"}: 
+                    eps_[row] = eps_[row] + lgw_mask * (cvf - eps_[row]) + lgw_mask_inv * (cvf_inv - eps_[row])
                     
+                elif self.guide_mode in {"epsilon_projection"}:
+                    eps_row_lerp = eps_[row]   +   self.mask * (cvf-eps_[row])   +   (1-self.mask) * (cvf_inv-eps_[row])
 
-                elif self.guide_mode in {"epsilon_cw", "epsilon_projection_cw"} or (self.lgw[step] > 0 or self.lgw_inv[step] > 0): # default old channelwise epsilon
+                    eps_collinear_eps_lerp = get_collinear(eps_[row], eps_row_lerp)
+                    eps_lerp_ortho_eps     = get_orthogonal(eps_row_lerp, eps_[row])
+
+                    eps_sum = eps_collinear_eps_lerp + eps_lerp_ortho_eps
+
+                    eps_[row] = eps_[row] + lgw_mask * (eps_sum - eps_[row]) + lgw_mask_inv * (eps_sum - eps_[row])
+                    
+                elif self.guide_mode in {"epsilon_cw", "epsilon_projection_cw"}:
                     avg, avg_inv = 0, 0
                     for b, c in itertools.product(range(x_0.shape[0]), range(x_0.shape[1])):
-                        avg     += torch.norm(data_[row][b][c] - y0    [b][c])
-                        avg_inv += torch.norm(data_[row][b][c] - y0_inv[b][c])
+                        avg     += torch.norm(lgw_mask    [b][c] * data_[row][b][c]   -   lgw_mask    [b][c] * y0    [b][c])
+                        avg_inv += torch.norm(lgw_mask_inv[b][c] * data_[row][b][c]   -   lgw_mask_inv[b][c] * y0_inv[b][c])
                     avg     /= x_0.shape[1]
                     avg_inv /= x_0.shape[1]
                     
                     for b, c in itertools.product(range(x_0.shape[0]), range(x_0.shape[1])):
-                        ratio     = torch.nan_to_num(torch.norm(data_[row][b][c] - y0    [b][c])   /   avg,     0)
-                        ratio_inv = torch.nan_to_num(torch.norm(data_[row][b][c] - y0_inv[b][c])   /   avg_inv, 0)
+                        ratio     = torch.nan_to_num(torch.norm(lgw_mask    [b][c] * data_[row][b][c] - lgw_mask    [b][c] * y0    [b][c])   /   avg,     0)
+                        ratio_inv = torch.nan_to_num(torch.norm(lgw_mask_inv[b][c] * data_[row][b][c] - lgw_mask_inv[b][c] * y0_inv[b][c])   /   avg_inv, 0)
+                                
+                        eps_[row][b][c] = eps_[row][b][c]      +     ratio * lgw_mask[b][c] * (cvf[b][c] - eps_[row][b][c])    +    ratio_inv * lgw_mask_inv[b][c] * (cvf_inv[b][c] - eps_[row][b][c])
                         
-                        eps_row, eps_row_inv = get_guide_epsilon_substep(x_0, x_, y0, y0_inv, s_, row, row_offset, rk_type, b, c)
-                        
-                        if self.guide_mode == "epsilon_projection_cw":
-                            eps_row_lerp = eps_[row][b][c]   +   self.mask[b][c] * (eps_row-eps_[row][b][c])   +   (1-self.mask[b][c]) * (eps_row_inv-eps_[row][b][c])
+                        if self.guide_mode in {"epsilon_projection_cw"}:
+                            eps_row_lerp = eps_[row][b][c]   +   self.mask[b][c] * (cvf[b][c]-eps_[row][b][c])   +   (1-self.mask[b][c]) * (cvf_inv[b][c]-eps_[row][b][c])
 
                             eps_collinear_eps_lerp = get_collinear(eps_[row][b][c], eps_row_lerp)
                             eps_lerp_ortho_eps     = get_orthogonal(eps_row_lerp, eps_[row][b][c])
@@ -692,76 +666,8 @@ class LatentGuide:
 
                             eps_[row][b][c] = eps_[row][b][c] + ratio*lgw_mask[b][c] * (eps_sum - eps_[row][b][c]) + ratio_inv*lgw_mask_inv[b][c] * (eps_sum - eps_[row][b][c])
                         else:
-                            eps_[row][b][c] = eps_[row][b][c]      +     ratio * lgw_mask[b][c] * (eps_row - eps_[row][b][c])    +    ratio_inv * lgw_mask_inv[b][c] * (eps_row_inv - eps_[row][b][c])
-                        
-                
-
-
-
-        elif (self.UNSAMPLE or self.guide_mode in {"resample", "unsample", "resample_projection", "unsample_projection", "resample_projection_cw", "unsample_projection_cw"}) and (self.lgw[step] > 0 or self.lgw_inv[step] > 0):
+                            eps_[row][b][c] = eps_[row][b][c]      +     ratio * lgw_mask[b][c] * (cvf[b][c] - eps_[row][b][c])    +    ratio_inv * lgw_mask_inv[b][c] * (cvf_inv[b][c] - eps_[row][b][c])
             
-            cvf = RK.get_unsample_epsilon(x_0, x_[row+row_offset], y0, sigma, s_[row], sigma_down, unsample_resample_scale, extra_options)                                
-            if self.UNSAMPLE and sigma > sigma_next and self.HAS_LATENT_GUIDE:
-                cvf_inv = RK.get_unsample_epsilon(x_0, x_[row+row_offset], y0_inv, sigma, s_[row], sigma_down, unsample_resample_scale, extra_options)      
-            else:
-                cvf_inv = torch.zeros_like(cvf)
-
-            tol_value = float(get_extra_options_kv("tol", "-1.0", extra_options))
-            if tol_value >= 0:
-                for b, c in itertools.product(range(x_0.shape[0]), range(x_0.shape[1])):
-                    current_diff     = torch.norm(data_[row][b][c] - y0    [b][c]) 
-                    current_diff_inv = torch.norm(data_[row][b][c] - y0_inv[b][c]) 
-                    
-                    lgw_scaled     = torch.nan_to_num(1-(tol_value/current_diff),     0)
-                    lgw_scaled_inv = torch.nan_to_num(1-(tol_value/current_diff_inv), 0)
-                    
-                    lgw_tmp     = min(self.lgw[step]    , lgw_scaled)
-                    lgw_tmp_inv = min(self.lgw_inv[step], lgw_scaled_inv)
-
-                    lgw_mask_clamp     = torch.clamp(lgw_mask,     max=lgw_tmp)
-                    lgw_mask_clamp_inv = torch.clamp(lgw_mask_inv, max=lgw_tmp_inv)
-
-                    eps_[row][b][c] = eps_[row][b][c] + lgw_mask_clamp[b][c] * (cvf[b][c] - eps_[row][b][c]) + lgw_mask_clamp_inv[b][c] * (cvf_inv[b][c] - eps_[row][b][c])
-            
-            elif self.guide_mode in {"unsample", "resample"}: # extra_options_flag("disable_lgw_scaling", extra_options):
-                eps_[row] = eps_[row] + lgw_mask * (cvf - eps_[row]) + lgw_mask_inv * (cvf_inv - eps_[row])
-                
-            elif self.guide_mode in {"resample_projection", "unsample_projection"}:
-                eps_row_lerp = eps_[row]   +   self.mask * (cvf-eps_[row])   +   (1-self.mask) * (cvf_inv-eps_[row])
-
-                eps_collinear_eps_lerp = get_collinear(eps_[row], eps_row_lerp)
-                eps_lerp_ortho_eps     = get_orthogonal(eps_row_lerp, eps_[row])
-
-                eps_sum = eps_collinear_eps_lerp + eps_lerp_ortho_eps
-
-                eps_[row] = eps_[row] + lgw_mask * (eps_sum - eps_[row]) + lgw_mask_inv * (eps_sum - eps_[row])
-                
-            elif self.guide_mode in {"unsample_cw", "resample_cw", "resample_projection_cw", "unsample_projection_cw"}:
-                avg, avg_inv = 0, 0
-                for b, c in itertools.product(range(x_0.shape[0]), range(x_0.shape[1])):
-                    avg     += torch.norm(lgw_mask    [b][c] * data_[row][b][c]   -   lgw_mask    [b][c] * y0    [b][c])
-                    avg_inv += torch.norm(lgw_mask_inv[b][c] * data_[row][b][c]   -   lgw_mask_inv[b][c] * y0_inv[b][c])
-                avg     /= x_0.shape[1]
-                avg_inv /= x_0.shape[1]
-                
-                for b, c in itertools.product(range(x_0.shape[0]), range(x_0.shape[1])):
-                    ratio     = torch.nan_to_num(torch.norm(lgw_mask    [b][c] * data_[row][b][c] - lgw_mask    [b][c] * y0    [b][c])   /   avg,     0)
-                    ratio_inv = torch.nan_to_num(torch.norm(lgw_mask_inv[b][c] * data_[row][b][c] - lgw_mask_inv[b][c] * y0_inv[b][c])   /   avg_inv, 0)
-                            
-                    eps_[row][b][c] = eps_[row][b][c]      +     ratio * lgw_mask[b][c] * (cvf[b][c] - eps_[row][b][c])    +    ratio_inv * lgw_mask_inv[b][c] * (cvf_inv[b][c] - eps_[row][b][c])
-                    
-                    if self.guide_mode in {"resample_projection_cw", "unsample_projection_cw"}:
-                        eps_row_lerp = eps_[row][b][c]   +   self.mask[b][c] * (cvf-eps_[row][b][c])   +   (1-self.mask[b][c]) * (cvf_inv-eps_[row][b][c])
-
-                        eps_collinear_eps_lerp = get_collinear(eps_[row][b][c], eps_row_lerp)
-                        eps_lerp_ortho_eps     = get_orthogonal(eps_row_lerp, eps_[row][b][c])
-
-                        eps_sum = eps_collinear_eps_lerp + eps_lerp_ortho_eps
-
-                        eps_[row][b][c] = eps_[row][b][c] + ratio*lgw_mask[b][c] * (eps_sum - eps_[row][b][c]) + ratio_inv*lgw_mask_inv[b][c] * (eps_sum - eps_[row][b][c])
-                    else:
-                        eps_[row][b][c] = eps_[row][b][c]      +     ratio * lgw_mask[b][c] * (cvf[b][c] - eps_[row][b][c])    +    ratio_inv * lgw_mask_inv[b][c] * (cvf_inv[b][c] - eps_[row][b][c])
-        
         temporal_smoothing = float(get_extra_options_kv("temporal_smoothing", "0.0", extra_options))
         if temporal_smoothing > 0:
             eps_[row] = apply_temporal_smoothing(eps_[row], temporal_smoothing)
@@ -991,8 +897,8 @@ def get_guide_epsilon_substep(x_0, x_, y0, y0_inv, s_, row, row_offset, rk_type,
         eps_row     = y0    [index] - x_0[index]
         eps_row_inv = y0_inv[index] - x_0[index]
     else:
-        eps_row     = (x_[row+row_offset][index] - y0    [index]) / (s_[row] * s_in) # potential issues here with x_[row+1] being RK.rows+2 with gauss-legendre_2s 1 imp step 1 imp substep
-        eps_row_inv = (x_[row+row_offset][index] - y0_inv[index]) / (s_[row] * s_in)
+        eps_row     = (x_[row][index] - y0    [index]) / (s_[row] * s_in) # was row+row_offset before for x_!!   not right...     also? potential issues here with x_[row+1] being RK.rows+2 with gauss-legendre_2s 1 imp step 1 imp substep
+        eps_row_inv = (x_[row][index] - y0_inv[index]) / (s_[row] * s_in)
     
     return eps_row, eps_row_inv
 

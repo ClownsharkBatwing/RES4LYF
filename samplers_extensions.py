@@ -566,8 +566,7 @@ GUIDE_MODE_NAMES_BETA = ["unsample",
 
 
 
-GUIDE_MODE_NAMES_BETA_SIMPLE = ["unsample", 
-                    "resample", 
+GUIDE_MODE_NAMES_BETA_SIMPLE = [
                     "epsilon",
                     "pseudoimplicit",
                     "fully_pseudoimplicit",

@@ -166,6 +166,7 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
 
     data_           = None
     eps_            = None
+
     eps             = torch.zeros_like(x)
     denoised        = torch.zeros_like(x)
     denoised_prev   = torch.zeros_like(x)
@@ -175,7 +176,6 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
     denoised_data_prev = None
     denoised_data_prev2 = None
     h_prev = None
-    h_prev2 = None
     
     torch.cuda.synchronize()
     torch.cuda.empty_cache()
@@ -202,7 +202,7 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
 
         recycled_stages = max(RK.multistep_stages, RK.hybrid_stages)
         if step == 0 or step == guide_skip_steps:
-            x_, data_, eps_ = (torch.zeros(    RK.rows+2,     *x.shape, dtype=default_dtype, device=x.device) for _ in range(3))
+            x_, data_, eps_, eps_prev_ = (torch.zeros(    RK.rows+2,     *x.shape, dtype=default_dtype, device=x.device) for _ in range(4))
             data_prev_      =  torch.zeros(max(RK.rows+2, 4), *x.shape, dtype=default_dtype, device=x.device)
             recycled_stages = len(data_prev_)-1
 
@@ -218,9 +218,10 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
         x_0 = x_[0].clone()
 
         # RECYCLE STAGES FOR MULTISTEP
-        for ms in range(len(eps_)):
-            eps_[ms] = RK.get_epsilon_anchored(x_0, data_prev_[ms], sigma)
-        eps_prev_ = eps_.clone()
+        if RK.multistep_stages > 0:
+            for ms in range(len(eps_)):
+                eps_[ms] = RK.get_epsilon_anchored(x_0, data_prev_[ms], sigma)
+            eps_prev_ = eps_.clone()
 
         # INITIALIZE IMPLICIT SAMPLING
         if RK.IMPLICIT:
@@ -246,12 +247,6 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
                         eta_substep = 0.
                     
                     NS.set_sde_substep(row, RK.multistep_stages, eta_substep, overshoot_substep, s_noise_substep, full_iter, diag_iter, implicit_steps_full, implicit_steps_diag)
-                    if not BONGMATH and eta_substep > 0:
-                        RK.LINEAR_ANCHOR_X_0 = True
-                    else:
-                        RK.LINEAR_ANCHOR_X_0 = False
-                    if extra_options_flag("disable_linear_anchor_x_0", extra_options):
-                        RK.LINEAR_ANCHOR_X_0 = False
 
                     # PRENOISE METHOD HERE!
                     
@@ -267,9 +262,7 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
 
                             x_tmp =     x_row_pseudoimplicit 
                             s_tmp = sub_sigma_pseudoimplicit 
-                        
-                        
-                        
+
                         # Fully implicit iteration (explicit only)                   # or... Fully implicit iteration (implicit only... not standard) 
                         elif (full_iter > 0 and RK.row_offset == 1 and row == 0)   or   (full_iter > 0 and RK.row_offset == 0 and row == 0 and extra_options_flag("fully_implicit_update_x", extra_options)):
                             if extra_options_flag("fully_explicit_pogostick_eta", extra_options): 
@@ -338,11 +331,12 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
                             if extra_options_flag("preview_substeps", extra_options):
                                 callback({'x': x, 'i': step, 'sigma': sigma, 'sigma_next': sigma_next, 'denoised': data_[row].to(torch.float32)}) if callback is not None else None
 
+
+
                         if extra_options_flag("bong2m", extra_options) and RK.multistep_stages > 0 and step < len(sigmas)-4:
                             h_no_eta       = -torch.log(sigmas[step+1]/sigmas[step])
                             h_prev1_no_eta = -torch.log(sigmas[step]/sigmas[step-1])
                             c2_prev = (-h_prev1_no_eta / h_no_eta).item()
-                            #c2_prev = -h_prev / NS.h
                             eps_prev = denoised_data_prev - x_0
                             
                             φ = Phi(h_prev, [0.,c2_prev])
@@ -390,12 +384,15 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
                                 
                             eps_[2] = eps_prev2
 
+
+
                         # GUIDE 
+                        #if not UNSAMPLE:
                         if not extra_options_flag("disable_guides_eps_substep", extra_options):
                             eps_, x_      = LG.process_guides_substep(x_0, x_, eps_,      data_, row, step, NS.sigma, NS.sigma_next, NS.sigma_down, NS.s_, unsample_resample_scale, RK, extra_options)
                         if not extra_options_flag("disable_guides_eps_prev_substep", extra_options):
                             eps_prev_, x_ = LG.process_guides_substep(x_0, x_, eps_prev_, data_, row, step, NS.sigma, NS.sigma_next, NS.sigma_down, NS.s_, unsample_resample_scale, RK, extra_options)
-                            
+
                         if (full_iter == 0 and diag_iter == 0)   or   extra_options_flag("newton_iter_post_use_on_implicit_steps", extra_options):
                             x_, eps_ = RK.newton_iter(x_0, x_, eps_, eps_prev_, data_, NS.s_, row, NS.h, sigmas, step, "post", extra_options)
 
@@ -432,6 +429,7 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
             x_prev = x_0
 
 
+
         data_prev_[0] = data_[0]
         for ms in range(recycled_stages):
             data_prev_[recycled_stages - ms] = data_prev_[recycled_stages - ms - 1]
@@ -456,6 +454,7 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
             pseudo_mix_strength = float(get_extra_options_kv("pseudo_mix_strength", "0.0", extra_options))
             LG.y0 = orig_y0 + pseudo_mix_strength * (denoised - orig_y0)
             LG.y0_inv = orig_y0_inv + pseudo_mix_strength * (denoised - orig_y0_inv)
+
 
 
     if sigmas[-1] == 0 and sigmas[-2] == NS.sigma_min:

@@ -31,49 +31,51 @@ class RK_Method_Beta:
     def __init__(self, model, rk_type, device='cuda', dtype=torch.float64, extra_options=""):
         self.device = device
         self.dtype  = dtype
-                
+
         self.model = model
         self.model_sampling = model.inner_model.inner_model.model_sampling
         self.sigma_min = model.inner_model.inner_model.model_sampling.sigma_min.to(dtype)
         self.sigma_max = model.inner_model.inner_model.model_sampling.sigma_max.to(dtype)
-        
+
         self.rk_type = rk_type
-             
+
         self.IMPLICIT = rk_type in IRK_SAMPLER_NAMES_BETA
         self.EXPONENTIAL = RK_Method_Beta.is_exponential(rk_type)
-        self.LINEAR_ANCHOR_X_0 = False
+        self.LINEAR_ANCHOR_X_0 = 1.0
         self.SYNC_SUBSTEP_MEAN_CW = True
-        
+
         self.A = None
         self.B = None
         self.U = None
         self.V = None
-        
+
         self.rows = 0
         self.cols = 0
-        
+
         self.denoised = None
         self.uncond   = None
-        
+
         self.y0     = None
         self.y0_inv = None
-        
+
         self.multistep_stages = 0
         self.row_offset = None
-        
+
         self.cfg_cw = 1.0
         self.extra_args = None
-        
+
         self.extra_options = extra_options
-        
+
         self.reorder_tableau_indices = get_extra_options_list("reorder_tableau_indices", "", extra_options).split(",")
         if self.reorder_tableau_indices[0]:
             self.reorder_tableau_indices = [int(self.reorder_tableau_indices[_]) for _ in range(len(self.reorder_tableau_indices))]
-            
-        if extra_options_flag("linear_anchor_x_0", extra_options):
-            self.LINEAR_ANCHOR_X_0 = True
-        else:
-            self.LINEAR_ANCHOR_X_0 = False
+
+        #if extra_options_flag("linear_anchor_x_0", extra_options):
+        #    self.LINEAR_ANCHOR_X_0 = True
+        #else:
+        #    self.LINEAR_ANCHOR_X_0 = False
+        
+        self.LINEAR_ANCHOR_X_0 = float(get_extra_options_kv("linear_anchor_x_0", "1.0", extra_options))
 
     @staticmethod
     def is_exponential(rk_type):
@@ -85,9 +87,9 @@ class RK_Method_Beta:
     @staticmethod
     def create(model, rk_type, device='cuda', dtype=torch.float64, extra_options=""):
         if RK_Method_Beta.is_exponential(rk_type):
-            return RK_Method_Exponential(model, rk_type, device, dtype)
+            return RK_Method_Exponential(model, rk_type, device, dtype, extra_options)
         else:
-            return RK_Method_Linear(model, rk_type, device, dtype)
+            return RK_Method_Linear(model, rk_type, device, dtype, extra_options)
                 
     def __call__(self):
         raise NotImplementedError("This method got clownsharked!")
@@ -448,8 +450,8 @@ class RK_Method_Beta:
 
 
 class RK_Method_Exponential(RK_Method_Beta):
-    def __init__(self, model, rk_type, device='cuda', dtype=torch.float64):
-        super().__init__(model, rk_type, device, dtype) 
+    def __init__(self, model, rk_type, device='cuda', dtype=torch.float64, extra_options=""):
+        super().__init__(model, rk_type, device, dtype, extra_options) 
         
     @staticmethod
     def alpha_fn(neg_h):
@@ -469,44 +471,59 @@ class RK_Method_Exponential(RK_Method_Beta):
 
     def __call__(self, x, sub_sigma, x_0, sigma): 
         denoised = self.model_denoised(x, sub_sigma, **self.extra_args)
+        
+        eps_anchored = (x_0 - denoised) / sigma
+        eps_unmoored = (x   - denoised) / sub_sigma
+        
+        eps = eps_unmoored + self.LINEAR_ANCHOR_X_0 * (eps_anchored - eps_unmoored)
+        
+        denoised = x_0 - sigma * eps
+        
         epsilon = denoised - x_0
+        
         #print("MODEL SUB_SIGMA: ", round(float(sub_sigma),3), round(float(sigma),3))
 
         return epsilon, denoised
     
     def get_epsilon(self, x_0, x, denoised, sigma, sub_sigma):
+        
+        eps_anchored = (x_0 - denoised) / sigma
+        eps_unmoored = (x   - denoised) / sub_sigma
+        
+        eps = eps_unmoored + self.LINEAR_ANCHOR_X_0 * (eps_anchored - eps_unmoored)
+        
+        denoised = x_0 - sigma * eps
+        
         return denoised - x_0
+                
         
     def get_epsilon_anchored(self, x_0, denoised, sigma):
         return denoised - x_0
     
-    def get_unsample_epsilon(self, x_0, x, y, sigma, sigma_cur, sigma_down=None, unsample_resample_scale=None, extra_options=None):
-        if sigma_down > sigma:
-            sigma_cur = self.sigma_max - sigma_cur.clone()
+    def get_guide_epsilon(self, x_0, x, y, sigma, sigma_cur, sigma_down=None, unsample_resample_scale=None, extra_options=None):
+
         sigma_cur = unsample_resample_scale if unsample_resample_scale is not None else sigma_cur
 
-        if (extra_options_flag("power_unsample", extra_options)   or   extra_options_flag("power_resample", extra_options))   and not extra_options_flag("disable_power_", extra_options):
-            if sigma_down is None:
-                return y - x_0
-            else:
-                if sigma_down > sigma:
-                    return (x_0 - y) * sigma_cur
-                else:
-                    return (y - x_0) * sigma_cur
+        if sigma_down > sigma:
+            eps_unmoored = (sigma_cur/(self.sigma_max - sigma_cur)) * (x   - y)
         else:
-            if sigma_down is None:
-                return (y - x_0) #/ sigma_cur
+            eps_unmoored = y - x 
+        
+        if extra_options_flag("manually_anchor_unsampler", extra_options):
+            if sigma_down > sigma:
+                eps_anchored = (sigma    /(self.sigma_max - sigma    )) * (x_0 - y)
             else:
-                if sigma_down > sigma:
-                    return (x_0 - y) #/ sigma_cur
-                else:
-                    return (y - x_0) #/ sigma_cur
-
+                eps_anchored = y - x_0
+            eps_guide = eps_unmoored + self.LINEAR_ANCHOR_X_0 * (eps_anchored - eps_unmoored)
+        else:
+            eps_guide = eps_unmoored
+        
+        return eps_guide
 
 
 class RK_Method_Linear(RK_Method_Beta):
-    def __init__(self, model, rk_type, device='cuda', dtype=torch.float64):
-        super().__init__(model, rk_type, device, dtype) 
+    def __init__(self, model, rk_type, device='cuda', dtype=torch.float64, extra_options=""):
+        super().__init__(model, rk_type, device, dtype, extra_options) 
         
     @staticmethod
     def alpha_fn(neg_h):
@@ -526,38 +543,36 @@ class RK_Method_Linear(RK_Method_Beta):
     
     def __call__(self, x, sub_sigma, x_0, sigma): 
         denoised = self.model_denoised(x, sub_sigma, **self.extra_args)
+
+        epsilon_anchor = (x_0 - denoised) / sigma
+        epsilon_unmoored = (x - denoised) / sub_sigma
         
-        if self.LINEAR_ANCHOR_X_0:
-            epsilon = (x_0 - denoised) / sigma
-        else:
-            epsilon = (x - denoised) / sub_sigma
-        #print("MODEL SUB_SIGMA: ", round(float(sub_sigma),3), round(float(sigma),3))
+        epsilon = epsilon_unmoored + self.LINEAR_ANCHOR_X_0 * (epsilon_anchor - epsilon_unmoored)
 
         return epsilon, denoised
 
     def get_epsilon(self, x_0, x, denoised, sigma, sub_sigma):
-        if self.LINEAR_ANCHOR_X_0:
-            eps = (x_0 - denoised) / sigma
-        else:
-            eps = (x - denoised) / sub_sigma
-        return eps
+        eps_anchor = (x_0 - denoised) / sigma
+        eps_unmoored = (x - denoised) / sub_sigma
+        
+        return eps_unmoored + self.LINEAR_ANCHOR_X_0 * (eps_anchor - eps_unmoored)
     
     def get_epsilon_anchored(self, x_0, denoised, sigma):
-        eps = (x_0 - denoised) / sigma
-        return eps
+        return (x_0 - denoised) / sigma
     
-    def get_unsample_epsilon(self, x_0, x, y, sigma, sigma_cur, sigma_down=None, unsample_resample_scale=None, extra_options=None):
+    def get_guide_epsilon(self, x_0, x, y, sigma, sigma_cur, sigma_down=None, unsample_resample_scale=None, extra_options=None):
+
         if sigma_down > sigma:
-            sigma_cur = self.sigma_max - sigma_cur.clone()
-        sigma_cur = unsample_resample_scale if unsample_resample_scale is not None else sigma_cur
+            sigma_ratio = self.sigma_max - sigma_cur.clone()
+        sigma_ratio = unsample_resample_scale if unsample_resample_scale is not None else sigma_ratio
 
         if sigma_down is None:
-            return (x - y) / sigma_cur
+            return (x - y) / sigma_ratio
         else:
             if sigma_down > sigma:
-                return (y - x) / sigma_cur
+                return (y - x) / sigma_ratio
             else:
-                return (x - y) / sigma_cur
+                return (x - y) / sigma_ratio
 
 
 
@@ -708,6 +723,7 @@ class RK_NoiseSampler:
         self.s_noise_substep   = s_noise_substep
         self.eta_substep       = eta_substep
         self.overshoot_substep = overshoot_substep
+
 
         if row < self.rows   and   self.s_[row+self.row_offset+multistep_stages] > 0:
             if   diag_iter > 0 and diag_iter == implicit_steps_diag and extra_options_flag("implicit_substep_skip_final_eta",  self.extra_options):
