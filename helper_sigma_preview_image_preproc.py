@@ -271,8 +271,8 @@ class VAEEncodeAdvanced:
         torch.manual_seed(42)
         torch.cuda.manual_seed_all(42)
 
-        image_1 = image_1.clone()
-        image_2 = image_2.clone()
+        image_1 = image_1.clone() if image_1 is not None else None
+        image_2 = image_2.clone() if image_2 is not None else None
 
         if latent is not None and resize_to_input == "latent":
             height, width = latent['samples'].shape[2:4]
