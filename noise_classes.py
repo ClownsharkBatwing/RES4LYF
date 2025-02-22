@@ -103,8 +103,8 @@ class NoiseGenerator:
         if device is not None:
             self.device = device
 
-        self.sigma_max = sigma_max.to(device)
-        self.sigma_min = sigma_min.to(device)
+        self.sigma_max = sigma_max.to(device) if isinstance(sigma_max, torch.Tensor) else sigma_max
+        self.sigma_min = sigma_min.to(device) if isinstance(sigma_min, torch.Tensor) else sigma_min
 
         if generator is None:
             self.generator = torch.Generator(device=self.device).manual_seed(seed)
