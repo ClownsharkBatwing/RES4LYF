@@ -149,23 +149,6 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
     
     NS.init_noise_samplers(x, noise_seed, noise_sampler_type, noise_sampler_type_substep, noise_mode_sde, noise_mode_sde_substep, overshoot_mode, overshoot_mode_substep, noise_boost_step, noise_boost_substep, alpha, alpha_substep, k, k_substep)
 
-    # SETUP GUIDES
-    LG = LatentGuide(model, sigmas, UNSAMPLE, LGW_MASK_RESCALE_MIN, extra_options, device=default_device, dtype=default_dtype, frame_weights_grp=frame_weights_grp)
-    x = LG.init_guides(x, guides, RK.IMPLICIT, NS.noise_sampler)
-    if torch.norm(LG.mask - torch.ones_like(LG.mask)) != 0   and   (LG.y0.sum() == 0 or LG.y0_inv.sum() == 0):
-        SKIP_PSEUDO = True
-        print("skip_pseudo")
-        if LG.y0.sum() == 0:
-            SKIP_PSEUDO_Y = "y0"
-        elif LG.y0_inv.sum() == 0:
-            SKIP_PSEUDO_Y = "y0_inv"
-    else:
-        SKIP_PSEUDO = False
-        print("dont_skip_pseudo")
-        
-    if extra_options_flag("pseudo_mix_strength", extra_options):
-        orig_y0 = LG.y0.clone()
-        orig_y0_inv = LG.y0_inv.clone()
 
     data_           = None
     eps_            = None
@@ -180,6 +163,31 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
     denoised_data_prev2 = None
     h_prev = None
     
+
+    # SETUP GUIDES
+    LG = LatentGuide(model, sigmas, UNSAMPLE, LGW_MASK_RESCALE_MIN, extra_options, device=default_device, dtype=default_dtype, frame_weights_grp=frame_weights_grp)
+    x = LG.init_guides(x, guides, RK.IMPLICIT, NS.noise_sampler)
+    if torch.norm(LG.mask - torch.ones_like(LG.mask)) != 0   and   (LG.y0.sum() == 0 or LG.y0_inv.sum() == 0):
+        SKIP_PSEUDO = True
+        print("skipping pseudo...")
+        if LG.y0.sum() == 0:
+            SKIP_PSEUDO_Y = "y0"
+        elif LG.y0_inv.sum() == 0:
+            SKIP_PSEUDO_Y = "y0_inv"
+    else:
+        SKIP_PSEUDO = False
+        
+    if LG.y0.sum() != 0 and LG.y0_inv.sum() != 0:
+        denoised_prev = LG.mask * LG.y0 + (1-LG.mask) * LG.y0_inv
+    elif LG.y0.sum() != 0:
+        denoised_prev = LG.y0
+    elif LG.y0_inv.sum() != 0:
+        denoised_prev = LG.y0_inv
+        
+    if extra_options_flag("pseudo_mix_strength", extra_options):
+        orig_y0 = LG.y0.clone()
+        orig_y0_inv = LG.y0_inv.clone()
+
     torch.cuda.synchronize()
     torch.cuda.empty_cache()
     gc.collect()
@@ -257,12 +265,12 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
                     if row < RK.rows:
 
                         # PREPARE PSEUDOIMPLICIT GUIDES
-                        if step > 0: # or not SKIP_PSEUDO:
+                        if step > 0 or not SKIP_PSEUDO:
                             x_0, x_, eps_, x_row_pseudoimplicit, sub_sigma_pseudoimplicit = LG.process_pseudoimplicit_guides_substep(x_0, x_, eps_, eps_prev_, data_, denoised_prev, row, step, sigmas, NS, RK, pseudoimplicit_row_weights, pseudoimplicit_step_weights, full_iter, BONGMATH, extra_options)
                         
                         # PREPARE MODEL CALL
                         #if LG.guide_mode in {"pseudoimplicit","pseudoimplicit_cw", "pseudoimplicit_projection", "pseudoimplicit_projection_cw","fully_pseudoimplicit", "fully_pseudoimplicit_projection","fully_pseudoimplicit_cw", "fully_pseudoimplicit_projection_cw"} and (step > 0 or not SKIP_PSEUDO) and (LG.lgw[step] > 0 or LG.lgw_inv[step] > 0) and x_row_pseudoimplicit is not None:
-                        if LG.guide_mode in {"pseudoimplicit","pseudoimplicit_cw", "pseudoimplicit_projection", "pseudoimplicit_projection_cw","fully_pseudoimplicit", "fully_pseudoimplicit_projection","fully_pseudoimplicit_cw", "fully_pseudoimplicit_projection_cw"} and (step > 0) and (LG.lgw[step] > 0 or LG.lgw_inv[step] > 0) and x_row_pseudoimplicit is not None:
+                        if LG.guide_mode in {"pseudoimplicit","pseudoimplicit_cw", "pseudoimplicit_projection", "pseudoimplicit_projection_cw","fully_pseudoimplicit", "fully_pseudoimplicit_projection","fully_pseudoimplicit_cw", "fully_pseudoimplicit_projection_cw"} and (step > 0 or not SKIP_PSEUDO) and (LG.lgw[step] > 0 or LG.lgw_inv[step] > 0) and x_row_pseudoimplicit is not None:
 
                             x_tmp =     x_row_pseudoimplicit 
                             s_tmp = sub_sigma_pseudoimplicit 

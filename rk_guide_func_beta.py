@@ -289,6 +289,9 @@ class LatentGuide:
                     x_0, x_, eps_ = RK.bong_iter(x_0, x_, eps_, eps_prev_, data_, sigma, NS.s_, row, RK.row_offset, NS.h, extra_options)
         else:
             eps_[row] = RK.get_epsilon(x_0, x_[row], denoised_prev, sigma, NS.s_[row])
+            
+        if extra_options_flag("pseudoimplicit_denoised_prev", extra_options):
+            eps_[row] = RK.get_epsilon(x_0, x_[row], denoised_prev, sigma, NS.s_[row])
  
         eps_substep_guide, eps_substep_guide_inv = [torch.zeros_like(x_0) for _ in range(2)]
         if self.HAS_LATENT_GUIDE:
@@ -297,7 +300,7 @@ class LatentGuide:
             eps_substep_guide_inv = RK.get_guide_epsilon(x_0, x_[row], y0_inv, sigma, NS.s_[row], NS.sigma_down, None, extra_options)  
 
 
-    
+
         if self.guide_mode in {"pseudoimplicit", "pseudoimplicit_cw", "pseudoimplicit_projection", "pseudoimplicit_projection_cw"}:
             maxmin_ratio = (NS.sub_sigma - RK.sigma_min) / NS.sub_sigma
             
@@ -397,7 +400,7 @@ class LatentGuide:
                 
                 eps_substep_guide, eps_substep_guide_inv = [torch.zeros_like(x_0) for _ in range(2)]
                 if self.HAS_LATENT_GUIDE:
-                    eps_substep_guide = RK.get_guide_epsilon(x_0, x_[r], y0, sigma, NS.s_[r], NS.sigma_down, None, extra_options)  
+                    eps_substep_guide     = RK.get_guide_epsilon(x_0, x_[r], y0,     sigma, NS.s_[r], NS.sigma_down, None, extra_options)  
                 if self.HAS_LATENT_GUIDE_INV:
                     eps_substep_guide_inv = RK.get_guide_epsilon(x_0, x_[r], y0_inv, sigma, NS.s_[r], NS.sigma_down, None, extra_options)  
                 
