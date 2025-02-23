@@ -9,6 +9,7 @@ from torch.distributions import StudentT, Laplace
 import numpy as np
 import pywt
 import functools
+from .res4lyf import RESplain
 
 # Set this to "True" if you have installed OpenSimplex. Recommended to install without dependencies due to conflicting packages: pip3 install opensimplex --no-deps 
 OPENSIMPLEX_ENABLE = False
@@ -340,7 +341,7 @@ class GaussianBackwardsNoiseGenerator(NoiseGenerator):
 
     def __call__(self, *, mean=None, std=None, **kwargs):
         self.update(mean=mean, std=std)
-        print("GaussianBackwards last seed:", self.generator.initial_seed())
+        RESplain("GaussianBackwards last seed:", self.generator.initial_seed())
         self.generator.manual_seed(self.generator.initial_seed() - 1)
         noise = torch.randn(self.size, dtype=self.dtype, layout=self.layout, device=self.device, generator=self.generator)
 

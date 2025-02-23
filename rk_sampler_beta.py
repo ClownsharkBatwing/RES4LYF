@@ -2,14 +2,13 @@ import torch
 from tqdm.auto import trange
 import gc
 
-from .noise_classes import *
 from .rk_method_beta import RK_Method_Beta, RK_NoiseSampler
 from .rk_guide_func_beta import *
 from .helper import get_extra_options_kv, extra_options_flag, lagrange_interpolation
 from .phi_functions import Phi
+from .res4lyf import RESplain
 
 MAX_STEPS=10000
-PRINT_DEBUG=False
 
 
 
@@ -97,7 +96,7 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
 
     if noise_seed < 0:
         noise_seed = torch.initial_seed()+1 
-        print("Set noise_seed to:", noise_seed, " using torch.initial_seed()+1")
+        RESplain("Set noise_seed to:", noise_seed, " using torch.initial_seed()+1", debug=False)
 
     c1 = float(get_extra_options_kv("c1", str(c1), extra_options))
     c2 = float(get_extra_options_kv("c2", str(c2), extra_options))
@@ -126,7 +125,7 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
     # SETUP SAMPLER
     if implicit_sampler_name not in ("use_explicit", "none"):
         rk_type = implicit_sampler_name
-    print("rk_type:", rk_type)
+    RESplain("rk_type:", rk_type)
     if implicit_sampler_name == "none":
         implicit_steps_diag = implicit_steps_full = 0
         
@@ -169,7 +168,7 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
     x = LG.init_guides(x, RK.IMPLICIT, guides, NS.noise_sampler)
     if torch.norm(LG.mask - torch.ones_like(LG.mask)) != 0   and   (LG.y0.sum() == 0 or LG.y0_inv.sum() == 0):
         SKIP_PSEUDO = True
-        print("skipping pseudo...")
+        RESplain("skipping pseudo...")
         if LG.y0.sum() == 0:
             SKIP_PSEUDO_Y = "y0"
         elif LG.y0_inv.sum() == 0:

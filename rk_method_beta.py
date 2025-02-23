@@ -1,5 +1,4 @@
 import torch
-from torch import FloatTensor
 
 import torch.nn.functional as F
 import torchvision.transforms as T
@@ -13,6 +12,7 @@ from .noise_classes import *
 from .rk_coefficients_beta import *
 from .phi_functions import *
 from .helper import get_orthogonal, get_collinear, get_extra_options_list, has_nested_attr
+from .res4lyf import RESplain
 
 MAX_STEPS = 10000
 
@@ -303,15 +303,15 @@ class RK_Method_Beta:
                 rk_swap_type = "deis_3m"
             
         if step > rk_swap_step:
-            print("Switching rk_type to:", rk_swap_type)
+            RESplain("Switching rk_type to:", rk_swap_type)
             self.rk_type = rk_swap_type
         if step > 2 and sigmas[step+1] > 0 and self.rk_type != rk_swap_type and rk_swap_threshold > 0:
             x_res_2m, denoised_res_2m = RK.calculate_res_2m_step(x_0, data_prev_, sigma_down, sigmas, step)
             x_res_3m, denoised_res_3m = RK.calculate_res_3m_step(x_0, data_prev_, sigma_down, sigmas, step)
             if rk_swap_print:
-                print("res_3m - res_2m:", torch.norm(denoised_res_3m - denoised_res_2m).item())
+                RESplain("res_3m - res_2m:", torch.norm(denoised_res_3m - denoised_res_2m).item())
             if rk_swap_threshold > torch.norm(denoised_res_2m - denoised_res_3m):
-                print("Switching rk_type to:", rk_swap_type, "at step:", step)
+                RESplain("Switching rk_type to:", rk_swap_type, "at step:", step)
                 self.rk_type = rk_swap_type
                 
         return self.rk_type
@@ -633,10 +633,10 @@ class RK_NoiseSampler:
         
         if noise_seed < 0:
             seed = torch.initial_seed()+1 
-            print("SDE noise seed: ", seed, " (set via torch.initial_seed()+1)")
+            RESplain("SDE noise seed: ", seed, " (set via torch.initial_seed()+1)")
         else:
             seed = noise_seed
-            print("SDE noise seed: ", seed)
+            RESplain("SDE noise seed: ", seed)
             
         seed2 = seed + MAX_STEPS #for substep noise generation. offset needed to ensure seeds are not reused
             
@@ -673,7 +673,7 @@ class RK_NoiseSampler:
                 
             elif sigma_up is not None:
                 if sigma_up >= sigma_next:
-                    print("Maximum VPSDE noise level exceeded: falling back to hard noise mode.")
+                    RESplain("Maximum VPSDE noise level exceeded: falling back to hard noise mode.")
                     if eta >= 1:
                         sigma_up = sigma_next * 0.9999 #avoid sqrt(neg_num) later 
                     else:

@@ -32,13 +32,13 @@ flags = {
 try:
     from . import test_samplers
     flags["test_samplers"] = True
-    print("Importing test_samplers.py")
+    print("(RES4LYF) Importing test_samplers.py")
 except ImportError:
     pass
 try:
     from . import rk_sampler_beta
     flags["beta_samplers"] = True
-    print("Importing rk_sampler_beta.py")
+    print("(RES4LYF) Importing rk_sampler_beta.py")
 except ImportError:
     pass
 

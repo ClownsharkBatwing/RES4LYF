@@ -24,6 +24,7 @@ from comfy.ldm.flux.model import Flux
 from comfy.ldm.flux.layers import SingleStreamBlock, DoubleStreamBlock
 
 from .rk_guide_func import get_orthogonal, get_cosine_similarity
+from .res4lyf import RESplain
 
 
 class ReFluxPatcher:
@@ -98,8 +99,8 @@ class FluxOrthoCFGPatcher:
             if self.ortho_clip_L and get_cosine_similarity(y[0], y[1]) != 0:
                 y[0] = get_orthogonal(y[0].unsqueeze(0), y[1].unsqueeze(0)).squeeze(0)
                 
-        print("postcossim1: ", get_cosine_similarity(context[0], context[1]))
-        print("postcossim2: ", get_cosine_similarity(y[0], y[1]))
+        RESplain("postcossim1: ", get_cosine_similarity(context[0], context[1]))
+        RESplain("postcossim2: ", get_cosine_similarity(y[0], y[1]))
         
         if self.zero_clip_L:
             y[0] = torch.zeros_like(y[0])
