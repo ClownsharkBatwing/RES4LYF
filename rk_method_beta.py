@@ -71,11 +71,6 @@ class RK_Method_Beta:
         if self.reorder_tableau_indices[0]:
             self.reorder_tableau_indices = [int(self.reorder_tableau_indices[_]) for _ in range(len(self.reorder_tableau_indices))]
 
-        #if extra_options_flag("linear_anchor_x_0", extra_options):
-        #    self.LINEAR_ANCHOR_X_0 = True
-        #else:
-        #    self.LINEAR_ANCHOR_X_0 = False
-        
         self.LINEAR_ANCHOR_X_0 = float(get_extra_options_kv("linear_anchor_x_0", "1.0", extra_options))
 
     @staticmethod
@@ -482,8 +477,6 @@ class RK_Method_Exponential(RK_Method_Beta):
         
         epsilon = denoised - x_0
         
-        #print("MODEL SUB_SIGMA: ", round(float(sub_sigma),3), round(float(sigma),3))
-
         return epsilon, denoised
     
     def get_epsilon(self, x_0, x, denoised, sigma, sub_sigma):

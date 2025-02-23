@@ -420,7 +420,6 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
                         for i in range(100):
                             x_0 = x_[row+RK.row_offset] - NS.h * (RK.B[0][0]*eps_[0] + RK.B[0][1]*eps_[1]) #RK.zum(0, eps_, eps_prev_)
                             
-                            #x_[row+RK.row_offset] = x_0 
                             x_[row+RK.row_offset] = x_0 + NS.h * (RK.B[0][0]*eps_[0] + RK.B[0][1]*eps_[1])
                             
                             eps_[1] = (x_[row+RK.row_offset] - x_0 - NS.h * RK.B[0][0]*eps_[0])   /   (NS.h * RK.B[0][1])
@@ -430,17 +429,19 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
                 
                     x_[row+RK.row_offset] = NS.rebound_overshoot_substep(x_0, x_[row+RK.row_offset])
                     
-                    #x_prev_prenoise = x_[row+RK.row_offset].clone()
-                    
                     if not RK.IMPLICIT and NS.noise_mode_sde_substep != "hard_sq":
                         x_[row+RK.row_offset] = NS.swap_noise_substep(x_0, x_[row+RK.row_offset])
 
-                    if BONGMATH and step < sigmas.shape[0]-1 and diag_iter == implicit_steps_diag and not extra_options_flag("disable_terminal_bongmath", extra_options):
+                    #if BONGMATH and step < sigmas.shape[0]-2 and diag_iter == implicit_steps_diag and not extra_options_flag("disable_terminal_bongmath", extra_options):
+                    if BONGMATH and NS.s_[-1] > 2 * RK.sigma_min  and diag_iter == implicit_steps_diag and not extra_options_flag("disable_terminal_bongmath", extra_options):
+
                         if step == 0 and UNSAMPLE:
+                            pass
+                        if RK.hybrid_stages > 0 and step >= sigmas.shape[0]-4:
                             pass
                         else:
                             x_0, x_, eps_ = RK.bong_iter(x_0, x_, eps_, eps_prev_, data_, sigma, NS.s_, row, RK.row_offset, NS.h, extra_options)
-                            
+                    
 
 
             denoised = x_0 + ((sigma / (sigma - NS.sigma_down)) *  NS.h_new) * RK.zum(RK.rows, eps_, eps_prev_)
