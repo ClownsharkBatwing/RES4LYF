@@ -926,7 +926,7 @@ class RK_NoiseSampler:
         x = alpha_ratio * (denoised_next + sigma_down * eps_next) + sigma_up * noise * s_noise
         return x
 
-
+    # not used
     def add_noise_pre(self, x_0, x, sigma_up, sigma_0, sigma, sigma_next, real_sigma_down, alpha_ratio, s_noise, noise_mode, SDE_NOISE_EXTERNAL=False, sde_noise_t=None, SUBSTEP=False):
         if not self.CONST and noise_mode == "hard_sq": 
             if self.LOCK_H_SCALE:
@@ -935,6 +935,7 @@ class RK_NoiseSampler:
                 x = self.add_noise(x, sigma_up, sigma, sigma_next, alpha_ratio, s_noise, SDE_NOISE_EXTERNAL, sde_noise_t, SUBSTEP, )
         return x
         
+    # only used for handle_tiled_etc_noise_steps() in rk_guide_func_beta.py
     def add_noise_post(self, x_0, x, sigma_up, sigma_0, sigma, sigma_next, real_sigma_down, alpha_ratio, s_noise, noise_mode, SDE_NOISE_EXTERNAL=False, sde_noise_t=None, SUBSTEP=False):
         if self.CONST   or   (not self.CONST and noise_mode != "hard_sq"):
             if self.LOCK_H_SCALE:
@@ -960,6 +961,7 @@ class RK_NoiseSampler:
 
             #noise_ortho = get_orthogonal(noise, x)
             #noise_ortho = noise_ortho / noise_ortho.std()model,
+            noise = (noise - noise.mean(dim=(-2, -1), keepdim=True)) / noise.std(dim=(-2, -1), keepdim=True)
 
             if SDE_NOISE_EXTERNAL:
                 noise = (1-s_noise) * noise + s_noise * sde_noise_t

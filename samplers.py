@@ -74,9 +74,9 @@ class SharkSampler:
     def main(self, model, cfg, sampler_mode, scheduler, steps, denoise=1.0, denoise_alt=1.0,
              noise_type_init="gaussian", latent_image=None, 
              positive=None, negative=None, sampler=None, sigmas=None, latent_noise=None, latent_noise_match=None,
-             noise_stdev=1.0, noise_mean=0.0, noise_normalize=True, noise_is_latent=False, 
+             noise_stdev=1.0, noise_mean=0.0, noise_normalize=True, 
              d_noise=1.0, alpha_init=-1.0, k_init=1.0, cfgpp=0.0, noise_seed=-1,
-                    shift=3.0, base_shift=0.85, options=None, sde_noise=None,sde_noise_steps=1, shift_scaling="exponential", unsampler_type="linear",
+                    options=None, sde_noise=None,sde_noise_steps=1, unsampler_type="linear",
                     extra_options="", 
                     ): 
             # blame comfy here
@@ -260,8 +260,7 @@ class SharkSampler:
                     for t in pos_cond:
                         d = t[1].copy()
                         pooled_output = d.get("pooled_output", None)
-                        #if pooled_output is not None:
-                        #    default_dtype = torch.float64
+
                     for t in neg_cond:
                         d = t[1].copy()
                         pooled_output = d.get("pooled_output", None)
@@ -300,12 +299,9 @@ class SharkSampler:
                     else:
                         noise = latent_noise_samples
 
-                    if noise_is_latent: #add noise and latent together and normalize --> noise
-                        noise += x.cpu()
-                        noise.sub_(noise.mean()).div_(noise.std())
-
                     if noise_normalize and noise.std() > 0:
-                        noise.sub_(noise.mean()).div_(noise.std())
+                        noise = (noise - noise.mean(dim=(-2, -1), keepdim=True)) / noise.std(dim=(-2, -1), keepdim=True)
+                        #noise.sub_(noise.mean()).div_(noise.std())
                     noise *= noise_stdev
                     noise = (noise - noise.mean()) + noise_mean
                     
