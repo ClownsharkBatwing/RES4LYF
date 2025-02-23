@@ -433,7 +433,7 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
                         x_[row+RK.row_offset] = NS.swap_noise_substep(x_0, x_[row+RK.row_offset])
 
                     #if BONGMATH and step < sigmas.shape[0]-2 and diag_iter == implicit_steps_diag and not extra_options_flag("disable_terminal_bongmath", extra_options):
-                    if BONGMATH and NS.s_[-1] > 2 * RK.sigma_min  and diag_iter == implicit_steps_diag and not extra_options_flag("disable_terminal_bongmath", extra_options):
+                    if BONGMATH and sigma_next > 2 * RK.sigma_min  and diag_iter == implicit_steps_diag and not extra_options_flag("disable_terminal_bongmath", extra_options):
 
                         if step == 0 and UNSAMPLE:
                             pass
