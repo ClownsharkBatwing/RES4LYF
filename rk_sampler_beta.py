@@ -2,14 +2,13 @@ import torch
 from tqdm.auto import trange
 import gc
 
-from .noise_classes import *
 from .rk_method_beta import RK_Method_Beta, RK_NoiseSampler
 from .rk_guide_func_beta import *
 from .helper import get_extra_options_kv, extra_options_flag, lagrange_interpolation
 from .phi_functions import Phi
+from .res4lyf import RESplain
 
 MAX_STEPS=10000
-PRINT_DEBUG=False
 
 
 
@@ -89,14 +88,15 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
                   noise_boost_step=0.0, noise_boost_substep=0.0, overshoot=0.0, overshoot_substep=0.0, overshoot_mode="hard", overshoot_mode_substep="hard", BONGMATH=True,
                   ):
     extra_args = {} if extra_args is None else extra_args
-    default_device = x.device
     default_dtype = getattr(torch, get_extra_options_kv("default_dtype", "", extra_options), x.dtype)
-    x      = x.to(default_dtype)
-    sigmas = sigmas.to(default_dtype)
+    model_device = x.device
+    work_device = 'cpu' if extra_options_flag("work_device_cpu", extra_options) else model_device
+    x      = x.to(dtype=default_dtype, device=work_device)
+    sigmas = sigmas.to(dtype=default_dtype, device=work_device)
 
     if noise_seed < 0:
         noise_seed = torch.initial_seed()+1 
-        print("Set noise_seed to:", noise_seed, " using torch.initial_seed()+1")
+        RESplain("Set noise_seed to:", noise_seed, " using torch.initial_seed()+1", debug=False)
 
     c1 = float(get_extra_options_kv("c1", str(c1), extra_options))
     c2 = float(get_extra_options_kv("c2", str(c2), extra_options))
@@ -125,17 +125,17 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
     # SETUP SAMPLER
     if implicit_sampler_name not in ("use_explicit", "none"):
         rk_type = implicit_sampler_name
-    print("rk_type:", rk_type)
+    RESplain("rk_type:", rk_type)
     if implicit_sampler_name == "none":
         implicit_steps_diag = implicit_steps_full = 0
         
-    RK = RK_Method_Beta.create(model, rk_type, device=default_device, dtype=default_dtype, extra_options=extra_options)
+    RK = RK_Method_Beta.create(model, rk_type, model_device=model_device, work_device=work_device, dtype=default_dtype, extra_options=extra_options)
     RK.extra_args = RK.init_cfg_channelwise(x, cfg_cw, **extra_args)
     RK.extra_args['model_options']['transformer_options']['regional_conditioning_weight'] = 0.0
     RK.extra_args['model_options']['transformer_options']['regional_conditioning_floor']  = 0.0
     
     # SETUP SIGMAS
-    NS = RK_NoiseSampler(RK, model, device=default_device, dtype=default_dtype, extra_options=extra_options)
+    NS = RK_NoiseSampler(RK, model, device=work_device, dtype=default_dtype, extra_options=extra_options)
     sigmas, UNSAMPLE = NS.prepare_sigmas(sigmas, sigmas_override, d_noise, sampler_mode)
     
     SDE_NOISE_EXTERNAL = False
@@ -152,11 +152,10 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
 
     data_           = None
     eps_            = None
-
-    eps             = torch.zeros_like(x)
-    denoised        = torch.zeros_like(x)
-    denoised_prev   = torch.zeros_like(x)
-    denoised_prev2  = torch.zeros_like(x)
+    eps             = torch.zeros_like(x, dtype=default_dtype, device=work_device)
+    denoised        = torch.zeros_like(x, dtype=default_dtype, device=work_device)
+    denoised_prev   = torch.zeros_like(x, dtype=default_dtype, device=work_device)
+    denoised_prev2  = torch.zeros_like(x, dtype=default_dtype, device=work_device)
     x_          = None
     eps_prev_   = None
     denoised_data_prev = None
@@ -165,11 +164,11 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
     
 
     # SETUP GUIDES
-    LG = LatentGuide(model, sigmas, UNSAMPLE, LGW_MASK_RESCALE_MIN, extra_options, device=default_device, dtype=default_dtype, frame_weights_grp=frame_weights_grp)
-    x = LG.init_guides(x, guides, RK.IMPLICIT, NS.noise_sampler)
+    LG = LatentGuide(model, sigmas, UNSAMPLE, LGW_MASK_RESCALE_MIN, extra_options, device=work_device, dtype=default_dtype, frame_weights_grp=frame_weights_grp)
+    x = LG.init_guides(x, RK.IMPLICIT, guides, NS.noise_sampler)
     if torch.norm(LG.mask - torch.ones_like(LG.mask)) != 0   and   (LG.y0.sum() == 0 or LG.y0_inv.sum() == 0):
         SKIP_PSEUDO = True
-        print("skipping pseudo...")
+        RESplain("skipping pseudo...")
         if LG.y0.sum() == 0:
             SKIP_PSEUDO_Y = "y0"
         elif LG.y0_inv.sum() == 0:
@@ -188,8 +187,6 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
         orig_y0 = LG.y0.clone()
         orig_y0_inv = LG.y0_inv.clone()
 
-    torch.cuda.synchronize()
-    torch.cuda.empty_cache()
     gc.collect()
 
     # BEGIN SAMPLING LOOP
@@ -213,8 +210,8 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
 
         recycled_stages = max(RK.multistep_stages, RK.hybrid_stages)
         if step == 0 or step == guide_skip_steps:
-            x_, data_, eps_, eps_prev_ = (torch.zeros(    RK.rows+2,     *x.shape, dtype=default_dtype, device=x.device) for _ in range(4))
-            data_prev_      =  torch.zeros(max(RK.rows+2, 4), *x.shape, dtype=default_dtype, device=x.device)
+            x_, data_, eps_, eps_prev_  = (torch.zeros(    RK.rows+2,     *x.shape, dtype=default_dtype, device=work_device) for _ in range(4))
+            data_prev_                  =  torch.zeros(max(RK.rows+2, 4), *x.shape, dtype=default_dtype, device=work_device)
             recycled_stages = len(data_prev_)-1
 
         sde_noise_t = None
@@ -236,9 +233,7 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
 
         # INITIALIZE IMPLICIT SAMPLING
         if RK.IMPLICIT:
-            LG.to(LG.offload_device)
             x_, eps_, data_ = init_implicit_sampling(RK, x_0, x_, eps_, eps_prev_, data_, eps, denoised, denoised_prev, denoised_prev2, step, sigmas, NS.h, NS.s_, extra_options)
-            LG.to(LG.device)
 
         # BEGIN FULLY IMPLICIT LOOP
         for full_iter in range(implicit_steps_full + 1):
@@ -344,9 +339,7 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
                                 break
                             x_, eps_ = RK.newton_iter(x_0, x_, eps_, eps_prev_, data_, NS.s_, row, NS.h, sigmas, step, "pre", extra_options) # will this do anything? not x_tmp
 
-                            LG.to(LG.offload_device)
                             eps_[row], data_[row] = RK(x_tmp, s_tmp, x_0, sigma)
-                            LG.to(LG.device)
 
                             if extra_options_flag("preview_substeps", extra_options):
                                 callback({'x': x, 'i': step, 'sigma': sigma, 'sigma_next': sigma_next, 'denoised': data_[row].to(torch.float32)}) if callback is not None else None
@@ -482,6 +475,10 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
     if sigmas[-1] == 0 and sigmas[-2] == NS.sigma_min:
         eps, denoised = RK(x, NS.sigma_min, x, NS.sigma_min)
         x = denoised
+
+    eps = eps.to(model_device)
+    denoise = denoised.to(model_device)
+    x = x.to(model_device)
 
     if not (UNSAMPLE and sigmas[1] > sigmas[0]) and not extra_options_flag("preview_last_step_always", extra_options):
         preview_callback(x, eps, denoised, x_, eps_, data_, step, sigma, sigma_next, callback, extra_options, FINAL_STEP=True)

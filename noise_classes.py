@@ -9,6 +9,7 @@ from torch.distributions import StudentT, Laplace
 import numpy as np
 import pywt
 import functools
+from .res4lyf import RESplain
 
 # Set this to "True" if you have installed OpenSimplex. Recommended to install without dependencies due to conflicting packages: pip3 install opensimplex --no-deps 
 OPENSIMPLEX_ENABLE = False
@@ -84,9 +85,6 @@ class NoiseGenerator:
     def __init__(self, x=None, size=None, dtype=None, layout=None, device=None, seed=42, generator=None, sigma_min=None, sigma_max=None):
         self.seed = seed
 
-        self.sigma_min = sigma_min
-        self.sigma_max = sigma_max
-
         if x is not None:
             self.x      = x
             self.size   = x.shape
@@ -105,6 +103,9 @@ class NoiseGenerator:
             self.layout = layout
         if device is not None:
             self.device = device
+
+        self.sigma_max = sigma_max.to(device) if isinstance(sigma_max, torch.Tensor) else sigma_max
+        self.sigma_min = sigma_min.to(device) if isinstance(sigma_min, torch.Tensor) else sigma_min
 
         if generator is None:
             self.generator = torch.Generator(device=self.device).manual_seed(seed)
@@ -340,7 +341,7 @@ class GaussianBackwardsNoiseGenerator(NoiseGenerator):
 
     def __call__(self, *, mean=None, std=None, **kwargs):
         self.update(mean=mean, std=std)
-        print("GaussianBackwards last seed:", self.generator.initial_seed())
+        RESplain("GaussianBackwards last seed:", self.generator.initial_seed())
         self.generator.manual_seed(self.generator.initial_seed() - 1)
         noise = torch.randn(self.size, dtype=self.dtype, layout=self.layout, device=self.device, generator=self.generator)
 
@@ -412,7 +413,7 @@ class WaveletNoiseGenerator(NoiseGenerator):
         orig_h, orig_w = h, w
 
         # noise for spatial dimensions only
-        coeffs = pywt.wavedecn(torch.randn(self.size, dtype=self.dtype, layout=self.layout, device=self.device, generator=self.generator).to('cpu'), wavelet=self.wavelet, mode='periodization')
+        coeffs = pywt.wavedecn(torch.randn(self.size, dtype=self.dtype, layout=self.layout, device=self.device, generator=self.generator).to(self.device), wavelet=self.wavelet, mode='periodization')
         noise = pywt.waverecn(coeffs, wavelet=self.wavelet, mode='periodization')
         noise_tensor = torch.tensor(noise, dtype=self.dtype, device=self.device)
 

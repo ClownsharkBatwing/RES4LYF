@@ -41,9 +41,9 @@ async def update_settings(request):
                 global using_RES4LYF_time_snr_shift
                 using_RES4LYF_time_snr_shift = value
                 if ( using_RES4LYF_time_snr_shift is True ):
-                    log("Using RES4LYF time SNR shift")
+                    RESplain("Using RES4LYF time SNR shift")
                 else:
-                    log("Disabled RES4LYF time SNR shift")
+                    RESplain("Disabled RES4LYF time SNR shift")
 
         return web.Response(status=200)
     except Exception as e:
@@ -56,7 +56,7 @@ async def log_message(request):
         log_text = json_data.get("log")
         
         if log_text:
-            log(log_text)
+            RESplain(log_text)
             return web.Response(status=200)
         else:
             return web.Response(status=400, text="No log text provided")
@@ -73,14 +73,14 @@ def calculate_sigmas_RES4LYF(model_sampling, scheduler_name, steps):
     return sigmas
 
 def init(check_imports=None):
-    log("RES4LYF Init")
+    RESplain("Init")
 
-    # Initialize using_RES4LYF_time_snr_shift from config
+    # Initialize using_RES4LYF_time_snr_shift from config (deprecated, disabled by default)
     global using_RES4LYF_time_snr_shift
     using_RES4LYF_time_snr_shift = get_config_value("updatedTimestepScaling", False)
-
-    # monkey patch comfy.model_sampling.time_snr_shift with custom implementation
-    comfy.model_sampling.time_snr_shift = time_snr_shift_RES4LYF
+    if using_RES4LYF_time_snr_shift:
+        comfy.model_sampling.time_snr_shift = time_snr_shift_RES4LYF
+        RESplain("Using RES4LYF time SNR shift but this is deprecated and will be disabled at some completely unpredictable point in the future")
 
     # monkey patch comfy.samplers.calculate_sigmas with custom implementation
     comfy.samplers.calculate_sigmas = calculate_sigmas_RES4LYF
@@ -89,15 +89,6 @@ def init(check_imports=None):
     if "beta57" not in comfy.samplers.KSampler.SCHEDULERS:
         comfy.samplers.KSampler.SCHEDULERS = comfy.samplers.KSampler.SCHEDULERS + ["beta57"]
 
-    # if check_imports is not None:
-    #     import importlib.util
-    #     for imp in check_imports:
-    #         spec = importlib.util.find_spec(imp)
-    #         if spec is None:
-    #             log(f"{imp} is required, please check requirements are installed.",
-    #                 type="ERROR", always=True)
-    #             return False
-    #install_js()
     return True
 
 
@@ -130,22 +121,30 @@ def get_config_value(key, default=None, throw=False):
     return d.get(keys[-1], default)
 
 
-def is_logging_enabled():
-    logging_enabled = get_config_value("enableDebugLogs", False) or get_config_value("logging", False)
+def is_debug_logging_enabled():
+    logging_enabled = get_config_value("enableDebugLogs", False)
     return logging_enabled
 
-def log(message, type=None, always=False, name=None):
-    if not always and not is_logging_enabled():
+def RESplain(*args, debug='info'):
+    if isinstance(debug, bool):
+        type = 'debug' if debug else 'info'
+    else:
+        type = debug
+
+    if type == 'debug' and not is_debug_logging_enabled():
+        return
+    
+    if not args:
         return
 
-    if type is not None:
-        message = f"[{type}] {message}"
+    name = get_extension_config()["name"]
 
-    if name is None:
-        name = get_extension_config()["name"]
+    message = " ".join(map(str, args))
 
-    print(f"({name}) {message}")
-
+    if type != 'debug' and type != 'warning':
+        print(f"({name}) {message}")
+    else:
+        print(f"({name} {type}) {message}")
 
 def get_ext_dir(subpath=None, mkdir=False):
     dir = os.path.dirname(__file__)
@@ -247,35 +246,35 @@ def is_junction(path):
 def install_js():
     src_dir = get_ext_dir("web/js")
     if not os.path.exists(src_dir):
-        log("No JS")
+        RESplain("No JS")
         return
 
     should_install = should_install_js()
     if should_install:
-        log("it looks like you're running an old version of ComfyUI that requires manual setup of web files, it is recommended you update your installation.", "warning", True)
+        RESplain("it looks like you're running an old version of ComfyUI that requires manual setup of web files, it is recommended you update your installation.", "warning", True)
     dst_dir = get_web_ext_dir()
     linked = os.path.islink(dst_dir) or is_junction(dst_dir)
     if linked or os.path.exists(dst_dir):
         if linked:
             if should_install:
-                log("JS already linked")
+                RESplain("JS already linked")
             else:
                 os.unlink(dst_dir)
-                log("JS unlinked, PromptServer will serve extension")
+                RESplain("JS unlinked, PromptServer will serve extension")
         elif not should_install:
             shutil.rmtree(dst_dir)
-            log("JS deleted, PromptServer will serve extension")
+            RESplain("JS deleted, PromptServer will serve extension")
         return
     
     if not should_install:
-        log("JS skipped, PromptServer will serve extension")
+        RESplain("JS skipped, PromptServer will serve extension")
         return
     
     if link_js(src_dir, dst_dir):
-        log("JS linked")
+        RESplain("JS linked")
         return
 
-    log("Copying JS files")
+    RESplain("Copying JS files")
     shutil.copytree(src_dir, dst_dir, dirs_exist_ok=True)
 
 

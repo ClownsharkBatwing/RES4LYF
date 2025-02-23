@@ -3,7 +3,6 @@ import torch
 from comfy.samplers import SCHEDULER_NAMES
 import torch.nn.functional as F
 
-
 def get_extra_options_kv(key, default, extra_options):
 
     match = re.search(rf"{key}\s*=\s*([a-zA-Z0-9_.+-]+)", extra_options)

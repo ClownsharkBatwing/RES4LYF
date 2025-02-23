@@ -1,5 +1,4 @@
 import torch
-from torch import FloatTensor
 
 import torch.nn.functional as F
 import torchvision.transforms as T
@@ -13,6 +12,7 @@ from .noise_classes import *
 from .rk_coefficients_beta import *
 from .phi_functions import *
 from .helper import get_orthogonal, get_collinear, get_extra_options_list, has_nested_attr
+from .res4lyf import RESplain
 
 MAX_STEPS = 10000
 
@@ -28,8 +28,9 @@ def get_epsilon_from_step(x, x_next, sigma, sigma_next):
 
 
 class RK_Method_Beta:
-    def __init__(self, model, rk_type, device='cuda', dtype=torch.float64, extra_options=""):
-        self.device = device
+    def __init__(self, model, rk_type, model_device='cuda', work_device='cpu', dtype=torch.float64, extra_options=""):
+        self.work_device = work_device
+        self.model_device = model_device
         self.dtype  = dtype
 
         self.model = model
@@ -85,11 +86,11 @@ class RK_Method_Beta:
             return False
 
     @staticmethod
-    def create(model, rk_type, device='cuda', dtype=torch.float64, extra_options=""):
+    def create(model, rk_type, model_device='cuda', work_device='cpu', dtype=torch.float64, extra_options=""):
         if RK_Method_Beta.is_exponential(rk_type):
-            return RK_Method_Exponential(model, rk_type, device, dtype, extra_options)
+            return RK_Method_Exponential(model, rk_type, model_device, work_device, dtype, extra_options)
         else:
-            return RK_Method_Linear(model, rk_type, device, dtype, extra_options)
+            return RK_Method_Linear(model, rk_type, model_device, work_device, dtype, extra_options)
                 
     def __call__(self):
         raise NotImplementedError("This method got clownsharked!")
@@ -302,15 +303,15 @@ class RK_Method_Beta:
                 rk_swap_type = "deis_3m"
             
         if step > rk_swap_step:
-            print("Switching rk_type to:", rk_swap_type)
+            RESplain("Switching rk_type to:", rk_swap_type)
             self.rk_type = rk_swap_type
         if step > 2 and sigmas[step+1] > 0 and self.rk_type != rk_swap_type and rk_swap_threshold > 0:
             x_res_2m, denoised_res_2m = RK.calculate_res_2m_step(x_0, data_prev_, sigma_down, sigmas, step)
             x_res_3m, denoised_res_3m = RK.calculate_res_3m_step(x_0, data_prev_, sigma_down, sigmas, step)
             if rk_swap_print:
-                print("res_3m - res_2m:", torch.norm(denoised_res_3m - denoised_res_2m).item())
+                RESplain("res_3m - res_2m:", torch.norm(denoised_res_3m - denoised_res_2m).item())
             if rk_swap_threshold > torch.norm(denoised_res_2m - denoised_res_3m):
-                print("Switching rk_type to:", rk_swap_type, "at step:", step)
+                RESplain("Switching rk_type to:", rk_swap_type, "at step:", step)
                 self.rk_type = rk_swap_type
                 
         return self.rk_type
@@ -450,8 +451,8 @@ class RK_Method_Beta:
 
 
 class RK_Method_Exponential(RK_Method_Beta):
-    def __init__(self, model, rk_type, device='cuda', dtype=torch.float64, extra_options=""):
-        super().__init__(model, rk_type, device, dtype, extra_options) 
+    def __init__(self, model, rk_type, model_device='cuda', work_device='cpu', dtype=torch.float64, extra_options=""):
+        super().__init__(model, rk_type, model_device=model_device, work_device=work_device, dtype=dtype, extra_options=extra_options) 
         
     @staticmethod
     def alpha_fn(neg_h):
@@ -470,7 +471,7 @@ class RK_Method_Exponential(RK_Method_Beta):
         return -torch.log(sigma_down/sigma)
 
     def __call__(self, x, sub_sigma, x_0, sigma): 
-        denoised = self.model_denoised(x, sub_sigma, **self.extra_args)
+        denoised = self.model_denoised(x.to(self.model_device), sub_sigma.to(self.model_device), **self.extra_args).to(sigma.device)
         
         eps_anchored = (x_0 - denoised) / sigma
         eps_unmoored = (x   - denoised) / sub_sigma
@@ -522,8 +523,8 @@ class RK_Method_Exponential(RK_Method_Beta):
 
 
 class RK_Method_Linear(RK_Method_Beta):
-    def __init__(self, model, rk_type, device='cuda', dtype=torch.float64, extra_options=""):
-        super().__init__(model, rk_type, device, dtype, extra_options) 
+    def __init__(self, model, rk_type, model_device='cuda', work_device='cpu', dtype=torch.float64, extra_options=""):
+        super().__init__(model, rk_type, model_device=model_device, work_device=work_device, dtype=dtype, extra_options=extra_options) 
         
     @staticmethod
     def alpha_fn(neg_h):
@@ -541,8 +542,8 @@ class RK_Method_Linear(RK_Method_Beta):
     def h_fn(sigma_down, sigma):
         return sigma_down - sigma
     
-    def __call__(self, x, sub_sigma, x_0, sigma): 
-        denoised = self.model_denoised(x, sub_sigma, **self.extra_args)
+    def __call__(self, x, sub_sigma, x_0, sigma):
+        denoised = self.model_denoised(x.to(self.model_device), sub_sigma.to(self.model_device), **self.extra_args).to(sigma.device)
 
         epsilon_anchor = (x_0 - denoised) / sigma
         epsilon_unmoored = (x - denoised) / sub_sigma
@@ -593,8 +594,8 @@ class RK_NoiseSampler:
         
         self.step   = step
         
-        self.sigma_max = model.inner_model.inner_model.model_sampling.sigma_max.to(self.dtype).to(self.device)
-        self.sigma_min = model.inner_model.inner_model.model_sampling.sigma_min.to(self.dtype).to(self.device)
+        self.sigma_max = model.inner_model.inner_model.model_sampling.sigma_max.to(dtype=self.dtype, device=self.device)
+        self.sigma_min = model.inner_model.inner_model.model_sampling.sigma_min.to(dtype=self.dtype, device=self.device)
         
         self.noise_sampler  = None
         self.noise_sampler2 = None
@@ -628,14 +629,14 @@ class RK_NoiseSampler:
         self.overshoot_mode_substep = overshoot_mode_substep
         self.noise_boost_step       = noise_boost_step
         self.noise_boost_substep    = noise_boost_substep
-        self.s_in                   = x.new_ones([1])
+        self.s_in                   = x.new_ones([1], dtype=self.dtype, device=self.device)
         
         if noise_seed < 0:
             seed = torch.initial_seed()+1 
-            print("SDE noise seed: ", seed, " (set via torch.initial_seed()+1)")
+            RESplain("SDE noise seed: ", seed, " (set via torch.initial_seed()+1)")
         else:
             seed = noise_seed
-            print("SDE noise seed: ", seed)
+            RESplain("SDE noise seed: ", seed)
             
         seed2 = seed + MAX_STEPS #for substep noise generation. offset needed to ensure seeds are not reused
             
@@ -672,7 +673,7 @@ class RK_NoiseSampler:
                 
             elif sigma_up is not None:
                 if sigma_up >= sigma_next:
-                    print("Maximum VPSDE noise level exceeded: falling back to hard noise mode.")
+                    RESplain("Maximum VPSDE noise level exceeded: falling back to hard noise mode.")
                     if eta >= 1:
                         sigma_up = sigma_next * 0.9999 #avoid sqrt(neg_num) later 
                     else:
@@ -797,7 +798,7 @@ class RK_NoiseSampler:
                 
             case "lorentzian":
                 eta_ratio  = eta
-                alpha      = 1 / ((sigma_next.to(torch.float64))**2 + 1)
+                alpha      = 1 / ((sigma_next.to(sigma.dtype))**2 + 1)
                 sigma_base = ((1 - alpha) ** 0.5).to(sigma.dtype)
                 
             case "hard_var":

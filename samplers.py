@@ -331,9 +331,9 @@ class SharkSampler:
                     else:
                         sde_noise = copy.deepcopy(sde_noise)
                         for i in range(len(sde_noise)):
-                            sde_noise[i] = sde_noise[i].to('cuda')
+                            sde_noise[i] = sde_noise[i]
                             for j in range(sde_noise[i].shape[1]):
-                                sde_noise[i][0][j] = ((sde_noise[i][0][j] - sde_noise[i][0][j].mean()) / sde_noise[i][0][j].std()) #.to('cuda')
+                                sde_noise[i][0][j] = ((sde_noise[i][0][j] - sde_noise[i][0][j].mean()) / sde_noise[i][0][j].std())
                                 
                     callback = latent_preview.prepare_callback(model, sigmas.shape[-1] - 1, x0_output)
 
@@ -480,9 +480,9 @@ class ClownSamplerAdvanced:
             else:
                 sde_noise = copy.deepcopy(sde_noise)
                 for i in range(len(sde_noise)):
-                    sde_noise[i] = sde_noise[i].to('cuda')
+                    sde_noise[i] = sde_noise[i]
                     for j in range(sde_noise[i].shape[1]):
-                        sde_noise[i][0][j] = ((sde_noise[i][0][j] - sde_noise[i][0][j].mean()) / sde_noise[i][0][j].std()) #.to('cuda')
+                        sde_noise[i][0][j] = ((sde_noise[i][0][j] - sde_noise[i][0][j].mean()) / sde_noise[i][0][j].std())
                         
             if unsample_resample_scales_override is not None:
                 unsample_resample_scales = unsample_resample_scales_override
@@ -614,9 +614,9 @@ class ClownSamplerAdvanced_Beta:
             else:
                 sde_noise = copy.deepcopy(sde_noise)
                 for i in range(len(sde_noise)):
-                    sde_noise[i] = sde_noise[i].to('cuda')
+                    sde_noise[i] = sde_noise[i]
                     for j in range(sde_noise[i].shape[1]):
-                        sde_noise[i][0][j] = ((sde_noise[i][0][j] - sde_noise[i][0][j].mean()) / sde_noise[i][0][j].std()) #.to('cuda')
+                        sde_noise[i][0][j] = ((sde_noise[i][0][j] - sde_noise[i][0][j].mean()) / sde_noise[i][0][j].std())
                         
             if unsample_resample_scales_override is not None:
                 unsample_resample_scales = unsample_resample_scales_override
