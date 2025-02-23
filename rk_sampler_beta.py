@@ -224,6 +224,8 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
         x_[0] = x.clone()
         # PRENOISE METHOD HERE!
         x_0 = x_[0].clone()
+        
+        eps_old_ = eps_.clone() # for noisy experiment
 
         # RECYCLE STAGES FOR MULTISTEP
         if RK.multistep_stages > 0:
@@ -271,6 +273,14 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
                         # PREPARE PSEUDOIMPLICIT GUIDES
                         if step > 0 or not SKIP_PSEUDO:
                             x_0, x_, eps_, x_row_pseudoimplicit, sub_sigma_pseudoimplicit = LG.process_pseudoimplicit_guides_substep(x_0, x_, eps_, eps_prev_, data_, denoised_prev, row, step, sigmas, NS, RK, pseudoimplicit_row_weights, pseudoimplicit_step_weights, full_iter, BONGMATH, extra_options)
+                        
+                        if RK.multistep_stages > 0 and extra_options_flag("unmoored0", extra_options):
+                            x_[0] = x_noise_alt
+                            #x_[0] = NS.swap_noise(x_prev, x_0, sigmas[step-1], sigma, )
+                        
+                        if RK.multistep_stages > 0 and extra_options_flag("unmoored1", extra_options):
+                            x_0 = x_prev_prenoise
+                            #x_[0] = NS.swap_noise(x_prev, x_0, )
                         
                         # PREPARE MODEL CALL
                         if LG.guide_mode in {"pseudoimplicit","pseudoimplicit_cw", "pseudoimplicit_projection", "pseudoimplicit_projection_cw","fully_pseudoimplicit", "fully_pseudoimplicit_projection","fully_pseudoimplicit_cw", "fully_pseudoimplicit_projection_cw"} and (step > 0 or not SKIP_PSEUDO) and (LG.lgw[step] > 0 or LG.lgw_inv[step] > 0) and x_row_pseudoimplicit is not None:
@@ -339,6 +349,10 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
                                 break
                             x_, eps_ = RK.newton_iter(x_0, x_, eps_, eps_prev_, data_, NS.s_, row, NS.h, sigmas, step, "pre", extra_options) # will this do anything? not x_tmp
 
+                            if extra_options_flag("unmoored666", extra_options) and (sigma != s_tmp) and (step > 0 or RK.multistep_stages > 0):
+                                alpha_ratio_tmp, sigma_tmp, sigma_down_tmp, sigma_up_tmp = NS.get_sde_substep(sigma, s_tmp, eta_substep)
+                                x_tmp = NS.swap_noise(x_0, x_tmp, sigma, sigma_tmp, s_tmp, sigma_down_tmp, sigma_up_tmp, alpha_ratio_tmp, s_noise_substep)
+                                
                             eps_[row], data_[row] = RK(x_tmp, s_tmp, x_0, sigma)
 
                             if extra_options_flag("preview_substeps", extra_options):
@@ -412,9 +426,25 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
 
 
                     # UPDATE
+
                     x_ = RK.update_substep(x_0, x_, eps_, eps_prev_, row, RK.row_offset, NS.h_new, NS.h_new_orig, extra_options)
                     
+                    if extra_options_flag("unmoored8", extra_options) and RK.multistep_stages > 0:
+                        for i in range(100):
+                            x_0 = x_[row+RK.row_offset] - NS.h * (RK.B[0][0]*eps_[0] + RK.B[0][1]*eps_[1]) #RK.zum(0, eps_, eps_prev_)
+                            
+                            #x_[row+RK.row_offset] = x_0 
+                            x_[row+RK.row_offset] = x_0 + NS.h * (RK.B[0][0]*eps_[0] + RK.B[0][1]*eps_[1])
+                            
+                            eps_[1] = (x_[row+RK.row_offset] - x_0 - NS.h * RK.B[0][0]*eps_[0])   /   (NS.h * RK.B[0][1])
+                            eps_[0] = (x_[row+RK.row_offset] - x_0 - NS.h * RK.B[0][1]*eps_[1])   /   (NS.h * RK.B[0][0])
+                            
+                        x_ = RK.update_substep(x_0, x_, eps_, eps_prev_, row, RK.row_offset, NS.h_new, NS.h_new_orig, extra_options)
+                
                     x_[row+RK.row_offset] = NS.rebound_overshoot_substep(x_0, x_[row+RK.row_offset])
+                    
+                    x_prev_prenoise = x_[row+RK.row_offset].clone()
+                    
                     if not RK.IMPLICIT and NS.noise_mode_sde_substep != "hard_sq":
                         x_[row+RK.row_offset] = NS.swap_noise_substep(x_0, x_[row+RK.row_offset])
 
@@ -423,17 +453,18 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
                             pass
                         else:
                             x_0, x_, eps_ = RK.bong_iter(x_0, x_, eps_, eps_prev_, data_, sigma, NS.s_, row, RK.row_offset, NS.h, extra_options)
-
+                            
 
 
             denoised = x_0 + ((sigma / (sigma - NS.sigma_down)) *  NS.h_new) * RK.zum(RK.rows, eps_, eps_prev_)
             eps = RK.get_epsilon_anchored(x_0, denoised, sigma_next)
             
-            x = x_[RK.rows - RK.multistep_stages - RK.row_offset + 1]
+            x_next = x_[RK.rows - RK.multistep_stages - RK.row_offset + 1]
 
-            x = NS.rebound_overshoot_step(x_0, x)
-            x = LG.process_guides_poststep(x, denoised, eps, step, extra_options)
-            x = NS.swap_noise_step(x_0, x)
+            x_next = NS.rebound_overshoot_step(x_0, x_next)
+            x_next = LG.process_guides_poststep(x_next, denoised, eps, step, extra_options)
+            x = NS.swap_noise_step(x_0, x_next)
+            x_noise_alt = NS.swap_noise_step(x_0, x_next)
             
             preview_callback(x, eps, denoised, x_, eps_, data_, step, sigma, sigma_next, callback, extra_options)
             
