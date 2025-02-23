@@ -178,6 +178,9 @@ class FluxLoader(BaseModelLoader):
     def main(self, model_name, weight_dtype, clip_name1, clip_name2_opt, vae_name, 
              clip_vision_name, style_model_name):
         model_options = self.process_weight_dtype(weight_dtype)
+        
+        torch.manual_seed(42)
+        torch.cuda.manual_seed_all(42)
 
         if clip_name1 == ".use_ckpt_clip" and clip_name2_opt != ".none":
             raise ValueError("Cannot specify both \".use_ckpt_clip\" and another clip")
@@ -227,6 +230,9 @@ class SD35Loader(BaseModelLoader):
     
     def main(self, model_name, weight_dtype, clip_name1, clip_name2_opt, clip_name3_opt, vae_name):
         model_options = self.process_weight_dtype(weight_dtype)
+        
+        torch.manual_seed(42)
+        torch.cuda.manual_seed_all(42)
         
         if clip_name1 == ".use_ckpt_clip" and (clip_name2_opt != ".none" or clip_name3_opt != ".none"):
             raise ValueError("Cannot specify both \".use_ckpt_clip\" and another clip")

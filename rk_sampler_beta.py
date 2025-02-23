@@ -150,20 +150,6 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
     
     NS.init_noise_samplers(x, noise_seed, noise_sampler_type, noise_sampler_type_substep, noise_mode_sde, noise_mode_sde_substep, overshoot_mode, overshoot_mode_substep, noise_boost_step, noise_boost_substep, alpha, alpha_substep, k, k_substep)
 
-    # SETUP GUIDES
-    LG = LatentGuide(model, sigmas, UNSAMPLE, LGW_MASK_RESCALE_MIN, extra_options, device=work_device, dtype=default_dtype, frame_weights_grp=frame_weights_grp)
-    x = LG.init_guides(x, RK.IMPLICIT, guides, NS.noise_sampler)
-    if torch.norm(LG.mask - torch.ones_like(LG.mask)) != 0   and   (LG.y0.sum() == 0 or LG.y0_inv.sum() == 0):
-        SKIP_PSEUDO = True
-        if LG.y0.sum() == 0:
-            SKIP_PSEUDO_Y = "y0"
-        elif LG.y0_inv.sum() == 0:
-            SKIP_PSEUDO_Y = "y0_inv"
-    else:
-        SKIP_PSEUDO = False
-    if extra_options_flag("pseudo_mix_strength", extra_options):
-        orig_y0 = LG.y0.clone()
-        orig_y0_inv = LG.y0_inv.clone()
 
     data_           = None
     eps_            = None
@@ -176,7 +162,31 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
     denoised_data_prev = None
     denoised_data_prev2 = None
     h_prev = None
-    h_prev2 = None
+    
+
+    # SETUP GUIDES
+    LG = LatentGuide(model, sigmas, UNSAMPLE, LGW_MASK_RESCALE_MIN, extra_options, device=work_device, dtype=default_dtype, frame_weights_grp=frame_weights_grp)
+    x = LG.init_guides(x, RK.IMPLICIT, guides, NS.noise_sampler)
+    if torch.norm(LG.mask - torch.ones_like(LG.mask)) != 0   and   (LG.y0.sum() == 0 or LG.y0_inv.sum() == 0):
+        SKIP_PSEUDO = True
+        print("skipping pseudo...")
+        if LG.y0.sum() == 0:
+            SKIP_PSEUDO_Y = "y0"
+        elif LG.y0_inv.sum() == 0:
+            SKIP_PSEUDO_Y = "y0_inv"
+    else:
+        SKIP_PSEUDO = False
+        
+    if LG.y0.sum() != 0 and LG.y0_inv.sum() != 0:
+        denoised_prev = LG.mask * LG.y0 + (1-LG.mask) * LG.y0_inv
+    elif LG.y0.sum() != 0:
+        denoised_prev = LG.y0
+    elif LG.y0_inv.sum() != 0:
+        denoised_prev = LG.y0_inv
+        
+    if extra_options_flag("pseudo_mix_strength", extra_options):
+        orig_y0 = LG.y0.clone()
+        orig_y0_inv = LG.y0_inv.clone()
 
     gc.collect()
 
@@ -201,8 +211,8 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
 
         recycled_stages = max(RK.multistep_stages, RK.hybrid_stages)
         if step == 0 or step == guide_skip_steps:
-            x_, data_, eps_ = (torch.zeros(    RK.rows+2,     *x.shape, dtype=default_dtype, device=work_device) for _ in range(3))
-            data_prev_      =  torch.zeros(max(RK.rows+2, 4), *x.shape, dtype=default_dtype, device=work_device)
+            x_, data_, eps_, eps_prev_  = (torch.zeros(    RK.rows+2,     *x.shape, dtype=default_dtype, device=work_device) for _ in range(4))
+            data_prev_                  =  torch.zeros(max(RK.rows+2, 4), *x.shape, dtype=default_dtype, device=work_device)
             recycled_stages = len(data_prev_)-1
 
         sde_noise_t = None
@@ -217,9 +227,10 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
         x_0 = x_[0].clone()
 
         # RECYCLE STAGES FOR MULTISTEP
-        for ms in range(len(eps_)):
-            eps_[ms] = RK.get_epsilon_anchored(x_0, data_prev_[ms], sigma)
-        eps_prev_ = eps_.clone()
+        if RK.multistep_stages > 0:
+            for ms in range(len(eps_)):
+                eps_[ms] = RK.get_epsilon_anchored(x_0, data_prev_[ms], sigma)
+            eps_prev_ = eps_.clone()
 
         # INITIALIZE IMPLICIT SAMPLING
         if RK.IMPLICIT:
@@ -233,11 +244,14 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
 
             # PREPARE FULLY PSEUDOIMPLICIT GUIDES
             if step > 0 or not SKIP_PSEUDO:
-                x_0, x_, eps_ = LG.prepare_fully_pseudoimplicit_guides_substep(x_0, x_, eps_, eps_prev_, data_, 0, step, sigmas, eta_substep, overshoot_substep, s_noise_substep, NS, RK, pseudoimplicit_row_weights, pseudoimplicit_step_weights, full_iter, BONGMATH, extra_options)
+                x_0, x_, eps_ = LG.prepare_fully_pseudoimplicit_guides_substep(x_0, x_, eps_, eps_prev_, data_, denoised_prev, 0, step, sigmas, eta_substep, overshoot_substep, s_noise_substep, NS, RK, pseudoimplicit_row_weights, pseudoimplicit_step_weights, full_iter, BONGMATH, extra_options)
 
             # TABLEAU LOOP
             for row in range(RK.rows - RK.multistep_stages - RK.row_offset + 1):
                 for diag_iter in range(implicit_steps_diag+1):
+                    
+                    if noise_sampler_type_substep == "brownian" and (full_iter > 0 or diag_iter > 0):
+                        eta_substep = 0.
                     
                     NS.set_sde_substep(row, RK.multistep_stages, eta_substep, overshoot_substep, s_noise_substep, full_iter, diag_iter, implicit_steps_full, implicit_steps_diag)
 
@@ -248,16 +262,15 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
 
                         # PREPARE PSEUDOIMPLICIT GUIDES
                         if step > 0 or not SKIP_PSEUDO:
-                            x_0, x_, eps_, x_row_pseudoimplicit, sub_sigma_pseudoimplicit = LG.process_pseudoimplicit_guides_substep(x_0, x_, eps_, eps_prev_, data_, row, step, sigmas, NS, RK, pseudoimplicit_row_weights, pseudoimplicit_step_weights, full_iter, BONGMATH, extra_options)
+                            x_0, x_, eps_, x_row_pseudoimplicit, sub_sigma_pseudoimplicit = LG.process_pseudoimplicit_guides_substep(x_0, x_, eps_, eps_prev_, data_, denoised_prev, row, step, sigmas, NS, RK, pseudoimplicit_row_weights, pseudoimplicit_step_weights, full_iter, BONGMATH, extra_options)
                         
                         # PREPARE MODEL CALL
+                        #if LG.guide_mode in {"pseudoimplicit","pseudoimplicit_cw", "pseudoimplicit_projection", "pseudoimplicit_projection_cw","fully_pseudoimplicit", "fully_pseudoimplicit_projection","fully_pseudoimplicit_cw", "fully_pseudoimplicit_projection_cw"} and (step > 0 or not SKIP_PSEUDO) and (LG.lgw[step] > 0 or LG.lgw_inv[step] > 0) and x_row_pseudoimplicit is not None:
                         if LG.guide_mode in {"pseudoimplicit","pseudoimplicit_cw", "pseudoimplicit_projection", "pseudoimplicit_projection_cw","fully_pseudoimplicit", "fully_pseudoimplicit_projection","fully_pseudoimplicit_cw", "fully_pseudoimplicit_projection_cw"} and (step > 0 or not SKIP_PSEUDO) and (LG.lgw[step] > 0 or LG.lgw_inv[step] > 0) and x_row_pseudoimplicit is not None:
 
                             x_tmp =     x_row_pseudoimplicit 
                             s_tmp = sub_sigma_pseudoimplicit 
-                        
-                        
-                        
+
                         # Fully implicit iteration (explicit only)                   # or... Fully implicit iteration (implicit only... not standard) 
                         elif (full_iter > 0 and RK.row_offset == 1 and row == 0)   or   (full_iter > 0 and RK.row_offset == 0 and row == 0 and extra_options_flag("fully_implicit_update_x", extra_options)):
                             if extra_options_flag("fully_explicit_pogostick_eta", extra_options): 
@@ -324,11 +337,12 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
                             if extra_options_flag("preview_substeps", extra_options):
                                 callback({'x': x, 'i': step, 'sigma': sigma, 'sigma_next': sigma_next, 'denoised': data_[row].to(torch.float32)}) if callback is not None else None
 
+
+
                         if extra_options_flag("bong2m", extra_options) and RK.multistep_stages > 0 and step < len(sigmas)-4:
                             h_no_eta       = -torch.log(sigmas[step+1]/sigmas[step])
                             h_prev1_no_eta = -torch.log(sigmas[step]/sigmas[step-1])
                             c2_prev = (-h_prev1_no_eta / h_no_eta).item()
-                            #c2_prev = -h_prev / NS.h
                             eps_prev = denoised_data_prev - x_0
                             
                             φ = Phi(h_prev, [0.,c2_prev])
@@ -376,12 +390,15 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
                                 
                             eps_[2] = eps_prev2
 
+
+
                         # GUIDE 
+                        #if not UNSAMPLE:
                         if not extra_options_flag("disable_guides_eps_substep", extra_options):
                             eps_, x_      = LG.process_guides_substep(x_0, x_, eps_,      data_, row, step, NS.sigma, NS.sigma_next, NS.sigma_down, NS.s_, unsample_resample_scale, RK, extra_options)
                         if not extra_options_flag("disable_guides_eps_prev_substep", extra_options):
                             eps_prev_, x_ = LG.process_guides_substep(x_0, x_, eps_prev_, data_, row, step, NS.sigma, NS.sigma_next, NS.sigma_down, NS.s_, unsample_resample_scale, RK, extra_options)
-                            
+
                         if (full_iter == 0 and diag_iter == 0)   or   extra_options_flag("newton_iter_post_use_on_implicit_steps", extra_options):
                             x_, eps_ = RK.newton_iter(x_0, x_, eps_, eps_prev_, data_, NS.s_, row, NS.h, sigmas, step, "post", extra_options)
 
@@ -395,7 +412,10 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
                         x_[row+RK.row_offset] = NS.swap_noise_substep(x_0, x_[row+RK.row_offset])
 
                     if BONGMATH and step < sigmas.shape[0]-1 and diag_iter == implicit_steps_diag and not extra_options_flag("disable_terminal_bongmath", extra_options):
-                        x_0, x_, eps_ = RK.bong_iter(x_0, x_, eps_, eps_prev_, data_, sigma, NS.s_, row, RK.row_offset, NS.h, extra_options)
+                        if step == 0 and UNSAMPLE:
+                            pass
+                        else:
+                            x_0, x_, eps_ = RK.bong_iter(x_0, x_, eps_, eps_prev_, data_, sigma, NS.s_, row, RK.row_offset, NS.h, extra_options)
 
 
 
@@ -413,6 +433,7 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
             h_prev2 = h_prev
             h_prev = NS.h
             x_prev = x_0
+
 
 
         data_prev_[0] = data_[0]
@@ -439,6 +460,7 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
             pseudo_mix_strength = float(get_extra_options_kv("pseudo_mix_strength", "0.0", extra_options))
             LG.y0 = orig_y0 + pseudo_mix_strength * (denoised - orig_y0)
             LG.y0_inv = orig_y0_inv + pseudo_mix_strength * (denoised - orig_y0_inv)
+
 
 
     if sigmas[-1] == 0 and sigmas[-2] == NS.sigma_min:
