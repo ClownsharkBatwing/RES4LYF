@@ -428,7 +428,6 @@ class LatentGuide:
             y0 = y0[min(step, y0.shape[0]-1)].unsqueeze(0)
         
         lgw_mask, lgw_mask_inv = self.get_masks_for_step(step)
-        mask = self.mask
 
         if self.guide_mode: # is not None: 
             data_norm   = data_[row] - data_[row].mean(dim=(-2,-1), keepdim=True)

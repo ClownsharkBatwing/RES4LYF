@@ -16,6 +16,7 @@ import torch.nn.functional as F
 import copy
 
 from .rk_guide_func import get_orthogonal, get_collinear
+from .res4lyf import RESplain
 
 
 
@@ -251,7 +252,7 @@ class ConditioningAverage :
         out = []
 
         if len(conditioning_from) > 1:
-            print("Warning: ConditioningAverage conditioning_from contains more than 1 cond, only the first one will actually be applied to conditioning_to.")
+            RESplain("Warning: ConditioningAverage conditioning_from contains more than 1 cond, only the first one will actually be applied to conditioning_to.")
 
         cond_from = conditioning_from[0][0]
         pooled_output_from = conditioning_from[0][1].get("pooled_output", None)
@@ -312,7 +313,7 @@ class ConditioningAverageScheduler: # don't think this is implemented correctly.
         out = []
 
         if len(conditioning_from) > 1:
-            print("Warning: ConditioningAverage conditioning_from contains more than 1 cond, only the first one will actually be applied to conditioning_to.")
+            RESplain("Warning: ConditioningAverage conditioning_from contains more than 1 cond, only the first one will actually be applied to conditioning_to.")
 
         cond_from = conditioning_from[0][0]
         pooled_output_from = conditioning_from[0][1].get("pooled_output", None)
@@ -431,12 +432,12 @@ class ConditioningToBase64:
         
         if unique_id is not None and extra_pnginfo is not None:
             if not isinstance(extra_pnginfo, list):
-                print("Error: extra_pnginfo is not a list")
+                RESplain("Error: extra_pnginfo is not a list")
             elif (
                 not isinstance(extra_pnginfo[0], dict)
                 or "workflow" not in extra_pnginfo[0]
             ):
-                print("Error: extra_pnginfo[0] is not a dict or missing 'workflow' key")
+                RESplain("Error: extra_pnginfo[0] is not a dict or missing 'workflow' key")
             else:
                 workflow = extra_pnginfo[0]["workflow"]
                 node = next(
