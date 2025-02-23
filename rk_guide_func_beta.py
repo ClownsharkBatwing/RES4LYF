@@ -2,20 +2,15 @@ import torch
 import torch.nn.functional as F
 import torchvision.transforms as T
 import copy
+import itertools
 
 from einops import rearrange
-
-from comfy.model_management import get_torch_device, unet_offload_device
 
 from .sigmas import get_sigmas
 from .noise_classes import *
 from .latents import hard_light_blend, normalize_latent, initialize_or_scale
 from .rk_method_beta import RK_Method_Beta
 from .helper import get_extra_options_kv, extra_options_flag, get_cosine_similarity, get_extra_options_list, is_video_model
-from .rk_coefficients_beta import IRK_SAMPLER_NAMES_BETA
-from .noise_sigmas_timesteps_scaling import get_res4lyf_step_with_model
-
-import itertools
 
 
 def normalize_inputs(x, y0, y0_inv, guide_mode,  extra_options):
