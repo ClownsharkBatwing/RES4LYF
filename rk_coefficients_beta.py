@@ -1355,35 +1355,41 @@ def get_rk_methods_beta(rk_type, h, c1=0.0, c2=0.5, c3=1.0, h_prev=None, step=0,
     if rk_type[-2:] == "3m": #multistep method
         rk_type = rk_type[:-2] + "3s"
         #if h_prev2 is not None and step >= 2: 
-        if step >= 2 + multistep_extra_initial_steps:
-            multistep_stages = 2
+        if h_no_eta < 1.0:
+            if step >= 2 + multistep_extra_initial_steps:
+                multistep_stages = 2
 
-            c2 = (-h_prev1_no_eta / h_no_eta).item()
-            c3 = (-h_prev2_no_eta / h_no_eta).item()      
+                c2 = (-h_prev1_no_eta / h_no_eta).item()
+                c3 = (-h_prev2_no_eta / h_no_eta).item()      
+            else:
+                rk_type = multistep_initial_sampler if multistep_initial_sampler else rk_type 
+            if rk_type.startswith("abnorsett"):
+                rk_type = "res_3s"
+                rk_type = multistep_initial_sampler if multistep_initial_sampler else rk_type
         else:
-            rk_type = multistep_initial_sampler if multistep_initial_sampler else rk_type 
-        if rk_type.startswith("abnorsett"):
             rk_type = "res_3s"
-            rk_type = multistep_initial_sampler if multistep_initial_sampler else rk_type
             
     if rk_type[-2:] == "4m": #multistep method
         rk_type = rk_type[:-2] + "4s"
         #if h_prev2 is not None and step >= 2: 
-        if step >= 3 + multistep_extra_initial_steps:
-            multistep_stages = 3
+        if h_no_eta < 1.0:
+            if step >= 3 + multistep_extra_initial_steps:
+                multistep_stages = 3
 
-            c2 = (-h_prev1_no_eta / h_no_eta).item()
-            c3 = (-h_prev2_no_eta / h_no_eta).item()
-            # WOULD NEED A C4 (POW) TO IMPLEMENT RES_4M IF IT EXISTED
+                c2 = (-h_prev1_no_eta / h_no_eta).item()
+                c3 = (-h_prev2_no_eta / h_no_eta).item()
+                # WOULD NEED A C4 (POW) TO IMPLEMENT RES_4M IF IT EXISTED
+            else:
+                rk_type = multistep_initial_sampler if multistep_initial_sampler else rk_type
+            if rk_type == "res_4s":
+                rk_type = "res_4s_strehmel_weiner"
+                rk_type = multistep_initial_sampler if multistep_initial_sampler else rk_type
+            if rk_type.startswith("abnorsett"):
+                rk_type = "res_4s_strehmel_weiner"
+                rk_type = multistep_initial_sampler if multistep_initial_sampler else rk_type
         else:
-            rk_type = multistep_initial_sampler if multistep_initial_sampler else rk_type
-        if rk_type == "res_4s":
             rk_type = "res_4s_strehmel_weiner"
-            rk_type = multistep_initial_sampler if multistep_initial_sampler else rk_type
-        if rk_type.startswith("abnorsett"):
-            rk_type = "res_4s_strehmel_weiner"
-            rk_type = multistep_initial_sampler if multistep_initial_sampler else rk_type
-            
+                        
     if rk_type[-3] == "h" and rk_type[-1] == "s": #hybrid method 
         if step < int(rk_type[-4]) + multistep_extra_initial_steps:
             rk_type = "res_" + rk_type[-2:]
