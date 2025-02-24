@@ -433,15 +433,16 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
                         x_[row+RK.row_offset] = NS.swap_noise_substep(x_0, x_[row+RK.row_offset])
 
                     #if BONGMATH and step < sigmas.shape[0]-2 and diag_iter == implicit_steps_diag and not extra_options_flag("disable_terminal_bongmath", extra_options):
-                    if BONGMATH and sigma_next > 2 * RK.sigma_min  and diag_iter == implicit_steps_diag and not extra_options_flag("disable_terminal_bongmath", extra_options):
+                    if BONGMATH and NS.s_[row] > RK.sigma_min and NS.h < RK.sigma_max/2 and diag_iter == implicit_steps_diag and not extra_options_flag("disable_terminal_bongmath", extra_options):
 
                         if step == 0 and UNSAMPLE:
                             pass
-                        if RK.hybrid_stages > 0 and step >= sigmas.shape[0]-4:
-                            pass
                         else:
                             x_0, x_, eps_ = RK.bong_iter(x_0, x_, eps_, eps_prev_, data_, sigma, NS.s_, row, RK.row_offset, NS.h, extra_options)
-                    
+                    #if step > 1:
+                    #    print(NS.h.item(), RK.h_fn(sigmas[step], sigmas[step-1]).item(), RK.h_fn(sigmas[step], sigmas[step-2]).item(), RK.h_fn(sigmas[step], sigmas[step-1]).item()/NS.h.item(), RK.h_fn(sigmas[step], sigmas[step-2]).item()/NS.h.item())
+                    #if NS.h > RK.sigma_max/2:
+                    #    print("high h:", step, row, NS.h.item())
 
 
             denoised = x_0 + ((sigma / (sigma - NS.sigma_down)) *  NS.h_new) * RK.zum(RK.rows, eps_, eps_prev_)
@@ -465,7 +466,7 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
 
 
 
-        data_prev_[0] = denoised # data_[0]
+        data_prev_[0] = data_[0]
         for ms in range(recycled_stages):
             data_prev_[recycled_stages - ms] = data_prev_[recycled_stages - ms - 1]
         
