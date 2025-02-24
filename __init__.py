@@ -98,6 +98,9 @@ NODE_CLASS_MAPPINGS = {
     "ClownSamplerAdvanced": samplers.ClownSamplerAdvanced,
     "SharkSampler": samplers.SharkSampler,
     "ClownsharKSampler": samplers.ClownsharKSampler,
+    "ClownsharKSamplerSimple_Beta": samplers.ClownsharKSamplerSimple_Beta,
+
+    
     "ClownsharKSamplerGuides": samplers_extensions.ClownsharKSamplerGuides,
     "ClownsharKSamplerGuide": samplers_extensions.ClownsharKSamplerGuide,
     
@@ -117,7 +120,6 @@ NODE_CLASS_MAPPINGS = {
     "ClownInpaint": samplers_extensions.ClownInpaint,
     "ClownInpaintSimple": samplers_extensions.ClownInpaintSimple,
 
-    
     "ClownsharKSamplerOptions": samplers_extensions.ClownsharKSamplerOptions,
     "ClownsharKSamplerOptions_SDE_Noise": samplers_extensions.ClownsharKSamplerOptions_SDE_Noise,
     "ClownsharkSamplerOptions_FrameWeights": samplers_extensions.ClownsharKSamplerOptions_FrameWeights,

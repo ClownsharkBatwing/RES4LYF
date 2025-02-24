@@ -110,7 +110,7 @@ RK_SAMPLER_NAMES_BETA_FOLDERS = ["none",
                     "exponential/ddim",
                     "linear/euler",
                     
-                    "irk_exp_diag_2s",
+                    "diag_implicit/irk_exp_diag_2s",
                     
                     "fully_implicit/gauss-legendre_2s",
                     "fully_implicit/gauss-legendre_3s", 
