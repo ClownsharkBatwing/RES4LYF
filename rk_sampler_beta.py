@@ -341,7 +341,8 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
                             x_, eps_ = RK.newton_iter(x_0, x_, eps_, eps_prev_, data_, NS.s_, row, NS.h, sigmas, step, "pre", extra_options) # will this do anything? not x_tmp
 
                             eps_[row], data_[row] = RK(x_tmp, s_tmp, x_0, sigma)
-
+                            if step > 0:
+                                print(step, NS.h.item(), RK.C[1].item(), RK.B[0][0].item(), RK.B[0][1].item(), NS.s_)
                             if extra_options_flag("preview_substeps", extra_options):
                                 callback({'x': x, 'i': step, 'sigma': sigma, 'sigma_next': sigma_next, 'denoised': data_[row].to(torch.float32)}) if callback is not None else None
 
@@ -432,7 +433,6 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
                     if not RK.IMPLICIT and NS.noise_mode_sde_substep != "hard_sq":
                         x_[row+RK.row_offset] = NS.swap_noise_substep(x_0, x_[row+RK.row_offset])
 
-                    #if BONGMATH and step < sigmas.shape[0]-2 and diag_iter == implicit_steps_diag and not extra_options_flag("disable_terminal_bongmath", extra_options):
                     if BONGMATH and NS.s_[row] > RK.sigma_min and NS.h < RK.sigma_max/2 and diag_iter == implicit_steps_diag and not extra_options_flag("disable_terminal_bongmath", extra_options):
 
                         if step == 0 and UNSAMPLE:
