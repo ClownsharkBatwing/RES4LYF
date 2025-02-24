@@ -343,8 +343,8 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
                             eps_[row], data_[row] = RK(x_tmp, s_tmp, x_0, sigma)
                             if step > 0:
                                 print(step, NS.h.item(), RK.C[1].item(), RK.B[0][0].item(), RK.B[0][1].item(), NS.s_)
-                            #if extra_options_flag("preview_substeps", extra_options):
-                            #    callback({'x': x, 'i': step, 'sigma': sigma, 'sigma_next': sigma_next, 'denoised': data_[row].to(torch.float32)}) if callback is not None else None
+                            if extra_options_flag("preview_substeps", extra_options):
+                                callback({'x': x, 'i': step, 'sigma': sigma, 'sigma_next': sigma_next, 'denoised': data_[row].to(torch.float32)}) if callback is not None else None
 
 
 
