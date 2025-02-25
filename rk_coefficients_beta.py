@@ -53,10 +53,12 @@ RK_SAMPLER_NAMES_BETA_FOLDERS = ["none",
                     "hybrid/abnorsett3_2h2s",
                     "hybrid/abnorsett4_3h2s",
 
+                    "multistep/dpmpp_2m",
+                    "multistep/dpmpp_3m",
+
                     "multistep/abnorsett_2m",
                     "multistep/abnorsett_3m",
                     "multistep/abnorsett_4m",
-
 
                     "multistep/deis_2m",
                     "multistep/deis_3m", 
@@ -66,8 +68,6 @@ RK_SAMPLER_NAMES_BETA_FOLDERS = ["none",
                     "linear/ralston_3s",
                     "linear/ralston_4s", 
                     
-                    "linear/dpmpp_2m",
-                    "linear/dpmpp_3m",
                     "exponential/dpmpp_2s",
                     "exponential/dpmpp_sde_2s",
                     "exponential/dpmpp_3s",

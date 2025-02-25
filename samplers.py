@@ -502,7 +502,6 @@ class ClownSamplerAdvanced:
 
 
 
-
 class ClownSamplerAdvanced_Beta:
     @classmethod
     def INPUT_TYPES(s):
@@ -520,12 +519,14 @@ class ClownSamplerAdvanced_Beta:
                     "overshoot_substep": ("FLOAT", {"default": 0.0, "min": -100.0, "max": 100.0, "step":0.01, "round": False, "tooltip": "Boost the size of each denoising substep, then rescale to match the original. Has a softening effect."}),
                     "noise_boost_step": ("FLOAT", {"default": 0.0, "min": -100.0, "max": 100.0, "step":0.01, "round": False, "tooltip": "Set to positive values to create a sharper, grittier, more detailed image. Set to negative values to soften and deepen the colors."}),
                     "noise_boost_substep": ("FLOAT", {"default": 0.0, "min": -100.0, "max": 100.0, "step":0.01, "round": False, "tooltip": "Set to positive values to create a sharper, grittier, more detailed image. Set to negative values to soften and deepen the colors."}),
+                    "noise_anchor": ("FLOAT", {"default": 1.0, "min": -100.0, "max": 100.0, "step":0.01, "round": False, "tooltip": "Typically set to between 1.0 and 0.0. Lower values cerate a grittier, more detailed image."}),
                     "s_noise": ("FLOAT", {"default": 1.0, "min": -10000, "max": 10000, "step":0.01, "tooltip": "Adds extra SDE noise. Values around 1.03-1.07 can lead to a moderate boost in detail and paint textures."}),
                     "s_noise_substep": ("FLOAT", {"default": 1.0, "min": -10000, "max": 10000, "step":0.01, "tooltip": "Adds extra SDE noise. Values around 1.03-1.07 can lead to a moderate boost in detail and paint textures."}),
                     "d_noise": ("FLOAT", {"default": 1.0, "min": -10000, "max": 10000, "step":0.01, "tooltip": "Downscales the sigma schedule. Values around 0.98-0.95 can lead to a large boost in detail and paint textures."}),
                     "noise_seed_sde": ("INT", {"default": -1, "min": -1, "max": 0xffffffffffffffff}),
-                    "sampler_name": (RK_SAMPLER_NAMES_BETA, {"default": "res_2m"}), 
-                    "implicit_sampler_name": (IRK_SAMPLER_NAMES_BETA, {"default": "use_explicit"}), 
+                    "sampler_name": (RK_SAMPLER_NAMES_BETA_FOLDERS, {"default": "multistep/res_2m"}), 
+                    #"sampler_name": (RK_SAMPLER_NAMES_BETA, {"default": "res_2m"}), 
+                    #"implicit_sampler_name": (IRK_SAMPLER_NAMES_BETA, {"default": "use_explicit"}), 
                     "implicit_steps": ("INT", {"default": 0, "min": 0, "max": 10000}),
                     "implicit_substeps": ("INT", {"default": 0, "min": 0, "max": 10000}),
                     "bongmath": ("BOOLEAN", {"default": True}),
@@ -553,8 +554,10 @@ class ClownSamplerAdvanced_Beta:
                     latent_guide=None, latent_guide_inv=None, guide_mode="", latent_guide_weights=None, latent_guide_weights_inv=None, latent_guide_mask=None, latent_guide_mask_inv=None, rescale_floor=True, sigmas_override=None, unsampler_type="linear",
                     guides=None, options=None, sde_noise=None,sde_noise_steps=1, 
                     extra_options="", automation=None, etas=None, etas_substep=None, s_noises=None, s_noises_substep=None, unsample_resample_scales=None, regional_conditioning_weights=None,frame_weights_grp=None, eta_substep=0.5, noise_mode_sde_substep="hard",
-                    overshoot=0.0, overshoot_substep=0.0, noise_boost_step=0.0, noise_boost_substep=0.0, bongmath=True,
+                    overshoot=0.0, overshoot_substep=0.0, noise_boost_step=0.0, noise_boost_substep=0.0, bongmath=True, noise_anchor=1.0,
                     ): 
+        
+            sampler_name, implicit_sampler_name = process_sampler_name(sampler_name)
 
             implicit_steps_diag = implicit_substeps
             implicit_steps_full = implicit_steps
@@ -596,14 +599,15 @@ class ClownSamplerAdvanced_Beta:
                 unsample_resample_scales = automation['unsample_resample_scales'] if 'unsample_resample_scales' in automation else None
                 frame_weights_grp = automation['frame_weights_grp'] if 'frame_weights_grp' in automation else None
 
-            etas = initialize_or_scale(etas, eta, max_steps).to(default_dtype)
-            etas = F.pad(etas, (0, max_steps), value=0.0)
-            etas_substep = initialize_or_scale(etas_substep, eta_substep, max_steps).to(default_dtype)
-            etas_substep = F.pad(etas_substep, (0, max_steps), value=0.0)
-            s_noises = initialize_or_scale(s_noises, s_noise, max_steps).to(default_dtype)
-            s_noises = F.pad(s_noises, (0, max_steps), value=0.0)
+            etas             = initialize_or_scale(etas,             eta,             max_steps).to(default_dtype)
+            etas_substep     = initialize_or_scale(etas_substep,     eta_substep,     max_steps).to(default_dtype)
+            s_noises         = initialize_or_scale(s_noises,         s_noise,         max_steps).to(default_dtype)
             s_noises_substep = initialize_or_scale(s_noises_substep, s_noise_substep, max_steps).to(default_dtype)
-            s_noises_substep = F.pad(s_noises_substep, (0, max_steps), value=0.0)
+
+            etas             = F.pad(etas,             (0, max_steps), value=0.0)
+            etas_substep     = F.pad(etas_substep,     (0, max_steps), value=0.0)
+            s_noises         = F.pad(s_noises,         (0, max_steps), value=1.0)
+            s_noises_substep = F.pad(s_noises_substep, (0, max_steps), value=1.0)
 
             if sde_noise is None:
                 sde_noise = []
@@ -624,7 +628,7 @@ class ClownSamplerAdvanced_Beta:
                                                             "extra_options": extra_options, "sampler_mode": "standard",
                                                             "etas": etas, "etas_substep": etas_substep, "s_noises": s_noises, "s_noises_substep": s_noises_substep, "unsample_resample_scales": unsample_resample_scales, "regional_conditioning_weights": regional_conditioning_weights,
                                                             "guides": guides, "frame_weights_grp": frame_weights_grp, "eta_substep": eta_substep, "noise_mode_sde_substep": noise_mode_sde_substep, "noise_boost_step": noise_boost_step, "noise_boost_substep": noise_boost_substep,
-                                                            "overshoot_mode": overshoot_mode, "overshoot_mode_substep": overshoot_mode_substep, "overshoot": overshoot, "overshoot_substep": overshoot_substep, "BONGMATH": bongmath,
+                                                            "overshoot_mode": overshoot_mode, "overshoot_mode_substep": overshoot_mode_substep, "overshoot": overshoot, "overshoot_substep": overshoot_substep, "BONGMATH": bongmath, "noise_anchor": noise_anchor,
                                                             })
 
 
@@ -703,25 +707,31 @@ def process_sampler_name(selected_value):
     
     return sampler_name, implicit_sampler_name
 
+
+
+
+
 class ClownsharKSamplerSimple_Beta:
     @classmethod
     def INPUT_TYPES(s):
         return {"required":
                     {"model": ("MODEL",),
                     "eta": ("FLOAT", {"default": 0.5, "min": -100.0, "max": 100.0, "step":0.01, "round": False, "tooltip": "Calculated noise amount to be added, then removed, after each step."}),
-                    "sampler_name": (RK_SAMPLER_NAMES_BETA_FOLDERS, {"default": "res_2m"}), 
+                    "sampler_name": (RK_SAMPLER_NAMES_BETA_FOLDERS, {"default": "multistep/res_2m"}), 
                     "scheduler": (get_res4lyf_scheduler_list(), {"default": "beta57"},),
                     "steps": ("INT", {"default": 30, "min": 1, "max": 10000}),
                     "denoise": ("FLOAT", {"default": 1.0, "min": -10000, "max": 10000, "step":0.01}),
                     "cfg": ("FLOAT", {"default": 5.5, "min": -100.0, "max": 100.0, "step":0.01, "round": False, }),
                     "seed": ("INT", {"default": 0, "min": -1, "max": 0xffffffffffffffff}),
+                    "bongmath": ("BOOLEAN", {"default": True}),
                      },
                 "optional": 
                     {
                     "positive": ("CONDITIONING", ),
                     "negative": ("CONDITIONING", ),
-                    "latent_image": ("LATENT", ),    
+                    "latent_image": ("LATENT", ),
                     "guides": ("GUIDES",), 
+                    "options": ("OPTIONS", ),   
                     }
                 }
 
@@ -740,12 +750,95 @@ class ClownsharKSamplerSimple_Beta:
                     latent_guide=None, latent_guide_inv=None, guide_mode="", latent_guide_weights=None, latent_guide_weights_inv=None, latent_guide_mask=None, latent_guide_mask_inv=None, rescale_floor=True, sigmas_override=None, unsampler_type="linear",
                     guides=None, options=None, sde_noise=None,sde_noise_steps=1, 
                     extra_options="", automation=None, etas=None, etas_substep=None, s_noises=None, s_noises_substep=None, unsample_resample_scales=None, regional_conditioning_weights=None,frame_weights_grp=None, eta_substep=0.5, noise_mode_sde_substep="hard",
-                    overshoot=0.0, overshoot_substep=0.0, noise_boost_step=0.0, noise_boost_substep=0.0, bongmath=True,
+                    overshoot=0.0, overshoot_substep=0.0, noise_boost_step=0.0, noise_boost_substep=0.0, noise_anchor=1.0, bongmath=True,
                     ): 
 
         noise_seed_sde = seed+1
         
         sampler_name, implicit_sampler_name = process_sampler_name(sampler_name)
+        
+        # defaults for SharkSampler
+        noise_type_init = "gaussian"
+        noise_stdev     = 1.0
+        sampler_mode    = "standard"
+        denoise_alt     = 1.0
+        
+        
+        if options is not None:
+            noise_type_sde = options.get('noise_type_sde', noise_type_sde)
+            noise_type_sde_substep = options.get('noise_type_sde_substep', noise_type_sde_substep)
+            
+            noise_mode_sde = options.get('noise_mode_sde', noise_mode_sde)
+            noise_mode_sde_substep = options.get('noise_mode_sde_substep', noise_mode_sde_substep)
+            
+            
+            
+            overshoot_mode = options.get('overshoot_mode', overshoot_mode)
+            overshoot_mode_substep = options.get('overshoot_mode_substep', overshoot_mode_substep)
+
+            eta = options.get('eta', eta)
+            eta_substep = options.get('eta_substep', eta_substep)
+
+            overshoot = options.get('overshoot', overshoot)
+            overshoot_substep = options.get('overshoot_substep', overshoot_substep)
+            
+
+
+            noise_boost_step = options.get('noise_boost_step', noise_boost_step)
+            noise_boost_substep = options.get('noise_boost_substep', noise_boost_substep)
+            
+            noise_anchor = options.get('noise_anchor', noise_anchor)
+
+            s_noise = options.get('s_noise', s_noise)
+            s_noise_substep = options.get('s_noise_substep', s_noise_substep)
+
+            d_noise = options.get('d_noise', d_noise)
+            
+            
+            
+            implicit_steps = options.get('implicit_steps', implicit_steps)
+            implicit_substeps = options.get('implicit_substeps', implicit_substeps)
+            
+            
+            
+            alpha_sde = options.get('alpha_sde', alpha_sde)
+            k_sde = options.get('k_sde', k_sde)
+            c1 = options.get('c1', c1)
+            c2 = options.get('c2', c2)
+            c3 = options.get('c3', c3)
+            t_fn_formula = options.get('t_fn_formula', t_fn_formula)
+            sigma_fn_formula = options.get('sigma_fn_formula', sigma_fn_formula)
+            unsampler_type = options.get('unsampler_type', unsampler_type)
+            frame_weights_grp = options.get('frame_weights_grp', frame_weights_grp)
+            
+            sde_noise = options.get('sde_noise', sde_noise)
+            sde_noise_steps = options.get('sde_noise_steps', sde_noise_steps)
+            
+            extra_options = options.get('extra_options', extra_options)
+            
+            automation = options.get('automation', automation)
+            
+            # SharkSampler Options
+            noise_type_init = options.get('noise_type_init', noise_type_init)
+            noise_stdev     = options.get('noise_stdev', noise_stdev)
+            sampler_mode    = options.get('sampler_mode', sampler_mode)
+            denoise_alt     = options.get('denoise_alt', denoise_alt)
+
+            
+            channelwise_cfg = options.get('channelwise_cfg', automation)
+            if channelwise_cfg:
+                cfg = -abs(cfg)  # set cfg negative for shark, to flag as cfg_cw
+
+
+
+        if automation is not None:
+            etas = automation['etas'] if 'etas' in automation else None
+            etas_substep = automation['etas_substep'] if 'etas_substep' in automation else None
+            s_noises = automation['s_noises'] if 's_noises' in automation else None
+            s_noises_substep = automation['s_noise_substep'] if 's_noise_substep' in automation else None
+            unsample_resample_scales = automation['epsilon_scales'] if 'epsilon_scales' in automation else None
+            frame_weights_grp = automation['frame_weights_grp'] if 'frame_weights_grp' in automation else None
+
 
         sampler = ClownSamplerAdvanced_Beta().main(noise_type_sde = noise_type_sde,
             noise_type_sde_substep = noise_type_sde_substep,
@@ -753,6 +846,7 @@ class ClownsharKSamplerSimple_Beta:
             overshoot_mode = overshoot_mode,
             overshoot_mode_substep = overshoot_mode_substep,
             eta = eta,
+            eta_substep = eta_substep,
             d_noise = d_noise,
             s_noise = s_noise,
             s_noise_substep = s_noise_substep,
@@ -785,19 +879,21 @@ class ClownsharKSamplerSimple_Beta:
             sde_noise_steps = sde_noise_steps,
             extra_options = extra_options,
             automation = automation,
-            etas = etas,
-            etas_substep = etas_substep,
-            s_noises = s_noises,
-            s_noises_substep = s_noises_substep,
+
             unsample_resample_scales = unsample_resample_scales,
             regional_conditioning_weights = regional_conditioning_weights,
             frame_weights_grp = frame_weights_grp,
-            eta_substep = eta_substep,
             noise_mode_sde_substep = noise_mode_sde_substep,
             overshoot = overshoot,
             overshoot_substep = overshoot_substep,
             noise_boost_step = noise_boost_step,
             noise_boost_substep = noise_boost_substep,
+            
+            etas = etas,
+            s_noises = s_noises,
+            s_noises_substep = s_noises_substep,
+            etas_substep = etas_substep,
+
             bongmath = bongmath,)
         
 
@@ -807,6 +903,10 @@ class ClownsharKSamplerSimple_Beta:
             latent_image=latent_image, positive=positive, negative=negative, sampler=sampler[0], 
             cfgpp=cfgpp, noise_seed=seed, 
             options=options, sde_noise=sde_noise, sde_noise_steps=sde_noise_steps, 
+            noise_type_init=noise_type_init,
+            noise_stdev=noise_stdev,
+            sampler_mode=sampler_mode,
+            denoise_alt=denoise_alt,
             extra_options=extra_options)
         
         return (output, denoised,)

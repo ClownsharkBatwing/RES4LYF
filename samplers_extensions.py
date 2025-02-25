@@ -28,6 +28,311 @@ def move_to_same_device(*tensors):
     return tuple(tensor.to(device) for tensor in tensors)
 
 
+from .rk_coefficients_beta import RK_SAMPLER_NAMES_BETA_FOLDERS
+from .noise_sigmas_timesteps_scaling import NOISE_MODE_NAMES
+
+
+class ClownSamplerSelector_Beta:
+    @classmethod
+    def INPUT_TYPES(s):
+        return {"required":
+                    {"sampler_name": (RK_SAMPLER_NAMES_BETA_FOLDERS, {"default": "multistep/res_2m"}), 
+                     },
+                "optional": 
+                    {
+                    }
+                }
+
+    RETURN_TYPES = (RK_SAMPLER_NAMES_BETA_FOLDERS,)
+    RETURN_NAMES = ("sampler_name",) 
+
+    FUNCTION = "main"
+
+    CATEGORY = "RES4LYF/sampler_options"
+    
+    def main(self,sampler_name="res_2m",):
+        
+        return (sampler_name,)
+
+
+
+
+class ClownOptions_SDE_Beta:
+    @classmethod
+    def INPUT_TYPES(s):
+        return {"required":
+                    {
+                    "noise_type_sde": (NOISE_GENERATOR_NAMES_SIMPLE, {"default": "gaussian"}),
+                    "noise_type_sde_substep": (NOISE_GENERATOR_NAMES_SIMPLE, {"default": "gaussian"}),
+                    "noise_mode_sde": (NOISE_MODE_NAMES, {"default": 'hard', "tooltip": "How noise scales with the sigma schedule. Hard is the most aggressive, the others start strong and drop rapidly."}),
+                    "noise_mode_sde_substep": (NOISE_MODE_NAMES, {"default": 'hard', "tooltip": "How noise scales with the sigma schedule. Hard is the most aggressive, the others start strong and drop rapidly."}),
+                    "eta": ("FLOAT", {"default": 0.5, "min": -100.0, "max": 100.0, "step":0.01, "round": False, "tooltip": "Calculated noise amount to be added, then removed, after each step."}),
+                    "eta_substep": ("FLOAT", {"default": 0.5, "min": -100.0, "max": 100.0, "step":0.01, "round": False, "tooltip": "Calculated noise amount to be added, then removed, after each step."}),
+                     },
+                "optional": 
+                    {
+                    "options": ("OPTIONS", ),   
+                    }
+                }
+
+    RETURN_TYPES = ("OPTIONS",)
+    RETURN_NAMES = ("options",)
+
+    FUNCTION = "main"
+
+    CATEGORY = "RES4LYF/sampler_options"
+    
+    def main(self, noise_type_sde="gaussian", noise_type_sde_substep="gaussian", noise_mode_sde="hard", noise_mode_sde_substep="hard", eta=0.5, eta_substep=0.5, options=None): 
+        
+        if options is None:
+            options = {}
+            
+        options['noise_type_sde'] = noise_type_sde
+        options['noise_type_sde_substep'] = noise_type_sde_substep
+        options['noise_mode_sde'] = noise_mode_sde
+        options['noise_mode_sde_substep'] = noise_mode_sde_substep
+        options['eta'] = eta
+        options['eta_substep'] = eta_substep
+
+        return (options,)
+
+
+
+class ClownOptions_StepSize_Beta:
+    @classmethod
+    def INPUT_TYPES(s):
+        return {"required":
+                    {
+                    "overshoot_mode":         (NOISE_MODE_NAMES, {"default": 'hard', "tooltip": "How step size overshoot scales with the sigma schedule. Hard is the most aggressive, the others start strong and drop rapidly."}),
+                    "overshoot_mode_substep": (NOISE_MODE_NAMES, {"default": 'hard', "tooltip": "How substep size overshoot scales with the sigma schedule. Hard is the most aggressive, the others start strong and drop rapidly."}),
+                    "overshoot":         ("FLOAT", {"default": 0.0, "min": -100.0, "max": 100.0, "step":0.01, "round": False, "tooltip": "Boost the size of each denoising step, then rescale to match the original. Has a softening effect."}),
+                    "overshoot_substep": ("FLOAT", {"default": 0.0, "min": -100.0, "max": 100.0, "step":0.01, "round": False, "tooltip": "Boost the size of each denoising substep, then rescale to match the original. Has a softening effect."}),
+                     },
+                "optional": 
+                    {
+                    "options": ("OPTIONS", ),   
+                    }
+                }
+
+    RETURN_TYPES = ("OPTIONS",)
+    RETURN_NAMES = ("options",)
+
+    FUNCTION = "main"
+
+    CATEGORY = "RES4LYF/sampler_options"
+    
+    def main(self, overshoot_mode="hard", overshoot_mode_substep="hard", overshoot=0.0, overshoot_substep=0.0, options=None): 
+        
+        if options is None:
+            options = {}
+            
+        options['overshoot_mode'] = overshoot_mode
+        options['overshoot_mode_substep'] = overshoot_mode_substep
+        options['overshoot'] = overshoot
+        options['overshoot_substep'] = overshoot_substep
+
+        return (options,)
+
+
+
+
+
+class ClownOptions_DetailBoost_Beta:
+    @classmethod
+    def INPUT_TYPES(s):
+        return {"required":
+                    {
+                    "noise_boost_step": ("FLOAT", {"default": 0.0, "min": -100.0, "max": 100.0, "step":0.01, "round": False, "tooltip": "Set to positive values to create a sharper, grittier, more detailed image. Set to negative values to soften and deepen the colors."}),
+                    "noise_boost_substep": ("FLOAT", {"default": 0.0, "min": -100.0, "max": 100.0, "step":0.01, "round": False, "tooltip": "Set to positive values to create a sharper, grittier, more detailed image. Set to negative values to soften and deepen the colors."}),
+                    "noise_anchor": ("FLOAT", {"default": 1.0, "min": -100.0, "max": 100.0, "step":0.01, "round": False, "tooltip": "Typically set to between 1.0 and 0.0. Lower values cerate a grittier, more detailed image."}),
+                    "s_noise": ("FLOAT", {"default": 1.0, "min": -10000, "max": 10000, "step":0.01, "tooltip": "Adds extra SDE noise. Values around 1.03-1.07 can lead to a moderate boost in detail and paint textures."}),
+                    "s_noise_substep": ("FLOAT", {"default": 1.0, "min": -10000, "max": 10000, "step":0.01, "tooltip": "Adds extra SDE noise. Values around 1.03-1.07 can lead to a moderate boost in detail and paint textures."}),
+                    "d_noise": ("FLOAT", {"default": 1.0, "min": -10000, "max": 10000, "step":0.01, "tooltip": "Downscales the sigma schedule. Values around 0.98-0.95 can lead to a large boost in detail and paint textures."}),
+                     },
+                "optional": 
+                    {
+                    "options": ("OPTIONS", ),   
+                    }
+                }
+
+    RETURN_TYPES = ("OPTIONS",)
+    RETURN_NAMES = ("options",)
+
+    FUNCTION = "main"
+
+    CATEGORY = "RES4LYF/sampler_options"
+    
+    def main(self, noise_boost_step=0.0, noise_boost_substep=0.0, noise_anchor=1.0, s_noise=1.0, s_noise_substep=1.0, d_noise=1.0, options=None): 
+        
+        if options is None:
+            options = {}
+            
+        options['noise_boost_step'] = noise_boost_step
+        options['noise_boost_substep'] = noise_boost_substep
+        options['noise_anchor'] = noise_anchor
+        options['s_noise'] = s_noise
+        options['s_noise_substep'] = s_noise_substep
+        options['d_noise'] = d_noise
+
+        return (options,)
+
+
+
+
+
+class ClownOptions_ImplicitSteps_Beta:
+    @classmethod
+    def INPUT_TYPES(s):
+        return {"required":
+                    {
+                    "implicit_steps": ("INT", {"default": 0, "min": 0, "max": 10000}),
+                    "implicit_substeps": ("INT", {"default": 0, "min": 0, "max": 10000}),
+                     },
+                "optional": 
+                    {
+                    "options": ("OPTIONS", ),   
+                    }
+                }
+
+    RETURN_TYPES = ("OPTIONS",)
+    RETURN_NAMES = ("options",)
+
+    FUNCTION = "main"
+
+    CATEGORY = "RES4LYF/sampler_options"
+    
+    def main(self, implicit_steps=0, implicit_substeps=0, options=None): 
+        
+        if options is None:
+            options = {}
+            
+        options['implicit_steps'] = implicit_steps
+        options['implicit_substeps'] = implicit_substeps
+
+        return (options,)
+
+
+
+class ClownOptions_ExtraOptions_Beta:
+    @classmethod
+    def INPUT_TYPES(s):
+        return {"required":
+                    {
+                    "extra_options": ("STRING", {"default": "", "multiline": True}),   
+                    },
+                    "optional": 
+                    {
+                    "options": ("OPTIONS", ),   
+                    }  
+               }
+    RETURN_TYPES = ("OPTIONS",)
+    RETURN_NAMES = ("options",)
+    CATEGORY = "RES4LYF/sampler_options"
+    
+    FUNCTION = "main"
+
+    def main(self, extra_options="",options=None):
+                
+        if options is None:
+            options = {}
+            
+        options['extra_options'] = extra_options
+
+        return (options, )
+
+
+
+
+class ClownOptions_Automation_Beta:
+    @classmethod
+    def INPUT_TYPES(s):
+        return {"required":
+                    {
+                    },
+                    "optional": 
+                    {
+                        "etas": ("SIGMAS", ),
+                        "etas_substep": ("SIGMAS", ),
+                        "s_noises": ("SIGMAS", ),
+                        "s_noises_substep": ("SIGMAS", ),
+                        "epsilon_scales": ("SIGMAS", ),
+                        "options": ("OPTIONS", ),  
+                    }  
+               }
+    RETURN_TYPES = ("OPTIONS",)
+    RETURN_NAMES = ("options",)
+    CATEGORY = "RES4LYF/sampler_options"
+    
+    FUNCTION = "main"
+
+    def main(self, etas=None, etas_substep=None, s_noises=None, s_noises_substep=None, epsilon_scales=None,options=None):
+                
+        if options is None:
+            options = {}
+            
+        automation = {
+            "etas": etas,
+            "etas_substep": etas_substep,
+            "s_noises": s_noises,
+            "s_noises_substep": s_noises_substep,
+            "epsilon_scales": epsilon_scales,
+        }
+        
+        options["automation"] = automation
+        #options['automation'] = (etas, etas_substep, s_noises, s_noises_substep, epsilon_scales) # epsilon_scales was called unsample_resample_scales
+
+        return (options, )
+
+
+
+
+
+class SharkOptions_Beta:
+    @classmethod
+    def INPUT_TYPES(s):
+        return {"required":
+                    {
+                    "noise_type_init": (NOISE_GENERATOR_NAMES_SIMPLE, {"default": "gaussian"}),
+                    "noise_stdev": ("FLOAT", {"default": 1.0, "min": -10000.0, "max": 10000.0, "step":0.01, "round": False, }),
+                    "sampler_mode": (['standard', 'unsample', 'resample'],),
+                    "denoise_alt": ("FLOAT", {"default": 1.0, "min": -10000, "max": 10000, "step":0.01}),
+                    "channelwise_cfg": ("BOOLEAN", {"default": False}),
+                     },
+                "optional": 
+                    {
+                    "sigmas": ("SIGMAS", ),
+                    "options": ("OPTIONS", ),   
+                    }
+                }
+
+    RETURN_TYPES = ("OPTIONS",)
+    RETURN_NAMES = ("options",)
+
+    FUNCTION = "main"
+
+    CATEGORY = "RES4LYF/sampler_options"
+    
+    def main(self, noise_type_init="gaussian", noise_stdev=1.0, sampler_mode="standard", denoise_alt=1.0, channelwise_cfg=False, options=None): 
+        
+        if options is None:
+            options = {}
+            
+        options['noise_type_init'] = noise_type_init
+        options['noise_stdev'] = noise_stdev
+        options['sampler_mode'] = sampler_mode
+        options['denoise_alt'] = denoise_alt
+        options['channelwise_cfg'] = channelwise_cfg
+
+        return (options,)
+
+
+
+
+
+
+
+
+
     
 class SamplerOptions_TimestepScaling:
     # for patching the t_fn and sigma_fn (sigma <-> timestep) formulas to allow picking Runge-Kutta Ci values ("midpoints") with different scaling.

@@ -85,7 +85,7 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
                   LGW_MASK_RESCALE_MIN=True, sigmas_override=None, sampler_mode="standard", unsample_resample_scales=None,regional_conditioning_weights=None, sde_noise=[],
                   extra_options="",
                   etas=None, etas_substep=None, s_noises=None, s_noises_substep=None, momentums=None, guides=None, cfgpp=0.0, cfg_cw = 1.0,regional_conditioning_floors=None, frame_weights_grp=None, eta_substep=0.0, noise_mode_sde_substep="hard",
-                  noise_boost_step=0.0, noise_boost_substep=0.0, overshoot=0.0, overshoot_substep=0.0, overshoot_mode="hard", overshoot_mode_substep="hard", BONGMATH=True,
+                  noise_boost_step=0.0, noise_boost_substep=0.0, overshoot=0.0, overshoot_substep=0.0, overshoot_mode="hard", overshoot_mode_substep="hard", BONGMATH=True, noise_anchor=1.0,
                   ):
     extra_args = {} if extra_args is None else extra_args
     default_dtype = getattr(torch, get_extra_options_kv("default_dtype", "", extra_options), x.dtype)
@@ -129,7 +129,7 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
     if implicit_sampler_name == "none":
         implicit_steps_diag = implicit_steps_full = 0
         
-    RK = RK_Method_Beta.create(model, rk_type, model_device=model_device, work_device=work_device, dtype=default_dtype, extra_options=extra_options)
+    RK = RK_Method_Beta.create(model, rk_type, noise_anchor, model_device=model_device, work_device=work_device, dtype=default_dtype, extra_options=extra_options)
     RK.extra_args = RK.init_cfg_channelwise(x, cfg_cw, **extra_args)
     RK.extra_args['model_options']['transformer_options']['regional_conditioning_weight'] = 0.0
     RK.extra_args['model_options']['transformer_options']['regional_conditioning_floor']  = 0.0
@@ -341,11 +341,6 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
                             x_, eps_ = RK.newton_iter(x_0, x_, eps_, eps_prev_, data_, NS.s_, row, NS.h, sigmas, step, "pre", extra_options) # will this do anything? not x_tmp
 
                             eps_[row], data_[row] = RK(x_tmp, s_tmp, x_0, sigma)
-                            #if step > 0:
-                            #    print(step, NS.h.item(), RK.C[1].item(), RK.B[0][0].item(), RK.B[0][1].item(), NS.s_)
-                            #if extra_options_flag("preview_substeps", extra_options):
-                            #    callback({'x': x, 'i': step, 'sigma': sigma, 'sigma_next': sigma_next, 'denoised': data_[row].to(torch.float32)}) if callback is not None else None
-
 
 
                         if extra_options_flag("bong2m", extra_options) and RK.multistep_stages > 0 and step < len(sigmas)-4:
@@ -414,50 +409,30 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
 
 
                     # UPDATE
-
                     x_ = RK.update_substep(x_0, x_, eps_, eps_prev_, row, RK.row_offset, NS.h_new, NS.h_new_orig, extra_options)
-                    
-                    if extra_options_flag("unmoored8", extra_options) and RK.multistep_stages > 0:
-                        for i in range(100):
-                            x_0 = x_[row+RK.row_offset] - NS.h * (RK.B[0][0]*eps_[0] + RK.B[0][1]*eps_[1]) #RK.zum(0, eps_, eps_prev_)
-                            
-                            x_[row+RK.row_offset] = x_0 + NS.h * (RK.B[0][0]*eps_[0] + RK.B[0][1]*eps_[1])
-                            
-                            eps_[1] = (x_[row+RK.row_offset] - x_0 - NS.h * RK.B[0][0]*eps_[0])   /   (NS.h * RK.B[0][1])
-                            eps_[0] = (x_[row+RK.row_offset] - x_0 - NS.h * RK.B[0][1]*eps_[1])   /   (NS.h * RK.B[0][0])
-                            
-                        x_ = RK.update_substep(x_0, x_, eps_, eps_prev_, row, RK.row_offset, NS.h_new, NS.h_new_orig, extra_options)
-                
+
                     x_[row+RK.row_offset] = NS.rebound_overshoot_substep(x_0, x_[row+RK.row_offset])
                     
                     if not RK.IMPLICIT and NS.noise_mode_sde_substep != "hard_sq":
                         x_[row+RK.row_offset] = NS.swap_noise_substep(x_0, x_[row+RK.row_offset])
 
                     if BONGMATH and NS.s_[row] > RK.sigma_min and NS.h < RK.sigma_max/2 and diag_iter == implicit_steps_diag and not extra_options_flag("disable_terminal_bongmath", extra_options):
-
                         if step == 0 and UNSAMPLE:
                             pass
                         else:
                             x_0, x_, eps_ = RK.bong_iter(x_0, x_, eps_, eps_prev_, data_, sigma, NS.s_, row, RK.row_offset, NS.h, extra_options)
-                    #if step > 1:
-                    #    print(NS.h.item(), RK.h_fn(sigmas[step], sigmas[step-1]).item(), RK.h_fn(sigmas[step], sigmas[step-2]).item(), RK.h_fn(sigmas[step], sigmas[step-1]).item()/NS.h.item(), RK.h_fn(sigmas[step], sigmas[step-2]).item()/NS.h.item())
-                    #if NS.h > RK.sigma_max/2:
-                    #    print("high h:", step, row, NS.h.item())
 
-
-            denoised = x_0 + ((sigma / (sigma - NS.sigma_down)) *  NS.h_new) * RK.zum(RK.rows, eps_, eps_prev_)
-            eps = RK.get_epsilon_anchored(x_0, denoised, sigma_next)
-            
             x_next = x_[RK.rows - RK.multistep_stages - RK.row_offset + 1]
-
             x_next = NS.rebound_overshoot_step(x_0, x_next)
+            
+            eps = (x_0 - x_next) / (sigma - sigma_next)
+            denoised = x_0 - sigma * eps
+            
             x_next = LG.process_guides_poststep(x_next, denoised, eps, step, extra_options)
             x = NS.swap_noise_step(x_0, x_next)
-            #x_noise_alt = NS.swap_noise_step(x_0, x_next)
             
             preview_callback(x, eps, denoised, x_, eps_, data_, step, sigma, sigma_next, callback, extra_options)
             
-            h_prev2 = h_prev
             h_prev = NS.h
             x_prev = x_0
             

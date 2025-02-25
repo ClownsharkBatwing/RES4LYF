@@ -28,7 +28,7 @@ def get_epsilon_from_step(x, x_next, sigma, sigma_next):
 
 
 class RK_Method_Beta:
-    def __init__(self, model, rk_type, model_device='cuda', work_device='cpu', dtype=torch.float64, extra_options=""):
+    def __init__(self, model, rk_type, noise_anchor, model_device='cuda', work_device='cpu', dtype=torch.float64, extra_options=""):
         self.work_device = work_device
         self.model_device = model_device
         self.dtype  = dtype
@@ -71,7 +71,8 @@ class RK_Method_Beta:
         if self.reorder_tableau_indices[0]:
             self.reorder_tableau_indices = [int(self.reorder_tableau_indices[_]) for _ in range(len(self.reorder_tableau_indices))]
 
-        self.LINEAR_ANCHOR_X_0 = float(get_extra_options_kv("linear_anchor_x_0", "1.0", extra_options))
+        #self.LINEAR_ANCHOR_X_0 = float(get_extra_options_kv("linear_anchor_x_0", "1.0", extra_options))
+        self.LINEAR_ANCHOR_X_0 = noise_anchor
 
     @staticmethod
     def is_exponential(rk_type):
@@ -81,11 +82,11 @@ class RK_Method_Beta:
             return False
 
     @staticmethod
-    def create(model, rk_type, model_device='cuda', work_device='cpu', dtype=torch.float64, extra_options=""):
+    def create(model, rk_type, noise_anchor=1.0, model_device='cuda', work_device='cpu', dtype=torch.float64, extra_options=""):
         if RK_Method_Beta.is_exponential(rk_type):
-            return RK_Method_Exponential(model, rk_type, model_device, work_device, dtype, extra_options)
+            return RK_Method_Exponential(model, rk_type, noise_anchor, model_device, work_device, dtype, extra_options)
         else:
-            return RK_Method_Linear(model, rk_type, model_device, work_device, dtype, extra_options)
+            return RK_Method_Linear(model, rk_type, noise_anchor, model_device, work_device, dtype, extra_options)
                 
     def __call__(self):
         raise NotImplementedError("This method got clownsharked!")
@@ -446,8 +447,8 @@ class RK_Method_Beta:
 
 
 class RK_Method_Exponential(RK_Method_Beta):
-    def __init__(self, model, rk_type, model_device='cuda', work_device='cpu', dtype=torch.float64, extra_options=""):
-        super().__init__(model, rk_type, model_device=model_device, work_device=work_device, dtype=dtype, extra_options=extra_options) 
+    def __init__(self, model, rk_type, noise_anchor, model_device='cuda', work_device='cpu', dtype=torch.float64, extra_options=""):
+        super().__init__(model, rk_type, noise_anchor, model_device=model_device, work_device=work_device, dtype=dtype, extra_options=extra_options) 
         
     @staticmethod
     def alpha_fn(neg_h):
@@ -516,8 +517,8 @@ class RK_Method_Exponential(RK_Method_Beta):
 
 
 class RK_Method_Linear(RK_Method_Beta):
-    def __init__(self, model, rk_type, model_device='cuda', work_device='cpu', dtype=torch.float64, extra_options=""):
-        super().__init__(model, rk_type, model_device=model_device, work_device=work_device, dtype=dtype, extra_options=extra_options) 
+    def __init__(self, model, rk_type, noise_anchor, model_device='cuda', work_device='cpu', dtype=torch.float64, extra_options=""):
+        super().__init__(model, rk_type, noise_anchor, model_device=model_device, work_device=work_device, dtype=dtype, extra_options=extra_options) 
         
     @staticmethod
     def alpha_fn(neg_h):
