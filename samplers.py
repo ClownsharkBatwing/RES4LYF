@@ -755,13 +755,14 @@ class ClownsharKSamplerSimple_Beta:
 
         noise_seed_sde = seed+1
         
-        sampler_name, implicit_sampler_name = process_sampler_name(sampler_name)
+        #sampler_name, implicit_sampler_name = process_sampler_name(sampler_name)
         
         # defaults for SharkSampler
         noise_type_init = "gaussian"
         noise_stdev     = 1.0
         sampler_mode    = "standard"
         denoise_alt     = 1.0
+        channelwise_cfg = 1.0
         
         
         if options is not None:
@@ -776,20 +777,20 @@ class ClownsharKSamplerSimple_Beta:
             overshoot_mode = options.get('overshoot_mode', overshoot_mode)
             overshoot_mode_substep = options.get('overshoot_mode_substep', overshoot_mode_substep)
 
-            eta = options.get('eta', eta)
-            eta_substep = options.get('eta_substep', eta_substep)
+            eta               = options.get('eta', eta)
+            eta_substep       = options.get('eta_substep', eta_substep)
 
-            overshoot = options.get('overshoot', overshoot)
+            overshoot         = options.get('overshoot', overshoot)
             overshoot_substep = options.get('overshoot_substep', overshoot_substep)
             
 
 
-            noise_boost_step = options.get('noise_boost_step', noise_boost_step)
+            noise_boost_step    = options.get('noise_boost_step', noise_boost_step)
             noise_boost_substep = options.get('noise_boost_substep', noise_boost_substep)
             
             noise_anchor = options.get('noise_anchor', noise_anchor)
 
-            s_noise = options.get('s_noise', s_noise)
+            s_noise         = options.get('s_noise', s_noise)
             s_noise_substep = options.get('s_noise_substep', s_noise_substep)
 
             d_noise = options.get('d_noise', d_noise)
@@ -825,19 +826,11 @@ class ClownsharKSamplerSimple_Beta:
             denoise_alt     = options.get('denoise_alt', denoise_alt)
 
             
-            channelwise_cfg = options.get('channelwise_cfg', automation)
+            channelwise_cfg = options.get('channelwise_cfg', channelwise_cfg)
             if channelwise_cfg:
                 cfg = -abs(cfg)  # set cfg negative for shark, to flag as cfg_cw
 
 
-
-        if automation is not None:
-            etas = automation['etas'] if 'etas' in automation else None
-            etas_substep = automation['etas_substep'] if 'etas_substep' in automation else None
-            s_noises = automation['s_noises'] if 's_noises' in automation else None
-            s_noises_substep = automation['s_noise_substep'] if 's_noise_substep' in automation else None
-            unsample_resample_scales = automation['epsilon_scales'] if 'epsilon_scales' in automation else None
-            frame_weights_grp = automation['frame_weights_grp'] if 'frame_weights_grp' in automation else None
 
 
         sampler = ClownSamplerAdvanced_Beta().main(noise_type_sde = noise_type_sde,
@@ -895,8 +888,8 @@ class ClownsharKSamplerSimple_Beta:
             etas_substep = etas_substep,
 
             bongmath = bongmath,)
+            
         
-
         output, denoised, sde_noise = SharkSampler().main(
             model=model, cfg=cfg, scheduler=scheduler, steps=steps, 
             denoise=denoise,
