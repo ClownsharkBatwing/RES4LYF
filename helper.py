@@ -2,6 +2,7 @@ import re
 import torch
 from comfy.samplers import SCHEDULER_NAMES
 import torch.nn.functional as F
+from .res4lyf import RESplain
 
 def get_extra_options_kv(key, default, extra_options):
 
@@ -23,8 +24,6 @@ def get_extra_options_list(key, default, extra_options):
 
 def extra_options_flag(flag, extra_options):
     return bool(re.search(rf"{flag}", extra_options))
-
-
 
 def safe_get_nested(d, keys, default=None):
     for key in keys:
@@ -253,3 +252,87 @@ def slerp(v0: FloatTensor, v1: FloatTensor, t: float|FloatTensor, DOT_THRESHOLD=
     out: FloatTensor = slerped.where(can_slerp.unsqueeze(-1), out)
   
   return out
+
+class OptionsManager:
+    APPEND_OPTIONS = {"extra_options"}
+    
+    def __init__(self, options_inputs=None):
+        self.options_list = options_inputs or []
+        self._merged_dict = None
+    
+    def add_option(self, option):
+        """Add a single options dictionary"""
+        if option is not None:
+            self.options_list.append(option)
+            self._merged_dict = None # invalidate cached merged options
+    
+    @property
+    def merged(self):
+        """Get merged options with proper priority handling"""
+        if self._merged_dict is None:
+            self._merged_dict = {}
+            
+            special_string_options = {
+                key: [] for key in self.APPEND_OPTIONS
+            }
+            
+            for options_dict in self.options_list:
+                if options_dict is not None:
+                    for key, value in options_dict.items():
+                        if key in self.APPEND_OPTIONS and value:
+                            special_string_options[key].append(value)
+                        elif isinstance(value, dict):
+                            # Deep merge dictionaries
+                            if key not in self._merged_dict:
+                                self._merged_dict[key] = {}
+                            
+                            if isinstance(self._merged_dict[key], dict):
+                                self._deep_update(self._merged_dict[key], value)
+                            else:
+                                self._merged_dict[key] = value.copy()
+                        else:
+                            self._merged_dict[key] = value
+            
+            # append special case string options (e.g. extra_options)
+            for key, value in special_string_options.items():
+                if value:
+                    self._merged_dict[key] = "\n".join(value)
+        
+        return self._merged_dict
+    
+    def get(self, key, default=None):
+        return self.merged.get(key, default)
+    
+    def _deep_update(self, target_dict, source_dict):
+
+        for key, value in source_dict.items():
+            if isinstance(value, dict) and key in target_dict and isinstance(target_dict[key], dict):
+                # recursive dict update
+                self._deep_update(target_dict[key], value)
+            else:
+                target_dict[key] = value
+    
+    def __getitem__(self, key):
+        """Allow dictionary-like access to options"""
+        return self.merged[key]
+    
+    def __contains__(self, key):
+        """Allow 'in' operator for options"""
+        return key in self.merged
+    
+    def as_dict(self):
+        """Return the merged options as a dictionary"""
+        return self.merged.copy()
+    
+    def __bool__(self):
+        """Return True if there are any options"""
+        return len(self.options_list) > 0 and any(opt is not None for opt in self.options_list)
+    
+    def debug_print_options(self):
+        for i, options_dict in enumerate(self.options_list):
+            RESplain(f"Options {i}:", debug=True)
+            if options_dict is not None:
+                for key, value in options_dict.items():
+                    RESplain(f"  {key}: {value}", debug=True)
+            else:
+                RESplain("  None", "\n", debug=True)

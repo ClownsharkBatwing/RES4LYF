@@ -279,7 +279,6 @@ class ClownOptions_Automation_Beta:
         }
         
         options["automation"] = automation
-        #options['automation'] = (etas, etas_substep, s_noises, s_noises_substep, epsilon_scales) # epsilon_scales was called unsample_resample_scales
 
         return (options, )
 
@@ -1221,7 +1220,13 @@ class ClownsharKSamplerAutomation:
     FUNCTION = "main"
 
     def main(self, etas=None, s_noises=None, unsample_resample_scales=None,):
-        automation = (etas, s_noises, unsample_resample_scales)
+        
+        automation = {
+            "etas": etas,
+            "s_noises": s_noises,
+            "unsample_resample_scales": unsample_resample_scales
+        }
+
         return (automation, )
 
 
@@ -1249,7 +1254,13 @@ class ClownsharKSamplerAutomation_Beta:
     FUNCTION = "main"
 
     def main(self, etas=None, etas_substep=None, s_noises=None, s_noises_substep=None, unsample_resample_scales=None,):
-        automation = (etas, etas_substep, s_noises, s_noises_substep, unsample_resample_scales)
+        automation = {
+            "etas": etas,
+            "etas_substep": etas_substep,
+            "s_noises": s_noises,
+            "s_noises_substep": s_noises_substep,
+            "unsample_resample_scales": unsample_resample_scales
+        }
         return (automation, )
 
 

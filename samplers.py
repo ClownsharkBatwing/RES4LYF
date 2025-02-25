@@ -3,6 +3,7 @@ from .sigmas import get_sigmas
 from .rk_sampler import sample_rk
 from .rk_coefficients import RK_SAMPLER_NAMES, IRK_SAMPLER_NAMES
 from .rk_coefficients_beta import RK_SAMPLER_NAMES_BETA, IRK_SAMPLER_NAMES_BETA
+from .res4lyf import RESplain
 
 import comfy.samplers
 import comfy.sample
@@ -20,7 +21,7 @@ import torch.nn.functional as F
 import math
 import copy
 
-from .helper import get_extra_options_kv, extra_options_flag, get_res4lyf_scheduler_list
+from .helper import get_extra_options_kv, extra_options_flag, get_res4lyf_scheduler_list, OptionsManager
 from .latents import initialize_or_scale
 from .rk_guide_func import get_orthogonal
 
@@ -708,13 +709,10 @@ def process_sampler_name(selected_value):
     return sampler_name, implicit_sampler_name
 
 
-
-
-
 class ClownsharKSamplerSimple_Beta:
     @classmethod
     def INPUT_TYPES(s):
-        return {"required":
+        inputs = {"required":
                     {"model": ("MODEL",),
                     "eta": ("FLOAT", {"default": 0.5, "min": -100.0, "max": 100.0, "step":0.01, "round": False, "tooltip": "Calculated noise amount to be added, then removed, after each step."}),
                     "sampler_name": (RK_SAMPLER_NAMES_BETA_FOLDERS, {"default": "multistep/res_2m"}), 
@@ -731,9 +729,11 @@ class ClownsharKSamplerSimple_Beta:
                     "negative": ("CONDITIONING", ),
                     "latent_image": ("LATENT", ),
                     "guides": ("GUIDES",), 
-                    "options": ("OPTIONS", ),   
+                    "options": ("OPTIONS", {}),
                     }
                 }
+        
+        return inputs
 
     RETURN_TYPES = ("LATENT","LATENT",)
     RETURN_NAMES = ("output", "denoised",) 
@@ -741,97 +741,78 @@ class ClownsharKSamplerSimple_Beta:
     FUNCTION = "main"
 
     CATEGORY = "RES4LYF/samplers"
-    
+
     def main(self, 
              model=None, denoise=1.0, scheduler="beta57", cfg=1.0, seed=42, positive=None, negative=None, latent_image=None, steps=30,
              noise_type_sde="gaussian", noise_type_sde_substep="gaussian", noise_mode_sde="hard",overshoot_mode="hard", overshoot_mode_substep="hard",
              eta=0.25, d_noise=1.0, s_noise=1.0, s_noise_substep=1.0, alpha_sde=-1.0, k_sde=1.0, cfgpp=0.0, c1=0.0, c2=0.5, c3=1.0, noise_seed_sde=-1, sampler_name="res_2m", implicit_sampler_name="use_explicit",
                     t_fn_formula=None, sigma_fn_formula=None, implicit_substeps=0, implicit_steps=0,
                     latent_guide=None, latent_guide_inv=None, guide_mode="", latent_guide_weights=None, latent_guide_weights_inv=None, latent_guide_mask=None, latent_guide_mask_inv=None, rescale_floor=True, sigmas_override=None, unsampler_type="linear",
-                    guides=None, options=None, sde_noise=None,sde_noise_steps=1, 
+                    guides=None, sde_noise=None,sde_noise_steps=1, 
                     extra_options="", automation=None, etas=None, etas_substep=None, s_noises=None, s_noises_substep=None, unsample_resample_scales=None, regional_conditioning_weights=None,frame_weights_grp=None, eta_substep=0.5, noise_mode_sde_substep="hard",
                     overshoot=0.0, overshoot_substep=0.0, noise_boost_step=0.0, noise_boost_substep=0.0, noise_anchor=1.0, bongmath=True,
-                    ): 
+                    **kwargs): 
 
+        options_inputs = []
+
+        if "options" in kwargs and kwargs["options"] is not None:
+            options_inputs.append(kwargs["options"])
+
+        i = 1
+        while True:
+            option_name = f"options {i}"
+            if option_name in kwargs and kwargs[option_name] is not None:
+                options_inputs.append(kwargs[option_name])
+                i += 1
+            else:
+                break
+
+        options = OptionsManager(options_inputs)
+
+        noise_type_sde = options.get('noise_type_sde', noise_type_sde)
+        noise_type_sde_substep = options.get('noise_type_sde_substep', noise_type_sde_substep)
+        noise_mode_sde = options.get('noise_mode_sde', noise_mode_sde)
+        noise_mode_sde_substep = options.get('noise_mode_sde_substep', noise_mode_sde_substep)
+        overshoot_mode = options.get('overshoot_mode', overshoot_mode)
+        overshoot_mode_substep = options.get('overshoot_mode_substep', overshoot_mode_substep)
+        eta               = options.get('eta', eta)
+        eta_substep       = options.get('eta_substep', eta_substep)
+        overshoot         = options.get('overshoot', overshoot)
+        overshoot_substep = options.get('overshoot_substep', overshoot_substep)
+        noise_boost_step    = options.get('noise_boost_step', noise_boost_step)
+        noise_boost_substep = options.get('noise_boost_substep', noise_boost_substep)
+        noise_anchor = options.get('noise_anchor', noise_anchor)
+        s_noise         = options.get('s_noise', s_noise)
+        s_noise_substep = options.get('s_noise_substep', s_noise_substep)
+        d_noise = options.get('d_noise', d_noise)
+        implicit_steps = options.get('implicit_steps', implicit_steps)
+        implicit_substeps = options.get('implicit_substeps', implicit_substeps)
+        alpha_sde = options.get('alpha_sde', alpha_sde)
+        k_sde = options.get('k_sde', k_sde)
+        c1 = options.get('c1', c1)
+        c2 = options.get('c2', c2)
+        c3 = options.get('c3', c3)
+        t_fn_formula = options.get('t_fn_formula', t_fn_formula)
+        sigma_fn_formula = options.get('sigma_fn_formula', sigma_fn_formula)
+        unsampler_type = options.get('unsampler_type', unsampler_type)
+        sde_noise = options.get('sde_noise', sde_noise)
+        sde_noise_steps = options.get('sde_noise_steps', sde_noise_steps)
+        extra_options = options.get('extra_options', extra_options)
+        frame_weights_grp = options.get('frame_weights_grp', frame_weights_grp)
+        automation = options.get('automation', automation)
+        
+        # SharkSampler Options
+        noise_type_init = options.get('noise_type_init', noise_type_sde)
+        noise_stdev     = options.get('noise_stdev', 1.0)
+        sampler_mode    = options.get('sampler_mode', "standard")
+        denoise_alt     = options.get('denoise_alt', 1.0)
+        channelwise_cfg = options.get('channelwise_cfg', 1.0)
+        if channelwise_cfg is True:
+            cfg = -abs(cfg)  # set cfg negative for shark, to flag as cfg_cw
+        
         noise_seed_sde = seed+1
         
         #sampler_name, implicit_sampler_name = process_sampler_name(sampler_name)
-        
-        # defaults for SharkSampler
-        noise_type_init = "gaussian"
-        noise_stdev     = 1.0
-        sampler_mode    = "standard"
-        denoise_alt     = 1.0
-        channelwise_cfg = 1.0
-        
-        
-        if options is not None:
-            noise_type_sde = options.get('noise_type_sde', noise_type_sde)
-            noise_type_sde_substep = options.get('noise_type_sde_substep', noise_type_sde_substep)
-            
-            noise_mode_sde = options.get('noise_mode_sde', noise_mode_sde)
-            noise_mode_sde_substep = options.get('noise_mode_sde_substep', noise_mode_sde_substep)
-            
-            
-            
-            overshoot_mode = options.get('overshoot_mode', overshoot_mode)
-            overshoot_mode_substep = options.get('overshoot_mode_substep', overshoot_mode_substep)
-
-            eta               = options.get('eta', eta)
-            eta_substep       = options.get('eta_substep', eta_substep)
-
-            overshoot         = options.get('overshoot', overshoot)
-            overshoot_substep = options.get('overshoot_substep', overshoot_substep)
-            
-
-
-            noise_boost_step    = options.get('noise_boost_step', noise_boost_step)
-            noise_boost_substep = options.get('noise_boost_substep', noise_boost_substep)
-            
-            noise_anchor = options.get('noise_anchor', noise_anchor)
-
-            s_noise         = options.get('s_noise', s_noise)
-            s_noise_substep = options.get('s_noise_substep', s_noise_substep)
-
-            d_noise = options.get('d_noise', d_noise)
-            
-            
-            
-            implicit_steps = options.get('implicit_steps', implicit_steps)
-            implicit_substeps = options.get('implicit_substeps', implicit_substeps)
-            
-            
-            
-            alpha_sde = options.get('alpha_sde', alpha_sde)
-            k_sde = options.get('k_sde', k_sde)
-            c1 = options.get('c1', c1)
-            c2 = options.get('c2', c2)
-            c3 = options.get('c3', c3)
-            t_fn_formula = options.get('t_fn_formula', t_fn_formula)
-            sigma_fn_formula = options.get('sigma_fn_formula', sigma_fn_formula)
-            unsampler_type = options.get('unsampler_type', unsampler_type)
-            frame_weights_grp = options.get('frame_weights_grp', frame_weights_grp)
-            
-            sde_noise = options.get('sde_noise', sde_noise)
-            sde_noise_steps = options.get('sde_noise_steps', sde_noise_steps)
-            
-            extra_options = options.get('extra_options', extra_options)
-            
-            automation = options.get('automation', automation)
-            
-            # SharkSampler Options
-            noise_type_init = options.get('noise_type_init', noise_type_init)
-            noise_stdev     = options.get('noise_stdev', noise_stdev)
-            sampler_mode    = options.get('sampler_mode', sampler_mode)
-            denoise_alt     = options.get('denoise_alt', denoise_alt)
-
-            
-            channelwise_cfg = options.get('channelwise_cfg', channelwise_cfg)
-            if channelwise_cfg:
-                cfg = -abs(cfg)  # set cfg negative for shark, to flag as cfg_cw
-
-
-
 
         sampler = ClownSamplerAdvanced_Beta().main(noise_type_sde = noise_type_sde,
             noise_type_sde_substep = noise_type_sde_substep,
@@ -867,7 +848,7 @@ class ClownsharKSamplerSimple_Beta:
             sigmas_override = sigmas_override,
             unsampler_type = unsampler_type,
             guides = guides,
-            options = options,
+            options = options.as_dict(),
             sde_noise = sde_noise,
             sde_noise_steps = sde_noise_steps,
             extra_options = extra_options,
