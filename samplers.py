@@ -786,8 +786,11 @@ class ClownsharKSamplerSimple_Beta:
              sampler_name="res_2m", 
              implicit_sampler_name="use_explicit",
 
-             implicit_substeps=0, 
+             implicit_type="bongmath",
+             implicit_type_substeps="bongmath",
              implicit_steps=0,
+             implicit_substeps=0, 
+
 
              sigmas_override=None, 
              guides=None, 
