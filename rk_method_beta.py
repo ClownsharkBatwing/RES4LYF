@@ -734,10 +734,16 @@ class RK_NoiseSampler:
             elif (full_iter > 0 or diag_iter > 0)                   and self.noise_sampler_type2 == "brownian":
                 pass # brownian noise does not increment its seed when generated, deactivate on implicit repeats to avoid burn
             elif full_iter > 0 and                                      extra_options_flag("implicit_step_only_first_all_eta", self.extra_options):
+                self.sigma_down_eta = self.sigma_next
+                self.sigma_up_eta *= 0
+                self.alpha_ratio_eta /= self.alpha_ratio_eta
+                
                 self.sigma_down = self.sigma_next
                 self.sigma_up *= 0
                 self.alpha_ratio /= self.alpha_ratio
+                
                 self.h_new = self.h = self.h_no_eta
+                
             elif (row < self.rows-self.row_offset-multistep_stages   or   diag_iter < implicit_steps_diag)   or   extra_options_flag("substep_eta_use_final", self.extra_options):
                 self.sub_sigma_up,     self.sub_sigma,     self.sub_sigma_down,     self.sub_alpha_ratio     = self.get_sde_substep(self.s_[row], self.s_[row+self.row_offset+multistep_stages], overshoot_substep, noise_mode_override=self.overshoot_mode_substep, DOWN=self.DOWN_SUBSTEP)
                 self.sub_sigma_up_eta, self.sub_sigma_eta, self.sub_sigma_down_eta, self.sub_alpha_ratio_eta = self.get_sde_substep(self.s_[row], self.s_[row+self.row_offset+multistep_stages], eta_substep,       noise_mode_override=self.noise_mode_sde_substep, DOWN=self.DOWN_SUBSTEP)

@@ -107,6 +107,8 @@ class NoiseGenerator:
         self.sigma_max = sigma_max.to(device) if isinstance(sigma_max, torch.Tensor) else sigma_max
         self.sigma_min = sigma_min.to(device) if isinstance(sigma_min, torch.Tensor) else sigma_min
 
+        self.last_seed = seed
+        
         if generator is None:
             self.generator = torch.Generator(device=self.device).manual_seed(seed)
         else:
@@ -116,6 +118,10 @@ class NoiseGenerator:
         raise NotImplementedError("This method got clownsharked!")
     
     def update(self, **kwargs):
+        
+        if not isinstance(self, BrownianNoiseGenerator):
+            self.last_seed += 1
+        
         updated_values = []
         for attribute_name, value in kwargs.items():
             if value is not None:
@@ -321,9 +327,11 @@ class UniformNoiseGenerator(NoiseGenerator):
 class GaussianNoiseGenerator(NoiseGenerator):
     def __init__(self, x=None, size=None, dtype=None, layout=None, device=None, seed=42, generator=None, sigma_min=None, sigma_max=None, 
                  mean=0.0, std=1.0):
-        self.update(mean=mean, std=std)
 
         super().__init__(x, size, dtype, layout, device, seed, generator, sigma_min, sigma_max)
+        self.update(mean=mean, std=std)
+
+        
 
     def __call__(self, *, mean=None, std=None, **kwargs):
         self.update(mean=mean, std=std)
