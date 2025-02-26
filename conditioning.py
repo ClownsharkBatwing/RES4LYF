@@ -100,7 +100,7 @@ class CLIPTextEncodeFluxUnguided:
                 clip_l_end=i
                 break
         t5xxl_end=0
-        for i in range(len(tokens['l'][0])):
+        for i in range(len(tokens['l'][0])):   # bug? should this be t5xxl?
             if tokens['t5xxl'][0][i][0] == 1:
                 t5xxl_end=i
                 break

@@ -535,7 +535,7 @@ class ClownSamplerAdvanced_Beta:
                     #"sampler_name": (RK_SAMPLER_NAMES_BETA, {"default": "res_2m"}), 
                     #"implicit_sampler_name": (IRK_SAMPLER_NAMES_BETA, {"default": "use_explicit"}), 
                     "implicit_type": (IMPLICIT_TYPE_NAMES, {"default": "predictor-corrector"}), 
-                    "implicit_type_substeps": (IMPLICIT_TYPE_NAMES, {"default": "predictor_corrector"}), 
+                    "implicit_type_substeps": (IMPLICIT_TYPE_NAMES, {"default": "predictor-corrector"}), 
                     "implicit_steps": ("INT", {"default": 0, "min": 0, "max": 10000}),
                     "implicit_substeps": ("INT", {"default": 0, "min": 0, "max": 10000}),
                     "bongmath": ("BOOLEAN", {"default": True}),

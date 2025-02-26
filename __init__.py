@@ -162,7 +162,14 @@ NODE_CLASS_MAPPINGS = {
     "TextBox1": nodes_misc.TextBox1,
     "TextBox3": nodes_misc.TextBox3,
     
-    
+    "TextLoadFile": nodes_misc.TextLoadFile,
+    "TextShuffle": nodes_misc.TextShuffle,
+    "TextShuffleAndTruncate": nodes_misc.TextShuffleAndTruncate,
+    "TextTruncateTokens": nodes_misc.TextTruncateTokens,
+
+    "TextConcatenate": nodes_misc.TextConcatenate,
+    "TextBoxConcatenate": nodes_misc.TextBoxConcatenate,
+
     
     "CLIPTextEncodeFluxUnguided": conditioning.CLIPTextEncodeFluxUnguided,
     "ConditioningOrthoCollin": conditioning.ConditioningOrthoCollin,
