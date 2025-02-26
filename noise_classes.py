@@ -140,9 +140,8 @@ class BrownianNoiseGenerator(NoiseGenerator):
 class FractalNoiseGenerator(NoiseGenerator):
     def __init__(self, x=None, size=None, dtype=None, layout=None, device=None, seed=42, generator=None, sigma_min=None, sigma_max=None, 
                  alpha=0.0, k=1.0, scale=0.1): 
-        self.update(alpha=alpha, k=k, scale=scale)
-
         super().__init__(x, size, dtype, layout, device, seed, generator, sigma_min, sigma_max)
+        self.update(alpha=alpha, k=k, scale=scale)
 
     def __call__(self, *, alpha=None, k=None, scale=None, **kwargs):
         self.update(alpha=alpha, k=k, scale=scale)
@@ -192,9 +191,8 @@ class SimplexNoiseGenerator(NoiseGenerator):
 class HiresPyramidNoiseGenerator(NoiseGenerator):
     def __init__(self, x=None, size=None, dtype=None, layout=None, device=None, seed=42, generator=None, sigma_min=None, sigma_max=None, 
                  discount=0.7, mode='nearest-exact'):
-        self.update(discount=discount, mode=mode)
-
         super().__init__(x, size, dtype, layout, device, seed, generator, sigma_min, sigma_max)
+        self.update(discount=discount, mode=mode)
 
     def __call__(self, *, discount=None, mode=None, **kwargs):
         self.update(discount=discount, mode=mode)
@@ -224,9 +222,8 @@ class HiresPyramidNoiseGenerator(NoiseGenerator):
 class PyramidNoiseGenerator(NoiseGenerator):
     def __init__(self, x=None, size=None, dtype=None, layout=None, device=None, seed=42, generator=None, sigma_min=None, sigma_max=None, 
                  discount=0.8, mode='nearest-exact'):
-        self.update(discount=discount, mode=mode)
-
         super().__init__(x, size, dtype, layout, device, seed, generator, sigma_min, sigma_max)
+        self.update(discount=discount, mode=mode)
 
     def __call__(self, *, discount=None, mode=None, **kwargs):
         self.update(discount=discount, mode=mode)
@@ -249,9 +246,8 @@ class PyramidNoiseGenerator(NoiseGenerator):
 class InterpolatedPyramidNoiseGenerator(NoiseGenerator):
     def __init__(self, x=None, size=None, dtype=None, layout=None, device=None, seed=42, generator=None, sigma_min=None, sigma_max=None, 
                  discount=0.7, mode='nearest-exact'):
-        self.update(discount=discount, mode=mode)
-
         super().__init__(x, size, dtype, layout, device, seed, generator, sigma_min, sigma_max)
+        self.update(discount=discount, mode=mode)
 
     def __call__(self, *, discount=None, mode=None, **kwargs):
         self.update(discount=discount, mode=mode)
@@ -283,9 +279,8 @@ class InterpolatedPyramidNoiseGenerator(NoiseGenerator):
 class CascadeBPyramidNoiseGenerator(NoiseGenerator):
     def __init__(self, x=None, size=None, dtype=None, layout=None, device=None, seed=42, generator=None, sigma_min=None, sigma_max=None, 
                  levels=10, mode='nearest', size_range=[1,16]):
-        self.update(epsilon=x, levels=levels, mode=mode, size_range=size_range)
-
         super().__init__(x, size, dtype, layout, device, seed, generator, sigma_min, sigma_max)
+        self.update(epsilon=x, levels=levels, mode=mode, size_range=size_range)
 
     def __call__(self, *, levels=10, mode='nearest', size_range=[1,16], **kwargs):
         self.update(levels=levels, mode=mode)
@@ -313,9 +308,8 @@ class CascadeBPyramidNoiseGenerator(NoiseGenerator):
 class UniformNoiseGenerator(NoiseGenerator):
     def __init__(self, x=None, size=None, dtype=None, layout=None, device=None, seed=42, generator=None, sigma_min=None, sigma_max=None, 
                  mean=0.0, scale=1.73):
-        self.update(mean=mean, scale=scale)
-
         super().__init__(x, size, dtype, layout, device, seed, generator, sigma_min, sigma_max)
+        self.update(mean=mean, scale=scale)
 
     def __call__(self, *, mean=None, scale=None, **kwargs):
         self.update(mean=mean, scale=scale)
@@ -327,11 +321,8 @@ class UniformNoiseGenerator(NoiseGenerator):
 class GaussianNoiseGenerator(NoiseGenerator):
     def __init__(self, x=None, size=None, dtype=None, layout=None, device=None, seed=42, generator=None, sigma_min=None, sigma_max=None, 
                  mean=0.0, std=1.0):
-
         super().__init__(x, size, dtype, layout, device, seed, generator, sigma_min, sigma_max)
         self.update(mean=mean, std=std)
-
-        
 
     def __call__(self, *, mean=None, std=None, **kwargs):
         self.update(mean=mean, std=std)
@@ -343,9 +334,8 @@ class GaussianNoiseGenerator(NoiseGenerator):
 class GaussianBackwardsNoiseGenerator(NoiseGenerator):
     def __init__(self, x=None, size=None, dtype=None, layout=None, device=None, seed=42, generator=None, sigma_min=None, sigma_max=None, 
                  mean=0.0, std=1.0):
-        self.update(mean=mean, std=std)
-
         super().__init__(x, size, dtype, layout, device, seed, generator, sigma_min, sigma_max)
+        self.update(mean=mean, std=std)
 
     def __call__(self, *, mean=None, std=None, **kwargs):
         self.update(mean=mean, std=std)
@@ -358,9 +348,8 @@ class GaussianBackwardsNoiseGenerator(NoiseGenerator):
 class LaplacianNoiseGenerator(NoiseGenerator):
     def __init__(self, x=None, size=None, dtype=None, layout=None, device=None, seed=42, generator=None, sigma_min=None, sigma_max=None, 
                  loc=0, scale=1.0):
-        self.update(loc=loc, scale=scale)
-
         super().__init__(x, size, dtype, layout, device, seed, generator, sigma_min, sigma_max)
+        self.update(loc=loc, scale=scale)
 
     def __call__(self, *, loc=None, scale=None, **kwargs):
         self.update(loc=loc, scale=scale)
@@ -382,9 +371,8 @@ class LaplacianNoiseGenerator(NoiseGenerator):
 class StudentTNoiseGenerator(NoiseGenerator):
     def __init__(self, x=None, size=None, dtype=None, layout=None, device=None, seed=42, generator=None, sigma_min=None, sigma_max=None, 
                  loc=0, scale=0.2, df=1):
-        self.update(loc=loc, scale=scale, df=df)
-
         super().__init__(x, size, dtype, layout, device, seed, generator, sigma_min, sigma_max)
+        self.update(loc=loc, scale=scale, df=df)
 
     def __call__(self, *, loc=None, scale=None, df=None, **kwargs):
         self.update(loc=loc, scale=scale, df=df)
@@ -410,9 +398,8 @@ class StudentTNoiseGenerator(NoiseGenerator):
 class WaveletNoiseGenerator(NoiseGenerator):
     def __init__(self, x=None, size=None, dtype=None, layout=None, device=None, seed=42, generator=None, sigma_min=None, sigma_max=None, 
                  wavelet='haar'):
-        self.update(wavelet=wavelet)
-
         super().__init__(x, size, dtype, layout, device, seed, generator, sigma_min, sigma_max)
+        self.update(wavelet=wavelet)
 
     def __call__(self, *, wavelet=None, **kwargs):
         self.update(wavelet=wavelet)
@@ -431,9 +418,8 @@ class WaveletNoiseGenerator(NoiseGenerator):
 class PerlinNoiseGenerator(NoiseGenerator):
     def __init__(self, x=None, size=None, dtype=None, layout=None, device=None, seed=42, generator=None, sigma_min=None, sigma_max=None, 
                  detail=0.0):
-        self.update(detail=detail)
-
         super().__init__(x, size, dtype, layout, device, seed, generator, sigma_min, sigma_max)
+        self.update(detail=detail)
 
     @staticmethod
     def get_positions(block_shape: Tuple[int, int]) -> Tensor:

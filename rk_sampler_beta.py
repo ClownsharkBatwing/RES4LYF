@@ -328,9 +328,13 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
                                 x_tmp = x
                                 s_tmp = sigma
                                 
-                            elif implicit_type == "bongmath" and BONGMATH and (NS.sub_sigma_up > 0 or NS.sub_sigma_up_eta > 0): 
-                                x_tmp = x_[row]
-                                s_tmp = NS.s_[row]
+                            elif implicit_type == "bongmath" and (NS.sub_sigma_up > 0 or NS.sub_sigma_up_eta > 0): 
+                                if BONGMATH:
+                                    x_tmp = x_[row]
+                                    s_tmp = NS.s_[row]
+                                else:
+                                    x_tmp = NS.sigma_from_to(x_0, x, sigma, sigma_next, sigma)
+                                    s_tmp = sigma
                                 
                             else:
                                 x_tmp = x
@@ -357,9 +361,13 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
                                     x_tmp = x_[row+RK.row_offset]
                                     s_tmp = NS.s_[row]
                                     
-                                elif implicit_type_substeps == "bongmath" and BONGMATH and (NS.sub_sigma_up > 0 or NS.sub_sigma_up_eta > 0) and not extra_options_flag("disable_diag_explicit_bongmath_rebound", extra_options): 
-                                    x_tmp = x_[row]
-                                    s_tmp = NS.s_[row]
+                                elif implicit_type_substeps == "bongmath" and (NS.sub_sigma_up > 0 or NS.sub_sigma_up_eta > 0) and not extra_options_flag("disable_diag_explicit_bongmath_rebound", extra_options): 
+                                    if BONGMATH:
+                                        x_tmp = x_[row]
+                                        s_tmp = NS.s_[row]
+                                    else:
+                                        x_tmp = NS.sigma_from_to(x_0, x_[row+RK.row_offset], sigma, NS.s_[row+RK.row_offset+RK.multistep_stages], NS.s_[row])
+                                        s_tmp = NS.s_[row]
                                     
                                 else:
                                     x_tmp =    x_[row+RK.row_offset]
