@@ -800,7 +800,7 @@ class ClownsharKSamplerSimple_Beta:
              extra_options="", 
              automation=None, 
 
-             unsample_resample_scales=None, 
+             epsilon_scales=None, 
              regional_conditioning_weights=None,
              frame_weights_grp=None, 
              noise_boost_step=0.0, 
@@ -947,7 +947,7 @@ class ClownsharKSamplerSimple_Beta:
             noise_boost_step = noise_boost_step,
             noise_boost_substep = noise_boost_substep,
             
-            unsample_resample_scales = unsample_resample_scales,
+            epsilon_scales = epsilon_scales,
             regional_conditioning_weights = regional_conditioning_weights,
             frame_weights_grp = frame_weights_grp,
             
