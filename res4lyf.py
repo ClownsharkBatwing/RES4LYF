@@ -26,6 +26,12 @@ def time_snr_shift_RES4LYF(alpha, t):
     else:
         out = original_time_snr_shift(alpha, t)
     return out
+
+display_sampler_category = False
+
+def get_display_sampler_category():
+    global display_sampler_category
+    return display_sampler_category
     
 @PromptServer.instance.routes.post("/reslyf/settings")
 async def update_settings(request):
@@ -44,6 +50,14 @@ async def update_settings(request):
                     RESplain("Using RES4LYF time SNR shift")
                 else:
                     RESplain("Disabled RES4LYF time SNR shift")
+            elif setting == "displayCategory":
+                global display_sampler_category
+                display_sampler_category = value
+                if ( display_sampler_category is True ):
+                    RESplain("Displaying sampler category")
+                else:
+                    RESplain("Not displaying sampler category")
+
 
         return web.Response(status=200)
     except Exception as e:

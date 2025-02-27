@@ -1,8 +1,8 @@
-from .noise_classes import *
+from .noise_classes import prepare_noise, NOISE_GENERATOR_CLASSES_SIMPLE, NOISE_GENERATOR_NAMES_SIMPLE, NOISE_GENERATOR_NAMES
 from .sigmas import get_sigmas
 from .rk_sampler import sample_rk
 from .rk_coefficients import RK_SAMPLER_NAMES, IRK_SAMPLER_NAMES
-from .rk_coefficients_beta import RK_SAMPLER_NAMES_BETA, IRK_SAMPLER_NAMES_BETA
+from .rk_coefficients_beta import get_default_sampler_name, get_sampler_name_list, process_sampler_name
 
 from .config import MAX_STEPS
 
@@ -34,9 +34,6 @@ def move_to_same_device(*tensors):
 
     device = tensors[0].device
     return tuple(tensor.to(device) for tensor in tensors)
-
-
-#SCHEDULER_NAMES = comfy.samplers.SCHEDULER_NAMES + ["beta57"]
 
 
 class SharkSampler:
@@ -509,6 +506,7 @@ class ClownSamplerAdvanced:
 
 from .config import IMPLICIT_TYPE_NAMES
 
+
 class ClownSamplerAdvanced_Beta:
     @classmethod
     def INPUT_TYPES(s):
@@ -531,7 +529,7 @@ class ClownSamplerAdvanced_Beta:
                     "s_noise_substep": ("FLOAT", {"default": 1.0, "min": -10000, "max": 10000, "step":0.01, "tooltip": "Adds extra SDE noise. Values around 1.03-1.07 can lead to a moderate boost in detail and paint textures."}),
                     "d_noise": ("FLOAT", {"default": 1.0, "min": -10000, "max": 10000, "step":0.01, "tooltip": "Downscales the sigma schedule. Values around 0.98-0.95 can lead to a large boost in detail and paint textures."}),
                     "noise_seed_sde": ("INT", {"default": -1, "min": -1, "max": 0xffffffffffffffff}),
-                    "sampler_name": (RK_SAMPLER_NAMES_BETA_FOLDERS, {"default": "multistep/res_2m"}), 
+                    "sampler_name": (get_sampler_name_list(), {"default": get_default_sampler_name()}), 
                     #"sampler_name": (RK_SAMPLER_NAMES_BETA, {"default": "res_2m"}), 
                     #"implicit_sampler_name": (IRK_SAMPLER_NAMES_BETA, {"default": "use_explicit"}), 
                     "implicit_type": (IMPLICIT_TYPE_NAMES, {"default": "predictor-corrector"}), 
@@ -671,7 +669,7 @@ class ClownSampler:
     FUNCTION = "main"
 
     CATEGORY = "RES4LYF/samplers"
-    
+
     def main(self, 
              noise_type_sde="gaussian", noise_type_sde_substep="gaussian", noise_mode_sde="hard",
              eta=0.25, eta_var=0.0, d_noise=1.0, s_noise=1.0, alpha_sde=-1.0, k_sde=1.0, cfgpp=0.0, c1=0.0, c2=0.5, c3=1.0, noise_seed_sde=-1, sampler_name="res_2m", implicit_sampler_name="gauss-legendre_2s",
@@ -698,23 +696,7 @@ class ClownSampler:
 
 
 
-from .rk_coefficients_beta import RK_SAMPLER_NAMES_BETA_FOLDERS
-
-def process_sampler_name(selected_value):
-    processed_name = selected_value.split("/")[-1]
-    
-    if selected_value.startswith("fully_implicit") or selected_value.startswith("diag_implicit"):
-        implicit_sampler_name = processed_name
-        sampler_name = "euler"
-    else:
-        sampler_name = processed_name
-        implicit_sampler_name = "use_explicit"
-    
-    return sampler_name, implicit_sampler_name
-
-
-
-
+#from .rk_coefficients_beta import RK_SAMPLER_NAMES_BETA_FOLDERS
 
 class ClownsharKSamplerSimple_Beta:
     @classmethod
@@ -722,7 +704,7 @@ class ClownsharKSamplerSimple_Beta:
         return {"required":
                     {"model": ("MODEL",),
                     "eta": ("FLOAT", {"default": 0.5, "min": -100.0, "max": 100.0, "step":0.01, "round": False, "tooltip": "Calculated noise amount to be added, then removed, after each step."}),
-                    "sampler_name": (RK_SAMPLER_NAMES_BETA_FOLDERS, {"default": "multistep/res_2m"}), 
+                    "sampler_name": (get_sampler_name_list(), {"default": get_default_sampler_name()}), 
                     "scheduler": (get_res4lyf_scheduler_list(), {"default": "beta57"},),
                     "steps": ("INT", {"default": 30, "min": 1, "max": 10000}),
                     "denoise": ("FLOAT", {"default": 1.0, "min": -10000, "max": 10000, "step":0.01}),
@@ -746,7 +728,22 @@ class ClownsharKSamplerSimple_Beta:
     FUNCTION = "main"
 
     CATEGORY = "RES4LYF/samplers"
-    
+
+    # @classmethod
+    # def VALIDATE_INPUTS(cls, sampler_name, **kwargs):
+    #     """
+    #     WARNING: This function does not prevent the validation in execution.py from failing, it can only add extra constraints on the validation!
+    #     """
+    #     name_value = sampler_name[0] if isinstance(sampler_name, list) else sampler_name
+    #     parts = name_value.split("/")
+    #     short_sampler_name = parts[-1]
+    #     valid_samplers = get_sampler_name_list(nameOnly=True)
+
+    #     if short_sampler_name in valid_samplers:
+    #         return True
+    #     else:
+    #         return f"Invalid sampler name: {name_value}"
+        
     def main(self, 
              model=None,
              denoise=1.0, 
