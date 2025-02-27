@@ -316,7 +316,7 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
                                 eps_tmp = (x - denoised_tmp) / sigma_next
                                 x_[0] = denoised_tmp + sigma * eps_tmp
                                 
-                                x_0 = x_[0]
+                                x_0 =   x_[0]
                                 x_tmp = x_[0]
                                 s_tmp = sigma
                                 
@@ -328,9 +328,13 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
                                 x_tmp = x
                                 s_tmp = sigma
                                 
+                            elif implicit_type == "retro-eta" and (NS.sub_sigma_up > 0 or NS.sub_sigma_up_eta > 0): 
+                                x_tmp = NS.sigma_from_to(x_0, x, sigma, sigma_next, sigma)
+                                s_tmp = sigma
+                                
                             elif implicit_type == "bongmath" and (NS.sub_sigma_up > 0 or NS.sub_sigma_up_eta > 0): 
                                 if BONGMATH:
-                                    x_tmp = x_[row]
+                                    x_tmp =    x_[row]
                                     s_tmp = NS.s_[row]
                                 else:
                                     x_tmp = NS.sigma_from_to(x_0, x, sigma, sigma_next, sigma)
@@ -359,6 +363,10 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
 
                                     x_[row+RK.row_offset] = NS.sigma_from_to(x_0, x_[row+RK.row_offset], sigma, NS.s_[row+RK.row_offset+RK.multistep_stages], NS.s_[row])
                                     x_tmp = x_[row+RK.row_offset]
+                                    s_tmp = NS.s_[row]
+                                    
+                                elif implicit_type_substeps == "retro-eta" and (NS.sub_sigma_up > 0 or NS.sub_sigma_up_eta > 0):
+                                    x_tmp = NS.sigma_from_to(x_0, x_[row+RK.row_offset], sigma, NS.s_[row+RK.row_offset+RK.multistep_stages], NS.s_[row])
                                     s_tmp = NS.s_[row]
                                     
                                 elif implicit_type_substeps == "bongmath" and (NS.sub_sigma_up > 0 or NS.sub_sigma_up_eta > 0) and not extra_options_flag("disable_diag_explicit_bongmath_rebound", extra_options): 
@@ -477,10 +485,10 @@ def sample_rk_beta(model, x, sigmas, extra_args=None, callback=None, disable=Non
                     if not RK.IMPLICIT and NS.noise_mode_sde_substep != "hard_sq":
                         x_[row+RK.row_offset] = NS.swap_noise_substep(x_0, x_[row+RK.row_offset])
 
-                    if BONGMATH and NS.s_[row] > RK.sigma_min and NS.h < RK.sigma_max/2 and diag_iter == implicit_steps_diag and not extra_options_flag("disable_terminal_bongmath", extra_options):
+                    if BONGMATH and NS.s_[row] > RK.sigma_min and NS.h < RK.sigma_max/2   and   (diag_iter == implicit_steps_diag or extra_options_flag("enable_diag_explicit_bongmath_all", extra_options))   and not extra_options_flag("disable_terminal_bongmath", extra_options):
                         if step == 0 and UNSAMPLE:
                             pass
-                        else:
+                        elif full_iter == implicit_steps_full or not extra_options_flag("disable_fully_explicit_bongmath_except_final", extra_options):
                             x_0, x_, eps_ = RK.bong_iter(x_0, x_, eps_, eps_prev_, data_, sigma, NS.s_, row, RK.row_offset, NS.h, extra_options)
 
             x_next = x_[RK.rows - RK.multistep_stages - RK.row_offset + 1]

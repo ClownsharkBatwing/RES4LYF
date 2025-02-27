@@ -129,7 +129,10 @@ def truncate_tokens(text, truncate_to, clip, clip_type, stop_token):
         truncated_words = words[:truncate_words_to]
         truncated_text = " ".join(truncated_words)
 
-        tokens[clip_type] = clip.tokenize(truncated_text)[clip_type]
+        try:
+            tokens[clip_type] = clip.tokenize(truncated_text)[clip_type]
+        except:
+            return ""
 
         if clip_type not in tokens:
             return truncated_text
@@ -159,12 +162,11 @@ class TextShuffleAndTruncate:
     def INPUT_TYPES(cls):
         return {
             "required": {
-                "text":        ("STRING", {"forceInput": True}),
-                "separator":   ("STRING", {"default": " ", "multiline": False}),
-                "truncate_words_to": ("INT", {"default": 77, "min": 1, "max": 10000}),
+                "text":               ("STRING", {"forceInput": True}),
+                "separator":          ("STRING", {"default": " ", "multiline": False}),
+                "truncate_words_to":  ("INT", {"default": 77, "min": 1, "max": 10000}),
                 "truncate_tokens_to": ("INT", {"default": 77, "min": 1, "max": 10000}),
-                #"mode":        (['tokens', 'words',], {"default": "tokens"}),
-                "seed":        ("INT", {"default": 0, "min": 0, "max": 0xffffffffffffffff}),
+                "seed":               ("INT", {"default": 0, "min": 0, "max": 0xffffffffffffffff}),
             },
             "optional": {
                 "clip": ("CLIP", ),
@@ -172,7 +174,7 @@ class TextShuffleAndTruncate:
         }
 
     RETURN_TYPES = ("STRING","STRING","STRING","STRING","STRING",)
-    RETURN_NAMES = ("shuffled_text", "text_words","text_clip_l","text_clip_g","text_t5xxl",)
+    RETURN_NAMES = ("shuffled_text", "text_words","text_clip_l","text_clip_g","text_t5",)
     FUNCTION = "main"
     CATEGORY = "RES4LYF/text"
 
@@ -187,14 +189,13 @@ class TextShuffleAndTruncate:
         truncated_words = words[:truncate_words_to]
         truncated_text = " ".join(truncated_words)
         
-        #if mode == "tokens":
+        t5_name = "t5xxl" if not hasattr(clip.tokenizer, "pile_t5xl") else "pile_t5xl"
+
         text_clip_l = truncate_tokens(truncated_text, truncate_tokens_to, clip, "l",     49407)
         text_clip_g = truncate_tokens(truncated_text, truncate_tokens_to, clip, "g",     49407)
-        text_t5xxl  = truncate_tokens(truncated_text, truncate_tokens_to, clip, "t5xxl", 1)
-        
-        #truncated_text = min(text_clip_l, text_clip_g, text_t5xxl, key=len)
-            
-        return (shuffled_text, truncated_text, text_clip_l, text_clip_g, text_t5xxl,)
+        text_t5     = truncate_tokens(truncated_text, truncate_tokens_to, clip, t5_name, 1)
+                    
+        return (shuffled_text, truncated_text, text_clip_l, text_clip_g, text_t5,)
 
 
 
@@ -205,10 +206,10 @@ class TextTruncateTokens:
         return {
             "required": {
                 "text":               ("STRING", {"forceInput": True}),
-                "truncate_words_to": ("INT", {"default": 30, "min": 0, "max": 10000}),
+                "truncate_words_to":  ("INT", {"default": 30, "min": 0, "max": 10000}),
                 "truncate_clip_l_to": ("INT", {"default": 77, "min": 0, "max": 10000}),
                 "truncate_clip_g_to": ("INT", {"default": 77, "min": 0, "max": 10000}),
-                "truncate_t5xxl_to":  ("INT", {"default": 77, "min": 0, "max": 10000}),
+                "truncate_t5_to":     ("INT", {"default": 77, "min": 0, "max": 10000}),
             },
             "optional": {
                 "clip":               ("CLIP", ),
@@ -216,26 +217,28 @@ class TextTruncateTokens:
         }
 
     RETURN_TYPES = ("STRING","STRING","STRING","STRING",)
-    RETURN_NAMES = ("text_words","text_clip_l","text_clip_g","text_t5xxl",)
+    RETURN_NAMES = ("text_words","text_clip_l","text_clip_g","text_t5",)
     FUNCTION = "main"
     CATEGORY = "RES4LYF/text"
 
-    def main(self, text, truncate_words_to, truncate_clip_l_to, truncate_clip_g_to, truncate_t5xxl_to, clip=None):
+    def main(self, text, truncate_words_to, truncate_clip_l_to, truncate_clip_g_to, truncate_t5_to, clip=None):
 
         words = text.split()
         truncated_words = words[:truncate_words_to]
         truncated_text = " ".join(truncated_words)
+        
+        t5_name = "t5xxl" if not hasattr(clip.tokenizer, "pile_t5xl") else "pile_t5xl"
 
         if clip is not None:
             text_clip_l = truncate_tokens(text, truncate_clip_l_to, clip, "l",     49407)
             text_clip_g = truncate_tokens(text, truncate_clip_g_to, clip, "g",     49407)
-            text_t5xxl  = truncate_tokens(text, truncate_t5xxl_to,  clip, "t5xxl", 1)
+            text_t5     = truncate_tokens(truncated_text, truncate_t5_to, clip, t5_name, 1)
         else:
             text_clip_l = None
             text_clip_g = None
-            text_t5xxl  = None
+            text_t5     = None
         
-        return (truncated_text, text_clip_l, text_clip_g, text_t5xxl,)
+        return (truncated_text, text_clip_l, text_clip_g, text_t5,)
 
 
 
