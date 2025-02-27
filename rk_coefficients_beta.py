@@ -11,6 +11,7 @@ from .helper import get_extra_options_kv, extra_options_flag
 from itertools import permutations, combinations
 import random
 
+from .res4lyf import get_display_sampler_category
 
 
 RK_SAMPLER_NAMES_BETA_FOLDERS = ["none",
@@ -161,161 +162,123 @@ RK_SAMPLER_NAMES_BETA_FOLDERS = ["none",
 
                     ]
 
+RK_SAMPLER_NAMES_BETA_NO_FOLDERS = []
+for orig_sampler_name in RK_SAMPLER_NAMES_BETA_FOLDERS[1:]:
+    sampler_name = orig_sampler_name.split("/")[-1] if "/" in orig_sampler_name else orig_sampler_name
+    RK_SAMPLER_NAMES_BETA_NO_FOLDERS.append(sampler_name)
 
+IRK_SAMPLER_NAMES_BETA_FOLDERS = ["none", "use_explicit"]
+for orig_sampler_name in RK_SAMPLER_NAMES_BETA_FOLDERS[1:]:
+    if "implicit" in orig_sampler_name and "/" in orig_sampler_name:
+        IRK_SAMPLER_NAMES_BETA_FOLDERS.append(orig_sampler_name)
 
+IRK_SAMPLER_NAMES_BETA_NO_FOLDERS = []
+for orig_sampler_name in IRK_SAMPLER_NAMES_BETA_FOLDERS[1:]:
+    sampler_name = orig_sampler_name.split("/")[-1] if "/" in orig_sampler_name else orig_sampler_name
+    IRK_SAMPLER_NAMES_BETA_NO_FOLDERS.append(sampler_name)
 
-RK_SAMPLER_NAMES_BETA = ["none",
-                    "res_2m",
-                    "res_3m",
-                    "res_2s_rkmk2e", 
-                    "res_2s", 
-                    "res_3s",
-                    "res_3s_alt",
-                    "res_3s_cox_matthews",
-                    "res_3s_lie",
+RK_SAMPLER_FOLDER_MAP = {}
+for orig_sampler_name in RK_SAMPLER_NAMES_BETA_FOLDERS:
+    if "/" in orig_sampler_name:
+        folder, sampler_name = orig_sampler_name.rsplit("/", 1)
+    else:
+        folder = ""
+        sampler_name = orig_sampler_name
+    RK_SAMPLER_FOLDER_MAP[sampler_name] = folder
 
-                    "res_3s_strehmel_weiner",
-                    "res_4s_krogstad",
-                    "res_4s_strehmel_weiner",
-                    "res_4s_cox_matthews",
-                    "res_4s_cfree4",
-                    "res_4s_friedli",
-                    "res_4s_minchev",
-                    "res_4s_munthe-kaas",
+IRK_SAMPLER_FOLDER_MAP = {}
+for orig_sampler_name in IRK_SAMPLER_NAMES_BETA_FOLDERS:
+    if "/" in orig_sampler_name:
+        folder, sampler_name = orig_sampler_name.rsplit("/", 1)
+    else:
+        folder = ""
+        sampler_name = orig_sampler_name
+    IRK_SAMPLER_FOLDER_MAP[sampler_name] = folder
 
-                    "res_5s",
-                    "res_6s",
-                    "res_8s",
-                    "res_8s_alt",
+class DualFormatList(list):
+    """list that can match items with or without category prefixes."""
+    def __contains__(self, item):
+        if super().__contains__(item):
+            return True
+        
+        if isinstance(item, str) and "/" in item:
+            base_name = item.split("/")[-1]
+            return any(name.endswith(base_name) for name in self)
+        
+        return any(isinstance(opt, str) and opt.endswith("/" + item) for opt in self)
 
-                    "res_10s",
-                    "res_15s",
-                    "res_16s",
-                    
-                    "etdrk2_2s",
-                    "etdrk3_a_3s",
-                    "etdrk3_b_3s",
-                    "etdrk4_4s",
-                    
-                    "pec423_2h2s",
-                    "pec433_2h3s",
-                    
-                    "abnorsett2_1h2s",
-                    "abnorsett3_2h2s",
-                    "abnorsett4_3h2s",
+def get_sampler_name_list(nameOnly = False) -> list:
+    sampler_name_list = []
+    for sampler_name in RK_SAMPLER_FOLDER_MAP:
+        if get_display_sampler_category() and not nameOnly:
+            folder_name = RK_SAMPLER_FOLDER_MAP[sampler_name]
+            full_sampler_name = f"{folder_name}/{sampler_name}"
+        else:
+            full_sampler_name = sampler_name
+        if full_sampler_name[0] == "/":
+            full_sampler_name = full_sampler_name[1:]
+        sampler_name_list.append(full_sampler_name)
+    return DualFormatList(sampler_name_list)
 
-                    "abnorsett_2m",
-                    "abnorsett_3m",
-                    "abnorsett_4m",
+def get_default_sampler_name(nameOnly = False) -> str:
+    default_sampler_name = "res_2m"
+    #find the key associated with the default value
+    for sampler_name in RK_SAMPLER_FOLDER_MAP:
+        if sampler_name == default_sampler_name:
+            if get_display_sampler_category() and not nameOnly:
+                folder_name = RK_SAMPLER_FOLDER_MAP[sampler_name]
+                return f"{folder_name}/{default_sampler_name}"
+            else:
+                return default_sampler_name
+    return default_sampler_name
 
+def get_implicit_sampler_name_list(nameOnly = False) -> list:
+    implicit_sampler_name_list = []
+    for sampler_name in IRK_SAMPLER_FOLDER_MAP:
+        if get_display_sampler_category() and not nameOnly:
+            folder_name = IRK_SAMPLER_FOLDER_MAP[sampler_name]
+            full_sampler_name = f"{folder_name}/{sampler_name}"
+        else:
+            full_sampler_name = sampler_name
+        if full_sampler_name[0] == "/":
+            full_sampler_name = full_sampler_name[1:]
+        implicit_sampler_name_list.append(full_sampler_name)
+    return DualFormatList(implicit_sampler_name_list)
 
-                    "deis_2m",
-                    "deis_3m", 
-                    "deis_4m",
-                    
-                    "ralston_2s",
-                    "ralston_3s",
-                    "ralston_4s", 
-                    
-                    "dpmpp_2m",
-                    "dpmpp_3m",
-                    "dpmpp_2s",
-                    "dpmpp_sde_2s",
-                    "dpmpp_3s",
-                    
-                    "lawson2a_2s",
-                    "lawson2b_2s",
+def get_default_implicit_sampler_name(nameOnly = False) -> str:
+    default_sampler_value = "explicit_diagonal"
+    #find the key associated with the default value
+    for sampler_name in IRK_SAMPLER_FOLDER_MAP:
+        if sampler_name == default_sampler_value:
+            if get_display_sampler_category() and not nameOnly:
+                folder_name = IRK_SAMPLER_FOLDER_MAP[sampler_name]
+                return f"{folder_name}/{default_sampler_value}"
+            else:
+                return default_sampler_value
+    return default_sampler_value
 
-                    "lawson4_4s",
-                    "lawson41-gen_4s",
-                    "lawson41-gen-mod_4s",
-                    
-                    "lawson42-gen-mod_1h4s",
-                    "lawson43-gen-mod_2h4s",
-                    "lawson44-gen-mod_3h4s",
-                    "lawson45-gen-mod_4h4s",
-                    
-                    "midpoint_2s",
-                    "heun_2s", 
-                    "heun_3s", 
-                    
-                    "houwen-wray_3s",
-                    "kutta_3s", 
-                    "ssprk3_3s",
-                    "ssprk4_4s",
-                    
-                    "rk38_4s",
-                    "rk4_4s", 
-                    "rk5_7s",
-                    "rk6_7s",
+def get_full_sampler_name(sampler_name_in: str) -> str:
+    if "/" in sampler_name_in and sampler_name_in[0] != "/":
+        return sampler_name_in
+    for sampler_name in RK_SAMPLER_FOLDER_MAP:
+        if sampler_name == sampler_name_in:
+            folder_name = RK_SAMPLER_FOLDER_MAP[sampler_name]
+            return f"{folder_name}/{sampler_name}"
+    return sampler_name
 
-                    "bogacki-shampine_4s",
-                    "bogacki-shampine_7s",
+def process_sampler_name(sampler_name_in):
+    processed_name = sampler_name_in.split("/")[-1] if "/" in sampler_name_in else sampler_name_in
+    full_sampler_name = get_full_sampler_name(sampler_name_in)
+    
+    if sampler_name_in.startswith("fully_implicit") or sampler_name_in.startswith("diag_implicit"):
+        implicit_sampler_name = processed_name
+        sampler_name = "euler"
+    else:
+        sampler_name = processed_name
+        implicit_sampler_name = "use_explicit"
+    
+    return sampler_name, implicit_sampler_name
 
-                    "dormand-prince_6s", 
-                    "dormand-prince_13s", 
-
-                    "tsi_7s",
-                    #"verner_robust_16s",
-
-                    "ddim",
-                    "euler",
-                    ]
-
-
-IRK_SAMPLER_NAMES_BETA = ["none",
-                    "use_explicit", 
-                    
-                    "irk_exp_diag_2s",
-                    
-                    "gauss-legendre_2s",
-                    "gauss-legendre_3s", 
-                    "gauss-legendre_4s",
-                    "gauss-legendre_4s_ascending_a",
-                    "gauss-legendre_4s_alt",
-                    "gauss-legendre_5s",                    
-                    "gauss-legendre_5s_ascending",
-                    #"gauss-legendre_diag_8s",
-
-                    
-                    "radau_ia_2s",
-                    "radau_ia_3s",
-
-                    "radau_iia_2s",
-                    "radau_iia_3s",
-                    "radau_iia_3s_alt",
-                    "radau_iia_5s",
-                    "radau_iia_7s",
-                    "radau_iia_9s",
-                    "radau_iia_11s",
-                    
-                    "lobatto_iiia_2s",
-                    "lobatto_iiia_3s",
-                    "lobatto_iiia_4s",
-                    "lobatto_iiib_2s",
-                    "lobatto_iiib_3s",
-                    "lobatto_iiib_4s",
-
-                    "lobatto_iiic_2s",
-                    "lobatto_iiic_3s",
-                    "lobatto_iiic_4s",
-
-                    "lobatto_iiic_star_2s",
-                    "lobatto_iiic_star_3s",
-                    "lobatto_iiid_2s",
-                    "lobatto_iiid_3s",
-                    
-                    "kraaijevanger_spijker_2s",
-                    "qin_zhang_2s",
-                    
-                    "pareschi_russo_2s",
-                    "pareschi_russo_alt_2s",
-                    
-                    "crouzeix_2s",
-                    "crouzeix_3s",
-                    "crouzeix_3s_alt",
-
-                    ]
 
 alpha_crouzeix  = (2/(3**0.5)) * math.cos(math.pi / 18)
 gamma_crouzeix = (1/(3**0.5)) * math.cos(math.pi / 18) + 1/2 # Crouzeix & Raviart 1980; A-stable; pg 100 in Solving Ordinary Differential Equations II

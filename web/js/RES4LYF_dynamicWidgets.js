@@ -2,6 +2,7 @@ import { app } from "../../scripts/app.js";
 
 let RESDEBUG = false;
 let TOP_CLOWNDOG = true;
+let DISPLAY_CATEGORY = true;
 
 const originalGetNodeTypesCategories = typeof LiteGraph.getNodeTypesCategories === 'function' ? LiteGraph.getNodeTypesCategories : null;
 
@@ -115,5 +116,35 @@ app.registerExtension({
             },
         });
         
+        app.ui.settings.addSetting({
+            id: "RES4LYF.displayCategory",
+            name: "RES4LYF: Display Category in Sampler Names",
+            defaultValue: true,
+            type: "boolean",
+            options: [
+                { value: true, text: "On" },
+                { value: false, text: "Off" },
+            ],
+            onChange: (value) => {
+                DISPLAY_CATEGORY = value;
+                resDebugLog(`Display Category ${value ? "enabled" : "disabled"}`);
+                
+                // Send to backend
+                fetch('/reslyf/settings', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        setting: "displayCategory",
+                        value: value
+                    })
+                }).catch(error => {
+                    resDebugLog(`Error updating displayCategory setting: ${error}`);
+                });
+            },
+        });
+        
     },
+
 });

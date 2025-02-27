@@ -3,8 +3,8 @@ from tqdm.auto import trange
 import gc
 
 from .rk_method_beta import RK_Method_Beta, RK_NoiseSampler
-from .rk_guide_func_beta import *
-from .helper import get_extra_options_kv, extra_options_flag, lagrange_interpolation
+from .rk_guide_func_beta import LatentGuide
+from .helper import get_extra_options_list, get_extra_options_kv, extra_options_flag, lagrange_interpolation
 from .phi_functions import Phi
 from .res4lyf import RESplain
 
