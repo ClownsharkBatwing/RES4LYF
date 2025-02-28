@@ -11,6 +11,13 @@ from ..sigmas import get_sigmas
 from ..helper import get_extra_options_kv, extra_options_flag, get_cosine_similarity, get_extra_options_list, is_video_model
 
 
+def initialize_or_scale(tensor, value, steps):
+    if tensor is None:
+        return torch.full((steps,), value)
+    else:
+        return value * tensor
+
+
 def normalize_inputs(x, y0, y0_inv, guide_mode,  extra_options):
     
     if guide_mode == "epsilon_guide_mean_std_from_bkg":
