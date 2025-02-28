@@ -19,7 +19,6 @@ from .helper import get_orthogonal, get_collinear
 from ..res4lyf import RESplain
 
 
-
 def multiply_nested_tensors(structure, scalar):
     if isinstance(structure, torch.Tensor):
         return structure * scalar

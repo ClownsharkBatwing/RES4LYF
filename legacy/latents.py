@@ -8,7 +8,7 @@ import itertools
 import torch
 import math
 
-from .noise_classes import *
+from .noise_classes import NOISE_GENERATOR_NAMES, NOISE_GENERATOR_CLASSES, precision_tool, prepare_noise
 
 def initialize_or_scale(tensor, value, steps):
     if tensor is None:
