@@ -54,9 +54,9 @@ async def update_settings(request):
                 global display_sampler_category
                 display_sampler_category = value
                 if ( display_sampler_category is True ):
-                    RESplain("Displaying sampler category")
+                    RESplain("Displaying sampler category", debug=True)
                 else:
-                    RESplain("Not displaying sampler category")
+                    RESplain("Not displaying sampler category", debug=True)
 
 
         return web.Response(status=200)
@@ -70,7 +70,7 @@ async def log_message(request):
         log_text = json_data.get("log")
         
         if log_text:
-            RESplain(log_text)
+            RESplain(log_text, debug=True)
             return web.Response(status=200)
         else:
             return web.Response(status=400, text="No log text provided")

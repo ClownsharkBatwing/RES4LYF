@@ -26,8 +26,6 @@ def get_extra_options_list(key, default, extra_options):
 def extra_options_flag(flag, extra_options):
     return bool(re.search(rf"{flag}", extra_options))
 
-
-
 def safe_get_nested(d, keys, default=None):
     for key in keys:
         if isinstance(d, dict):
