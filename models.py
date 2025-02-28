@@ -38,7 +38,7 @@ class ReFluxPatcher:
     RETURN_TYPES = ("MODEL",)
     RETURN_NAMES = ("model",)
 
-    CATEGORY = "model_patches"
+    CATEGORY = "RES4LYF/model_patches"
     FUNCTION = "main"
 
     def main(self, model, enable=True):
@@ -82,10 +82,11 @@ class FluxOrthoCFGPatcher:
             "zero_clip_L": ("BOOLEAN", {"default": True}),
            }
         }
+        
     RETURN_TYPES = ("MODEL",)
     RETURN_NAMES = ("model",)
 
-    CATEGORY = "model_patches"
+    CATEGORY = "RES4LYF/model_patches"
     FUNCTION = "main"
     
     original_forward = Flux.forward
@@ -136,8 +137,8 @@ class FluxGuidanceDisable:
     RETURN_TYPES = ("MODEL",)
     RETURN_NAMES = ("model",)
 
-    CATEGORY = "model_patches"
     FUNCTION = "main"
+    CATEGORY = "RES4LYF/model_patches"
 
     original_forward = Flux.forward
 
@@ -184,8 +185,10 @@ class ModelSamplingAdvanced:
                }
     
     RETURN_TYPES = ("MODEL",)
+    RETURN_NAMES = ("model",)
+    
     FUNCTION = "main"
-    CATEGORY = "model_patches"
+    CATEGORY = "RES4LYF/model_shift"
 
     def sigma_exponential(self, timestep):
         return time_snr_shift_exponential(self.timestep_shift, timestep / self.multiplier)
@@ -274,7 +277,8 @@ class ModelSamplingAdvancedResolution:
     
     RETURN_TYPES = ("MODEL",)
     FUNCTION = "main"
-    CATEGORY = "model_shift"
+    
+    CATEGORY = "RES4LYF/model_shift"
 
     def sigma_exponential(self, timestep):
         return time_snr_shift_exponential(self.timestep_shift, timestep / self.multiplier)
@@ -348,7 +352,7 @@ class UNetSave:
     FUNCTION = "save"
     OUTPUT_NODE = True
 
-    CATEGORY = "advanced/model_merging"
+    CATEGORY = "RES4LYF/model_merging"
     DESCRIPTION = "Save a .safetensors containing only the model data."
 
     def save(self, model, filename_prefix, prompt=None, extra_pnginfo=None):
@@ -457,7 +461,7 @@ class TorchCompileModelFluxAdvanced: #adapted from https://github.com/kijai/Comf
     RETURN_TYPES = ("MODEL",)
     FUNCTION = "patch"
 
-    CATEGORY = "model_patches"
+    CATEGORY = "RES4LYF/model_patches"
     EXPERIMENTAL = True
 
     def parse_blocks(self, blocks_str):

@@ -98,34 +98,34 @@ NODE_CLASS_MAPPINGS = {
     "ClownSamplerAdvanced": samplers.ClownSamplerAdvanced,
     "SharkSampler": samplers.SharkSampler,
     "ClownsharKSampler": samplers.ClownsharKSampler,
+    
     "ClownsharKSamplerSimple_Beta": samplers.ClownsharKSamplerSimple_Beta,
     
-    "ClownSamplerSelector_Beta": samplers_extensions.ClownSamplerSelector_Beta,
     
+
+    "ClownsharKSamplerGuides": samplers_extensions.ClownsharKSamplerGuides,
+    "ClownsharKSamplerGuide": samplers_extensions.ClownsharKSamplerGuide,
+    
+    
+
+    "ClownGuidesAB_Beta": samplers_extensions.ClownGuidesAB_Beta,
+    "ClownGuides_Beta": samplers_extensions.ClownGuides_Beta,
+    "ClownGuide_Beta": samplers_extensions.ClownGuide_Beta,
+    
+    "ClownOptions_SDE_Noise": samplers_extensions.ClownOptions_SDE_Noise,
+    "ClownOptions_FrameWeights": samplers_extensions.ClownOptions_FrameWeights,
+    
+    "ClownSamplerSelector_Beta": samplers_extensions.ClownSamplerSelector_Beta,
+
     "ClownOptions_SDE_Beta": samplers_extensions.ClownOptions_SDE_Beta,
     "ClownOptions_StepSize_Beta": samplers_extensions.ClownOptions_StepSize_Beta,
     "ClownOptions_DetailBoost_Beta": samplers_extensions.ClownOptions_DetailBoost_Beta,
     "ClownOptions_ImplicitSteps_Beta": samplers_extensions.ClownOptions_ImplicitSteps_Beta,
     "ClownOptions_ExtraOptions_Beta": samplers_extensions.ClownOptions_ExtraOptions_Beta,
-
     "ClownOptions_Automation_Beta": samplers_extensions.ClownOptions_Automation_Beta,
 
     "SharkOptions_Beta": samplers_extensions.SharkOptions_Beta,
 
-
-    
-    "ClownsharKSamplerGuides": samplers_extensions.ClownsharKSamplerGuides,
-    "ClownsharKSamplerGuide": samplers_extensions.ClownsharKSamplerGuide,
-    
-    "ClownGuidesAB_Beta": samplers_extensions.ClownGuidesAB_Beta,
-
-    #"ClownGuidesSimple_Beta": samplers_extensions.ClownGuidesSimple_Beta,
-
-    "ClownGuides_Beta": samplers_extensions.ClownGuides_Beta,
-    "ClownGuide_Beta": samplers_extensions.ClownGuide_Beta,
-    
-
-    
     
     "ClownsharKSamplerGuidesMisc_Beta": samplers_extensions.ClownsharKSamplerGuidesMisc_Beta,
     "ClownsharKSamplerGuideMisc_Beta": samplers_extensions.ClownsharKSamplerGuideMisc_Beta,
@@ -137,8 +137,7 @@ NODE_CLASS_MAPPINGS = {
     "ClownInpaintSimple": samplers_extensions.ClownInpaintSimple,
 
     "ClownsharKSamplerOptions": samplers_extensions.ClownsharKSamplerOptions,
-    "ClownsharKSamplerOptions_SDE_Noise": samplers_extensions.ClownsharKSamplerOptions_SDE_Noise,
-    "ClownsharkSamplerOptions_FrameWeights": samplers_extensions.ClownsharKSamplerOptions_FrameWeights,
+
     "ClownsharKSamplerAutomation": samplers_extensions.ClownsharKSamplerAutomation,
     "ClownsharKSamplerAutomation_Beta": samplers_extensions.ClownsharKSamplerAutomation_Beta,
     "ClownsharKSamplerAutomation_Advanced": samplers_extensions.ClownsharKSamplerAutomation_Advanced,
@@ -163,7 +162,14 @@ NODE_CLASS_MAPPINGS = {
     "TextBox1": nodes_misc.TextBox1,
     "TextBox3": nodes_misc.TextBox3,
     
-    
+    "TextLoadFile": nodes_misc.TextLoadFile,
+    "TextShuffle": nodes_misc.TextShuffle,
+    "TextShuffleAndTruncate": nodes_misc.TextShuffleAndTruncate,
+    "TextTruncateTokens": nodes_misc.TextTruncateTokens,
+
+    "TextConcatenate": nodes_misc.TextConcatenate,
+    "TextBoxConcatenate": nodes_misc.TextBoxConcatenate,
+
     
     "CLIPTextEncodeFluxUnguided": conditioning.CLIPTextEncodeFluxUnguided,
     "ConditioningOrthoCollin": conditioning.ConditioningOrthoCollin,
