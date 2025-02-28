@@ -808,7 +808,6 @@ class ClownsharKSamplerSimple_Beta:
 
              sigmas_override=None, 
              guides=None, 
-             options=None, 
              sde_noise=None,
              sde_noise_steps=1, 
              extra_options="", 

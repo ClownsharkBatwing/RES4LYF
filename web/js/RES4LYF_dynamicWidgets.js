@@ -127,7 +127,7 @@ app.registerExtension({
         
         app.ui.settings.addSetting({
             id: "RES4LYF.displayCategory",
-            name: "RES4LYF: Display Category in Sampler Names",
+            name: "RES4LYF: Display Category in Sampler Names (requires browser refresh)",
             defaultValue: true,
             type: "boolean",
             options: [
