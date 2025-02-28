@@ -61,6 +61,8 @@ function debugLog(...args) {
     }
 }
 
+const resDebugLog = debugLog;
+
 app.registerExtension({
     name: "Comfy.RES4LYF.DynamicWidgets",
 
@@ -232,13 +234,13 @@ function setupExpandableOptions(node) {
                     } else if (input.name.startsWith("options ")) {
                         const match = input.name.match(/options (\d+)/);
                         if (match) {
-                            const index = parseInt(match[1]);
+                            const index = parseInt(match[1]) - 1;
                             maxIndex = Math.max(maxIndex, index);
                         }
                     }
                 }
                 
-                const newName = maxIndex === 0 ? "options 1" : `options ${maxIndex + 1}`;
+                const newName = maxIndex === 0 ? "options 2" : `options ${maxIndex + 2}`;
                 this.addInput(newName, "OPTIONS");
                 debugLog(`Created new options input: ${newName}`);
                 
@@ -254,11 +256,11 @@ function setupExpandableOptions(node) {
     const baseOptionsInput = optionsInputs.find(input => input.name === "options");
     const hasOptionsWithIndex = optionsInputs.some(input => input.name !== "options");
     
-    if (baseOptionsInput && !hasOptionsWithIndex) {
-        debugLog(`Adding initial options 1 input to ${node.comfyClass}`);
-        node.addInput("options 1", "OPTIONS");
-        node.setDirtyCanvas(true, true);
-    }
+    // if (baseOptionsInput && !hasOptionsWithIndex) {
+    //     debugLog(`Adding initial options 1 input to ${node.comfyClass}`);
+    //     node.addInput("options 1", "OPTIONS");
+    //     node.setDirtyCanvas(true, true);
+    // }
     
     const originalOnConfigure = node.onConfigure;
     node.onConfigure = function(info) {
@@ -284,13 +286,13 @@ function setupExpandableOptions(node) {
                 } else if (input.name.startsWith("options ")) {
                     const match = input.name.match(/options (\d+)/);
                     if (match) {
-                        const index = parseInt(match[1]);
+                        const index = parseInt(match[1]) - 1;
                         maxIndex = Math.max(maxIndex, index);
                     }
                 }
             }
             
-            const newName = maxIndex === 0 ? "options 1" : `options ${maxIndex + 1}`;
+            const newName = maxIndex === 0 ? "options 2" : `options ${maxIndex + 2}`;
             this.addInput(newName, "OPTIONS");
         }
     };
@@ -380,7 +382,7 @@ function setupExpandableOptions(node) {
         
         for (let i = 0; i < optionsInfo.length; i++) {
             const inputInfo = optionsInfo[i];
-            const newName = `options ${i + 1}`;
+            const newName = `options ${i + 2}`;
             
             if (inputInfo.name !== newName) {
                 debugLog(`Renaming ${inputInfo.name} to ${newName}`);

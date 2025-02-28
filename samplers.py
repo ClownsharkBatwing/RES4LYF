@@ -76,9 +76,26 @@ class SharkSampler:
              positive=None, negative=None, sampler=None, sigmas=None, latent_noise=None, latent_noise_match=None,
              noise_stdev=1.0, noise_mean=0.0, noise_normalize=True, 
              d_noise=1.0, alpha_init=-1.0, k_init=1.0, cfgpp=0.0, noise_seed=-1,
-                    options=None, sde_noise=None,sde_noise_steps=1, 
-                    extra_options="", 
+                    sde_noise=None,sde_noise_steps=1, 
+                    extra_options="", **kwargs
                     ): 
+            
+            options_inputs = []
+
+            if "options" in kwargs and kwargs["options"] is not None:
+                options_inputs.append(kwargs["options"])
+
+            i = 2
+            while True:
+                option_name = f"options {i}"
+                if option_name in kwargs and kwargs[option_name] is not None:
+                    options_inputs.append(kwargs[option_name])
+                    i += 1
+                else:
+                    break
+
+            options = OptionsManager(options_inputs)
+
             # blame comfy here
             raw_x = latent_image['raw_x'] if 'raw_x' in latent_image else None
             last_seed = latent_image['last_seed'] if 'last_seed' in latent_image else None
@@ -139,15 +156,14 @@ class SharkSampler:
                     #torch.cuda.manual_seed_all(seed)
 
 
-                if options is not None:
-                    noise_stdev     = options.get('noise_init_stdev', noise_stdev)
-                    noise_mean      = options.get('noise_init_mean',  noise_mean)
-                    noise_type_init = options.get('noise_type_init',  noise_type_init)
-                    d_noise         = options.get('d_noise',          d_noise)
-                    alpha_init      = options.get('alpha_init',       alpha_init)
-                    k_init          = options.get('k_init',           k_init)
-                    sde_noise       = options.get('sde_noise',        sde_noise)
-                    sde_noise_steps = options.get('sde_noise_steps',  sde_noise_steps)
+                noise_stdev     = options.get('noise_init_stdev', noise_stdev)
+                noise_mean      = options.get('noise_init_mean',  noise_mean)
+                noise_type_init = options.get('noise_type_init',  noise_type_init)
+                d_noise         = options.get('d_noise',          d_noise)
+                alpha_init      = options.get('alpha_init',       alpha_init)
+                k_init          = options.get('k_init',           k_init)
+                sde_noise       = options.get('sde_noise',        sde_noise)
+                sde_noise_steps = options.get('sde_noise_steps',  sde_noise_steps)
 
                 latent_image_dtype = latent_unbatch['samples'].dtype
 
@@ -212,8 +228,7 @@ class SharkSampler:
 
                 if denoise_alt < 0:
                     d_noise = denoise_alt = -denoise_alt
-                if options is not None:
-                    d_noise = options.get('d_noise', d_noise)
+                d_noise = options.get('d_noise', d_noise)
 
                 if sigmas is not None:
                     sigmas = sigmas.clone().to(default_dtype)
@@ -542,8 +557,8 @@ class ClownSamplerAdvanced_Beta:
                 "optional": 
                     {
                     "guides": ("GUIDES", ),     
-                    "options": ("OPTIONS", ),   
                     "automation": ("AUTOMATION", ),
+                    "options": ("OPTIONS", ),   
                     "extra_options": ("STRING", {"default": "", "multiline": True}),   
                     }
                 }
@@ -560,12 +575,44 @@ class ClownSamplerAdvanced_Beta:
              eta=0.5, eta_substep=0.5, d_noise=1.0, s_noise=1.0, s_noise_substep=1.0, alpha_sde=-1.0, k_sde=1.0, cfgpp=0.0, c1=0.0, c2=0.5, c3=1.0, noise_seed_sde=-1, sampler_name="res_2m", implicit_sampler_name="gauss-legendre_2s",
                     implicit_substeps=0, implicit_steps=0,
                     rescale_floor=True, sigmas_override=None,
-                    guides=None, options=None, sde_noise=None,sde_noise_steps=1, 
+                    guides=None, sde_noise=None,sde_noise_steps=1, 
                     extra_options="", automation=None, etas=None, etas_substep=None, s_noises=None, s_noises_substep=None, epsilon_scales=None, regional_conditioning_weights=None,frame_weights_grp=None, noise_mode_sde_substep="hard",
                     overshoot=0.0, overshoot_substep=0.0, noise_boost_step=0.0, noise_boost_substep=0.0, bongmath=True, noise_anchor=1.0,
-                    implicit_type="predictor-corrector", implicit_type_substeps="predictor-corrector",
+                    implicit_type="predictor-corrector", implicit_type_substeps="predictor-corrector", **kwargs
                     ): 
-        
+
+            options_inputs = []
+
+            if "options" in kwargs and kwargs["options"] is not None:
+                options_inputs.append(kwargs["options"])
+
+            i = 2
+            while True:
+                option_name = f"options {i}"
+                if option_name in kwargs and kwargs[option_name] is not None:
+                    options_inputs.append(kwargs[option_name])
+                    i += 1
+                else:
+                    break
+
+            options = OptionsManager(options_inputs)
+            noise_type_sde = options.get('noise_type_sde', noise_type_sde)
+            noise_mode_sde = options.get('noise_mode_sde', noise_mode_sde)
+            eta = options.get('eta', eta)
+            s_noise = options.get('s_noise', s_noise)
+            d_noise = options.get('d_noise', d_noise)
+            alpha_sde = options.get('alpha_sde', alpha_sde)
+            k_sde = options.get('k_sde', k_sde)
+            c1 = options.get('c1', c1)
+            c2 = options.get('c2', c2)
+            c3 = options.get('c3', c3)
+
+            frame_weights_grp = options.get('frame_weights_grp', frame_weights_grp)
+            sde_noise = options.get('sde_noise', sde_noise)
+            sde_noise_steps = options.get('sde_noise_steps', sde_noise_steps)
+
+            rescale_floor = extra_options_flag("rescale_floor", extra_options)
+
             sampler_name, implicit_sampler_name = process_sampler_name(sampler_name)
 
             implicit_steps_diag = implicit_substeps
@@ -577,24 +624,6 @@ class ClownSamplerAdvanced_Beta:
 
             default_dtype = getattr(torch, get_extra_options_kv("default_dtype", "float64", extra_options), torch.float64)
 
-
-            if options is not None:
-                noise_type_sde = options.get('noise_type_sde', noise_type_sde)
-                noise_mode_sde = options.get('noise_mode_sde', noise_mode_sde)
-                eta = options.get('eta', eta)
-                s_noise = options.get('s_noise', s_noise)
-                d_noise = options.get('d_noise', d_noise)
-                alpha_sde = options.get('alpha_sde', alpha_sde)
-                k_sde = options.get('k_sde', k_sde)
-                c1 = options.get('c1', c1)
-                c2 = options.get('c2', c2)
-                c3 = options.get('c3', c3)
-
-                frame_weights_grp = options.get('frame_weights_grp', frame_weights_grp)
-                sde_noise = options.get('sde_noise', sde_noise)
-                sde_noise_steps = options.get('sde_noise_steps', sde_noise_steps)
-
-            rescale_floor = extra_options_flag("rescale_floor", extra_options)
 
             if automation is not None:
                 etas = automation['etas'] if 'etas' in automation else None
@@ -800,7 +829,7 @@ class ClownsharKSamplerSimple_Beta:
         if "options" in kwargs and kwargs["options"] is not None:
             options_inputs.append(kwargs["options"])
 
-        i = 1
+        i = 2
         while True:
             option_name = f"options {i}"
             if option_name in kwargs and kwargs[option_name] is not None:
@@ -810,9 +839,9 @@ class ClownsharKSamplerSimple_Beta:
                 break
 
         options = OptionsManager(options_inputs)
+
         noise_seed_sde = seed+1
-        
-        
+
         # defaults for ClownSampler
         eta_substep = eta
         
@@ -964,7 +993,7 @@ class ClownsharKSamplerSimple_Beta:
             denoise=denoise,
             latent_image=latent_image, positive=positive, negative=negative, sampler=sampler[0], 
             cfgpp=cfgpp, noise_seed=seed, 
-            options=options, sde_noise=sde_noise, sde_noise_steps=sde_noise_steps, 
+            options=options.as_dict(), sde_noise=sde_noise, sde_noise_steps=sde_noise_steps, 
             noise_type_init=noise_type_init,
             noise_stdev=noise_stdev,
             sampler_mode=sampler_mode,
@@ -1012,8 +1041,8 @@ class ClownsharkUnsampler:
                     "sigmas": ("SIGMAS", ),
                     "latent_image": ("LATENT", ),     
                     "guides": ("GUIDES", ),     
-                    "options": ("OPTIONS", ),   
                     "automation": ("AUTOMATION", ),
+                    "options": ("OPTIONS", ),   
                     }
                 }
 
@@ -1031,9 +1060,25 @@ class ClownsharkUnsampler:
              eta=0.25, eta_var=0.0, d_noise=1.0, s_noise=1.0, alpha_init=-1.0, k_init=1.0, alpha_sde=-1.0, k_sde=1.0, cfgpp=0.0, c1=0.0, c2=0.5, c3=1.0, noise_seed=-1, sampler_name="res_2m", implicit_sampler_name="default",
                     t_fn_formula=None, sigma_fn_formula=None, implicit_steps=0,
                     latent_guide=None, latent_guide_inv=None, guide_mode="blend", latent_guide_weights=None, latent_guide_weights_inv=None, latent_guide_mask=None, latent_guide_mask_inv=None, rescale_floor=True, sigmas_override=None,
-                    shift=3.0, base_shift=0.85, guides=None, options=None, sde_noise=None,sde_noise_steps=1, shift_scaling="exponential",
-                    extra_options="", automation=None, etas=None, s_noises=None,unsample_resample_scales=None, regional_conditioning_weights=None,frame_weights_grp=None,
+                    shift=3.0, base_shift=0.85, guides=None, sde_noise=None,sde_noise_steps=1, shift_scaling="exponential",
+                    extra_options="", automation=None, etas=None, s_noises=None,unsample_resample_scales=None, regional_conditioning_weights=None,frame_weights_grp=None, **kwargs
                     ): 
+        
+        options_inputs = []
+
+        if "options" in kwargs and kwargs["options"] is not None:
+            options_inputs.append(kwargs["options"])
+
+        i = 2
+        while True:
+            option_name = f"options {i}"
+            if option_name in kwargs and kwargs[option_name] is not None:
+                options_inputs.append(kwargs[option_name])
+                i += 1
+            else:
+                break
+
+        options = OptionsManager(options_inputs)
 
         if noise_seed >= 0:
             noise_seed_sde = noise_seed + 1
@@ -1049,7 +1094,7 @@ class ClownsharkUnsampler:
              eta=eta, eta_var=eta_var, d_noise=d_noise, s_noise=s_noise, alpha_sde=alpha_sde, k_sde=k_sde, cfgpp=cfgpp, c1=c1, c2=c2, c3=c3, noise_seed_sde=noise_seed_sde, sampler_name=sampler_name, implicit_sampler_name=implicit_sampler_name,
                     t_fn_formula=t_fn_formula, sigma_fn_formula=sigma_fn_formula, implicit_steps=implicit_steps,
                     latent_guide=latent_guide, latent_guide_inv=latent_guide_inv, guide_mode=guide_mode, latent_guide_weights=latent_guide_weights, latent_guide_weights_inv=latent_guide_weights_inv, latent_guide_mask=latent_guide_mask, latent_guide_mask_inv=latent_guide_mask_inv, rescale_floor=rescale_floor, sigmas_override=sigmas_override,
-                    guides=guides, options=options, sde_noise=sde_noise,sde_noise_steps=sde_noise_steps, 
+                    guides=guides, options=options.as_dict(), sde_noise=sde_noise,sde_noise_steps=sde_noise_steps, 
                     extra_options=extra_options, automation=automation, etas=etas, s_noises=s_noises,unsample_resample_scales=unsample_resample_scales, regional_conditioning_weights=regional_conditioning_weights,frame_weights_grp=frame_weights_grp, eta_substep=eta_substep, noise_mode_sde_substep=noise_mode_sde_substep,
                     )
 
@@ -1059,7 +1104,7 @@ class ClownsharkUnsampler:
             positive, negative, sampler[0], sigmas, latent_noise, latent_noise_match,
             noise_stdev, noise_mean, noise_normalize, noise_is_latent, 
             d_noise, alpha_init, k_init, cfgpp, noise_seed,
-            shift, base_shift, options, sde_noise, sde_noise_steps, shift_scaling,
+            shift, base_shift, options.as_dict(), sde_noise, sde_noise_steps, shift_scaling,
             extra_options)
 
 

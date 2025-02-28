@@ -125,6 +125,7 @@ NODE_CLASS_MAPPINGS = {
     "ClownOptions_Automation_Beta": samplers_extensions.ClownOptions_Automation_Beta,
 
     "SharkOptions_Beta": samplers_extensions.SharkOptions_Beta,
+    "ClownOptions_Combine": samplers_extensions.ClownOptions_Combine,
 
     
     "ClownsharKSamplerGuidesMisc_Beta": samplers_extensions.ClownsharKSamplerGuidesMisc_Beta,
