@@ -24,7 +24,7 @@ from comfy.ldm.flux.model import Flux
 from comfy.ldm.flux.layers import SingleStreamBlock, DoubleStreamBlock
 
 from .helper import get_orthogonal, get_cosine_similarity
-from .res4lyf import RESplain
+from ..res4lyf import RESplain
 
 
 class ReFluxPatcher:

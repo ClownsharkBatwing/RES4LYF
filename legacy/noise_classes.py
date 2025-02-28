@@ -9,7 +9,7 @@ from torch.distributions import StudentT, Laplace
 import numpy as np
 import pywt
 import functools
-from .res4lyf import RESplain
+from ..res4lyf import RESplain
 
 # Set this to "True" if you have installed OpenSimplex. Recommended to install without dependencies due to conflicting packages: pip3 install opensimplex --no-deps 
 OPENSIMPLEX_ENABLE = False
