@@ -1,13 +1,8 @@
 import torch
 import torch.nn.functional as F
-import torchvision.transforms as T
-import re
-import copy
 
 from tqdm.auto import trange
-import gc
 
-import comfy.model_patcher
 
 from .noise_classes import *
 from .noise_sigmas_timesteps_scaling import get_res4lyf_step_with_model, get_res4lyf_half_step3

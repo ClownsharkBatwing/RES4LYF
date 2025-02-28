@@ -9,22 +9,24 @@ import os
 import random
 
 from io import BytesIO
-from comfy.cli_args import args
-import comfy.utils
-from nodes import MAX_RESOLUTION
 
 import matplotlib.pyplot as plt
 import matplotlib
 matplotlib.use('Agg')  # use the Agg backend for non-interactive rendering... prevent crashes by not using tkinter (which requires running in the main thread)
+from comfy.cli_args import args
 
-from .noise_sigmas_timesteps_scaling import get_res4lyf_step_with_model
-from .helper import get_res4lyf_scheduler_list
-
-from .noise_sigmas_timesteps_scaling import NOISE_MODE_NAMES
-from .sigmas import get_sigmas
 import comfy.samplers
+import comfy.utils
 
-import copy
+from nodes import MAX_RESOLUTION
+
+
+
+from .beta.rk_method_beta        import RK_Method_Beta
+from .beta.rk_noise_sampler_beta import RK_NoiseSampler, NOISE_MODE_NAMES
+from .helper                     import get_res4lyf_scheduler_list
+from .sigmas                     import get_sigmas
+
 
 
 
@@ -39,7 +41,7 @@ class SaveImage:
     def INPUT_TYPES(s):
         return {
             "required": {
-                "images": ("IMAGE", {"tooltip": "The images to save."}),
+                "images":          ("IMAGE",  {                      "tooltip": "The images to save."}),
                 "filename_prefix": ("STRING", {"default": "ComfyUI", "tooltip": "The prefix for the file to save. This may include formatting information such as %date:yyyy-MM-dd% or %Empty Latent Image.width% to include values from nodes."})
             },
             "hidden": {
@@ -244,19 +246,19 @@ class VAEEncodeAdvanced:
         return {
             "required": {
                 "resize_to_input": (["false", "image_1", "image_2", "mask", "latent"], {"default": "false"},),
-                "width": ("INT", { "default": 1024, "min": 0, "max": MAX_RESOLUTION, "step": 1, }),
-                "height": ("INT", { "default": 1024, "min": 0, "max": MAX_RESOLUTION, "step": 1, }),
-                "mask_channel": (["red", "green", "blue", "alpha"],),
-                "invert_mask": ("BOOLEAN", {"default": False}),
-                "latent_type": (["4_channels", "16_channels"], {"default": "16_channels",}),
+                "width":           ("INT",                                             {"default": 1024, "min": 0, "max": MAX_RESOLUTION, "step": 1, }),
+                "height":          ("INT",                                             {"default": 1024, "min": 0, "max": MAX_RESOLUTION, "step": 1, }),
+                "mask_channel":    (["red", "green", "blue", "alpha"],),
+                "invert_mask":     ("BOOLEAN",                                         {"default": False}),
+                "latent_type":     (["4_channels", "16_channels"],                     {"default": "16_channels",}),
             },
             
             "optional": {
-                "image_1": ("IMAGE",),
-                "image_2": ("IMAGE",),
-                "mask": ("IMAGE",),
-                "latent": ("LATENT",),
-                "vae": ("VAE", ),
+                "image_1":         ("IMAGE",),
+                "image_2":         ("IMAGE",),
+                "mask":            ("IMAGE",),
+                "latent":          ("LATENT",),
+                "vae":             ("VAE", ),
             }
         }
 
@@ -326,19 +328,19 @@ class SigmasSchedulePreview(SaveImage):
     def INPUT_TYPES(cls):
         return {
             "required": {
-                "model": ("MODEL",),
-                "noise_mode": (NOISE_MODE_NAMES, {"default": 'hard', "tooltip": "How noise scales with the sigma schedule. Hard is the most aggressive, the others start strong and drop rapidly."}),
-                "eta": ("FLOAT", {"default": 0.25, "step": 0.01, "min": -1000.0, "max": 1000.0}),
-                "s_noise": ("FLOAT", {"default": 1.00, "step": 0.01, "min": -1000.0, "max": 1000.0}),
-                "denoise": ("FLOAT", {"default": 1.0, "min": -10000, "max": 10000, "step":0.01}),
-                "denoise_alt": ("FLOAT", {"default": 1.0, "min": -10000, "max": 10000, "step":0.01}),
-                "scheduler": (get_res4lyf_scheduler_list(), {"default": "beta57"},),
-                "steps": ("INT", {"default": 30, "min": 1, "max": 10000}),
-                "plot_max": ("FLOAT", {"default": 2.1, "min": -10000, "max": 10000, "step":0.01, "tooltip": "Set to a negative value to have the plot scale automatically."}),
-                "plot_min": ("FLOAT", {"default": 0.0, "min": -10000, "max": 10000, "step":0.01, "tooltip": "Set to a negative value to have the plot scale automatically."}),
+                "model":       ("MODEL",),
+                "noise_mode":  (NOISE_MODE_NAMES,             {"default": 'hard',                                        "tooltip": "How noise scales with the sigma schedule. Hard is the most aggressive, the others start strong and drop rapidly."}),
+                "eta":         ("FLOAT",                      {"default": 0.25, "step": 0.01, "min": -1000.0, "max": 1000.0}),
+                "s_noise":     ("FLOAT",                      {"default": 1.00, "step": 0.01, "min": -1000.0, "max": 1000.0}),
+                "denoise":     ("FLOAT",                      {"default": 1.0, "min": -10000, "max": 10000, "step":0.01}),
+                "denoise_alt": ("FLOAT",                      {"default": 1.0, "min": -10000, "max": 10000, "step":0.01}),
+                "scheduler":   (get_res4lyf_scheduler_list(), {"default": "beta57"},),
+                "steps":       ("INT",                        {"default": 30, "min": 1, "max": 10000}),
+                "plot_max":    ("FLOAT",                      {"default": 2.1, "min": -10000, "max": 10000, "step":0.01, "tooltip": "Set to a negative value to have the plot scale automatically."}),
+                "plot_min":    ("FLOAT",                      {"default": 0.0, "min": -10000, "max": 10000, "step":0.01, "tooltip": "Set to a negative value to have the plot scale automatically."}),
             },
             "optional": {
-                "sigmas": ("SIGMAS",),
+                "sigmas":      ("SIGMAS",),
             },
         }
 
@@ -368,12 +370,12 @@ class SigmasSchedulePreview(SaveImage):
             plt.ylim(plot_min, plot_max)
 
         input_text = (
-            f"noise_mode: {input_params['noise_mode']}  |  "
-            f"eta: {input_params['eta']}  |  "
-            f"s_noise: {input_params['s_noise']}  |  "
-            f"denoise: {input_params['denoise']}  |  "
+            f"noise_mode:  {input_params['noise_mode']}  |  "
+            f"eta:         {input_params['eta']}  |  "
+            f"s_noise:     {input_params['s_noise']}  |  "
+            f"denoise:     {input_params['denoise']}  |  "
             f"denoise_alt: {input_params['denoise_alt']}  |  "
-            f"scheduler: {input_params['scheduler']}"
+            f"scheduler:   {input_params['scheduler']}"
         )
         plt.text(0.5, 1.05, input_text, ha='center', va='center', color='white', fontsize=8, transform=ax.transAxes)
 
@@ -390,17 +392,23 @@ class SigmasSchedulePreview(SaveImage):
 
 
     def plot_schedule(self, model, noise_mode, eta, s_noise, denoise, denoise_alt, scheduler, steps, plot_min, plot_max, sigmas=None):
-        sigma_vals = []
-        sigma_next_vals = []
-        sigma_down_vals = []
-        sigma_up_vals = []
-        sigma_plus_up_vals = []
-        sigma_hat_vals = []
-        alpha_ratio_vals = []
-        sigma_step_size_vals = []
+        sigma_vals               = []
+        sigma_next_vals          = []
+        sigma_down_vals          = []
+        sigma_up_vals            = []
+        sigma_plus_up_vals       = []
+        sigma_hat_vals           = []
+        alpha_ratio_vals         = []
+        sigma_step_size_vals     = []
         sigma_step_size_sde_vals = []
         
         eta_var = eta
+        
+        rk_type = "res_2s"
+        noise_anchor = 1.0
+        
+        RK = RK_Method_Beta.create(model, rk_type, noise_anchor, model_device=sigmas.device, work_device=sigmas.device, dtype=sigmas.dtype, extra_options="")
+        NS = RK_NoiseSampler(RK, model, device=sigmas.device, dtype=sigmas.dtype, extra_options="")
         
         if sigmas is not None:
             sigmas = sigmas.clone()
@@ -412,29 +420,30 @@ class SigmasSchedulePreview(SaveImage):
             sigma = sigmas[i]
             sigma_next = sigmas[i + 1]
             
-            su, sigma_hat, sd, alpha_ratio = get_res4lyf_step_with_model(model, sigma, sigma_next, eta, noise_mode)
+            su, sigma_hat, sd, alpha_ratio = NS.get_sde_step(sigma, sigma_next, eta, noise_mode_override=noise_mode, )
+            #su, sigma_hat, sd, alpha_ratio = get_res4lyf_step_with_model(model, sigma, sigma_next, eta, noise_mode)
 
             su = su * s_noise
             
-            sigma_vals.append(sigma)
-            sigma_next_vals.append(sigma_next)
-            sigma_down_vals.append(sd)
-            sigma_up_vals.append(su)
-            sigma_plus_up_vals.append(sigma + su)
-            alpha_ratio_vals.append(alpha_ratio)
-            sigma_step_size_vals.append(sigma - sigma_next)
+            sigma_vals              .append(sigma)
+            sigma_next_vals         .append(sigma_next)
+            sigma_down_vals         .append(sd)
+            sigma_up_vals           .append(su)
+            sigma_plus_up_vals      .append(sigma + su)
+            alpha_ratio_vals        .append(alpha_ratio)
+            sigma_step_size_vals    .append(sigma - sigma_next)
             sigma_step_size_sde_vals.append(sigma + su - sd)
 
             if sigma_hat != sigma:
                 sigma_hat_vals.append(sigma_hat)
 
-        sigma_tensor = torch.tensor(sigma_vals)
-        sigma_next_tensor = torch.tensor(sigma_next_vals)
-        sigma_down_tensor = torch.tensor(sigma_down_vals)
-        sigma_up_tensor = torch.tensor(sigma_up_vals)
-        sigma_plus_up_tensor = torch.tensor(sigma_plus_up_vals)
-        alpha_ratio_tensor = torch.tensor(alpha_ratio_vals)
-        sigma_step_size_tensor = torch.tensor(sigma_step_size_vals)
+        sigma_tensor               = torch.tensor(sigma_vals)
+        sigma_next_tensor          = torch.tensor(sigma_next_vals)
+        sigma_down_tensor          = torch.tensor(sigma_down_vals)
+        sigma_up_tensor            = torch.tensor(sigma_up_vals)
+        sigma_plus_up_tensor       = torch.tensor(sigma_plus_up_vals)
+        alpha_ratio_tensor         = torch.tensor(alpha_ratio_vals)
+        sigma_step_size_tensor     = torch.tensor(sigma_step_size_vals)
         sigma_step_size_sde_tensor = torch.tensor(sigma_step_size_sde_vals)
 
         tensors = [sigma_tensor, sigma_next_tensor, sigma_down_tensor, sigma_up_tensor]
@@ -493,10 +502,10 @@ class SigmasSchedulePreview(SaveImage):
             }
         )
 
-        numpy_image = np.array(graph_image)
-        numpy_image = numpy_image / 255.0
-        tensor_image = torch.from_numpy(numpy_image)
-        tensor_image = tensor_image.unsqueeze(0)
+        numpy_image   = np.array(graph_image)
+        numpy_image   = numpy_image / 255.0
+        tensor_image  = torch.from_numpy(numpy_image)
+        tensor_image  = tensor_image.unsqueeze(0)
         images_tensor = torch.cat([tensor_image], 0)
 
         return self.save_images(images_tensor, "SigmasSchedulePreview")

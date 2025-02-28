@@ -1,5 +1,3 @@
-import torch.nn.functional as F
-
 import comfy.samplers
 import comfy.sample
 import comfy.sampler_helpers
@@ -10,7 +8,7 @@ import itertools
 import torch
 import math
 
-from .beta.noise_classes import NOISE_GENERATOR_NAMES, NOISE_GENERATOR_CLASSES, prepare_noise, precision_tool
+from .noise_classes import *
 
 def initialize_or_scale(tensor, value, steps):
     if tensor is None:

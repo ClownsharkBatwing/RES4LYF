@@ -1,5 +1,5 @@
-from .noise_classes import *
-from .sigmas import get_sigmas
+import torch
+import torch.nn.functional as F
 
 import comfy.samplers
 import comfy.sample
@@ -11,9 +11,12 @@ from comfy_extras.nodes_model_advanced import ModelSamplingSD3, ModelSamplingFlu
 import comfy.supported_models
 
 import latent_preview
-import torch
-import torch.nn.functional as F
+
+from .noise_classes import NOISE_GENERATOR_NAMES, NOISE_GENERATOR_NAMES_SIMPLE, NOISE_GENERATOR_CLASSES_SIMPLE, NOISE_GENERATOR_CLASSES
+
+from .sigmas import get_sigmas
 from .helper import get_res4lyf_scheduler_list
+
 
 def initialize_or_scale(tensor, value, steps):
     if tensor is None:

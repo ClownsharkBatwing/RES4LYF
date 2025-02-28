@@ -1,9 +1,6 @@
-from . import legacy_sampler_rk
-from . import legacy_samplers
-from . import rk_sampler
-from . import samplers
-from . import samplers_extensions
-from . import samplers_tiled
+import importlib
+
+from .legacy import samplers_tiled
 from . import loaders
 from . import sigmas
 from . import latents
@@ -13,13 +10,8 @@ from . import images
 from . import models
 from . import helper_sigma_preview_image_preproc
 from . import nodes_misc
-from .res4lyf import init, get_ext_dir
 
-import torch
-
-import os
-import shutil
-import sys
+from .res4lyf import RESplain, init, get_ext_dir
 
 #torch.use_deterministic_algorithms(True)
 #torch.backends.cudnn.deterministic = True
@@ -29,12 +21,7 @@ flags = {
     "test_samplers": False,
     "beta_samplers": False,
 }
-try:
-    from . import test_samplers
-    flags["test_samplers"] = True
-    print("(RES4LYF) Importing test_samplers.py")
-except ImportError:
-    pass
+
 try:
     from . import rk_sampler_beta
     flags["beta_samplers"] = True
@@ -65,89 +52,16 @@ def add_samplers():
         import importlib
         importlib.reload(k_diffusion_sampling)
 
-extra_samplers = {
-    "res_2m": rk_sampler.sample_res_2m,
-    "res_2s": rk_sampler.sample_res_2s,
-    "res_3s": rk_sampler.sample_res_3s,
-    "res_5s": rk_sampler.sample_res_5s,
-    "res_6s": rk_sampler.sample_res_6s,
-    "res_2m_sde": rk_sampler.sample_res_2m_sde,
-    "res_2s_sde": rk_sampler.sample_res_2s_sde,
-    "res_3s_sde": rk_sampler.sample_res_3s_sde,
-    "res_5s_sde": rk_sampler.sample_res_5s_sde,
-    "res_6s_sde": rk_sampler.sample_res_6s_sde,
-    "deis_2m": rk_sampler.sample_deis_2m,
-    "deis_3m": rk_sampler.sample_deis_3m,
-    "deis_4m": rk_sampler.sample_deis_4m,
-    "deis_2m_sde": rk_sampler.sample_deis_2m_sde,
-    "deis_3m_sde": rk_sampler.sample_deis_3m_sde,
-    "deis_4m_sde": rk_sampler.sample_deis_4m_sde,
-    "rk": rk_sampler.sample_rk,
-    "legacy_rk": legacy_sampler_rk.legacy_sample_rk,
-}
+extra_samplers = {}
 
 extra_samplers = dict(reversed(extra_samplers.items()))
 
 NODE_CLASS_MAPPINGS = {
-    "Legacy_ClownSampler": legacy_samplers.Legacy_SamplerRK,
-    "Legacy_SharkSampler": legacy_samplers.Legacy_SharkSampler,
-    "Legacy_ClownsharKSampler": legacy_samplers.Legacy_ClownsharKSampler,
-    "Legacy_ClownsharKSamplerGuides": legacy_samplers.Legacy_ClownsharKSamplerGuides,
-    
-    "ClownSampler": samplers.ClownSampler,
-    "ClownSamplerAdvanced": samplers.ClownSamplerAdvanced,
-    "SharkSampler": samplers.SharkSampler,
-    "ClownsharKSampler": samplers.ClownsharKSampler,
-    
-    "ClownsharKSamplerSimple_Beta": samplers.ClownsharKSamplerSimple_Beta,
-    
-    
 
-    "ClownsharKSamplerGuides": samplers_extensions.ClownsharKSamplerGuides,
-    "ClownsharKSamplerGuide": samplers_extensions.ClownsharKSamplerGuide,
-    
-    
-
-    "ClownGuidesAB_Beta": samplers_extensions.ClownGuidesAB_Beta,
-    "ClownGuides_Beta": samplers_extensions.ClownGuides_Beta,
-    "ClownGuide_Beta": samplers_extensions.ClownGuide_Beta,
-    
-    "ClownOptions_SDE_Noise": samplers_extensions.ClownOptions_SDE_Noise,
-    "ClownOptions_FrameWeights": samplers_extensions.ClownOptions_FrameWeights,
-    
-    "ClownSamplerSelector_Beta": samplers_extensions.ClownSamplerSelector_Beta,
-
-    "ClownOptions_SDE_Beta": samplers_extensions.ClownOptions_SDE_Beta,
-    "ClownOptions_StepSize_Beta": samplers_extensions.ClownOptions_StepSize_Beta,
-    "ClownOptions_DetailBoost_Beta": samplers_extensions.ClownOptions_DetailBoost_Beta,
-    "ClownOptions_ImplicitSteps_Beta": samplers_extensions.ClownOptions_ImplicitSteps_Beta,
-    "ClownOptions_ExtraOptions_Beta": samplers_extensions.ClownOptions_ExtraOptions_Beta,
-    "ClownOptions_Automation_Beta": samplers_extensions.ClownOptions_Automation_Beta,
-
-    "SharkOptions_Beta": samplers_extensions.SharkOptions_Beta,
-    "ClownOptions_Combine": samplers_extensions.ClownOptions_Combine,
-
-    
-    "ClownsharKSamplerGuidesMisc_Beta": samplers_extensions.ClownsharKSamplerGuidesMisc_Beta,
-    "ClownsharKSamplerGuideMisc_Beta": samplers_extensions.ClownsharKSamplerGuideMisc_Beta,
-    
-    "ClownGuidesFluxAdvanced_Beta": samplers_extensions.ClownGuidesFluxAdvanced_Beta,
     "ClownRegionalConditioningFlux": conditioning.ClownRegionalConditioningFlux,
-    
-    "ClownInpaint": samplers_extensions.ClownInpaint,
-    "ClownInpaintSimple": samplers_extensions.ClownInpaintSimple,
 
-    "ClownsharKSamplerOptions": samplers_extensions.ClownsharKSamplerOptions,
+    #"UltraSharkSampler": samplers.UltraSharkSampler,
 
-    "ClownsharKSamplerAutomation": samplers_extensions.ClownsharKSamplerAutomation,
-    "ClownsharKSamplerAutomation_Beta": samplers_extensions.ClownsharKSamplerAutomation_Beta,
-    "ClownsharKSamplerAutomation_Advanced": samplers_extensions.ClownsharKSamplerAutomation_Advanced,
-
-    "UltraSharkSampler": samplers.UltraSharkSampler,
-    "UltraSharkSampler Tiled": samplers_tiled.UltraSharkSampler_Tiled,
-
-    "SamplerOptions_TimestepScaling": samplers_extensions.SamplerOptions_TimestepScaling,
-    "SamplerOptions_GarbageCollection": samplers_extensions.SamplerOptions_GarbageCollection,
     "ModelSamplingAdvanced": models.ModelSamplingAdvanced,
     "ModelTimestepPatcher": models.ModelSamplingAdvanced,
     "TorchCompileModelFluxAdv": models.TorchCompileModelFluxAdvanced,
@@ -287,132 +201,44 @@ NODE_CLASS_MAPPINGS = {
     "FluxOrthoCFGPatcher": models.FluxOrthoCFGPatcher,
 }
 
-if flags["test_samplers"]:
-    NODE_CLASS_MAPPINGS.update({
-        "SamplerRK_Test": test_samplers.SamplerRK_Test,
-        "Zampler_Test": test_samplers.Zampler_Test,
-        "UltraSharkSamplerRBTest": test_samplers.UltraSharkSamplerRBTest,
-    })
-    extra_samplers.update({
-        "rk_test":  test_samplers.sample_rk_test,
-        "rk_sphere":  test_samplers.sample_rk_sphere,
-        "rk_vpsde":  test_samplers.sample_rk_vpsde,
-        "rk_vpsde_ddpm":  test_samplers.sample_rk_vpsde_ddpm,
-        "rk_vpsde_csbw":  test_samplers.sample_rk_vpsde_csbw,
-        "rk_momentum":  test_samplers.sample_rk_momentum,
-        "rk_ralston_2s":  test_samplers.sample_rk_ralston_2s,
-        "rk_implicit_res_2s":  test_samplers.sample_rk_implicit_res_2s,
-        "res_multistep": test_samplers.sample_res_multistep,
-        "rk_res_2m": test_samplers.sample_rk_res_2m,
-        "rk_res_2s": test_samplers.sample_rk_res_2s,
-        "rk_res_2s_prenoise": test_samplers.sample_rk_res_2s_prenoise,
-        "rk_ralston_2s_prenoise": test_samplers.sample_rk_ralston_2s_prenoise,
 
-        "rk_ralston_2s_prenoise_alt": test_samplers.sample_rk_ralston_2s_prenoise_alt,
-        "rk_ralston_2s_prenoise_alt2": test_samplers.sample_rk_ralston_2s_prenoise_alt2,
-        "rk_ralston_3s_prenoise_alt2": test_samplers.sample_rk_ralston_3s_prenoise_alt2,
-
-        "rk_res_2m_nonstandard_prenoise_alt": test_samplers.sample_rk_res_2m_nonstandard_prenoise_alt,
-
-        "rk_res_2m_prenoise_alt": test_samplers.sample_rk_res_2m_prenoise_alt,
-        "rk_res_2m_prenoise_alt2": test_samplers.sample_rk_res_2m_prenoise_alt2,
-
-        "rk_res_2s_prenoise_alt": test_samplers.sample_rk_res_2s_prenoise_alt,
-        "rk_res_2s_prenoise_data": test_samplers.sample_rk_res_2s_prenoise_data,
-
-        "rk_res_2s_overstep": test_samplers.sample_rk_res_2s_overstep,
-        "rk_res_2s_downswap": test_samplers.sample_rk_res_2s_downswap,
-
-        
-        "rk_crazy": test_samplers.sample_rk_crazy,
-        "rk_crazy2": test_samplers.sample_rk_crazy2,
-        "rk_crazymod43": test_samplers.sample_rk_crazymod43,
-        "rk_crazymod44": test_samplers.sample_rk_crazymod44,
-        "rk_crazymod45": test_samplers.sample_rk_crazymod45,
-        "rk_pec423": test_samplers.sample_rk_pec423,
-        "rk_pec433": test_samplers.sample_rk_pec433,
-        "rk_gausslang_full": test_samplers.sample_rk_gausslang_full,
-        "rk_gausslang_3s_full": test_samplers.sample_rk_gausslang_3s_full,
-        "rk_gausslang_3s_full_guide": test_samplers.sample_rk_gausslang_3s_full_guide,
-        "rk_radau_iia_alt_lang_3s_full": test_samplers.sample_rk_radau_iia_alt_lang_3s_full,
-        "rk_implicit": test_samplers.sample_rk_implicit,
-
-
-        "rk_gausslang": test_samplers.sample_rk_gausslang,
-        "rk_gausslangeps": test_samplers.sample_rk_gausslangeps,
-        "rk_ralradau": test_samplers.sample_rk_ralradau,
-
-
-        "rk_gausscycle": test_samplers.sample_rk_gausscycle,
-        "rk_gausscycle2": test_samplers.sample_rk_gausscycle2,
-
-        "rk_radaucycle": test_samplers.sample_rk_radaucycle,
-        "rk_radaucycle_ia": test_samplers.sample_rk_radaucycle_ia,
-        "rk_radaucycle_3s": test_samplers.sample_rk_radaucycle_3s,
-        "rk_radaucycle_retry": test_samplers.sample_rk_radaucycle_retry,
-        "rk_radaucycle_staggered": test_samplers.sample_rk_radaucycle_staggered,
-        
-        "rk_implicit_euler_von_svd": test_samplers.sample_rk_implicit_euler_von_svd,
-        "rk_implicit_cycloeuler": test_samplers.sample_rk_implicit_cycloeuler,
-        "rk_salmon": test_samplers.sample_rk_salmon,
-
-
-        "rk_radau_iia_2s_BS": test_samplers.sample_rk_radau_iia_2s_BS,
-
-        "rk_radau_ia_2s_lang_full": test_samplers.sample_rk_radau_ia_2s_lang_full,
-
-        "rk_radau_iia_2s_lang_full": test_samplers.sample_rk_radau_iia_2s_lang_full,
-
-        "rk_radau_iia_2s": test_samplers.sample_rk_radau_iia_2s,
-        "rk_radau_iia_3s": test_samplers.sample_rk_radau_iia_3s,
-
-
-        "rk_abnorsett4": test_samplers.sample_rk_abnorsett4,
-        "rk_euler_lowranksvd": test_samplers.sample_rk_euler_lowranksvd,
-        "rk_randomized_svd": test_samplers.sample_rk_randomized_svd,
-        "rk_implicit_euler_fd": test_samplers.sample_rk_implicit_euler_fd,
-
-        "rk_euler_banana_alphaupdown_test": test_samplers.sample_rk_euler_banana_alphaupdown_test,
-        "rk_euler_hamberder": test_samplers.sample_rk_euler_hamberder,
-
-        "rk_euler_banana": test_samplers.sample_rk_euler_banana,
-        "rk_res_2s_banana": test_samplers.sample_rk_res_2s_banana,
-        "rk_res_3s_banana": test_samplers.sample_rk_res_3s_banana,
-
-        "rk_euler": test_samplers.sample_rk_euler,
-
-        "rk_euler_prenoise": test_samplers.sample_rk_euler_prenoise,
-
-
-        "rk_ddim_test": test_samplers.sample_rk_ddim_test,
-        "rk_res_denoise_eps": test_samplers.sample_rk_res_denoise_eps,
-        "rk_exp_euler_denoise_eps": test_samplers.sample_rk_exp_euler_denoise_eps,
-        "rk_euler_alt_sde": test_samplers.sample_rk_euler_alt_sde,
-
-        "rk_implicit_euler":  test_samplers.sample_rk_implicit_euler,
-
-        "rk_vpsde_trivial":  test_samplers.sample_rk_vpsde_trivial,
-        "zample": test_samplers.sample_zsample,
-        "zample_paper": test_samplers.sample_zample_paper,
-        "zample_inversion": test_samplers.sample_zample_inversion,
-        "sample_zample_edit": test_samplers.sample_zample_edit,
-        
-    })
-    
-
-if flags["beta_samplers"]:
-    NODE_CLASS_MAPPINGS.update({
-        "ClownSamplerAdvanced_Beta": samplers.ClownSamplerAdvanced_Beta,
-    })
-    extra_samplers.update({
-        "rk_beta": rk_sampler_beta.sample_rk_beta,
-    })
 
 WEB_DIRECTORY = "./web/js"
 __all__ = ["NODE_CLASS_MAPPINGS",  "WEB_DIRECTORY"]
 
 
+try:
+    zampler_module = importlib.import_module("RES4LYF.zampler")
+    from .zampler import add_zamplers
+    NODE_CLASS_MAPPINGS, extra_samplers = add_zamplers(NODE_CLASS_MAPPINGS, extra_samplers)
+    flags["zampler"] = True
+    RESplain("Importing zampler.")
+except ImportError:
+    RESplain("Failed to import zampler.", debug=True)
+    #print(f"Failed to import zamplers: {e}")
+    pass
+
+
+try:
+    legacy_module = importlib.import_module("RES4LYF.legacy")
+    from .legacy import add_legacy
+    NODE_CLASS_MAPPINGS, extra_samplers = add_legacy(NODE_CLASS_MAPPINGS, extra_samplers)
+    flags["legacy_samplers"] = True
+    RESplain("Importing legacy samplers.")
+except Exception as e:
+    #RESplain("Failed to import legacy samplers", debug=False)
+    print(f"Failed to import legacy samplers: {e}")
+
+
+try:
+    beta_module = importlib.import_module("RES4LYF.beta")
+    from .beta import add_beta
+    NODE_CLASS_MAPPINGS, extra_samplers = add_beta(NODE_CLASS_MAPPINGS, extra_samplers)
+    flags["beta_samplers"] = True
+    RESplain("Importing beta samplers.")
+except Exception as e:
+    #RESplain("Failed to import legacy samplers", debug=False)
+    print(f"Failed to import beta samplers: {e}")
+
+
 add_samplers()
-
-
-

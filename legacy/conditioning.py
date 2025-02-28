@@ -7,7 +7,9 @@ import comfy.sample
 import comfy.sampler_helpers
 import node_helpers
 
-from .beta.noise_classes import precision_tool
+import functools
+from .noise_classes import precision_tool
+from copy import deepcopy
 
 from .helper import initialize_or_scale
 import torch.nn.functional as F
@@ -471,6 +473,8 @@ class Base64ToConditioning:
 
 
 
+
+
 class RegionalMask(torch.nn.Module):
     def __init__(self, mask: torch.Tensor, conditioning: torch.Tensor, conditioning_regional: torch.Tensor, latent:torch.Tensor, start_percent: float, end_percent: float, mask_type: str, img_len: int, text_len: int) -> None:
         super().__init__()
@@ -491,6 +495,66 @@ class RegionalMask(torch.nn.Module):
             if self.mask_type == "gradient":
                 #mask = self.gen_mask(weight)
                 return self.mask.clone().to(sigma.device) * weight
+
+
+    """def gen_mask(self, weight):             #FOR REGENERATION OF SELF-ATTN MASK
+        b, c, h, w = self.latent.shape
+        h //= 2  # 16x16 PE
+        w //= 2
+        img_len = h * w
+
+        cond_r = torch.cat([cond_reg['cond'] for cond_reg in self.conditioning_regional], dim=1)
+        
+        if self.conditioning is not None:
+            text_len = 256 + cond_r.shape[1]  # 256 = main prompt tokens... half of t5, comfy issue
+            conditioning_regional = [
+                {
+                    'mask': torch.ones((1,   h,    w), dtype=torch.bfloat16),
+                    'cond': torch.ones((1, 256, 4096), dtype=torch.bfloat16),
+                },
+                *self.conditioning_regional,
+            ]
+        else:
+            text_len = cond_r.shape[1]  # 256 = main prompt tokens... half of t5, comfy issue
+            conditioning_regional = self.conditioning_regional
+        
+        all_attn_mask       = torch.zeros((text_len+img_len, text_len+img_len), dtype=torch.bfloat16)
+        self_attn_mask     = torch.zeros((          img_len,          img_len), dtype=torch.bfloat16)
+        self_attn_mask_bkg = torch.zeros((          img_len,          img_len), dtype=torch.bfloat16)
+        
+        prev_len = 0
+        for cond_reg_dict in conditioning_regional:         #FOR REGENERATION OF SELF-ATTN MASK
+            cond_reg         = cond_reg_dict['cond']
+            region_mask_ = 1 - cond_reg_dict['mask'][0]
+            
+            region_mask_sq = cond_reg_dict['mask'][0].to(torch.bfloat16)
+
+            
+            img2txt_mask = torch.nn.functional.interpolate(region_mask_sq[None, None, :, :], (h, w), mode='nearest-exact').flatten().unsqueeze(1).repeat(1, cond_reg.size(1))
+            txt2img_mask = img2txt_mask.transpose(-1, -2)
+            
+            img2txt_mask_sq = torch.nn.functional.interpolate(region_mask_sq[None, None, :, :], (h, w), mode='nearest-exact').flatten().unsqueeze(1).repeat(1, self.img_len)
+            #img2txt_mask_sq = img2txt_mask[:, :1].repeat(1, img_len)
+            txt2img_mask_sq = img2txt_mask_sq.transpose(-1, -2)
+
+            curr_len = prev_len + cond_reg.shape[1]         #FOR REGENERATION OF SELF-ATTN MASK
+            
+            all_attn_mask[prev_len:curr_len, prev_len:curr_len] = 1.0           # self             TXT 2 TXT
+            all_attn_mask[prev_len:curr_len, text_len:        ] = txt2img_mask  # cross            TXT 2 regional IMG
+            all_attn_mask[text_len:        , prev_len:curr_len] = img2txt_mask  # cross   regional IMG 2 TXT
+            
+            #all_attn_mask[text_len:, text_len:] = fp_or(all_attn_mask[text_len:, text_len:]    , fp_and(  img2txt_mask_sq,   txt2img_mask_sq))
+            
+            self_attn_mask     = fp_or(self_attn_mask    , fp_and(                      img2txt_mask_sq,                       txt2img_mask_sq))
+            self_attn_mask_bkg = fp_or(self_attn_mask_bkg, fp_and(img2txt_mask_sq.max()-img2txt_mask_sq, txt2img_mask_sq.max()-txt2img_mask_sq))
+            #self_attn_mask_bkg = fp_or(self_attn_mask_bkg, fp_and(1-img2txt_mask_sq, 1-txt2img_mask_sq))
+            
+            prev_len = curr_len
+
+        all_attn_mask[text_len:, text_len:] = fp_or(self_attn_mask, self_attn_mask_bkg) #combine foreground/background self-attn
+
+        return all_attn_mask
+    """
     
     
 class RegionalConditioning(torch.nn.Module):

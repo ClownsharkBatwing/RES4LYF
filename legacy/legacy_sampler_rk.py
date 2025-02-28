@@ -1,7 +1,5 @@
 import torch
 import torch.nn.functional as F
-import torchvision.transforms as T
-import re
 
 
 from tqdm.auto import trange
@@ -11,10 +9,11 @@ import gc
 
 import comfy.model_patcher
 
-from .noise_classes import *
-from .extra_samplers_helpers import get_deis_coeff_list
-from .noise_sigmas_timesteps_scaling import get_res4lyf_step_with_model, get_res4lyf_half_step3
+from .noise_classes import NOISE_GENERATOR_CLASSES_SIMPLE, NOISE_GENERATOR_CLASSES
+from .deis_coefficients import get_deis_coeff_list
 from .latents import hard_light_blend
+
+from .noise_sigmas_timesteps_scaling import get_res4lyf_step_with_model, get_res4lyf_half_step3
 
 
 def get_epsilon(model, x, sigma, **extra_args):
@@ -739,7 +738,9 @@ def legacy_sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=N
 
         order, model_call, alpha_fn, t_fn, sigma_fn, h_fn, FSAL, EPS_PRED = get_rk_methods_order_and_fn(rk_type)
         
-        sigma_up, sigma, sigma_down, alpha_ratio = get_res4lyf_step_with_model(model, sigma, sigma_next, eta, eta_var, noise_mode, h_fn(sigma_next,sigma) )
+        #sigma_up, sigma, sigma_down, alpha_ratio = get_res4lyf_step_with_model(model, sigma, sigma_next, eta, eta_var, noise_mode, h_fn(sigma_next,sigma) )
+        sigma_up, sigma, sigma_down, alpha_ratio = get_res4lyf_step_with_model(model, sigma, sigma_next, eta, noise_mode)
+
         t_down, t = t_fn(sigma_down), t_fn(sigma)
         h = h_fn(sigma_down, sigma)
         

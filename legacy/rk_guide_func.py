@@ -1,12 +1,10 @@
 import torch
 import torch.nn.functional as F
-import torchvision.transforms as T
-import re
+from typing import Tuple
 
 from einops import rearrange
 
 from .sigmas import get_sigmas
-from .noise_classes import *
 from .latents import hard_light_blend, normalize_latent, initialize_or_scale
 from .rk_method import RK_Method
 from .helper import get_extra_options_kv, extra_options_flag, get_cosine_similarity, get_extra_options_list

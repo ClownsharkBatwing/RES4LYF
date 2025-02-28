@@ -2,10 +2,12 @@ import torch
 import copy
 import math
 
-from .extra_samplers_helpers import get_deis_coeff_list
+from .deis_coefficients import get_deis_coeff_list
 from .phi_functions import *
+from .helper import get_extra_options_kv
 
-from itertools import permutations, combinations
+
+from itertools import permutations #, combinations
 import random
 
 RK_SAMPLER_NAMES = ["none",
@@ -755,7 +757,6 @@ rk_coeff = {
     ),
 }
 
-from .helper import get_extra_options_kv
 
 
 

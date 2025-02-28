@@ -9,7 +9,7 @@ import torch
 import math
 import re
 
-from .noise_classes import *
+from .beta.noise_classes import *
 
 def initialize_or_scale(tensor, value, steps):
     if tensor is None:
