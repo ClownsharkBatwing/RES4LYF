@@ -1,0 +1,672 @@
+import torch
+from tqdm.auto import trange
+import gc
+
+from .rk_method_beta        import RK_Method_Beta
+from .rk_noise_sampler_beta import RK_NoiseSampler
+from .rk_guide_func_beta    import LatentGuide
+from .phi_functions         import Phi
+from ..res4lyf               import RESplain
+from .constants             import MAX_STEPS, GUIDE_MODE_NAMES_PSEUDOIMPLICIT
+from ..helper                import get_extra_options_list, get_extra_options_kv, extra_options_flag, lagrange_interpolation
+
+
+
+def init_implicit_sampling(
+        RK,
+        x_0,
+        x_,
+        eps_,
+        eps_prev_,
+        data_,
+        eps,
+        denoised,
+        denoised_prev2,
+        step,
+        sigmas,
+        h,
+        s_,
+        extra_options
+        ):
+    
+    sigma = sigmas[step]
+    if extra_options_flag("implicit_skip_model_call_at_start", extra_options) and denoised.sum() + eps.sum() != 0:
+        if denoised_prev2.sum() == 0:
+            eps_ [0] = eps.clone()
+            data_[0] = denoised.clone()
+            eps_ [0] = RK.get_epsilon_anchored(x_0, denoised, sigma)
+        else:
+            sratio = sigma - s_[0]
+            data_[0] = denoised + sratio * (denoised - denoised_prev2)
+            
+    elif extra_options_flag("implicit_full_skip_model_call_at_start", extra_options) and denoised.sum() + eps.sum() != 0:
+        if denoised_prev2.sum() == 0:
+            eps_ [0] = eps.clone()
+            data_[0] = denoised.clone()
+            eps_ [0] = RK.get_epsilon_anchored(x_0, denoised, sigma)
+        else:
+            for r in range(RK.rows):
+                sratio = sigma - s_[r]
+                data_[r] = denoised + sratio * (denoised - denoised_prev2)
+                eps_ [r] = RK.get_epsilon_anchored(x_0, data_[r], s_[r])
+
+    elif extra_options_flag("implicit_lagrange_skip_model_call_at_start", extra_options) and denoised.sum() + eps.sum() != 0:
+        if denoised_prev2.sum() == 0:
+            eps_ [0] = eps.clone()
+            data_[0] = denoised.clone()
+            eps_ [0] = RK.get_epsilon_anchored(x_0, denoised, sigma)   
+        else:
+            sigma_prev    = sigmas[step-1]
+            h_prev        = sigma - sigma_prev
+            w             = h / h_prev
+            substeps_prev = len(RK.C[:-1])
+            
+            for r in range(RK.rows):
+                sratio = sigma - s_[r]
+                data_[r] = lagrange_interpolation([0,1], [denoised_prev2, denoised], 1 + w*RK.C[r]).squeeze(0) + denoised_prev2 - denoised
+                eps_ [r] = RK.get_epsilon_anchored(x_0, data_[r], s_[r])      
+                
+            if extra_options_flag("implicit_lagrange_skip_model_call_at_start_0_only", extra_options):
+                for r in range(RK.rows):
+                    eps_ [r] = eps_ [0].clone() * s_[0] / s_[r]
+                    data_[r] = denoised.clone()
+
+
+    elif extra_options_flag("implicit_lagrange_init", extra_options) and denoised.sum() + eps.sum() != 0:
+        sigma_prev    = sigmas[step-1]
+        h_prev        = sigma - sigma_prev
+        w             = h / h_prev
+        substeps_prev = len(RK.C[:-1])
+
+        z_prev_ = eps_.clone()
+        for r in range (substeps_prev):
+            z_prev_[r] = h * RK.zum(r, eps_) # u,v not implemented for lagrange guess for implicit
+        zi_1  = lagrange_interpolation(RK.C[:-1], z_prev_[:substeps_prev], RK.C[0]).squeeze(0) # + x_prev - x_0"""
+        x_[0] = x_0 + zi_1
+        
+    else:
+        
+        eps_[0], data_[0] = RK(x_[0], sigma, x_0, sigma)
+    
+    if     not extra_options_flag("implicit_lagrange_init", extra_options)  \
+       and not extra_options_flag("radaucycle", extra_options)  \
+       and not extra_options_flag("implicit_full_skip_model_call_at_start", extra_options)  \
+       and not extra_options_flag("implicit_lagrange_skip_model_call_at_start", extra_options):
+        for r in range(RK.rows):
+            eps_ [r] = eps_ [0].clone() * sigma / s_[r]
+            data_[r] = data_[0].clone()
+
+    x_, eps_ = RK.newton_iter(x_0, x_, eps_, eps_prev_, data_, s_, 0, h, sigmas, step, "init", extra_options)
+    return x_, eps_, data_
+
+
+
+
+@torch.no_grad()
+def sample_rk_beta(model,
+        x,
+        sigmas,
+        extra_args                    = None,
+        callback                      = None,
+        disable                       = None,
+        noise_sampler_type            = "gaussian",
+        noise_sampler_type_substep    = "gaussian",
+        noise_mode_sde                = "hard",
+        noise_seed                    = -1,
+        rk_type                       = "res_2m",
+        implicit_sampler_name         = "explicit_full",
+
+        eta                           = 0.0,
+        s_noise                       = 1.,
+        s_noise_substep               = 1.,
+        d_noise                       = 1.,
+        alpha                         = -1.0,
+        alpha_substep                 = -1.0,
+        k                             = 1.0,
+        k_substep                     = 1.0,
+        c1                            = 0.0,
+        c2                            = 0.5,
+        c3                            = 1.0,
+        implicit_steps_diag           = 0,
+        implicit_steps_full           = 0,
+
+        LGW_MASK_RESCALE_MIN          = True,
+        sigmas_override               = None,
+        sampler_mode                  = "standard",
+        epsilon_scales                = None,
+        regional_conditioning_weights = None,
+        sde_noise                     = [],
+
+        extra_options                 = "",
+
+        etas                          = None,
+        etas_substep                  = None,
+        s_noises                      = None,
+        s_noises_substep              = None,
+        momentums                     = None,
+        guides                        = None,
+        cfgpp                         = 0.0,
+        cfg_cw                        =  1.0,
+        regional_conditioning_floors  = None,
+        frame_weights_grp             = None,
+        eta_substep                   = 0.0,
+        noise_mode_sde_substep        = "hard",
+
+        noise_boost_step              = 0.0,
+        noise_boost_substep           = 0.0,
+        overshoot                     = 0.0,
+        overshoot_substep             = 0.0,
+        overshoot_mode                = "hard",
+        overshoot_mode_substep        = "hard",
+        BONGMATH                      = True,
+        noise_anchor                  = 1.0,
+
+        implicit_type                 = "predictor-corrector",
+        implicit_type_substeps        = "predictor-corrector",
+        
+        state_info                    = {}
+        ):
+    
+    extra_args    = {} if extra_args is None else extra_args
+    default_dtype = getattr(torch, get_extra_options_kv("default_dtype", "float64", extra_options), torch.float64)
+    model_device  = x.device
+    work_device   = 'cpu' if extra_options_flag("work_device_cpu", extra_options) else model_device
+
+    if 'raw_x' in state_info:
+        x = state_info['raw_x'].clone()
+        RESplain("Continuing from raw latent from previous sampler.", debug=False)
+
+    x      = x     .to(dtype=default_dtype, device=work_device)
+    sigmas = sigmas.to(dtype=default_dtype, device=work_device)
+
+    resume_state = False
+    if noise_seed < 0:
+        resume_state = True
+        noise_seed = torch.initial_seed()+1 
+        RESplain("Set noise_seed to:", noise_seed, " using torch.initial_seed()+1", debug=False)
+        
+    noise_seed         = int(get_extra_options_kv("noise_seed", str(noise_seed), extra_options))
+    noise_seed_substep = int(get_extra_options_kv("noise_seed_substep", str(noise_seed + MAX_STEPS), extra_options))
+    
+    c1                = float(get_extra_options_kv("c1", str(c1), extra_options))
+    c2                = float(get_extra_options_kv("c2", str(c2), extra_options))
+    c3                = float(get_extra_options_kv("c3", str(c3), extra_options))
+
+    guide_skip_steps  =   int(get_extra_options_kv("guide_skip_steps", 0,          extra_options))   
+    rk_swap_step      =   int(get_extra_options_kv("rk_swap_step", str(MAX_STEPS), extra_options))
+    rk_swap_print     =         extra_options_flag("rk_swap_print",                extra_options);
+    rk_swap_threshold = float(get_extra_options_kv("rk_swap_threshold", "0.0",     extra_options))
+    rk_swap_type      =       get_extra_options_kv("rk_swap_type",         "",     extra_options)   
+
+    pseudoimplicit_step_weights = get_extra_options_list("pseudoimplicit_step_weights", "", extra_options).split(",")
+    if pseudoimplicit_step_weights[0]:
+        pseudoimplicit_step_weights = [float(pseudoimplicit_step_weights[_]) for _ in range(len(pseudoimplicit_step_weights))]
+    else:
+        pseudoimplicit_step_weights = [1. for _ in range(max(implicit_steps_diag, implicit_steps_full)+1)]
+
+    pseudoimplicit_row_weights = get_extra_options_list("pseudoimplicit_row_weights", "", extra_options).split(",")
+    if pseudoimplicit_row_weights[0]:
+        pseudoimplicit_row_weights = [float(pseudoimplicit_row_weights[_]) for _ in range(len(pseudoimplicit_row_weights))]
+    else:
+        pseudoimplicit_row_weights = [1. for _ in range(100)]
+
+    cfg_cw = float(get_extra_options_kv("cfg_cw", str(cfg_cw), extra_options))
+
+    # SETUP SAMPLER
+    if implicit_sampler_name not in ("use_explicit", "none"):
+        rk_type = implicit_sampler_name
+    RESplain("rk_type:", rk_type)
+    if implicit_sampler_name == "none":
+        implicit_steps_diag = implicit_steps_full = 0
+        
+    RK = RK_Method_Beta.create(model, rk_type, noise_anchor, model_device=model_device, work_device=work_device, dtype=default_dtype, extra_options=extra_options)
+    RK.extra_args = RK.init_cfg_channelwise(x, cfg_cw, **extra_args)
+    RK.extra_args['model_options']['transformer_options']['regional_conditioning_weight'] = 0.0
+    RK.extra_args['model_options']['transformer_options']['regional_conditioning_floor']  = 0.0
+    
+    # SETUP SIGMAS
+    NS = RK_NoiseSampler(RK, model, device=work_device, dtype=default_dtype, extra_options=extra_options)
+    sigmas, UNSAMPLE = NS.prepare_sigmas(sigmas, sigmas_override, d_noise, sampler_mode)
+    
+    SDE_NOISE_EXTERNAL = False
+    if sde_noise is not None:
+        if len(sde_noise) > 0 and sigmas[1] > sigmas[2]:
+            SDE_NOISE_EXTERNAL = True
+            sigma_up_total = torch.zeros_like(sigmas[0])
+            for i in range(len(sde_noise)-1):
+                sigma_up_total += sigmas[i+1]
+            etas = torch.full_like(sigmas, eta / sigma_up_total)
+    
+    NS.init_noise_samplers(x, noise_seed, noise_seed_substep, noise_sampler_type, noise_sampler_type_substep, noise_mode_sde, noise_mode_sde_substep, overshoot_mode, overshoot_mode_substep, noise_boost_step, noise_boost_substep, alpha, alpha_substep, k, k_substep)
+
+    if 'last_rng' in state_info and resume_state == True:
+        NS.noise_sampler.generator.set_state (state_info['last_rng'])
+        NS.noise_sampler2.generator.set_state(state_info['last_rng_substep'])
+
+
+    data_               = None
+    eps_                = None
+    eps                 = torch.zeros_like(x, dtype=default_dtype, device=work_device)
+    denoised            = torch.zeros_like(x, dtype=default_dtype, device=work_device)
+    denoised_prev       = torch.zeros_like(x, dtype=default_dtype, device=work_device)
+    denoised_prev2      = torch.zeros_like(x, dtype=default_dtype, device=work_device)
+    x_                  = None
+    eps_prev_           = None
+    denoised_data_prev  = None
+    denoised_data_prev2 = None
+    h_prev              = None
+    
+
+    # SETUP GUIDES
+    LG = LatentGuide(model, sigmas, UNSAMPLE, LGW_MASK_RESCALE_MIN, extra_options, device=work_device, dtype=default_dtype, frame_weights_grp=frame_weights_grp)
+    x = LG.init_guides(x, RK.IMPLICIT, guides, NS.noise_sampler)
+    if torch.norm(LG.mask - torch.ones_like(LG.mask)) != 0   and   (LG.y0.sum() == 0 or LG.y0_inv.sum() == 0):
+        SKIP_PSEUDO = True
+        RESplain("skipping pseudo...")
+        if   LG.y0    .sum() == 0:
+            SKIP_PSEUDO_Y = "y0"
+        elif LG.y0_inv.sum() == 0:
+            SKIP_PSEUDO_Y = "y0_inv"
+    else:
+        SKIP_PSEUDO = False
+        
+    if   LG.y0.sum()     != 0 and LG.y0_inv.sum() != 0:
+        denoised_prev = LG.mask * LG.y0 + (1-LG.mask) * LG.y0_inv
+    elif LG.y0.sum()     != 0:
+        denoised_prev = LG.y0
+    elif LG.y0_inv.sum() != 0:
+        denoised_prev = LG.y0_inv
+        
+    if extra_options_flag("pseudo_mix_strength", extra_options):
+        orig_y0     = LG.y0.clone()
+        orig_y0_inv = LG.y0_inv.clone()
+
+    gc.collect()
+
+    # BEGIN SAMPLING LOOP
+    num_steps = len(sigmas)-2 if sigmas[-1] == 0 else len(sigmas)-1
+    for step in trange(num_steps, disable=disable):
+        sigma, sigma_next = sigmas[step], sigmas[step+1]
+                
+        if regional_conditioning_weights is not None:
+            RK.extra_args['model_options']['transformer_options']['regional_conditioning_weight'] = regional_conditioning_weights[step]
+            RK.extra_args['model_options']['transformer_options']['regional_conditioning_floor']  = regional_conditioning_floors [step]
+        
+        epsilon_scale = float(epsilon_scales[step]) if epsilon_scales is not None else None
+        eta             = etas            [step] if etas             is not None else eta
+        eta_substep     = etas_substep    [step] if etas_substep     is not None else eta_substep
+        s_noise         = s_noises        [step] if s_noises         is not None else s_noise
+        s_noise_substep = s_noises_substep[step] if s_noises_substep is not None else s_noise_substep
+        
+        NS.set_sde_step(sigma, sigma_next, eta, overshoot, s_noise)
+        RK.set_coeff(rk_type, NS.h, c1, c2, c3, step, sigmas, NS.sigma_down)
+        NS.set_substep_list(RK)
+
+        recycled_stages = max(RK.multistep_stages, RK.hybrid_stages)
+        if step == 0 or step == guide_skip_steps:
+            x_, data_, eps_, eps_prev_  = (torch.zeros(    RK.rows+2,     *x.shape, dtype=default_dtype, device=work_device) for _ in range(4))
+            data_prev_                  =  torch.zeros(max(RK.rows+2, 4), *x.shape, dtype=default_dtype, device=work_device)
+            recycled_stages = len(data_prev_)-1
+
+        sde_noise_t = None
+        if SDE_NOISE_EXTERNAL:
+            if step >= len(sde_noise):
+                SDE_NOISE_EXTERNAL=False
+            else:
+                sde_noise_t = sde_noise[step]
+        
+        x_[0] = x.clone()
+        # PRENOISE METHOD HERE!
+        x_0 = x_[0].clone()
+        
+        # RECYCLE STAGES FOR MULTISTEP
+        if RK.multistep_stages > 0 or RK.hybrid_stages > 0:
+            for ms in range(len(eps_)):
+                eps_[ms] = RK.get_epsilon_anchored(x_0, data_prev_[ms], sigma)
+            eps_prev_ = eps_.clone()
+
+        # INITIALIZE IMPLICIT SAMPLING
+        if RK.IMPLICIT:
+            x_, eps_, data_ = init_implicit_sampling(RK, x_0, x_, eps_, eps_prev_, data_, eps, denoised, denoised_prev2, step, sigmas, NS.h, NS.s_, extra_options)
+
+        # BEGIN FULLY IMPLICIT LOOP
+        for full_iter in range(implicit_steps_full + 1):
+
+            if RK.IMPLICIT:
+                x_, eps_ = RK.newton_iter(x_0, x_, eps_, eps_prev_, data_, NS.s_, 0, NS.h, sigmas, step, "init", extra_options)
+
+            # PREPARE FULLY PSEUDOIMPLICIT GUIDES
+            if step > 0 or not SKIP_PSEUDO:
+                if full_iter > 0 and extra_options_flag("fully_implicit_reupdate_x", extra_options):
+                    x_[0] = NS.sigma_from_to(x_0, x, sigma, sigma_next, NS.s_[0])
+                    x_0   = NS.sigma_from_to(x_0, x, sigma, sigma_next, sigma)
+                    
+                if extra_options_flag("fully_pseudo_init", extra_options) and full_iter == 0:
+                    guide_mode_tmp = LG.guide_mode
+                    LG.guide_mode = "fully_" + LG.guide_mode
+                x_0, x_, eps_ = LG.prepare_fully_pseudoimplicit_guides_substep(x_0, x_, eps_, eps_prev_, data_, denoised_prev, 0, step, sigmas, eta_substep, overshoot_substep, s_noise_substep, NS, RK, pseudoimplicit_row_weights, pseudoimplicit_step_weights, full_iter, BONGMATH, extra_options)
+                if extra_options_flag("fully_pseudo_init", extra_options) and full_iter == 0:
+                    LG.guide_mode = guide_mode_tmp
+
+            # TABLEAU LOOP
+            for row in range(RK.rows - RK.multistep_stages - RK.row_offset + 1):
+                for diag_iter in range(implicit_steps_diag+1):
+                    
+                    if noise_sampler_type_substep == "brownian" and (full_iter > 0 or diag_iter > 0):
+                        eta_substep = 0.
+                    
+                    NS.set_sde_substep(row, RK.multistep_stages, eta_substep, overshoot_substep, s_noise_substep, full_iter, diag_iter, implicit_steps_full, implicit_steps_diag)
+
+                    # PRENOISE METHOD HERE!
+                    
+                    # A-TABLEAU
+                    if row < RK.rows:
+
+                        # PREPARE PSEUDOIMPLICIT GUIDES
+                        if step > 0 or not SKIP_PSEUDO:
+                            x_0, x_, eps_, x_row_pseudoimplicit, sub_sigma_pseudoimplicit = LG.process_pseudoimplicit_guides_substep(x_0, x_, eps_, eps_prev_, data_, denoised_prev, row, step, sigmas, NS, RK, pseudoimplicit_row_weights, pseudoimplicit_step_weights, full_iter, BONGMATH, extra_options)
+                        
+
+                        # PREPARE MODEL CALL
+                        if LG.guide_mode in GUIDE_MODE_NAMES_PSEUDOIMPLICIT and (step > 0 or not SKIP_PSEUDO) and (LG.lgw[step] > 0 or LG.lgw_inv[step] > 0) and x_row_pseudoimplicit is not None:
+
+                            x_tmp =     x_row_pseudoimplicit 
+                            s_tmp = sub_sigma_pseudoimplicit 
+
+                        # Fully implicit iteration (explicit only)                   # or... Fully implicit iteration (implicit only... not standard) 
+                        elif (full_iter > 0 and RK.row_offset == 1 and row == 0)   or   (full_iter > 0 and RK.row_offset == 0 and row == 0 and extra_options_flag("fully_implicit_update_x", extra_options)):
+                            if extra_options_flag("fully_explicit_pogostick_eta", extra_options): 
+                                super_alpha_ratio, super_sigma_down, super_sigma_up = NS.get_sde_coeff(sigma, sigma_next, None, eta)
+                                x = super_alpha_ratio * x + super_sigma_up * NS.noise_sampler(sigma=sigma_next, sigma_next=sigma)
+                                
+                                x_tmp = x
+                                s_tmp = sigma
+                            elif extra_options_flag("enable_fully_explicit_lagrange_rebound1", extra_options):
+                                substeps_prev = len(RK.C[:-1]) 
+                                x_tmp = lagrange_interpolation(RK.C[1:-1], x_[1:substeps_prev], RK.C[0]).squeeze(0)
+                                
+                            elif extra_options_flag("enable_fully_explicit_lagrange_rebound2", extra_options):
+                                substeps_prev = len(RK.C[:-1]) 
+                                x_tmp = lagrange_interpolation(RK.C[1:], x_[1:substeps_prev+1], RK.C[0]).squeeze(0)
+
+                            elif extra_options_flag("enable_fully_explicit_rebound1", extra_options):  # 17630, faded dots, just crap
+                                eps_tmp, denoised_tmp = RK(x, sigma_next, x, sigma_next)
+                                eps_tmp = (x - denoised_tmp) / sigma_next
+                                x_[0] = denoised_tmp + sigma * eps_tmp
+                                
+                                x_0 =   x_[0]
+                                x_tmp = x_[0]
+                                s_tmp = sigma
+                                
+                            elif implicit_type == "rebound": 
+                                eps_tmp, denoised_tmp = RK(x, sigma_next, x_0, sigma)
+                                eps_tmp = (x - denoised_tmp) / sigma_next
+                                x = denoised_tmp + sigma * eps_tmp
+                                
+                                x_tmp = x
+                                s_tmp = sigma
+                                
+                            elif implicit_type == "retro-eta" and (NS.sub_sigma_up > 0 or NS.sub_sigma_up_eta > 0): 
+                                x_tmp = NS.sigma_from_to(x_0, x, sigma, sigma_next, sigma)
+                                s_tmp = sigma
+                                
+                            elif implicit_type == "bongmath" and (NS.sub_sigma_up > 0 or NS.sub_sigma_up_eta > 0): 
+                                if BONGMATH:
+                                    x_tmp =    x_[row]
+                                    s_tmp = NS.s_[row]
+                                else:
+                                    x_tmp = NS.sigma_from_to(x_0, x, sigma, sigma_next, sigma)
+                                    s_tmp = sigma
+                                
+                            else:
+                                x_tmp = x
+                                s_tmp = sigma_next
+                        
+                        # All others
+                        else:
+                            # three potential toggle options: force rebound/model call, force PC style, force pogostick style
+                            if diag_iter > 0: # Diagonally implicit iteration (explicit or implicit)
+                                if extra_options_flag("diag_explicit_pogostick_eta", extra_options): 
+                                    super_alpha_ratio, super_sigma_down, super_sigma_up = NS.get_sde_coeff(NS.s_[row], NS.s_[row+RK.row_offset+RK.multistep_stages], None, eta)
+                                    x_[row+RK.row_offset] = super_alpha_ratio * x_[row+RK.row_offset] + super_sigma_up * NS.noise_sampler(sigma=NS.s_[row+RK.row_offset+RK.multistep_stages], sigma_next=NS.s_[row])
+                                    
+                                    x_tmp = x_[row+RK.row_offset]
+                                    s_tmp = sigma
+                                
+                                elif implicit_type_substeps == "rebound":
+                                    eps_[row], data_[row] = RK(x_[row+RK.row_offset], NS.s_[row+RK.row_offset+RK.multistep_stages], x_0, sigma)
+                                    
+                                    x_ = RK.update_substep(x_0, x_, eps_, eps_prev_, row, RK.row_offset, NS.h_new, NS.h_new_orig, extra_options)
+                                    x_[row+RK.row_offset] = NS.rebound_overshoot_substep(x_0, x_[row+RK.row_offset])
+
+                                    x_[row+RK.row_offset] = NS.sigma_from_to(x_0,    x_[row+RK.row_offset],    sigma,    NS.s_[row+RK.row_offset+RK.multistep_stages],    NS.s_[row])
+                                    x_tmp = x_[row+RK.row_offset]
+                                    s_tmp = NS.s_[row]
+                                    
+                                elif implicit_type_substeps == "retro-eta" and (NS.sub_sigma_up > 0 or NS.sub_sigma_up_eta > 0):
+                                    x_tmp = NS.sigma_from_to(x_0,   x_[row+RK.row_offset],    sigma,    NS.s_[row+RK.row_offset+RK.multistep_stages],    NS.s_[row])
+                                    s_tmp = NS.s_[row]
+                                    
+                                elif implicit_type_substeps == "bongmath" and (NS.sub_sigma_up > 0 or NS.sub_sigma_up_eta > 0) and not extra_options_flag("disable_diag_explicit_bongmath_rebound", extra_options): 
+                                    if BONGMATH:
+                                        x_tmp = x_[row]
+                                        s_tmp = NS.s_[row]
+                                    else:
+                                        x_tmp = NS.sigma_from_to(x_0, x_[row+RK.row_offset], sigma, NS.s_[row+RK.row_offset+RK.multistep_stages], NS.s_[row])
+                                        s_tmp = NS.s_[row]
+                                    
+                                else:
+                                    x_tmp =    x_[row+RK.row_offset]
+                                    s_tmp = NS.s_[row+RK.row_offset+RK.multistep_stages]
+                            else:
+                                x_tmp = x_[row]
+                                s_tmp = NS.sub_sigma 
+
+                            if RK.IMPLICIT: 
+                                if not extra_options_flag("disable_implicit_guide_preproc", extra_options):
+                                    eps_, x_      = LG.process_guides_substep(x_0, x_, eps_,      data_, row, step, sigma, sigma_next, NS.sigma_down, NS.s_, epsilon_scale, RK, extra_options)
+                                    eps_prev_, x_ = LG.process_guides_substep(x_0, x_, eps_prev_, data_, row, step, sigma, sigma_next, NS.sigma_down, NS.s_, epsilon_scale, RK, extra_options)
+                                if row == 0 and (extra_options_flag("implicit_lagrange_init", extra_options)  or   extra_options_flag("radaucycle", extra_options)):
+                                    pass
+                                else:
+                                    x_[row+RK.row_offset] = x_0 + NS.h_new * RK.zum(row+RK.row_offset, eps_, eps_prev_)
+                                    x_[row+RK.row_offset] = NS.rebound_overshoot_substep(x_0, x_[row+RK.row_offset])
+                                    if row > 0:
+                                        x_[row+RK.row_offset] = NS.swap_noise_substep(x_0, x_[row+RK.row_offset])
+                                        if BONGMATH and step < sigmas.shape[0]-1 and not extra_options_flag("disable_implicit_prebong", extra_options):
+                                            x_0, x_, eps_ = RK.bong_iter(x_0, x_, eps_, eps_prev_, data_, sigma, NS.s_, row, RK.row_offset, NS.h, extra_options)     # TRY WITH h_new ??
+                                    x_tmp = x_[row+RK.row_offset]
+
+
+
+                        # MODEL CALL
+                        if RK.IMPLICIT   and   row == 0   and   (extra_options_flag("implicit_lazy_recycle_first_model_call_at_start", extra_options)   or   extra_options_flag("radaucycle", extra_options)):
+                            pass
+                        else: 
+                            if s_tmp == 0:
+                                break
+                            x_, eps_ = RK.newton_iter(x_0, x_, eps_, eps_prev_, data_, NS.s_, row, NS.h, sigmas, step, "pre", extra_options) # will this do anything? not x_tmp
+
+                            eps_[row], data_[row] = RK(x_tmp, s_tmp, x_0, sigma)
+
+
+                        if extra_options_flag("bong2m", extra_options) and RK.multistep_stages > 0 and step < len(sigmas)-4:
+                            h_no_eta       = -torch.log(sigmas[step+1]/sigmas[step])
+                            h_prev1_no_eta = -torch.log(sigmas[step]  /sigmas[step-1])
+                            c2_prev = (-h_prev1_no_eta / h_no_eta).item()
+                            eps_prev = denoised_data_prev - x_0
+                            
+                            φ = Phi(h_prev, [0.,c2_prev])
+                            a2_1 = c2_prev * φ(1,2)
+                            for i in range(100):
+                                x_prev = x_0 - h_prev * (a2_1 * eps_prev)
+                                eps_prev = denoised_data_prev - x_prev
+                                
+                            eps_[1] = eps_prev
+                            
+                        if extra_options_flag("bong3m", extra_options) and RK.multistep_stages > 0 and step < len(sigmas)-10:
+                            h_no_eta       = -torch.log(sigmas[step+1]/sigmas[step])
+                            h_prev1_no_eta = -torch.log(sigmas[step]  /sigmas[step-1])
+                            h_prev2_no_eta = -torch.log(sigmas[step]  /sigmas[step-2])
+                            c2_prev        = (-h_prev1_no_eta / h_no_eta).item()
+                            c3_prev        = (-h_prev2_no_eta / h_no_eta).item()      
+                            
+                            eps_prev2 = denoised_data_prev2 - x_0
+                            eps_prev  = denoised_data_prev  - x_0
+                            
+                            φ = Phi(h_prev1_no_eta, [0.,c2_prev, c3_prev])
+                            a2_1 = c2_prev * φ(1,2)
+                            for i in range(100):
+                                x_prev = x_0 - h_prev1_no_eta * (a2_1 * eps_prev)
+                                eps_prev = denoised_data_prev2 - x_prev
+                                
+                            eps_[1] = eps_prev
+                            
+                            φ = Phi(h_prev2_no_eta, [0.,c3_prev, c3_prev])
+                            
+                            def calculate_gamma(c2_prev, c3_prev):
+                                return (3*(c3_prev**3) - 2*c3_prev) / (c2_prev*(2 - 3*c2_prev))
+                            gamma = calculate_gamma(c2_prev, c3_prev)
+                            
+                            a2_1 = c2_prev * φ(1,2)
+                            a3_2 = gamma * c2_prev * φ(2,2) + (c3_prev ** 2 / c2_prev) * φ(2, 3)
+                            a3_1 = c3_prev * φ(1,3) - a3_2
+                            
+                            for i in range(100):
+                                x_prev2 = x_0     - h_prev2_no_eta * (a3_1 * eps_prev + a3_2 * eps_prev2)
+                                x_prev  = x_prev2 + h_prev2_no_eta * (a2_1 * eps_prev)
+                                
+                                eps_prev2 = denoised_data_prev - x_prev2
+                                eps_prev  = denoised_data_prev2 - x_prev
+                                
+                            eps_[2] = eps_prev2
+
+
+
+                        # GUIDE 
+                        #if not UNSAMPLE:
+                        if not extra_options_flag("disable_guides_eps_substep", extra_options):
+                            eps_, x_      = LG.process_guides_substep(x_0, x_, eps_,      data_, row, step, NS.sigma, NS.sigma_next, NS.sigma_down, NS.s_, epsilon_scale, RK, extra_options)
+                        if not extra_options_flag("disable_guides_eps_prev_substep", extra_options):
+                            eps_prev_, x_ = LG.process_guides_substep(x_0, x_, eps_prev_, data_, row, step, NS.sigma, NS.sigma_next, NS.sigma_down, NS.s_, epsilon_scale, RK, extra_options)
+
+                        if (full_iter == 0 and diag_iter == 0)   or   extra_options_flag("newton_iter_post_use_on_implicit_steps", extra_options):
+                            x_, eps_ = RK.newton_iter(x_0, x_, eps_, eps_prev_, data_, NS.s_, row, NS.h, sigmas, step, "post", extra_options)
+
+
+
+                    # UPDATE
+                    x_ = RK.update_substep(x_0, x_, eps_, eps_prev_, row, RK.row_offset, NS.h_new, NS.h_new_orig, extra_options)
+
+                    x_[row+RK.row_offset] = NS.rebound_overshoot_substep(x_0, x_[row+RK.row_offset])
+                    
+                    if not RK.IMPLICIT and NS.noise_mode_sde_substep != "hard_sq":
+                        x_[row+RK.row_offset] = NS.swap_noise_substep(x_0, x_[row+RK.row_offset])
+
+                    if BONGMATH and NS.s_[row] > RK.sigma_min and NS.h < RK.sigma_max/2   and   (diag_iter == implicit_steps_diag or extra_options_flag("enable_diag_explicit_bongmath_all", extra_options))   and not extra_options_flag("disable_terminal_bongmath", extra_options):
+                        if step == 0 and UNSAMPLE:
+                            pass
+                        elif full_iter == implicit_steps_full or not extra_options_flag("disable_fully_explicit_bongmath_except_final", extra_options):
+                            x_0, x_, eps_ = RK.bong_iter(x_0, x_, eps_, eps_prev_, data_, sigma, NS.s_, row, RK.row_offset, NS.h, extra_options)
+
+            x_next = x_[RK.rows - RK.multistep_stages - RK.row_offset + 1]
+            x_next = NS.rebound_overshoot_step(x_0, x_next)
+            
+            eps = (x_0 - x_next) / (sigma - sigma_next)
+            denoised = x_0 - sigma * eps
+            
+            x_next = LG.process_guides_poststep(x_next, denoised, eps, step, extra_options)
+            x      = NS.swap_noise_step(x_0, x_next)
+            
+            preview_callback(x, eps, denoised, x_, eps_, data_, step, sigma, sigma_next, callback, extra_options)
+            
+            h_prev = NS.h
+            x_prev = x_0
+            
+            denoised_prev2 = denoised_prev
+            denoised_prev  = denoised
+
+
+
+        data_prev_[0] = data_[0]
+        for ms in range(recycled_stages):
+            data_prev_[recycled_stages - ms] = data_prev_[recycled_stages - ms - 1]
+        
+        rk_type = RK.swap_rk_type_at_step_or_threshold(x_0, data_prev_, NS.sigma_down, sigmas, step, RK, rk_swap_step, rk_swap_threshold, rk_swap_type, rk_swap_print)
+
+
+        
+        denoised_data_prev2 = denoised_data_prev
+        denoised_data_prev = data_[0]
+        
+        if SKIP_PSEUDO:
+            if SKIP_PSEUDO_Y == "y0":
+                LG.y0 = denoised
+                LG.HAS_LATENT_GUIDE_INV = True
+            else:
+                LG.y0_inv = denoised
+                LG.HAS_LATENT_GUIDE_INV = True
+                
+        if extra_options_flag("pseudo_mix_strength", extra_options):
+            pseudo_mix_strength = float(get_extra_options_kv("pseudo_mix_strength", "0.0", extra_options))
+            LG.y0 = orig_y0 + pseudo_mix_strength * (denoised - orig_y0)
+            LG.y0_inv = orig_y0_inv + pseudo_mix_strength * (denoised - orig_y0_inv)
+
+
+
+    if sigmas[-1] == 0 and sigmas[-2] == NS.sigma_min:
+        eps, denoised = RK(x, NS.sigma_min, x, NS.sigma_min)
+        x = denoised
+
+    eps      = eps     .to(model_device)
+    denoised = denoised.to(model_device)
+    x        = x       .to(model_device)
+
+    if not (UNSAMPLE and sigmas[1] > sigmas[0]) and not extra_options_flag("preview_last_step_always", extra_options):
+        preview_callback(x, eps, denoised, x_, eps_, data_, step, sigma, sigma_next, callback, extra_options, FINAL_STEP=True)
+
+    state_info['raw_x']             = x.clone()
+    state_info['last_rng']          = NS.noise_sampler.generator.get_state()
+    state_info['last_rng_substep']  = NS.noise_sampler2.generator.get_state()
+
+    return x
+
+
+
+def preview_callback(x, eps, denoised, x_, eps_, data_, step, sigma, sigma_next, callback, extra_options, FINAL_STEP=False):
+    
+    if FINAL_STEP:
+        denoised_callback = denoised
+        
+    elif extra_options_flag("eps_substep_preview", extra_options):
+        row_callback = int(get_extra_options_kv("eps_substep_preview", "0", extra_options))
+        denoised_callback = eps_[row_callback]
+        
+    elif extra_options_flag("denoised_substep_preview", extra_options):
+        row_callback = int(get_extra_options_kv("denoised_substep_preview", "0", extra_options))
+        denoised_callback = data_[row_callback]
+        
+    elif extra_options_flag("x_substep_preview", extra_options):
+        row_callback = int(get_extra_options_kv("x_substep_preview", "0", extra_options))
+        denoised_callback = x_[row_callback]
+        
+    elif extra_options_flag("eps_preview", extra_options):
+        denoised_callback = eps
+        
+    elif extra_options_flag("denoised_preview", extra_options):
+        denoised_callback = denoised
+        
+    elif extra_options_flag("x_preview", extra_options):
+        denoised_callback = x
+        
+    else:
+        denoised_callback = data_[0]
+        
+    callback({'x': x, 'i': step, 'sigma': sigma, 'sigma_next': sigma_next, 'denoised': denoised_callback.to(torch.float32)}) if callback is not None else None
+    
+    return
+
+
+
+
+
