@@ -239,7 +239,7 @@ def sample_rk_beta(model,
     
     NS.init_noise_samplers(x, noise_seed, noise_seed_substep, noise_sampler_type, noise_sampler_type_substep, noise_mode_sde, noise_mode_sde_substep, overshoot_mode, overshoot_mode_substep, noise_boost_step, noise_boost_substep, alpha, alpha_substep, k, k_substep)
 
-    if 'last_rng' in state_info and resume_state == True:
+    if 'last_rng' in state_info: # and resume_state == True:
         NS.noise_sampler.generator.set_state (state_info['last_rng'])
         NS.noise_sampler2.generator.set_state(state_info['last_rng_substep'])
 
