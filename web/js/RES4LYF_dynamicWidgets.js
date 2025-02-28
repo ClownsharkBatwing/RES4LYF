@@ -167,7 +167,11 @@ app.registerExtension({
 
 const NODES_WITH_EXPANDABLE_OPTIONS = [
     "ClownsharKSamplerSimple_Beta",
-    "ClownsharKSamplerSimple",
+    "ClownOptions_Combine",
+    "SharkSampler",
+    "ClownsharkUnsampler",
+    "ClownSamplerAdvanced_Beta"
+
 ]
 
 function setupExpandableOptions(node) {
