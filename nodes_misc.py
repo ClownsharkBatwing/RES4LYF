@@ -5,7 +5,7 @@ import os
 import random
 
 
-    
+
 class TextBox1:
     @classmethod
     def INPUT_TYPES(cls):
@@ -84,7 +84,6 @@ class TextLoadFile:
 
 
 
-
 class TextShuffle:
     @classmethod
     def INPUT_TYPES(cls):
@@ -111,7 +110,6 @@ class TextShuffle:
         shuffled_text = separator.join(parts)
 
         return (shuffled_text, )
-
 
 
 
@@ -153,7 +151,6 @@ def truncate_tokens(text, truncate_to, clip, clip_type, stop_token):
         truncate_words_to -= 1
         
     return truncated_text
-
 
 
 
@@ -199,7 +196,6 @@ class TextShuffleAndTruncate:
 
 
 
-
 class TextTruncateTokens:
     @classmethod
     def INPUT_TYPES(cls):
@@ -242,7 +238,6 @@ class TextTruncateTokens:
 
 
 
-
 class TextConcatenate:
 
     @ classmethod
@@ -265,7 +260,6 @@ class TextConcatenate:
     def main(self, text_1="", text_2="", separator=""):
     
         return (text_1 + separator + text_2, )
-
 
 
 
@@ -298,4 +292,25 @@ class TextBoxConcatenate:
             text = text_external + separator + text
     
         return (text, )
+
+
+
+class SeedGenerator:
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "seed": ("INT", {"default": 0, "min": 0, "max": 0xffffffffffffffff}),
+            },
+            "optional": {
+            }
+        }
+
+    RETURN_TYPES = ("INT",  "INT",)
+    RETURN_NAMES = ("seed", "seed+1",)
+    FUNCTION = "main"
+    CATEGORY = "RES4LYF/utils"
+
+    def main(self, seed,):
+        return (seed, seed+1,)
 

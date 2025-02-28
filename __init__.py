@@ -85,6 +85,7 @@ NODE_CLASS_MAPPINGS = {
     "TextConcatenate": nodes_misc.TextConcatenate,
     "TextBoxConcatenate": nodes_misc.TextBoxConcatenate,
 
+    "SeedGenerator": nodes_misc.SeedGenerator,
     
     "CLIPTextEncodeFluxUnguided": conditioning.CLIPTextEncodeFluxUnguided,
     "ConditioningOrthoCollin": conditioning.ConditioningOrthoCollin,
@@ -195,7 +196,6 @@ NODE_CLASS_MAPPINGS = {
     
     "SigmasPreview": helper_sigma_preview_image_preproc.SigmasPreview,
     "SigmasSchedulePreview": helper_sigma_preview_image_preproc.SigmasSchedulePreview,
-
     
     "ReFluxPatcher": models.ReFluxPatcher,
     "FluxOrthoCFGPatcher": models.FluxOrthoCFGPatcher,
