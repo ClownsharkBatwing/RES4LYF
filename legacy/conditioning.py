@@ -16,7 +16,7 @@ import torch.nn.functional as F
 import copy
 
 from .helper import get_orthogonal, get_collinear
-from .res4lyf import RESplain
+from ..res4lyf import RESplain
 
 
 
