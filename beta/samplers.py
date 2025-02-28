@@ -681,6 +681,7 @@ class ClownsharKSamplerSimple_Beta:
                     "positive":     ("CONDITIONING",),
                     "negative":     ("CONDITIONING",),
                     "latent_image": ("LATENT",),
+                    "sigmas":       ("SIGMAS",), 
                     "guides":       ("GUIDES",), 
                     "options":      ("OPTIONS", {}),   
                     }
