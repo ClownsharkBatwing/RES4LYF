@@ -19,7 +19,7 @@ import torch.nn.functional as F
 import math
 import copy
 
-from .helper import get_extra_options_kv, extra_options_flag, get_res4lyf_scheduler_list, OptionsManager
+from .helper import get_extra_options_kv, extra_options_flag, get_res4lyf_scheduler_list
 from .latents import initialize_or_scale
 
 from .noise_classes import prepare_noise, NOISE_GENERATOR_CLASSES_SIMPLE, NOISE_GENERATOR_NAMES_SIMPLE, NOISE_GENERATOR_NAMES
@@ -268,26 +268,9 @@ class SharkSamplerAlpha:
              positive=None, negative=None, sampler=None, sigmas=None, latent_noise=None, latent_noise_match=None,
              noise_stdev=1.0, noise_mean=0.0, noise_normalize=True, 
              d_noise=1.0, alpha_init=-1.0, k_init=1.0, cfgpp=0.0, noise_seed=-1,
-                    sde_noise=None,sde_noise_steps=1, 
-                    extra_options="", **kwargs
+                    options=None, sde_noise=None,sde_noise_steps=1, 
+                    extra_options="", 
                     ): 
-            
-            options_inputs = []
-
-            if "options" in kwargs and kwargs["options"] is not None:
-                options_inputs.append(kwargs["options"])
-
-            i = 2
-            while True:
-                option_name = f"options {i}"
-                if option_name in kwargs and kwargs[option_name] is not None:
-                    options_inputs.append(kwargs[option_name])
-                    i += 1
-                else:
-                    break
-
-            options = OptionsManager(options_inputs)
-
             # blame comfy here
             raw_x = latent_image['raw_x'] if 'raw_x' in latent_image else None
             last_seed = latent_image['last_seed'] if 'last_seed' in latent_image else None
@@ -348,14 +331,15 @@ class SharkSamplerAlpha:
                     #torch.cuda.manual_seed_all(seed)
 
 
-                noise_stdev     = options.get('noise_init_stdev', noise_stdev)
-                noise_mean      = options.get('noise_init_mean',  noise_mean)
-                noise_type_init = options.get('noise_type_init',  noise_type_init)
-                d_noise         = options.get('d_noise',          d_noise)
-                alpha_init      = options.get('alpha_init',       alpha_init)
-                k_init          = options.get('k_init',           k_init)
-                sde_noise       = options.get('sde_noise',        sde_noise)
-                sde_noise_steps = options.get('sde_noise_steps',  sde_noise_steps)
+                if options is not None:
+                    noise_stdev     = options.get('noise_init_stdev', noise_stdev)
+                    noise_mean      = options.get('noise_init_mean',  noise_mean)
+                    noise_type_init = options.get('noise_type_init',  noise_type_init)
+                    d_noise         = options.get('d_noise',          d_noise)
+                    alpha_init      = options.get('alpha_init',       alpha_init)
+                    k_init          = options.get('k_init',           k_init)
+                    sde_noise       = options.get('sde_noise',        sde_noise)
+                    sde_noise_steps = options.get('sde_noise_steps',  sde_noise_steps)
 
                 latent_image_dtype = latent_unbatch['samples'].dtype
 
@@ -420,7 +404,8 @@ class SharkSamplerAlpha:
 
                 if denoise_alt < 0:
                     d_noise = denoise_alt = -denoise_alt
-                d_noise = options.get('d_noise', d_noise)
+                if options is not None:
+                    d_noise = options.get('d_noise', d_noise)
 
                 if sigmas is not None:
                     sigmas = sigmas.clone().to(default_dtype)

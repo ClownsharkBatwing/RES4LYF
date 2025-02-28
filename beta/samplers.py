@@ -201,7 +201,6 @@ class SharkSampler:
                     torch.cuda.manual_seed(seed)
 
 
-                #if options is not None:
                 noise_stdev     = options.get('noise_init_stdev', noise_stdev)
                 noise_mean      = options.get('noise_init_mean',  noise_mean)
                 noise_type_init = options.get('noise_type_init',  noise_type_init)
@@ -274,7 +273,6 @@ class SharkSampler:
 
                 if denoise_alt < 0:
                     d_noise = denoise_alt = -denoise_alt
-                #if options is not None:
                 d_noise = options.get('d_noise', d_noise)
 
                 if sigmas is not None:
@@ -512,7 +510,6 @@ class ClownSamplerAdvanced_Beta:
             sigmas_override               = None,
             
             guides                        = None,
-            options                       = None,
             sde_noise                     = None,
             sde_noise_steps               = 1,
             
@@ -536,9 +533,25 @@ class ClownSamplerAdvanced_Beta:
             
             implicit_type                 = "predictor-corrector",
             implicit_type_substeps        = "predictor-corrector",
-            
+            **kwargs,
             ): 
         
+            options_inputs = []
+
+            if "options" in kwargs and kwargs["options"] is not None:
+                options_inputs.append(kwargs["options"])
+
+            i = 2
+            while True:
+                option_name = f"options {i}"
+                if option_name in kwargs and kwargs[option_name] is not None:
+                    options_inputs.append(kwargs[option_name])
+                    i += 1
+                else:
+                    break
+
+            options = OptionsManager(options_inputs)
+    
             sampler_name, implicit_sampler_name = process_sampler_name(sampler_name)
 
             implicit_steps_diag = implicit_substeps
@@ -550,21 +563,20 @@ class ClownSamplerAdvanced_Beta:
 
             default_dtype = getattr(torch, get_extra_options_kv("default_dtype", "float64", extra_options), torch.float64)
 
-            if options is not None:
-                noise_type_sde    = options.get('noise_type_sde'   , noise_type_sde)
-                noise_mode_sde    = options.get('noise_mode_sde'   , noise_mode_sde)
-                eta               = options.get('eta'              , eta)
-                s_noise           = options.get('s_noise'          , s_noise)
-                d_noise           = options.get('d_noise'          , d_noise)
-                alpha_sde         = options.get('alpha_sde'        , alpha_sde)
-                k_sde             = options.get('k_sde'            , k_sde)
-                c1                = options.get('c1'               , c1)
-                c2                = options.get('c2'               , c2)
-                c3                = options.get('c3'               , c3)
+            noise_type_sde    = options.get('noise_type_sde'   , noise_type_sde)
+            noise_mode_sde    = options.get('noise_mode_sde'   , noise_mode_sde)
+            eta               = options.get('eta'              , eta)
+            s_noise           = options.get('s_noise'          , s_noise)
+            d_noise           = options.get('d_noise'          , d_noise)
+            alpha_sde         = options.get('alpha_sde'        , alpha_sde)
+            k_sde             = options.get('k_sde'            , k_sde)
+            c1                = options.get('c1'               , c1)
+            c2                = options.get('c2'               , c2)
+            c3                = options.get('c3'               , c3)
 
-                frame_weights_grp = options.get('frame_weights_grp', frame_weights_grp)
-                sde_noise         = options.get('sde_noise'        , sde_noise)
-                sde_noise_steps   = options.get('sde_noise_steps'  , sde_noise_steps)
+            frame_weights_grp = options.get('frame_weights_grp', frame_weights_grp)
+            sde_noise         = options.get('sde_noise'        , sde_noise)
+            sde_noise_steps   = options.get('sde_noise_steps'  , sde_noise_steps)
 
             rescale_floor = extra_options_flag("rescale_floor", extra_options)
 
@@ -896,7 +908,7 @@ class ClownsharKSamplerSimple_Beta:
             noise_seed_sde                = noise_seed_sde,
             
             guides                        = guides,
-            options                       = options,
+            options                       = options.as_dict(),
 
             extra_options                 = extra_options,
             automation                    = automation,
@@ -927,7 +939,7 @@ class ClownsharKSamplerSimple_Beta:
             sampler         = sampler[0], 
             cfgpp           = cfgpp, 
             noise_seed      = seed, 
-            options         = options, 
+            options         = options.as_dict(), 
             sde_noise       = sde_noise, 
             sde_noise_steps = sde_noise_steps, 
             noise_type_init = noise_type_init,
