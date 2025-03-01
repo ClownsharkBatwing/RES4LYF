@@ -159,7 +159,7 @@ app.registerExtension({
 
     nodeCreated(node) {
         if (NODES_WITH_EXPANDABLE_OPTIONS.includes(node.comfyClass)) {
-            debugLog(`Setting up expandable options for ${node.comfyClass}`, true);
+            //debugLog(`Setting up expandable options for ${node.comfyClass}`, true);
             setupExpandableOptions(node);
         }
     }
@@ -175,7 +175,7 @@ const NODES_WITH_EXPANDABLE_OPTIONS = [
 function setupExpandableOptions(node) {
     if (!processedNodeMap.has(node)) {
         processedNodeMap.set(node, ++nodeCounter);
-        debugLog(`Assigned ID ${nodeCounter} to node ${node.comfyClass}`);
+        //debugLog(`Assigned ID ${nodeCounter} to node ${node.comfyClass}`);
     } else {
         debugLog(`Node ${node.comfyClass} already processed with ID ${processedNodeMap.get(node)} - skipping`);
         return;
