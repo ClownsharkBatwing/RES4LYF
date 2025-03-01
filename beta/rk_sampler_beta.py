@@ -166,6 +166,7 @@ def sample_rk_beta(model,
         implicit_type_substeps        = "predictor-corrector",
         
         state_info                    = {},
+        state_info_out                = {},
         
         rk_swap_step                  = MAX_STEPS,
         rk_swap_print                 = False,
@@ -623,9 +624,9 @@ def sample_rk_beta(model,
     if not (UNSAMPLE and sigmas[1] > sigmas[0]) and not extra_options_flag("preview_last_step_always", extra_options):
         preview_callback(x, eps, denoised, x_, eps_, data_, step, sigma, sigma_next, callback, extra_options, FINAL_STEP=True)
 
-    state_info['raw_x']             = x.clone()
-    state_info['last_rng']          = NS.noise_sampler.generator.get_state()
-    state_info['last_rng_substep']  = NS.noise_sampler2.generator.get_state()
+    state_info_out['raw_x']             = x.clone()
+    state_info_out['last_rng']          = NS.noise_sampler .generator.get_state()
+    state_info_out['last_rng_substep']  = NS.noise_sampler2.generator.get_state()
 
     return x
 

@@ -120,7 +120,8 @@ class SharkSampler:
             options_mgr = OptionsManager(options_inputs)
         
             # blame comfy here
-            state_info  = copy.deepcopy(latent_image['state_info']) if 'state_info' in latent_image else {}
+            state_info     = copy.deepcopy(latent_image['state_info']) if 'state_info' in latent_image else {}
+            state_info_out = {}
 
             #state_info  = latent_image['state_info'] if 'state_info' in latent_image else {}
             #latent_image['state_info'] = {}
@@ -384,7 +385,7 @@ class SharkSampler:
                         cfg = 1.0
                     else:
                         sampler.extra_options.pop("cfg_cw", None) 
-                        
+                    
                     
                     if sde_noise is None:
                         sde_noise = []
@@ -399,7 +400,8 @@ class SharkSampler:
 
                     disable_pbar = not comfy.utils.PROGRESS_BAR_ENABLED
 
-                    sampler.extra_options['state_info'] = state_info
+                    sampler.extra_options['state_info']     = state_info
+                    sampler.extra_options['state_info_out'] = state_info_out
                     
                     samples = comfy.sample.sample_custom(work_model, noise, cfg, sampler, sigmas, pos_cond, neg_cond, x.clone(), noise_mask=noise_mask, callback=callback, disable_pbar=disable_pbar, seed=noise_seed)
 
@@ -438,7 +440,7 @@ class SharkSampler:
             out_denoised['samples']      = torch.stack(out_denoised_samples,      dim=0)
             out_denoised['samples_fp64'] = torch.stack(out_denoised_samples_fp64, dim=0)
 
-            out['state_info'] = copy.deepcopy(state_info)
+            out['state_info'] = copy.deepcopy(state_info_out)
             state_info = {}
             #out['state_info'] = state_info
 
