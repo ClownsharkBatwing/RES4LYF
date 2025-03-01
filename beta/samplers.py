@@ -27,6 +27,11 @@ from .rk_coefficients_beta  import get_default_sampler_name, get_sampler_name_li
 
 
 class SharkSampler:
+    def __init__(self):
+        self._compiled              = False
+        self._compiled_reflux_model = None
+        self._compiled_model        = None
+    
     @classmethod
     def INPUT_TYPES(cls):
         return {"required":
@@ -129,7 +134,12 @@ class SharkSampler:
 
             default_dtype = getattr(torch, get_extra_options_kv("default_dtype", "float64", extra_options), torch.float64)
             
-            model = model.clone()
+            #if extra_options_flag("compile_model", extra_options):
+            #    reflux_model, = RES4LYF.models.ReFluxPatcher().main(model, enable=True)
+            #    self._compiled_reflux_model, = RES4LYF.models.TorchCompileModelFluxAdvanced().main(reflux_model)
+            #    self._compiled_model, = RES4LYF.models.TorchCompileModelFluxAdvanced().main(model)
+                
+            work_model = model #.clone()
             if pos_cond[0][1] is not None: 
                 if "regional_conditioning_weights" in pos_cond[0][1]:
                     sampler.extra_options['regional_conditioning_weights'] = pos_cond[0][1]['regional_conditioning_weights']
@@ -139,11 +149,32 @@ class SharkSampler:
                     regional_conditioning                                  = copy.deepcopy(regional_conditioning)
                     regional_mask                                          = copy.deepcopy(regional_mask)
                     
-                    model, = RES4LYF.models.ReFluxPatcher().main(model, enable=True)
-                    model.set_model_patch(regional_conditioning, 'regional_conditioning_positive')
-                    model.set_model_patch(regional_mask,         'regional_conditioning_mask')
+                    if not extra_options_flag("disable_autoswap_reflux", extra_options):
+                        work_model, = RES4LYF.models.ReFluxPatcher().main(work_model, enable=True)
+                    """work_model, = RES4LYF.models.ReFluxPatcher().main(work_model, enable=True)
+                    if extra_options_flag("compile_model", extra_options):
+                        work_model, = RES4LYF.models.TorchCompileModelFluxAdvanced().main(work_model)"""
+                    #else:
+                    #    work_model = w_model.clone()
+                    #work_model = self._compiled_reflux_model
+                    
+                    work_model.set_model_patch(regional_conditioning, 'regional_conditioning_positive')
+                    work_model.set_model_patch(regional_mask,         'regional_conditioning_mask')
                 else:
-                    model, = RES4LYF.models.ReFluxPatcher().main(model, enable=False)
+                    if not extra_options_flag("disable_autoswap_reflux", extra_options):
+                        work_model, = RES4LYF.models.ReFluxPatcher().main(work_model, enable=False)
+                    """w_model, = RES4LYF.models.ReFluxPatcher().main(w_model, enable=False)
+                    
+                    if extra_options_flag("compile_model", extra_options):
+                        work_model, = RES4LYF.models.TorchCompileModelFluxAdvanced().main(w_model)
+                    else:
+                        work_model = w_model.clone()"""
+                    """work_model, = RES4LYF.models.ReFluxPatcher().main(work_model, enable=False)
+                    if extra_options_flag("compile_model", extra_options):
+                        work_model, = RES4LYF.models.TorchCompileModelFluxAdvanced().main(work_model)"""
+                        
+                    #work_model = self._compiled_model
+                    
 
                     
             if "noise_seed" in sampler.extra_options:
@@ -190,7 +221,7 @@ class SharkSampler:
 
                 latent_image_dtype = latent_unbatch['samples'].dtype
 
-                if isinstance(model.model.model_config, comfy.supported_models.Flux) or isinstance(model.model.model_config, comfy.supported_models.FluxSchnell):
+                if isinstance(work_model.model.model_config, comfy.supported_models.Flux) or isinstance(work_model.model.model_config, comfy.supported_models.FluxSchnell):
                     if pos_cond is None:
                         pos_cond = [[
                             torch.zeros((1, 256, 4096)),
@@ -228,7 +259,7 @@ class SharkSampler:
                                 {'pooled_output': torch.randn((1, 2048))}
                                 ]]
                         
-                        neg_cond[0][0] = get_orthogonal(neg_cond[0][0], pos_cond[0][0])
+                        neg_cond[0][0]                  = get_orthogonal(neg_cond[0][0],                  pos_cond[0][0])
                         neg_cond[0][1]['pooled_output'] = get_orthogonal(neg_cond[0][1]['pooled_output'], pos_cond[0][1]['pooled_output'])
                         
 
@@ -307,8 +338,8 @@ class SharkSampler:
                         c.append(n)
                     neg_cond = c
                 
-                sigmin = model.model.model_sampling.sigma_min
-                sigmax = model.model.model_sampling.sigma_max
+                sigmin = work_model.model.model_sampling.sigma_min
+                sigmax = work_model.model.model_sampling.sigma_max
 
                 if sde_noise is None and sampler_mode.startswith("unsample"):
                     total_steps = len(sigmas)+1
@@ -364,19 +395,19 @@ class SharkSampler:
                             for j in range(sde_noise[i].shape[1]):
                                 sde_noise[i][0][j] = ((sde_noise[i][0][j] - sde_noise[i][0][j].mean()) / sde_noise[i][0][j].std())
                                 
-                    callback = latent_preview.prepare_callback(model, sigmas.shape[-1] - 1, x0_output)
+                    callback = latent_preview.prepare_callback(work_model, sigmas.shape[-1] - 1, x0_output)
 
                     disable_pbar = not comfy.utils.PROGRESS_BAR_ENABLED
 
                     sampler.extra_options['state_info'] = state_info
                     
-                    samples = comfy.sample.sample_custom(model, noise, cfg, sampler, sigmas, pos_cond, neg_cond, x.clone(), noise_mask=noise_mask, callback=callback, disable_pbar=disable_pbar, seed=noise_seed)
+                    samples = comfy.sample.sample_custom(work_model, noise, cfg, sampler, sigmas, pos_cond, neg_cond, x.clone(), noise_mask=noise_mask, callback=callback, disable_pbar=disable_pbar, seed=noise_seed)
 
                     out = latent_unbatch.copy()
                     out["samples"] = samples
                     if "x0" in x0_output:
                         out_denoised             = latent_unbatch.copy()
-                        out_denoised["samples"]  = model.model.process_latent_out(x0_output["x0"].cpu())
+                        out_denoised["samples"]  = work_model.model.process_latent_out(x0_output["x0"].cpu())
                     else:
                         out_denoised = out
                     
