@@ -57,8 +57,15 @@ def get_extra_options_list(key, default, extra_options, ret_type=None):
 class OptionsManager:
     APPEND_OPTIONS = {"extra_options"}
 
-    def __init__(self, options_inputs=None):
-        self.options_list = options_inputs or []
+    def __init__(self, options, **kwargs):
+        self.options_list = []
+        if options is not None:
+            self.options_list.append(options)
+        
+        for key, value in kwargs.items():
+            if key.startswith('options') and value is not None:
+                self.options_list.append(value)
+
         self._merged_dict = None
 
     def add_option(self, option):
@@ -137,7 +144,6 @@ class OptionsManager:
                     RESplain(f"  {key}: {value}", debug=True)
             else:
                 RESplain("  None", "\n", debug=True)
-
 
 
 

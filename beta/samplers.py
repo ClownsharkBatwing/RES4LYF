@@ -102,22 +102,8 @@ class SharkSampler:
             extra_options      = "", 
             **kwargs,
             ): 
-        
-            options_inputs = []
 
-            if options is not None:
-                options_inputs.append(options)
-
-            i = 2
-            while True:
-                option_name = f"options {i}"
-                if option_name in kwargs and kwargs[option_name] is not None:
-                    options_inputs.append(kwargs[option_name])
-                    i += 1
-                else:
-                    break
-
-            options_mgr = OptionsManager(options_inputs)
+            options_mgr = OptionsManager(options, **kwargs)
         
             # blame comfy here
             state_info  = copy.deepcopy(latent_image['state_info']) if 'state_info' in latent_image else {}
@@ -552,21 +538,7 @@ class ClownSamplerAdvanced_Beta:
             **kwargs,
             ): 
         
-            options_inputs = []
-
-            if options is not None:
-                options_inputs.append(options)
-
-            i = 2
-            while True:
-                option_name = f"options {i}"
-                if option_name in kwargs and kwargs[option_name] is not None:
-                    options_inputs.append(kwargs[option_name])
-                    i += 1
-                else:
-                    break
-
-            options_mgr = OptionsManager(options_inputs)
+            options_mgr = OptionsManager(options, **kwargs)
     
             sampler_name, implicit_sampler_name = process_sampler_name(sampler_name)
 
@@ -808,21 +780,8 @@ class ClownsharKSampler_Beta:
             **kwargs
             ): 
         
-        options_inputs = []
+        options_mgr = OptionsManager(options, **kwargs)
 
-        if options is not None:
-            options_inputs.append(options)
-
-        i = 2
-        while True:
-            option_name = f"options {i}"
-            if option_name in kwargs and kwargs[option_name] is not None:
-                options_inputs.append(kwargs[option_name])
-                i += 1
-            else:
-                break
-
-        options_mgr = OptionsManager(options_inputs)
 
         #noise_seed_sde = seed+1
         
@@ -838,7 +797,6 @@ class ClownsharKSampler_Beta:
         
         
         #if options is not None:
-        options_mgr = OptionsManager(options_inputs)
         noise_type_sde         = options_mgr.get('noise_type_sde'        , noise_type_sde)
         noise_type_sde_substep = options_mgr.get('noise_type_sde_substep', noise_type_sde_substep)
         
