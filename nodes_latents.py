@@ -13,7 +13,7 @@ import math
 from nodes import MAX_RESOLUTION
 #MAX_RESOLUTION=8192
 
-from .helper             import initialize_or_scale, extra_options_flag, get_extra_options_list
+from .helper             import ExtraOptions, initialize_or_scale, extra_options_flag, get_extra_options_list
 from .latents            import latent_meancenter_channels, latent_stdize_channels
 from .beta.noise_classes import NOISE_GENERATOR_NAMES, NOISE_GENERATOR_CLASSES, prepare_noise
 
