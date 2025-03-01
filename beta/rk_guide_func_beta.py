@@ -2,20 +2,16 @@ import torch
 import torch.nn.functional as F
 import itertools
 
-from einops import rearrange
+from einops          import rearrange
+
+from ..sigmas        import get_sigmas
+from ..helper        import initialize_or_scale, get_extra_options_kv, extra_options_flag, is_video_model
+from ..latents       import get_cosine_similarity, normalize_latent, hard_light_blend
 
 from .rk_method_beta import RK_Method_Beta
+from .constants      import MAX_STEPS
 
-from ..sigmas import get_sigmas
-#from ..latents import normalize_latent, initialize_or_scale
-from ..helper import get_extra_options_kv, extra_options_flag, get_cosine_similarity, get_extra_options_list, is_video_model
-
-
-def initialize_or_scale(tensor, value, steps):
-    if tensor is None:
-        return torch.full((steps,), value)
-    else:
-        return value * tensor
+#from ..latents import hard_light_blend, normalize_latent
 
 
 def normalize_inputs(x, y0, y0_inv, guide_mode,  extra_options):
@@ -41,113 +37,52 @@ def normalize_inputs(x, y0, y0_inv, guide_mode,  extra_options):
     return x, y0, y0_inv
 
 
-def normalize_latent(target, source=None, mean=True, std=True, set_mean=None, set_std=None, channelwise=True):
-    target = target.clone()
-    source = source.clone() if source is not None else None
-    def normalize_single_latent(single_target, single_source=None):
-        y = torch.zeros_like(single_target)
-        for b in range(y.shape[0]):
-            if channelwise:
-                for c in range(y.shape[1]):
-                    single_source_mean = single_source[b][c].mean() if set_mean is None else set_mean
-                    single_source_std  = single_source[b][c].std()  if set_std  is None else set_std
-                    
-                    if mean and std:
-                        y[b][c] = (single_target[b][c] - single_target[b][c].mean()) / single_target[b][c].std()
-                        if single_source is not None:
-                            y[b][c] = y[b][c] * single_source_std + single_source_mean
-                    elif mean:
-                        y[b][c] = single_target[b][c] - single_target[b][c].mean()
-                        if single_source is not None:
-                            y[b][c] = y[b][c] + single_source_mean
-                    elif std:
-                        y[b][c] = single_target[b][c] / single_target[b][c].std()
-                        if single_source is not None:
-                            y[b][c] = y[b][c] * single_source_std
-            else:
-                single_source_mean = single_source[b].mean() if set_mean is None else set_mean
-                single_source_std  = single_source[b].std()  if set_std  is None else set_std
-                
-                if mean and std:
-                    y[b] = (single_target[b] - single_target[b].mean()) / single_target[b].std()
-                    if single_source is not None:
-                        y[b] = y[b] * single_source_std + single_source_mean
-                elif mean:
-                    y[b] = single_target[b] - single_target[b].mean()
-                    if single_source is not None:
-                        y[b] = y[b] + single_source_mean
-                elif std:
-                    y[b] = single_target[b] / single_target[b].std()
-                    if single_source is not None:
-                        y[b] = y[b] * single_source_std
-        return y
-
-
-def hard_light_blend(base_latent, blend_latent):
-    if base_latent.sum() == 0 and base_latent.std() == 0:
-        return base_latent
-    
-    blend_latent = (blend_latent - blend_latent.min()) / (blend_latent.max() - blend_latent.min())
-
-    positive_mask = base_latent >= 0
-    negative_mask = base_latent < 0
-    
-    positive_latent = base_latent * positive_mask.float()
-    negative_latent = base_latent * negative_mask.float()
-
-    positive_result = torch.where(blend_latent < 0.5,
-                                  2 * positive_latent * blend_latent,
-                                  1 - 2 * (1 - positive_latent) * (1 - blend_latent))
-
-    negative_result = torch.where(blend_latent < 0.5,
-                                  2 * negative_latent.abs() * blend_latent,
-                                  1 - 2 * (1 - negative_latent.abs()) * (1 - blend_latent))
-    negative_result = -negative_result
-
-    combined_result = positive_result * positive_mask.float() + negative_result * negative_mask.float()
-
-    #combined_result *= base_latent.max()
-    
-    ks = combined_result
-    ks2 = torch.zeros_like(base_latent)
-    for n in range(base_latent.shape[1]):
-        ks2[0][n] = (ks[0][n]) / ks[0][n].std()
-        ks2[0][n] = (ks2[0][n] * base_latent[0][n].std())
-    combined_result = ks2
-    
-    return combined_result
-
-
-
-
 
 class LatentGuide:
-    def __init__(self, model, sigmas, UNSAMPLE, LGW_MASK_RESCALE_MIN, extra_options, device='cpu', dtype=torch.float64, max_steps=10000, frame_weights_grp=None):
-        self.model                                               = model
-        self.dtype                                               = dtype
-        self.device                                              = device
-        self.sigma_min                                           = model.inner_model.inner_model.model_sampling.sigma_min.to(dtype=dtype, device=device)
-        self.sigma_max                                           = model.inner_model.inner_model.model_sampling.sigma_max.to(dtype=dtype, device=device)
-        self.sigmas                                              = sigmas                                                .to(dtype=dtype, device=device)
-        self.UNSAMPLE                                            = UNSAMPLE
-        self.VIDEO                                               = is_video_model(model)
-        self.SAMPLE                                              = (sigmas[0] > sigmas[1])
-        self.extra_options                                       = extra_options
-        self.y0                                                  = None
-        self.y0_inv                                              = None
-        self.guide_mode                                          = ""
-        self.max_steps                                           = max_steps
-        self.mask                                                = None
-        self.mask_inv                                            = None
-        self.x_lying_                                            = None
-        self.s_lying_                                            = None
-        self.LGW_MASK_RESCALE_MIN                                = LGW_MASK_RESCALE_MIN
-        self.HAS_LATENT_GUIDE                                    = False
-        self.HAS_LATENT_GUIDE_INV                                = False
-        self.lgw, self.lgw_inv                                   = [torch.full_like(sigmas, 0., dtype=dtype) for _ in range(2)]
-        self.guide_cossim_cutoff_, self.guide_bkg_cossim_cutoff_ = 1.0, 1.0
-        self.frame_weights                                       = frame_weights_grp[0] if frame_weights_grp is not None else None
-        self.frame_weights_inv                                   = frame_weights_grp[1] if frame_weights_grp is not None else None
+    def __init__(self,
+                model,
+                sigmas,
+                UNSAMPLE,
+                LGW_MASK_RESCALE_MIN,
+                extra_options,
+                device            = 'cpu',
+                dtype             = torch.float64,
+                frame_weights_grp = None
+                ):
+        
+        self.dtype                    = dtype
+        self.device                   = device
+        self.model                    = model
+
+        if hasattr(model, "model"):
+            model_sampling = model.model.model_sampling
+        elif hasattr(model, "inner_model"):
+            model_sampling = model.inner_model.inner_model.model_sampling
+        
+        self.sigma_min                = model_sampling.sigma_min.to(dtype=dtype, device=device)
+        self.sigma_max                = model_sampling.sigma_max.to(dtype=dtype, device=device)
+        self.sigmas                   = sigmas                  .to(dtype=dtype, device=device)
+        self.UNSAMPLE                 = UNSAMPLE
+        self.VIDEO                    = is_video_model(model)
+        self.SAMPLE                   = (sigmas[0] > sigmas[1])
+        self.extra_options            = extra_options
+        self.y0                       = None
+        self.y0_inv                   = None
+        self.guide_mode               = ""
+        self.max_steps                = MAX_STEPS
+        self.mask                     = None
+        self.mask_inv                 = None
+        self.x_lying_                 = None
+        self.s_lying_                 = None
+        self.LGW_MASK_RESCALE_MIN     = LGW_MASK_RESCALE_MIN
+        self.HAS_LATENT_GUIDE         = False
+        self.HAS_LATENT_GUIDE_INV     = False
+        self.lgw                      = torch.full_like(sigmas, 0., dtype=dtype) 
+        self.lgw_inv                  = torch.full_like(sigmas, 0., dtype=dtype)
+        self.guide_cossim_cutoff_     = 1.0
+        self.guide_bkg_cossim_cutoff_ = 1.0
+        self.frame_weights            = frame_weights_grp[0] if frame_weights_grp is not None else None
+        self.frame_weights_inv        = frame_weights_grp[1] if frame_weights_grp is not None else None
 
     def init_guides(self, x : torch.Tensor, RK_IMPLICIT, guides=None, noise_sampler=None):
         latent_guide_weight      = 0.0
@@ -255,15 +190,15 @@ class LatentGuide:
             self.y0_inv = torch.zeros_like(x, dtype=self.dtype, device=self.device)
 
         if self.frame_weights is not None:
-            self.frame_weights = initialize_or_scale(self.frame_weights, 1.0, self.max_steps).to(dtype=self.dtype, device=self.device)
-            self.frame_weights = F.pad(self.frame_weights, (0, self.max_steps), value=0.0)
+            self.frame_weights     = initialize_or_scale(self.frame_weights,     1.0, self.max_steps).to(dtype=self.dtype, device=self.device)
+            self.frame_weights     = F.pad              (self.frame_weights,     (0,  self.max_steps), value=0.0)
         if self.frame_weights_inv is not None:
             self.frame_weights_inv = initialize_or_scale(self.frame_weights_inv, 1.0, self.max_steps).to(dtype=self.dtype, device=self.device)
-            self.frame_weights_inv = F.pad(self.frame_weights_inv, (0, self.max_steps), value=0.0)
+            self.frame_weights_inv = F.pad              (self.frame_weights_inv, (0,  self.max_steps), value=0.0)
 
         if self.UNSAMPLE and not self.SAMPLE: #sigma_next > sigma:
-            self.y0 = noise_sampler(sigma=self.sigma_max, sigma_next=self.sigma_min).to(dtype=self.dtype, device=self.device)
-            self.y0 = (self.y0 - self.y0.mean()) / self.y0.std()
+            self.y0     = noise_sampler(sigma=self.sigma_max, sigma_next=self.sigma_min).to(dtype=self.dtype, device=self.device)
+            self.y0     = (self.y0 - self.y0.mean()) / self.y0.std()
             self.y0_inv = noise_sampler(sigma=self.sigma_max, sigma_next=self.sigma_min).to(dtype=self.dtype, device=self.device)
             self.y0_inv = (self.y0_inv - self.y0_inv.mean()) / self.y0_inv.std()
             
@@ -272,10 +207,11 @@ class LatentGuide:
         return x
 
     def prepare_weighted_masks(self, step):
-        lgw_ = self.lgw[step]
+        lgw_     = self.lgw    [step]
         lgw_inv_ = self.lgw_inv[step]
-        mask = torch.ones_like(self.y0) if self.mask is None else self.mask
-        mask_inv = torch.zeros_like(mask) if self.mask_inv is None else self.mask_inv
+        
+        mask     = torch.ones_like(self.y0) if self.mask     is None else self.mask
+        mask_inv = torch.zeros_like(mask  ) if self.mask_inv is None else self.mask_inv
 
         if self.LGW_MASK_RESCALE_MIN: 
             lgw_mask     =    mask  * (1-lgw_)     + lgw_
@@ -301,8 +237,8 @@ class LatentGuide:
     def get_masks_for_step(self, step):
         lgw_mask, lgw_mask_inv = self.prepare_weighted_masks(step)
         if self.VIDEO:
-            if self.frame_weights is not None:
-                apply_frame_weights(lgw_mask, self.frame_weights)
+            if self.frame_weights     is not None:
+                apply_frame_weights(lgw_mask,     self.frame_weights)
             if self.frame_weights_inv is not None:
                 apply_frame_weights(lgw_mask_inv, self.frame_weights_inv)
 
@@ -310,8 +246,67 @@ class LatentGuide:
 
 
 
+    def get_cossim_adjusted_lgw_masks(self, data, step):
+        
+        if self.HAS_LATENT_GUIDE:
+            y0     = self.y0.clone()
+        else:
+            y0     = torch.zeros_like(data)
+            
+        if self.HAS_LATENT_GUIDE_INV:
+            y0_inv = self.y0_inv.clone()
+        else:
+            y0_inv = torch.zeros_like(data)
+
+        if y0.shape[0] > 1:                                    # this is for changing the guide on a per-step basis
+            y0 = y0[min(step, y0.shape[0]-1)].unsqueeze(0)
+        
+        lgw_mask, lgw_mask_inv = self.get_masks_for_step(step)
+        
+        data_norm         = data   - data  .mean(dim=(-2,-1), keepdim=True)
+        
+        if self.HAS_LATENT_GUIDE:
+            y0_norm       = y0     - y0    .mean(dim=(-2,-1), keepdim=True)
+            y0_cossim     = get_cosine_similarity(data_norm * lgw_mask,     y0_norm     * lgw_mask)
+        else:
+            y0_cossim     = 1.0
+        
+        if self.HAS_LATENT_GUIDE_INV:
+            y0_inv_norm   = y0_inv - y0_inv.mean(dim=(-2,-1), keepdim=True)
+            y0_cossim_inv = get_cosine_similarity(data_norm * lgw_mask_inv, y0_inv_norm * lgw_mask_inv)
+        else:
+            y0_cossim_inv = 1.0
+        
+        #if y0_cossim < self.guide_cossim_cutoff_ or y0_cossim_inv < self.guide_bkg_cossim_cutoff_:
+        if y0_cossim     >= self.guide_cossim_cutoff_:
+            lgw_mask     *= 0
+        if y0_cossim_inv >= self.guide_bkg_cossim_cutoff_:
+            lgw_mask_inv *= 0
+        
+        return y0, y0_inv, lgw_mask, lgw_mask_inv
+
+
+
     @torch.no_grad
-    def process_pseudoimplicit_guides_substep(self, x_0, x_, eps_, eps_prev_, data_, denoised_prev, row, step, sigmas, NS, RK, pseudoimplicit_row_weights, pseudoimplicit_step_weights, full_iter, BONGMATH, extra_options,):
+    def process_pseudoimplicit_guides_substep(self,
+                                            x_0,
+                                            x_,
+                                            eps_,
+                                            eps_prev_,
+                                            data_,
+                                            denoised_prev,
+                                            row,
+                                            step,
+                                            sigmas,
+                                            NS,
+                                            RK,
+                                            pseudoimplicit_row_weights,
+                                            pseudoimplicit_step_weights,
+                                            full_iter,
+                                            BONGMATH,
+                                            extra_options,
+                                            ):
+        
         if "pseudoimplicit" not in self.guide_mode or (self.lgw[step] == 0 and self.lgw_inv[step] == 0):
             return x_0, x_, eps_, None, None
         
@@ -321,38 +316,16 @@ class LatentGuide:
             if row >= len(self.s_lying_):
                 return x_0, x_, eps_, None, None
         
-        y0 = self.y0.clone()
-        if self.HAS_LATENT_GUIDE_INV:
-            y0_inv = self.y0_inv.clone()
+        if self.guide_mode.startswith("fully_"):
+            data_cossim_test = denoised_prev
         else:
-            y0_inv = torch.zeros_like(y0)
+            data_cossim_test = data_[row]
+            
+        y0, y0_inv, lgw_mask, lgw_mask_inv = self.get_cossim_adjusted_lgw_masks(data_cossim_test, step)
+        
+        if not (lgw_mask.any() != 0 or lgw_mask_inv.any() != 0):  # cossim score too similar! deactivate guide for this step
+            return x_0, x_, eps_, None, None
 
-        if y0.shape[0] > 1:
-            y0 = y0[min(step, y0.shape[0]-1)].unsqueeze(0)
-        
-        lgw_mask, lgw_mask_inv = self.get_masks_for_step(step)
-        
-        
-        
-        data_norm   = data_[row] - data_[row].mean(dim=(-2,-1), keepdim=True)
-        y0_norm     = y0         -         y0.mean(dim=(-2,-1), keepdim=True)
-        y0_cossim     = get_cosine_similarity(data_norm*lgw_mask,     y0_norm    *lgw_mask)
-        
-        if self.HAS_LATENT_GUIDE_INV:
-            y0_inv_norm = y0_inv     -     y0_inv.mean(dim=(-2,-1), keepdim=True)
-            y0_cossim_inv = get_cosine_similarity(data_norm*lgw_mask_inv, y0_inv_norm*lgw_mask_inv)
-        else:
-            y0_cossim_inv = 1.0
-        
-        if y0_cossim < self.guide_cossim_cutoff_ or y0_cossim_inv < self.guide_bkg_cossim_cutoff_:
-            if y0_cossim     >= self.guide_cossim_cutoff_:
-                lgw_mask *= 0
-            if y0_cossim_inv >= self.guide_bkg_cossim_cutoff_:
-                lgw_mask_inv *= 0
-        else:
-            return x_0, x_, eps_, None, None         #eps_, x_      #deactivate, too similar
-        
-        
 
         if "fully_pseudoimplicit" in self.guide_mode:
             if self.x_lying_ is None:
@@ -364,24 +337,45 @@ class LatentGuide:
         
         
         if RK.IMPLICIT:
-            x_ = RK.update_substep(x_0, x_, eps_, eps_prev_, row, RK.row_offset, NS.h_new, NS.h_new_orig, extra_options)
+            x_ = RK.update_substep(x_0,
+                                    x_,
+                                    eps_,
+                                    eps_prev_,
+                                    row,
+                                    RK.row_offset,
+                                    NS.h_new,
+                                    NS.h_new_orig,
+                                    )
+            
             x_[row] = NS.rebound_overshoot_substep(x_0, x_[row])
             
             if row > 0:
                 x_[row] = NS.swap_noise_substep(x_0, x_[row])
                 if BONGMATH and step < sigmas.shape[0]-1 and not extra_options_flag("disable_pseudoimplicit_bongmath", extra_options):
-                    x_0, x_, eps_ = RK.bong_iter(x_0, x_, eps_, eps_prev_, data_, sigma, NS.s_, row, RK.row_offset, NS.h, extra_options)
+                    x_0, x_, eps_ = RK.bong_iter(x_0,
+                                                x_,
+                                                eps_,
+                                                eps_prev_,
+                                                data_,
+                                                sigma,
+                                                NS.s_,
+                                                row,
+                                                RK.row_offset,
+                                                NS.h,
+                                                )
         else:
             eps_[row] = RK.get_epsilon(x_0, x_[row], denoised_prev, sigma, NS.s_[row])
             
         if extra_options_flag("pseudoimplicit_denoised_prev", extra_options):
             eps_[row] = RK.get_epsilon(x_0, x_[row], denoised_prev, sigma, NS.s_[row])
  
-        eps_substep_guide, eps_substep_guide_inv = [torch.zeros_like(x_0) for _ in range(2)]
+        eps_substep_guide     = torch.zeros_like(x_0)
+        eps_substep_guide_inv = torch.zeros_like(x_0)
+        
         if self.HAS_LATENT_GUIDE:
-            eps_substep_guide = RK.get_guide_epsilon(x_0, x_[row], y0, sigma, NS.s_[row], NS.sigma_down, None, extra_options)  
+            eps_substep_guide     = RK.get_guide_epsilon(x_0, x_[row], y0,     sigma, NS.s_[row], NS.sigma_down, None)  
         if self.HAS_LATENT_GUIDE_INV:
-            eps_substep_guide_inv = RK.get_guide_epsilon(x_0, x_[row], y0_inv, sigma, NS.s_[row], NS.sigma_down, None, extra_options)  
+            eps_substep_guide_inv = RK.get_guide_epsilon(x_0, x_[row], y0_inv, sigma, NS.s_[row], NS.sigma_down, None)  
 
 
 
@@ -395,115 +389,171 @@ class LatentGuide:
             
             sub_sigma_2 = NS.sub_sigma - maxmin_ratio * (NS.sub_sigma * pseudoimplicit_row_weights[row] * pseudoimplicit_step_weights[full_iter] * self.lgw[step])
 
-            use_projection = self.guide_mode in {"pseudoimplicit_projection", "pseudoimplicit_projection_cw"}
-            use_channelwise = self.guide_mode in {"pseudoimplicit_cw", "pseudoimplicit_projection_cw"}
             eps_tmp_ = eps_.clone()
 
-            eps_ = self.process_channelwise(x_0, eps_, data_, row, eps_substep_guide, eps_substep_guide_inv, y0, y0_inv, lgw_mask, lgw_mask_inv, use_projection=use_projection, channelwise=use_channelwise)
+            eps_ = self.process_channelwise(x_0,
+                                            eps_,
+                                            data_,
+                                            row,
+                                            eps_substep_guide,
+                                            eps_substep_guide_inv,
+                                            y0,
+                                            y0_inv,
+                                            lgw_mask,
+                                            lgw_mask_inv,
+                                            use_projection = self.guide_mode in {"pseudoimplicit_projection", "pseudoimplicit_projection_cw"},
+                                            channelwise    = self.guide_mode in {"pseudoimplicit_cw",         "pseudoimplicit_projection_cw"},
+                                            )
 
             x_row_tmp = x_[row] + RK.h_fn(sub_sigma_2, NS.sub_sigma) * eps_[row]
             
-            eps_ = eps_tmp_
-            x_row_pseudoimplicit = x_row_tmp
+            eps_                     = eps_tmp_
+            x_row_pseudoimplicit     = x_row_tmp
             sub_sigma_pseudoimplicit = sub_sigma_2
 
 
         if RK.IMPLICIT and BONGMATH and step < sigmas.shape[0]-1 and not extra_options_flag("disable_pseudobongmath", extra_options):
             x_[row] = NS.sigma_from_to(x_0, x_row_pseudoimplicit, sigma, sub_sigma_pseudoimplicit, NS.s_[row])
-            x_0, x_, eps_ = RK.bong_iter(x_0, x_, eps_, eps_prev_, data_, sigma, NS.s_, row, RK.row_offset, NS.h, extra_options) 
+            
+            x_0, x_, eps_ = RK.bong_iter(x_0,
+                                        x_,
+                                        eps_,
+                                        eps_prev_,
+                                        data_,
+                                        sigma,
+                                        NS.s_,
+                                        row,
+                                        RK.row_offset,
+                                        NS.h,
+                                        ) 
             
         return x_0, x_, eps_, x_row_pseudoimplicit, sub_sigma_pseudoimplicit
 
 
 
     @torch.no_grad
-    def prepare_fully_pseudoimplicit_guides_substep(self, x_0, x_, eps_, eps_prev_, data_, denoised_prev, row, step, sigmas, eta_substep, overshoot_substep, s_noise_substep, NS, \
-                                                    RK, pseudoimplicit_row_weights, pseudoimplicit_step_weights, full_iter, BONGMATH, extra_options):
+    def prepare_fully_pseudoimplicit_guides_substep(self,
+                                                    x_0,
+                                                    x_,
+                                                    eps_,
+                                                    eps_prev_,
+                                                    data_,
+                                                    denoised_prev,
+                                                    row,
+                                                    step,
+                                                    sigmas,
+                                                    eta_substep,
+                                                    overshoot_substep,
+                                                    s_noise_substep,
+                                                    NS,
+                                                    RK,
+                                                    pseudoimplicit_row_weights,
+                                                    pseudoimplicit_step_weights,
+                                                    full_iter,
+                                                    BONGMATH,
+                                                    extra_options,
+                                                    ):
+        
         if "fully_pseudoimplicit" not in self.guide_mode or (self.lgw[step] == 0 and self.lgw_inv[step] == 0):
             return x_0, x_, eps_ 
         
         sigma = sigmas[step]
         
-        y0 = self.y0.clone()
-        if self.HAS_LATENT_GUIDE_INV:
-            y0_inv = self.y0_inv.clone()
-        else:
-            y0_inv = torch.zeros_like(y0)
+        y0, y0_inv, lgw_mask, lgw_mask_inv = self.get_cossim_adjusted_lgw_masks(denoised_prev, step)
+        
+        if not (lgw_mask.any() != 0 or lgw_mask_inv.any() != 0):  # cossim score too similar! deactivate guide for this step
+            return x_0, x_, eps_
+        
 
-        if y0.shape[0] > 1:
-            y0 = y0[min(step, y0.shape[0]-1)].unsqueeze(0)
-        
-        lgw_mask, lgw_mask_inv = self.get_masks_for_step(step)
-        
-        
-        
-        data_norm   = data_[row] - data_[row].mean(dim=(-2,-1), keepdim=True)
-        y0_norm     = y0         -         y0.mean(dim=(-2,-1), keepdim=True)
-        y0_cossim     = get_cosine_similarity(data_norm*lgw_mask,     y0_norm    *lgw_mask)
-        
-        if self.HAS_LATENT_GUIDE_INV:
-            y0_inv_norm = y0_inv     -     y0_inv.mean(dim=(-2,-1), keepdim=True)
-            y0_cossim_inv = get_cosine_similarity(data_norm*lgw_mask_inv, y0_inv_norm*lgw_mask_inv)
-        else:
-            y0_cossim_inv = 1.0
-        
-        if y0_cossim < self.guide_cossim_cutoff_ or y0_cossim_inv < self.guide_bkg_cossim_cutoff_:
-            if y0_cossim     >= self.guide_cossim_cutoff_:
-                lgw_mask *= 0
-            if y0_cossim_inv >= self.guide_bkg_cossim_cutoff_:
-                lgw_mask_inv *= 0
-        else:
-            return x_0, x_, eps_ #deactivate, too similar
-        
-        
-        
         # PREPARE FULLY PSEUDOIMPLICIT GUIDES
         if self.guide_mode in {"fully_pseudoimplicit", "fully_pseudoimplicit_cw", "fully_pseudoimplicit_projection", "fully_pseudoimplicit_projection_cw"} and (self.lgw[step] > 0 or self.lgw_inv[step] > 0):
-            x_lying_ = x_.clone()
-            s_lying_ = []
+            x_lying_   = x_.clone()
             eps_lying_ = eps_.clone()
+            s_lying_   = []
+            
             for r in range(RK.rows):
                 
                 NS.set_sde_substep(r, RK.multistep_stages, eta_substep, overshoot_substep, s_noise_substep)
 
-                maxmin_ratio = (NS.sub_sigma - RK.sigma_min) / NS.sub_sigma
-                fully_sub_sigma_2 = NS.sub_sigma - maxmin_ratio * (NS.sub_sigma * pseudoimplicit_row_weights[r] * pseudoimplicit_step_weights[full_iter] * self.lgw[step])
+                maxmin_ratio      = (NS.sub_sigma - RK.sigma_min) / NS.sub_sigma
+                fully_sub_sigma_2 =  NS.sub_sigma - maxmin_ratio * (NS.sub_sigma * pseudoimplicit_row_weights[r] * pseudoimplicit_step_weights[full_iter] * self.lgw[step])
+                
                 s_lying_.append(fully_sub_sigma_2)
 
                 if RK.IMPLICIT:
-                    x_ = RK.update_substep(x_0, x_, eps_, eps_prev_, r, RK.row_offset, NS.h_new, NS.h_new_orig, extra_options) 
+                    x_ = RK.update_substep(x_0,
+                                            x_,
+                                            eps_,
+                                            eps_prev_,
+                                            r,
+                                            RK.row_offset,
+                                            NS.h_new,
+                                            NS.h_new_orig,
+                                            ) 
+                    
                     x_[r] = NS.rebound_overshoot_substep(x_0, x_[r])
 
                     if r > 0:
                         x_[r] = NS.swap_noise_substep(x_0, x_[r])
                         if BONGMATH and step < sigmas.shape[0]-1 and not extra_options_flag("disable_fully_pseudoimplicit_bongmath", extra_options):
-                            x_0, x_, eps_ = RK.bong_iter(x_0, x_, eps_, eps_prev_, data_, sigma, NS.s_, r, RK.row_offset, NS.h, extra_options)
+                            x_0, x_, eps_ = RK.bong_iter(x_0,
+                                                        x_,
+                                                        eps_,
+                                                        eps_prev_,
+                                                        data_,
+                                                        sigma,
+                                                        NS.s_,
+                                                        r,
+                                                        RK.row_offset,
+                                                        NS.h,
+                                                        )
                             
                 if extra_options_flag("fully_pseudoimplicit_denoised_prev", extra_options):
                     eps_[r] = RK.get_epsilon(x_0, x_[r], denoised_prev, sigma, NS.s_[r])
                 
-                eps_substep_guide, eps_substep_guide_inv = [torch.zeros_like(x_0) for _ in range(2)]
+                eps_substep_guide     = torch.zeros_like(x_0)
+                eps_substep_guide_inv = torch.zeros_like(x_0)
+                
                 if self.HAS_LATENT_GUIDE:
-                    eps_substep_guide     = RK.get_guide_epsilon(x_0, x_[r], y0,     sigma, NS.s_[r], NS.sigma_down, None, extra_options)  
+                    eps_substep_guide     = RK.get_guide_epsilon(x_0, x_[r], y0,     sigma, NS.s_[r], NS.sigma_down, None)  
                 if self.HAS_LATENT_GUIDE_INV:
-                    eps_substep_guide_inv = RK.get_guide_epsilon(x_0, x_[r], y0_inv, sigma, NS.s_[r], NS.sigma_down, None, extra_options)  
+                    eps_substep_guide_inv = RK.get_guide_epsilon(x_0, x_[r], y0_inv, sigma, NS.s_[r], NS.sigma_down, None)  
                 
-                use_projection = self.guide_mode in {"fully_pseudoimplicit_projection", "fully_pseudoimplicit_projection_cw"}
-                use_channelwise = self.guide_mode in {"fully_pseudoimplicit_cw", "fully_pseudoimplicit_projection_cw"}
-                eps_ = self.process_channelwise(x_0, eps_, data_, row, eps_substep_guide, eps_substep_guide_inv, y0, y0_inv, lgw_mask, lgw_mask_inv, use_projection=use_projection, channelwise=use_channelwise)
+                eps_ = self.process_channelwise(x_0,
+                                                eps_,
+                                                data_,
+                                                row,
+                                                eps_substep_guide,
+                                                eps_substep_guide_inv,
+                                                y0,
+                                                y0_inv,
+                                                lgw_mask,
+                                                lgw_mask_inv,
+                                                use_projection = self.guide_mode in {"fully_pseudoimplicit_projection", "fully_pseudoimplicit_projection_cw"},
+                                                channelwise    = self.guide_mode in {"fully_pseudoimplicit_cw",         "fully_pseudoimplicit_projection_cw"},
+                                                )
 
-                x_lying_[r] = x_[r] + RK.h_fn(fully_sub_sigma_2, NS.sub_sigma) * eps_[r] #eps_substep_guide
-                
-                data_lying = x_[r] + RK.h_fn(0, NS.s_[r]) * eps_[r] #eps_substep_guide
+                x_lying_[r]   = x_[r] + RK.h_fn(fully_sub_sigma_2, NS.sub_sigma) * eps_[r]
+                data_lying    = x_[r] + RK.h_fn(0,                 NS.s_[r])     * eps_[r] 
                 
                 eps_lying_[r] = RK.get_epsilon(x_0, x_[r], data_lying, sigma, NS.s_[r])
-                #eps_lying_[r] = RK.get_epsilon_anchored(x_0, data_lying, NS.s_[r])
                 
             if not extra_options_flag("pseudoimplicit_disable_eps_lying", extra_options):
                 eps_ = eps_lying_
             
             if not extra_options_flag("pseudoimplicit_disable_newton_iter", extra_options):
-                x_, eps_ = RK.newton_iter(x_0, x_, eps_, eps_prev_, data_, NS.s_, 0, NS.h, sigmas, step, "lying", extra_options)
+                x_, eps_ = RK.newton_iter(x_0,
+                                        x_,
+                                        eps_,
+                                        eps_prev_,
+                                        data_,
+                                        NS.s_,
+                                        0,
+                                        NS.h,
+                                        sigmas,
+                                        step,
+                                        "lying",
+                                        )
             
             self.x_lying_ = x_lying_
             self.s_lying_ = s_lying_
@@ -513,40 +563,26 @@ class LatentGuide:
 
 
     @torch.no_grad
-    def process_guides_substep(self, x_0, x_, eps_, data_, row, step, sigma, sigma_next, sigma_down, s_, unsample_resample_scale, RK, extra_options):
+    def process_guides_substep(self,
+                                x_0,
+                                x_,
+                                eps_,
+                                data_,
+                                row,
+                                step,
+                                sigma,
+                                sigma_next,
+                                sigma_down,
+                                s_,
+                                epsilon_scale,
+                                RK,
+                                extra_options,
+                                ):
 
-        y0 = self.y0.clone()
-        if self.HAS_LATENT_GUIDE_INV:
-            y0_inv = self.y0_inv.clone()
-        else:
-            y0_inv = torch.zeros_like(y0)
-
-        if y0.shape[0] > 1:
-            y0 = y0[min(step, y0.shape[0]-1)].unsqueeze(0)
+        y0, y0_inv, lgw_mask, lgw_mask_inv = self.get_cossim_adjusted_lgw_masks(data_[row], step)
         
-        lgw_mask, lgw_mask_inv = self.get_masks_for_step(step)
-
-        if self.guide_mode: # is not None: 
-            data_norm   = data_[row] - data_[row].mean(dim=(-2,-1), keepdim=True)
-            y0_norm     = y0         -         y0.mean(dim=(-2,-1), keepdim=True)
-            y0_cossim     = get_cosine_similarity(data_norm*lgw_mask,     y0_norm    *lgw_mask)
-            
-            if self.HAS_LATENT_GUIDE_INV:
-                y0_inv_norm = y0_inv     -     y0_inv.mean(dim=(-2,-1), keepdim=True)
-                y0_cossim_inv = get_cosine_similarity(data_norm*lgw_mask_inv, y0_inv_norm*lgw_mask_inv)
-            else:
-                y0_cossim_inv = 1.0
-            
-            if y0_cossim < self.guide_cossim_cutoff_ or y0_cossim_inv < self.guide_bkg_cossim_cutoff_:
-                if y0_cossim     >= self.guide_cossim_cutoff_:
-                    lgw_mask *= 0
-                if y0_cossim_inv >= self.guide_bkg_cossim_cutoff_:
-                    lgw_mask_inv *= 0
-            else:
-                return eps_, x_ 
-        else:
+        if not (lgw_mask.any() != 0 or lgw_mask_inv.any() != 0):  # cossim score too similar! deactivate guide for this step
             return eps_, x_ 
-        
 
         eps_orig = eps_.clone()
         
@@ -572,26 +608,28 @@ class LatentGuide:
             
         if self.guide_mode == "data_projection":
 
-            d_lerp = data_[row]   +   lgw_mask * (y0-data_[row])   +   lgw_mask_inv * (y0_inv-data_[row])
+            d_lerp             = data_[row]   +   lgw_mask * (y0-data_[row])   +   lgw_mask_inv * (y0_inv-data_[row])
             
             d_collinear_d_lerp = get_collinear(data_[row], d_lerp)  
             d_lerp_ortho_d     = get_orthogonal(d_lerp, data_[row])  
             
-            data_[row] = d_collinear_d_lerp + d_lerp_ortho_d
+            data_[row]         = d_collinear_d_lerp + d_lerp_ortho_d
             
-            x_[row+1] = data_[row] + eps_[row] * sigma
+            x_[row+1]          = data_[row] + eps_[row] * sigma
             
 
 
         elif (self.UNSAMPLE or self.guide_mode in {"epsilon", "epsilon_cw", "epsilon_projection", "epsilon_projection_cw"}) and (self.lgw[step] > 0 or self.lgw_inv[step] > 0):
             if sigma_down < sigma   or   s_[row] < RK.sigma_max:
-                eps_substep_guide, eps_substep_guide_inv = [torch.zeros_like(x_0) for _ in range(2)]
+                                
+                eps_substep_guide     = torch.zeros_like(x_0)
+                eps_substep_guide_inv = torch.zeros_like(x_0)
                 
                 if self.HAS_LATENT_GUIDE:
-                    eps_substep_guide = RK.get_guide_epsilon(x_0, x_[row], y0, sigma, s_[row], sigma_down, unsample_resample_scale, extra_options)  
+                    eps_substep_guide     = RK.get_guide_epsilon(x_0, x_[row], y0,     sigma, s_[row], sigma_down, epsilon_scale)  
                     
                 if self.HAS_LATENT_GUIDE_INV:
-                    eps_substep_guide_inv = RK.get_guide_epsilon(x_0, x_[row], y0_inv, sigma, s_[row], sigma_down, unsample_resample_scale, extra_options)  
+                    eps_substep_guide_inv = RK.get_guide_epsilon(x_0, x_[row], y0_inv, sigma, s_[row], sigma_down, epsilon_scale)  
 
                 tol_value = float(get_extra_options_kv("tol", "-1.0", extra_options))
                 if tol_value >= 0:
@@ -624,8 +662,19 @@ class LatentGuide:
                     eps_[row]              = eps_[row] + lgw_mask * (eps_sum - eps_[row]) + lgw_mask_inv * (eps_sum - eps_[row])
                     
                 elif self.guide_mode in {"epsilon_cw", "epsilon_projection_cw"}:
-                    use_projection = self.guide_mode == "epsilon_projection_cw"
-                    eps_ = self.process_channelwise(x_0, eps_, data_, row, eps_substep_guide, eps_substep_guide_inv, y0, y0_inv, lgw_mask, lgw_mask_inv, use_projection=use_projection, channelwise=True)
+                    eps_ = self.process_channelwise(x_0,
+                                                    eps_,
+                                                    data_,
+                                                    row,
+                                                    eps_substep_guide,
+                                                    eps_substep_guide_inv,
+                                                    y0,
+                                                    y0_inv,
+                                                    lgw_mask,
+                                                    lgw_mask_inv,
+                                                    use_projection = self.guide_mode == "epsilon_projection_cw",
+                                                    channelwise    = True
+                                                    )
 
         temporal_smoothing = float(get_extra_options_kv("temporal_smoothing", "0.0", extra_options))
         if temporal_smoothing > 0:
@@ -646,11 +695,26 @@ class LatentGuide:
         return eps_, x_
 
 
-    def process_channelwise(self, x_0, eps_, data_, row, eps_substep_guide, eps_substep_guide_inv, y0, y0_inv, lgw_mask, lgw_mask_inv, use_projection=False, channelwise=False):
+    def process_channelwise(self,
+                            x_0,
+                            eps_,
+                            data_,
+                            row,
+                            eps_substep_guide,
+                            eps_substep_guide_inv,
+                            y0,
+                            y0_inv,
+                            lgw_mask,
+                            lgw_mask_inv,
+                            use_projection = False,
+                            channelwise    = False
+                            ):
+        
         avg, avg_inv = 0, 0
         for b, c in itertools.product(range(x_0.shape[0]), range(x_0.shape[1])):
             avg     += torch.norm(lgw_mask    [b][c] * data_[row][b][c]   -   lgw_mask    [b][c] * y0    [b][c])
             avg_inv += torch.norm(lgw_mask_inv[b][c] * data_[row][b][c]   -   lgw_mask_inv[b][c] * y0_inv[b][c])
+            
         avg     /= x_0.shape[1]
         avg_inv /= x_0.shape[1]
         
@@ -665,7 +729,7 @@ class LatentGuide:
             eps_[row][b][c]            = eps_[row][b][c]   +   ratio * lgw_mask[b][c] * (eps_substep_guide[b][c] - eps_[row][b][c])   +   ratio_inv * lgw_mask_inv[b][c] * (eps_substep_guide_inv[b][c] - eps_[row][b][c])
             
             if use_projection:
-                eps_row_lerp           = eps_[row][b][c]   +          self.mask[b][c] * (eps_substep_guide[b][c] - eps_[row][b][c])   +              (1-self.mask[b][c]) * (eps_substep_guide_inv[b][c] - eps_[row][b][c])
+                eps_row_lerp           = eps_[row][b][c]   +          self.mask[b][c] * (eps_substep_guide[b][c] - eps_[row][b][c])   +              (1-self.mask[b][c]) * (eps_substep_guide_inv[b][c] - eps_[row][b][c]) # should this ever be self.mask_inv?
 
                 eps_collinear_eps_lerp = get_collinear (eps_[row][b][c], eps_row_lerp)
                 eps_lerp_ortho_eps     = get_orthogonal(eps_row_lerp   , eps_[row][b][c])
@@ -683,41 +747,17 @@ class LatentGuide:
     def process_guides_poststep(self, x, denoised, eps, step, extra_options):
         x_orig = x.clone()
         mean_weight = float(get_extra_options_kv("mean_weight", "0.01", extra_options))
-        
-        y0 = self.y0.clone()
-        if self.HAS_LATENT_GUIDE_INV:
-            y0_inv = self.y0_inv.clone()
-        else:
-            y0_inv = torch.zeros_like(y0)
 
-        if y0.shape[0] > 1:
-            y0 = y0[min(step, y0.shape[0]-1)].unsqueeze(0)
+        y0, y0_inv, lgw_mask, lgw_mask_inv = self.get_cossim_adjusted_lgw_masks(denoised, step)
         
-        lgw_mask, lgw_mask_inv = self.get_masks_for_step(step)
+        if not (lgw_mask.any() != 0 or lgw_mask_inv.any() != 0):  # cossim score too similar! deactivate guide for this step
+            return x
+        
         mask = self.mask #needed for bitwise mask below
-        
-        if self.guide_mode: 
-            data_norm   = denoised - denoised.mean(dim=(-2,-1), keepdim=True)
-            y0_norm     = y0       - y0      .mean(dim=(-2,-1), keepdim=True)
-            y0_inv_norm = y0_inv   - y0_inv  .mean(dim=(-2,-1), keepdim=True)
-
-            y0_cossim     = get_cosine_similarity(data_norm*lgw_mask,     y0_norm    *lgw_mask)
-            y0_cossim_inv = get_cosine_similarity(data_norm*lgw_mask_inv, y0_inv_norm*lgw_mask_inv)
-            
-            if y0_cossim < self.guide_cossim_cutoff_ or y0_cossim_inv < self.guide_bkg_cossim_cutoff_:
-                lgw_mask_cossim, lgw_mask_cossim_inv = lgw_mask, lgw_mask_inv
-                if y0_cossim     >= self.guide_cossim_cutoff_:
-                    lgw_mask_cossim     = torch.zeros_like(lgw_mask)
-                if y0_cossim_inv >= self.guide_bkg_cossim_cutoff_:
-                    lgw_mask_cossim_inv = torch.zeros_like(lgw_mask_inv)
-                lgw_mask = lgw_mask_cossim
-                lgw_mask_inv = lgw_mask_cossim_inv
-            else:
-                return x
         
         if self.guide_mode in {"epsilon_dynamic_mean_std", "epsilon_dynamic_mean", "epsilon_dynamic_std", "epsilon_dynamic_mean_from_bkg"}:
         
-            denoised_masked     = denoised * ((mask==1)*mask)
+            denoised_masked     = denoised * ((mask==1)*   mask)
             denoised_masked_inv = denoised * ((mask==0)*(1-mask))
             
             
@@ -885,8 +925,8 @@ def get_guide_epsilon_substep(x_0, x_, y0, y0_inv, s_, row, row_offset, rk_type,
         index = ()
 
     if RK_Method_Beta.is_exponential(rk_type):
-        eps_row     = y0    [index] - x_0[index]
-        eps_row_inv = y0_inv[index] - x_0[index]
+        eps_row     =  y0    [index] -  x_0[index]
+        eps_row_inv =  y0_inv[index] -  x_0[index]
     else:
         eps_row     = (x_[row][index] - y0    [index]) / (s_[row] * s_in) # was row+row_offset before for x_!!   not right...     also? potential issues here with x_[row+1] being RK.rows+2 with gauss-legendre_2s 1 imp step 1 imp substep
         eps_row_inv = (x_[row][index] - y0_inv[index]) / (s_[row] * s_in)

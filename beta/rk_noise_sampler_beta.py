@@ -4,10 +4,29 @@ import comfy.model_patcher
 import comfy.supported_models
 
 from .noise_classes import NOISE_GENERATOR_CLASSES, NOISE_GENERATOR_CLASSES_SIMPLE
-from ..helper import get_orthogonal, get_collinear, get_extra_options_list, has_nested_attr, extra_options_flag, get_extra_options_kv
-from ..res4lyf import RESplain
+from .constants     import MAX_STEPS
 
-MAX_STEPS = 10000
+from ..helper       import get_extra_options_list, has_nested_attr, extra_options_flag, get_extra_options_kv
+from ..latents      import get_orthogonal, get_collinear
+from ..res4lyf      import RESplain
+
+
+
+
+NOISE_MODE_NAMES = ["none",
+                    "hard_sq",
+                    "hard",
+                    "lorentzian", 
+                    "soft", 
+                    "soft-linear",
+                    "softer",
+                    "eps",
+                    "sinusoidal",
+                    "exp", 
+                    "vpsde",
+                    "hard_var", 
+                    ]
+
 
 
 def get_data_from_step(x, x_next, sigma, sigma_next):
@@ -21,12 +40,29 @@ def get_epsilon_from_step(x, x_next, sigma, sigma_next):
 
 
 class RK_NoiseSampler:
-    def __init__(self, RK, model, step=0, device='cuda', dtype=torch.float64, extra_options=""):
+    def __init__(self,
+                RK,
+                model,
+                step=0,
+                device='cuda',
+                dtype=torch.float64,
+                extra_options=""
+                ):
+        
         self.device                 = device
         self.dtype                  = dtype
         
         self.model                  = model
-                
+
+        if has_nested_attr(model, "inner_model.inner_model.model_sampling"):
+            model_sampling = model.inner_model.inner_model.model_sampling
+        elif has_nested_attr(model, "model.model_sampling"):
+            model_sampling = model.model.model_sampling
+            
+        self.sigma_max              = model_sampling.sigma_max.to(dtype=self.dtype, device=self.device)
+        self.sigma_min              = model_sampling.sigma_min.to(dtype=self.dtype, device=self.device)
+        
+                        
         self.sigma_fn               = RK.sigma_fn
         self.t_fn                   = RK.t_fn
         self.h_fn                   = RK.h_fn
@@ -34,9 +70,6 @@ class RK_NoiseSampler:
         self.row_offset             = 1 if not RK.IMPLICIT else 0
         
         self.step                   = step
-        
-        self.sigma_max              = model.inner_model.inner_model.model_sampling.sigma_max.to(dtype=self.dtype, device=self.device)
-        self.sigma_min              = model.inner_model.inner_model.model_sampling.sigma_min.to(dtype=self.dtype, device=self.device)
         
         self.noise_sampler          = None
         self.noise_sampler2         = None
@@ -46,22 +79,36 @@ class RK_NoiseSampler:
         
         self.LOCK_H_SCALE           = True
         
-        if has_nested_attr(model, "inner_model.inner_model.model_sampling"):
-            model_sampling = model.inner_model.inner_model.model_sampling
-        elif has_nested_attr(model, "model.model_sampling"):
-            model_sampling = model.model.model_sampling
-        
         self.CONST                  = isinstance(model_sampling, comfy.model_sampling.CONST)
         self.VARIANCE_PRESERVING    = isinstance(model_sampling, comfy.model_sampling.CONST)
-           
+        
         self.extra_options          = extra_options
-           
+        
         self.DOWN_SUBSTEP           = extra_options_flag("down_substep", extra_options)  
         self.DOWN_STEP              = extra_options_flag("down_step",    extra_options)  
 
 
 
-    def init_noise_samplers(self, x, noise_seed, noise_seed_substep, noise_sampler_type, noise_sampler_type2, noise_mode_sde, noise_mode_sde_substep, overshoot_mode, overshoot_mode_substep, noise_boost_step, noise_boost_substep, alpha, alpha2, k=1., k2=1., scale=0.1, scale2=0.1):
+    def init_noise_samplers(self,
+                            x,
+                            noise_seed,
+                            noise_seed_substep,
+                            noise_sampler_type,
+                            noise_sampler_type2,
+                            noise_mode_sde,
+                            noise_mode_sde_substep,
+                            overshoot_mode,
+                            overshoot_mode_substep,
+                            noise_boost_step,
+                            noise_boost_substep,
+                            alpha,
+                            alpha2,
+                            k      = 1.0,
+                            k2     = 1.0,
+                            scale  = 0.1,
+                            scale2 = 0.1,
+                            ):
+        
         self.noise_sampler_type     = noise_sampler_type
         self.noise_sampler_type2    = noise_sampler_type2
         self.noise_mode_sde         = noise_mode_sde
@@ -82,7 +129,7 @@ class RK_NoiseSampler:
         #seed2 = seed + MAX_STEPS #for substep noise generation. offset needed to ensure seeds are not reused
             
         if noise_sampler_type == "fractal":
-            self.noise_sampler        = NOISE_GENERATOR_CLASSES.get(noise_sampler_type )(x=x, seed=seed,  sigma_min=self.sigma_min, sigma_max=self.sigma_max)
+            self.noise_sampler        = NOISE_GENERATOR_CLASSES.get(noise_sampler_type )(x=x, seed=seed,               sigma_min=self.sigma_min, sigma_max=self.sigma_max)
             self.noise_sampler.alpha  = alpha
             self.noise_sampler.k      = k
             self.noise_sampler.scale  = scale
@@ -92,12 +139,13 @@ class RK_NoiseSampler:
             self.noise_sampler2.k     = k2
             self.noise_sampler2.scale = scale2
         else:
-            self.noise_sampler  = NOISE_GENERATOR_CLASSES_SIMPLE.get(noise_sampler_type )(x=x, seed=seed,  sigma_min=self.sigma_min, sigma_max=self.sigma_max)
+            self.noise_sampler  = NOISE_GENERATOR_CLASSES_SIMPLE.get(noise_sampler_type )(x=x, seed=seed,               sigma_min=self.sigma_min, sigma_max=self.sigma_max)
             self.noise_sampler2 = NOISE_GENERATOR_CLASSES_SIMPLE.get(noise_sampler_type2)(x=x, seed=noise_seed_substep, sigma_min=self.sigma_min, sigma_max=self.sigma_max)
             
             
             
     def set_substep_list(self, RK):
+        
         self.multistep_stages = RK.multistep_stages
         self.rows = RK.rows
         self.C    = RK.C
@@ -147,18 +195,29 @@ class RK_NoiseSampler:
         
         self.sigma_up_eta, self.sigma_eta, self.sigma_down_eta, self.alpha_ratio_eta \
             = self.get_sde_step(sigma, sigma_next, eta, self.noise_mode_sde, self.DOWN_STEP, SUBSTEP=False)
+            
         self.sigma_up, self.sigma, self.sigma_down, self.alpha_ratio \
             = self.get_sde_step(sigma, sigma_next, overshoot, self.overshoot_mode, self.DOWN_STEP, SUBSTEP=False)
             
-        self.h         = self.h_fn(self.sigma_down, self.sigma)
-        self.h_no_eta  = self.h_fn(self.sigma_next, self.sigma)
-        self.h = self.h + self.noise_boost_step * (self.h_no_eta - self.h)
+        self.h          = self.h_fn(self.sigma_down, self.sigma)
+        self.h_no_eta   = self.h_fn(self.sigma_next, self.sigma)
+        self.h          = self.h + self.noise_boost_step * (self.h_no_eta - self.h)
         
 
         
         
         
-    def set_sde_substep(self, row, multistep_stages, eta_substep, overshoot_substep, s_noise_substep, full_iter=0, diag_iter=0, implicit_steps_full=0, implicit_steps_diag=0):    
+    def set_sde_substep(self,
+                        row,
+                        multistep_stages,
+                        eta_substep,
+                        overshoot_substep,
+                        s_noise_substep,
+                        full_iter           = 0,
+                        diag_iter           = 0,
+                        implicit_steps_full = 0,
+                        implicit_steps_diag = 0
+                        ):    
         
         self.sub_sigma_up_eta    = self.sub_sigma_up                          = 0.0
         self.sub_sigma_eta       = self.sub_sigma                             = self.s_[row]
@@ -204,10 +263,24 @@ class RK_NoiseSampler:
         
         
 
-    def get_sde_substep(self, sigma, sigma_next, eta=0.0, noise_mode_override=None, DOWN=False,):
+    def get_sde_substep(self,
+                        sigma,
+                        sigma_next,
+                        eta                 = 0.0,
+                        noise_mode_override = None,
+                        DOWN                = False,
+                        ):
+        
         return self.get_sde_step(sigma, sigma_next, eta, noise_mode_override=noise_mode_override, DOWN=DOWN, SUBSTEP=True,)
 
-    def get_sde_step(self, sigma, sigma_next, eta=0.0, noise_mode_override=None, DOWN=False, SUBSTEP=False, ):
+    def get_sde_step(self,
+                    sigma,
+                    sigma_next,
+                    eta                 = 0.0,
+                    noise_mode_override = None,
+                    DOWN                = False,
+                    SUBSTEP             = False,
+                    ):
             
         if noise_mode_override is not None:
             noise_mode = noise_mode_override
@@ -283,10 +356,10 @@ class RK_NoiseSampler:
         return su, sigma, sd, alpha_ratio
     
     def get_vpsde_step_RF(self, sigma, sigma_next, eta):
-        dt = sigma - sigma_next
-        sigma_up = eta * sigma * dt**0.5
+        dt          = sigma - sigma_next
+        sigma_up    = eta * sigma * dt**0.5
         alpha_ratio = 1 - dt * (eta**2/4) * (1 + sigma)
-        sigma_down = sigma_next - (eta/4)*sigma*(1-sigma)*(sigma - sigma_next)
+        sigma_down  = sigma_next - (eta/4)*sigma*(1-sigma)*(sigma - sigma_next)
         return sigma_up, sigma_down, alpha_ratio
         
 
@@ -302,7 +375,8 @@ class RK_NoiseSampler:
             return x_next
         if brownian_sigma == brownian_sigma_next:
             brownian_sigma_next *= 0.999
-        eps_next = (x_0 - x_next) / (self.sigma - self.sigma_next)
+            
+        eps_next      = (x_0 - x_next) / (self.sigma - self.sigma_next)
         denoised_next = x_0 - self.sigma * eps_next
         
         if brownian_sigma_next > brownian_sigma:
@@ -344,7 +418,21 @@ class RK_NoiseSampler:
         return x
 
 
-    def swap_noise(self, x_0, x_next, sigma_0, sigma, sigma_next, sigma_down, sigma_up, alpha_ratio, s_noise, SUBSTEP=False, brownian_sigma=None, brownian_sigma_next=None, ):
+    def swap_noise(self,
+                    x_0,
+                    x_next,
+                    sigma_0,
+                    sigma,
+                    sigma_next,
+                    sigma_down,
+                    sigma_up,
+                    alpha_ratio,
+                    s_noise,
+                    SUBSTEP             = False,
+                    brownian_sigma      = None,
+                    brownian_sigma_next = None,
+                    ):
+        
         if sigma_up == 0:
             return x_next
         
@@ -356,12 +444,12 @@ class RK_NoiseSampler:
             return x_next
         if brownian_sigma == brownian_sigma_next:
             brownian_sigma_next *= 0.999
-        eps_next = (x_0 - x_next) / (sigma_0 - sigma_next)
+        eps_next      = (x_0 - x_next) / (sigma_0 - sigma_next)
         denoised_next = x_0 - sigma_0 * eps_next
         
         if brownian_sigma_next > brownian_sigma:
-            s_tmp = brownian_sigma
-            brownian_sigma = brownian_sigma_next
+            s_tmp               = brownian_sigma
+            brownian_sigma      = brownian_sigma_next
             brownian_sigma_next = s_tmp
         
         if not SUBSTEP:
@@ -375,30 +463,106 @@ class RK_NoiseSampler:
         return x
 
     # not used
-    def add_noise_pre(self, x_0, x, sigma_up, sigma_0, sigma, sigma_next, real_sigma_down, alpha_ratio, s_noise, noise_mode, SDE_NOISE_EXTERNAL=False, sde_noise_t=None, SUBSTEP=False):
+    def add_noise_pre(self,
+                        x_0,
+                        x,
+                        sigma_up,
+                        sigma_0,
+                        sigma,
+                        sigma_next,
+                        real_sigma_down,
+                        alpha_ratio,
+                        s_noise,
+                        noise_mode,
+                        SDE_NOISE_EXTERNAL = False,
+                        sde_noise_t        = None,
+                        SUBSTEP            = False,
+                        ):
+        
         if not self.CONST and noise_mode == "hard_sq": 
             if self.LOCK_H_SCALE:
-                x = self.swap_noise(x_0, x, sigma, sigma_0, sigma_next, real_sigma_down, sigma_up, alpha_ratio, s_noise, SUBSTEP, )
+                x = self.swap_noise(x_0,
+                                    x,
+                                    sigma,
+                                    sigma_0,
+                                    sigma_next,
+                                    real_sigma_down,
+                                    sigma_up,
+                                    alpha_ratio,
+                                    s_noise,
+                                    SUBSTEP,
+                                    )
             else:
-                x = self.add_noise(x, sigma_up, sigma, sigma_next, alpha_ratio, s_noise, SDE_NOISE_EXTERNAL, sde_noise_t, SUBSTEP, )
+                x = self.add_noise(x,
+                                    sigma_up,
+                                    sigma,
+                                    sigma_next,
+                                    alpha_ratio,
+                                    s_noise,
+                                    SDE_NOISE_EXTERNAL,
+                                    sde_noise_t,
+                                    SUBSTEP,
+                                    )
         return x
         
     # only used for handle_tiled_etc_noise_steps() in rk_guide_func_beta.py
-    def add_noise_post(self, x_0, x, sigma_up, sigma_0, sigma, sigma_next, real_sigma_down, alpha_ratio, s_noise, noise_mode, SDE_NOISE_EXTERNAL=False, sde_noise_t=None, SUBSTEP=False):
+    def add_noise_post(self,
+                        x_0,
+                        x,
+                        sigma_up,
+                        sigma_0,
+                        sigma,
+                        sigma_next,
+                        real_sigma_down,
+                        alpha_ratio,
+                        s_noise,
+                        noise_mode,
+                        SDE_NOISE_EXTERNAL = False,
+                        sde_noise_t        = None,
+                        SUBSTEP            = False
+                        ):
+        
         if self.CONST   or   (not self.CONST and noise_mode != "hard_sq"):
             if self.LOCK_H_SCALE:
-                x = self.swap_noise(x_0, x, sigma_0, sigma, sigma_next, real_sigma_down, sigma_up, alpha_ratio, s_noise, SUBSTEP, )
+                x = self.swap_noise(x_0,
+                                    x,
+                                    sigma_0,
+                                    sigma,
+                                    sigma_next,
+                                    real_sigma_down,
+                                    sigma_up,
+                                    alpha_ratio,
+                                    s_noise,
+                                    SUBSTEP,
+                                    )
             else:
-                x = self.add_noise(x, sigma_up, sigma, sigma_next, alpha_ratio, s_noise, SDE_NOISE_EXTERNAL, sde_noise_t, SUBSTEP, )
+                x = self.add_noise(x,
+                                    sigma_up,
+                                    sigma,
+                                    sigma_next,
+                                    alpha_ratio,
+                                    s_noise,
+                                    SDE_NOISE_EXTERNAL,
+                                    sde_noise_t,
+                                    SUBSTEP,
+                                    )
         return x
 
-    def add_noise(self, x, sigma_up, sigma, sigma_next, alpha_ratio, s_noise, SDE_NOISE_EXTERNAL, sde_noise_t, SUBSTEP, ):
+    def add_noise(self,
+                    x,
+                    sigma_up,
+                    sigma,
+                    sigma_next,
+                    alpha_ratio,
+                    s_noise,
+                    SDE_NOISE_EXTERNAL,
+                    sde_noise_t,
+                    SUBSTEP,
+                    ):
 
         if sigma_next > 0.0 and sigma_up > 0.0:
             if sigma_next > sigma:
-                s_tmp = sigma
-                sigma = sigma_next
-                sigma_next = s_tmp
+                sigma, sigma_next = sigma_next, sigma
             
             if sigma == sigma_next:
                 sigma_next = sigma * 0.9999
@@ -422,21 +586,21 @@ class RK_NoiseSampler:
             return x
     
     def sigma_from_to(self, x_0, x_down, sigma, sigma_down, sigma_next):   #sigma, sigma_from, sigma_to
-        eps = (x_0 - x_down) / (sigma - sigma_down)
-        denoised = x_0 - sigma * eps
-        x_next = denoised + sigma_next * eps
+        eps      = (x_0 - x_down) / (sigma - sigma_down)
+        denoised =  x_0 - sigma * eps
+        x_next   = denoised + sigma_next * eps
         return x_next
 
     def rebound_overshoot_step(self, x_0, x):
-        eps = (x_0 - x) / (self.sigma - self.sigma_down)
-        denoised = x_0 - self.sigma * eps
-        x = denoised + self.sigma_next * eps
+        eps      = (x_0 - x) / (self.sigma - self.sigma_down)
+        denoised =  x_0 - self.sigma * eps
+        x        = denoised + self.sigma_next * eps
         return x
     
     def rebound_overshoot_substep(self, x_0, x):
-        sub_eps = (x_0 - x) / (self.sigma - self.sub_sigma_down)
-        sub_denoised = x_0 - self.sigma * sub_eps
-        x = sub_denoised + self.sub_sigma_next * sub_eps
+        sub_eps      = (x_0 - x) / (self.sigma - self.sub_sigma_down)
+        sub_denoised =  x_0 - self.sigma * sub_eps
+        x            = sub_denoised + self.sub_sigma_next * sub_eps
         return x
 
     def prepare_sigmas(self, sigmas, sigmas_override, d_noise, sampler_mode):
@@ -446,7 +610,7 @@ class RK_NoiseSampler:
         
         if sigmas[0] == 0.0:      #remove padding used to prevent comfy from adding noise to the latent (for unsampling, etc.)
             UNSAMPLE = True
-            sigmas = sigmas[1:-1]
+            sigmas   = sigmas[1:-1]
         else:
             UNSAMPLE = False
         
@@ -472,20 +636,4 @@ class RK_NoiseSampler:
         
         return sigmas, UNSAMPLE
     
-
-
-
-NOISE_MODE_NAMES = ["none",
-                    "hard_sq",
-                    "hard",
-                    "lorentzian", 
-                    "soft", 
-                    "soft-linear",
-                    "softer",
-                    "eps",
-                    "sinusoidal",
-                    "exp", 
-                    "vpsde",
-                    "hard_var", 
-                    ]
 

@@ -1,10 +1,7 @@
-from .noise_classes import prepare_noise, NOISE_GENERATOR_CLASSES_SIMPLE, NOISE_GENERATOR_NAMES_SIMPLE, NOISE_GENERATOR_NAMES
-from .rk_noise_sampler_beta import NOISE_MODE_NAMES
-from ..sigmas import get_sigmas
+import torch
+import torch.nn.functional as F
 
-from .rk_coefficients_beta import get_default_sampler_name, get_sampler_name_list, process_sampler_name
-
-from .constants import MAX_STEPS, IMPLICIT_TYPE_NAMES
+import copy
 
 import comfy.samplers
 import comfy.sample
@@ -15,44 +12,23 @@ import comfy.sd
 import comfy.supported_models
 
 import latent_preview
-import torch
-import torch.nn.functional as F
 
-import math
-import copy
+from ..helper               import initialize_or_scale, get_extra_options_kv, extra_options_flag, get_res4lyf_scheduler_list, OptionsManager
+from ..res4lyf              import RESplain
+from ..latents              import get_orthogonal, get_collinear
+from ..sigmas               import get_sigmas
+import RES4LYF.models              # import ReFluxPatcher
 
-from ..helper import get_extra_options_kv, extra_options_flag, get_res4lyf_scheduler_list, get_orthogonal, get_collinear, OptionsManager
-#from RES4LYF.latents import initialize_or_scale
-import RES4LYF.latents
-from ..res4lyf import RESplain
-
-
-def move_to_same_device(*tensors):
-    if not tensors:
-        return tensors
-
-    device = tensors[0].device
-    return tuple(tensor.to(device) for tensor in tensors)
-
-
-
-def process_sampler_name(selected_value):
-    processed_name = selected_value.split("/")[-1]
-    
-    if selected_value.startswith("fully_implicit") or selected_value.startswith("diag_implicit"):
-        implicit_sampler_name = processed_name
-        sampler_name = "euler"
-    else:
-        sampler_name = processed_name
-        implicit_sampler_name = "use_explicit"
-    
-    return sampler_name, implicit_sampler_name
+from .constants             import MAX_STEPS, IMPLICIT_TYPE_NAMES
+from .noise_classes         import NOISE_GENERATOR_CLASSES_SIMPLE, NOISE_GENERATOR_NAMES_SIMPLE, NOISE_GENERATOR_NAMES
+from .rk_noise_sampler_beta import NOISE_MODE_NAMES
+from .rk_coefficients_beta  import get_default_sampler_name, get_sampler_name_list, process_sampler_name
 
 
 
 class SharkSampler:
     @classmethod
-    def INPUT_TYPES(s):
+    def INPUT_TYPES(cls):
         return {"required":
                     {"model":          ("MODEL",),
                     "noise_type_init": (NOISE_GENERATOR_NAMES_SIMPLE, {"default": "gaussian"}),
@@ -122,7 +98,6 @@ class SharkSampler:
             **kwargs,
             ): 
         
-
             options_inputs = []
 
             if options is not None:
@@ -138,8 +113,6 @@ class SharkSampler:
                     break
 
             options_mgr = OptionsManager(options_inputs)
-        
-        
         
             # blame comfy here
             state_info  = copy.deepcopy(latent_image['state_info']) if 'state_info' in latent_image else {}
@@ -165,8 +138,13 @@ class SharkSampler:
                     regional_conditioning, regional_mask                   = regional_generate_conditionings_and_masks_fn(latent_image['samples'])
                     regional_conditioning                                  = copy.deepcopy(regional_conditioning)
                     regional_mask                                          = copy.deepcopy(regional_mask)
+                    
+                    model, = RES4LYF.models.ReFluxPatcher().main(model, enable=True)
                     model.set_model_patch(regional_conditioning, 'regional_conditioning_positive')
                     model.set_model_patch(regional_mask,         'regional_conditioning_mask')
+                else:
+                    model, = RES4LYF.models.ReFluxPatcher().main(model, enable=False)
+
                     
             if "noise_seed" in sampler.extra_options:
                 if sampler.extra_options['noise_seed'] == -1 and noise_seed != -1:
@@ -355,8 +333,8 @@ class SharkSampler:
                         noise = latent_noise_samples
 
                     if noise_normalize and noise.std() > 0:
-                        noise = (noise - noise.mean(dim=(-2, -1), keepdim=True)) / noise.std(dim=(-2, -1), keepdim=True)
-                        #noise.sub_(noise.mean(dim=(-2, -1), keepdim=True)).div_(noise.std(dim=(-2, -1), keepdim=True))
+                        #noise = (noise - noise.mean(dim=(-2, -1), keepdim=True)) / noise.std(dim=(-2, -1), keepdim=True)
+                        noise.sub_(noise.mean(dim=(-2, -1), keepdim=True)).div_(noise.std(dim=(-2, -1), keepdim=True))
                     noise *= noise_stdev
                     noise = (noise - noise.mean()) + noise_mean
                     
@@ -439,7 +417,7 @@ class SharkSampler:
 
 class ClownSamplerAdvanced_Beta:
     @classmethod
-    def INPUT_TYPES(s):
+    def INPUT_TYPES(cls):
         return {"required":
                     {
                     "noise_type_sde":         (NOISE_GENERATOR_NAMES_SIMPLE, {"default": "gaussian"}),
@@ -534,6 +512,12 @@ class ClownSamplerAdvanced_Beta:
             
             implicit_type                 = "predictor-corrector",
             implicit_type_substeps        = "predictor-corrector",
+            
+            rk_swap_step                  = MAX_STEPS,
+            rk_swap_print                 = False,
+            rk_swap_threshold             = 0.0,
+            rk_swap_type                  = "",
+            
             **kwargs,
             ): 
         
@@ -578,6 +562,12 @@ class ClownSamplerAdvanced_Beta:
             frame_weights_grp = options_mgr.get('frame_weights_grp', frame_weights_grp)
             sde_noise         = options_mgr.get('sde_noise'        , sde_noise)
             sde_noise_steps   = options_mgr.get('sde_noise_steps'  , sde_noise_steps)
+            
+            rk_swap_step      = options_mgr.get('rk_swap_step'     , rk_swap_step)
+            rk_swap_print     = options_mgr.get('rk_swap_print'    , rk_swap_print)
+            rk_swap_threshold = options_mgr.get('rk_swap_threshold', rk_swap_threshold)
+            rk_swap_type      = options_mgr.get('rk_swap_type'     , rk_swap_type)
+
 
             rescale_floor = extra_options_flag("rescale_floor", extra_options)
 
@@ -589,10 +579,10 @@ class ClownSamplerAdvanced_Beta:
                 epsilon_scales    = automation['epsilon_scales']    if 'epsilon_scales'    in automation else None
                 frame_weights_grp = automation['frame_weights_grp'] if 'frame_weights_grp' in automation else None
 
-            etas             = RES4LYF.latents.initialize_or_scale(etas,             eta,             MAX_STEPS).to(default_dtype)
-            etas_substep     = RES4LYF.latents.initialize_or_scale(etas_substep,     eta_substep,     MAX_STEPS).to(default_dtype)
-            s_noises         = RES4LYF.latents.initialize_or_scale(s_noises,         s_noise,         MAX_STEPS).to(default_dtype)
-            s_noises_substep = RES4LYF.latents.initialize_or_scale(s_noises_substep, s_noise_substep, MAX_STEPS).to(default_dtype)
+            etas             = initialize_or_scale(etas,             eta,             MAX_STEPS).to(default_dtype)
+            etas_substep     = initialize_or_scale(etas_substep,     eta_substep,     MAX_STEPS).to(default_dtype)
+            s_noises         = initialize_or_scale(s_noises,         s_noise,         MAX_STEPS).to(default_dtype)
+            s_noises_substep = initialize_or_scale(s_noises_substep, s_noise_substep, MAX_STEPS).to(default_dtype)
 
             etas             = F.pad(etas,             (0, MAX_STEPS), value=0.0)
             etas_substep     = F.pad(etas_substep,     (0, MAX_STEPS), value=0.0)
@@ -662,6 +652,11 @@ class ClownSamplerAdvanced_Beta:
 
                     "implicit_type"                 : implicit_type,
                     "implicit_type_substeps"        : implicit_type_substeps,
+                    
+                    "rk_swap_step"                  : rk_swap_step,
+                    "rk_swap_print"                 : rk_swap_print,
+                    "rk_swap_threshold"             : rk_swap_threshold,
+                    "rk_swap_type"                  : rk_swap_type,
                 })
 
 
@@ -673,9 +668,9 @@ class ClownSamplerAdvanced_Beta:
 
 
 
-class ClownsharKSamplerSimple_Beta:
+class ClownsharKSampler_Beta:
     @classmethod
-    def INPUT_TYPES(s):
+    def INPUT_TYPES(cls):
         inputs = {"required":
                     {
                     "model":        ("MODEL",),
@@ -773,6 +768,12 @@ class ClownsharKSamplerSimple_Beta:
             noise_anchor                  = 1.0,
 
             rescale_floor                 = True, 
+            
+            rk_swap_step                  = MAX_STEPS,
+            rk_swap_print                 = False,
+            rk_swap_threshold             = 0.0,
+            rk_swap_type                  = "",
+            
             **kwargs
             ): 
         
@@ -801,7 +802,6 @@ class ClownsharKSamplerSimple_Beta:
         # defaults for SharkSampler
         noise_type_init = "gaussian"
         noise_stdev     = 1.0
-        sampler_mode    = "standard"
         denoise_alt     = 1.0
         channelwise_cfg = 1.0
         
@@ -862,6 +862,11 @@ class ClownsharKSamplerSimple_Beta:
         channelwise_cfg        = options_mgr.get('channelwise_cfg'       , channelwise_cfg)
         
         sigmas                 = options_mgr.get('sigmas'                , sigmas)
+        
+        rk_swap_type           = options_mgr.get('rk_swap_type'          , rk_swap_type)
+        rk_swap_step           = options_mgr.get('rk_swap_step'          , rk_swap_step)
+        rk_swap_threshold      = options_mgr.get('rk_swap_threshold'     , rk_swap_threshold)
+        rk_swap_print          = options_mgr.get('rk_swap_print'         , rk_swap_print)
         
         if channelwise_cfg:
             cfg = -abs(cfg)  # set cfg negative for shark, to flag as cfg_cw
@@ -924,6 +929,11 @@ class ClownsharKSamplerSimple_Beta:
             sde_noise                     = sde_noise,
             sde_noise_steps               = sde_noise_steps,
             
+            rk_swap_step                  = rk_swap_step,
+            rk_swap_print                 = rk_swap_print,
+            rk_swap_threshold             = rk_swap_threshold,
+            rk_swap_type                  = rk_swap_type,
+                        
             bongmath                      = bongmath,
             )
             
@@ -948,11 +958,9 @@ class ClownsharKSamplerSimple_Beta:
             sampler_mode    = sampler_mode,
             denoise_alt     = denoise_alt,
             sigmas          = sigmas,
+
             extra_options   = extra_options)
         
         return (output, denoised,)
-
-
-
 
 

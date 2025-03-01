@@ -1,14 +1,19 @@
 import torch
-from torch import nn, Tensor, Generator, lerp
-from torch.nn.functional import unfold
 import torch.nn.functional as F
-from typing import Callable, Tuple
-from math import pi
-from comfy.k_diffusion.sampling import BrownianTreeNoiseSampler
+
+from torch               import nn, Tensor, Generator, lerp
+from torch.nn.functional import unfold
 from torch.distributions import StudentT, Laplace
+
 import numpy as np
 import pywt
 import functools
+
+from typing import Callable, Tuple
+from math   import pi
+
+from comfy.k_diffusion.sampling import BrownianTreeNoiseSampler
+
 from ..res4lyf import RESplain
 
 # Set this to "True" if you have installed OpenSimplex. Recommended to install without dependencies due to conflicting packages: pip3 install opensimplex --no-deps 
@@ -560,51 +565,50 @@ class PerlinNoiseGenerator(NoiseGenerator):
 from functools import partial
 
 NOISE_GENERATOR_CLASSES = {
-    "fractal": FractalNoiseGenerator,
-
-    "gaussian": GaussianNoiseGenerator,
-    "gaussian_backwards": GaussianBackwardsNoiseGenerator,
-    "uniform": UniformNoiseGenerator,
-    "pyramid-cascade_B": CascadeBPyramidNoiseGenerator,
-    "pyramid-interpolated": InterpolatedPyramidNoiseGenerator,
-    "pyramid-bilinear": noise_generator_factory(PyramidNoiseGenerator, mode='bilinear'),
-    "pyramid-bicubic": noise_generator_factory(PyramidNoiseGenerator, mode='bicubic'),   
-    "pyramid-nearest": noise_generator_factory(PyramidNoiseGenerator, mode='nearest'),  
+    "fractal"               :                         FractalNoiseGenerator,
+    "gaussian"              :                         GaussianNoiseGenerator,
+    "gaussian_backwards"    :                         GaussianBackwardsNoiseGenerator,
+    "uniform"               :                         UniformNoiseGenerator,
+    "pyramid-cascade_B"     :                         CascadeBPyramidNoiseGenerator,
+    "pyramid-interpolated"  :                         InterpolatedPyramidNoiseGenerator,
+    "pyramid-bilinear"      : noise_generator_factory(PyramidNoiseGenerator,      mode='bilinear'),
+    "pyramid-bicubic"       : noise_generator_factory(PyramidNoiseGenerator,      mode='bicubic'),   
+    "pyramid-nearest"       : noise_generator_factory(PyramidNoiseGenerator,      mode='nearest'),  
     "hires-pyramid-bilinear": noise_generator_factory(HiresPyramidNoiseGenerator, mode='bilinear'),
-    "hires-pyramid-bicubic": noise_generator_factory(HiresPyramidNoiseGenerator, mode='bicubic'),   
-    "hires-pyramid-nearest": noise_generator_factory(HiresPyramidNoiseGenerator, mode='nearest'),  
-    "brownian": BrownianNoiseGenerator,
-    "laplacian": LaplacianNoiseGenerator,
-    "studentt": StudentTNoiseGenerator,
-    "wavelet": WaveletNoiseGenerator,
-    "perlin": PerlinNoiseGenerator,
+    "hires-pyramid-bicubic" : noise_generator_factory(HiresPyramidNoiseGenerator, mode='bicubic'),   
+    "hires-pyramid-nearest" : noise_generator_factory(HiresPyramidNoiseGenerator, mode='nearest'),  
+    "brownian"              :                         BrownianNoiseGenerator,
+    "laplacian"             :                         LaplacianNoiseGenerator,
+    "studentt"              :                         StudentTNoiseGenerator,
+    "wavelet"               :                         WaveletNoiseGenerator,
+    "perlin"                :                         PerlinNoiseGenerator,
 }
 
 
 NOISE_GENERATOR_CLASSES_SIMPLE = {
-    "none": GaussianNoiseGenerator,
-    "brownian": BrownianNoiseGenerator,
-    "gaussian": GaussianNoiseGenerator,
-    "gaussian_backwards": GaussianBackwardsNoiseGenerator,
-    "laplacian": LaplacianNoiseGenerator,
-    "perlin": PerlinNoiseGenerator,
-    "studentt": StudentTNoiseGenerator,
-    "uniform": UniformNoiseGenerator,
-    "wavelet": WaveletNoiseGenerator,
-    "brown": noise_generator_factory(FractalNoiseGenerator, alpha=2.0),
-    "pink": noise_generator_factory(FractalNoiseGenerator, alpha=1.0),
-    "white": noise_generator_factory(FractalNoiseGenerator, alpha=0.0),
-    "blue": noise_generator_factory(FractalNoiseGenerator, alpha=-1.0),
-    "violet": noise_generator_factory(FractalNoiseGenerator, alpha=-2.0),
-    "hires-pyramid-bicubic": noise_generator_factory(HiresPyramidNoiseGenerator, mode='bicubic'),   
+    "none"                  :                         GaussianNoiseGenerator,
+    "brownian"              :                         BrownianNoiseGenerator,
+    "gaussian"              :                         GaussianNoiseGenerator,
+    "gaussian_backwards"    :                         GaussianBackwardsNoiseGenerator,
+    "laplacian"             :                         LaplacianNoiseGenerator,
+    "perlin"                :                         PerlinNoiseGenerator,
+    "studentt"              :                         StudentTNoiseGenerator,
+    "uniform"               :                         UniformNoiseGenerator,
+    "wavelet"               :                         WaveletNoiseGenerator,
+    "brown"                 : noise_generator_factory(FractalNoiseGenerator,      alpha=2.0),
+    "pink"                  : noise_generator_factory(FractalNoiseGenerator,      alpha=1.0),
+    "white"                 : noise_generator_factory(FractalNoiseGenerator,      alpha=0.0),
+    "blue"                  : noise_generator_factory(FractalNoiseGenerator,      alpha=-1.0),
+    "violet"                : noise_generator_factory(FractalNoiseGenerator,      alpha=-2.0),
+    "hires-pyramid-bicubic" : noise_generator_factory(HiresPyramidNoiseGenerator, mode='bicubic'),   
     "hires-pyramid-bilinear": noise_generator_factory(HiresPyramidNoiseGenerator, mode='bilinear'),
-    "hires-pyramid-nearest": noise_generator_factory(HiresPyramidNoiseGenerator, mode='nearest'),  
-    "pyramid-bicubic": noise_generator_factory(PyramidNoiseGenerator, mode='bicubic'),   
-    "pyramid-bilinear": noise_generator_factory(PyramidNoiseGenerator, mode='bilinear'),
-    "pyramid-nearest": noise_generator_factory(PyramidNoiseGenerator, mode='nearest'),  
-    "pyramid-interpolated": InterpolatedPyramidNoiseGenerator,
-    "pyramid-cascade_B": CascadeBPyramidNoiseGenerator,
-}
+    "hires-pyramid-nearest" : noise_generator_factory(HiresPyramidNoiseGenerator, mode='nearest'),  
+    "pyramid-bicubic"       : noise_generator_factory(PyramidNoiseGenerator,      mode='bicubic'),   
+    "pyramid-bilinear"      : noise_generator_factory(PyramidNoiseGenerator,      mode='bilinear'),
+    "pyramid-nearest"       : noise_generator_factory(PyramidNoiseGenerator,      mode='nearest'),  
+    "pyramid-interpolated"  :                         InterpolatedPyramidNoiseGenerator,
+    "pyramid-cascade_B"     :                         CascadeBPyramidNoiseGenerator,
+}                        
 
 if OPENSIMPLEX_ENABLE:
     NOISE_GENERATOR_CLASSES.update({
@@ -618,7 +622,7 @@ NOISE_GENERATOR_NAMES_SIMPLE = tuple(NOISE_GENERATOR_CLASSES_SIMPLE.keys())
 @precision_tool.cast_tensor
 def prepare_noise(latent_image, seed, noise_type, noise_inds=None, alpha=1.0, k=1.0): # adapted from comfy/sample.py: https://github.com/comfyanonymous/ComfyUI
     #optional arg skip can be used to skip and discard x number of noise generations for a given seed
-    noise_func = NOISE_GENERATOR_CLASSES.get(noise_type)(x=latent_image, seed=seed, sigma_min=0.0291675, sigma_max=14.614642)
+    noise_func = NOISE_GENERATOR_CLASSES.get(noise_type)(x=latent_image, seed=seed, sigma_min=0.0291675, sigma_max=14.614642)                                          # WARNING: HARDCODED SDXL SIGMA RANGE!
 
     if noise_type == "fractal":
         noise_func.alpha = alpha
