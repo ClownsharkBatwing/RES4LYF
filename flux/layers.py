@@ -167,8 +167,8 @@ class DoubleStreamBlock(nn.Module):
         txt_q, txt_k, txt_v = rearrange(txt_qkv, "B L (K H D) -> K B H L D", K=3, H=self.num_heads)    # Batch SeqLen (9216==3*3072) -> 3*1 24 SeqLen 128
         txt_q, txt_k = self.txt_attn.norm(txt_q, txt_k, txt_v)
         return txt_q, txt_k, txt_v
-    
-    def forward(self, img: Tensor, txt: Tensor, vec: Tensor, pe: Tensor, timestep, transformer_options={}, mask=None, weight=1): # vec 1,3072
+    # ADDED THIS TIMESTEP = NONE     2-28-25
+    def forward(self, img: Tensor, txt: Tensor, vec: Tensor, pe: Tensor, timestep=None, transformer_options={}, mask=None, weight=1): # vec 1,3072
 
         img_mod1, img_mod2 = self.img_mod(vec) # -> 3072, 3072
         txt_mod1, txt_mod2 = self.txt_mod(vec)
