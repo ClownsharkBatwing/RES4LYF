@@ -1,11 +1,9 @@
 import torch
 import torch.nn.functional as F
 
-#from ..conditioning          import FluxRegionalPrompt, FluxRegionalConditioning
-#from ..models                import ReFluxPatcher
-from ..helper                import OptionsManager, initialize_or_scale, get_res4lyf_scheduler_list, get_extra_options_kv, extra_options_flag
+from ..helper                import OptionsManager, initialize_or_scale, get_res4lyf_scheduler_list
 
-from .rk_coefficients_beta   import RK_SAMPLER_NAMES_BETA_FOLDERS, get_default_sampler_name, get_sampler_name_list, process_sampler_name
+from .rk_coefficients_beta   import RK_SAMPLER_NAMES_BETA_FOLDERS, get_default_sampler_name, get_sampler_name_list
 
 from .noise_classes          import NOISE_GENERATOR_NAMES_SIMPLE
 from .rk_noise_sampler_beta  import NOISE_MODE_NAMES

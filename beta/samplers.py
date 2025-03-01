@@ -13,9 +13,9 @@ import comfy.supported_models
 
 import latent_preview
 
-from ..helper               import initialize_or_scale, get_extra_options_kv, extra_options_flag, get_res4lyf_scheduler_list, OptionsManager
+from ..helper               import initialize_or_scale, get_res4lyf_scheduler_list, OptionsManager, ExtraOptions
 from ..res4lyf              import RESplain
-from ..latents              import get_orthogonal, get_collinear
+from ..latents              import normalize_zscore, get_orthogonal
 from ..sigmas               import get_sigmas
 import RES4LYF.models              # import ReFluxPatcher
 
@@ -34,29 +34,29 @@ class SharkSampler:
     
     @classmethod
     def INPUT_TYPES(cls):
-        return {"required":
-                    {"model":          ("MODEL",),
-                    "noise_type_init": (NOISE_GENERATOR_NAMES_SIMPLE, {"default": "gaussian"}),
-                    "noise_stdev":     ("FLOAT",                      {"default": 1.0, "min": -10000.0, "max": 10000.0, "step":0.01, "round": False, }),
-                    "noise_seed":      ("INT",                        {"default": 0,   "min": -1,       "max": 0xffffffffffffffff}),
-                    "sampler_mode":    (['standard', 'unsample', 'resample'],),
-                    "scheduler":       (get_res4lyf_scheduler_list(), {"default": "beta57"},),
-                    "steps":           ("INT",                        {"default": 30,  "min": 1,        "max": 10000.0}),
-                    "denoise":         ("FLOAT",                      {"default": 1.0, "min": -10000.0, "max": 10000.0, "step":0.01}),
-                    "denoise_alt":     ("FLOAT",                      {"default": 1.0, "min": -10000.0, "max": 10000.0, "step":0.01}),
-                    "cfg":             ("FLOAT",                      {"default": 3.0, "min": -10000.0, "max": 10000.0, "step":0.01, "round": False, "tooltip": "Negative values use channelwise CFG." }),
-                    },
-                "optional": 
-                    {
-                    "positive":        ("CONDITIONING", ),
-                    "negative":        ("CONDITIONING", ),
-                    "sampler":         ("SAMPLER", ),
-                    "sigmas":          ("SIGMAS", ),
-                    "latent_image":    ("LATENT", ),     
-                    "options":         ("OPTIONS", ),   
-                    "extra_options":   ("STRING",                     {"default": "", "multiline": True}),   
-                    }
+        return {
+            "required": {
+                "model":          ("MODEL",),
+                "noise_type_init": (NOISE_GENERATOR_NAMES_SIMPLE, {"default": "gaussian"}),
+                "noise_stdev":     ("FLOAT",                      {"default": 1.0, "min": -10000.0, "max": 10000.0, "step":0.01, "round": False, }),
+                "noise_seed":      ("INT",                        {"default": 0,   "min": -1,       "max": 0xffffffffffffffff}),
+                "sampler_mode":    (['standard', 'unsample', 'resample'],),
+                "scheduler":       (get_res4lyf_scheduler_list(), {"default": "beta57"},),
+                "steps":           ("INT",                        {"default": 30,  "min": 1,        "max": 10000.0}),
+                "denoise":         ("FLOAT",                      {"default": 1.0, "min": -10000.0, "max": 10000.0, "step":0.01}),
+                "denoise_alt":     ("FLOAT",                      {"default": 1.0, "min": -10000.0, "max": 10000.0, "step":0.01}),
+                "cfg":             ("FLOAT",                      {"default": 3.0, "min": -10000.0, "max": 10000.0, "step":0.01, "round": False, "tooltip": "Negative values use channelwise CFG." }),
+                },
+            "optional": {
+                "positive":        ("CONDITIONING", ),
+                "negative":        ("CONDITIONING", ),
+                "sampler":         ("SAMPLER", ),
+                "sigmas":          ("SIGMAS", ),
+                "latent_image":    ("LATENT", ),     
+                "options":         ("OPTIONS", ),   
+                "extra_options":   ("STRING",                     {"default": "", "multiline": True}),   
                 }
+            }
 
     RETURN_TYPES = ("LATENT", 
                     "LATENT",  
@@ -84,8 +84,6 @@ class SharkSampler:
             negative           = None,
             sampler            = None,
             sigmas             = None,
-            latent_noise       = None,
-            latent_noise_match = None,
             noise_stdev        = 1.0,
             noise_mean         = 0.0,
             noise_normalize    = True,
@@ -103,6 +101,15 @@ class SharkSampler:
             **kwargs,
             ): 
         
+            EO = ExtraOptions(extra_options)
+            default_dtype = EO("default_dtype", torch.float64)
+            
+            disable_pbar = not comfy.utils.PROGRESS_BAR_ENABLED
+
+
+
+            # INIT EXTENDABLE OPTIONS INPUTS
+            
             options_inputs = []
 
             if options is not None:
@@ -119,28 +126,115 @@ class SharkSampler:
 
             options_mgr = OptionsManager(options_inputs)
         
-            # blame comfy here
-            state_info     = copy.deepcopy(latent_image['state_info']) if 'state_info' in latent_image else {}
-            state_info_out = {}
+            noise_stdev     = options_mgr.get('noise_init_stdev', noise_stdev)
+            noise_mean      = options_mgr.get('noise_init_mean',  noise_mean)
+            noise_type_init = options_mgr.get('noise_type_init',  noise_type_init)
+            d_noise         = options_mgr.get('d_noise',          d_noise)
+            alpha_init      = options_mgr.get('alpha_init',       alpha_init)
+            k_init          = options_mgr.get('k_init',           k_init)
+            sde_noise       = options_mgr.get('sde_noise',        sde_noise)
+            sde_noise_steps = options_mgr.get('sde_noise_steps',  sde_noise_steps)
+        
+            if cfg < 0:
+                sampler.extra_options['cfg_cw'] = -cfg
+                cfg = 1.0
+            else:
+                sampler.extra_options.pop("cfg_cw", None) 
 
-            #state_info  = latent_image['state_info'] if 'state_info' in latent_image else {}
-            #latent_image['state_info'] = {}
-            pos_cond    = copy.deepcopy(positive)
-            neg_cond    = copy.deepcopy(negative)
-
+            work_model   = model.clone()
+            sigma_min    = work_model.model.model_sampling.sigma_min
+            sigma_max    = work_model.model.model_sampling.sigma_max
+        
             if sampler is None:
                 raise ValueError("sampler is required")
             else:
                 sampler = copy.deepcopy(sampler)
+        
+        
+        
+            # INIT SIGMAS
+            if sigmas is not None:
+                sigmas = sigmas.clone().to(default_dtype) # does this type carry into clown after passing through comfy?
+            else: 
+                sigmas = get_sigmas(model, scheduler, steps, denoise).to(default_dtype)
+            sigmas *= denoise_alt
 
-            default_dtype = getattr(torch, get_extra_options_kv("default_dtype", "float64", extra_options), torch.float64)
+            # USE NULL FLOATS AS "FLAGS" TO PREVENT COMFY NOISE ADDITION
+            if sampler_mode.startswith("unsample"): 
+                null   = torch.tensor([0.0], device=sigmas.device, dtype=sigmas.dtype)
+                sigmas = torch.flip(sigmas, dims=[0])
+                sigmas = torch.cat([sigmas, null])
+            elif sampler_mode.startswith("resample"):
+                null   = torch.tensor([0.0], device=sigmas.device, dtype=sigmas.dtype)
+                sigmas = torch.cat([null, sigmas])
+                sigmas = torch.cat([sigmas, null])
+
+
+        
+            # INIT STATE INFO FOR CONTINUING GENERATION ACROSS MULTIPLE SAMPLER NODES
+            state_info     = copy.deepcopy(latent_image['state_info']) if 'state_info' in latent_image else {}
+            state_info_out = {}
             
-            #if extra_options_flag("compile_model", extra_options):
-            #    reflux_model, = RES4LYF.models.ReFluxPatcher().main(model, enable=True)
-            #    self._compiled_reflux_model, = RES4LYF.models.TorchCompileModelFluxAdvanced().main(reflux_model)
-            #    self._compiled_model, = RES4LYF.models.TorchCompileModelFluxAdvanced().main(model)
+            
+            
+            # NOISE, ORTHOGONALIZE, OR ZERO EMBEDS
+            
+            pos_cond    = copy.deepcopy(positive)
+            neg_cond    = copy.deepcopy(negative)
+            
+            if   isinstance(work_model.model.model_config, comfy.supported_models.Flux) or isinstance(work_model.model.model_config, comfy.supported_models.FluxSchnell):
+                pos_cond = [[torch.zeros((1, 256, 4096)), {'pooled_output': torch.zeros((1,  768))}]] if pos_cond is None else pos_cond
+                neg_cond = [[torch.zeros((1, 256, 4096)), {'pooled_output': torch.zeros((1,  768))}]] if neg_cond is None else neg_cond
                 
-            work_model = model #.clone()
+            elif isinstance(work_model.model.model_config, comfy.supported_models.SD3):
+                pos_cond = [[torch.zeros((1, 154, 4096)), {'pooled_output': torch.zeros((1, 2048))}]] if pos_cond is None else pos_cond
+                neg_cond = [[torch.zeros((1, 154, 4096)), {'pooled_output': torch.zeros((1, 2048))}]] if neg_cond is None else neg_cond
+            
+
+
+            if EO(("cond_noise", "uncond_noise")):
+                if noise_seed == -1:
+                    cond_seed = torch.initial_seed() + 1
+                else:
+                    cond_seed = noise_seed
+                
+                t5_seed              = EO("t5_seed"             , cond_seed)
+                clip_seed            = EO("clip_seed"           , cond_seed+1)
+                t5_noise_type        = EO("t5_noise_type"       , "gaussian")
+                clip_noise_type      = EO("clip_noise_type"     , "gaussian")
+                t5_noise_sigma_max   = EO("t5_noise_sigma_max"  , "gaussian")
+                t5_noise_sigma_min   = EO("t5_noise_sigma_min"  , "gaussian")
+                clip_noise_sigma_max = EO("clip_noise_sigma_max", "gaussian")
+                clip_noise_sigma_min = EO("clip_noise_sigma_min", "gaussian")
+                
+                noise_sampler_t5     = NOISE_GENERATOR_CLASSES_SIMPLE.get(  t5_noise_type)(x=pos_cond[0][0],                  seed=  t5_seed, sigma_max=  t5_noise_sigma_max, sigma_min=  t5_noise_sigma_min, )
+                noise_sampler_clip   = NOISE_GENERATOR_CLASSES_SIMPLE.get(clip_noise_type)(x=pos_cond[0][1]['pooled_output'], seed=clip_seed, sigma_max=clip_noise_sigma_max, sigma_min=clip_noise_sigma_min, )
+                
+                t5_noise_scale   = EO("t5_noise_scale",   1.0)
+                clip_noise_scale = EO("clip_noise_scale", 1.0)
+                
+                if EO("cond_noise"):
+                    t5_noise   = noise_sampler_t5  (sigma=  t5_noise_sigma_max, sigma_next=  t5_noise_sigma_min)
+                    clip_noise = noise_sampler_clip(sigma=clip_noise_sigma_max, sigma_next=clip_noise_sigma_min)
+                    
+                    pos_cond[0][0]                  = pos_cond[0][0]                  + t5_noise_scale   * (t5_noise   - pos_cond[0][0])
+                    pos_cond[0][1]['pooled_output'] = pos_cond[0][1]['pooled_output'] + clip_noise_scale * (clip_noise - pos_cond[0][1]['pooled_output'])
+                    
+                if EO("uncond_noise"):
+                    t5_noise   = noise_sampler_t5  (sigma=  t5_noise_sigma_max, sigma_next=  t5_noise_sigma_min)
+                    clip_noise = noise_sampler_clip(sigma=clip_noise_sigma_max, sigma_next=clip_noise_sigma_min)
+                    
+                    neg_cond[0][0]                  = neg_cond[0][0]                  + t5_noise_scale   * (t5_noise   - neg_cond[0][0])
+                    neg_cond[0][1]['pooled_output'] = neg_cond[0][1]['pooled_output'] + clip_noise_scale * (clip_noise - neg_cond[0][1]['pooled_output'])
+
+            if EO("uncond_ortho"):
+                neg_cond[0][0]                  = get_orthogonal(neg_cond[0][0],                  pos_cond[0][0])
+                neg_cond[0][1]['pooled_output'] = get_orthogonal(neg_cond[0][1]['pooled_output'], pos_cond[0][1]['pooled_output'])
+
+
+
+            # SETUP FLUX REGIONAL COND
+
             if pos_cond[0][1] is not None: 
                 if "regional_conditioning_weights" in pos_cond[0][1]:
                     sampler.extra_options['regional_conditioning_weights'] = pos_cond[0][1]['regional_conditioning_weights']
@@ -150,301 +244,146 @@ class SharkSampler:
                     regional_conditioning                                  = copy.deepcopy(regional_conditioning)
                     regional_mask                                          = copy.deepcopy(regional_mask)
                     
-                    if not extra_options_flag("disable_autoswap_reflux", extra_options):
+                    if not EO("disable_autoswap_reflux"):
                         work_model, = RES4LYF.models.ReFluxPatcher().main(work_model, enable=True)
-                    """work_model, = RES4LYF.models.ReFluxPatcher().main(work_model, enable=True)
-                    if extra_options_flag("compile_model", extra_options):
-                        work_model, = RES4LYF.models.TorchCompileModelFluxAdvanced().main(work_model)"""
-                    #else:
-                    #    work_model = w_model.clone()
-                    #work_model = self._compiled_reflux_model
-                    
+
                     work_model.set_model_patch(regional_conditioning, 'regional_conditioning_positive')
                     work_model.set_model_patch(regional_mask,         'regional_conditioning_mask')
                 else:
-                    if not extra_options_flag("disable_autoswap_reflux", extra_options):
+                    if not EO("disable_autoswap_reflux"):
                         work_model, = RES4LYF.models.ReFluxPatcher().main(work_model, enable=False)
-                    """w_model, = RES4LYF.models.ReFluxPatcher().main(w_model, enable=False)
-                    
-                    if extra_options_flag("compile_model", extra_options):
-                        work_model, = RES4LYF.models.TorchCompileModelFluxAdvanced().main(w_model)
-                    else:
-                        work_model = w_model.clone()"""
-                    """work_model, = RES4LYF.models.ReFluxPatcher().main(work_model, enable=False)
-                    if extra_options_flag("compile_model", extra_options):
-                        work_model, = RES4LYF.models.TorchCompileModelFluxAdvanced().main(work_model)"""
-                        
-                    #work_model = self._compiled_model
-                    
-
-                    
+            
+            
+            
             if "noise_seed" in sampler.extra_options:
                 if sampler.extra_options['noise_seed'] == -1 and noise_seed != -1:
                     sampler.extra_options['noise_seed'] = noise_seed + 1
-                    print("Shark: setting clown noise seed to: ", sampler.extra_options['noise_seed'])
+                    RESplain("Shark: setting clown noise seed to: ", sampler.extra_options['noise_seed'], debug=False)
 
             if "sampler_mode" in sampler.extra_options:
                 sampler.extra_options['sampler_mode'] = sampler_mode
 
             if "extra_options" in sampler.extra_options:
-                extra_options += " "
+                extra_options += "\n"
                 extra_options += sampler.extra_options['extra_options']
                 sampler.extra_options['extra_options'] = extra_options
 
-            batch_size = int(get_extra_options_kv("batch_size", "1", extra_options))
+
+
+            batch_size = EO("batch_size", 1)
             if batch_size > 1:
                 latent_image['samples'] = latent_image['samples'].repeat(batch_size, 1, 1, 1) 
             
             latent_image_batch = {"samples": latent_image['samples']}
-            out_samples, out_samples_fp64, out_denoised_samples, out_denoised_samples_fp64 = [], [], [], []
+            
+            
+            
+            # UNROLL BATCHES
+            
+            out_samples          = []
+            out_denoised_samples = []
+            
             for batch_num in range(latent_image_batch['samples'].shape[0]):
                 latent_unbatch            = copy.deepcopy(latent_image)
                 latent_unbatch['samples'] = latent_image_batch['samples'][batch_num].clone().unsqueeze(0)
                 
 
+
                 if noise_seed == -1:
                     seed = torch.initial_seed() + 1 + batch_num
                 else:
                     seed = noise_seed + batch_num
-                    #if state_info == {}:
                     torch.manual_seed(seed)
                     torch.cuda.manual_seed(seed)
 
 
-                noise_stdev     = options_mgr.get('noise_init_stdev', noise_stdev)
-                noise_mean      = options_mgr.get('noise_init_mean',  noise_mean)
-                noise_type_init = options_mgr.get('noise_type_init',  noise_type_init)
-                d_noise         = options_mgr.get('d_noise',          d_noise)
-                alpha_init      = options_mgr.get('alpha_init',       alpha_init)
-                k_init          = options_mgr.get('k_init',           k_init)
-                sde_noise       = options_mgr.get('sde_noise',        sde_noise)
-                sde_noise_steps = options_mgr.get('sde_noise_steps',  sde_noise_steps)
+                x = latent_unbatch["samples"].clone().to(default_dtype) # does this type carry into clown after passing through comfy?
 
-                latent_image_dtype = latent_unbatch['samples'].dtype
 
-                if isinstance(work_model.model.model_config, comfy.supported_models.Flux) or isinstance(work_model.model.model_config, comfy.supported_models.FluxSchnell):
-                    if pos_cond is None:
-                        pos_cond = [[
-                            torch.zeros((1, 256, 4096)),
-                            {'pooled_output': torch.zeros((1, 768))}
-                            ]]
-
-                    if extra_options_flag("uncond_ortho_flux", extra_options):
-                        if neg_cond is None:
-                            print("uncond_ortho_flux: using random negative conditioning...")
-                            neg_cond = [[
-                                torch.randn((1, 256, 4096)),
-                                {'pooled_output': torch.randn((1, 768))}
-                                ]]
-                        #neg_cond[0][0] = get_orthogonal(neg_cond[0][0].to(torch.bfloat16), pos_cond[0][0].to(torch.bfloat16))
-                        #neg_cond[0][1]['pooled_output'] = get_orthogonal(neg_cond[0][1]['pooled_output'].to(torch.bfloat16), pos_cond[0][1]['pooled_output'].to(torch.bfloat16))
-                        neg_cond[0][0]                  = get_orthogonal(neg_cond[0][0],                  pos_cond[0][0])
-                        neg_cond[0][1]['pooled_output'] = get_orthogonal(neg_cond[0][1]['pooled_output'], pos_cond[0][1]['pooled_output'])
-                        
-                    if neg_cond is None:
-                        neg_cond = [[
-                            torch.zeros((1, 256, 4096)),
-                            {'pooled_output': torch.zeros((1, 768))}
-                            ]]
-                else:
-                    if pos_cond is None:
-                        pos_cond = [[
-                            torch.zeros((1, 154, 4096)),
-                            {'pooled_output': torch.zeros((1, 2048))}
-                            ]]
-
-                    if extra_options_flag("uncond_ortho_sd35", extra_options):
-                        if neg_cond is None:
-                            neg_cond = [[
-                                torch.randn((1, 154, 4096)),
-                                {'pooled_output': torch.randn((1, 2048))}
-                                ]]
-                        
-                        neg_cond[0][0]                  = get_orthogonal(neg_cond[0][0],                  pos_cond[0][0])
-                        neg_cond[0][1]['pooled_output'] = get_orthogonal(neg_cond[0][1]['pooled_output'], pos_cond[0][1]['pooled_output'])
-                        
-
-                    if neg_cond is None:
-                        neg_cond = [[
-                            torch.zeros((1, 154, 4096)),
-                            {'pooled_output': torch.zeros((1, 2048))}
-                            ]]
-                        
-                        
-                if extra_options_flag("zero_uncond_t5", extra_options):
-                    neg_cond[0][0] = torch.zeros_like(neg_cond[0][0])
-                    
-                if extra_options_flag("zero_uncond_pooled_output", extra_options):
-                    neg_cond[0][1]['pooled_output'] = torch.zeros_like(neg_cond[0][1]['pooled_output'])
-                        
-                if extra_options_flag("zero_pooled_output", extra_options):
-                    pos_cond[0][1]['pooled_output'] = torch.zeros_like(pos_cond[0][1]['pooled_output'])
-                    neg_cond[0][1]['pooled_output'] = torch.zeros_like(neg_cond[0][1]['pooled_output'])
-
-                if denoise_alt < 0:
-                    d_noise = denoise_alt = -denoise_alt
-                d_noise = options_mgr.get('d_noise', d_noise)
-
-                if sigmas is not None:
-                    sigmas = sigmas.clone().to(default_dtype)
-                else: 
-                    sigmas = get_sigmas(model, scheduler, steps, denoise).to(default_dtype)
-                sigmas *= denoise_alt
-
-                if sampler_mode.startswith("unsample"): 
-                    null   = torch.tensor([0.0], device=sigmas.device, dtype=sigmas.dtype)
-                    sigmas = torch.flip(sigmas, dims=[0])
-                    sigmas = torch.cat([sigmas, null])
-                    
-                elif sampler_mode.startswith("resample"):
-                    null   = torch.tensor([0.0], device=sigmas.device, dtype=sigmas.dtype)
-                    sigmas = torch.cat([null, sigmas])
-                    sigmas = torch.cat([sigmas, null])
-
-                x = latent_unbatch["samples"].clone().to(default_dtype) 
-                if latent_unbatch is not None:
-                    if "samples_fp64" in latent_unbatch:
-                        if latent_unbatch['samples'].shape == latent_unbatch['samples_fp64'].shape:
-                            if torch.norm(latent_unbatch['samples'] - latent_unbatch['samples_fp64']) < 0.01:
-                                x = latent_unbatch["samples_fp64"].clone()
-
-                if latent_noise is not None:
-                    latent_noise_samples       = latent_noise["samples"]      .clone().to(default_dtype)  
-                if latent_noise_match is not None:
-                    latent_noise_match_samples = latent_noise_match["samples"].clone().to(default_dtype)
-
-                truncate_conditioning = extra_options_flag("truncate_conditioning", extra_options)
-                if truncate_conditioning == "true" or truncate_conditioning == "true_and_zero_neg":
-                    if pos_cond is not None:
-                        pos_cond[0][0]                  = pos_cond[0][0]                 .clone().to(default_dtype)
-                        pos_cond[0][1]["pooled_output"] = pos_cond[0][1]["pooled_output"].clone().to(default_dtype)
-                    if neg_cond is not None:
-                        neg_cond[0][0]                  = neg_cond[0][0]                 .clone().to(default_dtype)
-                        neg_cond[0][1]["pooled_output"] = neg_cond[0][1]["pooled_output"].clone().to(default_dtype)
-                    c = []
-                    for t in pos_cond:
-                        d = t[1].copy()
-                        pooled_output = d.get("pooled_output", None)
-
-                    for t in neg_cond:
-                        d = t[1].copy()
-                        pooled_output = d.get("pooled_output", None)
-                        if pooled_output is not None:
-                            if truncate_conditioning == "true_and_zero_neg":
-                                d["pooled_output"] =  torch.zeros((1,2048),     dtype=t[0].dtype, device=t[0].device)
-                                n                  = [torch.zeros((1,154,4096), dtype=t[0].dtype, device=t[0].device), d]
-                            else:
-                                d["pooled_output"] = d["pooled_output"][:, :2048]
-                                n                  = [t[0][:, :154, :4096], d]
-                        c.append(n)
-                    neg_cond = c
-                
-                sigmin = work_model.model.model_sampling.sigma_min
-                sigmax = work_model.model.model_sampling.sigma_max
 
                 if sde_noise is None and sampler_mode.startswith("unsample"):
-                    total_steps = len(sigmas)+1
                     sde_noise = []
                 else:
-                    total_steps = 1
+                    sde_noise_steps = 1
 
                 for total_steps_iter in range (sde_noise_steps):
                         
-                    if noise_type_init == "none":
+                    if noise_type_init == "none" or noise_stdev == 0.0:
                         noise = torch.zeros_like(x)
-                    elif latent_noise is None:
-                        print("Initial latent noise seed: ", seed)
-                        noise_sampler_init = NOISE_GENERATOR_CLASSES_SIMPLE.get(noise_type_init)(x=x, seed=seed, sigma_min=sigmin, sigma_max=sigmax)
+                    else:
+                        RESplain("Initial latent noise seed: ", seed, debug=False)
+                        
+                        noise_sampler_init = NOISE_GENERATOR_CLASSES_SIMPLE.get(noise_type_init)(x=x, seed=seed, sigma_max=sigma_max, sigma_min=sigma_min)
                     
                         if noise_type_init == "fractal":
                             noise_sampler_init.alpha = alpha_init
                             noise_sampler_init.k     = k_init
                             noise_sampler_init.scale = 0.1
-                        noise = noise_sampler_init(sigma=sigmax, sigma_next=sigmin)
-                    else:
-                        noise = latent_noise_samples
+                        
+                        noise = noise_sampler_init(sigma=sigma_max * noise_stdev, sigma_next=sigma_min)
 
                     if noise_normalize and noise.std() > 0:
-                        #noise = (noise - noise.mean(dim=(-2, -1), keepdim=True)) / noise.std(dim=(-2, -1), keepdim=True)
-                        noise.sub_(noise.mean(dim=(-2, -1), keepdim=True)).div_(noise.std(dim=(-2, -1), keepdim=True))
+                        noise = normalize_zscore(noise, channelwise=True, inplace=True)
+                        
                     noise *= noise_stdev
                     noise = (noise - noise.mean()) + noise_mean
-                    
-                    if latent_noise_match is not None:
-                        for i in range(latent_noise_match_samples.shape[1]):
-                            noise[0][i] = (noise[0][i] - noise[0][i].mean())
-                            noise[0][i] = (noise[0][i]) + latent_noise_match_samples[0][i].mean()
 
                     noise_mask = latent_unbatch["noise_mask"] if "noise_mask" in latent_unbatch else None
 
                     x0_output = {}
 
 
-                    if cfg < 0:
-                        sampler.extra_options['cfg_cw'] = -cfg
-                        cfg = 1.0
-                    else:
-                        sampler.extra_options.pop("cfg_cw", None) 
+                    callback     = latent_preview.prepare_callback(work_model, sigmas.shape[-1] - 1, x0_output)
                     
-                    
-                    if sde_noise is None:
-                        sde_noise = []
-                    else:
-                        sde_noise = copy.deepcopy(sde_noise)
-                        for i in range(len(sde_noise)):
-                            sde_noise[i] = sde_noise[i]                  #WTF                            #WTF                                    #WTF
-                            for j in range(sde_noise[i].shape[1]):
-                                sde_noise[i][0][j] = ((sde_noise[i][0][j] - sde_noise[i][0][j].mean()) / sde_noise[i][0][j].std())
-                                
-                    callback = latent_preview.prepare_callback(work_model, sigmas.shape[-1] - 1, x0_output)
-
-                    disable_pbar = not comfy.utils.PROGRESS_BAR_ENABLED
-
                     sampler.extra_options['state_info']     = state_info
                     sampler.extra_options['state_info_out'] = state_info_out
                     
                     samples = comfy.sample.sample_custom(work_model, noise, cfg, sampler, sigmas, pos_cond, neg_cond, x.clone(), noise_mask=noise_mask, callback=callback, disable_pbar=disable_pbar, seed=noise_seed)
 
+
+
                     out = latent_unbatch.copy()
                     out["samples"] = samples
+                    
                     if "x0" in x0_output:
-                        out_denoised             = latent_unbatch.copy()
-                        out_denoised["samples"]  = work_model.model.process_latent_out(x0_output["x0"].cpu())
+                        out_denoised            = latent_unbatch.copy()
+                        out_denoised["samples"] = work_model.model.process_latent_out(x0_output["x0"].cpu())
                     else:
-                        out_denoised = out
+                        out_denoised            = out
+
+                    out_samples         .append(out         ["samples"])
+                    out_denoised_samples.append(out_denoised["samples"])
                     
-                    out["samples_fp64"]          = out["samples"]         .clone()                    
-                    out_denoised["samples_fp64"] = out_denoised["samples"].clone()
                     
-                    out["samples"]               = out["samples"]         .to(latent_image_dtype)
-                    out_denoised["samples"]      = out_denoised["samples"].to(latent_image_dtype)
                     
-                    out_samples              .append(out["samples"])
-                    out_samples_fp64         .append(out["samples_fp64"])
-                    out_denoised_samples     .append(out_denoised["samples"])
-                    out_denoised_samples_fp64.append(out_denoised["samples_fp64"])
+                    # ACCUMULATE UNSAMPLED SDE NOISE
+                    if total_steps_iter > 1: 
+                        if 'raw_x' in state_info_out:
+                            sde_noise_out = state_info_out['raw_x']
+                        else:
+                            sde_noise_out = out["samples"]  
+                        sde_noise.append(normalize_zscore(sde_noise_out, channelwise=True, inplace=True))    
                     
+                    
+                    
+                    # INCREMENT BATCH LOOP
                     seed += 1
                     torch.manual_seed(seed)
-                    if total_steps_iter > 1: 
-                        sde_noise.append(out["samples_fp64"])
-                        
-            out_samples               = [tensor.squeeze(0) for tensor in out_samples]
-            out_samples_fp64          = [tensor.squeeze(0) for tensor in out_samples_fp64]
-            out_denoised_samples      = [tensor.squeeze(0) for tensor in out_denoised_samples]
-            out_denoised_samples_fp64 = [tensor.squeeze(0) for tensor in out_denoised_samples_fp64]
 
-            out['samples']      = torch.stack(out_samples,      dim=0)
-            out['samples_fp64'] = torch.stack(out_samples_fp64, dim=0)
-            
-            out_denoised['samples']      = torch.stack(out_denoised_samples,      dim=0)
-            out_denoised['samples_fp64'] = torch.stack(out_denoised_samples_fp64, dim=0)
 
-            out['state_info'] = copy.deepcopy(state_info_out)
-            state_info = {}
-            #out['state_info'] = state_info
 
-            return ( out, out_denoised, sde_noise,)
+            # STACK SDE NOISES, SAVE STATE INFO
+
+            out_samples             = [tensor.squeeze(0) for tensor in out_samples]
+            out_denoised_samples    = [tensor.squeeze(0) for tensor in out_denoised_samples]
+
+            out         ['samples'] = torch.stack(out_samples,          dim=0)
+            out_denoised['samples'] = torch.stack(out_denoised_samples, dim=0)
+
+            out['state_info']       = copy.deepcopy(state_info_out)
+            state_info              = {}
+
+            return (out, out_denoised, sde_noise,)
 
 
 
@@ -554,6 +493,9 @@ class ClownSamplerAdvanced_Beta:
             **kwargs,
             ): 
         
+            EO = ExtraOptions(extra_options)
+            default_dtype = EO("default_dtype", torch.float64)
+        
             options_inputs = []
 
             if options is not None:
@@ -579,8 +521,6 @@ class ClownSamplerAdvanced_Beta:
                 eta = 0.0
                 noise_mode_sde = "hard"
 
-            default_dtype = getattr(torch, get_extra_options_kv("default_dtype", "float64", extra_options), torch.float64)
-
             noise_type_sde    = options_mgr.get('noise_type_sde'   , noise_type_sde)
             noise_mode_sde    = options_mgr.get('noise_mode_sde'   , noise_mode_sde)
             eta               = options_mgr.get('eta'              , eta)
@@ -602,7 +542,7 @@ class ClownSamplerAdvanced_Beta:
             rk_swap_type      = options_mgr.get('rk_swap_type'     , rk_swap_type)
 
 
-            rescale_floor = extra_options_flag("rescale_floor", extra_options)
+            rescale_floor = EO("rescale_floor")
 
             if automation is not None:
                 etas              = automation['etas']              if 'etas'              in automation else None
@@ -626,10 +566,7 @@ class ClownSamplerAdvanced_Beta:
                 sde_noise = []
             else:
                 sde_noise = copy.deepcopy(sde_noise)
-                for i in range(len(sde_noise)):
-                    sde_noise[i] = sde_noise[i]
-                    for j in range(sde_noise[i].shape[1]):
-                        sde_noise[i][0][j] = ((sde_noise[i][0][j] - sde_noise[i][0][j].mean()) / sde_noise[i][0][j].std())
+                sde_noise = normalize_zscore(sde_noise, channelwise=True, inplace=True)
                         
 
             sampler = comfy.samplers.ksampler("rk_beta", 
