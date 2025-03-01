@@ -391,8 +391,9 @@ class LatentGuide:
                             lgw_mask_factor = 1/(row+1)
                             
                         if extra_options_flag("substep_eps_proj_factors", extra_options):
-                            value_str = get_extra_options_list("substep_eps_proj_factors", "", extra_options)
-                            float_list = [float(item.strip()) for item in value_str.split(',') if item.strip()]
+                            #value_str = get_extra_options_list("substep_eps_proj_factors", "", extra_options)
+                            #float_list = [float(item.strip()) for item in value_str.split(',') if item.strip()]
+                            float_list = get_extra_options_list("substep_eps_proj_factors", "", extra_options, ret_type=float)
                             lgw_mask_factor = float_list[row]
                         
                         eps_row_lerp = eps_[row]   +   self.mask * (eps_row-eps_[row])   +   (1-self.mask) * (eps_row_inv-eps_[row])

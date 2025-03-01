@@ -248,7 +248,7 @@ class ModelSamplingAdvanced:
 
         m.object_patches['model_sampling'] = m.model.model_sampling = ModelSamplingAdvanced(m.model.model_config)
 
-        m.model.model_sampling.__dict__['shift'] = self.timestep_shift
+        m.model.model_sampling.__dict__['shift']      = self.timestep_shift
         m.model.model_sampling.__dict__['multiplier'] = self.multiplier
 
         s_range = torch.arange(1, timesteps + 1, 1).to(torch.float64)
@@ -324,7 +324,7 @@ class ModelSamplingAdvancedResolution:
 
         m.object_patches['model_sampling'] = m.model.model_sampling = ModelSamplingAdvanced(m.model.model_config)
 
-        m.model.model_sampling.__dict__['shift'] = self.timestep_shift
+        m.model.model_sampling.__dict__['shift']      = self.timestep_shift
         m.model.model_sampling.__dict__['multiplier'] = self.multiplier
 
         s_range = torch.arange(1, timesteps + 1, 1).to(torch.float64)

@@ -16,16 +16,16 @@ import comfy.controlnet
 import comfy.model_management
 import comfy.sample
 import comfy.sampler_helpers
-from . import tiling
 import latent_preview
+
+from nodes import MAX_RESOLUTION
+#MAX_RESOLUTION=8192
 
 import comfy.clip_vision
 import folder_paths
 
+from . import tiling
 from .noise_classes import *
-
-
-MAX_RESOLUTION=8192
 
 def initialize_or_scale(tensor, value, steps):
     if tensor is None:

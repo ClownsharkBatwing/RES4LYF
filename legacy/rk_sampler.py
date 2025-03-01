@@ -226,13 +226,15 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
                         
                     edsef=1
                     if extra_options_flag("explicit_diagonal_eta_substep_factors", extra_options):
-                        value_str = get_extra_options_list("explicit_diagonal_eta_substep_factors", "", extra_options)
-                        float_list = [float(item.strip()) for item in value_str.split(',') if item.strip()]
+                        #value_str = get_extra_options_list("explicit_diagonal_eta_substep_factors", "", extra_options)
+                        #float_list = [float(item.strip()) for item in value_str.split(',') if item.strip()]
+                        float_list = get_extra_options_list("explicit_diagonal_eta_substep_factors", "", extra_options, ret_type=float)
                         edsef = float_list[exim_iter]
                     nsef = 1
                     if extra_options_flag("noise_eta_substep_factors", extra_options):
-                        value_str = get_extra_options_list("noise_eta_substep_factors", "", extra_options)
-                        nsef_list = [float(item.strip()) for item in value_str.split(',') if item.strip()]
+                        #value_str = get_extra_options_list("noise_eta_substep_factors", "", extra_options)
+                        #nsef_list = [float(item.strip()) for item in value_str.split(',') if item.strip()]
+                        nsef_list = get_extra_options_list("noise_eta_substep_factors", "", extra_options, ret_type=float)
                         nsef = nsef_list[row]
                     if exim_iter > 0 and rk_type.endswith("m") and step >= int(rk_type[-2]): 
                         sub_sigma_up, sub_sigma, sub_sigma_down, sub_alpha_ratio = get_res4lyf_step_with_model(model, sigma, sigma_next, substep_eta*edsef*nsef, substep_noise_mode)
@@ -343,8 +345,9 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
                     eps_, x_ = LG.process_guides_substep(x_0, x_, eps_, data_, row, step, sigma, sigma_next, sigma_down, s_, unsample_resample_scale, rk, rk_type, extra_options, frame_weights_grp)
 
                     if extra_options_flag("explicit_diagonal_eps_proj_factors", extra_options):
-                        value_str = get_extra_options_list("explicit_diagonal_eps_proj_factors", "", extra_options)
-                        float_list = [float(item.strip()) for item in value_str.split(',') if item.strip()]
+                        #value_str = get_extra_options_list("explicit_diagonal_eps_proj_factors", "", extra_options)
+                        #float_list = [float(item.strip()) for item in value_str.split(',') if item.strip()]
+                        value_str = get_extra_options_list("explicit_diagonal_eps_proj_factors", "", extra_options, ret_type=float)
                         eps_[row] = (float_list[exim_iter]) * eps_[row]   +   (1-float_list[exim_iter]) * eps_row_tmp
                         x_[row+1] = (float_list[exim_iter]) * x_[row+1]   +   (1-float_list[exim_iter]) * x_row_tmp
 
