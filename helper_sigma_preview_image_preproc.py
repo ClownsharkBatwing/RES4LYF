@@ -1,5 +1,6 @@
 import torch
 import torch.nn.functional as F
+
 import numpy as np
 import folder_paths
 from PIL.PngImagePlugin import PngInfo
@@ -38,7 +39,7 @@ class SaveImage:
         self.compress_level = 4
 
     @classmethod
-    def INPUT_TYPES(s):
+    def INPUT_TYPES(cls):
         return {
             "required": {
                 "images":          ("IMAGE",  {                      "tooltip": "The images to save."}),
@@ -57,7 +58,13 @@ class SaveImage:
     CATEGORY = "image"
     DESCRIPTION = "Saves the input images to your ComfyUI output directory."
 
-    def save_images(self, images, filename_prefix="ComfyUI", prompt=None, extra_pnginfo=None):
+    def save_images(self,
+                    images,
+                    filename_prefix = "ComfyUI",
+                    prompt          = None,
+                    extra_pnginfo   = None
+                    ):
+        
         filename_prefix += self.prefix_append
         full_output_folder, filename, counter, subfolder, filename_prefix = folder_paths.get_save_image_path(filename_prefix, self.output_dir, images[0].shape[1], images[0].shape[0])
         results = list()
@@ -87,6 +94,7 @@ class SaveImage:
 
 
 
+# adapted from https://github.com/Extraltodeus/sigmas_tools_and_the_golden_scheduler
 class SigmasPreview(SaveImage):
     def __init__(self):
         self.output_dir = folder_paths.get_temp_directory()
@@ -98,36 +106,42 @@ class SigmasPreview(SaveImage):
     def INPUT_TYPES(self):
         return {
             "required": {
-                "sigmas": ("SIGMAS",),
+                "sigmas":         ("SIGMAS",),
                 "print_as_list" : ("BOOLEAN", {"default": False}),
             }
         }
 
     FUNCTION = "sigmas_preview"
-    CATEGORY = 'RES4LYF/sigmas'
     OUTPUT_NODE = True
+    CATEGORY = 'RES4LYF/sigmas'
 
     @staticmethod
     def tensor_to_graph_image(tensor):
+        
         plt.figure()
         plt.plot(tensor.numpy(), marker='o', linestyle='-', color='blue')
         plt.title("Graph from Tensor")
         plt.xlabel("Step Number")
         plt.ylabel("Sigma Value")
+        
         with BytesIO() as buf:
             plt.savefig(buf, format='png')
             buf.seek(0)
             image = Image.open(buf).copy()
+            
         plt.close()
         return image
 
     def sigmas_preview(self, sigmas, print_as_list):
-        # adapted from https://github.com/Extraltodeus/sigmas_tools_and_the_golden_scheduler
+        
         if print_as_list:
             print(sigmas.tolist())
+            
             sigmas_percentages = ((sigmas-sigmas.min())/(sigmas.max()-sigmas.min())).tolist()
             sigmas_percentages_w_steps = [(i,round(s,4)) for i,s in enumerate(sigmas_percentages)]
+            
             print(sigmas_percentages_w_steps)
+            
         sigmas_graph = self.tensor_to_graph_image(sigmas.cpu())
         numpy_image = np.array(sigmas_graph)
         numpy_image = numpy_image / 255.0
@@ -139,11 +153,16 @@ class SigmasPreview(SaveImage):
 
 
 
-
-
-
 # adapted from https://github.com/cubiq/ComfyUI_essentials
-def image_resize(image, width, height, method="stretch", interpolation="nearest", condition="always", multiple_of=0, keep_proportion=False):
+def image_resize(image,
+                width,
+                height,
+                method          = "stretch",
+                interpolation   = "nearest",
+                condition       = "always",
+                multiple_of     = 0,
+                keep_proportion = False):
+    
     _, oh, ow, _ = image.shape
     x = y = x2 = y2 = 0
     pad_left = pad_right = pad_top = pad_bottom = 0
@@ -240,9 +259,10 @@ def image_resize(image, width, height, method="stretch", interpolation="nearest"
     return outputs
 
 
+
 class VAEEncodeAdvanced:
     @classmethod
-    def INPUT_TYPES(s):
+    def INPUT_TYPES(cls):
         return {
             "required": {
                 "resize_to_input": (["false", "image_1", "image_2", "mask", "latent"], {"default": "false"},),
@@ -262,15 +282,49 @@ class VAEEncodeAdvanced:
             }
         }
 
-    RETURN_TYPES = ("LATENT", "LATENT", "MASK", "LATENT", "INT", "INT",)
-    RETURN_NAMES = ("latent_1", "latent_2", "mask", "empty_latent", "width", "height",)
+    RETURN_TYPES = ("LATENT",
+                    "LATENT",
+                    "MASK",
+                    "LATENT",
+                    "INT",
+                    "INT",
+                    )
+                    
+    RETURN_NAMES = ("latent_1",
+                    "latent_2",
+                    "mask",
+                    "empty_latent",
+                    "width",
+                    "height",
+                    )
+    
     FUNCTION = "main"
     CATEGORY = "RES4LYF/vae"
 
-    def main(self, width, height, resize_to_input="false", image_1=None, image_2=None, mask=None, invert_mask=False, method="stretch", interpolation="lanczos", condition="always", multiple_of=0, keep_proportion=False, mask_channel="red", latent=None, latent_type="16_channels", vae=None):
-        #NOTE: VAE encode with comyfui is *non-deterministic* in that each success encode will return slightly different latent images! The difference is visible after decoding.
+    def main(self,
+            width,
+            height,
+            resize_to_input = "false",
+            image_1         = None,
+            image_2         = None,
+            mask            = None,
+            invert_mask     = False,
+            method          = "stretch",
+            interpolation   = "lanczos",
+            condition       = "always",
+            multiple_of     = 0,
+            keep_proportion = False,
+            mask_channel    = "red",
+            latent          = None, 
+            latent_type     = "16_channels", 
+            vae             = None
+            ):
+        
         ratio = 8 # latent compression factor
-        torch.manual_seed(42)
+        
+        # this is unfortunately required to avoid apparent non-deterministic outputs. 
+        # without setting the seed each time, the outputs of the VAE encode will change with every generation.
+        torch.manual_seed(42)          
         torch.cuda.manual_seed_all(42)
 
         image_1 = image_1.clone() if image_1 is not None else None
@@ -279,12 +333,15 @@ class VAEEncodeAdvanced:
         if latent is not None and resize_to_input == "latent":
             height, width = latent['samples'].shape[2:4]
             height, width = height * ratio, width * ratio
+            
         elif image_1 is not None and resize_to_input == "image_1":
             height, width = image_1.shape[1:3]
+            
         elif image_2 is not None and resize_to_input == "image_2":
             height, width = image_2.shape[1:3]       
+            
         elif mask is not None and resize_to_input == "mask":
-            height, width = mask.shape[1:3]   
+            height, width =    mask.shape[1:3]   
             
         if latent is not None:
             c = latent['samples'].shape[1]
@@ -297,10 +354,10 @@ class VAEEncodeAdvanced:
         
         latent_1, latent_2 = None, None
         if image_1 is not None:
-            image_1 = image_resize(image_1, width, height, method, interpolation, condition, multiple_of, keep_proportion)
+            image_1  = image_resize(image_1, width, height, method, interpolation, condition, multiple_of, keep_proportion)
             latent_1 = {"samples": vae.encode(image_1[:,:,:,:3])}
         if image_2 is not None:
-            image_2 = image_resize(image_2, width, height, method, interpolation, condition, multiple_of, keep_proportion)
+            image_2  = image_resize(image_2, width, height, method, interpolation, condition, multiple_of, keep_proportion)
             latent_2 = {"samples": vae.encode(image_2[:,:,:,:3])}
         
         if mask is not None and mask.shape[-1] > 1:
@@ -312,8 +369,13 @@ class VAEEncodeAdvanced:
             if invert_mask:
                 mask = 1.0 - mask
 
-        return (latent_1, latent_2, mask, latent, width, height,)
-
+        return (latent_1, 
+                latent_2, 
+                mask, 
+                latent,
+                width, 
+                height,
+                )
 
 
 

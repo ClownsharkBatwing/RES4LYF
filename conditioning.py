@@ -1,21 +1,17 @@
 import torch
+import torch.nn.functional as F
+
+import copy
 import base64
 import pickle # used strictly for serializing conditioning in the ConditioningToBase64 and Base64ToConditioning nodes for API use. (Offloading T5 processing to another machine to avoid model shuffling.)
 
-import comfy.samplers
-import comfy.sample
-import comfy.sampler_helpers
 import node_helpers
 
-from .beta.noise_classes import precision_tool
 
-from .helper import initialize_or_scale
-import torch.nn.functional as F
-import copy
-
-from .helper import get_orthogonal, get_collinear
+from .helper  import initialize_or_scale, precision_tool
+from .latents import get_orthogonal, get_collinear
 from .res4lyf import RESplain
-
+from .beta.constants import MAX_STEPS
 
 
 def multiply_nested_tensors(structure, scalar):
@@ -37,8 +33,8 @@ class ConditioningOrthoCollin:
         return {"required": {
             "conditioning_0": ("CONDITIONING", ), 
             "conditioning_1": ("CONDITIONING", ),
-            "t5_strength": ("FLOAT", {"default": 1.0, "min": -10000, "max": 10000, "step":0.01}),
-            "clip_strength": ("FLOAT", {"default": 1.0, "min": -10000, "max": 10000, "step":0.01}),
+            "t5_strength":    ("FLOAT", {"default": 1.0, "min": -10000, "max": 10000, "step":0.01}),
+            "clip_strength":  ("FLOAT", {"default": 1.0, "min": -10000, "max": 10000, "step":0.01}),
             }}
     RETURN_TYPES = ("CONDITIONING",)
     FUNCTION = "combine"
@@ -47,26 +43,26 @@ class ConditioningOrthoCollin:
 
     def combine(self, conditioning_0, conditioning_1, t5_strength, clip_strength):
 
-        t5_0_1_collin = get_collinear (conditioning_0[0][0], conditioning_1[0][0])
-        t5_1_0_ortho  = get_orthogonal(conditioning_1[0][0], conditioning_0[0][0])
+        t5_0_1_collin         = get_collinear (conditioning_0[0][0], conditioning_1[0][0])
+        t5_1_0_ortho          = get_orthogonal(conditioning_1[0][0], conditioning_0[0][0])
 
-        t5_combined = t5_0_1_collin + t5_1_0_ortho
+        t5_combined           = t5_0_1_collin + t5_1_0_ortho
         
-        t5_1_0_collin = get_collinear (conditioning_1[0][0], conditioning_0[0][0])
-        t5_0_1_ortho  = get_orthogonal(conditioning_0[0][0], conditioning_1[0][0])
+        t5_1_0_collin         = get_collinear (conditioning_1[0][0], conditioning_0[0][0])
+        t5_0_1_ortho          = get_orthogonal(conditioning_0[0][0], conditioning_1[0][0])
 
-        t5_B_combined = t5_1_0_collin + t5_0_1_ortho
+        t5_B_combined         = t5_1_0_collin + t5_0_1_ortho
 
-        pooled_0_1_collin = get_collinear (conditioning_0[0][1]['pooled_output'].unsqueeze(0), conditioning_1[0][1]['pooled_output'].unsqueeze(0)).squeeze(0)
-        pooled_1_0_ortho  = get_orthogonal(conditioning_1[0][1]['pooled_output'].unsqueeze(0), conditioning_0[0][1]['pooled_output'].unsqueeze(0)).squeeze(0)
+        pooled_0_1_collin     = get_collinear (conditioning_0[0][1]['pooled_output'].unsqueeze(0), conditioning_1[0][1]['pooled_output'].unsqueeze(0)).squeeze(0)
+        pooled_1_0_ortho      = get_orthogonal(conditioning_1[0][1]['pooled_output'].unsqueeze(0), conditioning_0[0][1]['pooled_output'].unsqueeze(0)).squeeze(0)
 
-        pooled_combined = pooled_0_1_collin + pooled_1_0_ortho
+        pooled_combined       = pooled_0_1_collin + pooled_1_0_ortho
         
         #conditioning_0[0][0] = conditioning_0[0][0] + t5_strength * (t5_combined - conditioning_0[0][0])
         
         #conditioning_0[0][0] = t5_strength * t5_combined + (1-t5_strength) * t5_B_combined
         
-        conditioning_0[0][0] = t5_strength * t5_0_1_collin + (1-t5_strength) * t5_1_0_collin
+        conditioning_0[0][0]  = t5_strength * t5_0_1_collin + (1-t5_strength) * t5_1_0_collin
         
         conditioning_0[0][1]['pooled_output'] = conditioning_0[0][1]['pooled_output'] + clip_strength * (pooled_combined - conditioning_0[0][1]['pooled_output'])
 
@@ -618,37 +614,51 @@ class RegionalGenerateConditioningsAndMasks:
 class FluxRegionalConditioning:
     @classmethod
     def INPUT_TYPES(s):
-        return {"required": { 
-            "mask_weight": ("FLOAT", {"default": 1.0, "min": -10000.0, "max": 10000.0, "step": 0.01}),
-            "self_attn_floor": ("FLOAT", {"default": 0.0, "min": -10000.0, "max": 10000.0, "step": 0.01}),
-            "start_percent": ("FLOAT", {"default": 0,   "min": 0.0, "max": 1.0, "step": 0.01}),
-            "end_percent":   ("FLOAT", {"default": 1.0, "min": 0.0, "max": 1.0, "step": 0.01}),
-            "mask_type": (["gradient"], {"default": "gradient"}),
-        }, 
+        return {
+            "required": { 
+                "mask_weight":           ("FLOAT",      {"default": 1.0, "min": -10000.0, "max": 10000.0, "step": 0.01}),
+                "self_attn_floor":       ("FLOAT",      {"default": 0.0, "min": -10000.0, "max": 10000.0, "step": 0.01}),
+                "start_percent":         ("FLOAT",      {"default": 0,   "min": 0.0,      "max": 1.0,     "step": 0.01}),
+                "end_percent":           ("FLOAT",      {"default": 1.0, "min": 0.0,      "max": 1.0,     "step": 0.01}),
+                "mask_type":             (["gradient"], {"default": "gradient"}),
+            }, 
             "optional": {
-                "conditioning": ("CONDITIONING",),
+                "conditioning":          ("CONDITIONING",),
                 "conditioning_regional": ("CONDITIONING_REGIONAL",),
-                "mask_weights": ("SIGMAS", ),
-                "self_attn_floors": ("SIGMAS", ),
-
-        }}
+                "mask_weights":          ("SIGMAS", ),
+                "self_attn_floors":      ("SIGMAS", ),
+            }
+        }
 
     RETURN_TYPES = ("CONDITIONING",)
     RETURN_NAMES = ("conditioning",)
-    FUNCTION = "main"
+    FUNCTION     = "main"
+    CATEGORY     = "RES4LYF/conditioning"
 
-    CATEGORY = "RES4LYF/conditioning"
-
-    def main(self, conditioning_regional, mask_weight=1.0, start_percent=0.0, end_percent=1.0, start_step=0, end_step=10000, conditioning=None, mask_weights=None, self_attn_floors=None, self_attn_floor=0.0, mask_type="gradient", latent=None):
+    def main(self,
+            conditioning_regional,
+            mask_weight      = 1.0,
+            start_percent    = 0.0,
+            end_percent      = 1.0,
+            start_step       = 0,
+            end_step         = 10000,
+            conditioning     = None,
+            mask_weights     = None,
+            self_attn_floors = None,
+            self_attn_floor  = 0.0,
+            mask_type        = "gradient",
+            latent           = None
+            ):
+        
         weight, weights = mask_weight, mask_weights
         floor, floors = self_attn_floor, self_attn_floors
         default_dtype = torch.float64
-        max_steps = 10000
-        weights = initialize_or_scale(weights, weight, max_steps).to(default_dtype)
-        weights = F.pad(weights, (0, max_steps), value=0.0)
         
-        floors = initialize_or_scale(floors, floor, max_steps).to(default_dtype)
-        floors = F.pad(floors, (0, max_steps), value=0.0)
+        weights = initialize_or_scale(weights, weight, MAX_STEPS).to(default_dtype)
+        weights = F.pad(weights, (0, MAX_STEPS), value=0.0)
+        
+        floors = initialize_or_scale(floors, floor, MAX_STEPS).to(default_dtype)
+        floors = F.pad(floors, (0, MAX_STEPS), value=0.0)
 
         regional_generate_conditionings_and_masks_fn = RegionalGenerateConditioningsAndMasks(conditioning, conditioning_regional, weight, start_percent, end_percent, mask_type)
 
@@ -674,23 +684,25 @@ from .models import ReFluxPatcher
 class ClownRegionalConditioningFlux:
     @classmethod
     def INPUT_TYPES(s):
-        return {"required": { 
-            "regional_model": (["auto", "deactivate"], {"default": "auto"}),
-            "mask_weight": ("FLOAT", {"default": 1.0, "min": -10000.0, "max": 10000.0, "step": 0.01}),
-            "region_bleed": ("FLOAT", {"default": 0.0, "min": -10000.0, "max": 10000.0, "step": 0.01}),
-            "start_percent": ("FLOAT", {"default": 0,   "min": 0.0, "max": 1.0, "step": 0.01}),
-            "end_percent":   ("FLOAT", {"default": 1.0, "min": 0.0, "max": 1.0, "step": 0.01}),
-            "mask_type": (["gradient"], {"default": "gradient"}),
-            "invert_mask": ("BOOLEAN", {"default": False}),
-        }, 
+        return {
+            "required": { 
+                "regional_model":    (["auto", "deactivate"], {"default": "auto"}),
+                "mask_weight":       ("FLOAT",                {"default": 1.0, "min": -10000.0, "max": 10000.0, "step": 0.01}),
+                "region_bleed":      ("FLOAT",                {"default": 0.0, "min": -10000.0, "max": 10000.0, "step": 0.01}),
+                "start_percent":     ("FLOAT",                {"default": 0,   "min": 0.0,      "max": 1.0,     "step": 0.01}),
+                "end_percent":       ("FLOAT",                {"default": 1.0, "min": 0.0,      "max": 1.0,     "step": 0.01}),
+                "mask_type":         (["gradient"],           {"default": "gradient"}),
+                "invert_mask":       ("BOOLEAN",              {"default": False}),
+            }, 
             "optional": {
                 "model":             ("MODEL", ),
-                "positive_masked":  ("CONDITIONING", ),
-                "positive_unmasked":      ("CONDITIONING", ),
+                "positive_masked":   ("CONDITIONING", ),
+                "positive_unmasked": ("CONDITIONING", ),
                 "mask":              ("MASK", ),
-                "mask_weights": ("SIGMAS", ),
-                "region_bleeds": ("SIGMAS", ),
-        }}
+                "mask_weights":      ("SIGMAS", ),
+                "region_bleeds":     ("SIGMAS", ),
+            }
+        }
 
     RETURN_TYPES = ("MODEL", "CONDITIONING",)
     RETURN_NAMES = ("model", "positive",)

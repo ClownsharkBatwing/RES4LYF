@@ -1,93 +1,99 @@
-# Code adapted from https://github.com/comfyanonymous/ComfyUI/
-
-import comfy.samplers
-import comfy.sample
-import comfy.sampler_helpers
-import comfy.utils
-from comfy.cli_args import args
-from comfy_extras.nodes_model_advanced import ModelSamplingSD3, ModelSamplingFlux, ModelSamplingAuraFlow, ModelSamplingStableCascade
-
-
 import torch
+import types
 
 import folder_paths
 import os
 import json
 import math
 
+import comfy.samplers
+import comfy.sample
+import comfy.sampler_helpers
+import comfy.utils
 import comfy.model_management
-    
+
+from comfy.cli_args import args
+
+from comfy.ldm.flux.model  import Flux
+from comfy.ldm.flux.layers import SingleStreamBlock, DoubleStreamBlock
+
 from .flux.model  import ReFlux
 from .flux.layers import SingleStreamBlock as ReSingleStreamBlock, DoubleStreamBlock as ReDoubleStreamBlock
 
-from comfy.ldm.flux.model import Flux
-from comfy.ldm.flux.layers import SingleStreamBlock, DoubleStreamBlock
-
-from .helper import get_orthogonal, get_cosine_similarity
+from .latents import get_orthogonal, get_cosine_similarity
 from .res4lyf import RESplain
+
+
+
+def time_snr_shift_exponential(alpha, t):
+    return math.exp(alpha) / (math.exp(alpha) + (1 / t - 1) ** 1.0)
+
+def time_snr_shift_linear(alpha, t):
+    if alpha == 1.0:
+        return t
+    return alpha * t / (1 + (alpha - 1) * t)
+
 
 
 class ReFluxPatcher:
     @classmethod
     def INPUT_TYPES(s):
-        return {"required": { 
-            "model": ("MODEL",),
-            "enable": ("BOOLEAN", {"default": True}),
-           }
+        return {
+            "required": { 
+                "model":  ("MODEL",),
+                "enable": ("BOOLEAN", {"default": True}),
+            }
         }
     RETURN_TYPES = ("MODEL",)
     RETURN_NAMES = ("model",)
-
-    CATEGORY = "RES4LYF/model_patches"
-    FUNCTION = "main"
+    CATEGORY     = "RES4LYF/model_patches"
+    FUNCTION     = "main"
 
     def main(self, model, enable=True):
         m = model #.clone()
         
         if enable:
-            m.model.diffusion_model.__class__ = ReFlux
+            m.model.diffusion_model.__class__     = ReFlux
             m.model.diffusion_model.threshold_inv = False
             
             for i, block in enumerate(m.model.diffusion_model.double_blocks):
                 block.__class__ = ReDoubleStreamBlock
-                block.idx = i
+                block.idx       = i
 
             for i, block in enumerate(m.model.diffusion_model.single_blocks):
                 block.__class__ = ReSingleStreamBlock
-                block.idx = i
+                block.idx       = i
         else:
             m.model.diffusion_model.__class__ = Flux
             
             for i, block in enumerate(m.model.diffusion_model.double_blocks):
                 block.__class__ = DoubleStreamBlock
-                block.idx = i
+                block.idx       = i
 
             for i, block in enumerate(m.model.diffusion_model.single_blocks):
                 block.__class__ = SingleStreamBlock
-                block.idx = i
+                block.idx       = i
         
         return (m,)
-    
-import types
+
 
 
 class FluxOrthoCFGPatcher:
     @classmethod
     def INPUT_TYPES(s):
         return {"required": { 
-            "model": ("MODEL",),
-            "enable": ("BOOLEAN", {"default": True}),
-            "ortho_T5": ("BOOLEAN", {"default": True}),
+            "model":        ("MODEL",),
+            "enable":       ("BOOLEAN", {"default": True}),
+            "ortho_T5":     ("BOOLEAN", {"default": True}),
             "ortho_clip_L": ("BOOLEAN", {"default": True}),
-            "zero_clip_L": ("BOOLEAN", {"default": True}),
+            "zero_clip_L":  ("BOOLEAN", {"default": True}),
            }
         }
         
     RETURN_TYPES = ("MODEL",)
     RETURN_NAMES = ("model",)
-
-    CATEGORY = "RES4LYF/model_patches"
-    FUNCTION = "main"
+    CATEGORY     = "RES4LYF/model_patches"
+    FUNCTION     = "main"
     
     original_forward = Flux.forward
 
@@ -112,9 +118,9 @@ class FluxOrthoCFGPatcher:
         m = model.clone()
 
         if enable:
-            m.model.diffusion_model.ortho_T5 = ortho_T5
+            m.model.diffusion_model.ortho_T5     = ortho_T5
             m.model.diffusion_model.ortho_clip_L = ortho_clip_L
-            m.model.diffusion_model.zero_clip_L = zero_clip_L
+            m.model.diffusion_model.zero_clip_L  = zero_clip_L
             Flux.forward = types.MethodType(FluxOrthoCFGPatcher.new_forward, m.model.diffusion_model)
         else:
             Flux.forward = FluxOrthoCFGPatcher.original_forward
@@ -127,18 +133,18 @@ class FluxOrthoCFGPatcher:
 class FluxGuidanceDisable:
     @classmethod
     def INPUT_TYPES(s):
-        return {"required": { 
-            "model": ("MODEL",),
-            "disable": ("BOOLEAN", {"default": True}),
-            "zero_clip_L": ("BOOLEAN", {"default": True}),
+        return {
+            "required": { 
+                "model":       ("MODEL",),
+                "disable":     ("BOOLEAN", {"default": True}),
+                "zero_clip_L": ("BOOLEAN", {"default": True}),
             }
         }
         
     RETURN_TYPES = ("MODEL",)
     RETURN_NAMES = ("model",)
-
-    FUNCTION = "main"
-    CATEGORY = "RES4LYF/model_patches"
+    FUNCTION     = "main"
+    CATEGORY     = "RES4LYF/model_patches"
 
     original_forward = Flux.forward
 
@@ -164,31 +170,21 @@ class FluxGuidanceDisable:
 
 
 
-def time_snr_shift_exponential(alpha, t):
-    return math.exp(alpha) / (math.exp(alpha) + (1 / t - 1) ** 1.0)
-
-def time_snr_shift_linear(alpha, t):
-    if alpha == 1.0:
-        return t
-    return alpha * t / (1 + (alpha - 1) * t)
-
 class ModelSamplingAdvanced:
     # this is used to set the "shift" using either exponential scaling (default for SD3.5M and Flux) or linear scaling (default for SD3.5L and SD3 2B beta)
     @classmethod
     def INPUT_TYPES(s):
         return {"required": { 
-                    "model": ("MODEL",),
+                    "model":   ("MODEL",),
                     "scaling": (["exponential", "linear"], {"default": 'exponential'}), 
-                    "shift": ("FLOAT", {"default": 3.0, "min": -100.0, "max": 100.0, "step":0.01, "round": False}),
-                    #"base_shift": ("FLOAT", {"default": 3.0, "min": -100.0, "max": 100.0, "step":0.01, "round": False}),
+                    "shift":   ("FLOAT",                   {"default": 3.0, "min": -100.0, "max": 100.0, "step":0.01, "round": False}),
                     }
                }
     
     RETURN_TYPES = ("MODEL",)
     RETURN_NAMES = ("model",)
-    
-    FUNCTION = "main"
-    CATEGORY = "RES4LYF/model_shift"
+    FUNCTION     = "main"
+    CATEGORY     = "RES4LYF/model_shift"
 
     def sigma_exponential(self, timestep):
         return time_snr_shift_exponential(self.timestep_shift, timestep / self.multiplier)
@@ -200,9 +196,9 @@ class ModelSamplingAdvanced:
         m = model.clone()
         
         self.timestep_shift = shift
-        self.multiplier = 1000
-        timesteps = 1000
-        sampling_base = None
+        self.multiplier     = 1000
+        timesteps           = 1000
+        sampling_base       = None
         
         if isinstance(m.model.model_config, comfy.supported_models.Flux) or isinstance(m.model.model_config, comfy.supported_models.FluxSchnell):
             self.multiplier = 1
@@ -262,23 +258,25 @@ class ModelSamplingAdvanced:
         
         return (m,)
 
+
+
 class ModelSamplingAdvancedResolution:
     # this is used to set the "shift" using either exponential scaling (default for SD3.5M and Flux) or linear scaling (default for SD3.5L and SD3 2B beta)
     @classmethod
     def INPUT_TYPES(s):
         return {"required": { 
-                    "model": ("MODEL",),
-                    "scaling": (["exponential", "linear"], {"default": 'exponential'}), 
-                    "max_shift": ("FLOAT", {"default": 1.35, "min": -100.0, "max": 100.0, "step":0.01, "round": False}),
-                    "base_shift": ("FLOAT", {"default": 0.85, "min": -100.0, "max": 100.0, "step":0.01, "round": False}),
+                    "model":        ("MODEL",),
+                    "scaling":      (["exponential", "linear"], {"default": 'exponential'}), 
+                    "max_shift":    ("FLOAT",                   {"default": 1.35, "min": -100.0, "max": 100.0, "step":0.01, "round": False}),
+                    "base_shift":   ("FLOAT",                   {"default": 0.85, "min": -100.0, "max": 100.0, "step":0.01, "round": False}),
                     "latent_image": ("LATENT",),
                 }
                }
     
     RETURN_TYPES = ("MODEL",)
-    FUNCTION = "main"
-    
-    CATEGORY = "RES4LYF/model_shift"
+    RETURN_NAMES = ("model",)
+    FUNCTION     = "main"
+    CATEGORY     = "RES4LYF/model_shift"
 
     def sigma_exponential(self, timestep):
         return time_snr_shift_exponential(self.timestep_shift, timestep / self.multiplier)
@@ -288,17 +286,18 @@ class ModelSamplingAdvancedResolution:
 
     def main(self, model, scaling, max_shift, base_shift, latent_image):
         m = model.clone()
+        
         height, width = latent_image['samples'].shape[2:]
         
-        x1 = 256
-        x2 = 4096
-        mm = (max_shift - base_shift) / (x2 - x1)
-        b = base_shift - mm * x1
+        x1    = 256
+        x2    = 4096
+        mm    = (max_shift - base_shift) / (x2 - x1)
+        b     = base_shift - mm * x1
         shift = (width * height / (8 * 8 * 2 * 2)) * mm + b
         
         self.timestep_shift = shift
-        self.multiplier = 1000
-        timesteps = 1000
+        self.multiplier     = 1000
+        timesteps           = 1000
         
         if isinstance(m.model.model_config, comfy.supported_models.Flux) or isinstance(m.model.model_config, comfy.supported_models.FluxSchnell):
             self.multiplier = 1
@@ -338,16 +337,23 @@ class ModelSamplingAdvancedResolution:
         
         return (m,)
     
-    
+# Code adapted from https://github.com/comfyanonymous/ComfyUI/
 class UNetSave:
     def __init__(self):
         self.output_dir = folder_paths.get_output_directory()
 
     @classmethod
     def INPUT_TYPES(s):
-        return {"required": { "model": ("MODEL",),
-                              "filename_prefix": ("STRING", {"default": "models/ComfyUI"}),},
-                "hidden": {"prompt": "PROMPT", "extra_pnginfo": "EXTRA_PNGINFO"},}
+        return {
+            "required": {
+                "model":           ("MODEL",),
+                "filename_prefix": ("STRING", {"default": "models/ComfyUI"}),
+                },
+            "hidden": {
+                "prompt": "PROMPT", "extra_pnginfo": "EXTRA_PNGINFO"
+                },
+            }
+        
     RETURN_TYPES = ()
     FUNCTION = "save"
     OUTPUT_NODE = True
@@ -356,11 +362,30 @@ class UNetSave:
     DESCRIPTION = "Save a .safetensors containing only the model data."
 
     def save(self, model, filename_prefix, prompt=None, extra_pnginfo=None):
-        save_checkpoint(model, clip=None, vae=None, filename_prefix=filename_prefix, output_dir=self.output_dir, prompt=prompt, extra_pnginfo=extra_pnginfo)
+        save_checkpoint(
+            model, 
+            clip            = None,
+            vae             = None,
+            filename_prefix = filename_prefix,
+            output_dir      = self.output_dir,
+            prompt          = prompt,
+            extra_pnginfo   = extra_pnginfo,
+            )
+        
         return {}
 
 
-def save_checkpoint(model, clip=None, vae=None, clip_vision=None, filename_prefix=None, output_dir=None, prompt=None, extra_pnginfo=None):
+def save_checkpoint(
+        model,
+        clip            = None,
+        vae             = None,
+        clip_vision     = None,
+        filename_prefix = None,
+        output_dir      = None,
+        prompt          = None,
+        extra_pnginfo   = None,
+        ):
+    
     full_output_folder, filename, counter, subfolder, filename_prefix = folder_paths.get_save_image_path(filename_prefix, output_dir)
     prompt_info = ""
     if prompt is not None:
@@ -440,29 +465,27 @@ def sd_save_checkpoint(output_path, model, clip=None, vae=None, clip_vision=None
 
 
 
-
-
-
-class TorchCompileModelFluxAdvanced: #adapted from https://github.com/kijai/ComfyUI-KJNodes
+# Code adapted from https://github.com/kijai/ComfyUI-KJNodes
+class TorchCompileModelFluxAdvanced: 
     def __init__(self):
         self._compiled = False
 
     @classmethod
     def INPUT_TYPES(s):
         return {"required": { 
-                    "model": ("MODEL",),
-                    "backend": (["inductor", "cudagraphs"],),
-                    "fullgraph": ("BOOLEAN", {"default": False, "tooltip": "Enable full graph mode"}),
-                    "mode": (["default", "max-autotune", "max-autotune-no-cudagraphs", "reduce-overhead"], {"default": "default"}),
-                    "double_blocks": ("STRING", {"default": "0-18", "multiline": True}),
-                    "single_blocks": ("STRING", {"default": "0-37", "multiline": True}),
-                    "dynamic": ("BOOLEAN", {"default": False, "tooltip": "Enable dynamic mode"}),
+                    "model":         ("MODEL",),
+                    "backend":       (["inductor", "cudagraphs"],),
+                    "fullgraph":     ("BOOLEAN",                                                                    {"default": False, "tooltip": "Enable full graph mode"}),
+                    "mode":          (["default", "max-autotune", "max-autotune-no-cudagraphs", "reduce-overhead"], {"default": "default"}),
+                    "double_blocks": ("STRING",                                                                     {"default": "0-18", "multiline": True}),
+                    "single_blocks": ("STRING",                                                                     {"default": "0-37", "multiline": True}),
+                    "dynamic":       ("BOOLEAN",                                                                    {"default": False, "tooltip": "Enable dynamic mode"}),
                 }}
+        
     RETURN_TYPES = ("MODEL",)
-    FUNCTION = "patch"
-
-    CATEGORY = "RES4LYF/model_patches"
-    EXPERIMENTAL = True
+    RETURN_NAMES = ("model",)
+    FUNCTION     = "main"
+    CATEGORY     = "RES4LYF/model_patches"
 
     def parse_blocks(self, blocks_str):
         blocks = []
@@ -475,7 +498,7 @@ class TorchCompileModelFluxAdvanced: #adapted from https://github.com/kijai/Comf
                 blocks.append(int(part))
         return blocks
 
-    def patch(self, model, backend, mode, fullgraph, single_blocks, double_blocks, dynamic):
+    def main(self, model, backend, mode, fullgraph, single_blocks, double_blocks, dynamic):
         single_block_list = self.parse_blocks(single_blocks)
         double_block_list = self.parse_blocks(double_blocks)
         m = model.clone()

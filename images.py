@@ -1,9 +1,13 @@
 import torch
+import torch.nn.functional as F
+
+from torchvision import transforms
+
 import numpy as np
 import kornia
 import cv2
+
 from PIL import Image, ImageFilter, ImageEnhance
-import torch.nn.functional as F
 
 # tensor -> PIL
 def tensor2pil(image):
@@ -138,10 +142,11 @@ def cv2_layer(tensor, function):
         raise ValueError("Incompatible tensor dimension.")
     
 
-from torchvision import transforms
 
 
-class Film_Grain: # Rewrite of the WAS Film Grain node, much improved speed and efficiency (https://github.com/WASasquatch/was-node-suite-comfyui)
+# Rewrite of the WAS Film Grain node, much improved speed and efficiency (https://github.com/WASasquatch/was-node-suite-comfyui)
+
+class Film_Grain: 
     def __init__(self):
         pass
 
@@ -217,17 +222,17 @@ class Frequency_Separation_Hard_Light:
         return {
             "optional": {
                 "high_pass": ("IMAGE",),
-                "original": ("IMAGE",),
-                "low_pass": ("IMAGE",),
+                "original":  ("IMAGE",),
+                "low_pass":  ("IMAGE",),
             },
             "required": {
             },
         }
+        
     RETURN_TYPES = ("IMAGE","IMAGE","IMAGE",)
     RETURN_NAMES = ("high_pass", "original", "low_pass",)
-    FUNCTION = "main"
-
-    CATEGORY = "RES4LYF/images"
+    FUNCTION     = "main"
+    CATEGORY     = "RES4LYF/images"
 
     def main(self, high_pass=None, original=None, low_pass=None):
 
@@ -249,17 +254,17 @@ class Frequency_Separation_Hard_Light_LAB:
         return {
             "optional": {
                 "high_pass": ("IMAGE",),
-                "original": ("IMAGE",),
-                "low_pass": ("IMAGE",),
+                "original":  ("IMAGE",),
+                "low_pass":  ("IMAGE",),
             },
             "required": {
             },
         }
+        
     RETURN_TYPES = ("IMAGE", "IMAGE", "IMAGE",)
     RETURN_NAMES = ("high_pass", "original", "low_pass",)
-    FUNCTION = "main"
-
-    CATEGORY = "RES4LYF/images"
+    FUNCTION     = "main"
+    CATEGORY     = "RES4LYF/images"
 
     def main(self, high_pass=None, original=None, low_pass=None):
 
@@ -306,11 +311,11 @@ class Image_Channels_LAB:
             "required": {
             },
         }
+        
     RETURN_TYPES = ("IMAGE","IMAGE","IMAGE","IMAGE",)
     RETURN_NAMES = ("RGB","L","A","B",)
-    FUNCTION = "main"
-
-    CATEGORY = "RES4LYF/images"
+    FUNCTION     = "main"
+    CATEGORY     = "RES4LYF/images"
 
     def main(self, RGB=None, L=None, A=None, B=None):
 
@@ -334,17 +339,16 @@ class Frequency_Separation_Vivid_Light:
         return {
             "optional": {
                 "high_pass": ("IMAGE",),
-                "original": ("IMAGE",),
-                "low_pass": ("IMAGE",),
+                "original":  ("IMAGE",),
+                "low_pass":  ("IMAGE",),
             },
             "required": {
             },
         }
     RETURN_TYPES = ("IMAGE","IMAGE","IMAGE",)
     RETURN_NAMES = ("high_pass", "original", "low_pass",)
-    FUNCTION = "main"
-
-    CATEGORY = "RES4LYF/images"
+    FUNCTION     = "main"
+    CATEGORY     = "RES4LYF/images"
 
     def main(self, high_pass=None, original=None, low_pass=None):
 
@@ -366,8 +370,8 @@ class Frequency_Separation_Linear_Light:
         return {
             "optional": {
                 "high_pass": ("IMAGE",),
-                "original": ("IMAGE",),
-                "low_pass": ("IMAGE",),
+                "original":  ("IMAGE",),
+                "low_pass":  ("IMAGE",),
             },
             "required": {
             },
@@ -375,9 +379,8 @@ class Frequency_Separation_Linear_Light:
         
     RETURN_TYPES = ("IMAGE","IMAGE","IMAGE",)
     RETURN_NAMES = ("high_pass", "original", "low_pass",)
-    FUNCTION = "main"
-
-    CATEGORY = "RES4LYF/images"
+    FUNCTION     = "main"
+    CATEGORY     = "RES4LYF/images"
 
     def main(self, high_pass=None, original=None, low_pass=None):
 
@@ -399,20 +402,19 @@ class Frequency_Separation_FFT:
         return {
             "optional": {
                 "high_pass": ("IMAGE",),
-                "original": ("IMAGE",),
-                "low_pass": ("IMAGE",),
+                "original":  ("IMAGE",),
+                "low_pass":  ("IMAGE",),
             },
             "required": {
-                "cutoff": ("FLOAT", {"default": 5.0, "min": -10000.0, "max": 10000.0, "step": 0.01}),
-                "sigma": ("FLOAT", {"default": 5.0, "min": -10000.0, "max": 10000.0, "step": 0.01}),
+                "cutoff":    ("FLOAT", {"default": 5.0, "min": -10000.0, "max": 10000.0, "step": 0.01}),
+                "sigma":     ("FLOAT", {"default": 5.0, "min": -10000.0, "max": 10000.0, "step": 0.01}),
             },
         }
         
     RETURN_TYPES = ("IMAGE","IMAGE","IMAGE",)
     RETURN_NAMES = ("high_pass", "original", "low_pass",)
-    FUNCTION = "main"
-
-    CATEGORY = "RES4LYF/images"
+    FUNCTION     = "main"
+    CATEGORY     = "RES4LYF/images"
 
     def main(self, high_pass=None, original=None, low_pass=None, cutoff=5.0, sigma=5.0):
 
@@ -435,20 +437,18 @@ class ImageSharpenFS:
     def INPUT_TYPES(cls):
         return {
             "required": {
-                "images": ("IMAGE",),
-                "method": (["hard", "linear", "vivid"], {"default": "hard"}),
-                "type": (["median", "gaussian"], {"default": "median"}),
-                "intensity": ("INT", {
-                    "default": 6,
-                    "min": 1,
-                    "step": 1,
+                "images":    ("IMAGE",),
+                "method":    (["hard", "linear", "vivid"], {"default": "hard"}),
+                "type":      (["median", "gaussian"],      {"default": "median"}),
+                "intensity": ("INT",                       {"default": 6, "min": 1, "step": 1,
                 }),
             },
         }
 
     RETURN_TYPES = ("IMAGE",)
-    FUNCTION = "main"
-    CATEGORY = "RES4LYF/images"
+    RETURN_NAMES = ("image",)
+    FUNCTION     = "main"
+    CATEGORY     = "RES4LYF/images"
 
     def main(self, images, method, type, intensity):
         match type:
@@ -469,7 +469,6 @@ class ImageSharpenFS:
         
         _, img_sharpened, _ = FS.main(high_pass=fs_hp, original=None, low_pass=images)
         
-
         return (img_sharpened,)
 
 
@@ -485,17 +484,14 @@ class ImageMedianBlur:
         return {
             "required": {
                 "images": ("IMAGE",),
-                "size": ("INT", {
-                    "default": 6,
-                    "min": 1,
-                    "step": 1,
-                }),
+                "size":   ("INT", {"default": 6, "min": 1, "step": 1,}),
             },
         }
 
     RETURN_TYPES = ("IMAGE",)
-    FUNCTION = "main"
-    CATEGORY = "RES4LYF/images"
+    RETURN_NAMES = ("image",)
+    FUNCTION     = "main"
+    CATEGORY     = "RES4LYF/images"
 
     def main(self, images, size):
         size -= 1
@@ -516,17 +512,14 @@ class ImageGaussianBlur:
         return {
             "required": {
                 "images": ("IMAGE",),
-                "size": ("INT", {
-                    "default": 6,
-                    "min": 1,
-                    "step": 1,
-                }),
+                "size":   ("INT", {"default": 6, "min": 1, "step": 1,}),
             },
         }
 
     RETURN_TYPES = ("IMAGE",)
-    FUNCTION = "main"
-    CATEGORY = "RES4LYF/images"
+    RETURN_NAMES = ("image",)
+    FUNCTION     = "main"
+    CATEGORY     = "RES4LYF/images"
 
     def main(self, images, size):
         size -= 1 
@@ -567,18 +560,15 @@ class FastSmudgeBlur:
     def INPUT_TYPES(cls):
         return {
             "required": {
-                "images": ("IMAGE",), 
-                "kernel_size": ("INT", {
-                    "default": 51,
-                    "min": 1,
-                    "step": 1,
-                }),
+                "images":      ("IMAGE",), 
+                "kernel_size": ("INT", {"default": 51, "min": 1, "step": 1,}),
             },
         }
 
     RETURN_TYPES = ("IMAGE",)
-    FUNCTION = "main"
-    CATEGORY = "RES4LYF/images"
+    RETURN_NAMES = ("image",)
+    FUNCTION     = "main"
+    CATEGORY     = "RES4LYF/images"
 
     def main(self, images, kernel_size):
         img = images.clone().detach().to('cuda').float()
@@ -611,15 +601,15 @@ class FastSmudgeBlur:
 class Image_Pair_Split:
     @classmethod
     def INPUT_TYPES(s):
-        return {"required": { "img_pair": ("IMAGE",),
-                             }
+        return {
+            "required": { 
+                "img_pair": ("IMAGE",),
                 }
+            }
     RETURN_TYPES = ("IMAGE","IMAGE",)
     RETURN_NAMES = ("img_0","img_1",)
-
-    FUNCTION = "main"
-
-    CATEGORY = "RES4LYF/images"
+    FUNCTION     = "main"
+    CATEGORY     = "RES4LYF/images"
 
     def main(self, img_pair):
         img_0, img_1 = img_pair.chunk(2, dim=0)
@@ -636,19 +626,19 @@ class Image_Crop_Location_Exact:
     def INPUT_TYPES(cls):
         return {
             "required": {
-                "image": ("IMAGE",),
-                "x": ("INT", {"default": 0, "max": 10000000, "min": 0, "step": 1}),
-                "y": ("INT", {"default": 0, "max": 10000000, "min": 0, "step": 1}),
-                "width": ("INT", {"default": 256, "max": 10000000, "min": 1, "step": 1}),
+                "image":  ("IMAGE",),
+                "x":      ("INT", {"default": 0,   "max": 10000000, "min": 0, "step": 1}),
+                "y":      ("INT", {"default": 0,   "max": 10000000, "min": 0, "step": 1}),
+                "width":  ("INT", {"default": 256, "max": 10000000, "min": 1, "step": 1}),
                 "height": ("INT", {"default": 256, "max": 10000000, "min": 1, "step": 1}),
-                "edge": (["original", "short", "long"],),
+                "edge":   (["original", "short", "long"],),
             }
         }
 
-    RETURN_TYPES = ("IMAGE", "CROP_DATA")
-    FUNCTION = "main"
-
-    CATEGORY = "RES4LYF/images"
+    RETURN_TYPES = ("IMAGE", "CROP_DATA",)
+    RETURN_NAMES = ("image", "crop_data",)
+    FUNCTION     = "main"
+    CATEGORY     = "RES4LYF/images"
 
     def main(self, image, x=0, y=0, width=256, height=256, edge="original"):
         if image.dim() != 4:
