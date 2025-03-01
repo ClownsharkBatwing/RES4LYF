@@ -686,7 +686,7 @@ class ClownRegionalConditioningFlux:
     def INPUT_TYPES(s):
         return {
             "required": { 
-                "regional_model":    (["auto", "deactivate"], {"default": "auto"}),
+                "regional_model":    (["auto", "deactivate", "passthrough"], {"default": "auto"}),
                 "mask_weight":       ("FLOAT",                {"default": 1.0, "min": -10000.0, "max": 10000.0, "step": 0.01}),
                 "region_bleed":      ("FLOAT",                {"default": 0.0, "min": -10000.0, "max": 10000.0, "step": 0.01}),
                 "start_percent":     ("FLOAT",                {"default": 0,   "min": 0.0,      "max": 1.0,     "step": 0.01}),
@@ -710,8 +710,23 @@ class ClownRegionalConditioningFlux:
 
     CATEGORY = "RES4LYF/conditioning"
 
-    def main(self, model, regional_model, mask_weight=1.0, start_percent=0.0, end_percent=1.0, positive_masked=None, positive_unmasked=None, mask_weights=None, region_bleeds=None, region_bleed=0.0, mask_type="gradient", mask=None, invert_mask=False):
-        if regional_model == "auto":
+    def main(self,
+            model,
+            regional_model,
+            mask_weight      = 1.0,
+            start_percent    = 0.0,
+            end_percent      = 1.0,
+            positive_masked  = None,
+            positive_unmasked= None,
+            mask_weights     = None,
+            region_bleeds    = None,
+            region_bleed     = 0.0,
+            mask_type        = "gradient",
+            mask             = None,
+            invert_mask      = False
+            ):
+        
+        if regional_model == "auto" or regional_model == "passthrough":
             reflux_enable = True
         else:
             model, = ReFluxPatcher().main(model, enable=False)
@@ -734,7 +749,7 @@ class ClownRegionalConditioningFlux:
             positive = None
             reflux_enable = False
         elif mask is not None:
-            if regional_model == "auto":
+            if regional_model == "auto" or regional_model == "passthrough":
                 reflux_enable = True
             else:
                 reflux_enable = False
@@ -757,7 +772,8 @@ class ClownRegionalConditioningFlux:
             model, = ReFluxPatcher().main(model, enable=False)
             return (model, positive_masked,)
         else:
-            model, = ReFluxPatcher().main(model, enable=True)
+            if regional_model == "auto":
+                model, = ReFluxPatcher().main(model, enable=True)
             return (model, positive,)
 
 
