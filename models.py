@@ -50,29 +50,30 @@ class ReFluxPatcher:
     FUNCTION     = "main"
 
     def main(self, model, enable=True):
-        m = model #.clone()
+        m = model.clone()
         
-        if enable:
-            m.model.diffusion_model.__class__     = ReFlux
-            m.model.diffusion_model.threshold_inv = False
-            
-            for i, block in enumerate(m.model.diffusion_model.double_blocks):
-                block.__class__ = ReDoubleStreamBlock
-                block.idx       = i
+        if m.model.diffusion_model.__class__ == ReFlux or m.model.diffusion_model.__class__ == Flux:
+            if enable:
+                m.model.diffusion_model.__class__     = ReFlux
+                m.model.diffusion_model.threshold_inv = False
+                
+                for i, block in enumerate(m.model.diffusion_model.double_blocks):
+                    block.__class__ = ReDoubleStreamBlock
+                    block.idx       = i
 
-            for i, block in enumerate(m.model.diffusion_model.single_blocks):
-                block.__class__ = ReSingleStreamBlock
-                block.idx       = i
-        else:
-            m.model.diffusion_model.__class__ = Flux
-            
-            for i, block in enumerate(m.model.diffusion_model.double_blocks):
-                block.__class__ = DoubleStreamBlock
-                block.idx       = i
+                for i, block in enumerate(m.model.diffusion_model.single_blocks):
+                    block.__class__ = ReSingleStreamBlock
+                    block.idx       = i
+            else:
+                m.model.diffusion_model.__class__ = Flux
+                
+                for i, block in enumerate(m.model.diffusion_model.double_blocks):
+                    block.__class__ = DoubleStreamBlock
+                    block.idx       = i
 
-            for i, block in enumerate(m.model.diffusion_model.single_blocks):
-                block.__class__ = SingleStreamBlock
-                block.idx       = i
+                for i, block in enumerate(m.model.diffusion_model.single_blocks):
+                    block.__class__ = SingleStreamBlock
+                    block.idx       = i
         
         return (m,)
 
@@ -498,7 +499,16 @@ class TorchCompileModelFluxAdvanced:
                 blocks.append(int(part))
         return blocks
 
-    def main(self, model, backend, mode, fullgraph, single_blocks, double_blocks, dynamic):
+    def main(self,
+            model,
+            backend       = "inductor",
+            mode          = "default",
+            fullgraph     = False,
+            single_blocks = "0-37",
+            double_blocks = "0-18",
+            dynamic       = False,
+            ):
+        
         single_block_list = self.parse_blocks(single_blocks)
         double_block_list = self.parse_blocks(double_blocks)
         m = model.clone()
