@@ -89,6 +89,12 @@ def calculate_sigmas_RES4LYF(model_sampling, scheduler_name, steps):
 def init(check_imports=None):
     RESplain("Init")
 
+    # initialize display category
+    global display_sampler_category
+    display_sampler_category = get_config_value("displayCategory", False)
+    if ( display_sampler_category is True ):
+        RESplain("Displaying sampler category", debug=True)
+
     # Initialize using_RES4LYF_time_snr_shift from config (deprecated, disabled by default)
     global using_RES4LYF_time_snr_shift
     using_RES4LYF_time_snr_shift = get_config_value("updatedTimestepScaling", False)
