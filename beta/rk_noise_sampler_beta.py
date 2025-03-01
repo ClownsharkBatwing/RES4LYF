@@ -6,8 +6,8 @@ import comfy.supported_models
 from .noise_classes import NOISE_GENERATOR_CLASSES, NOISE_GENERATOR_CLASSES_SIMPLE
 from .constants     import MAX_STEPS
 
-from ..helper       import get_extra_options_list, has_nested_attr, extra_options_flag, get_extra_options_kv
-from ..latents      import get_orthogonal, get_collinear
+from ..helper       import ExtraOptions, has_nested_attr 
+from ..latents      import normalize_zscore, get_orthogonal, get_collinear
 from ..res4lyf      import RESplain
 
 
@@ -83,9 +83,11 @@ class RK_NoiseSampler:
         self.VARIANCE_PRESERVING    = isinstance(model_sampling, comfy.model_sampling.CONST)
         
         self.extra_options          = extra_options
+        self.EO                     = ExtraOptions(extra_options)
         
-        self.DOWN_SUBSTEP           = extra_options_flag("down_substep", extra_options)  
-        self.DOWN_STEP              = extra_options_flag("down_step",    extra_options)  
+        self.DOWN_SUBSTEP           = self.EO("down_substep")
+        self.DOWN_STEP              = self.EO("down_step")
+
 
 
 
@@ -149,7 +151,6 @@ class RK_NoiseSampler:
         self.multistep_stages = RK.multistep_stages
         self.rows = RK.rows
         self.C    = RK.C
-        #self.s_ = [(self.sigma_fn(self.t_fn(self.sigma) + self.h*c_)) * self.s_in for c_ in self.C]
         self.s_ = self.sigma_fn(self.t_fn(self.sigma) + self.h * self.C)
     
     
@@ -219,6 +220,7 @@ class RK_NoiseSampler:
                         implicit_steps_diag = 0
                         ):    
         
+        # start with stepsizes for no overshoot/noise addition/noise swapping
         self.sub_sigma_up_eta    = self.sub_sigma_up                          = 0.0
         self.sub_sigma_eta       = self.sub_sigma                             = self.s_[row]
         self.sub_sigma_down_eta  = self.sub_sigma_down  = self.sub_sigma_next = self.s_[row+self.row_offset+multistep_stages]
@@ -230,17 +232,17 @@ class RK_NoiseSampler:
 
 
         if row < self.rows   and   self.s_[row+self.row_offset+multistep_stages] > 0:
-            if   diag_iter > 0 and diag_iter == implicit_steps_diag and extra_options_flag("implicit_substep_skip_final_eta",  self.extra_options):
+            if   diag_iter > 0 and diag_iter == implicit_steps_diag and self.EO("implicit_substep_skip_final_eta"):
                 pass
-            elif diag_iter > 0 and                                      extra_options_flag("implicit_substep_only_first_eta",  self.extra_options):
+            elif diag_iter > 0 and                                      self.EO("implicit_substep_only_first_eta"):
                 pass
-            elif full_iter > 0 and full_iter == implicit_steps_full and extra_options_flag("implicit_step_skip_final_eta",     self.extra_options):
+            elif full_iter > 0 and full_iter == implicit_steps_full and self.EO("implicit_step_skip_final_eta"):
                 pass
-            elif full_iter > 0 and                                      extra_options_flag("implicit_step_only_first_eta",     self.extra_options):
+            elif full_iter > 0 and                                      self.EO("implicit_step_only_first_eta"):
                 pass
             elif (full_iter > 0 or diag_iter > 0)                   and self.noise_sampler_type2 == "brownian":
                 pass # brownian noise does not increment its seed when generated, deactivate on implicit repeats to avoid burn
-            elif full_iter > 0 and                                      extra_options_flag("implicit_step_only_first_all_eta", self.extra_options):
+            elif full_iter > 0 and                                      self.EO("implicit_step_only_first_all_eta"):
                 self.sigma_down_eta   = self.sigma_next
                 self.sigma_up_eta    *= 0
                 self.alpha_ratio_eta /= self.alpha_ratio_eta
@@ -250,10 +252,19 @@ class RK_NoiseSampler:
                 self.alpha_ratio     /= self.alpha_ratio
                 
                 self.h_new = self.h = self.h_no_eta
+            
+            elif (row < self.rows-self.row_offset-multistep_stages   or   diag_iter < implicit_steps_diag)   or   self.EO("substep_eta_use_final"):
+                self.sub_sigma_up,     self.sub_sigma,     self.sub_sigma_down,     self.sub_alpha_ratio     = self.get_sde_substep(sigma               = self.s_[row],
+                                                                                                                                    sigma_next          = self.s_[row+self.row_offset+multistep_stages],
+                                                                                                                                    eta                 = overshoot_substep,
+                                                                                                                                    noise_mode_override = self.overshoot_mode_substep,
+                                                                                                                                    DOWN                = self.DOWN_SUBSTEP)
                 
-            elif (row < self.rows-self.row_offset-multistep_stages   or   diag_iter < implicit_steps_diag)   or   extra_options_flag("substep_eta_use_final", self.extra_options):
-                self.sub_sigma_up,     self.sub_sigma,     self.sub_sigma_down,     self.sub_alpha_ratio     = self.get_sde_substep(self.s_[row], self.s_[row+self.row_offset+multistep_stages], overshoot_substep, noise_mode_override=self.overshoot_mode_substep, DOWN=self.DOWN_SUBSTEP)
-                self.sub_sigma_up_eta, self.sub_sigma_eta, self.sub_sigma_down_eta, self.sub_alpha_ratio_eta = self.get_sde_substep(self.s_[row], self.s_[row+self.row_offset+multistep_stages], eta_substep,       noise_mode_override=self.noise_mode_sde_substep, DOWN=self.DOWN_SUBSTEP)
+                self.sub_sigma_up_eta, self.sub_sigma_eta, self.sub_sigma_down_eta, self.sub_alpha_ratio_eta = self.get_sde_substep(sigma               = self.s_[row],
+                                                                                                                                    sigma_next          = self.s_[row+self.row_offset+multistep_stages],
+                                                                                                                                    eta                 = eta_substep,
+                                                                                                                                    noise_mode_override = self.noise_mode_sde_substep,
+                                                                                                                                    DOWN                = self.DOWN_SUBSTEP)
 
         self.h_new      = self.h * self.h_fn(self.sub_sigma_down,     self.sigma) / self.h_fn(self.sub_sigma_next, self.sigma) 
         self.h_eta      = self.h * self.h_fn(self.sub_sigma_down_eta, self.sigma) / self.h_fn(self.sub_sigma_next, self.sigma) 
@@ -364,55 +375,46 @@ class RK_NoiseSampler:
         
 
     def swap_noise_step(self, x_0, x_next, brownian_sigma=None, brownian_sigma_next=None, ):
-        if self.sigma_up_eta == 0:
+        if self.sigma_up_eta == 0   or   self.sigma_next == 0:
             return x_next
+
+        brownian_sigma      = self.sigma.clone()      if brownian_sigma      is None else brownian_sigma
+        brownian_sigma_next = self.sigma_next.clone() if brownian_sigma_next is None else brownian_sigma_next
         
-        if brownian_sigma is None:
-            brownian_sigma = self.sigma.clone()
-        if brownian_sigma_next is None:
-            brownian_sigma_next = self.sigma_next.clone()
-        if self.sigma_next == 0:
-            return x_next
         if brownian_sigma == brownian_sigma_next:
             brownian_sigma_next *= 0.999
             
         eps_next      = (x_0 - x_next) / (self.sigma - self.sigma_next)
         denoised_next = x_0 - self.sigma * eps_next
         
-        if brownian_sigma_next > brownian_sigma:
-            s_tmp               = brownian_sigma
-            brownian_sigma      = brownian_sigma_next
-            brownian_sigma_next = s_tmp
+        if brownian_sigma_next > brownian_sigma and not self.EO("disable_brownian_swap"): # should this really be done?
+            brownian_sigma, brownian_sigma_next = brownian_sigma_next, brownian_sigma
         
         noise = self.noise_sampler(sigma=brownian_sigma, sigma_next=brownian_sigma_next)
-        noise = (noise - noise.mean(dim=(-2, -1), keepdim=True)) / noise.std(dim=(-2, -1), keepdim=True)
+        noise = normalize_zscore(noise, channelwise=True, inplace=True)
 
         x = self.alpha_ratio_eta * (denoised_next + self.sigma_down_eta * eps_next) + self.sigma_up_eta * noise * self.s_noise
         return x
 
 
     def swap_noise_substep(self, x_0, x_next, brownian_sigma=None, brownian_sigma_next=None, ):
-        if self.sub_sigma_up_eta == 0:
+        if self.sub_sigma_up_eta == 0   or   self.sub_sigma_next == 0:
             return x_next
         
-        if brownian_sigma is None:
-            brownian_sigma = self.sub_sigma.clone()
-        if brownian_sigma_next is None:
-            brownian_sigma_next = self.sub_sigma_next.clone()
-        if self.sigma_next == 0:
-            return x_next
+        brownian_sigma      = self.sub_sigma.clone()      if brownian_sigma      is None else brownian_sigma
+        brownian_sigma_next = self.sub_sigma_next.clone() if brownian_sigma_next is None else brownian_sigma_next
+
         if brownian_sigma == brownian_sigma_next:
             brownian_sigma_next *= 0.999
-        eps_next = (x_0 - x_next) / (self.sigma - self.sub_sigma_next)
+            
+        eps_next      = (x_0 - x_next) / (self.sigma - self.sub_sigma_next)
         denoised_next = x_0 - self.sigma * eps_next
         
-        if brownian_sigma_next > brownian_sigma:
-            s_tmp               = brownian_sigma
-            brownian_sigma      = brownian_sigma_next
-            brownian_sigma_next = s_tmp
+        if brownian_sigma_next > brownian_sigma and not self.EO("disable_brownian_swap"): # should this really be done?
+            brownian_sigma, brownian_sigma_next = brownian_sigma_next, brownian_sigma
         
         noise = self.noise_sampler2(sigma=brownian_sigma, sigma_next=brownian_sigma_next)
-        noise = (noise - noise.mean(dim=(-2, -1), keepdim=True)) / noise.std(dim=(-2, -1), keepdim=True)
+        noise = normalize_zscore(noise, channelwise=True, inplace=True)
 
         x = self.sub_alpha_ratio_eta * (denoised_next + self.sub_sigma_down_eta * eps_next) + self.sub_sigma_up_eta * noise * self.s_noise_substep
         return x
@@ -457,7 +459,7 @@ class RK_NoiseSampler:
         else:
             noise = self.noise_sampler2(sigma=brownian_sigma, sigma_next=brownian_sigma_next)
             
-        noise = (noise - noise.mean(dim=(-2, -1), keepdim=True)) / noise.std(dim=(-2, -1), keepdim=True)
+        noise = normalize_zscore(noise, channelwise=True, inplace=True)
 
         x = alpha_ratio * (denoised_next + sigma_down * eps_next) + sigma_up * noise * s_noise
         return x
@@ -573,7 +575,7 @@ class RK_NoiseSampler:
 
             #noise_ortho = get_orthogonal(noise, x)
             #noise_ortho = noise_ortho / noise_ortho.std()model,
-            noise = (noise - noise.mean(dim=(-2, -1), keepdim=True)) / noise.std(dim=(-2, -1), keepdim=True)
+            noise = normalize_zscore(noise, channelwise=True, inplace=True)
 
             if SDE_NOISE_EXTERNAL:
                 noise = (1-s_noise) * noise + s_noise * sde_noise_t

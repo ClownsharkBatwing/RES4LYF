@@ -11,11 +11,63 @@ from .res4lyf import RESplain
 
 
 
-
 # EXTRA_OPTIONS OPS
 
+class ExtraOptions():
+    def __init__(self, extra_options):
+        self.extra_options = extra_options
+        
+    def __call__(self, option, default=None, ret_type=None, match_all_flags=False):
+        if isinstance(option, (tuple, list)):
+            if match_all_flags:
+                return all(self(single_option, default, ret_type) for single_option in option)
+            else:
+                return any(self(single_option, default, ret_type) for single_option in option)
+
+        if default is None: # get flag
+            pattern = rf"^(?:{re.escape(option)}\s*$|{re.escape(option)}=)"
+            return bool(re.search(pattern, self.extra_options, flags=re.MULTILINE))
+        elif ret_type is None:
+            ret_type = type(default)
+        
+            if ret_type.__module__ != "builtins":
+                mod = __import__(default.__module__)
+                ret_type = lambda v: getattr(mod, v, None)
+        
+        if ret_type == list:
+            pattern = rf"^{re.escape(option)}\s*=\s*([a-zA-Z0-9_.,+-]+)\s*$"
+            match   = re.search(pattern, self.extra_options, flags=re.MULTILINE)
+            
+            if match:
+                value = match.group(1)
+            else:
+                value = default
+                
+            if type(value) == str:
+                value = value.split(',')
+            
+                if type(default[0]) == type:
+                    ret_type = default[0]
+                else:
+                    ret_type = type(default[0])
+                
+                value = [ret_type(value[_]) for _ in range(len(value))]
+        
+        else:
+            pattern = rf"^{re.escape(option)}\s*=\s*([a-zA-Z0-9_.+-]+)\s*$"
+            match = re.search(pattern, self.extra_options, flags=re.MULTILINE)
+            if match:
+                value = ret_type(match.group(1))
+            else:
+                value = default
+        
+        return value
+
+
+
+
 def extra_options_flag(flag, extra_options):
-    pattern = rf"^{re.escape(flag)}\s*$"
+    pattern = rf"^(?:{re.escape(flag)}\s*$|{re.escape(flag)}=)"
     return bool(re.search(pattern, extra_options, flags=re.MULTILINE))
 
 def get_extra_options_kv(key, default, extra_options, ret_type=None):
@@ -178,7 +230,7 @@ def is_video_model(model):
         is_video_model = 'video' in model.inner_model.inner_model.model_config.unet_config['image_model'] or \
                          'cosmos' in model.inner_model.inner_model.model_config.unet_config['image_model'] or \
                          'wan2' in model.inner_model.inner_model.model_config.unet_config['image_model'] or \
-                         'ltxv' in model.inner_model.inner_model.model_config.unet_config['image_model']
+                         'ltxv' in model.inner_model.inner_model.model_config.unet_config['image_model']    
     except:
         pass
     return is_video_model

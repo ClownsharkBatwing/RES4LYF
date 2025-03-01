@@ -43,6 +43,18 @@ def get_collinear_flat(x, y):
 
 # TENSOR NORMALIZATION OPS
 
+def normalize_zscore(x, channelwise=False, inplace=False):
+    if inplace:
+        if channelwise:
+            return x.sub_(x.mean(dim=(-2,-1), keepdim=True)).div_(x.std(dim=(-2,-1), keepdim=True))
+        else:
+            return x.sub_(x.mean()).div_(x.std())
+    else:
+        if channelwise:
+            return (x - x.mean(dim=(-2,-1), keepdim=True) / x.std(dim=(-2,-1), keepdim=True))
+        else:
+            return (x - x.mean()) / x.std()
+
 def latent_normalize_channels(x):
     mean = x.mean(dim=(-2, -1), keepdim=True)
     std  = x.std (dim=(-2, -1), keepdim=True)

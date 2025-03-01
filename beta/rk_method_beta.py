@@ -7,7 +7,7 @@ import itertools
 
 from .phi_functions        import Phi
 from .rk_coefficients_beta import get_implicit_sampler_name_list, get_rk_methods_beta
-from ..helper              import get_extra_options_list, extra_options_flag, get_extra_options_kv
+from ..helper              import ExtraOptions
 from ..latents             import get_orthogonal, get_collinear, get_cosine_similarity
 
 from ..res4lyf             import RESplain
@@ -78,8 +78,9 @@ class RK_Method_Beta:
         self.extra_args                  = None
 
         self.extra_options               = extra_options
+        self.EO                          = ExtraOptions(extra_options)
 
-        self.reorder_tableau_indices     = get_extra_options_list("reorder_tableau_indices", -1, extra_options)
+        self.reorder_tableau_indices     = self.EO("reorder_tableau_indices", [-1])
 
         self.LINEAR_ANCHOR_X_0           = noise_anchor
 
@@ -213,8 +214,8 @@ class RK_Method_Beta:
         
         x_[row_tmp_offset] = x_0 + h_new * zr
         
-        if (self.SYNC_SUBSTEP_MEAN_CW and h_new != h_new_orig) or extra_options_flag("sync_mean_noise", self.extra_options):
-            if not extra_options_flag("disable_sync_mean_noise", self.extra_options):
+        if (self.SYNC_SUBSTEP_MEAN_CW and h_new != h_new_orig) or self.EO("sync_mean_noise"):
+            if not self.EO("disable_sync_mean_noise"):
                 x_row_down = x_0 + h_new_orig * zr
                 x_[row_tmp_offset] = x_[row_tmp_offset] - x_[row_tmp_offset].mean(dim=(-2,-1), keepdim=True) + x_row_down.mean(dim=(-2,-1), keepdim=True)
         
@@ -404,11 +405,11 @@ class RK_Method_Beta:
                     ):
         
         bong_iter_max_row = self.rows - row_offset
-        if extra_options_flag("bong_iter_max_row_full", self.extra_options):
+        if self.EO("bong_iter_max_row_full"):
             bong_iter_max_row = self.rows
         
         if row < bong_iter_max_row   and   self.multistep_stages == 0:
-            bong_strength = float(get_extra_options_kv("use_bong", "1.0", self.extra_options))
+            bong_strength = self.EO("bong_strength", 1.0)
             
             if bong_strength != 1.0:
                 x_0_tmp = x_0.clone()
@@ -420,7 +421,7 @@ class RK_Method_Beta:
                 for rr in range(row+row_offset):
                     x_[rr] = x_0 + h * self.zum(rr, eps_, eps_prev_)
                 for rr in range(row+row_offset):
-                    if extra_options_flag("zonkytar", self.extra_options):
+                    if self.EO("zonkytar"):
                         #eps_[rr] = self.get_unsample_epsilon(x_[rr], x_0, data_[rr], sigma, s_[rr])
                         eps_[rr] = self.get_epsilon(x_[rr], x_0, data_[rr], sigma, s_[rr])
                     else:
@@ -454,17 +455,17 @@ class RK_Method_Beta:
         if newton_name == "lying":
             default_anchor_x_all = True
         
-        newton_iter                 =   int(get_extra_options_kv(newton_iter_name,                      str("100"),                 self.extra_options))
-        newton_iter_skip_last_steps =   int(get_extra_options_kv(newton_iter_name + "_skip_last_steps", str("0"),                   self.extra_options))
-        newton_iter_mixing_rate     = float(get_extra_options_kv(newton_iter_name + "_mixing_rate",     str("1.0"),                 self.extra_options))
+        newton_iter                 = self.EO(newton_iter_name,                      100)
+        newton_iter_skip_last_steps = self.EO(newton_iter_name + "_skip_last_steps",   0)
+        newton_iter_mixing_rate     = self.EO(newton_iter_name + "_mixing_rate",     1.0)
         
-        newton_iter_anchor          =   int(get_extra_options_kv(newton_iter_name + "_anchor",          str("0"),                   self.extra_options))
-        newton_iter_anchor_x_all    =  bool(get_extra_options_kv(newton_iter_name + "_anchor_x_all",    str(default_anchor_x_all),  self.extra_options))
-        newton_iter_type            =       get_extra_options_kv(newton_iter_name + "_type",            "from_epsilon",             self.extra_options)
-        newton_iter_sequence        =       get_extra_options_kv(newton_iter_name + "_sequence",        "double",                   self.extra_options)
+        newton_iter_anchor          = self.EO(newton_iter_name + "_anchor",            0)
+        newton_iter_anchor_x_all    = self.EO(newton_iter_name + "_anchor_x_all",    default_anchor_x_all)
+        newton_iter_type            = self.EO(newton_iter_name + "_type",           "from_epsilon")
+        newton_iter_sequence        = self.EO(newton_iter_name + "_sequence",       "double")
         
         row_b_offset = 0
-        if extra_options_flag(newton_iter_name + "_include_row_b", self.extra_options):
+        if self.EO(newton_iter_name + "_include_row_b"):
             row_b_offset = 1
         
         if step >= len(sigmas)-1-newton_iter_skip_last_steps   or   sigmas[step+1] == 0   or   not self.IMPLICIT:
@@ -511,9 +512,8 @@ class RK_Method_Beta:
                     elif newton_iter_type == "from_epsilon":
                         eps_ [r_] = self.get_epsilon(x_0, x_[r_], data_[r_], sigma, s_[r_])
                     
-                    if extra_options_flag(newton_iter_name + "_opt", self.extra_options):
-                        #opt_timing, opt_type, opt_subtype = get_extra_options_list(newton_iter_name+"_opt", "", extra_options).split(",")
-                        opt_timing, opt_type, opt_subtype = get_extra_options_list(newton_iter_name+"_opt", "", self.extra_options)
+                    if self.EO(newton_iter_name + "_opt"):
+                        opt_timing, opt_type, opt_subtype = self.EO(newton_iter_name+"_opt", [str])
                         
                         opt_start, opt_stop = 0, self.rows+row_b_offset
                         if    opt_timing == "early":
@@ -641,7 +641,7 @@ class RK_Method_Exponential(RK_Method_Beta):
         else:
             eps_unmoored = y - x 
         
-        if extra_options_flag("manually_anchor_unsampler", self.extra_options):
+        if self.EO("manually_anchor_unsampler"):
             if sigma_down > sigma:
                 eps_anchored = (sigma    /(self.sigma_max - sigma)) * (x_0 - y)
             else:
