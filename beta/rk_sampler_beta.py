@@ -8,7 +8,7 @@ from ..res4lyf              import RESplain
 from ..helper               import ExtraOptions
 from ..latents              import lagrange_interpolation
 
-from .rk_method_beta        import RK_Method_Beta
+from .rk_method_beta        import RK_Method_Beta, RK_Method_Exponential, RK_Method_Linear
 from .rk_noise_sampler_beta import RK_NoiseSampler
 from .rk_guide_func_beta    import LatentGuide
 from .phi_functions         import Phi
