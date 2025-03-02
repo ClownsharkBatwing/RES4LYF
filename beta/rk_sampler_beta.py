@@ -205,13 +205,9 @@ def sample_rk_beta(
         x = state_info['raw_x'].clone()
         RESplain("Continuing from raw latent from previous sampler.", debug=False)
     
-    if 'sigmas' in state_info and sampler_mode == "resample":
-        sigmas = state_info['sigmas'].clone()
-        RESplain("Continuing from sigmas from previous sampler.", debug=False)
-        
-    if steps_to_run > 0:
-        state_info_out['sigmas'] = sigmas.clone()[steps_to_run:]
-        sigmas = sigmas.clone()[:steps_to_run+1]
+    start_step = 0
+    if 'end_step' in state_info and sampler_mode == "resample":
+        start_step = state_info['end_step'] if state_info['end_step'] != -1 else 0
 
     x      = x     .to(dtype=default_dtype, device=work_device)
     sigmas = sigmas.to(dtype=default_dtype, device=work_device)
@@ -300,9 +296,19 @@ def sample_rk_beta(
 
     gc.collect()
 
-    # BEGIN SAMPLING LOOP
-    num_steps = len(sigmas)-2 if sigmas[-1] == 0 else len(sigmas)-1
-    for step in trange(num_steps, disable=disable):
+    # BEGIN SAMPLING LOOP    
+    num_steps = len(sigmas[start_step:])-2 if sigmas[-1] == 0 else len(sigmas[start_step:])-1
+    if steps_to_run != -1:
+        current_steps = min(num_steps, steps_to_run)
+        num_steps     = start_step + min(num_steps, steps_to_run)
+    else:
+        current_steps = num_steps
+        num_steps     = start_step + num_steps
+    
+    INIT_SAMPLE_LOOP = True
+    step = start_step
+    progress_bar = trange(current_steps, disable=disable)
+    while step < num_steps:
         sigma, sigma_next = sigmas[step], sigmas[step+1]
                 
         if regional_conditioning_weights is not None:
@@ -322,9 +328,15 @@ def sample_rk_beta(
         rk_swap_stages = 3 if rk_swap_type != "" else 0
         recycled_stages = max(rk_swap_stages, RK.multistep_stages, RK.hybrid_stages)
         
-        if step == 0:
+        if INIT_SAMPLE_LOOP:
+            INIT_SAMPLE_LOOP = False
             x_, data_, eps_, eps_prev_  = (torch.zeros(    RK.rows+2,     *x.shape, dtype=default_dtype, device=work_device) for _ in range(4))
-            data_prev_                  =  torch.zeros(max(RK.rows+2, 4), *x.shape, dtype=default_dtype, device=work_device)
+            
+            if 'data_prev_' in state_info:
+                data_prev_ = state_info['data_prev_']
+            else:
+                data_prev_              =  torch.zeros(max(RK.rows+2, 4), *x.shape, dtype=default_dtype, device=work_device)
+            
             recycled_stages = len(data_prev_)-1
 
         sde_noise_t = None
@@ -634,10 +646,15 @@ def sample_rk_beta(
             pseudo_mix_strength = EO("pseudo_mix_strength", 0.0)
             LG.y0     = orig_y0     + pseudo_mix_strength * (denoised - orig_y0)
             LG.y0_inv = orig_y0_inv + pseudo_mix_strength * (denoised - orig_y0_inv)
+            
+            
+        progress_bar.update(1)
+        step += 1
+        # end sampling loop
 
+    progress_bar.close()
 
-
-    if sigmas[-1] == 0 and sigmas[-2] == NS.sigma_min:
+    if step == len(sigmas)-2 and sigmas[-1] == 0 and sigmas[-2] == NS.sigma_min:
         eps, denoised = RK(x, NS.sigma_min, x, NS.sigma_min)
         x = denoised
 
@@ -649,8 +666,8 @@ def sample_rk_beta(
         preview_callback(x, eps, denoised, x_, eps_, data_, step, sigma, sigma_next, callback, EO, FINAL_STEP=True)
 
     state_info_out['raw_x']             = x.clone()
-    #if steps_to_run > 0:
-    #    state_info_out['sigmas']            = sigmas.clone()[steps_to_run:]
+    state_info_out['data_prev_']        = data_prev_.clone()
+    state_info_out['end_step']          = step
     state_info_out['last_rng']          = NS.noise_sampler .generator.get_state()
     state_info_out['last_rng_substep']  = NS.noise_sampler2.generator.get_state()
     

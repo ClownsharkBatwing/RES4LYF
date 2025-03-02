@@ -1,11 +1,15 @@
 import torch
+from torch import Tensor
+
 import copy
 import math
+
+from typing          import Optional, Callable, Tuple, Dict, Any, Union, TYPE_CHECKING, TypeVar
 
 from .deis_coefficients import get_deis_coeff_list
 from .phi_functions import phi, Phi, calculate_gamma
 
-from ..helper import get_extra_options_kv, extra_options_flag
+from ..helper import ExtraOptions, get_extra_options_kv, extra_options_flag
 
 
 from itertools import permutations, combinations
@@ -1246,14 +1250,29 @@ rk_coeff = {
 
 
 
-def get_rk_methods_beta(rk_type, h, c1=0.0, c2=0.5, c3=1.0, h_prev=None, step=0, sigmas=None, sigma=None, sigma_next=None, sigma_down=None, extra_options=None):
-    FSAL = False
-    multistep_stages = 0
-    hybrid_stages = 0
-    u, v = None, None
+def get_rk_methods_beta(rk_type       : str,
+                        h             : Tensor,
+                        c1            : float            = 0.0,
+                        c2            : float            = 0.5,
+                        c3            : float            = 1.0,
+                        h_prev        : Optional[Tensor] = None,
+                        step          : int              = 0,
+                        sigmas        : Optional[Tensor] = None,
+                        sigma         : Optional[Tensor] = None,
+                        sigma_next    : Optional[Tensor] = None,
+                        sigma_down    : Optional[Tensor] = None,
+                        extra_options : Optional[str]    = None
+                        ):
     
-    multistep_initial_sampler = get_extra_options_kv("multistep_initial_sampler", "", extra_options)
-    multistep_extra_initial_steps = int(get_extra_options_kv("multistep_extra_initial_steps", "1", extra_options))
+    FSAL             = False
+    multistep_stages = 0
+    hybrid_stages    = 0
+    u                = None
+    v                = None
+    
+    EO                            = ExtraOptions(extra_options)
+    multistep_initial_sampler     = EO("multistep_initial_sampler", "")
+    multistep_extra_initial_steps = EO("multistep_extra_initial_steps", 1)
     
     #if RK_Method_Beta.is_exponential(rk_type): 
     if rk_type.startswith(("res", "dpmpp", "ddim", "pec", "etdrk", "lawson")): 
