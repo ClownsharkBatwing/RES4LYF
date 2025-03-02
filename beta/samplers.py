@@ -571,7 +571,7 @@ class ClownSamplerAdvanced_Beta:
             else:
                 sde_noise = copy.deepcopy(sde_noise)
                 sde_noise = normalize_zscore(sde_noise, channelwise=True, inplace=True)
-                        
+
 
             sampler = comfy.samplers.ksampler("rk_beta", 
                 {

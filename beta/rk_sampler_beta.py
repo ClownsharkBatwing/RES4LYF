@@ -206,8 +206,10 @@ def sample_rk_beta(
         RESplain("Continuing from raw latent from previous sampler.", debug=False)
     
     start_step = 0
-    if 'end_step' in state_info and sampler_mode == "resample":
+    if 'end_step' in state_info and (sampler_mode == "resample" or sampler_mode == "unsample"):
         start_step = state_info['end_step'] if state_info['end_step'] != -1 else 0
+        if sampler_mode != state_info['sampler_mode']:
+            start_step = 0
 
     x      = x     .to(dtype=default_dtype, device=work_device)
     sigmas = sigmas.to(dtype=default_dtype, device=work_device)
@@ -668,6 +670,7 @@ def sample_rk_beta(
     state_info_out['raw_x']             = x#.clone()
     state_info_out['data_prev_']        = data_prev_#.clone()
     state_info_out['end_step']          = step
+    state_info_out['sampler_mode']      = sampler_mode
     state_info_out['last_rng']          = NS.noise_sampler .generator.get_state()
     state_info_out['last_rng_substep']  = NS.noise_sampler2.generator.get_state()
     
