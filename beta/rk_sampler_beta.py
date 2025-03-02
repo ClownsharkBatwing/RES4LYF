@@ -1,12 +1,14 @@
 import torch
+from torch import Tensor
 from tqdm.auto import trange
 import gc
+from typing import Optional, Callable
 
 from ..res4lyf              import RESplain
 from ..helper               import ExtraOptions
 from ..latents              import lagrange_interpolation
 
-from .rk_method_beta        import RK_Method_Beta
+from .rk_method_beta        import RK_Method_Beta, RK_Method_Exponential, RK_Method_Linear
 from .rk_noise_sampler_beta import RK_NoiseSampler
 from .rk_guide_func_beta    import LatentGuide
 from .phi_functions         import Phi
@@ -14,20 +16,20 @@ from .constants             import MAX_STEPS, GUIDE_MODE_NAMES_PSEUDOIMPLICIT
 
 
 def init_implicit_sampling(
-        RK,
-        x_0,
-        x_,
-        eps_,
-        eps_prev_,
-        data_,
-        eps,
-        denoised,
-        denoised_prev2,
-        step,
-        sigmas,
-        h,
-        s_,
-        EO
+        RK             : RK_Method_Beta,
+        x_0            : Tensor,
+        x_             : Tensor,
+        eps_           : Tensor,
+        eps_prev_      : Tensor,
+        data_          : Tensor,
+        eps            : Tensor,
+        denoised       : Tensor,
+        denoised_prev2 : Tensor,
+        step           : int,
+        sigmas         : Tensor,
+        h              : Tensor,
+        s_             : Tensor,
+        EO             : ExtraOptions,
         ):
     
     sigma = sigmas[step]
@@ -104,79 +106,82 @@ def init_implicit_sampling(
 def sample_rk_beta(model,
         x,
         sigmas,
-        extra_args                    = None,
-        callback                      = None,
-        disable                       = None,
-        noise_sampler_type            = "gaussian",
-        noise_sampler_type_substep    = "gaussian",
-        noise_mode_sde                = "hard",
-        noise_seed                    = -1,
-        rk_type                       = "res_2m",
-        implicit_sampler_name         = "explicit_full",
+        extra_args                    : Optional[Tensor]   = None,
+        callback                      : Optional[Callable] = None,
+        disable                       : bool               = None,
+        noise_sampler_type            : str                = "gaussian",
+        noise_sampler_type_substep    : str                = "gaussian",
+        noise_mode_sde                : str                = "hard",
+        noise_seed                    : int                = -1,
+        rk_type                       : str                = "res_2m",
+        implicit_sampler_name         : str                = "explicit_full",
 
-        eta                           = 0.0,
-        s_noise                       = 1.,
-        s_noise_substep               = 1.,
-        d_noise                       = 1.,
-        alpha                         = -1.0,
-        alpha_substep                 = -1.0,
-        k                             = 1.0,
-        k_substep                     = 1.0,
-        c1                            = 0.0,
-        c2                            = 0.5,
-        c3                            = 1.0,
-        implicit_steps_diag           = 0,
-        implicit_steps_full           = 0,
+        eta                           : float              =  0.0,
+        s_noise                       : float              =  1.0,
+        s_noise_substep               : float              =  1.0,
+        d_noise                       : float              =  1.0,
+        alpha                         : float              = -1.0,
+        alpha_substep                 : float              = -1.0,
+        k                             : float              =  1.0,
+        k_substep                     : float              =  1.0,
+        c1                            : float              =  0.0,
+        c2                            : float              =  0.5,
+        c3                            : float              =  1.0,
+        implicit_steps_diag           : int                =  0,
+        implicit_steps_full           : int                =  0,
 
-        LGW_MASK_RESCALE_MIN          = True,
-        sigmas_override               = None,
-        sampler_mode                  = "standard",
-        epsilon_scales                = None,
-        regional_conditioning_weights = None,
-        sde_noise                     = [],
+        LGW_MASK_RESCALE_MIN          : bool               = True,
+        sigmas_override               : Optional[Tensor]   = None,
+        sampler_mode                  : str                = "standard",
+        epsilon_scales                : Optional[Tensor]   = None,
+        regional_conditioning_weights : Optional[Tensor]   = None,
+        sde_noise                     : list    [Tensor]   = [],
 
-        extra_options                 = "",
+        extra_options                 : str                = "",
 
-        etas                          = None,
-        etas_substep                  = None,
-        s_noises                      = None,
-        s_noises_substep              = None,
-        momentums                     = None,
-        guides                        = None,
-        cfgpp                         = 0.0,
-        cfg_cw                        =  1.0,
-        regional_conditioning_floors  = None,
-        frame_weights_grp             = None,
-        eta_substep                   = 0.0,
-        noise_mode_sde_substep        = "hard",
+        etas                          : Optional[Tensor]   = None,
+        etas_substep                  : Optional[Tensor]   = None,
+        s_noises                      : Optional[Tensor]   = None,
+        s_noises_substep              : Optional[Tensor]   = None,
+        momentums                     : Optional[Tensor]   = None,
+        guides                        : bool               = None,
+        cfgpp                         : float              = 0.0,
+        cfg_cw                        : float              = 1.0,
+        regional_conditioning_floors  : bool               = None,
+        frame_weights_grp             : bool               = None,
+        eta_substep                   : float              = 0.0,
+        noise_mode_sde_substep        : str                = "hard",
 
-        noise_boost_step              = 0.0,
-        noise_boost_substep           = 0.0,
-        overshoot                     = 0.0,
-        overshoot_substep             = 0.0,
-        overshoot_mode                = "hard",
-        overshoot_mode_substep        = "hard",
-        BONGMATH                      = True,
-        noise_anchor                  = 1.0,
+        noise_boost_step              : float              = 0.0,
+        noise_boost_substep           : float              = 0.0,
+        overshoot                     : float              = 0.0,
+        overshoot_substep             : float              = 0.0,
+        overshoot_mode                : str                = "hard",
+        overshoot_mode_substep        : str                = "hard",
+        BONGMATH                      : bool               = True,
+        noise_anchor                  : float              = 1.0,
 
-        implicit_type                 = "predictor-corrector",
-        implicit_type_substeps        = "predictor-corrector",
+        implicit_type                 : str                = "predictor-corrector",
+        implicit_type_substeps        : str                = "predictor-corrector",
         
-        state_info                    = {},
-        state_info_out                = {},
+        state_info                    : Optional[dict]     = None,
+        state_info_out                : Optional[dict]     = None,
         
-        rk_swap_step                  = MAX_STEPS,
-        rk_swap_print                 = False,
-        rk_swap_threshold             = 0.0,
-        rk_swap_type                  = "",
+        rk_swap_step                  : int                = MAX_STEPS,
+        rk_swap_print                 : bool               = False,
+        rk_swap_threshold             : float              = 0.0,
+        rk_swap_type                  : str                = "",
         ):
     
-    EO = ExtraOptions(extra_options)
-    default_dtype = EO("default_dtype", torch.float64)
+    EO             = ExtraOptions(extra_options)
+    default_dtype  = EO("default_dtype", torch.float64)
     
-    extra_args    = {} if extra_args is None else extra_args
-    model_device  = x.device
-    work_device   = 'cpu' if EO("work_device_cpu") else model_device
+    extra_args     = {} if extra_args is None else extra_args
+    model_device   = x.device
+    work_device    = 'cpu' if EO("work_device_cpu") else model_device
+
+    state_info     = {} if state_info     is None else state_info
+    state_info_out = {} if state_info_out is None else state_info_out
 
     if 'raw_x' in state_info:
         x = state_info['raw_x'].clone()
@@ -185,14 +190,14 @@ def sample_rk_beta(model,
     x      = x     .to(dtype=default_dtype, device=work_device)
     sigmas = sigmas.to(dtype=default_dtype, device=work_device)
 
-    c1                          = EO("c1", c1)
-    c2                          = EO("c2", c2)
-    c3                          = EO("c3", c3)
+    c1                          = EO("c1"                         , c1)
+    c2                          = EO("c2"                         , c2)
+    c3                          = EO("c3"                         , c3)
     
-    cfg_cw                      = EO("cfg_cw", cfg_cw)
+    cfg_cw                      = EO("cfg_cw"                     , cfg_cw)
     
-    noise_seed                  = EO("noise_seed",         noise_seed)
-    noise_seed_substep          = EO("noise_seed_substep", noise_seed + MAX_STEPS)
+    noise_seed                  = EO("noise_seed"                 ,         noise_seed)
+    noise_seed_substep          = EO("noise_seed_substep"         , noise_seed + MAX_STEPS)
     
     pseudoimplicit_row_weights  = EO("pseudoimplicit_row_weights" , [1. for _ in range(100)])
     pseudoimplicit_step_weights = EO("pseudoimplicit_step_weights", [1. for _ in range(max(implicit_steps_diag, implicit_steps_full)+1)])
@@ -579,7 +584,7 @@ def sample_rk_beta(model,
         for ms in range(recycled_stages):
             data_prev_[recycled_stages - ms] = data_prev_[recycled_stages - ms - 1]
         
-        rk_type = RK.swap_rk_type_at_step_or_threshold(x_0, data_prev_, NS.sigma_down, sigmas, step, RK, rk_swap_step, rk_swap_threshold, rk_swap_type, rk_swap_print)
+        rk_type = RK.swap_rk_type_at_step_or_threshold(x_0, data_prev_, NS, sigmas, step, rk_swap_step, rk_swap_threshold, rk_swap_type, rk_swap_print)
 
 
         
@@ -620,7 +625,19 @@ def sample_rk_beta(model,
 
 
 
-def preview_callback(x, eps, denoised, x_, eps_, data_, step, sigma, sigma_next, callback, EO, FINAL_STEP=False):
+def preview_callback(
+                    x          : Tensor,
+                    eps        : Tensor,
+                    denoised   : Tensor,
+                    x_         : Tensor,
+                    eps_       : Tensor,
+                    data_      : Tensor,
+                    step       : int,
+                    sigma      : Tensor,
+                    sigma_next : Tensor,
+                    callback   : Callable,
+                    EO         : ExtraOptions,
+                    FINAL_STEP : bool = False):
     
     if FINAL_STEP:
         denoised_callback = denoised

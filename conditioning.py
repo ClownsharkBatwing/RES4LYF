@@ -420,6 +420,7 @@ class ConditioningToBase64:
     CATEGORY = "RES4LYF/utilities"
 
     def notify(self, unique_id=None, extra_pnginfo=None, conditioning=None):
+        
         conditioning_pickle = pickle.dumps(conditioning)
         conditioning_base64 = base64.b64encode(conditioning_pickle).decode('utf-8')
         text = [conditioning_base64]
@@ -471,15 +472,15 @@ class RegionalMask(torch.nn.Module):
     def __init__(self, mask: torch.Tensor, conditioning: torch.Tensor, conditioning_regional: torch.Tensor, latent:torch.Tensor, start_percent: float, end_percent: float, mask_type: str, img_len: int, text_len: int) -> None:
         super().__init__()
         #self.register_buffer('mask', mask)
-        self.mask = mask.clone().to('cuda')
-        self.conditioning = copy.deepcopy(conditioning)
+        self.mask                  = mask.clone().to('cuda')
+        self.conditioning          = copy.deepcopy(conditioning)
         self.conditioning_regional = copy.deepcopy(conditioning_regional)
-        self.latent = latent.clone()
-        self.start_percent = start_percent
-        self.end_percent   = end_percent
-        self.mask_type = mask_type
-        self.img_len = img_len
-        self.text_len = text_len
+        self.latent                = latent.clone()
+        self.start_percent         = start_percent
+        self.end_percent           = end_percent
+        self.mask_type             = mask_type
+        self.img_len               = img_len
+        self.text_len              = text_len
 
     def __call__(self, transformer_options, weight=0, dtype=torch.bfloat16, *args, **kwargs):
         sigma = transformer_options['sigmas'][0]
@@ -493,8 +494,8 @@ class RegionalConditioning(torch.nn.Module):
     def __init__(self, conditioning: torch.Tensor, region_cond: torch.Tensor, start_percent: float, end_percent: float) -> None:
         super().__init__()
         #self.register_buffer('region_cond', region_cond)
-        self.conditioning = conditioning
-        self.region_cond = region_cond.clone().to('cuda')
+        self.conditioning  = conditioning
+        self.region_cond   = region_cond.clone().to('cuda')
         self.start_percent = start_percent
         self.end_percent   = end_percent
 
@@ -686,7 +687,7 @@ class ClownRegionalConditioningFlux:
     def INPUT_TYPES(s):
         return {
             "required": { 
-                "regional_model":    (["auto", "deactivate", "passthrough"], {"default": "auto"}),
+                #"regional_model":    (["auto", "deactivate", "passthrough"], {"default": "auto"}),
                 "mask_weight":       ("FLOAT",                {"default": 1.0, "min": -10000.0, "max": 10000.0, "step": 0.01}),
                 "region_bleed":      ("FLOAT",                {"default": 0.0, "min": -10000.0, "max": 10000.0, "step": 0.01}),
                 "start_percent":     ("FLOAT",                {"default": 0,   "min": 0.0,      "max": 1.0,     "step": 0.01}),
@@ -712,18 +713,18 @@ class ClownRegionalConditioningFlux:
 
     def main(self,
             model,
-            regional_model,
-            mask_weight      = 1.0,
-            start_percent    = 0.0,
-            end_percent      = 1.0,
+            regional_model   : str = "auto",
+            mask_weight      : float = 1.0,
+            start_percent    : float = 0.0,
+            end_percent      : float = 1.0,
             positive_masked  = None,
             positive_unmasked= None,
             mask_weights     = None,
             region_bleeds    = None,
-            region_bleed     = 0.0,
-            mask_type        = "gradient",
+            region_bleed     : float = 0.0,
+            mask_type        : str = "gradient",
             mask             = None,
-            invert_mask      = False
+            invert_mask      : bool = False
             ):
         
         if regional_model == "auto" or regional_model == "passthrough":

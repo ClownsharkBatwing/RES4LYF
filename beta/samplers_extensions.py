@@ -3,7 +3,7 @@ import torch.nn.functional as F
 
 from ..helper                import OptionsManager, initialize_or_scale, get_res4lyf_scheduler_list
 
-from .rk_coefficients_beta   import RK_SAMPLER_NAMES_BETA_FOLDERS, get_default_sampler_name, get_sampler_name_list
+from .rk_coefficients_beta   import RK_SAMPLER_NAMES_BETA_FOLDERS, get_default_sampler_name, get_sampler_name_list, process_sampler_name
 
 from .noise_classes          import NOISE_GENERATOR_NAMES_SIMPLE
 from .rk_noise_sampler_beta  import NOISE_MODE_NAMES
@@ -31,6 +31,10 @@ class ClownSamplerSelector_Beta:
     def main(self,
              sampler_name = "res_2m",
              ):
+        
+        sampler_name, implicit_sampler_name = process_sampler_name(sampler_name)
+        
+        sampler_name = sampler_name if implicit_sampler_name == "use_explicit" else implicit_sampler_name
         
         return (sampler_name,)
 
@@ -361,6 +365,10 @@ class ClownOptions_SwapSampler_Beta:
             options            = None,
             ): 
         
+        sampler_name, implicit_sampler_name = process_sampler_name(sampler_name)
+        
+        sampler_name = sampler_name if implicit_sampler_name == "use_explicit" else implicit_sampler_name
+                
         options = options if options is not None else {}
             
         options['rk_swap_type']      = sampler_name

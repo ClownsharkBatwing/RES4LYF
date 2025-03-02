@@ -50,30 +50,35 @@ class ReFluxPatcher:
     FUNCTION     = "main"
 
     def main(self, model, enable=True):
-        m = model.clone()
         
-        if m.model.diffusion_model.__class__ == ReFlux or m.model.diffusion_model.__class__ == Flux:
-            if enable:
-                m.model.diffusion_model.__class__     = ReFlux
-                m.model.diffusion_model.threshold_inv = False
-                
-                for i, block in enumerate(m.model.diffusion_model.double_blocks):
-                    block.__class__ = ReDoubleStreamBlock
-                    block.idx       = i
+        if enable and model.model.diffusion_model.__class__ == Flux:
+            m = model.clone()
+            m.model.diffusion_model.__class__     = ReFlux
+            m.model.diffusion_model.threshold_inv = False
+            
+            for i, block in enumerate(m.model.diffusion_model.double_blocks):
+                block.__class__ = ReDoubleStreamBlock
+                block.idx       = i
 
-                for i, block in enumerate(m.model.diffusion_model.single_blocks):
-                    block.__class__ = ReSingleStreamBlock
-                    block.idx       = i
-            else:
-                m.model.diffusion_model.__class__ = Flux
+            for i, block in enumerate(m.model.diffusion_model.single_blocks):
+                block.__class__ = ReSingleStreamBlock
+                block.idx       = i
                 
-                for i, block in enumerate(m.model.diffusion_model.double_blocks):
-                    block.__class__ = DoubleStreamBlock
-                    block.idx       = i
+                
+        elif not enable and model.model.diffusion_model.__class__ == ReFlux:
+            m = model.clone()
+            m.model.diffusion_model.__class__ = Flux
+            
+            for i, block in enumerate(m.model.diffusion_model.double_blocks):
+                block.__class__ = DoubleStreamBlock
+                block.idx       = i
 
-                for i, block in enumerate(m.model.diffusion_model.single_blocks):
-                    block.__class__ = SingleStreamBlock
-                    block.idx       = i
+            for i, block in enumerate(m.model.diffusion_model.single_blocks):
+                block.__class__ = SingleStreamBlock
+                block.idx       = i
+                
+        else:
+            m = model
         
         return (m,)
 

@@ -1,4 +1,6 @@
 import torch
+from torch import Tensor
+from typing import Optional, Callable
 
 import comfy.model_patcher
 import comfy.supported_models
@@ -38,7 +40,7 @@ class RK_Method_Beta:
         
         self.work_device                 = work_device
         self.model_device                = model_device
-        self.dtype                       = dtype
+        self.dtype                       : torch.dtype = dtype
 
         self.model                       = model
 
@@ -50,62 +52,62 @@ class RK_Method_Beta:
         self.sigma_min                   = model_sampling.sigma_min.to(dtype=dtype, device=model_device)
         self.sigma_max                   = model_sampling.sigma_max.to(dtype=dtype, device=model_device)
 
-        self.rk_type                     = rk_type
+        self.rk_type                     : str = rk_type
 
-        self.IMPLICIT                    = rk_type in get_implicit_sampler_name_list(nameOnly=True)
-        self.EXPONENTIAL                 = RK_Method_Beta.is_exponential(rk_type)
-        self.LINEAR_ANCHOR_X_0           = 1.0
-        self.SYNC_SUBSTEP_MEAN_CW        = True
+        self.IMPLICIT                    : str = rk_type in get_implicit_sampler_name_list(nameOnly=True)
+        self.EXPONENTIAL                 : bool = RK_Method_Beta.is_exponential(rk_type)
+        self.LINEAR_ANCHOR_X_0           : float = 1.0
+        self.SYNC_SUBSTEP_MEAN_CW        : bool = True
 
         self.A                           = None
         self.B                           = None
         self.U                           = None
         self.V                           = None
 
-        self.rows                        = 0
-        self.cols                        = 0
+        self.rows                        : int = 0
+        self.cols                        : int = 0
 
-        self.denoised                    = None
-        self.uncond                      = None
+        self.denoised                    : Optional[Tensor] = None
+        self.uncond                      : Optional[Tensor] = None
 
-        self.y0                          = None
-        self.y0_inv                      = None
+        self.y0                          : Optional[Tensor] = None
+        self.y0_inv                      : Optional[Tensor] = None
 
-        self.multistep_stages            = 0
-        self.row_offset                  = None
+        self.multistep_stages            : int = 0
+        self.row_offset                  : Optional[int] = None
 
-        self.cfg_cw                      = 1.0
+        self.cfg_cw                      : float = 1.0
         self.extra_args                  = None
 
-        self.extra_options               = extra_options
-        self.EO                          = ExtraOptions(extra_options)
+        self.extra_options               : str = extra_options
+        self.EO                          : ExtraOptions = ExtraOptions(extra_options)
 
-        self.reorder_tableau_indices     = self.EO("reorder_tableau_indices", [-1])
+        self.reorder_tableau_indices     : list[int] = self.EO("reorder_tableau_indices", [-1])
 
-        self.LINEAR_ANCHOR_X_0           = noise_anchor
+        self.LINEAR_ANCHOR_X_0           : float = noise_anchor
 
     @staticmethod
     def is_exponential(rk_type):
-        if rk_type.startswith(("res", 
-                               "dpmpp", 
-                               "ddim", 
-                               "pec", 
-                               "etdrk", 
-                               "lawson", 
-                               "abnorsett",
-                               )): 
+        if rk_type.startswith(( "res", 
+                                "dpmpp", 
+                                "ddim", 
+                                "pec", 
+                                "etdrk", 
+                                "lawson", 
+                                "abnorsett",
+                                )): 
             return True
         else:
             return False
 
     @staticmethod
     def create(model,
-            rk_type,
-            noise_anchor  = 1.0,
-            model_device  = 'cuda',
-            work_device   = 'cpu',
-            dtype         = torch.float64,
-            extra_options = ""
+            rk_type       : str,
+            noise_anchor  : float       = 1.0,
+            model_device  : str         = 'cuda',
+            work_device   : str         = 'cpu',
+            dtype         : torch.dtype = torch.float64,
+            extra_options : str         = ""
             ):
         
         if RK_Method_Beta.is_exponential(rk_type):
@@ -117,30 +119,28 @@ class RK_Method_Beta:
         raise NotImplementedError("This method got clownsharked!")
     
     def model_epsilon(self, x, sigma, **extra_args):
-        s_in = x.new_ones([x.shape[0]])
+        s_in     = x.new_ones([x.shape[0]])
         denoised = self.model(x, sigma * s_in, **extra_args)
         denoised = self.calc_cfg_channelwise(denoised)
-
-        #return x0 ###################################THIS WORKS ONLY WITH THE MODEL SAMPLING PATCH
-        eps = (x - denoised) / (sigma * s_in).view(x.shape[0], 1, 1, 1)
+        eps      = (x - denoised) / (sigma * s_in).view(x.shape[0], 1, 1, 1)       #return x0 ###################################THIS WORKS ONLY WITH THE MODEL SAMPLING PATCH
         return eps, denoised
     
     def model_denoised(self, x, sigma, **extra_args):
-        s_in = x.new_ones([x.shape[0]])
+        s_in     = x.new_ones([x.shape[0]])
         denoised = self.model(x, sigma * s_in, **extra_args)
         denoised = self.calc_cfg_channelwise(denoised)
         return denoised
 
 
     def set_coeff(self,
-                rk_type,
-                h,
-                c1         = 0.0,
-                c2         = 0.5,
-                c3         = 1.0,
-                step       = 0,
-                sigmas     = None,
-                sigma_down = None,
+                rk_type    : str,
+                h          : Tensor,
+                c1         : float  = 0.0,
+                c2         : float  = 0.5,
+                c3         : float  = 1.0,
+                step       : int    = 0,
+                sigmas     : Tensor = None,
+                sigma_down : Tensor = None,
                 ):
 
         self.rk_type     = rk_type
@@ -360,10 +360,9 @@ class RK_Method_Beta:
     def swap_rk_type_at_step_or_threshold(self,
                                             x_0,
                                             data_prev_,
-                                            sigma_down,
+                                            NS,
                                             sigmas,
                                             step,
-                                            RK,
                                             rk_swap_step,
                                             rk_swap_threshold,
                                             rk_swap_type,
@@ -378,15 +377,52 @@ class RK_Method_Beta:
         if step > rk_swap_step and self.rk_type != rk_swap_type:
             RESplain("Switching rk_type to:", rk_swap_type)
             self.rk_type = rk_swap_type
+            
+            if RK_Method_Beta.is_exponential(rk_swap_type):
+                self.__class__ = RK_Method_Exponential
+            else:
+                self.__class__ = RK_Method_Linear
+                
+            if rk_swap_type in get_implicit_sampler_name_list(nameOnly=True):
+                self.IMPLICIT = True
+                self.row_offset = 0
+                NS.row_offset   = 0
+            else:
+                self.IMPLICIT = False
+                self.row_offset = 1
+                NS.row_offset   = 1
+            NS.h_fn = self.h_fn
+            NS.t_fn = self.t_fn
+            NS.sigma_fn = self.sigma_fn
+            
+            
+            
         if step > 2 and sigmas[step+1] > 0 and self.rk_type != rk_swap_type and rk_swap_threshold > 0:
-            x_res_2m, denoised_res_2m = RK.calculate_res_2m_step(x_0, data_prev_, sigma_down, sigmas, step)
-            x_res_3m, denoised_res_3m = RK.calculate_res_3m_step(x_0, data_prev_, sigma_down, sigmas, step)
+            x_res_2m, denoised_res_2m = self.calculate_res_2m_step(x_0, data_prev_, NS.sigma_down, sigmas, step)
+            x_res_3m, denoised_res_3m = self.calculate_res_3m_step(x_0, data_prev_, NS.sigma_down, sigmas, step)
             if denoised_res_2m is not None:
                 if rk_swap_print:
                     RESplain("res_3m - res_2m:", torch.norm(denoised_res_3m - denoised_res_2m).item())
                 if rk_swap_threshold > torch.norm(denoised_res_2m - denoised_res_3m):
                     RESplain("Switching rk_type to:", rk_swap_type, "at step:", step)
                     self.rk_type = rk_swap_type
+            
+                    if RK_Method_Beta.is_exponential(rk_swap_type):
+                        self.__class__ = RK_Method_Exponential
+                    else:
+                        self.__class__ = RK_Method_Linear
+                
+                    if rk_swap_type in get_implicit_sampler_name_list(nameOnly=True):
+                        self.IMPLICIT = True
+                        self.row_offset = 0
+                        NS.row_offset   = 0
+                    else:
+                        self.IMPLICIT = False
+                        self.row_offset = 1
+                        NS.row_offset   = 1
+                    NS.h_fn = self.h_fn
+                    NS.t_fn = self.t_fn
+                    NS.sigma_fn = self.sigma_fn
             
         return self.rk_type
 

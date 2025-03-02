@@ -1688,6 +1688,7 @@ class latent_channelwise_match:
             extra_options
             ):
         
+        #EO = ExtraOptions(extra_options)
         dtype = latent_target['samples'].dtype
 
         exclude_channels = get_extra_options_list(exclude_channels, -1, extra_options)
