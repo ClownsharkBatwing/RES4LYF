@@ -103,16 +103,11 @@ class SharkSampler:
             **kwargs,
             ): 
         
+            options_mgr = OptionsManager(options, **kwargs)
+            extra_options    += "\n" + options_mgr.get('extra_options', "")
+
             EO = ExtraOptions(extra_options)
             default_dtype = EO("default_dtype", torch.float64)
-            
-            disable_pbar = not comfy.utils.PROGRESS_BAR_ENABLED
-
-
-
-            # INIT EXTENDABLE OPTIONS INPUTS
-    
-            options_mgr = OptionsManager(options, **kwargs)
         
             noise_stdev     = options_mgr.get('noise_init_stdev', noise_stdev)
             noise_mean      = options_mgr.get('noise_init_mean',  noise_mean)
@@ -122,7 +117,9 @@ class SharkSampler:
             k_init          = options_mgr.get('k_init',           k_init)
             sde_noise       = options_mgr.get('sde_noise',        sde_noise)
             sde_noise_steps = options_mgr.get('sde_noise_steps',  sde_noise_steps)
-        
+                    
+            disable_pbar = not comfy.utils.PROGRESS_BAR_ENABLED
+
             if cfg < 0:
                 sampler.extra_options['cfg_cw'] = -cfg
                 cfg = 1.0
@@ -481,19 +478,11 @@ class ClownSamplerAdvanced_Beta:
             **kwargs,
             ): 
         
+            options_mgr = OptionsManager(options, **kwargs)
+            extra_options    += "\n" + options_mgr.get('extra_options', "")
+
             EO = ExtraOptions(extra_options)
             default_dtype = EO("default_dtype", torch.float64)
-        
-            options_mgr = OptionsManager(options, **kwargs)
-    
-            sampler_name, implicit_sampler_name = process_sampler_name(sampler_name)
-
-            implicit_steps_diag = implicit_substeps
-            implicit_steps_full = implicit_steps
-
-            if noise_mode_sde == "none":
-                eta = 0.0
-                noise_mode_sde = "hard"
 
             noise_type_sde    = options_mgr.get('noise_type_sde'   , noise_type_sde)
             noise_mode_sde    = options_mgr.get('noise_mode_sde'   , noise_mode_sde)
@@ -515,6 +504,15 @@ class ClownSamplerAdvanced_Beta:
             rk_swap_threshold = options_mgr.get('rk_swap_threshold', rk_swap_threshold)
             rk_swap_type      = options_mgr.get('rk_swap_type'     , rk_swap_type)
 
+
+            sampler_name, implicit_sampler_name = process_sampler_name(sampler_name)
+
+            implicit_steps_diag = implicit_substeps
+            implicit_steps_full = implicit_steps
+
+            if noise_mode_sde == "none":
+                eta = 0.0
+                noise_mode_sde = "hard"
 
             rescale_floor = EO("rescale_floor")
 
@@ -722,7 +720,7 @@ class ClownsharKSampler_Beta:
             ): 
         
         options_mgr = OptionsManager(options, **kwargs)
-
+        extra_options    += "\n" + options_mgr.get('extra_options', "")
 
         #noise_seed_sde = seed+1
         
