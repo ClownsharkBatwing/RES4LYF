@@ -585,7 +585,9 @@ def sample_rk_beta(model,
             data_prev_[recycled_stages - ms] = data_prev_[recycled_stages - ms - 1]
         
         rk_type = RK.swap_rk_type_at_step_or_threshold(x_0, data_prev_, NS, sigmas, step, rk_swap_step, rk_swap_threshold, rk_swap_type, rk_swap_print)
-
+        if step > rk_swap_step:
+            implicit_steps_full = 0
+            implicit_steps_diag = 0
 
         
         denoised_data_prev2 = denoised_data_prev
