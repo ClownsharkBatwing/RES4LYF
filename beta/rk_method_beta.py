@@ -360,10 +360,9 @@ class RK_Method_Beta:
     def swap_rk_type_at_step_or_threshold(self,
                                             x_0,
                                             data_prev_,
-                                            sigma_down,
+                                            NS,
                                             sigmas,
                                             step,
-                                            RK,
                                             rk_swap_step,
                                             rk_swap_threshold,
                                             rk_swap_type,
@@ -383,12 +382,24 @@ class RK_Method_Beta:
                 self.__class__ = RK_Method_Exponential
             else:
                 self.__class__ = RK_Method_Linear
+                
+            if rk_swap_type in get_implicit_sampler_name_list(nameOnly=True):
+                self.IMPLICIT = True
+                self.row_offset = 0
+                NS.row_offset   = 0
+            else:
+                self.IMPLICIT = False
+                self.row_offset = 1
+                NS.row_offset   = 1
+            NS.h_fn = self.h_fn
+            NS.t_fn = self.t_fn
+            NS.sigma_fn = self.sigma_fn
             
             
             
         if step > 2 and sigmas[step+1] > 0 and self.rk_type != rk_swap_type and rk_swap_threshold > 0:
-            x_res_2m, denoised_res_2m = RK.calculate_res_2m_step(x_0, data_prev_, sigma_down, sigmas, step)
-            x_res_3m, denoised_res_3m = RK.calculate_res_3m_step(x_0, data_prev_, sigma_down, sigmas, step)
+            x_res_2m, denoised_res_2m = self.calculate_res_2m_step(x_0, data_prev_, NS.sigma_down, sigmas, step)
+            x_res_3m, denoised_res_3m = self.calculate_res_3m_step(x_0, data_prev_, NS.sigma_down, sigmas, step)
             if denoised_res_2m is not None:
                 if rk_swap_print:
                     RESplain("res_3m - res_2m:", torch.norm(denoised_res_3m - denoised_res_2m).item())
@@ -400,6 +411,18 @@ class RK_Method_Beta:
                         self.__class__ = RK_Method_Exponential
                     else:
                         self.__class__ = RK_Method_Linear
+                
+                    if rk_swap_type in get_implicit_sampler_name_list(nameOnly=True):
+                        self.IMPLICIT = True
+                        self.row_offset = 0
+                        NS.row_offset   = 0
+                    else:
+                        self.IMPLICIT = False
+                        self.row_offset = 1
+                        NS.row_offset   = 1
+                    NS.h_fn = self.h_fn
+                    NS.t_fn = self.t_fn
+                    NS.sigma_fn = self.sigma_fn
             
         return self.rk_type
 

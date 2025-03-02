@@ -73,12 +73,12 @@ RK_SAMPLER_NAMES_BETA_FOLDERS = ["none",
                     "exponential/dpmpp_sde_2s",
                     "exponential/dpmpp_3s",
                     
-                    "linear/lawson2a_2s",
-                    "linear/lawson2b_2s",
+                    "exponential/lawson2a_2s",
+                    "exponential/lawson2b_2s",
 
-                    "linear/lawson4_4s",
-                    "linear/lawson41-gen_4s",
-                    "linear/lawson41-gen-mod_4s",
+                    "exponential/lawson4_4s",
+                    "exponential/lawson41-gen_4s",
+                    "exponential/lawson41-gen-mod_4s",
                     
                     "hybrid/lawson42-gen-mod_1h4s",
                     "hybrid/lawson43-gen-mod_2h4s",
@@ -284,7 +284,7 @@ def process_sampler_name(sampler_name_in):
 
 
 
-alpha_crouzeix  = (2/(3**0.5)) * math.cos(math.pi / 18)
+alpha_crouzeix = (2/(3**0.5)) * math.cos(math.pi / 18)
 gamma_crouzeix = (1/(3**0.5)) * math.cos(math.pi / 18) + 1/2 # Crouzeix & Raviart 1980; A-stable; pg 100 in Solving Ordinary Differential Equations II
 delta_crouzeix = 1 / (6 * (2 * gamma_crouzeix - 1)**2)       # Crouzeix & Raviart 1980; A-stable; pg 100 in Solving Ordinary Differential Equations II
 
