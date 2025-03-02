@@ -14,7 +14,7 @@ from ..res4lyf      import RESplain
 
 
 NOISE_MODE_NAMES = ["none",
-                    "hard_sq",
+                    #"hard_sq",
                     "hard",
                     "lorentzian", 
                     "soft", 
@@ -43,10 +43,10 @@ class RK_NoiseSampler:
     def __init__(self,
                 RK,
                 model,
-                step=0,
-                device='cuda',
-                dtype=torch.float64,
-                extra_options=""
+                step          : int=0,
+                device        : str='cuda',
+                dtype         : torch.dtype=torch.float64,
+                extra_options : str=""
                 ):
         
         self.device                 = device

@@ -143,7 +143,7 @@ class SharkSampler:
             else:
                 sampler.extra_options.pop("cfg_cw", None) 
 
-            work_model   = model#.clone()
+            work_model   = model.clone()
             sigma_min    = work_model.model.model_sampling.sigma_min
             sigma_max    = work_model.model.model_sampling.sigma_max
         
@@ -183,7 +183,7 @@ class SharkSampler:
             
             pos_cond    = copy.deepcopy(positive)
             neg_cond    = copy.deepcopy(negative)
-            
+            """
             if   isinstance(work_model.model.model_config, comfy.supported_models.Flux) or isinstance(work_model.model.model_config, comfy.supported_models.FluxSchnell):
                 pos_cond = [[torch.zeros((1, 256, 4096)), {'pooled_output': torch.zeros((1,  768))}]] if pos_cond is None else pos_cond
                 neg_cond = [[torch.zeros((1, 256, 4096)), {'pooled_output': torch.zeros((1,  768))}]] if neg_cond is None else neg_cond
@@ -232,7 +232,7 @@ class SharkSampler:
             if EO("uncond_ortho"):
                 neg_cond[0][0]                  = get_orthogonal(neg_cond[0][0],                  pos_cond[0][0])
                 neg_cond[0][1]['pooled_output'] = get_orthogonal(neg_cond[0][1]['pooled_output'], pos_cond[0][1]['pooled_output'])
-
+            """
 
 
             # SETUP FLUX REGIONAL COND
@@ -247,7 +247,7 @@ class SharkSampler:
                     regional_mask                                          = copy.deepcopy(regional_mask)
                     
                     if not EO("disable_autoswap_reflux"):
-                        work_model, = RES4LYF.models.ReFluxPatcher().main(work_model, enable=True)
+                        work_model, = RES4LYF.models.ReFluxPatcher().main(work_model, enable=True, force=True)
 
                     work_model.set_model_patch(regional_conditioning, 'regional_conditioning_positive')
                     work_model.set_model_patch(regional_mask,         'regional_conditioning_mask')

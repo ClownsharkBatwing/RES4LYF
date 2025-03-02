@@ -1,6 +1,6 @@
 import torch
 from torch import Tensor
-from typing import Optional, Callable
+from typing import Optional, Callable, Tuple, Dict, Any, Union
 
 import comfy.model_patcher
 import comfy.supported_models
@@ -17,11 +17,11 @@ from ..res4lyf             import RESplain
 MAX_STEPS = 10000
 
 
-def get_data_from_step(x, x_next, sigma, sigma_next):
+def get_data_from_step   (x:Tensor, x_next:Tensor, sigma:Tensor, sigma_next:Tensor) -> Tensor:
     h = sigma_next - sigma
     return (sigma_next * x - sigma * x_next) / h
 
-def get_epsilon_from_step(x, x_next, sigma, sigma_next):
+def get_epsilon_from_step(x:Tensor, x_next:Tensor, sigma:Tensor, sigma_next:Tensor) -> Tensor:
     h = sigma_next - sigma
     return (x - x_next) / h
 
@@ -30,12 +30,12 @@ def get_epsilon_from_step(x, x_next, sigma, sigma_next):
 class RK_Method_Beta:
     def __init__(self,
                 model,
-                rk_type,
-                noise_anchor,
-                model_device  = 'cuda',
-                work_device   = 'cpu',
-                dtype         = torch.float64,
-                extra_options = ""
+                rk_type       : str,
+                noise_anchor  : float,
+                model_device  : str         = 'cuda',
+                work_device   : str         = 'cpu',
+                dtype         : torch.dtype = torch.float64,
+                extra_options : str         = ""
                 ):
         
         self.work_device                 = work_device
@@ -49,45 +49,45 @@ class RK_Method_Beta:
         elif hasattr(model, "inner_model"):
             model_sampling = model.inner_model.inner_model.model_sampling
         
-        self.sigma_min                   = model_sampling.sigma_min.to(dtype=dtype, device=model_device)
-        self.sigma_max                   = model_sampling.sigma_max.to(dtype=dtype, device=model_device)
+        self.sigma_min                   : Tensor                   = model_sampling.sigma_min.to(dtype=dtype, device=model_device)
+        self.sigma_max                   : Tensor                   = model_sampling.sigma_max.to(dtype=dtype, device=model_device)
 
-        self.rk_type                     : str = rk_type
+        self.rk_type                     : str                      = rk_type
 
-        self.IMPLICIT                    : str = rk_type in get_implicit_sampler_name_list(nameOnly=True)
-        self.EXPONENTIAL                 : bool = RK_Method_Beta.is_exponential(rk_type)
-        self.LINEAR_ANCHOR_X_0           : float = 1.0
-        self.SYNC_SUBSTEP_MEAN_CW        : bool = True
+        self.IMPLICIT                    : str                      = rk_type in get_implicit_sampler_name_list(nameOnly=True)
+        self.EXPONENTIAL                 : bool                     = RK_Method_Beta.is_exponential(rk_type)
+        self.LINEAR_ANCHOR_X_0           : float                    = 1.0
+        self.SYNC_SUBSTEP_MEAN_CW        : bool                     = True
 
-        self.A                           = None
-        self.B                           = None
-        self.U                           = None
-        self.V                           = None
+        self.A                           : Optional[Tensor]         = None
+        self.B                           : Optional[Tensor]         = None
+        self.U                           : Optional[Tensor]         = None
+        self.V                           : Optional[Tensor]         = None
 
-        self.rows                        : int = 0
-        self.cols                        : int = 0
+        self.rows                        : int                      = 0
+        self.cols                        : int                      = 0
 
-        self.denoised                    : Optional[Tensor] = None
-        self.uncond                      : Optional[Tensor] = None
+        self.denoised                    : Optional[Tensor]         = None
+        self.uncond                      : Optional[Tensor]         = None
 
-        self.y0                          : Optional[Tensor] = None
-        self.y0_inv                      : Optional[Tensor] = None
+        self.y0                          : Optional[Tensor]         = None
+        self.y0_inv                      : Optional[Tensor]         = None
 
-        self.multistep_stages            : int = 0
-        self.row_offset                  : Optional[int] = None
+        self.multistep_stages            : int                      = 0
+        self.row_offset                  : Optional[int]            = None
 
-        self.cfg_cw                      : float = 1.0
-        self.extra_args                  = None
+        self.cfg_cw                      : float                    = 1.0
+        self.extra_args                  : Optional[Dict[str, Any]] = None
 
-        self.extra_options               : str = extra_options
-        self.EO                          : ExtraOptions = ExtraOptions(extra_options)
+        self.extra_options               : str                      = extra_options
+        self.EO                          : ExtraOptions             = ExtraOptions(extra_options)
 
-        self.reorder_tableau_indices     : list[int] = self.EO("reorder_tableau_indices", [-1])
+        self.reorder_tableau_indices     : list[int]                = self.EO("reorder_tableau_indices", [-1])
 
-        self.LINEAR_ANCHOR_X_0           : float = noise_anchor
+        self.LINEAR_ANCHOR_X_0           : float                    = noise_anchor
 
     @staticmethod
-    def is_exponential(rk_type):
+    def is_exponential(rk_type:str) -> bool:
         if rk_type.startswith(( "res", 
                                 "dpmpp", 
                                 "ddim", 
@@ -108,7 +108,7 @@ class RK_Method_Beta:
             work_device   : str         = 'cpu',
             dtype         : torch.dtype = torch.float64,
             extra_options : str         = ""
-            ):
+            ) -> "Union[RK_Method_Exponential, RK_Method_Linear]":
         
         if RK_Method_Beta.is_exponential(rk_type):
             return RK_Method_Exponential(model, rk_type, noise_anchor, model_device, work_device, dtype, extra_options)
@@ -118,14 +118,14 @@ class RK_Method_Beta:
     def __call__(self):
         raise NotImplementedError("This method got clownsharked!")
     
-    def model_epsilon(self, x, sigma, **extra_args):
+    def model_epsilon(self, x:Tensor, sigma:Tensor, **extra_args) -> Tuple[Tensor, Tensor]:
         s_in     = x.new_ones([x.shape[0]])
         denoised = self.model(x, sigma * s_in, **extra_args)
         denoised = self.calc_cfg_channelwise(denoised)
         eps      = (x - denoised) / (sigma * s_in).view(x.shape[0], 1, 1, 1)       #return x0 ###################################THIS WORKS ONLY WITH THE MODEL SAMPLING PATCH
         return eps, denoised
     
-    def model_denoised(self, x, sigma, **extra_args):
+    def model_denoised(self, x:Tensor, sigma:Tensor, **extra_args) -> Tensor:
         s_in     = x.new_ones([x.shape[0]])
         denoised = self.model(x, sigma * s_in, **extra_args)
         denoised = self.calc_cfg_channelwise(denoised)
@@ -139,9 +139,9 @@ class RK_Method_Beta:
                 c2         : float  = 0.5,
                 c3         : float  = 1.0,
                 step       : int    = 0,
-                sigmas     : Tensor = None,
-                sigma_down : Tensor = None,
-                ):
+                sigmas     : Optional[Tensor] = None,
+                sigma_down : Optional[Tensor] = None,
+                ) -> None:
 
         self.rk_type     = rk_type
         self.IMPLICIT    = rk_type in get_implicit_sampler_name_list(nameOnly=True)
@@ -183,7 +183,9 @@ class RK_Method_Beta:
         if self.IMPLICIT and self.reorder_tableau_indices[0] != -1:
             self.reorder_tableau(self.reorder_tableau_indices)
 
-    def reorder_tableau(self, indices):
+
+
+    def reorder_tableau(self, indices:list[int]) -> None:
         #if indices[0]:
         self.A    = self.A   [indices]
         self.B[0] = self.B[0][indices]
@@ -194,15 +196,15 @@ class RK_Method_Beta:
 
 
     def update_substep(self,
-                        x_0,
-                        x_,
-                        eps_,
-                        eps_prev_,
-                        row,
-                        row_offset,
-                        h_new,
-                        h_new_orig,
-                        ):
+                        x_0        : Tensor,
+                        x_         : Tensor,
+                        eps_       : Tensor,
+                        eps_prev_  : Tensor,
+                        row        : int,
+                        row_offset : int,
+                        h_new      : Tensor,
+                        h_new_orig : Tensor,
+                        ) -> Tensor:
             
         if row < self.rows - row_offset   and   self.multistep_stages == 0:
             row_tmp_offset = row + row_offset
@@ -223,32 +225,35 @@ class RK_Method_Beta:
 
 
     
-    def a_k_einsum(self, row, k):
+    def a_k_einsum(self, row:int, k     :Tensor) -> Tensor:
         return torch.einsum('i, i... -> ...', self.A[row], k[:self.cols])
     
-    def b_k_einsum(self, row, k):
+    def b_k_einsum(self, row:int, k     :Tensor) -> Tensor:
         return torch.einsum('i, i... -> ...', self.B[row], k[:self.cols])
     
-    def u_k_einsum(self, row, k_prev):
+    def u_k_einsum(self, row:int, k_prev:Tensor) -> Tensor:
         return torch.einsum('i, i... -> ...', self.U[row], k_prev[:self.cols]) if (self.U is not None and k_prev is not None) else 0
     
-    def v_k_einsum(self, row, k_prev):
+    def v_k_einsum(self, row:int, k_prev:Tensor) -> Tensor:
         return torch.einsum('i, i... -> ...', self.V[row], k_prev[:self.cols]) if (self.V is not None and k_prev is not None) else 0
     
-    def zum(self, row, k, k_prev=None,):
+    
+    
+    def zum(self, row:int, k:Tensor, k_prev:Tensor=None,) -> Tensor:
         if row < self.rows:
             return self.a_k_einsum(row, k) + self.u_k_einsum(row, k_prev)
         else:
             row = row - self.rows
             return self.b_k_einsum(row, k) + self.v_k_einsum(row, k_prev)
         
-    def zum_tableau(self, k, k_prev=None,):
+    def zum_tableau(self,  k:Tensor, k_prev:Tensor=None,) -> Tensor:
         a_k_sum = torch.einsum('ij, j... -> i...', self.A, k[:self.cols])
         u_k_sum = torch.einsum('ij, j... -> i...', self.U, k_prev[:self.cols]) if (self.U is not None and k_prev is not None) else 0
         return a_k_sum + u_k_sum
         
 
-    def init_cfg_channelwise(self, x, cfg_cw=1.0, **extra_args):
+
+    def init_cfg_channelwise(self, x:Tensor, cfg_cw:float=1.0, **extra_args) -> Dict[str, Any]:
         self.uncond = [torch.full_like(x, 0.0)]
         self.cfg_cw = cfg_cw
         if cfg_cw != 1.0:
@@ -260,7 +265,7 @@ class RK_Method_Beta:
         return extra_args
             
             
-    def calc_cfg_channelwise(self, denoised):
+    def calc_cfg_channelwise(self, denoised:Tensor) -> Tensor:
         if self.cfg_cw != 1.0:            
             avg = 0
             for b, c in itertools.product(range(denoised.shape[0]), range(denoised.shape[1])):
@@ -276,12 +281,13 @@ class RK_Method_Beta:
         
 
     @staticmethod
-    def calculate_res_2m_step(x_0,
-                            denoised_,
-                            sigma_down,
-                            sigmas,
-                            step,
-                            ):
+    def calculate_res_2m_step(
+                            x_0        : Tensor,
+                            denoised_  : Tensor,
+                            sigma_down : Tensor,
+                            sigmas     : Tensor,
+                            step       : int,
+                            ) -> Tuple[Tensor, Tensor]:
         
         if denoised_[2].sum() == 0:
             return None, None
@@ -314,12 +320,13 @@ class RK_Method_Beta:
 
 
     @staticmethod
-    def calculate_res_3m_step(x_0,
-                            denoised_,
-                            sigma_down,
-                            sigmas,
-                            step,
-                            ):
+    def calculate_res_3m_step(
+                            x_0        : Tensor,
+                            denoised_  : Tensor,
+                            sigma_down : Tensor,
+                            sigmas     : Tensor,
+                            step       : int,
+                            ) -> Tuple[Tensor, Tensor]:
         
         if denoised_[3].sum() == 0:
             return None, None
@@ -358,16 +365,16 @@ class RK_Method_Beta:
         return x, denoised
 
     def swap_rk_type_at_step_or_threshold(self,
-                                            x_0,
-                                            data_prev_,
+                                            x_0               : Tensor,
+                                            data_prev_        : Tensor,
                                             NS,
-                                            sigmas,
-                                            step,
-                                            rk_swap_step,
-                                            rk_swap_threshold,
-                                            rk_swap_type,
-                                            rk_swap_print,
-                                            ):
+                                            sigmas            : Tensor,
+                                            step              : Tensor,
+                                            rk_swap_step      : int,
+                                            rk_swap_threshold : float,
+                                            rk_swap_type      : str,
+                                            rk_swap_print     : bool,
+                                            ) -> str:
         if rk_swap_type == "":
             if self.EXPONENTIAL:
                 rk_swap_type = "res_3m" 
@@ -384,15 +391,15 @@ class RK_Method_Beta:
                 self.__class__ = RK_Method_Linear
                 
             if rk_swap_type in get_implicit_sampler_name_list(nameOnly=True):
-                self.IMPLICIT = True
+                self.IMPLICIT   = True
                 self.row_offset = 0
                 NS.row_offset   = 0
             else:
-                self.IMPLICIT = False
+                self.IMPLICIT   = False
                 self.row_offset = 1
                 NS.row_offset   = 1
-            NS.h_fn = self.h_fn
-            NS.t_fn = self.t_fn
+            NS.h_fn     = self.h_fn
+            NS.t_fn     = self.t_fn
             NS.sigma_fn = self.sigma_fn
             
             
@@ -413,32 +420,32 @@ class RK_Method_Beta:
                         self.__class__ = RK_Method_Linear
                 
                     if rk_swap_type in get_implicit_sampler_name_list(nameOnly=True):
-                        self.IMPLICIT = True
+                        self.IMPLICIT   = True
                         self.row_offset = 0
                         NS.row_offset   = 0
                     else:
-                        self.IMPLICIT = False
+                        self.IMPLICIT   = False
                         self.row_offset = 1
                         NS.row_offset   = 1
-                    NS.h_fn = self.h_fn
-                    NS.t_fn = self.t_fn
+                    NS.h_fn     = self.h_fn
+                    NS.t_fn     = self.t_fn
                     NS.sigma_fn = self.sigma_fn
             
         return self.rk_type
 
 
     def bong_iter(self,
-                    x_0,
-                    x_,
-                    eps_,
-                    eps_prev_,
-                    data_,
-                    sigma,
-                    s_,
-                    row,
-                    row_offset,
-                    h,
-                    ):
+                    x_0       : Tensor,
+                    x_        : Tensor,
+                    eps_      : Tensor,
+                    eps_prev_ : Tensor,
+                    data_     : Tensor,
+                    sigma     : Tensor,
+                    s_        : Tensor,
+                    row       : int,
+                    row_offset: int,
+                    h         : Tensor,
+                    ) -> Tuple[Tensor, Tensor, Tensor]:
         
         bong_iter_max_row = self.rows - row_offset
         if self.EO("bong_iter_max_row_full"):
@@ -448,8 +455,8 @@ class RK_Method_Beta:
             bong_strength = self.EO("bong_strength", 1.0)
             
             if bong_strength != 1.0:
-                x_0_tmp = x_0.clone()
-                x_tmp_ = x_.clone()
+                x_0_tmp  = x_0.clone()
+                x_tmp_   = x_.clone()
                 eps_tmp_ = eps_.clone()
                 
             for i in range(100):
@@ -472,18 +479,18 @@ class RK_Method_Beta:
 
 
     def newton_iter(self,
-                    x_0,
-                    x_,
-                    eps_,
-                    eps_prev_,
-                    data_,
-                    s_,
-                    row,
-                    h,
-                    sigmas,
-                    step,
-                    newton_name,
-                    ):
+                    x_0        : Tensor,
+                    x_         : Tensor,
+                    eps_       : Tensor,
+                    eps_prev_  : Tensor,
+                    data_      : Tensor,
+                    s_         : Tensor,
+                    row        : int,
+                    h          : Tensor,
+                    sigmas     : Tensor,
+                    step       : int,
+                    newton_name: str,
+                    ) -> Tuple[Tensor, Tensor]:
         
         newton_iter_name = "newton_iter_" + newton_name
         
@@ -587,12 +594,12 @@ class RK_Method_Beta:
 class RK_Method_Exponential(RK_Method_Beta):
     def __init__(self,
                 model,
-                rk_type,
-                noise_anchor,
-                model_device  = 'cuda',
-                work_device   = 'cpu',
-                dtype         = torch.float64,
-                extra_options = ""
+                rk_type       : str,
+                noise_anchor  : float,
+                model_device  : str         = 'cuda',
+                work_device   : str         = 'cpu',
+                dtype         : torch.dtype = torch.float64,
+                extra_options : str         = "",
                 ):
         
         super().__init__(model,
@@ -605,22 +612,27 @@ class RK_Method_Exponential(RK_Method_Beta):
                         ) 
         
     @staticmethod
-    def alpha_fn(neg_h):
+    def alpha_fn(neg_h:Tensor) -> Tensor:
         return torch.exp(neg_h)
 
     @staticmethod
-    def sigma_fn(t):
+    def sigma_fn(t:Tensor) -> Tensor:
         return t.neg().exp()
 
     @staticmethod
-    def t_fn(sigma):
+    def t_fn(sigma:Tensor) -> Tensor:
         return sigma.log().neg()
     
     @staticmethod
-    def h_fn(sigma_down, sigma):
+    def h_fn(sigma_down:Tensor, sigma:Tensor) -> Tensor:
         return -torch.log(sigma_down/sigma)
 
-    def __call__(self, x, sub_sigma, x_0, sigma): 
+    def __call__(self,
+                x         : Tensor,
+                sub_sigma : Tensor,
+                x_0       : Tensor,
+                sigma     : Tensor) -> Tuple[Tensor, Tensor]:
+        
         denoised = self.model_denoised(x.to(self.model_device), sub_sigma.to(self.model_device), **self.extra_args).to(sigma.device)
         
         eps_anchored = (x_0 - denoised) / sigma
@@ -637,12 +649,12 @@ class RK_Method_Exponential(RK_Method_Beta):
     
     
     def get_epsilon(self,
-                    x_0,
-                    x,
-                    denoised,
-                    sigma,
-                    sub_sigma,
-                    ):
+                    x_0       : Tensor,
+                    x         : Tensor,
+                    denoised  : Tensor,
+                    sigma     : Tensor,
+                    sub_sigma : Tensor,
+                    ) -> Tensor:
         
         eps_anchored = (x_0 - denoised) / sigma
         eps_unmoored = (x   - denoised) / sub_sigma
@@ -655,20 +667,20 @@ class RK_Method_Exponential(RK_Method_Beta):
     
     
     
-    def get_epsilon_anchored(self, x_0, denoised, sigma):
+    def get_epsilon_anchored(self, x_0:Tensor, denoised:Tensor, sigma:Tensor) -> Tensor:
         return denoised - x_0
     
     
     
     def get_guide_epsilon(self,
-                            x_0,
-                            x,
-                            y,
-                            sigma,
-                            sigma_cur,
-                            sigma_down    = None,
-                            epsilon_scale = None,
-                            ):
+                            x_0           : Tensor,
+                            x             : Tensor,
+                            y             : Tensor,
+                            sigma         : Tensor,
+                            sigma_cur     : Tensor,
+                            sigma_down    : Optional[Tensor] = None,
+                            epsilon_scale : Optional[Tensor] = None,
+                            ) -> Tensor:
 
         sigma_cur = epsilon_scale if epsilon_scale is not None else sigma_cur
 
@@ -694,12 +706,12 @@ class RK_Method_Exponential(RK_Method_Beta):
 class RK_Method_Linear(RK_Method_Beta):
     def __init__(self,
                 model,
-                rk_type,
-                noise_anchor,
-                model_device  = 'cuda',
-                work_device   = 'cpu',
-                dtype         = torch.float64,
-                extra_options = "",
+                rk_type       : str,
+                noise_anchor  : float,
+                model_device  : str         = 'cuda',
+                work_device   : str         = 'cpu',
+                dtype         : torch.dtype = torch.float64,
+                extra_options : str         = "",
                 ):
         
         super().__init__(model,
@@ -712,22 +724,27 @@ class RK_Method_Linear(RK_Method_Beta):
                         ) 
         
     @staticmethod
-    def alpha_fn(neg_h):
+    def alpha_fn(neg_h:Tensor) -> Tensor:
         return torch.ones_like(neg_h)
 
     @staticmethod
-    def sigma_fn(t):
+    def sigma_fn(t:Tensor) -> Tensor:
         return t
 
     @staticmethod
-    def t_fn(sigma):
+    def t_fn(sigma:Tensor) -> Tensor:
         return sigma
     
     @staticmethod
-    def h_fn(sigma_down, sigma):
+    def h_fn(sigma_down:Tensor, sigma:Tensor) -> Tensor:
         return sigma_down - sigma
     
-    def __call__(self, x, sub_sigma, x_0, sigma):
+    def __call__(self,
+                x         : Tensor,
+                sub_sigma : Tensor,
+                x_0       : Tensor,
+                sigma     : Tensor) -> Tuple[Tensor, Tensor]:
+        
         denoised = self.model_denoised(x.to(self.model_device), sub_sigma.to(self.model_device), **self.extra_args).to(sigma.device)
 
         epsilon_anchor   = (x_0 - denoised) / sigma
@@ -740,12 +757,12 @@ class RK_Method_Linear(RK_Method_Beta):
 
 
     def get_epsilon(self,
-                    x_0,
-                    x,
-                    denoised,
-                    sigma,
-                    sub_sigma,
-                    ):
+                    x_0       : Tensor,
+                    x         : Tensor,
+                    denoised  : Tensor,
+                    sigma     : Tensor,
+                    sub_sigma : Tensor,
+                    ) -> Tensor:
         
         eps_anchor   = (x_0 - denoised) / sigma
         eps_unmoored =   (x - denoised) / sub_sigma
@@ -754,20 +771,20 @@ class RK_Method_Linear(RK_Method_Beta):
     
     
     
-    def get_epsilon_anchored(self, x_0, denoised, sigma):
+    def get_epsilon_anchored(self, x_0:Tensor, denoised:Tensor, sigma:Tensor) -> Tensor:
         return (x_0 - denoised) / sigma
     
     
     
     def get_guide_epsilon(self, 
-                            x_0, 
-                            x, 
-                            y, 
-                            sigma, 
-                            sigma_cur, 
-                            sigma_down    = None, 
-                            epsilon_scale = None, 
-                            ):
+                            x_0           : Tensor, 
+                            x             : Tensor, 
+                            y             : Tensor, 
+                            sigma         : Tensor, 
+                            sigma_cur     : Tensor, 
+                            sigma_down    : Optional[Tensor] = None, 
+                            epsilon_scale : Optional[Tensor] = None, 
+                            ) -> Tensor:
 
         if sigma_down > sigma:
             sigma_ratio = self.sigma_max - sigma_cur.clone()
