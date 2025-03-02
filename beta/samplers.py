@@ -504,21 +504,7 @@ class ClownSamplerAdvanced_Beta:
         
             options_mgr = OptionsManager(options, **kwargs)
             extra_options    += "\n" + options_mgr.get('extra_options', "")
-            """options_inputs = []
 
-            if options is not None:
-                options_inputs.append(options)
-
-            i = 2
-            while True:
-                option_name = f"options {i}"
-                if option_name in kwargs and kwargs[option_name] is not None:
-                    options_inputs.append(kwargs[option_name])
-                    i += 1
-                else:
-                    break
-
-            options_mgr = OptionsManager(options_inputs)"""
     
             sampler_name, implicit_sampler_name = process_sampler_name(sampler_name)
 
@@ -757,24 +743,6 @@ class ClownsharKSampler_Beta:
         
         options_mgr = OptionsManager(options, **kwargs)
         extra_options    += "\n" + options_mgr.get('extra_options', "")
-        
-        """options_inputs = []
-
-        if options is not None:
-            options_inputs.append(options)
-
-        i = 2
-        while True:
-            option_name = f"options {i}"
-            if option_name in kwargs and kwargs[option_name] is not None:
-                options_inputs.append(kwargs[option_name])
-                i += 1
-            else:
-                break
-
-        options_mgr = OptionsManager(options_inputs)"""
-
-        #noise_seed_sde = seed+1
         
         
         # defaults for ClownSampler

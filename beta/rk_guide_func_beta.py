@@ -94,22 +94,22 @@ class LatentGuide:
 
         if guides is not None:
             (self.guide_mode, 
-             latent_guide_weight, 
-             latent_guide_weight_inv, 
-             latent_guide_weights, 
-             latent_guide_weights_inv, 
-             latent_guide, 
-             latent_guide_inv, 
-             self.mask, 
-             self.mask_inv, 
-             scheduler_, 
-             scheduler_inv_, 
-             start_steps_, 
-             start_steps_inv_, 
-             steps_, 
-             steps_inv_, 
-             self.guide_cossim_cutoff_, 
-             self.guide_bkg_cossim_cutoff_) = guides
+            latent_guide_weight, 
+            latent_guide_weight_inv, 
+            latent_guide_weights, 
+            latent_guide_weights_inv, 
+            latent_guide, 
+            latent_guide_inv, 
+            self.mask, 
+            self.mask_inv, 
+            scheduler_, 
+            scheduler_inv_, 
+            start_steps_, 
+            start_steps_inv_, 
+            steps_, 
+            steps_inv_, 
+            self.guide_cossim_cutoff_, 
+            self.guide_bkg_cossim_cutoff_) = guides
 
             if self.guide_mode.startswith("fully_") and not RK_IMPLICIT:
                 self.guide_mode = self.guide_mode[6:]   # fully_pseudoimplicit is only supported for implicit samplers, default back to pseudoimplicit
