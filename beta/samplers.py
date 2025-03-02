@@ -242,6 +242,9 @@ class SharkSampler:
             # SETUP FLUX REGIONAL COND
 
             if pos_cond[0][1] is not None: 
+                if 'callback_regional' in pos_cond[0][1]:
+                    pos_cond = pos_cond[0][1]['callback_regional'](model)
+                
                 if "regional_conditioning_weights" in pos_cond[0][1]:
                     sampler.extra_options['regional_conditioning_weights'] = pos_cond[0][1]['regional_conditioning_weights']
                     sampler.extra_options['regional_conditioning_floors']  = pos_cond[0][1]['regional_conditioning_floors']

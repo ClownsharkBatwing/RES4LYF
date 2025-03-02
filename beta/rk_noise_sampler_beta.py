@@ -1,5 +1,11 @@
 import torch
 
+from torch  import Tensor
+from typing import Optional, Callable, Tuple, Dict, Any, Union, TYPE_CHECKING, TypeVar
+
+if TYPE_CHECKING:
+    from .rk_method_beta import RK_Method_Exponential, RK_Method_Linear
+
 import comfy.model_patcher
 import comfy.supported_models
 
@@ -41,7 +47,7 @@ def get_epsilon_from_step(x, x_next, sigma, sigma_next):
 
 class RK_NoiseSampler:
     def __init__(self,
-                RK,
+                RK            : Union["RK_Method_Exponential", "RK_Method_Linear"],
                 model,
                 step          : int=0,
                 device        : str='cuda',
@@ -92,24 +98,24 @@ class RK_NoiseSampler:
 
 
     def init_noise_samplers(self,
-                            x,
-                            noise_seed,
-                            noise_seed_substep,
-                            noise_sampler_type,
-                            noise_sampler_type2,
-                            noise_mode_sde,
-                            noise_mode_sde_substep,
-                            overshoot_mode,
-                            overshoot_mode_substep,
-                            noise_boost_step,
-                            noise_boost_substep,
-                            alpha,
-                            alpha2,
-                            k      = 1.0,
-                            k2     = 1.0,
-                            scale  = 0.1,
-                            scale2 = 0.1,
-                            ):
+                            x                      : Tensor,              
+                            noise_seed             : int,
+                            noise_seed_substep     : int,
+                            noise_sampler_type     : str,
+                            noise_sampler_type2    : str,
+                            noise_mode_sde         : str,
+                            noise_mode_sde_substep : str,
+                            overshoot_mode         : str,
+                            overshoot_mode_substep : str,
+                            noise_boost_step       : float,
+                            noise_boost_substep    : float,
+                            alpha                  : float,
+                            alpha2                 : float,
+                            k                      : float = 1.0,
+                            k2                     : float = 1.0,
+                            scale                  : float = 0.1,
+                            scale2                 : float = 0.1,
+                            ) -> None:
         
         self.noise_sampler_type     = noise_sampler_type
         self.noise_sampler_type2    = noise_sampler_type2
@@ -146,7 +152,7 @@ class RK_NoiseSampler:
             
             
             
-    def set_substep_list(self, RK):
+    def set_substep_list(self, RK:Union["RK_Method_Exponential", "RK_Method_Linear"]) -> None:
         
         self.multistep_stages = RK.multistep_stages
         self.rows = RK.rows
@@ -155,7 +161,7 @@ class RK_NoiseSampler:
     
     
     
-    def get_sde_coeff(self, sigma_next, sigma_down=None, sigma_up=None, eta=0.0):
+    def get_sde_coeff(self, sigma_next:Tensor, sigma_down:Tensor=None, sigma_up:Tensor=None, eta:float=0.0) -> Tuple[Tensor,Tensor,Tensor]:
         if self.VARIANCE_PRESERVING:
             if sigma_down is not None:
                 alpha_ratio = (1 - sigma_next) / (1 - sigma_down)
@@ -186,7 +192,7 @@ class RK_NoiseSampler:
 
 
 
-    def set_sde_step(self, sigma, sigma_next, eta, overshoot, s_noise):
+    def set_sde_step(self, sigma:Tensor, sigma_next:Tensor, eta:float, overshoot:float, s_noise:float) -> None:
         self.sigma_0    = sigma
         self.sigma_next = sigma_next
         
@@ -209,16 +215,16 @@ class RK_NoiseSampler:
         
         
     def set_sde_substep(self,
-                        row,
-                        multistep_stages,
-                        eta_substep,
-                        overshoot_substep,
-                        s_noise_substep,
-                        full_iter           = 0,
-                        diag_iter           = 0,
-                        implicit_steps_full = 0,
-                        implicit_steps_diag = 0
-                        ):    
+                        row                 : int,
+                        multistep_stages    : int,
+                        eta_substep         : float,
+                        overshoot_substep   : float,
+                        s_noise_substep     : float,
+                        full_iter           : int = 0,
+                        diag_iter           : int = 0,
+                        implicit_steps_full : int = 0,
+                        implicit_steps_diag : int = 0
+                        ) -> None:    
         
         # start with stepsizes for no overshoot/noise addition/noise swapping
         self.sub_sigma_up_eta    = self.sub_sigma_up                          = 0.0
@@ -275,23 +281,23 @@ class RK_NoiseSampler:
         
 
     def get_sde_substep(self,
-                        sigma,
-                        sigma_next,
-                        eta                 = 0.0,
-                        noise_mode_override = None,
-                        DOWN                = False,
-                        ):
+                        sigma               :Tensor,
+                        sigma_next          :Tensor,
+                        eta                 :float         = 0.0  ,
+                        noise_mode_override :Optional[str] = None ,
+                        DOWN                :bool          = False,
+                        ) -> Tuple[Tensor,Tensor,Tensor,Tensor]:
         
-        return self.get_sde_step(sigma, sigma_next, eta, noise_mode_override=noise_mode_override, DOWN=DOWN, SUBSTEP=True,)
+        return self.get_sde_step(sigma=sigma, sigma_next=sigma_next, eta=eta, noise_mode_override=noise_mode_override, DOWN=DOWN, SUBSTEP=True,)
 
     def get_sde_step(self,
-                    sigma,
-                    sigma_next,
-                    eta                 = 0.0,
-                    noise_mode_override = None,
-                    DOWN                = False,
-                    SUBSTEP             = False,
-                    ):
+                        sigma               :Tensor,
+                        sigma_next          :Tensor,
+                        eta                 :float         = 0.0  ,
+                        noise_mode_override :Optional[str] = None ,
+                        DOWN                :bool          = False,
+                        SUBSTEP             :bool          = False,
+                        ) -> Tuple[Tensor,Tensor,Tensor,Tensor]:
             
         if noise_mode_override is not None:
             noise_mode = noise_mode_override
@@ -366,7 +372,7 @@ class RK_NoiseSampler:
 
         return su, sigma, sd, alpha_ratio
     
-    def get_vpsde_step_RF(self, sigma, sigma_next, eta):
+    def get_vpsde_step_RF(self, sigma:Tensor, sigma_next:Tensor, eta:float) -> Tuple[Tensor,Tensor,Tensor]:
         dt          = sigma - sigma_next
         sigma_up    = eta * sigma * dt**0.5
         alpha_ratio = 1 - dt * (eta**2/4) * (1 + sigma)
@@ -374,7 +380,7 @@ class RK_NoiseSampler:
         return sigma_up, sigma_down, alpha_ratio
         
 
-    def swap_noise_step(self, x_0, x_next, brownian_sigma=None, brownian_sigma_next=None, ):
+    def swap_noise_step(self, x_0:Tensor, x_next:Tensor, brownian_sigma:Optional[Tensor]=None, brownian_sigma_next:Optional[Tensor]=None,) -> Tensor:
         if self.sigma_up_eta == 0   or   self.sigma_next == 0:
             return x_next
 
@@ -397,7 +403,7 @@ class RK_NoiseSampler:
         return x
 
 
-    def swap_noise_substep(self, x_0, x_next, brownian_sigma=None, brownian_sigma_next=None, ):
+    def swap_noise_substep(self, x_0:Tensor, x_next:Tensor, brownian_sigma:Optional[Tensor]=None, brownian_sigma_next:Optional[Tensor]=None,) -> Tensor:
         if self.sub_sigma_up_eta == 0   or   self.sub_sigma_next == 0:
             return x_next
         
@@ -421,19 +427,19 @@ class RK_NoiseSampler:
 
 
     def swap_noise(self,
-                    x_0,
-                    x_next,
-                    sigma_0,
-                    sigma,
-                    sigma_next,
-                    sigma_down,
-                    sigma_up,
-                    alpha_ratio,
-                    s_noise,
-                    SUBSTEP             = False,
-                    brownian_sigma      = None,
-                    brownian_sigma_next = None,
-                    ):
+                    x_0                 :Tensor,
+                    x_next              :Tensor,
+                    sigma_0             :Tensor,
+                    sigma               :Tensor,
+                    sigma_next          :Tensor,
+                    sigma_down          :Tensor,
+                    sigma_up            :Tensor,
+                    alpha_ratio         :Tensor,
+                    s_noise             :float,
+                    SUBSTEP             :bool             = False,
+                    brownian_sigma      :Optional[Tensor] = None,
+                    brownian_sigma_next :Optional[Tensor] = None,
+                    ) -> Tensor:
         
         if sigma_up == 0:
             return x_next
@@ -464,103 +470,104 @@ class RK_NoiseSampler:
         x = alpha_ratio * (denoised_next + sigma_down * eps_next) + sigma_up * noise * s_noise
         return x
 
-    # not used
+    # not used. WARNING: some parameters have a different order than swap_noise!
     def add_noise_pre(self,
-                        x_0,
-                        x,
-                        sigma_up,
-                        sigma_0,
-                        sigma,
-                        sigma_next,
-                        real_sigma_down,
-                        alpha_ratio,
-                        s_noise,
-                        noise_mode,
-                        SDE_NOISE_EXTERNAL = False,
-                        sde_noise_t        = None,
-                        SUBSTEP            = False,
-                        ):
+                        x_0                :Tensor,
+                        x                  :Tensor,
+                        sigma_up           :Tensor,
+                        sigma_0            :Tensor,
+                        sigma              :Tensor,
+                        sigma_next         :Tensor,
+                        real_sigma_down    :Tensor,
+                        alpha_ratio        :Tensor,
+                        s_noise            :float,
+                        noise_mode         :str,
+                        SDE_NOISE_EXTERNAL :bool             = False,
+                        sde_noise_t        :Optional[Tensor] = None,
+                        SUBSTEP            :bool             = False,
+                        ) -> Tensor:
         
         if not self.CONST and noise_mode == "hard_sq": 
             if self.LOCK_H_SCALE:
-                x = self.swap_noise(x_0,
-                                    x,
-                                    sigma,
-                                    sigma_0,
-                                    sigma_next,
-                                    real_sigma_down,
-                                    sigma_up,
-                                    alpha_ratio,
-                                    s_noise,
-                                    SUBSTEP,
+                x = self.swap_noise(x_0             = x_0,
+                                    x               = x,
+                                    sigma           = sigma,
+                                    sigma_0         = sigma_0,
+                                    sigma_next      = sigma_next,
+                                    real_sigma_down = real_sigma_down,
+                                    sigma_up        = sigma_up,
+                                    alpha_ratio     = alpha_ratio,
+                                    s_noise         = s_noise,
+                                    SUBSTEP         = SUBSTEP,
                                     )
             else:
-                x = self.add_noise(x,
-                                    sigma_up,
-                                    sigma,
-                                    sigma_next,
-                                    alpha_ratio,
-                                    s_noise,
-                                    SDE_NOISE_EXTERNAL,
-                                    sde_noise_t,
-                                    SUBSTEP,
+                x = self.add_noise( x                  = x,
+                                    sigma_up           = sigma_up,
+                                    sigma              = sigma,
+                                    sigma_next         = sigma_next,
+                                    alpha_ratio        = alpha_ratio,
+                                    s_noise            = s_noise,
+                                    SDE_NOISE_EXTERNAL = SDE_NOISE_EXTERNAL,
+                                    sde_noise_t        = sde_noise_t,
+                                    SUBSTEP            = SUBSTEP,
                                     )
+                
         return x
         
     # only used for handle_tiled_etc_noise_steps() in rk_guide_func_beta.py
     def add_noise_post(self,
-                        x_0,
-                        x,
-                        sigma_up,
-                        sigma_0,
-                        sigma,
-                        sigma_next,
-                        real_sigma_down,
-                        alpha_ratio,
-                        s_noise,
-                        noise_mode,
-                        SDE_NOISE_EXTERNAL = False,
-                        sde_noise_t        = None,
-                        SUBSTEP            = False
-                        ):
+                        x_0                :Tensor,
+                        x                  :Tensor,
+                        sigma_up           :Tensor,
+                        sigma_0            :Tensor,
+                        sigma              :Tensor,
+                        sigma_next         :Tensor,
+                        real_sigma_down    :Tensor,
+                        alpha_ratio        :Tensor,
+                        s_noise            :float,
+                        noise_mode         :str,
+                        SDE_NOISE_EXTERNAL :bool             = False,
+                        sde_noise_t        :Optional[Tensor] = None,
+                        SUBSTEP            :bool             = False,
+                        ) -> Tensor:
         
         if self.CONST   or   (not self.CONST and noise_mode != "hard_sq"):
             if self.LOCK_H_SCALE:
-                x = self.swap_noise(x_0,
-                                    x,
-                                    sigma_0,
-                                    sigma,
-                                    sigma_next,
-                                    real_sigma_down,
-                                    sigma_up,
-                                    alpha_ratio,
-                                    s_noise,
-                                    SUBSTEP,
+                x = self.swap_noise(x_0             = x_0,
+                                    x               = x,
+                                    sigma           = sigma,
+                                    sigma_0         = sigma_0,
+                                    sigma_next      = sigma_next,
+                                    real_sigma_down = real_sigma_down,
+                                    sigma_up        = sigma_up,
+                                    alpha_ratio     = alpha_ratio,
+                                    s_noise         = s_noise,
+                                    SUBSTEP         = SUBSTEP,
                                     )
             else:
-                x = self.add_noise(x,
-                                    sigma_up,
-                                    sigma,
-                                    sigma_next,
-                                    alpha_ratio,
-                                    s_noise,
-                                    SDE_NOISE_EXTERNAL,
-                                    sde_noise_t,
-                                    SUBSTEP,
+                x = self.add_noise( x                  = x,
+                                    sigma_up           = sigma_up,
+                                    sigma              = sigma,
+                                    sigma_next         = sigma_next,
+                                    alpha_ratio        = alpha_ratio,
+                                    s_noise            = s_noise,
+                                    SDE_NOISE_EXTERNAL = SDE_NOISE_EXTERNAL,
+                                    sde_noise_t        = sde_noise_t,
+                                    SUBSTEP            = SUBSTEP,
                                     )
         return x
 
     def add_noise(self,
-                    x,
-                    sigma_up,
-                    sigma,
-                    sigma_next,
-                    alpha_ratio,
-                    s_noise,
-                    SDE_NOISE_EXTERNAL,
-                    sde_noise_t,
-                    SUBSTEP,
-                    ):
+                    x                 :Tensor,
+                    sigma_up          :Tensor,
+                    sigma             :Tensor,
+                    sigma_next        :Tensor,
+                    alpha_ratio       :Tensor,
+                    s_noise           :float,
+                    SDE_NOISE_EXTERNAL :bool             = False,
+                    sde_noise_t        :Optional[Tensor] = None,
+                    SUBSTEP            :bool             = False,
+                    ) -> Tensor:
 
         if sigma_next > 0.0 and sigma_up > 0.0:
             if sigma_next > sigma:
@@ -587,25 +594,36 @@ class RK_NoiseSampler:
         else:
             return x
     
-    def sigma_from_to(self, x_0, x_down, sigma, sigma_down, sigma_next):   #sigma, sigma_from, sigma_to
+    def sigma_from_to(self,
+                        x_0        : Tensor,
+                        x_down     : Tensor,
+                        sigma      : Tensor,
+                        sigma_down : Tensor,
+                        sigma_next : Tensor) -> Tensor:   #sigma, sigma_from, sigma_to
+        
         eps      = (x_0 - x_down) / (sigma - sigma_down)
         denoised =  x_0 - sigma * eps
         x_next   = denoised + sigma_next * eps
         return x_next
 
-    def rebound_overshoot_step(self, x_0, x):
+    def rebound_overshoot_step(self, x_0:Tensor, x:Tensor) -> Tensor:
         eps      = (x_0 - x) / (self.sigma - self.sigma_down)
         denoised =  x_0 - self.sigma * eps
         x        = denoised + self.sigma_next * eps
         return x
     
-    def rebound_overshoot_substep(self, x_0, x):
+    def rebound_overshoot_substep(self, x_0:Tensor, x:Tensor) -> Tensor:
         sub_eps      = (x_0 - x) / (self.sigma - self.sub_sigma_down)
         sub_denoised =  x_0 - self.sigma * sub_eps
         x            = sub_denoised + self.sub_sigma_next * sub_eps
         return x
 
-    def prepare_sigmas(self, sigmas, sigmas_override, d_noise, sampler_mode):
+    def prepare_sigmas(self,
+                        sigmas          : Tensor,
+                        sigmas_override : Tensor,
+                        d_noise         : float,
+                        sampler_mode    : str) -> Tuple[Tensor,bool]:
+        
         if sigmas_override is not None:
             sigmas = sigmas_override.clone()
         sigmas = sigmas.clone() * d_noise

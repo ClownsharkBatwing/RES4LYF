@@ -4,12 +4,16 @@ from torch import Tensor
 
 import itertools
 
-from typing          import Optional, Callable, Tuple, Dict, Any, Union
+from typing          import Optional, Callable, Tuple, Dict, Any, Union, TYPE_CHECKING, TypeVar
+
+if TYPE_CHECKING:
+    from .noise_classes import NoiseGenerator
+    NoiseGeneratorSubclass = TypeVar("NoiseGeneratorSubclass", bound="NoiseGenerator") 
 
 from einops          import rearrange
 
 from ..sigmas        import get_sigmas
-from ..helper        import ExtraOptions, initialize_or_scale, get_extra_options_kv, extra_options_flag, is_video_model
+from ..helper        import ExtraOptions, initialize_or_scale, is_video_model
 from ..latents       import normalize_zscore, get_cosine_similarity, normalize_latent, hard_light_blend
 
 from .rk_method_beta import RK_Method_Beta
@@ -23,12 +27,12 @@ from .constants      import MAX_STEPS
 class LatentGuide:
     def __init__(self,
                 model,
-                sigmas,
-                UNSAMPLE,
-                LGW_MASK_RESCALE_MIN,
-                extra_options,
-                device            = 'cpu',
-                dtype             = torch.float64,
+                sigmas               : Tensor,
+                UNSAMPLE             : bool,
+                LGW_MASK_RESCALE_MIN : bool,
+                extra_options        : str,
+                device               : str = 'cpu',
+                dtype                : torch.dtype = torch.float64,
                 frame_weights_grp = None
                 ):
         
@@ -69,7 +73,7 @@ class LatentGuide:
         self.EO                       = ExtraOptions(extra_options)
 
 
-    def init_guides(self, x : torch.Tensor, RK_IMPLICIT, guides=None, noise_sampler=None):
+    def init_guides(self, x:Tensor, RK_IMPLICIT:bool, guides:Optional[Tensor]=None, noise_sampler:Optional["NoiseGeneratorSubclass"]=None) -> Tensor:
         latent_guide_weight      = 0.0
         latent_guide_weight_inv  = 0.0
         latent_guide_weights     = torch.zeros_like(self.sigmas, dtype=self.dtype, device=self.device)
@@ -187,11 +191,11 @@ class LatentGuide:
             self.y0_inv = noise_sampler(sigma=self.sigma_max, sigma_next=self.sigma_min).to(dtype=self.dtype, device=self.device)
             self.y0_inv = normalize_zscore(self.y0_inv, channelwise=True, inplace=True)
             
-        x, self.y0, self.y0_inv = self.normalize_inputs(x, self.y0, self.y0_inv) #, self.extra_options)
+        x, self.y0, self.y0_inv = self.normalize_inputs(x, self.y0, self.y0_inv)
 
         return x
 
-    def prepare_weighted_masks(self, step):
+    def prepare_weighted_masks(self, step:int) -> Tuple[Tensor, Tensor]:
         lgw_     = self.lgw    [step]
         lgw_inv_ = self.lgw_inv[step]
         
@@ -219,7 +223,7 @@ class LatentGuide:
         return lgw_mask, lgw_mask_inv
 
 
-    def get_masks_for_step(self, step):
+    def get_masks_for_step(self, step:int) -> Tuple[Tensor, Tensor]:
         lgw_mask, lgw_mask_inv = self.prepare_weighted_masks(step)
         if self.VIDEO:
             if self.frame_weights     is not None:
@@ -231,7 +235,7 @@ class LatentGuide:
 
 
 
-    def get_cossim_adjusted_lgw_masks(self, data, step):
+    def get_cossim_adjusted_lgw_masks(self, data:Tensor, step:int) -> Tuple[Tensor, Tensor, Tensor, Tensor]:
         
         if self.HAS_LATENT_GUIDE:
             y0     = self.y0.clone()
@@ -274,22 +278,21 @@ class LatentGuide:
 
     @torch.no_grad
     def process_pseudoimplicit_guides_substep(self,
-                                            x_0,
-                                            x_,
-                                            eps_,
-                                            eps_prev_,
-                                            data_,
-                                            denoised_prev,
-                                            row,
-                                            step,
-                                            sigmas,
-                                            NS,
-                                            RK,
-                                            pseudoimplicit_row_weights,
-                                            pseudoimplicit_step_weights,
-                                            full_iter,
-                                            BONGMATH,
-                                            extra_options,
+                                            x_0                         : Tensor,
+                                            x_                          : Tensor,
+                                            eps_                        : Tensor,
+                                            eps_prev_                   : Tensor,
+                                            data_                       : Tensor,
+                                            denoised_prev               : Tensor,
+                                            row                         : int,
+                                            step                        : int,
+                                            sigmas                      : Tensor,
+                                            NS                                  ,
+                                            RK                                  ,
+                                            pseudoimplicit_row_weights  : Tensor,
+                                            pseudoimplicit_step_weights : Tensor,
+                                            full_iter                   : int,
+                                            BONGMATH                    : bool,
                                             ):
         
         if "pseudoimplicit" not in self.guide_mode or (self.lgw[step] == 0 and self.lgw_inv[step] == 0):
@@ -336,7 +339,7 @@ class LatentGuide:
             
             if row > 0:
                 x_[row] = NS.swap_noise_substep(x_0, x_[row])
-                if BONGMATH and step < sigmas.shape[0]-1 and not self.EO("disable_pseudoimplicit_bongmath", extra_options):
+                if BONGMATH and step < sigmas.shape[0]-1 and not self.EO("disable_pseudoimplicit_bongmath"):
                     x_0, x_, eps_ = RK.bong_iter(x_0,
                                                 x_,
                                                 eps_,
@@ -351,7 +354,7 @@ class LatentGuide:
         else:
             eps_[row] = RK.get_epsilon(x_0, x_[row], denoised_prev, sigma, NS.s_[row])
             
-        if self.EO("pseudoimplicit_denoised_prev", extra_options):
+        if self.EO("pseudoimplicit_denoised_prev"):
             eps_[row] = RK.get_epsilon(x_0, x_[row], denoised_prev, sigma, NS.s_[row])
  
         eps_substep_guide     = torch.zeros_like(x_0)
@@ -367,9 +370,9 @@ class LatentGuide:
         if self.guide_mode in {"pseudoimplicit", "pseudoimplicit_cw", "pseudoimplicit_projection", "pseudoimplicit_projection_cw"}:
             maxmin_ratio = (NS.sub_sigma - RK.sigma_min) / NS.sub_sigma
             
-            if   self.EO("guide_pseudoimplicit_power_substep_flip_maxmin_scaling", extra_options):
+            if   self.EO("guide_pseudoimplicit_power_substep_flip_maxmin_scaling"):
                 maxmin_ratio *= (RK.rows-row) / RK.rows
-            elif self.EO("guide_pseudoimplicit_power_substep_maxmin_scaling", extra_options):
+            elif self.EO("guide_pseudoimplicit_power_substep_maxmin_scaling"):
                 maxmin_ratio *= row / RK.rows
             
             sub_sigma_2 = NS.sub_sigma - maxmin_ratio * (NS.sub_sigma * pseudoimplicit_row_weights[row] * pseudoimplicit_step_weights[full_iter] * self.lgw[step])
@@ -397,7 +400,7 @@ class LatentGuide:
             sub_sigma_pseudoimplicit = sub_sigma_2
 
 
-        if RK.IMPLICIT and BONGMATH and step < sigmas.shape[0]-1 and not self.EO("disable_pseudobongmath", extra_options):
+        if RK.IMPLICIT and BONGMATH and step < sigmas.shape[0]-1 and not self.EO("disable_pseudobongmath"):
             x_[row] = NS.sigma_from_to(x_0, x_row_pseudoimplicit, sigma, sub_sigma_pseudoimplicit, NS.s_[row])
             
             x_0, x_, eps_ = RK.bong_iter(x_0,
@@ -436,7 +439,6 @@ class LatentGuide:
                                                     pseudoimplicit_step_weights,
                                                     full_iter,
                                                     BONGMATH,
-                                                    extra_options,
                                                     ):
         
         if "fully_pseudoimplicit" not in self.guide_mode or (self.lgw[step] == 0 and self.lgw_inv[step] == 0):
@@ -480,7 +482,7 @@ class LatentGuide:
 
                     if r > 0:
                         x_[r] = NS.swap_noise_substep(x_0, x_[r])
-                        if BONGMATH and step < sigmas.shape[0]-1 and not self.EO("disable_fully_pseudoimplicit_bongmath", extra_options):
+                        if BONGMATH and step < sigmas.shape[0]-1 and not self.EO("disable_fully_pseudoimplicit_bongmath"):
                             x_0, x_, eps_ = RK.bong_iter(x_0,
                                                         x_,
                                                         eps_,
@@ -493,7 +495,7 @@ class LatentGuide:
                                                         NS.h,
                                                         )
                             
-                if self.EO("fully_pseudoimplicit_denoised_prev", extra_options):
+                if self.EO("fully_pseudoimplicit_denoised_prev"):
                     eps_[r] = RK.get_epsilon(x_0, x_[r], denoised_prev, sigma, NS.s_[r])
                 
                 eps_substep_guide     = torch.zeros_like(x_0)
@@ -523,10 +525,10 @@ class LatentGuide:
                 
                 eps_lying_[r] = RK.get_epsilon(x_0, x_[r], data_lying, sigma, NS.s_[r])
                 
-            if not self.EO("pseudoimplicit_disable_eps_lying", extra_options):
+            if not self.EO("pseudoimplicit_disable_eps_lying"):
                 eps_ = eps_lying_
             
-            if not self.EO("pseudoimplicit_disable_newton_iter", extra_options):
+            if not self.EO("pseudoimplicit_disable_newton_iter"):
                 x_, eps_ = RK.newton_iter(x_0,
                                         x_,
                                         eps_,
@@ -549,19 +551,18 @@ class LatentGuide:
 
     @torch.no_grad
     def process_guides_substep(self,
-                                x_0,
-                                x_,
-                                eps_,
-                                data_,
-                                row,
-                                step,
-                                sigma,
-                                sigma_next,
-                                sigma_down,
-                                s_,
-                                epsilon_scale,
+                                x_0           : Tensor,
+                                x_            : Tensor,
+                                eps_          : Tensor,
+                                data_         : Tensor,
+                                row           :  int,
+                                step          :  int,
+                                sigma         : Tensor,
+                                sigma_next    : Tensor,
+                                sigma_down    : Tensor,
+                                s_            : Tensor,
+                                epsilon_scale :  float,
                                 RK,
-                                extra_options,
                                 ):
 
         y0, y0_inv, lgw_mask, lgw_mask_inv = self.get_cossim_adjusted_lgw_masks(data_[row], step)
@@ -571,16 +572,16 @@ class LatentGuide:
 
         eps_orig = eps_.clone()
         
-        if self.EO("dynamic_guides_mean_std", extra_options):
+        if self.EO("dynamic_guides_mean_std"):
             y_shift, y_inv_shift = normalize_latent([y0, y0_inv], [data_, data_])
             y0 = y_shift
-            if self.EO("dynamic_guides_inv", extra_options):
+            if self.EO("dynamic_guides_inv"):
                 y0_inv = y_inv_shift
 
-        if self.EO("dynamic_guides_mean", extra_options):
+        if self.EO("dynamic_guides_mean"):
             y_shift, y_inv_shift = normalize_latent([y0, y0_inv], [data_, data_], std=False)
             y0 = y_shift
-            if self.EO("dynamic_guides_inv", extra_options):
+            if self.EO("dynamic_guides_inv"):
                 y0_inv = y_inv_shift
 
 
@@ -665,34 +666,34 @@ class LatentGuide:
         if temporal_smoothing > 0:
             eps_[row] = apply_temporal_smoothing(eps_[row], temporal_smoothing)
             
-        if self.EO("substep_eps_ch_mean_std", extra_options):
+        if self.EO("substep_eps_ch_mean_std"):
             eps_[row] = normalize_latent(eps_[row], eps_orig[row])
-        if self.EO("substep_eps_ch_mean", extra_options):
+        if self.EO("substep_eps_ch_mean"):
             eps_[row] = normalize_latent(eps_[row], eps_orig[row], std=False)
-        if self.EO("substep_eps_ch_std", extra_options):
+        if self.EO("substep_eps_ch_std"):
             eps_[row] = normalize_latent(eps_[row], eps_orig[row], mean=False)
-        if self.EO("substep_eps_mean_std", extra_options):
+        if self.EO("substep_eps_mean_std"):
             eps_[row] = normalize_latent(eps_[row], eps_orig[row], channelwise=False)
-        if self.EO("substep_eps_mean", extra_options):
+        if self.EO("substep_eps_mean"):
             eps_[row] = normalize_latent(eps_[row], eps_orig[row], std=False, channelwise=False)
-        if self.EO("substep_eps_std", extra_options):
+        if self.EO("substep_eps_std"):
             eps_[row] = normalize_latent(eps_[row], eps_orig[row], mean=False, channelwise=False)
         return eps_, x_
 
 
     def process_channelwise(self,
-                            x_0,
-                            eps_,
-                            data_,
-                            row,
-                            eps_substep_guide,
-                            eps_substep_guide_inv,
-                            y0,
-                            y0_inv,
-                            lgw_mask,
-                            lgw_mask_inv,
-                            use_projection = False,
-                            channelwise    = False
+                            x_0                   : Tensor,
+                            eps_                  : Tensor,
+                            data_                 : Tensor,
+                            row                   : int,
+                            eps_substep_guide     : Tensor,
+                            eps_substep_guide_inv : Tensor,
+                            y0                    : Tensor,
+                            y0_inv                : Tensor,
+                            lgw_mask              : Tensor,
+                            lgw_mask_inv          : Tensor,
+                            use_projection        : bool    = False,
+                            channelwise           : bool    = False
                             ):
         
         avg, avg_inv = 0, 0
@@ -729,7 +730,7 @@ class LatentGuide:
 
 
     @torch.no_grad
-    def process_guides_poststep(self, x, denoised, eps, step, extra_options):
+    def process_guides_poststep(self, x:Tensor, denoised:Tensor, eps:Tensor, step:int) -> Tuple[Tensor, Tensor, Tensor]:
         x_orig = x.clone()
         mean_weight = self.EO("mean_weight", 0.01)
 
@@ -843,7 +844,15 @@ class LatentGuide:
     
     
     def normalize_inputs(self, x:Tensor, y0:Tensor, y0_inv:Tensor):
-        
+        """
+        Modifies and returns 'x' by matching its mean and/or std to y0 and/or y0_inv.
+        Controlled by extra_options.
+
+        Returns:
+            - x      (modified)
+            - y0     (may be modified to match mean and std from y0_inv)
+            - y0_inv (unchanged)
+        """
         if self.guide_mode == "epsilon_guide_mean_std_from_bkg":
             y0 = normalize_latent(y0, y0_inv)
 
@@ -857,7 +866,7 @@ class LatentGuide:
             x = normalize_latent(x, set_std=input_std, mean=False)
                 
         if input_norm == "input_mean_set_std_to":
-            x = normalize_latent(x, set_std=input_std, channelwise=False)
+            x = normalize_latent(x, set_std=input_std,             channelwise=False)
             
         if input_norm == "input_std_set_std_to":
             x = normalize_latent(x, set_std=input_std, mean=False, channelwise=False)
@@ -1351,21 +1360,25 @@ def handle_tiled_etc_noise_steps(
     cossim_tmp     = []
     noise_tmp_list = []
     
-    #if step > int(get_extra_options_kv("noise_cossim_end_step", "10000", extra_options)):
     if step > EO("noise_cossim_end_step", MAX_STEPS):
-        NOISE_COSSIM_SOURCE = EO("noise_cossim_takeover_source", "eps")
-        NOISE_COSSIM_MODE   = EO("noise_cossim_takeover_mode", "forward", extra_options)
-        noise_cossim_tile_size   = EO("noise_cossim_takeover_tile", noise_cossim_tile_size, extra_options)
-        noise_cossim_iterations   = EO("noise_cossim_takeover_iterations", noise_cossim_iterations, extra_options)
+        NOISE_COSSIM_SOURCE       = EO("noise_cossim_takeover_source"    , "eps")
+        NOISE_COSSIM_MODE         = EO("noise_cossim_takeover_mode"      , "forward"              )
+        noise_cossim_tile_size    = EO("noise_cossim_takeover_tile"      , noise_cossim_tile_size )
+        noise_cossim_iterations   = EO("noise_cossim_takeover_iterations", noise_cossim_iterations)
         
     for i in range(noise_cossim_iterations):
         #x_tmp.append(NS.swap_noise(x_0, x, sigma, sigma, sigma_next, ))
         x_tmp.append(NS.add_noise_post(x, sigma_up, sigma, sigma_next, alpha_ratio, s_noise, noise_mode, SDE_NOISE_EXTERNAL, sde_noise_t)    )#y0, lgw, sigma_down are currently unused
         noise_tmp = x_tmp[i] - x
-        if extra_options_flag("noise_noise_zscore_norm", extra_options):
-            noise_tmp = (noise_tmp - noise_tmp.mean()) / noise_tmp.std()
-        if extra_options_flag("noise_eps_zscore_norm", extra_options):
-            eps = (eps - eps.mean()) / eps.std()
+        if EO("noise_noise_zscore_norm"):
+            noise_tmp = normalize_zscore(noise_tmp, channelwise=False, inplace=True)
+        if EO("noise_noise_zscore_norm_cw"):
+            noise_tmp = normalize_zscore(noise_tmp, channelwise=True,  inplace=True)
+        if EO("noise_eps_zscore_norm"):
+            eps       = normalize_zscore(eps,       channelwise=False, inplace=True)
+        if EO("noise_eps_zscore_norm_cw"):
+            eps       = normalize_zscore(eps,       channelwise=True,  inplace=True)
+            
         if   NOISE_COSSIM_SOURCE in ("eps_tiled", "guide_epsilon_tiled", "guide_bkg_epsilon_tiled", "iig_tiled"):
             noise_tmp_list.append(noise_tmp)
         if   NOISE_COSSIM_SOURCE == "eps":
@@ -1394,7 +1407,7 @@ def handle_tiled_etc_noise_steps(
         elif NOISE_COSSIM_SOURCE == "guide_bkg":
             cossim_tmp.append(get_cosine_similarity(y0_inv, x_tmp[i]))
             
-    if step < int(get_extra_options_kv("noise_cossim_start_step", "0", extra_options)):
+    if step < EO("noise_cossim_start_step", 0):
         x = x_tmp[0]
 
     elif (NOISE_COSSIM_SOURCE == "eps_tiled"):

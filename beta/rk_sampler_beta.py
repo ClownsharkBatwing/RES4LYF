@@ -2,7 +2,7 @@ import torch
 from torch import Tensor
 from tqdm.auto import trange
 import gc
-from typing import Optional, Callable
+from typing import Optional, Callable, Tuple, Dict, Any, Union
 
 from ..res4lyf              import RESplain
 from ..helper               import ExtraOptions
@@ -103,74 +103,90 @@ def init_implicit_sampling(
 
 
 @torch.no_grad()
-def sample_rk_beta(model,
-        x,
-        sigmas,
+def sample_rk_beta(
+        model,
+        x                             : Tensor,
+        sigmas                        : Tensor,
+        sigmas_override               : Optional[Tensor]   = None,
+        
         extra_args                    : Optional[Tensor]   = None,
         callback                      : Optional[Callable] = None,
         disable                       : bool               = None,
-        noise_sampler_type            : str                = "gaussian",
-        noise_sampler_type_substep    : str                = "gaussian",
-        noise_mode_sde                : str                = "hard",
-        noise_seed                    : int                = -1,
+        
+        sampler_mode                  : str                = "standard",
+
         rk_type                       : str                = "res_2m",
         implicit_sampler_name         : str                = "explicit_full",
 
+        c1                            : float              =  0.0,
+        c2                            : float              =  0.5,
+        c3                            : float              =  1.0,
+
+        noise_sampler_type            : str                = "gaussian",
+        noise_sampler_type_substep    : str                = "gaussian",
+        noise_mode_sde                : str                = "hard",
+        noise_mode_sde_substep        : str                = "hard",
+
         eta                           : float              =  0.0,
+        eta_substep                   : float              =  0.0,
+
         s_noise                       : float              =  1.0,
         s_noise_substep               : float              =  1.0,
-        d_noise                       : float              =  1.0,
+        
         alpha                         : float              = -1.0,
         alpha_substep                 : float              = -1.0,
         k                             : float              =  1.0,
         k_substep                     : float              =  1.0,
-        c1                            : float              =  0.0,
-        c2                            : float              =  0.5,
-        c3                            : float              =  1.0,
+        
+        d_noise                       : float              =  1.0,
+        noise_boost_step              : float              =  0.0,
+        noise_boost_substep           : float              =  0.0,
+
+        overshoot_mode                : str                = "hard",
+        overshoot_mode_substep        : str                = "hard",
+        overshoot                     : float              =  0.0,
+        overshoot_substep             : float              =  0.0,
+
+        implicit_type                 : str                = "predictor-corrector",
+        implicit_type_substeps        : str                = "predictor-corrector",
+        
         implicit_steps_diag           : int                =  0,
         implicit_steps_full           : int                =  0,
-
-        LGW_MASK_RESCALE_MIN          : bool               = True,
-        sigmas_override               : Optional[Tensor]   = None,
-        sampler_mode                  : str                = "standard",
-        epsilon_scales                : Optional[Tensor]   = None,
-        regional_conditioning_weights : Optional[Tensor]   = None,
-        sde_noise                     : list    [Tensor]   = [],
-
-        extra_options                 : str                = "",
 
         etas                          : Optional[Tensor]   = None,
         etas_substep                  : Optional[Tensor]   = None,
         s_noises                      : Optional[Tensor]   = None,
         s_noises_substep              : Optional[Tensor]   = None,
+        
         momentums                     : Optional[Tensor]   = None,
-        guides                        : bool               = None,
+
+        regional_conditioning_weights : Optional[Tensor]   = None,
+        regional_conditioning_floors  : Optional[Tensor]   = None,
+                
+        LGW_MASK_RESCALE_MIN          : bool               = True,
+        guides                        : Optional[Tuple[Any, ...]]    = None,
+        epsilon_scales                : Optional[Tensor]   = None,
+        frame_weights_grp             : Optional[Tuple[Tensor, Tensor]] = None,
+
+        sde_noise                     : list    [Tensor]   = [],
+
+        noise_seed                    : int                = -1,
+
         cfgpp                         : float              = 0.0,
         cfg_cw                        : float              = 1.0,
-        regional_conditioning_floors  : bool               = None,
-        frame_weights_grp             : bool               = None,
-        eta_substep                   : float              = 0.0,
-        noise_mode_sde_substep        : str                = "hard",
 
-        noise_boost_step              : float              = 0.0,
-        noise_boost_substep           : float              = 0.0,
-        overshoot                     : float              = 0.0,
-        overshoot_substep             : float              = 0.0,
-        overshoot_mode                : str                = "hard",
-        overshoot_mode_substep        : str                = "hard",
-        BONGMATH                      : bool               = True,
         noise_anchor                  : float              = 1.0,
+        BONGMATH                      : bool               = True,
 
-        implicit_type                 : str                = "predictor-corrector",
-        implicit_type_substeps        : str                = "predictor-corrector",
+        state_info                    : Optional[dict[str, Any]] = None,
+        state_info_out                : Optional[dict[str, Any]] = None,
         
-        state_info                    : Optional[dict]     = None,
-        state_info_out                : Optional[dict]     = None,
-        
-        rk_swap_step                  : int                = MAX_STEPS,
-        rk_swap_print                 : bool               = False,
-        rk_swap_threshold             : float              = 0.0,
         rk_swap_type                  : str                = "",
+        rk_swap_step                  : int                = MAX_STEPS,
+        rk_swap_threshold             : float              = 0.0,
+        rk_swap_print                 : bool               = False,
+
+        extra_options                 : str                = "",
         ):
     
     EO             = ExtraOptions(extra_options)
@@ -196,7 +212,7 @@ def sample_rk_beta(model,
     
     cfg_cw                      = EO("cfg_cw"                     , cfg_cw)
     
-    noise_seed                  = EO("noise_seed"                 ,         noise_seed)
+    noise_seed                  = EO("noise_seed"                 , noise_seed)
     noise_seed_substep          = EO("noise_seed_substep"         , noise_seed + MAX_STEPS)
     
     pseudoimplicit_row_weights  = EO("pseudoimplicit_row_weights" , [1. for _ in range(100)])
@@ -210,13 +226,13 @@ def sample_rk_beta(model,
     if implicit_sampler_name == "none":
         implicit_steps_diag = implicit_steps_full = 0
         
-    RK = RK_Method_Beta.create(model, rk_type, noise_anchor, model_device=model_device, work_device=work_device, dtype=default_dtype, extra_options=extra_options)
+    RK            = RK_Method_Beta.create(model, rk_type, noise_anchor, model_device=model_device, work_device=work_device, dtype=default_dtype, extra_options=extra_options)
     RK.extra_args = RK.init_cfg_channelwise(x, cfg_cw, **extra_args)
     RK.extra_args['model_options']['transformer_options']['regional_conditioning_weight'] = 0.0
     RK.extra_args['model_options']['transformer_options']['regional_conditioning_floor']  = 0.0
     
     # SETUP SIGMAS
-    NS = RK_NoiseSampler(RK, model, device=work_device, dtype=default_dtype, extra_options=extra_options)
+    NS               = RK_NoiseSampler(RK, model, device=work_device, dtype=default_dtype, extra_options=extra_options)
     sigmas, UNSAMPLE = NS.prepare_sigmas(sigmas, sigmas_override, d_noise, sampler_mode)
     
     SDE_NOISE_EXTERNAL = False
@@ -228,9 +244,10 @@ def sample_rk_beta(model,
                 sigma_up_total += sigmas[i+1]
             etas = torch.full_like(sigmas, eta / sigma_up_total)
     
-    NS.init_noise_samplers(x, noise_seed, noise_seed_substep, noise_sampler_type, noise_sampler_type_substep, noise_mode_sde, noise_mode_sde_substep, overshoot_mode, overshoot_mode_substep, noise_boost_step, noise_boost_substep, alpha, alpha_substep, k, k_substep)
+    NS.init_noise_samplers(x, noise_seed, noise_seed_substep, noise_sampler_type, noise_sampler_type_substep, noise_mode_sde, noise_mode_sde_substep, \
+                            overshoot_mode, overshoot_mode_substep, noise_boost_step, noise_boost_substep, alpha, alpha_substep, k, k_substep)
 
-    if 'last_rng' in state_info and noise_seed < 0: # and resume_state == True:
+    if 'last_rng' in state_info and noise_seed < 0:
         NS.noise_sampler.generator.set_state (state_info['last_rng'])
         NS.noise_sampler2.generator.set_state(state_info['last_rng_substep'])
 
@@ -336,7 +353,8 @@ def sample_rk_beta(model,
                 if EO("fully_pseudo_init") and full_iter == 0:
                     guide_mode_tmp = LG.guide_mode
                     LG.guide_mode = "fully_" + LG.guide_mode
-                x_0, x_, eps_ = LG.prepare_fully_pseudoimplicit_guides_substep(x_0, x_, eps_, eps_prev_, data_, denoised_prev, 0, step, sigmas, eta_substep, overshoot_substep, s_noise_substep, NS, RK, pseudoimplicit_row_weights, pseudoimplicit_step_weights, full_iter, BONGMATH, extra_options)
+                x_0, x_, eps_ = LG.prepare_fully_pseudoimplicit_guides_substep(x_0, x_, eps_, eps_prev_, data_, denoised_prev, 0, step, sigmas, eta_substep, overshoot_substep, s_noise_substep, \
+                                                                                NS, RK, pseudoimplicit_row_weights, pseudoimplicit_step_weights, full_iter, BONGMATH)
                 if EO("fully_pseudo_init") and full_iter == 0:
                     LG.guide_mode = guide_mode_tmp
 
@@ -356,7 +374,8 @@ def sample_rk_beta(model,
 
                         # PREPARE PSEUDOIMPLICIT GUIDES
                         if step > 0 or not SKIP_PSEUDO:
-                            x_0, x_, eps_, x_row_pseudoimplicit, sub_sigma_pseudoimplicit = LG.process_pseudoimplicit_guides_substep(x_0, x_, eps_, eps_prev_, data_, denoised_prev, row, step, sigmas, NS, RK, pseudoimplicit_row_weights, pseudoimplicit_step_weights, full_iter, BONGMATH, extra_options)
+                            x_0, x_, eps_, x_row_pseudoimplicit, sub_sigma_pseudoimplicit = LG.process_pseudoimplicit_guides_substep(x_0, x_, eps_, eps_prev_, data_, denoised_prev, row, step, sigmas, NS, RK, \
+                                                                                                                        pseudoimplicit_row_weights, pseudoimplicit_step_weights, full_iter, BONGMATH)
                         
 
                         # PREPARE MODEL CALL
@@ -456,8 +475,8 @@ def sample_rk_beta(model,
 
                             if RK.IMPLICIT: 
                                 if not EO("disable_implicit_guide_preproc"):
-                                    eps_, x_      = LG.process_guides_substep(x_0, x_, eps_,      data_, row, step, sigma, sigma_next, NS.sigma_down, NS.s_, epsilon_scale, RK, extra_options)
-                                    eps_prev_, x_ = LG.process_guides_substep(x_0, x_, eps_prev_, data_, row, step, sigma, sigma_next, NS.sigma_down, NS.s_, epsilon_scale, RK, extra_options)
+                                    eps_, x_      = LG.process_guides_substep(x_0, x_, eps_,      data_, row, step, sigma, sigma_next, NS.sigma_down, NS.s_, epsilon_scale, RK)
+                                    eps_prev_, x_ = LG.process_guides_substep(x_0, x_, eps_prev_, data_, row, step, sigma, sigma_next, NS.sigma_down, NS.s_, epsilon_scale, RK)
                                 if row == 0 and (EO("implicit_lagrange_init")  or   EO("radaucycle")):
                                     pass
                                 else:
@@ -538,9 +557,9 @@ def sample_rk_beta(model,
                         # GUIDE 
                         #if not UNSAMPLE:
                         if not EO("disable_guides_eps_substep"):
-                            eps_, x_      = LG.process_guides_substep(x_0, x_, eps_,      data_, row, step, NS.sigma, NS.sigma_next, NS.sigma_down, NS.s_, epsilon_scale, RK, extra_options)
+                            eps_, x_      = LG.process_guides_substep(x_0, x_, eps_,      data_, row, step, NS.sigma, NS.sigma_next, NS.sigma_down, NS.s_, epsilon_scale, RK)
                         if not EO("disable_guides_eps_prev_substep"):
-                            eps_prev_, x_ = LG.process_guides_substep(x_0, x_, eps_prev_, data_, row, step, NS.sigma, NS.sigma_next, NS.sigma_down, NS.s_, epsilon_scale, RK, extra_options)
+                            eps_prev_, x_ = LG.process_guides_substep(x_0, x_, eps_prev_, data_, row, step, NS.sigma, NS.sigma_next, NS.sigma_down, NS.s_, epsilon_scale, RK)
 
                         if (full_iter == 0 and diag_iter == 0)   or   EO("newton_iter_post_use_on_implicit_steps"):
                             x_, eps_ = RK.newton_iter(x_0, x_, eps_, eps_prev_, data_, NS.s_, row, NS.h, sigmas, step, "post")
@@ -567,7 +586,7 @@ def sample_rk_beta(model,
             eps = (x_0 - x_next) / (sigma - sigma_next)
             denoised = x_0 - sigma * eps
             
-            x_next = LG.process_guides_poststep(x_next, denoised, eps, step, extra_options)
+            x_next = LG.process_guides_poststep(x_next, denoised, eps, step)
             x      = NS.swap_noise_step(x_0, x_next)
             
             preview_callback(x, eps, denoised, x_, eps_, data_, step, sigma, sigma_next, callback, EO)
