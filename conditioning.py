@@ -648,7 +648,6 @@ class FluxRegionalConditioning:
             self_attn_floors = None,
             self_attn_floor  = 0.0,
             mask_type        = "gradient",
-            latent           = None
             ):
         
         weight, weights = mask_weight, mask_weights
@@ -680,14 +679,11 @@ class FluxRegionalConditioning:
 
 
 
-from .models import ReFluxPatcher
-
 class ClownRegionalConditioningFlux:
     @classmethod
     def INPUT_TYPES(s):
         return {
             "required": { 
-                #"regional_model":    (["auto", "deactivate", "passthrough"], {"default": "auto"}),
                 "mask_weight":       ("FLOAT",                {"default": 1.0, "min": -10000.0, "max": 10000.0, "step": 0.01}),
                 "region_bleed":      ("FLOAT",                {"default": 0.0, "min": -10000.0, "max": 10000.0, "step": 0.01}),
                 "start_percent":     ("FLOAT",                {"default": 0,   "min": 0.0,      "max": 1.0,     "step": 0.01}),
@@ -696,7 +692,6 @@ class ClownRegionalConditioningFlux:
                 "invert_mask":       ("BOOLEAN",              {"default": False}),
             }, 
             "optional": {
-                "model":             ("MODEL", ),
                 "positive_masked":   ("CONDITIONING", ),
                 "positive_unmasked": ("CONDITIONING", ),
                 "mask":              ("MASK", ),
@@ -705,56 +700,43 @@ class ClownRegionalConditioningFlux:
             }
         }
 
-    RETURN_TYPES = ("MODEL", "CONDITIONING",)
-    RETURN_NAMES = ("model", "positive",)
-    FUNCTION = "main"
-
-    CATEGORY = "RES4LYF/conditioning"
+    RETURN_TYPES = ("CONDITIONING",)
+    RETURN_NAMES = ("positive",)
+    FUNCTION     = "main"
+    CATEGORY     = "RES4LYF/conditioning"
 
     def main(self,
-            model,
-            regional_model   : str = "auto",
             mask_weight      : float = 1.0,
             start_percent    : float = 0.0,
             end_percent      : float = 1.0,
-            positive_masked  = None,
-            positive_unmasked= None,
-            mask_weights     = None,
-            region_bleeds    = None,
+            positive_masked          = None,
+            positive_unmasked        = None,
+            mask_weights             = None,
+            region_bleeds            = None,
             region_bleed     : float = 0.0,
-            mask_type        : str = "gradient",
-            mask             = None,
-            invert_mask      : bool = False
+            mask_type        : str   = "gradient",
+            mask                     = None,
+            invert_mask      : bool  = False
             ):
         
-        if regional_model == "auto" or regional_model == "passthrough":
-            reflux_enable = True
-        else:
-            model, = ReFluxPatcher().main(model, enable=False)
-            return (model, positive_masked,)
-            
         if invert_mask and mask is not None:
             mask = 1-mask
 
         weight, weights = mask_weight, mask_weights
         floor, floors = region_bleed, region_bleeds
         default_dtype = torch.float64
-        max_steps = 10000
-        weights = initialize_or_scale(weights, weight, max_steps).to(default_dtype)
-        weights = F.pad(weights, (0, max_steps), value=0.0)
         
-        floors = initialize_or_scale(floors, floor, max_steps).to(default_dtype)
-        floors = F.pad(floors, (0, max_steps), value=0.0)
+        weights = initialize_or_scale(weights, weight, MAX_STEPS).to(default_dtype)
+        weights = F.pad(weights, (0, MAX_STEPS), value=0.0)
+        
+        floors = initialize_or_scale(floors, floor, MAX_STEPS).to(default_dtype)
+        floors = F.pad(floors, (0, MAX_STEPS), value=0.0)
 
         if (positive_masked is None) and (positive_unmasked is None):
             positive = None
-            reflux_enable = False
-        elif mask is not None:
-            if regional_model == "auto" or regional_model == "passthrough":
-                reflux_enable = True
-            else:
-                reflux_enable = False
             
+        elif mask is not None:
+
             if positive_unmasked is None:
                 if positive_unmasked is None:
                     positive_unmasked = [[
@@ -767,14 +749,7 @@ class ClownRegionalConditioningFlux:
             positive, = FluxRegionalConditioning().main(conditioning_regional=cond_regional, self_attn_floor=floor, self_attn_floors=floors, mask_weight=weight, mask_weights=weights, start_percent=start_percent, end_percent=end_percent, mask_type=mask_type)
         else:
             positive = positive_masked
-            reflux_enable = False
-        
-        if not reflux_enable:
-            model, = ReFluxPatcher().main(model, enable=False)
-            return (model, positive_masked,)
-        else:
-            if regional_model == "auto":
-                model, = ReFluxPatcher().main(model, enable=True)
-            return (model, positive,)
+            
+        return (positive,)
 
 

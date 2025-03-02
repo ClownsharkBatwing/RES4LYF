@@ -49,9 +49,9 @@ class ReFluxPatcher:
     CATEGORY     = "RES4LYF/model_patches"
     FUNCTION     = "main"
 
-    def main(self, model, enable=True):
+    def main(self, model, enable=True, force=False):
         
-        if enable and model.model.diffusion_model.__class__ == Flux:
+        if (enable or force) and model.model.diffusion_model.__class__ == Flux:
             m = model.clone()
             m.model.diffusion_model.__class__     = ReFlux
             m.model.diffusion_model.threshold_inv = False
@@ -64,7 +64,7 @@ class ReFluxPatcher:
                 block.__class__ = ReSingleStreamBlock
                 block.idx       = i
                 
-                
+        
         elif not enable and model.model.diffusion_model.__class__ == ReFlux:
             m = model.clone()
             m.model.diffusion_model.__class__ = Flux
