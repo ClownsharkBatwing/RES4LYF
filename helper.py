@@ -113,7 +113,7 @@ class OptionsManager:
         self.options_list = []
         if options is not None:
             self.options_list.append(options)
-        
+
         for key, value in kwargs.items():
             if key.startswith('options') and value is not None:
                 self.options_list.append(value)
@@ -196,6 +196,7 @@ class OptionsManager:
                     RESplain(f"  {key}: {value}", debug=True)
             else:
                 RESplain("  None", "\n", debug=True)
+
 
 
 
