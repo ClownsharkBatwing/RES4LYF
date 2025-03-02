@@ -543,6 +543,8 @@ class ClownSamplerAdvanced_Beta:
             rk_swap_threshold = options_mgr.get('rk_swap_threshold', rk_swap_threshold)
             rk_swap_type      = options_mgr.get('rk_swap_type'     , rk_swap_type)
 
+            steps_to_run      = options_mgr.get('steps_to_run'     , steps_to_run)
+
 
             rescale_floor = EO("rescale_floor")
 
