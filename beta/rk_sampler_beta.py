@@ -8,7 +8,7 @@ from ..res4lyf              import RESplain
 from ..helper               import ExtraOptions
 from ..latents              import lagrange_interpolation
 
-from .rk_method_beta        import RK_Method_Beta, RK_Method_Exponential, RK_Method_Linear
+from .rk_method_beta        import RK_Method_Beta
 from .rk_noise_sampler_beta import RK_NoiseSampler
 from .rk_guide_func_beta    import LatentGuide
 from .phi_functions         import Phi
@@ -622,6 +622,8 @@ def sample_rk_beta(model,
     state_info_out['raw_x']             = x.clone()
     state_info_out['last_rng']          = NS.noise_sampler .generator.get_state()
     state_info_out['last_rng_substep']  = NS.noise_sampler2.generator.get_state()
+    
+    gc.collect()
 
     return x
 

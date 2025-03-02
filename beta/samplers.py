@@ -4,6 +4,7 @@ from torch import Tensor
 
 from typing import Optional, Callable
 import copy
+import gc
 
 import comfy.samplers
 import comfy.sample
@@ -250,7 +251,7 @@ class SharkSampler:
                     regional_mask                                          = copy.deepcopy(regional_mask)
                     
                     if not EO("disable_autoswap_reflux"):
-                        work_model, = RES4LYF.models.ReFluxPatcher().main(work_model, enable=True, force=True)
+                        work_model, = RES4LYF.models.ReFluxPatcher().main(work_model, enable=True) #, force=True)
 
                     work_model.set_model_patch(regional_conditioning, 'regional_conditioning_positive')
                     work_model.set_model_patch(regional_mask,         'regional_conditioning_mask')
@@ -387,6 +388,8 @@ class SharkSampler:
 
             out['state_info']       = copy.deepcopy(state_info_out)
             state_info              = {}
+            
+            gc.collect()
 
             return (out, out_denoised, sde_noise,)
 
