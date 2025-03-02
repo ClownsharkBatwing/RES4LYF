@@ -378,6 +378,39 @@ class ClownOptions_SwapSampler_Beta:
 
         return (options,)
     
+    
+    
+class ClownOptions_SplitSigmas_Beta:
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "start_at_step": ("INT", {"default": 30,  "min": 0, "max": 10000}),
+                "stop_at_step":  ("INT", {"default": 30,  "min": 1, "max": 10000}),
+                },
+            "optional": {
+                "options":            ("OPTIONS", ),   
+                }
+            }
+
+    RETURN_TYPES = ("OPTIONS",)
+    RETURN_NAMES = ("options",)
+    FUNCTION     = "main"
+    CATEGORY     = "RES4LYF/sampler_options"
+    
+    def main(self,
+            start_at_step = 0,
+            stop_at_step  = 1,
+            options       = None,
+            ): 
+        
+        options = options if options is not None else {}
+            
+        options['start_at_step'] = start_at_step
+        options['stop_at_step']  = stop_at_step
+
+        return (options,)
+
 
 
 class ClownGuide_Misc_Beta:

@@ -113,8 +113,8 @@ class SharkSampler:
 
             # INIT EXTENDABLE OPTIONS INPUTS
             
-            options_mgr = OptionsManager(options, **kwargs)
-            extra_options    += "\n" + options_mgr.get('extra_options', "")
+            options_mgr    = OptionsManager(options, **kwargs)
+            extra_options += "\n" + options_mgr.get('extra_options', "")
             
             """options_inputs = []
 
@@ -501,6 +501,8 @@ class ClownSamplerAdvanced_Beta:
             rk_swap_threshold             : float = 0.0,
             rk_swap_type                  : str = "",
             
+            steps_to_run                  : int = -1,
+            
             **kwargs,
             ): 
         
@@ -627,6 +629,8 @@ class ClownSamplerAdvanced_Beta:
                     "rk_swap_print"                 : rk_swap_print,
                     "rk_swap_threshold"             : rk_swap_threshold,
                     "rk_swap_type"                  : rk_swap_type,
+                    
+                    "steps_to_run"                  : steps_to_run,
                 })
 
 
@@ -644,12 +648,13 @@ class ClownsharKSampler_Beta:
         inputs = {"required":
                     {
                     "model":        ("MODEL",),
-                    "eta":          ("FLOAT",                      {"default": 0.5, "min": -100.0, "max": 100.0, "step":0.01, "round": False, "tooltip": "Calculated noise amount to be added, then removed, after each step."}),
+                    "eta":          ("FLOAT",                      {"default": 0.5, "min": -100.0, "max": 100.0,     "step":0.01, "round": False, "tooltip": "Calculated noise amount to be added, then removed, after each step."}),
                     "sampler_name": (get_sampler_name_list     (), {"default": get_default_sampler_name()}), 
                     "scheduler":    (get_res4lyf_scheduler_list(), {"default": "beta57"},),
-                    "steps":        ("INT",                        {"default": 30,  "min": 1,      "max": 10000}),
-                    "denoise":      ("FLOAT",                      {"default": 1.0, "min": -10000, "max": 10000, "step":0.01}),
-                    "cfg":          ("FLOAT",                      {"default": 5.5, "min": -100.0, "max": 100.0, "step":0.01, "round": False, }),
+                    "steps":        ("INT",                        {"default": 30,  "min":  1,     "max": MAX_STEPS}),
+                    "steps_to_run": ("INT",                        {"default": -1,  "min": -1,     "max": MAX_STEPS}),
+                    "denoise":      ("FLOAT",                      {"default": 1.0, "min": -10000, "max": MAX_STEPS, "step":0.01}),
+                    "cfg":          ("FLOAT",                      {"default": 5.5, "min": -100.0, "max": 100.0,     "step":0.01, "round": False, }),
                     "seed":         ("INT",                        {"default": 0,   "min": -1,     "max": 0xffffffffffffffff}),
                     "sampler_mode": (['standard', 'unsample', 'resample'],),
                     "bongmath":     ("BOOLEAN",                    {"default": True}),
@@ -686,6 +691,7 @@ class ClownsharKSampler_Beta:
             negative                                               = None, 
             latent_image                  : Optional[dict[Tensor]] = None, 
             steps                         : int                    = 30,
+            steps_to_run                  : int                    = -1,
             bongmath                      : bool                   = True,
             sampler_mode                  : str                    = "standard",
             
@@ -744,6 +750,9 @@ class ClownsharKSampler_Beta:
             rk_swap_threshold             : float                  = 0.0,
             rk_swap_type                  : str                    = "",
             
+            #start_at_step                 : int                    = 0,
+            #stop_at_step                  : int                    = MAX_STEPS,
+                        
             **kwargs
             ): 
         
@@ -823,6 +832,9 @@ class ClownsharKSampler_Beta:
         rk_swap_threshold      = options_mgr.get('rk_swap_threshold'     , rk_swap_threshold)
         rk_swap_print          = options_mgr.get('rk_swap_print'         , rk_swap_print)
         
+        #start_at_step          = options_mgr.get('start_at_step'         , start_at_step)
+        #stop_at_ste            = options_mgr.get('stop_at_step'          , stop_at_step)
+                
         if channelwise_cfg:
             cfg = -abs(cfg)  # set cfg negative for shark, to flag as cfg_cw
 
@@ -888,7 +900,9 @@ class ClownsharKSampler_Beta:
             rk_swap_print                 = rk_swap_print,
             rk_swap_threshold             = rk_swap_threshold,
             rk_swap_type                  = rk_swap_type,
-                        
+            
+            steps_to_run                  = steps_to_run,
+            
             bongmath                      = bongmath,
             )
             

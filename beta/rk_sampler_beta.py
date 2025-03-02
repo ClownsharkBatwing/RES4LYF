@@ -185,6 +185,8 @@ def sample_rk_beta(
         rk_swap_step                  : int                = MAX_STEPS,
         rk_swap_threshold             : float              = 0.0,
         rk_swap_print                 : bool               = False,
+        
+        steps_to_run                  : int                = -1,
 
         extra_options                 : str                = "",
         ):
@@ -192,16 +194,24 @@ def sample_rk_beta(
     EO             = ExtraOptions(extra_options)
     default_dtype  = EO("default_dtype", torch.float64)
     
-    extra_args     = {} if extra_args is None else extra_args
+    extra_args     = {} if extra_args     is None else extra_args
     model_device   = x.device
     work_device    = 'cpu' if EO("work_device_cpu") else model_device
 
     state_info     = {} if state_info     is None else state_info
     state_info_out = {} if state_info_out is None else state_info_out
 
-    if 'raw_x' in state_info:
+    if 'raw_x' in state_info and sampler_mode == "resample":
         x = state_info['raw_x'].clone()
         RESplain("Continuing from raw latent from previous sampler.", debug=False)
+    
+    if 'sigmas' in state_info and sampler_mode == "resample":
+        sigmas = state_info['sigmas'].clone()
+        RESplain("Continuing from sigmas from previous sampler.", debug=False)
+        
+    if steps_to_run > 0:
+        state_info_out['sigmas'] = sigmas.clone()[steps_to_run:]
+        sigmas = sigmas.clone()[:steps_to_run+1]
 
     x      = x     .to(dtype=default_dtype, device=work_device)
     sigmas = sigmas.to(dtype=default_dtype, device=work_device)
@@ -247,7 +257,7 @@ def sample_rk_beta(
     NS.init_noise_samplers(x, noise_seed, noise_seed_substep, noise_sampler_type, noise_sampler_type_substep, noise_mode_sde, noise_mode_sde_substep, \
                             overshoot_mode, overshoot_mode_substep, noise_boost_step, noise_boost_substep, alpha, alpha_substep, k, k_substep)
 
-    if 'last_rng' in state_info and noise_seed < 0:
+    if 'last_rng' in state_info and sampler_mode == "resample" and noise_seed < 0:
         NS.noise_sampler.generator.set_state (state_info['last_rng'])
         NS.noise_sampler2.generator.set_state(state_info['last_rng_substep'])
 
@@ -639,6 +649,8 @@ def sample_rk_beta(
         preview_callback(x, eps, denoised, x_, eps_, data_, step, sigma, sigma_next, callback, EO, FINAL_STEP=True)
 
     state_info_out['raw_x']             = x.clone()
+    #if steps_to_run > 0:
+    #    state_info_out['sigmas']            = sigmas.clone()[steps_to_run:]
     state_info_out['last_rng']          = NS.noise_sampler .generator.get_state()
     state_info_out['last_rng_substep']  = NS.noise_sampler2.generator.get_state()
     
