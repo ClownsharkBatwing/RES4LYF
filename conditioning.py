@@ -7,8 +7,9 @@ import pickle # used strictly for serializing conditioning in the ConditioningTo
 
 import node_helpers
 
+from .sigmas  import get_sigmas
 
-from .helper  import initialize_or_scale, precision_tool
+from .helper  import initialize_or_scale, precision_tool, get_res4lyf_scheduler_list
 from .latents import get_orthogonal, get_collinear
 from .res4lyf import RESplain
 from .beta.constants import MAX_STEPS
@@ -684,10 +685,12 @@ class ClownRegionalConditioningFlux:
     def INPUT_TYPES(s):
         return {
             "required": { 
-                "mask_weight":       ("FLOAT",                {"default": 1.0, "min": -10000.0, "max": 10000.0, "step": 0.01}),
-                "region_bleed":      ("FLOAT",                {"default": 0.0, "min": -10000.0, "max": 10000.0, "step": 0.01}),
-                "start_percent":     ("FLOAT",                {"default": 0,   "min": 0.0,      "max": 1.0,     "step": 0.01}),
-                "end_percent":       ("FLOAT",                {"default": 1.0, "min": 0.0,      "max": 1.0,     "step": 0.01}),
+                "model":             ("MODEL",),
+                "weight":            ("FLOAT",                {"default": 1.7, "min": -10000.0, "max": 10000.0, "step": 0.01}),
+                "region_bleed":      ("FLOAT",                {"default": 1.0, "min": -10000.0, "max": 10000.0, "step": 0.01}),
+                "weight_scheduler":  (["constant"] + get_res4lyf_scheduler_list(), {"default": "beta57"},),
+                "start_step":        ("INT",                                       {"default": 0,    "min": 0,      "max": 10000}),
+                "end_step":          ("INT",                                       {"default": 10,   "min": 1,      "max": 10000}),
                 "mask_type":         (["gradient"],           {"default": "gradient"}),
                 "invert_mask":       ("BOOLEAN",              {"default": False}),
             }, 
@@ -695,7 +698,7 @@ class ClownRegionalConditioningFlux:
                 "positive_masked":   ("CONDITIONING", ),
                 "positive_unmasked": ("CONDITIONING", ),
                 "mask":              ("MASK", ),
-                "mask_weights":      ("SIGMAS", ),
+                "weights":      ("SIGMAS", ),
                 "region_bleeds":     ("SIGMAS", ),
             }
         }
@@ -706,12 +709,16 @@ class ClownRegionalConditioningFlux:
     CATEGORY     = "RES4LYF/conditioning"
 
     def main(self,
-            mask_weight      : float = 1.0,
+            model,
+            weight      : float = 1.0,
             start_percent    : float = 0.0,
             end_percent      : float = 1.0,
+            weight_scheduler = None,
+            start_step = 0,
+            end_step = 10000,
             positive_masked          = None,
             positive_unmasked        = None,
-            mask_weights             = None,
+            weights             = None,
             region_bleeds            = None,
             region_bleed     : float = 0.0,
             mask_type        : str   = "gradient",
@@ -719,18 +726,26 @@ class ClownRegionalConditioningFlux:
             invert_mask      : bool  = False
             ):
         
+        default_dtype  = torch.float64
+        default_device = torch.device("cuda") 
+        
+        if weights is None:
+            total_steps = end_step - start_step
+            weights     = get_sigmas(model, weight_scheduler, total_steps, 1.0).to(dtype=default_dtype, device=default_device) #/ model.inner_model.inner_model.model_sampling.sigma_max  #scaling doesn't matter as this is a flux-only node
+            prepend     = torch.zeros(start_step,                                  dtype=default_dtype, device=default_device)
+            weights     = torch.cat((prepend, weights), dim=0)
+        
         if invert_mask and mask is not None:
             mask = 1-mask
 
-        weight, weights = mask_weight, mask_weights
+        #weight, weights = mask_weight, mask_weights
         floor, floors = region_bleed, region_bleeds
-        default_dtype = torch.float64
         
         weights = initialize_or_scale(weights, weight, MAX_STEPS).to(default_dtype)
         weights = F.pad(weights, (0, MAX_STEPS), value=0.0)
         
-        floors = initialize_or_scale(floors, floor, MAX_STEPS).to(default_dtype)
-        floors = F.pad(floors, (0, MAX_STEPS), value=0.0)
+        floors  = initialize_or_scale(floors, floor, MAX_STEPS).to(default_dtype)
+        floors  = F.pad(floors, (0, MAX_STEPS), value=0.0)
 
         if (positive_masked is None) and (positive_unmasked is None):
             positive = None
@@ -749,7 +764,7 @@ class ClownRegionalConditioningFlux:
             positive, = FluxRegionalConditioning().main(conditioning_regional=cond_regional, self_attn_floor=floor, self_attn_floors=floors, mask_weight=weight, mask_weights=weights, start_percent=start_percent, end_percent=end_percent, mask_type=mask_type)
         else:
             positive = positive_masked
-            
+        
         return (positive,)
 
 
