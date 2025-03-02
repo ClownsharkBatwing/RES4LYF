@@ -228,10 +228,10 @@ def safe_get_nested(d, keys, default=None):
 def is_video_model(model):
     is_video_model = False
     try :
-        is_video_model = 'video' in model.inner_model.inner_model.model_config.unet_config['image_model'] or \
-                         'cosmos' in model.inner_model.inner_model.model_config.unet_config['image_model'] or \
-                         'wan2' in model.inner_model.inner_model.model_config.unet_config['image_model'] or \
-                         'ltxv' in model.inner_model.inner_model.model_config.unet_config['image_model']    
+        is_video_model =    'video'  in model.inner_model.inner_model.model_config.unet_config['image_model'] or \
+                            'cosmos' in model.inner_model.inner_model.model_config.unet_config['image_model'] or \
+                            'wan2'   in model.inner_model.inner_model.model_config.unet_config['image_model'] or \
+                            'ltxv'   in model.inner_model.inner_model.model_config.unet_config['image_model']    
     except:
         pass
     return is_video_model

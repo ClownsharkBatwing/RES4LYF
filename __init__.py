@@ -64,8 +64,6 @@ NODE_CLASS_MAPPINGS = {
 
     "SeedGenerator"                       : nodes_misc.SeedGenerator,
     
-    
-    
     "ClownRegionalConditioningFlux"       : conditioning.ClownRegionalConditioningFlux,
     
     "CLIPTextEncodeFluxUnguided"          : conditioning.CLIPTextEncodeFluxUnguided,

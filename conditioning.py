@@ -1,6 +1,10 @@
 import torch
 import torch.nn.functional as F
 
+from torch  import Tensor
+from typing import Optional, Callable, Tuple, Dict, Any, Union, TYPE_CHECKING, TypeVar
+
+
 import copy
 import base64
 import pickle # used strictly for serializing conditioning in the ConditioningToBase64 and Base64ToConditioning nodes for API use. (Offloading T5 processing to another machine to avoid model shuffling.)
@@ -685,20 +689,19 @@ class ClownRegionalConditioningFlux:
     def INPUT_TYPES(s):
         return {
             "required": { 
-                "model":             ("MODEL",),
-                "weight":            ("FLOAT",                {"default": 1.7, "min": -10000.0, "max": 10000.0, "step": 0.01}),
-                "region_bleed":      ("FLOAT",                {"default": 1.0, "min": -10000.0, "max": 10000.0, "step": 0.01}),
+                "weight":            ("FLOAT",                                     {"default": 1.7, "min": -10000.0, "max": 10000.0, "step": 0.01}),
+                "region_bleed":      ("FLOAT",                                     {"default": 1.0, "min": -10000.0, "max": 10000.0, "step": 0.01}),
                 "weight_scheduler":  (["constant"] + get_res4lyf_scheduler_list(), {"default": "beta57"},),
-                "start_step":        ("INT",                                       {"default": 0,    "min": 0,      "max": 10000}),
-                "end_step":          ("INT",                                       {"default": 10,   "min": 1,      "max": 10000}),
-                "mask_type":         (["gradient"],           {"default": "gradient"}),
-                "invert_mask":       ("BOOLEAN",              {"default": False}),
+                "start_step":        ("INT",                                       {"default": 0,   "min": 0,        "max": 10000}),
+                "end_step":          ("INT",                                       {"default": 10,  "min": 1,        "max": 10000}),
+                "mask_type":         (["gradient"],                                {"default": "gradient"}),
+                "invert_mask":       ("BOOLEAN",                                   {"default": False}),
             }, 
             "optional": {
                 "positive_masked":   ("CONDITIONING", ),
                 "positive_unmasked": ("CONDITIONING", ),
                 "mask":              ("MASK", ),
-                "weights":      ("SIGMAS", ),
+                "weights":           ("SIGMAS", ),
                 "region_bleeds":     ("SIGMAS", ),
             }
         }
@@ -708,24 +711,74 @@ class ClownRegionalConditioningFlux:
     FUNCTION     = "main"
     CATEGORY     = "RES4LYF/conditioning"
 
+    def create_callback(self, **kwargs):
+        def callback(model):
+            kwargs["model"] = model  
+            pos_cond, = self.prepare_regional_cond(**kwargs)
+            return pos_cond
+        return callback
+
     def main(self,
-            model,
-            weight      : float = 1.0,
-            start_percent    : float = 0.0,
-            end_percent      : float = 1.0,
-            weight_scheduler = None,
-            start_step = 0,
-            end_step = 10000,
-            positive_masked          = None,
-            positive_unmasked        = None,
-            weights             = None,
-            region_bleeds            = None,
-            region_bleed     : float = 0.0,
-            mask_type        : str   = "gradient",
-            mask                     = None,
-            invert_mask      : bool  = False
-            ):
+            weight                   : float  = 1.0,
+            start_percent            : float  = 0.0,
+            end_percent              : float  = 1.0,
+            weight_scheduler                  = None,
+            start_step               :int     = 0,
+            end_step                 :int     = 10000,
+            positive_masked                   = None,
+            positive_unmasked                 = None,
+            weights                  : Tensor = None,
+            region_bleeds            : Tensor = None,
+            region_bleed             : float  = 0.0,
+            mask_type                : str    = "gradient",
+            mask                              = None,
+            invert_mask              : bool   = False
+            ) -> Tuple[Tensor]:
         
+        callback = self.create_callback(weight            = weight,
+                                        start_percent     = start_percent,
+                                        end_percent       = end_percent,
+                                        weight_scheduler  = weight_scheduler,
+                                        start_step        = start_step,
+                                        end_step          = end_step,
+                                        weights           = weights,
+                                        region_bleeds     = region_bleeds,
+                                        region_bleed      = region_bleed,
+                                        mask_type         = mask_type,
+                                        mask              = mask,
+                                        invert_mask       = invert_mask,
+                                        positive_masked   = positive_masked,
+                                        positive_unmasked = positive_unmasked,
+                                        )
+        positive = [[
+            torch.zeros((1, 256, 4096)),
+            {'pooled_output': torch.zeros((1, 768))}
+            ]]
+        
+        positive[0][1]['callback_regional'] = callback
+        
+        return (positive,)
+
+
+
+    def prepare_regional_cond(self,
+            model,
+            weight                   : float  = 1.0,
+            start_percent            : float  = 0.0,
+            end_percent              : float  = 1.0,
+            weight_scheduler                  = None,
+            start_step               :int     = 0,
+            end_step                 :int     = 10000,
+            positive_masked                   = None,
+            positive_unmasked                 = None,
+            weights                  : Tensor = None,
+            region_bleeds            : Tensor = None,
+            region_bleed             : float  = 0.0,
+            mask_type                : str    = "gradient",
+            mask                              = None,
+            invert_mask              : bool   = False
+            ) -> Tuple[Tensor]:
+
         default_dtype  = torch.float64
         default_device = torch.device("cuda") 
         
@@ -744,8 +797,8 @@ class ClownRegionalConditioningFlux:
         weights = initialize_or_scale(weights, weight, MAX_STEPS).to(default_dtype)
         weights = F.pad(weights, (0, MAX_STEPS), value=0.0)
         
-        floors  = initialize_or_scale(floors, floor, MAX_STEPS).to(default_dtype)
-        floors  = F.pad(floors, (0, MAX_STEPS), value=0.0)
+        floors  = initialize_or_scale(floors,  floor,  MAX_STEPS).to(default_dtype)
+        floors  = F.pad(floors,  (0, MAX_STEPS), value=0.0)
 
         if (positive_masked is None) and (positive_unmasked is None):
             positive = None
@@ -761,7 +814,14 @@ class ClownRegionalConditioningFlux:
             cond_regional, mask_inv     = FluxRegionalPrompt().main(cond=positive_masked,                                    mask=mask)
             cond_regional, mask_inv_inv = FluxRegionalPrompt().main(cond=positive_unmasked    , cond_regional=cond_regional, mask=mask_inv)
             
-            positive, = FluxRegionalConditioning().main(conditioning_regional=cond_regional, self_attn_floor=floor, self_attn_floors=floors, mask_weight=weight, mask_weights=weights, start_percent=start_percent, end_percent=end_percent, mask_type=mask_type)
+            positive, = FluxRegionalConditioning().main( conditioning_regional = cond_regional,
+                                                        self_attn_floor       = floor,
+                                                        self_attn_floors      = floors,
+                                                        mask_weight           = weight,
+                                                        mask_weights          = weights,
+                                                        start_percent         = start_percent,
+                                                        end_percent           = end_percent,
+                                                        mask_type             = mask_type)
         else:
             positive = positive_masked
         
