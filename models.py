@@ -1,5 +1,7 @@
 import torch
 import types
+from typing import Optional, Callable, Tuple, Dict, Any, Union, TYPE_CHECKING, TypeVar
+
 
 import folder_paths
 import os

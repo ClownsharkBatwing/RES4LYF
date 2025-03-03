@@ -723,8 +723,8 @@ class ClownRegionalConditioningFlux:
             start_percent            : float  = 0.0,
             end_percent              : float  = 1.0,
             weight_scheduler                  = None,
-            start_step               :int     = 0,
-            end_step                 :int     = 10000,
+            start_step               : int    = 0,
+            end_step                 : int    = 10000,
             positive_masked                   = None,
             positive_unmasked                 = None,
             weights                  : Tensor = None,
@@ -762,22 +762,22 @@ class ClownRegionalConditioningFlux:
 
 
     def prepare_regional_cond(self,
-            model,
-            weight                   : float  = 1.0,
-            start_percent            : float  = 0.0,
-            end_percent              : float  = 1.0,
-            weight_scheduler                  = None,
-            start_step               :int     = 0,
-            end_step                 :int     = 10000,
-            positive_masked                   = None,
-            positive_unmasked                 = None,
-            weights                  : Tensor = None,
-            region_bleeds            : Tensor = None,
-            region_bleed             : float  = 0.0,
-            mask_type                : str    = "gradient",
-            mask                              = None,
-            invert_mask              : bool   = False
-            ) -> Tuple[Tensor]:
+                                model,
+                                weight            : float  = 1.0,
+                                start_percent     : float  = 0.0,
+                                end_percent       : float  = 1.0,
+                                weight_scheduler           = None,
+                                start_step        : int    = 0,
+                                end_step          : int    = 10000,
+                                positive_masked            = None,
+                                positive_unmasked          = None,
+                                weights           : Tensor = None,
+                                region_bleeds     : Tensor = None,
+                                region_bleed      : float  = 0.0,
+                                mask_type         : str    = "gradient",
+                                mask                       = None,
+                                invert_mask       : bool   = False
+                                ) -> Tuple[Tensor]:
 
         default_dtype  = torch.float64
         default_device = torch.device("cuda") 
