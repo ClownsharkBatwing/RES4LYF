@@ -208,7 +208,7 @@ def sample_rk_beta(
     start_step = 0
     if 'end_step' in state_info and (sampler_mode == "resample" or sampler_mode == "unsample"):
         start_step = state_info['end_step'] if state_info['end_step'] != -1 else 0
-        if sampler_mode != state_info['sampler_mode']:
+        if state_info['sampler_mode'] == "unsample" and sampler_mode == "resample":
             start_step = 0
 
     x      = x     .to(dtype=default_dtype, device=work_device)
@@ -335,7 +335,7 @@ def sample_rk_beta(
             x_, data_, eps_, eps_prev_  = (torch.zeros(    RK.rows+2,     *x.shape, dtype=default_dtype, device=work_device) for _ in range(4))
             
             if 'data_prev_' in state_info:
-                data_prev_ = state_info['data_prev_']
+                data_prev_ = state_info['data_prev_'].clone()
             else:
                 data_prev_              =  torch.zeros(max(RK.rows+2, 4), *x.shape, dtype=default_dtype, device=work_device)
             
@@ -354,7 +354,7 @@ def sample_rk_beta(
         
         # RECYCLE STAGES FOR MULTISTEP
         if RK.multistep_stages > 0 or RK.hybrid_stages > 0:
-            for ms in range(len(eps_)):
+            for ms in range(len(data_prev_)):
                 eps_[ms] = RK.get_epsilon_anchored(x_0, data_prev_[ms], sigma)
             eps_prev_ = eps_.clone()
 
@@ -671,8 +671,9 @@ def sample_rk_beta(
     state_info_out['data_prev_']        = data_prev_#.clone()
     state_info_out['end_step']          = step
     state_info_out['sampler_mode']      = sampler_mode
-    state_info_out['last_rng']          = NS.noise_sampler .generator.get_state()
-    state_info_out['last_rng_substep']  = NS.noise_sampler2.generator.get_state()
+    state_info_out['last_rng']          = NS.noise_sampler .generator.get_state().clone()
+    state_info_out['last_rng_substep']  = NS.noise_sampler2.generator.get_state().clone()
+    
     
     gc.collect()
 

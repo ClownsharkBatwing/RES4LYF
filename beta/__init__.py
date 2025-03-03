@@ -8,8 +8,13 @@ def add_beta(NODE_CLASS_MAPPINGS, extra_samplers):
     
     NODE_CLASS_MAPPINGS.update({
         "SharkSampler"                    : samplers.SharkSampler,
+        "SharkSamplerAdvanced_Beta"       : samplers.SharkSampler, #SharkSamplerAdvanced_Beta,
+
+        "SharkSampler_Beta"               : samplers.SharkSampler_Beta,
 
         "ClownsharKSampler_Beta"          : samplers.ClownsharKSampler_Beta,
+        
+        "ClownSampler_Beta"               : samplers.ClownSampler_Beta,
         "ClownSamplerAdvanced_Beta"       : samplers.ClownSamplerAdvanced_Beta,
 
         "ClownGuide_Beta"                 : samplers_extensions.ClownGuide_Beta,

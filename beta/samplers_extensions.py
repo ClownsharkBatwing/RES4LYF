@@ -178,8 +178,8 @@ class ClownOptions_ImplicitSteps_Beta:
     def INPUT_TYPES(cls):
         return {"required":
                     {
-                    "implicit_type":          (IMPLICIT_TYPE_NAMES, {"default": "predictor-corrector"}), 
-                    "implicit_type_substeps": (IMPLICIT_TYPE_NAMES, {"default": "predictor-corrector"}), 
+                    "implicit_type":          (IMPLICIT_TYPE_NAMES, {"default": "bongmath"}), 
+                    "implicit_type_substeps": (IMPLICIT_TYPE_NAMES, {"default": "bongmath"}), 
                     "implicit_steps":         ("INT",               {"default": 0, "min": 0, "max": 10000}),
                     "implicit_substeps":      ("INT",               {"default": 0, "min": 0, "max": 10000}),
                      },
@@ -195,8 +195,8 @@ class ClownOptions_ImplicitSteps_Beta:
     CATEGORY     = "RES4LYF/sampler_options"
     
     def main(self,
-            implicit_type          = "predictor-corrector",
-            implicit_type_substeps = "predictor-corrector",
+            implicit_type          = "bongmath",
+            implicit_type_substeps = "bongmath",
             implicit_steps         = 0,
             implicit_substeps      = 0,
             options                = None
@@ -299,12 +299,12 @@ class SharkOptions_Beta:
             "required": {
                 "noise_type_init": (NOISE_GENERATOR_NAMES_SIMPLE, {"default": "gaussian"}),
                 "noise_stdev":     ("FLOAT",                      {"default": 1.0, "min": -10000.0, "max": 10000.0, "step":0.01, "round": False, }),
-                "sampler_mode":    (['standard', 'unsample', 'resample'],),
+                #"sampler_mode":    (['standard', 'unsample', 'resample'],),
                 "denoise_alt":     ("FLOAT",                      {"default": 1.0, "min": -10000,   "max": 10000,   "step":0.01}),
                 "channelwise_cfg": ("BOOLEAN",                    {"default": False}),
                 },
             "optional": {
-                "sigmas":          ("SIGMAS", ),
+                #"sigmas":          ("SIGMAS", ),
                 "options":         ("OPTIONS", ),   
                 }
             }
@@ -317,10 +317,10 @@ class SharkOptions_Beta:
     def main(self,
             noise_type_init = "gaussian",
             noise_stdev     = 1.0,
-            sampler_mode    = "standard",
+            #sampler_mode    = "standard",
             denoise_alt     = 1.0,
             channelwise_cfg = False,
-            sigmas          = None,
+            #sigmas          = None,
             options         = None
             ): 
         
@@ -328,10 +328,10 @@ class SharkOptions_Beta:
             
         options['noise_type_init'] = noise_type_init
         options['noise_stdev']     = noise_stdev
-        options['sampler_mode']    = sampler_mode
+        #options['sampler_mode']    = sampler_mode
         options['denoise_alt']     = denoise_alt
         options['channelwise_cfg'] = channelwise_cfg
-        options['sigmas']          = sigmas
+        #options['sigmas']          = sigmas
 
         return (options,)
 
