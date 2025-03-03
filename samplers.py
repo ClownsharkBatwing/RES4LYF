@@ -2,7 +2,7 @@ import torch
 import torch.nn.functional as F
 from torch import Tensor
 
-from typing import Optional, Callable
+from typing import Optional, Callable, Tuple, Dict, Any, Union
 import copy
 import gc
 
@@ -44,7 +44,7 @@ class SharkSampler:
                 "steps":           ("INT",                        {"default": 30,  "min": 1,        "max": 10000.0}),
                 "denoise":         ("FLOAT",                      {"default": 1.0, "min": -10000.0, "max": 10000.0, "step":0.01}),
                 "denoise_alt":     ("FLOAT",                      {"default": 1.0, "min": -10000.0, "max": 10000.0, "step":0.01}),
-                "cfg":             ("FLOAT",                      {"default": 3.0, "min": -10000.0, "max": 10000.0, "step":0.01, "round": False, "tooltip": "Negative values use channelwise CFG." }),
+                "cfg":             ("FLOAT",                      {"default": 5.5, "min": -10000.0, "max": 10000.0, "step":0.01, "round": False, "tooltip": "Negative values use channelwise CFG." }),
                 },
             "optional": {
                 "positive":        ("CONDITIONING", ),
@@ -52,8 +52,8 @@ class SharkSampler:
                 "sampler":         ("SAMPLER", ),
                 "sigmas":          ("SIGMAS", ),
                 "latent_image":    ("LATENT", ),     
-                "options":         ("OPTIONS", ),   
                 "extra_options":   ("STRING",                     {"default": "", "multiline": True}),   
+                "options":         ("OPTIONS", ),   
                 }
             }
 
@@ -95,6 +95,13 @@ class SharkSampler:
             options            = None,
             sde_noise          = None,
             sde_noise_steps    : int = 1,
+            
+            #ultracascade_stage : str = "stage_UP",
+            ultracascade_latent_image : Optional[dict[str,Any]] = None,
+            ultracascade_guide_weights: Optional[Tuple] = None,
+            
+            ultracascade_latent_width : int = 0,
+            ultracascade_latent_height: int = 0,
         
             extra_options      : str = "", 
             **kwargs,
@@ -121,6 +128,12 @@ class SharkSampler:
             k_init          = options_mgr.get('k_init',           k_init)
             sde_noise       = options_mgr.get('sde_noise',        sde_noise)
             sde_noise_steps = options_mgr.get('sde_noise_steps',  sde_noise_steps)
+            
+            #ultracascade_stage        = options_mgr.get('ultracascade_stage',         ultracascade_stage)
+            ultracascade_latent_image  = options_mgr.get('ultracascade_latent_image',  ultracascade_latent_image)
+            ultracascade_latent_width  = options_mgr.get('ultracascade_latent_width',  ultracascade_latent_width)
+            ultracascade_latent_height = options_mgr.get('ultracascade_latent_height', ultracascade_latent_height)
+
         
             if cfg < 0:
                 sampler.extra_options['cfg_cw'] = -cfg
@@ -158,17 +171,89 @@ class SharkSampler:
                 sigmas = torch.cat([sigmas, null])
 
 
-        
+            latent_x = {}
             # INIT STATE INFO FOR CONTINUING GENERATION ACROSS MULTIPLE SAMPLER NODES
-            state_info     = copy.deepcopy(latent_image['state_info']) if 'state_info' in latent_image else {}
+            if latent_image is not None:
+                latent_x['samples'] = latent_image['samples'].clone()
+                state_info     = copy.deepcopy(latent_image['state_info']) if 'state_info' in latent_image else {}
+            else:
+                state_info = {}
             state_info_out = {}
             
             
             
-            # NOISE, ORTHOGONALIZE, OR ZERO EMBEDS
+            # SETUP CONDITIONING EMBEDS
             
             pos_cond    = copy.deepcopy(positive)
             neg_cond    = copy.deepcopy(negative)
+            
+            
+            
+            # SETUP FOR ULTRACASCADE IF DETECTED
+            if work_model.model.model_config.unet_config.get('stable_cascade_stage') == 'up':
+                
+                ultracascade_guide_weight = EO("ultracascade_guide_weight", 0.0)
+                ultracascade_guide_type   = EO("ultracascade_guide_type", "residual")
+                
+                #x_lr = ultracascade_latent_image['samples'].clone() if ultracascade_latent_image is not None else None
+                x_lr = None
+                if ultracascade_latent_height * ultracascade_latent_width > 0:
+                    x_lr = latent_image['samples'].clone() if latent_image is not None else None
+                    x_lr_bs = 1 if x_lr is None else x_lr.shape[-4]
+                    x_lr_dtype = default_dtype if x_lr is None else x_lr.dtype
+                    x_lr_device = 'cuda' if x_lr is None else x_lr.device
+                    
+                    #if latent_image is None:
+                    #    latent_image = {}
+                    
+                    latent_x['samples'] = torch.zeros([x_lr_bs, 16, ultracascade_latent_height, ultracascade_latent_width], dtype=x_lr_dtype, device=x_lr_device)
+                
+                if x_lr is not None:
+                    if x_lr.shape[-2:] != latent_image['samples'].shape[-2:]:
+                        x_height, x_width = latent_image['samples'].shape[-2:]
+                        ultracascade_stage_up_upscale_align_corners = EO("ultracascade_stage_up_upscale_align_corners", False)
+                        ultracascade_stage_up_upscale_mode          = EO("ultracascade_stage_up_upscale_mode",         "bicubic")
+                        
+                        x_lr = F.interpolate(x_lr, size=(x_height, x_width), mode=ultracascade_stage_up_upscale_mode, align_corners=ultracascade_stage_up_upscale_align_corners)
+                        
+                ultracascade_guide_weights = initialize_or_scale(ultracascade_guide_weights, ultracascade_guide_weight, MAX_STEPS)
+
+                patch = work_model.model_options.get("transformer_options", {}).get("patches_replace", {}).get("ultracascade", {}).get("main")
+                if patch is not None:
+                    patch.update(x_lr=x_lr, guide_weights=ultracascade_guide_weights, guide_type=ultracascade_guide_type)
+                else:
+                    work_model.model.diffusion_model.set_sigmas_schedule(sigmas_schedule = sigmas)
+                    work_model.model.diffusion_model.set_sigmas_prev    (sigmas_prev     = sigmas[:1])
+                    work_model.model.diffusion_model.set_guide_weights  (guide_weights   = ultracascade_guide_weights)
+                    work_model.model.diffusion_model.set_guide_type     (guide_type      = ultracascade_guide_type)
+                    work_model.model.diffusion_model.set_x_lr           (x_lr            = x_lr)
+                
+            elif work_model.model.model_config.unet_config.get('stable_cascade_stage') == 'b':
+                c_pos, c_neg = [], []
+                for t in pos_cond:
+                    d_pos = t[1].copy()
+                    d_neg = t[1].copy()
+                    
+                    x_lr = None
+                    if ultracascade_latent_height * ultracascade_latent_width > 0:
+                        x_lr = latent_image['samples'].clone()
+                        latent_x['samples'] = torch.zeros([x_lr.shape[-4], 4, ultracascade_latent_height // 4, ultracascade_latent_width // 4], dtype=x_lr.dtype, device=x_lr.device)
+                    
+                    d_pos['stable_cascade_prior'] = x_lr
+                    #d_pos['stable_cascade_prior'] = ultracascade_latent_image['samples'].clone()
+
+                    pooled_output = d_neg.get("pooled_output", None)
+                    if pooled_output is not None:
+                        d_neg["pooled_output"] = torch.zeros_like(pooled_output)
+                    
+                    c_pos.append(                 [t[0],  d_pos])            
+                    c_neg.append([torch.zeros_like(t[0]), d_neg])
+                pos_cond = c_pos
+                neg_cond = c_neg
+            
+            
+            
+            # NOISE, ORTHOGONALIZE, OR ZERO EMBEDS
             
             if   isinstance(work_model.model.model_config, comfy.supported_models.Flux) or isinstance(work_model.model.model_config, comfy.supported_models.FluxSchnell):
                 pos_cond = [[torch.zeros((1, 256, 4096)), {'pooled_output': torch.zeros((1,  768))}]] if pos_cond is None else pos_cond
@@ -266,9 +351,9 @@ class SharkSampler:
 
             batch_size = EO("batch_size", 1)
             if batch_size > 1:
-                latent_image['samples'] = latent_image['samples'].repeat(batch_size, 1, 1, 1) 
+                latent_x['samples'] = latent_x['samples'].repeat(batch_size, 1, 1, 1) 
             
-            latent_image_batch = {"samples": latent_image['samples']}
+            latent_image_batch = {"samples": latent_x['samples']}
             
             
             
@@ -278,7 +363,7 @@ class SharkSampler:
             out_denoised_samples = []
             
             for batch_num in range(latent_image_batch['samples'].shape[0]):
-                latent_unbatch            = copy.deepcopy(latent_image)
+                latent_unbatch            = copy.deepcopy(latent_x)
                 latent_unbatch['samples'] = latent_image_batch['samples'][batch_num].clone().unsqueeze(0)
                 
 
@@ -532,8 +617,8 @@ class ClownSamplerAdvanced_Beta:
                     {
                     "guides":                 ("GUIDES", ),     
                     "automation":             ("AUTOMATION", ),
-                    "options":                ("OPTIONS", ),   
                     "extra_options":          ("STRING",                     {"default": "", "multiline": True}),   
+                    "options":                ("OPTIONS", ),   
                     }
                 }
 
@@ -1066,7 +1151,7 @@ class ClownSampler_Beta:
                     #"steps_to_run": ("INT",                        {"default": -1,  "min": -1,     "max": MAX_STEPS}),
                     #"denoise":      ("FLOAT",                      {"default": 1.0, "min": -10000, "max": MAX_STEPS, "step":0.01}),
                     #"cfg":          ("FLOAT",                      {"default": 5.5, "min": -100.0, "max": 100.0,     "step":0.01, "round": False, }),
-                    "seed":         ("INT",                        {"default": 0,   "min": -1,     "max": 0xffffffffffffffff}),
+                    "seed":         ("INT",                        {"default": -1,   "min": -1,     "max": 0xffffffffffffffff}),
                     #"sampler_mode": (['standard', 'unsample', 'resample'],),
                     "bongmath":     ("BOOLEAN",                    {"default": True}),
                     },
