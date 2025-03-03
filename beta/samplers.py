@@ -171,9 +171,10 @@ class SharkSampler:
                 sigmas = torch.cat([sigmas, null])
 
 
-        
+            latent_x = {}
             # INIT STATE INFO FOR CONTINUING GENERATION ACROSS MULTIPLE SAMPLER NODES
             if latent_image is not None:
+                latent_x['samples'] = latent_image['samples'].clone()
                 state_info     = copy.deepcopy(latent_image['state_info']) if 'state_info' in latent_image else {}
             else:
                 state_info = {}
@@ -202,10 +203,10 @@ class SharkSampler:
                     x_lr_dtype = default_dtype if x_lr is None else x_lr.dtype
                     x_lr_device = 'cuda' if x_lr is None else x_lr.device
                     
-                    if latent_image is None:
-                        latent_image = {}
+                    #if latent_image is None:
+                    #    latent_image = {}
                     
-                    latent_image['samples'] = torch.zeros([x_lr_bs, 16, ultracascade_latent_height, ultracascade_latent_width], dtype=x_lr_dtype, device=x_lr_device)
+                    latent_x['samples'] = torch.zeros([x_lr_bs, 16, ultracascade_latent_height, ultracascade_latent_width], dtype=x_lr_dtype, device=x_lr_device)
                 
                 if x_lr is not None:
                     if x_lr.shape[-2:] != latent_image['samples'].shape[-2:]:
@@ -236,7 +237,7 @@ class SharkSampler:
                     x_lr = None
                     if ultracascade_latent_height * ultracascade_latent_width > 0:
                         x_lr = latent_image['samples'].clone()
-                        latent_image['samples'] = torch.zeros([x_lr.shape[-4], 4, ultracascade_latent_height // 4, ultracascade_latent_width // 4], dtype=x_lr.dtype, device=x_lr.device)
+                        latent_x['samples'] = torch.zeros([x_lr.shape[-4], 4, ultracascade_latent_height // 4, ultracascade_latent_width // 4], dtype=x_lr.dtype, device=x_lr.device)
                     
                     d_pos['stable_cascade_prior'] = x_lr
                     #d_pos['stable_cascade_prior'] = ultracascade_latent_image['samples'].clone()
@@ -350,9 +351,9 @@ class SharkSampler:
 
             batch_size = EO("batch_size", 1)
             if batch_size > 1:
-                latent_image['samples'] = latent_image['samples'].repeat(batch_size, 1, 1, 1) 
+                latent_x['samples'] = latent_x['samples'].repeat(batch_size, 1, 1, 1) 
             
-            latent_image_batch = {"samples": latent_image['samples']}
+            latent_image_batch = {"samples": latent_x['samples']}
             
             
             
@@ -362,7 +363,7 @@ class SharkSampler:
             out_denoised_samples = []
             
             for batch_num in range(latent_image_batch['samples'].shape[0]):
-                latent_unbatch            = copy.deepcopy(latent_image)
+                latent_unbatch            = copy.deepcopy(latent_x)
                 latent_unbatch['samples'] = latent_image_batch['samples'][batch_num].clone().unsqueeze(0)
                 
 
@@ -946,6 +947,9 @@ class ClownsharKSampler_Beta:
         options_mgr = OptionsManager(options, **kwargs)
         extra_options    += "\n" + options_mgr.get('extra_options', "")
         
+        if model.model.model_config.unet_config.get('stable_cascade_stage') == 'b':
+            noise_type_sde         = "pyramid-cascade_B"
+            noise_type_sde_substep = "pyramid-cascade_B"
         
         # defaults for ClownSampler
         eta_substep = eta
