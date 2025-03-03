@@ -172,32 +172,40 @@ class SharkSampler:
             
             
             
-            # NOISE, ORTHOGONALIZE, OR ZERO EMBEDS
+            # SETUP CONDITIONING EMBEDS
             
             pos_cond    = copy.deepcopy(positive)
             neg_cond    = copy.deepcopy(negative)
             
             
             
+            # SETUP FOR ULTRACASCADE IF DETECTED
             if work_model.model.model_config.unet_config.get('stable_cascade_stage') == 'up':
+                
                 ultracascade_guide_weight = EO("ultracascade_guide_weight", 0.0)
                 ultracascade_guide_type   = EO("ultracascade_guide_type", "residual")
+                
                 x_lr = ultracascade_latent_image['samples'].clone() if ultracascade_latent_image is not None else None
-                ultracascade_guide_weights = initialize_or_scale(ultracascade_guide_weights, ultracascade_guide_weight, MAX_STEPS) #("FLOAT", {"default": 1.0, "min": -10000, "max": 10000, "step":0.01}),
-                #model.model.diffusion_model.set_guide_weights(guide_weights=guide_weights)
-                #model.model.diffusion_model.set_guide_type(guide_type=guide_type)
-                #model.model.diffusion_model.set_x_lr(x_lr=x_lr)
+                
+                if x_lr is not None:
+                    if x_lr.shape[-2:] != latent_image['samples'].shape[-2:]:
+                        x_height, x_width = latent_image['samples'].shape[-2:]
+                        ultracascade_stage_up_upscale_align_corners = EO("ultracascade_stage_up_upscale_align_corners", False)
+                        ultracascade_stage_up_upscale_mode          = EO("ultracascade_stage_up_upscale_mode",         "bicubic")
+                        
+                        x_lr = F.interpolate(x_lr, size=(x_height, x_width), mode=ultracascade_stage_up_upscale_mode, align_corners=ultracascade_stage_up_upscale_align_corners)
+                        
+                ultracascade_guide_weights = initialize_or_scale(ultracascade_guide_weights, ultracascade_guide_weight, MAX_STEPS)
+
                 patch = work_model.model_options.get("transformer_options", {}).get("patches_replace", {}).get("ultracascade", {}).get("main")
                 if patch is not None:
                     patch.update(x_lr=x_lr, guide_weights=ultracascade_guide_weights, guide_type=ultracascade_guide_type)
                 else:
-                    work_model.model.diffusion_model.set_sigmas_schedule(sigmas_schedule=sigmas)
-                    work_model.model.diffusion_model.set_sigmas_prev(sigmas_prev=sigmas[:1])
-                    work_model.model.diffusion_model.set_guide_weights(guide_weights=ultracascade_guide_weights)
-                    work_model.model.diffusion_model.set_guide_type(guide_type=ultracascade_guide_type)
-                    work_model.model.diffusion_model.set_x_lr(x_lr=x_lr)
-                    
-                #latent_image['samples'] = torch.zeros_like(latent_image['samples'])
+                    work_model.model.diffusion_model.set_sigmas_schedule(sigmas_schedule = sigmas)
+                    work_model.model.diffusion_model.set_sigmas_prev    (sigmas_prev     = sigmas[:1])
+                    work_model.model.diffusion_model.set_guide_weights  (guide_weights   = ultracascade_guide_weights)
+                    work_model.model.diffusion_model.set_guide_type     (guide_type      = ultracascade_guide_type)
+                    work_model.model.diffusion_model.set_x_lr           (x_lr            = x_lr)
                 
             elif work_model.model.model_config.unet_config.get('stable_cascade_stage') == 'b':
                 c_pos, c_neg = [], []
@@ -211,17 +219,14 @@ class SharkSampler:
                     if pooled_output is not None:
                         d_neg["pooled_output"] = torch.zeros_like(pooled_output)
                     
-                    c_pos.append([t[0], d_pos])            
+                    c_pos.append(                 [t[0],  d_pos])            
                     c_neg.append([torch.zeros_like(t[0]), d_neg])
                 pos_cond = c_pos
                 neg_cond = c_neg
-                
-                #latent_image['samples'] = torch.zeros_like(latent_image['samples'])
-
-                
-                
             
             
+            
+            # NOISE, ORTHOGONALIZE, OR ZERO EMBEDS
             
             if   isinstance(work_model.model.model_config, comfy.supported_models.Flux) or isinstance(work_model.model.model_config, comfy.supported_models.FluxSchnell):
                 pos_cond = [[torch.zeros((1, 256, 4096)), {'pooled_output': torch.zeros((1,  768))}]] if pos_cond is None else pos_cond
