@@ -35,11 +35,11 @@ class SharkSampler:
     def INPUT_TYPES(cls):
         return {
             "required": {
-                "model":          ("MODEL",),
+                "model":           ("MODEL",),
                 "noise_type_init": (NOISE_GENERATOR_NAMES_SIMPLE, {"default": "gaussian"}),
                 "noise_stdev":     ("FLOAT",                      {"default": 1.0, "min": -10000.0, "max": 10000.0, "step":0.01, "round": False, }),
                 "noise_seed":      ("INT",                        {"default": 0,   "min": -1,       "max": 0xffffffffffffffff}),
-                "sampler_mode": (['unsample', 'standard', 'resample'], {"default": "standard"}),
+                "sampler_mode":    (['unsample', 'standard', 'resample'], {"default": "standard"}),
                 "scheduler":       (get_res4lyf_scheduler_list(), {"default": "beta57"},),
                 "steps":           ("INT",                        {"default": 30,  "min": 1,        "max": 10000.0}),
                 "denoise":         ("FLOAT",                      {"default": 1.0, "min": -10000.0, "max": 10000.0, "step":0.01}),
