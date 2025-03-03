@@ -334,6 +334,39 @@ class SharkOptions_Beta:
         #options['sigmas']          = sigmas
 
         return (options,)
+    
+    
+    
+class SharkOptions_UltraCascade_Beta:
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                #"ultracascade_stage": (["stage_UP", "stage_B"], {"default": "stage_UP"}),
+                "latent_image":       ("LATENT",),
+                },
+            "optional": {
+                "options":            ("OPTIONS",),   
+                }
+            }
+
+    RETURN_TYPES = ("OPTIONS",)
+    RETURN_NAMES = ("options",)
+    FUNCTION     = "main"
+    CATEGORY     = "RES4LYF/sampler_options"
+    
+    def main(self,
+            #ultracascade_stage = "stage_UP",
+            latent_image       = None,
+            options            = None
+            ): 
+        
+        options = options if options is not None else {}
+            
+        #options['ultracascade_stage']        = ultracascade_stage
+        options['ultracascade_latent_image'] = latent_image
+
+        return (options,)
 
 
 

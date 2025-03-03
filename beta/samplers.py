@@ -2,7 +2,7 @@ import torch
 import torch.nn.functional as F
 from torch import Tensor
 
-from typing import Optional, Callable
+from typing import Optional, Callable, Tuple, Dict, Any, Union
 import copy
 import gc
 
@@ -44,7 +44,7 @@ class SharkSampler:
                 "steps":           ("INT",                        {"default": 30,  "min": 1,        "max": 10000.0}),
                 "denoise":         ("FLOAT",                      {"default": 1.0, "min": -10000.0, "max": 10000.0, "step":0.01}),
                 "denoise_alt":     ("FLOAT",                      {"default": 1.0, "min": -10000.0, "max": 10000.0, "step":0.01}),
-                "cfg":             ("FLOAT",                      {"default": 3.0, "min": -10000.0, "max": 10000.0, "step":0.01, "round": False, "tooltip": "Negative values use channelwise CFG." }),
+                "cfg":             ("FLOAT",                      {"default": 5.5, "min": -10000.0, "max": 10000.0, "step":0.01, "round": False, "tooltip": "Negative values use channelwise CFG." }),
                 },
             "optional": {
                 "positive":        ("CONDITIONING", ),
@@ -52,8 +52,8 @@ class SharkSampler:
                 "sampler":         ("SAMPLER", ),
                 "sigmas":          ("SIGMAS", ),
                 "latent_image":    ("LATENT", ),     
-                "options":         ("OPTIONS", ),   
                 "extra_options":   ("STRING",                     {"default": "", "multiline": True}),   
+                "options":         ("OPTIONS", ),   
                 }
             }
 
@@ -95,6 +95,10 @@ class SharkSampler:
             options            = None,
             sde_noise          = None,
             sde_noise_steps    : int = 1,
+            
+            #ultracascade_stage : str = "stage_UP",
+            ultracascade_latent_image : Optional[dict[str,Any]] = None,
+            ultracascade_guide_weights: Optional[Tuple] = None,
         
             extra_options      : str = "", 
             **kwargs,
@@ -121,6 +125,9 @@ class SharkSampler:
             k_init          = options_mgr.get('k_init',           k_init)
             sde_noise       = options_mgr.get('sde_noise',        sde_noise)
             sde_noise_steps = options_mgr.get('sde_noise_steps',  sde_noise_steps)
+            
+            #ultracascade_stage        = options_mgr.get('ultracascade_stage',         ultracascade_stage)
+            ultracascade_latent_image = options_mgr.get('ultracascade_latent_image',  ultracascade_latent_image)
         
             if cfg < 0:
                 sampler.extra_options['cfg_cw'] = -cfg
@@ -151,6 +158,7 @@ class SharkSampler:
                 null   = torch.tensor([0.0], device=sigmas.device, dtype=sigmas.dtype)
                 sigmas = torch.flip(sigmas, dims=[0])
                 sigmas = torch.cat([sigmas, null])
+                
             elif sampler_mode.startswith("resample"):
                 null   = torch.tensor([0.0], device=sigmas.device, dtype=sigmas.dtype)
                 sigmas = torch.cat([null, sigmas])
@@ -168,6 +176,52 @@ class SharkSampler:
             
             pos_cond    = copy.deepcopy(positive)
             neg_cond    = copy.deepcopy(negative)
+            
+            
+            
+            if work_model.model.model_config.unet_config.get('stable_cascade_stage') == 'up':
+                ultracascade_guide_weight = EO("ultracascade_guide_weight", 0.0)
+                ultracascade_guide_type   = EO("ultracascade_guide_type", "residual")
+                x_lr = ultracascade_latent_image['samples'].clone() if ultracascade_latent_image is not None else None
+                ultracascade_guide_weights = initialize_or_scale(ultracascade_guide_weights, ultracascade_guide_weight, MAX_STEPS) #("FLOAT", {"default": 1.0, "min": -10000, "max": 10000, "step":0.01}),
+                #model.model.diffusion_model.set_guide_weights(guide_weights=guide_weights)
+                #model.model.diffusion_model.set_guide_type(guide_type=guide_type)
+                #model.model.diffusion_model.set_x_lr(x_lr=x_lr)
+                patch = work_model.model_options.get("transformer_options", {}).get("patches_replace", {}).get("ultracascade", {}).get("main")
+                if patch is not None:
+                    patch.update(x_lr=x_lr, guide_weights=ultracascade_guide_weights, guide_type=ultracascade_guide_type)
+                else:
+                    work_model.model.diffusion_model.set_sigmas_schedule(sigmas_schedule=sigmas)
+                    work_model.model.diffusion_model.set_sigmas_prev(sigmas_prev=sigmas[:1])
+                    work_model.model.diffusion_model.set_guide_weights(guide_weights=ultracascade_guide_weights)
+                    work_model.model.diffusion_model.set_guide_type(guide_type=ultracascade_guide_type)
+                    work_model.model.diffusion_model.set_x_lr(x_lr=x_lr)
+                    
+                #latent_image['samples'] = torch.zeros_like(latent_image['samples'])
+                
+            elif work_model.model.model_config.unet_config.get('stable_cascade_stage') == 'b':
+                c_pos, c_neg = [], []
+                for t in pos_cond:
+                    d_pos = t[1].copy()
+                    d_neg = t[1].copy()
+                    
+                    d_pos['stable_cascade_prior'] = ultracascade_latent_image['samples'].clone()
+
+                    pooled_output = d_neg.get("pooled_output", None)
+                    if pooled_output is not None:
+                        d_neg["pooled_output"] = torch.zeros_like(pooled_output)
+                    
+                    c_pos.append([t[0], d_pos])            
+                    c_neg.append([torch.zeros_like(t[0]), d_neg])
+                pos_cond = c_pos
+                neg_cond = c_neg
+                
+                #latent_image['samples'] = torch.zeros_like(latent_image['samples'])
+
+                
+                
+            
+            
             
             if   isinstance(work_model.model.model_config, comfy.supported_models.Flux) or isinstance(work_model.model.model_config, comfy.supported_models.FluxSchnell):
                 pos_cond = [[torch.zeros((1, 256, 4096)), {'pooled_output': torch.zeros((1,  768))}]] if pos_cond is None else pos_cond
@@ -328,8 +382,9 @@ class SharkSampler:
 
                     callback     = latent_preview.prepare_callback(work_model, sigmas.shape[-1] - 1, x0_output)
                     
-                    sampler.extra_options['state_info']     = state_info
-                    sampler.extra_options['state_info_out'] = state_info_out
+                    if 'bongmath' in sampler.extra_options:
+                        sampler.extra_options['state_info']     = state_info
+                        sampler.extra_options['state_info_out'] = state_info_out
                     
                     samples = comfy.sample.sample_custom(work_model, noise, cfg, sampler, sigmas, pos_cond, neg_cond, x.clone(), noise_mask=noise_mask, callback=callback, disable_pbar=disable_pbar, seed=noise_seed)
 
@@ -456,7 +511,8 @@ class SharkSampler_Beta:
             **kwargs,
             ): 
         
-        sampler.extra_options['steps_to_run'] = steps_to_run
+        if 'steps_to_run' in sampler.extra_options:
+            sampler.extra_options['steps_to_run'] = steps_to_run
         
         output, denoised, sde_noise = SharkSampler().main(
             model           = model, 
@@ -529,8 +585,8 @@ class ClownSamplerAdvanced_Beta:
                     {
                     "guides":                 ("GUIDES", ),     
                     "automation":             ("AUTOMATION", ),
-                    "options":                ("OPTIONS", ),   
                     "extra_options":          ("STRING",                     {"default": "", "multiline": True}),   
+                    "options":                ("OPTIONS", ),   
                     }
                 }
 
@@ -1063,7 +1119,7 @@ class ClownSampler_Beta:
                     #"steps_to_run": ("INT",                        {"default": -1,  "min": -1,     "max": MAX_STEPS}),
                     #"denoise":      ("FLOAT",                      {"default": 1.0, "min": -10000, "max": MAX_STEPS, "step":0.01}),
                     #"cfg":          ("FLOAT",                      {"default": 5.5, "min": -100.0, "max": 100.0,     "step":0.01, "round": False, }),
-                    "seed":         ("INT",                        {"default": 0,   "min": -1,     "max": 0xffffffffffffffff}),
+                    "seed":         ("INT",                        {"default": -1,   "min": -1,     "max": 0xffffffffffffffff}),
                     #"sampler_mode": (['standard', 'unsample', 'resample'],),
                     "bongmath":     ("BOOLEAN",                    {"default": True}),
                     },
