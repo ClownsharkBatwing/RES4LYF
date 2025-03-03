@@ -99,6 +99,9 @@ class SharkSampler:
             #ultracascade_stage : str = "stage_UP",
             ultracascade_latent_image : Optional[dict[str,Any]] = None,
             ultracascade_guide_weights: Optional[Tuple] = None,
+            
+            ultracascade_latent_width : int = 0,
+            ultracascade_latent_height: int = 0,
         
             extra_options      : str = "", 
             **kwargs,
@@ -127,7 +130,10 @@ class SharkSampler:
             sde_noise_steps = options_mgr.get('sde_noise_steps',  sde_noise_steps)
             
             #ultracascade_stage        = options_mgr.get('ultracascade_stage',         ultracascade_stage)
-            ultracascade_latent_image = options_mgr.get('ultracascade_latent_image',  ultracascade_latent_image)
+            ultracascade_latent_image  = options_mgr.get('ultracascade_latent_image',  ultracascade_latent_image)
+            ultracascade_latent_width  = options_mgr.get('ultracascade_latent_width',  ultracascade_latent_width)
+            ultracascade_latent_height = options_mgr.get('ultracascade_latent_height', ultracascade_latent_height)
+
         
             if cfg < 0:
                 sampler.extra_options['cfg_cw'] = -cfg
@@ -167,7 +173,10 @@ class SharkSampler:
 
         
             # INIT STATE INFO FOR CONTINUING GENERATION ACROSS MULTIPLE SAMPLER NODES
-            state_info     = copy.deepcopy(latent_image['state_info']) if 'state_info' in latent_image else {}
+            if latent_image is not None:
+                state_info     = copy.deepcopy(latent_image['state_info']) if 'state_info' in latent_image else {}
+            else:
+                state_info = {}
             state_info_out = {}
             
             
@@ -185,7 +194,18 @@ class SharkSampler:
                 ultracascade_guide_weight = EO("ultracascade_guide_weight", 0.0)
                 ultracascade_guide_type   = EO("ultracascade_guide_type", "residual")
                 
-                x_lr = ultracascade_latent_image['samples'].clone() if ultracascade_latent_image is not None else None
+                #x_lr = ultracascade_latent_image['samples'].clone() if ultracascade_latent_image is not None else None
+                x_lr = None
+                if ultracascade_latent_height * ultracascade_latent_width > 0:
+                    x_lr = latent_image['samples'].clone() if latent_image is not None else None
+                    x_lr_bs = 1 if x_lr is None else x_lr.shape[-4]
+                    x_lr_dtype = default_dtype if x_lr is None else x_lr.dtype
+                    x_lr_device = 'cuda' if x_lr is None else x_lr.device
+                    
+                    if latent_image is None:
+                        latent_image = {}
+                    
+                    latent_image['samples'] = torch.zeros([x_lr_bs, 16, ultracascade_latent_height, ultracascade_latent_width], dtype=x_lr_dtype, device=x_lr_device)
                 
                 if x_lr is not None:
                     if x_lr.shape[-2:] != latent_image['samples'].shape[-2:]:
@@ -213,7 +233,13 @@ class SharkSampler:
                     d_pos = t[1].copy()
                     d_neg = t[1].copy()
                     
-                    d_pos['stable_cascade_prior'] = ultracascade_latent_image['samples'].clone()
+                    x_lr = None
+                    if ultracascade_latent_height * ultracascade_latent_width > 0:
+                        x_lr = latent_image['samples'].clone()
+                        latent_image['samples'] = torch.zeros([x_lr.shape[-4], 4, ultracascade_latent_height // 4, ultracascade_latent_width // 4], dtype=x_lr.dtype, device=x_lr.device)
+                    
+                    d_pos['stable_cascade_prior'] = x_lr
+                    #d_pos['stable_cascade_prior'] = ultracascade_latent_image['samples'].clone()
 
                     pooled_output = d_neg.get("pooled_output", None)
                     if pooled_output is not None:

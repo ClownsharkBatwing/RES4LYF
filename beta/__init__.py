@@ -38,7 +38,7 @@ def add_beta(NODE_CLASS_MAPPINGS, extra_samplers):
 
         "SharkOptions_Beta"               : samplers_extensions.SharkOptions_Beta,
         "SharkOptions_UltraCascade_Beta"  : samplers_extensions.SharkOptions_UltraCascade_Beta,
-
+        "SharkOptions_UltraCascade_Latent_Beta"  : samplers_extensions.SharkOptions_UltraCascade_Latent_Beta,
     })
 
     extra_samplers.update({

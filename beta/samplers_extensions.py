@@ -1,6 +1,8 @@
 import torch
 import torch.nn.functional as F
 
+from nodes import MAX_RESOLUTION
+
 from ..helper                import OptionsManager, initialize_or_scale, get_res4lyf_scheduler_list
 
 from .rk_coefficients_beta   import RK_SAMPLER_NAMES_BETA_FOLDERS, get_default_sampler_name, get_sampler_name_list, process_sampler_name
@@ -367,6 +369,40 @@ class SharkOptions_UltraCascade_Beta:
         options['ultracascade_latent_image'] = latent_image
 
         return (options,)
+
+
+
+class SharkOptions_UltraCascade_Latent_Beta:
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "width":   ("INT", {"default": 60, "min": 1, "max": MAX_RESOLUTION, "step": 1}),
+                "height":  ("INT", {"default": 36, "min": 1, "max": MAX_RESOLUTION, "step": 1}),
+                },
+            "optional": {
+                "options": ("OPTIONS",),   
+                }
+            }
+
+    RETURN_TYPES = ("OPTIONS",)
+    RETURN_NAMES = ("options",)
+    FUNCTION     = "main"
+    CATEGORY     = "RES4LYF/sampler_options"
+    
+    def main(self,
+            width  : int = 60,
+            height : int = 36,
+            options       = None,
+            ): 
+        
+        options = options if options is not None else {}
+            
+        options['ultracascade_latent_width']  = width
+        options['ultracascade_latent_height'] = height
+
+        return (options,)
+
 
 
 
