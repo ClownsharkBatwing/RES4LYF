@@ -309,7 +309,7 @@ class SeedGenerator:
     RETURN_TYPES = ("INT",  "INT",)
     RETURN_NAMES = ("seed", "seed+1",)
     FUNCTION = "main"
-    CATEGORY = "RES4LYF/utils"
+    CATEGORY = "RES4LYF/utilities"
 
     def main(self, seed,):
         return (seed, seed+1,)
