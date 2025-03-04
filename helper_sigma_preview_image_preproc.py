@@ -331,7 +331,7 @@ class VAEEncodeAdvanced:
         image_2 = image_2.clone() if image_2 is not None else None
 
         if latent is not None and resize_to_input == "latent":
-            height, width = latent['samples'].shape[2:4]
+            height, width = latent['samples'].shape[-2:]
             height, width = height * ratio, width * ratio
             
         elif image_1 is not None and resize_to_input == "image_1":

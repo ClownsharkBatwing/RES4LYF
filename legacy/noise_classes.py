@@ -145,21 +145,28 @@ class FractalNoiseGenerator(NoiseGenerator):
 
     def __call__(self, *, alpha=None, k=None, scale=None, **kwargs):
         self.update(alpha=alpha, k=k, scale=scale)
-
-        b, c, h, w = self.size
+        if len(self.shape) == 5:
+            b, c, t, h, w = self.size
+        else:
+            b, c, h, w = self.size
         
         noise = torch.normal(mean=0.0, std=1.0, size=self.size, dtype=self.dtype, layout=self.layout, device=self.device, generator=self.generator)
         
         y_freq = torch.fft.fftfreq(h, 1/h, device=self.device)
         x_freq = torch.fft.fftfreq(w, 1/w, device=self.device)
-        freq = torch.sqrt(y_freq[:, None]**2 + x_freq[None, :]**2).clamp(min=1e-10)
+
+        if len(self.shape) == 5:
+            t_freq = torch.fft.fftfreq(t, 1/t, device=self.device)
+            freq = torch.sqrt(y_freq[:, None, None]**2 + x_freq[None, :, None]**2 + t_freq[None, None, :]**2).clamp(min=1e-10)
+        else:
+            freq = torch.sqrt(y_freq[:, None]**2 + x_freq[None, :]**2).clamp(min=1e-10)
         
         spectral_density = self.k / torch.pow(freq, self.alpha * self.scale)
         spectral_density[0, 0] = 0
 
-        noise_fft = torch.fft.fft2(noise)
+        noise_fft = torch.fft.fftn(noise)
         modified_fft = noise_fft * spectral_density
-        noise = torch.fft.ifft2(modified_fft).real
+        noise = torch.fft.ifftn(modified_fft).real
 
         return noise / torch.std(noise)
     
@@ -175,13 +182,18 @@ class SimplexNoiseGenerator(NoiseGenerator):
     def __call__(self, *, scale=None, **kwargs):
         self.update(scale=scale)
         
-        b, c, h, w = self.size
+        if len(self.size) == 5:
+            b, c, t, h, w = self.size
+        else:
+            b, c, h, w = self.size
 
         noise_array = self.noise.noise3array(np.arange(w),np.arange(h),np.arange(c))
         self.noise = OpenSimplex(seed=self.noise.get_seed()+1)
         
         noise_tensor = torch.from_numpy(noise_array).to(self.device)
         noise_tensor = torch.unsqueeze(noise_tensor, dim=0)
+        if len(self.size) == 5:
+            noise_tensor = torch.unsqueeze(noise_tensor, dim=0)
         
         return noise_tensor / noise_tensor.std()
         #return normalize(scale_to_range(noise_tensor))
@@ -197,22 +209,31 @@ class HiresPyramidNoiseGenerator(NoiseGenerator):
     def __call__(self, *, discount=None, mode=None, **kwargs):
         self.update(discount=discount, mode=mode)
 
-        b, c, h, w = self.size
-        orig_h, orig_w = h, w
-
-        u = nn.Upsample(size=(orig_h, orig_w), mode=self.mode).to(self.device)
+        if len(self.size) == 5:
+            b, c, t, h, w = self.size
+            orig_h, orig_w, orig_t = h, w, t
+            u = nn.Upsample(size=(orig_h, orig_w, orig_t), mode=self.mode).to(self.device)
+        else:
+            b, c, h, w = self.size
+            orig_h, orig_w = h, w
+            orig_t = t = 1
+            u = nn.Upsample(size=(orig_h, orig_w), mode=self.mode).to(self.device)
 
         noise = ((torch.rand(size=self.size, dtype=self.dtype, layout=self.layout, device=self.device, generator=self.generator) - 0.5) * 2 * 1.73)
 
         for i in range(4):
             r = torch.rand(1, device=self.device, generator=self.generator).item() * 2 + 2
             h, w = min(orig_h * 15, int(h * (r ** i))), min(orig_w * 15, int(w * (r ** i)))
+            if len(self.size) == 5:
+                t = min(orig_t * 15, int(t * (r ** i)))
+                new_noise = torch.randn((b, c, t, h, w), dtype=self.dtype, layout=self.layout, device=self.device, generator=self.generator)
+            else:
+                new_noise = torch.randn((b, c, h, w), dtype=self.dtype, layout=self.layout, device=self.device, generator=self.generator)
 
-            new_noise = torch.randn((b, c, h, w), dtype=self.dtype, layout=self.layout, device=self.device, generator=self.generator)
             upsampled_noise = u(new_noise)
             noise += upsampled_noise * self.discount ** i
             
-            if h >= orig_h * 15 or w >= orig_w * 15:
+            if h >= orig_h * 15 or w >= orig_w * 15 or t >= orig_t * 15:
                 break  # if resolution is too high
         
         return noise / noise.std()
@@ -229,15 +250,28 @@ class PyramidNoiseGenerator(NoiseGenerator):
         self.update(discount=discount, mode=mode)
 
         x = torch.zeros(self.size, dtype=self.dtype, layout=self.layout, device=self.device)
-        b, c, h, w = self.size
-        orig_h, orig_w = h, w
+
+        if len(self.size) == 5:
+            b, c, t, h, w = self.size
+            orig_h, orig_w, orig_t = h, w, t
+        else:
+            b, c, h, w = self.size
+            orig_h, orig_w = h, w
 
         r = 1
         for i in range(5):
             r *= 2
+
+            if len(self.size) == 5:
+                scaledSize = (b, c, t * r, h * r, w * r)
+                origSize = (orig_h, orig_w, orig_t)
+            else:
+                scaledSize = (b, c, h * r, w * r)
+                origSize = (orig_h, orig_w)
+
             x += torch.nn.functional.interpolate(
-                torch.normal(mean=0, std=0.5 ** i, size=(b, c, h * r, w * r), dtype=self.dtype, layout=self.layout, device=self.device, generator=self.generator),
-                size=(orig_h, orig_w), mode=self.mode
+                torch.normal(mean=0, std=0.5 ** i, size=scaledSize, dtype=self.dtype, layout=self.layout, device=self.device, generator=self.generator),
+                size=origSize, mode=self.mode
             ) * self.discount ** i
         return x / x.std()
 
@@ -246,14 +280,20 @@ class PyramidNoiseGenerator(NoiseGenerator):
 class InterpolatedPyramidNoiseGenerator(NoiseGenerator):
     def __init__(self, x=None, size=None, dtype=None, layout=None, device=None, seed=42, generator=None, sigma_min=None, sigma_max=None, 
                  discount=0.7, mode='nearest-exact'):
-        super().__init__(x, size, dtype, layout, device, seed, generator, sigma_min, sigma_max)
         self.update(discount=discount, mode=mode)
+
+        super().__init__(x, size, dtype, layout, device, seed, generator, sigma_min, sigma_max)
 
     def __call__(self, *, discount=None, mode=None, **kwargs):
         self.update(discount=discount, mode=mode)
 
-        b, c, h, w = self.size
-        orig_h, orig_w = h, w
+        if len(self.size) == 5:
+            b, c, t, h, w = self.size
+            orig_t, orig_h, orig_w = t, h, w
+        else:
+            b, c, h, w = self.size
+            orig_h, orig_w = h, w
+            t = orig_t = 1
 
         noise = ((torch.rand(size=self.size, dtype=self.dtype, layout=self.layout, device=self.device, generator=self.generator) - 0.5) * 2 * 1.73)
         multipliers = [1]
@@ -261,14 +301,19 @@ class InterpolatedPyramidNoiseGenerator(NoiseGenerator):
         for i in range(4):
             r = torch.rand(1, device=self.device, generator=self.generator).item() * 2 + 2
             h, w = min(orig_h * 15, int(h * (r ** i))), min(orig_w * 15, int(w * (r ** i)))
-
-            new_noise = torch.randn((b, c, h, w), dtype=self.dtype, layout=self.layout, device=self.device, generator=self.generator)
-            upsampled_noise = nn.functional.interpolate(new_noise, size=(orig_h, orig_w), mode=self.mode)
+            
+            if len(self.size) == 5:
+                t = min(orig_t * 15, int(t * (r ** i)))
+                new_noise = torch.randn((b, c, t, h, w), dtype=self.dtype, layout=self.layout, device=self.device, generator=self.generator)
+                upsampled_noise = nn.functional.interpolate(new_noise, size=(orig_t, orig_h, orig_w), mode=self.mode)
+            else:
+                new_noise = torch.randn((b, c, h, w), dtype=self.dtype, layout=self.layout, device=self.device, generator=self.generator)
+                upsampled_noise = nn.functional.interpolate(new_noise, size=(orig_h, orig_w), mode=self.mode)
 
             noise += upsampled_noise * self.discount ** i
-            multipliers.append(        self.discount ** i)
+            multipliers.append(self.discount ** i)
             
-            if h >= orig_h * 15 or w >= orig_w * 15:
+            if h >= orig_h * 15 or w >= orig_w * 15 or (len(self.size) == 5 and t >= orig_t * 15):
                 break  # if resolution is too high
         
         noise = noise / sum([m ** 2 for m in multipliers]) ** 0.5 
@@ -354,8 +399,8 @@ class LaplacianNoiseGenerator(NoiseGenerator):
     def __call__(self, *, loc=None, scale=None, **kwargs):
         self.update(loc=loc, scale=scale)
 
-        b, c, h, w = self.size
-        orig_h, orig_w = h, w
+        # b, c, h, w = self.size
+        # orig_h, orig_w = h, w
 
         noise = torch.randn(self.size, dtype=self.dtype, layout=self.layout, device=self.device, generator=self.generator) / 4.0
 
@@ -377,8 +422,8 @@ class StudentTNoiseGenerator(NoiseGenerator):
     def __call__(self, *, loc=None, scale=None, df=None, **kwargs):
         self.update(loc=loc, scale=scale, df=df)
 
-        b, c, h, w = self.size
-        orig_h, orig_w = h, w
+        # b, c, h, w = self.size
+        # orig_h, orig_w = h, w
 
         rng_state = torch.random.get_rng_state()
         torch.manual_seed(self.generator.initial_seed())
@@ -386,9 +431,13 @@ class StudentTNoiseGenerator(NoiseGenerator):
         noise = StudentT(loc=self.loc, scale=self.scale, df=self.df).rsample(self.size)
 
         s = torch.quantile(noise.flatten(start_dim=1).abs(), 0.75, dim=-1)
-        s = s.reshape(*s.shape, 1, 1, 1)
-        noise = noise.clamp(-s, s)
+        
+        if len(self.size) == 5:
+            s = s.reshape(*s.shape, 1, 1, 1, 1)
+        else:
+            s = s.reshape(*s.shape, 1, 1, 1)
 
+        noise = noise.clamp(-s, s)
         noise_latent = torch.copysign(torch.pow(torch.abs(noise), 0.5), noise).to(self.device)
 
         self.generator.manual_seed(self.generator.initial_seed() + 1)
@@ -404,8 +453,8 @@ class WaveletNoiseGenerator(NoiseGenerator):
     def __call__(self, *, wavelet=None, **kwargs):
         self.update(wavelet=wavelet)
 
-        b, c, h, w = self.size
-        orig_h, orig_w = h, w
+        # b, c, h, w = self.size
+        # orig_h, orig_w = h, w
 
         # noise for spatial dimensions only
         coeffs = pywt.wavedecn(torch.randn(self.size, dtype=self.dtype, layout=self.layout, device=self.device, generator=self.generator).to(self.device), wavelet=self.wavelet, mode='periodization')
@@ -531,15 +580,24 @@ class PerlinNoiseGenerator(NoiseGenerator):
     def __call__(self, *, detail=None, **kwargs):
         self.update(detail=detail) #currently unused
 
-        b, c, h, w = self.size
-        orig_h, orig_w = h, w
+        if len(self.size) == 5:
+            b, c, t, h, w = self.size
+            noise = torch.randn(self.size, dtype=self.dtype, layout=self.layout, device=self.device, generator=self.generator) / 2.0
+            
+            for tt in range(t):
+                for i in range(2):
+                    perlin_slice = self.perlin_noise((h, w), (h, w), batch_size=c, generator=self.generator).to(self.device)
+                    perlin_expanded = perlin_slice.unsqueeze(0).unsqueeze(2)
+                    time_slice = noise[:, :, tt:tt+1, :, :]
+                    noise[:, :, tt:tt+1, :, :] += perlin_expanded
+        else:
+            b, c, h, w = self.size
+            #orig_h, orig_w = h, w
 
-        noise = torch.randn(self.size, dtype=self.dtype, layout=self.layout, device=self.device, generator=self.generator) / 2.0
-        noise_size_H = noise.size(dim=2)
-        noise_size_W = noise.size(dim=3)
-        perlin = None
-        for i in range(2):
-            noise += self.perlin_noise((noise_size_H, noise_size_W), (noise_size_H, noise_size_W), batch_size=self.x.shape[1], generator=self.generator).to(self.device)
+            noise = torch.randn(self.size, dtype=self.dtype, layout=self.layout, device=self.device, generator=self.generator) / 2.0
+            for i in range(2):
+                noise += self.perlin_noise((h, w), (h, w), batch_size=c, generator=self.generator).to(self.device)
+                
         return noise / noise.std()
     
 from functools import partial
