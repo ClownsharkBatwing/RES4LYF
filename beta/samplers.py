@@ -310,6 +310,13 @@ class SharkSampler:
 
             if pos_cond[0][1] is not None: 
                 if 'callback_regional' in pos_cond[0][1]:
+                    if   isinstance(work_model.model.model_config, comfy.supported_models.SD3):
+                        text_len_base = 154
+                        pooled_len    = 2048
+                    elif isinstance(work_model.model.model_config, comfy.supported_models.Flux) or isinstance(work_model.model.model_config, comfy.supported_models.FluxSchnell):
+                        text_len_base = 256
+                        pooled_len    = 768
+                    
                     pos_cond = pos_cond[0][1]['callback_regional'](model)
                 
                 if "regional_conditioning_weights" in pos_cond[0][1]:
@@ -414,7 +421,7 @@ class SharkSampler:
 
                     callback     = latent_preview.prepare_callback(work_model, sigmas.shape[-1] - 1, x0_output)
                     
-                    if 'bongmath' in sampler.extra_options:
+                    if 'BONGMATH' in sampler.extra_options:
                         sampler.extra_options['state_info']     = state_info
                         sampler.extra_options['state_info_out'] = state_info_out
                     
@@ -485,7 +492,7 @@ class SharkSampler_Beta:
                 "steps":           ("INT",                        {"default": 30,  "min": 1,        "max": 10000.0}),
                 "steps_to_run":    ("INT",                        {"default": -1,  "min": -1,       "max": MAX_STEPS}),
                 "denoise":         ("FLOAT",                      {"default": 1.0, "min": -10000.0, "max": 10000.0, "step":0.01}),
-                "cfg":             ("FLOAT",                      {"default": 3.0, "min": -10000.0, "max": 10000.0, "step":0.01, "round": False, "tooltip": "Negative values use channelwise CFG." }),
+                "cfg":             ("FLOAT",                      {"default": 5.5, "min": -10000.0, "max": 10000.0, "step":0.01, "round": False, "tooltip": "Negative values use channelwise CFG." }),
                 "seed":            ("INT",                        {"default": 0,   "min": -1,       "max": 0xffffffffffffffff}),
                 "sampler_mode": (['unsample', 'standard', 'resample'], {"default": "standard"}),
                 },
