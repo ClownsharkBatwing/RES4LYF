@@ -22,6 +22,9 @@ from comfy.ldm.flux.layers import SingleStreamBlock, DoubleStreamBlock
 from .flux.model  import ReFlux
 from .flux.layers import SingleStreamBlock as ReSingleStreamBlock, DoubleStreamBlock as ReDoubleStreamBlock
 
+from comfy.ldm.modules.diffusionmodules.mmdit import OpenAISignatureMMDITWrapper, JointBlock
+from .sd35.mmdit import ReOpenAISignatureMMDITWrapper, ReJointBlock
+
 from .latents import get_orthogonal, get_cosine_similarity
 from .res4lyf import RESplain
 
@@ -79,6 +82,45 @@ class ReFluxPatcher:
                 block.__class__ = SingleStreamBlock
                 block.idx       = i
                 
+        else:
+            m = model
+        
+        return (m,)
+
+
+class ReSD35Patcher:
+    @classmethod
+    def INPUT_TYPES(s):
+        return {
+            "required": { 
+                "model":  ("MODEL",),
+                "enable": ("BOOLEAN", {"default": True}),
+            }
+        }
+    RETURN_TYPES = ("MODEL",)
+    RETURN_NAMES = ("model",)
+    CATEGORY     = "RES4LYF/model_patches"
+    FUNCTION     = "main"
+
+    def main(self, model, enable=True, force=False):
+        
+        if (enable or force) and model.model.diffusion_model.__class__ == OpenAISignatureMMDITWrapper:
+            m = model.clone()
+            m.model.diffusion_model.__class__     = ReOpenAISignatureMMDITWrapper
+            m.model.diffusion_model.threshold_inv = False
+            
+            for i, block in enumerate(m.model.diffusion_model.joint_blocks):
+                block.__class__ = ReJointBlock
+                block.idx       = i
+
+        elif not enable and model.model.diffusion_model.__class__ == ReOpenAISignatureMMDITWrapper:
+            m = model.clone()
+            m.model.diffusion_model.__class__ = OpenAISignatureMMDITWrapper
+            
+            for i, block in enumerate(m.model.diffusion_model.joint_blocks):
+                block.__class__ = JointBlock
+                block.idx       = i
+
         else:
             m = model
         
@@ -550,3 +592,5 @@ class TorchCompileModelFluxAdvanced:
         # diffusion_model.time_in = torch.compile(diffusion_model.time_in, mode=mode, fullgraph=fullgraph, backend=backend)
         # diffusion_model.txt_in = torch.compile(diffusion_model.txt_in, mode=mode, fullgraph=fullgraph, backend=backend)
         # diffusion_model.vector_in = torch.compile(diffusion_model.vector_in, mode=mode, fullgraph=fullgraph, backend=backend)
+        
+        #   @torch.compile(mode="default", dynamic=False, fullgraph=False, backend="inductor")

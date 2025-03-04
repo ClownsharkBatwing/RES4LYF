@@ -64,7 +64,7 @@ NODE_CLASS_MAPPINGS = {
 
     "SeedGenerator"                       : nodes_misc.SeedGenerator,
     
-    "ClownRegionalConditioningFlux"       : conditioning.ClownRegionalConditioningFlux,
+    "ClownRegionalConditioning"           : conditioning.ClownRegionalConditioning,
     
     "CLIPTextEncodeFluxUnguided"          : conditioning.CLIPTextEncodeFluxUnguided,
     "ConditioningOrthoCollin"             : conditioning.ConditioningOrthoCollin,
@@ -78,8 +78,8 @@ NODE_CLASS_MAPPINGS = {
     "ConditioningTruncate"                : conditioning.ConditioningTruncate,
     "StyleModelApplyAdvanced"             : conditioning.StyleModelApplyAdvanced,
     
-    "FluxRegionalPrompt"                  : conditioning.FluxRegionalPrompt,
-    "FluxRegionalConditioning"            : conditioning.FluxRegionalConditioning,
+    "RectifiedFlow_RegionalPrompt"        : conditioning.RectifiedFlow_RegionalPrompt,
+    "RectifiedFlow_RegionalConditioning"  : conditioning.RectifiedFlow_RegionalConditioning,
 
     "ConditioningToBase64"                : conditioning.ConditioningToBase64,
     "Base64ToConditioning"                : conditioning.Base64ToConditioning,
@@ -144,6 +144,8 @@ NODE_CLASS_MAPPINGS = {
 
     "ReFluxPatcher"                       : models.ReFluxPatcher,
     "FluxOrthoCFGPatcher"                 : models.FluxOrthoCFGPatcher,
+    "ReSD35Patcher"                       : models.ReSD35Patcher,
+
     
     "UNetSave"                            : models.UNetSave,
 

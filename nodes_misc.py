@@ -171,7 +171,7 @@ class TextShuffleAndTruncate:
         }
 
     RETURN_TYPES = ("STRING","STRING","STRING","STRING","STRING",)
-    RETURN_NAMES = ("shuffled_text", "text_words","text_clip_l","text_clip_g","text_t5",)
+    RETURN_NAMES = ("shuffled_text", "text_words", "text_clip_l", "text_clip_g", "text_t5",)
     FUNCTION = "main"
     CATEGORY = "RES4LYF/text"
 
@@ -186,7 +186,10 @@ class TextShuffleAndTruncate:
         truncated_words = words[:truncate_words_to]
         truncated_text = " ".join(truncated_words)
         
-        t5_name = "t5xxl" if not hasattr(clip.tokenizer, "pile_t5xl") else "pile_t5xl"
+        #t5_name = "t5xxl" if not hasattr(clip.tokenizer, "pile_t5xl") else "pile_t5xl"
+        t5_name = "t5xxl"
+        if hasattr(clip.tokenizer, "clip_name"):
+            t5_name = "t5xxl" if clip.tokenizer.clip_name != "pile_t5xl" else "pile_t5xl"
 
         text_clip_l = truncate_tokens(truncated_text, truncate_tokens_to, clip, "l",     49407)
         text_clip_g = truncate_tokens(truncated_text, truncate_tokens_to, clip, "g",     49407)
@@ -223,7 +226,10 @@ class TextTruncateTokens:
         truncated_words = words[:truncate_words_to]
         truncated_text = " ".join(truncated_words)
         
-        t5_name = "t5xxl" if not hasattr(clip.tokenizer, "pile_t5xl") else "pile_t5xl"
+        #t5_name = "t5xxl" if not hasattr(clip.tokenizer, "pile_t5xl") else "pile_t5xl"
+        t5_name = "t5xxl"
+        if hasattr(clip.tokenizer, "clip_name"):
+            t5_name = "t5xxl" if clip.tokenizer.clip_name != "pile_t5xl" else "pile_t5xl"
 
         if clip is not None:
             text_clip_l = truncate_tokens(text, truncate_clip_l_to, clip, "l",     49407)

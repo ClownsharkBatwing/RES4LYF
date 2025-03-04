@@ -4,11 +4,11 @@ import torch.nn.functional as F
 from torch  import Tensor
 from typing import Optional, Callable, Tuple, Dict, Any, Union, TYPE_CHECKING, TypeVar
 
-
 import copy
 import base64
 import pickle # used strictly for serializing conditioning in the ConditioningToBase64 and Base64ToConditioning nodes for API use. (Offloading T5 processing to another machine to avoid model shuffling.)
 
+import comfy.supported_models
 import node_helpers
 
 from .sigmas  import get_sigmas
@@ -115,15 +115,20 @@ class CLIPTextEncodeFluxUnguided:
 class StyleModelApplyAdvanced: 
     @classmethod
     def INPUT_TYPES(s):
-        return {"required": {"conditioning": ("CONDITIONING", ),
-                             "style_model": ("STYLE_MODEL", ),
-                             "clip_vision_output": ("CLIP_VISION_OUTPUT", ),
-                             "strength": ("FLOAT", {"default": 1.0, "min": -10.0, "max": 10.0, "step": 0.001}),
-                             }}
+        return {
+            "required": {
+                "conditioning":       ("CONDITIONING", ),
+                "style_model":        ("STYLE_MODEL", ),
+                "clip_vision_output": ("CLIP_VISION_OUTPUT", ),
+                "strength":           ("FLOAT", {"default": 1.0, "min": -10.0, "max": 10.0, "step": 0.001}),
+            }
+    }
+        
     RETURN_TYPES = ("CONDITIONING",)
-    FUNCTION = "main"
-    CATEGORY = "RES4LYF/conditioning"
-    DESCRIPTION = "Use with Flux Redux."
+    RETURN_NAMES = ("conditioning",)
+    DESCRIPTION  = "Use with Flux Redux."
+    FUNCTION     = "main"
+    CATEGORY     = "RES4LYF/conditioning"
 
     def main(self, clip_vision_output, style_model, conditioning, strength=1.0):
         cond = style_model.get_cond(clip_vision_output).flatten(start_dim=0, end_dim=1).unsqueeze(dim=0)
@@ -487,9 +492,9 @@ class RegionalMask(torch.nn.Module):
         self.img_len               = img_len
         self.text_len              = text_len
 
-    def __call__(self, transformer_options, weight=0, dtype=torch.bfloat16, *args, **kwargs):
+    def __call__(self, transformer_options, weight=0, dtype=torch.float16, *args, **kwargs):
         sigma = transformer_options['sigmas'][0]
-        if self.start_percent <= 1 - sigma < self.end_percent:
+        if self.start_percent <= 1 - sigma < self.end_percent:        # could be an issue, 1 - sigma? 
             if self.mask_type == "gradient":
                 #mask = self.gen_mask(weight)
                 return self.mask.clone().to(sigma.device) * weight
@@ -504,25 +509,25 @@ class RegionalConditioning(torch.nn.Module):
         self.start_percent = start_percent
         self.end_percent   = end_percent
 
-    def __call__(self, transformer_options, dtype=torch.bfloat16, *args,  **kwargs):
+    def __call__(self, transformer_options, dtype=torch.float16, *args,  **kwargs):
         sigma = transformer_options['sigmas'][0]
         if self.start_percent <= 1 - sigma < self.end_percent:
             return self.region_cond.clone().to(sigma.device).to(dtype)
         return None
     
-    def concat_cond(self, context, transformer_options, dtype=torch.bfloat16, *args,  **kwargs):
+    def concat_cond(self, context, transformer_options, dtype=torch.float16, *args,  **kwargs):
         sigma = transformer_options['sigmas'][0]
         if self.start_percent <= 1 - sigma < self.end_percent:
             region_cond = self.region_cond.clone().to(sigma.device).to(dtype)
             if self.conditioning is None:
                 return self.region_cond.clone().to(sigma.device).to(dtype)
             else:
-                return torch.cat([context, region_cond.clone().to(torch.bfloat16)], dim=1)
+                return torch.cat([context, region_cond.clone().to(torch.float16)], dim=1)
         return None
 
 
 
-class FluxRegionalPrompt:
+class RectifiedFlow_RegionalPrompt:
     @classmethod
     def INPUT_TYPES(s):
         return {"required": { 
@@ -541,7 +546,7 @@ class FluxRegionalPrompt:
     def main(self, cond, mask, cond_regional=[]):
         cond_regional = [*cond_regional]
         cond_regional.append({'mask': mask, 'cond': cond[0][0]})
-        mask_inv = 1-mask
+        mask_inv      = 1-mask
         return (cond_regional,mask_inv,)
 
 def fp_not(tensor):
@@ -554,13 +559,14 @@ def fp_and(tensor1, tensor2):
     return torch.minimum(tensor1, tensor2)
 
 class RegionalGenerateConditioningsAndMasks:
-    def __init__(self, conditioning, conditioning_regional, weight, start_percent, end_percent, mask_type):
+    def __init__(self, conditioning, conditioning_regional, weight, start_percent, end_percent, mask_type, model_config):
         self.conditioning          = conditioning
         self.conditioning_regional = conditioning_regional
         self.weight                = weight
         self.start_percent         = start_percent
         self.end_percent           = end_percent
         self.mask_type             = mask_type
+        self.model_config          = model_config
 
     def __call__(self, latent):
         b, c, h, w = latent.shape
@@ -568,24 +574,29 @@ class RegionalGenerateConditioningsAndMasks:
         w //= 2
         img_len = h * w
 
+        if   isinstance(self.model_config, comfy.supported_models.SD3):
+            text_len_base = 154
+        elif isinstance(self.model_config, comfy.supported_models.Flux) or isinstance(self.model_config, comfy.supported_models.FluxSchnell):
+            text_len_base = 256
+
         cond_r = torch.cat([cond_reg['cond'] for cond_reg in self.conditioning_regional], dim=1)
         
         if self.conditioning is not None:
-            text_len = 256 + cond_r.shape[1]  # 256 = main prompt tokens... half of t5, comfy issue
+            text_len = text_len_base + cond_r.shape[1]  # 256 = main prompt tokens... half of t5, comfy issue
             conditioning_regional = [
                 {
-                    'mask': torch.ones((1,   h,    w), dtype=torch.bfloat16),
-                    'cond': torch.ones((1, 256, 4096), dtype=torch.bfloat16),
+                    'mask': torch.ones((1,             h,    w), dtype=torch.float16),
+                    'cond': torch.ones((1, text_len_base, 4096), dtype=torch.float16),
                 },
                 *self.conditioning_regional,
             ]
         else:
-            text_len = cond_r.shape[1]  # 256 = main prompt tokens... half of t5, comfy issue
+            text_len = cond_r.shape[1]  # 256 = main prompt tokens... half of t5, comfy issue        # gets set to 308 with sd35m. 154 * 2 = 308 (THIS IS WITH CFG)
             conditioning_regional = self.conditioning_regional
         
-        all_attn_mask      = torch.zeros((text_len+img_len, text_len+img_len), dtype=torch.bfloat16)
-        self_attn_mask     = torch.zeros((         img_len,          img_len), dtype=torch.bfloat16)
-        self_attn_mask_bkg = torch.zeros((         img_len,          img_len), dtype=torch.bfloat16)
+        all_attn_mask      = torch.zeros((text_len+img_len, text_len+img_len), dtype=torch.float16)
+        self_attn_mask     = torch.zeros((         img_len,          img_len), dtype=torch.float16)
+        self_attn_mask_bkg = torch.zeros((         img_len,          img_len), dtype=torch.float16)
         
         prev_len = 0
         for cond_reg_dict in conditioning_regional:
@@ -617,7 +628,7 @@ class RegionalGenerateConditioningsAndMasks:
         return regional_conditioning, all_attn_mask
 
 
-class FluxRegionalConditioning:
+class RectifiedFlow_RegionalConditioning:
     @classmethod
     def INPUT_TYPES(s):
         return {
@@ -653,6 +664,7 @@ class FluxRegionalConditioning:
             self_attn_floors = None,
             self_attn_floor  = 0.0,
             mask_type        = "gradient",
+            model_config     = None,
             ):
         
         weight, weights = mask_weight, mask_weights
@@ -665,14 +677,22 @@ class FluxRegionalConditioning:
         floors = initialize_or_scale(floors, floor, MAX_STEPS).to(default_dtype)
         floors = F.pad(floors, (0, MAX_STEPS), value=0.0)
 
-        regional_generate_conditionings_and_masks_fn = RegionalGenerateConditioningsAndMasks(conditioning, conditioning_regional, weight, start_percent, end_percent, mask_type)
+        regional_generate_conditionings_and_masks_fn = RegionalGenerateConditioningsAndMasks(conditioning, conditioning_regional, weight, start_percent, end_percent, mask_type, model_config)
+
+        if   isinstance(model_config, comfy.supported_models.SD3):
+            text_len_base = 154
+            pooled_len    = 2048
+        elif isinstance(model_config, comfy.supported_models.Flux) or isinstance(model_config, comfy.supported_models.FluxSchnell):
+            text_len_base = 256
+            pooled_len    = 768
+
 
         if conditioning is None:
             conditioning = [
                                 [
                                     torch.zeros_like(conditioning_regional[0]['cond']),
                                     {'pooled_output':
-                                        torch.zeros((1,768), dtype=conditioning_regional[0]['cond'].dtype, device=conditioning_regional[0]['cond'].device),
+                                        torch.zeros((1,pooled_len), dtype=conditioning_regional[0]['cond'].dtype, device=conditioning_regional[0]['cond'].device),
                                     }
                                 ],
             ]
@@ -684,7 +704,7 @@ class FluxRegionalConditioning:
 
 
 
-class ClownRegionalConditioningFlux:
+class ClownRegionalConditioning:
     @classmethod
     def INPUT_TYPES(s):
         return {
@@ -750,10 +770,21 @@ class ClownRegionalConditioningFlux:
                                         positive_masked   = positive_masked,
                                         positive_unmasked = positive_unmasked,
                                         )
-        positive = [[
+        
+        if positive_masked is not None:
+            positive = [[
+                torch.zeros_like(positive_masked[0][0]),
+                {"pooled_output": torch.zeros_like(positive_masked[0][1]['pooled_output'])}
+            ]]
+        elif positive_unmasked is not None:
+            positive = [[
+                torch.zeros_like(positive_unmasked[0][0]),
+                {"pooled_output": torch.zeros_like(positive_unmasked[0][1]['pooled_output'])}
+            ]]
+        """positive = [[
             torch.zeros((1, 256, 4096)),
             {'pooled_output': torch.zeros((1, 768))}
-            ]]
+            ]]"""
         
         positive[0][1]['callback_regional'] = callback
         
@@ -782,7 +813,7 @@ class ClownRegionalConditioningFlux:
         default_dtype  = torch.float64
         default_device = torch.device("cuda") 
         
-        if weights is None:
+        if weights is None and weight_scheduler != "constant":
             total_steps = end_step - start_step
             weights     = get_sigmas(model, weight_scheduler, total_steps, 1.0).to(dtype=default_dtype, device=default_device) #/ model.inner_model.inner_model.model_sampling.sigma_max  #scaling doesn't matter as this is a flux-only node
             prepend     = torch.zeros(start_step,                                  dtype=default_dtype, device=default_device)
@@ -802,26 +833,43 @@ class ClownRegionalConditioningFlux:
 
         if (positive_masked is None) and (positive_unmasked is None):
             positive = None
-            
-        elif mask is not None:
 
-            if positive_unmasked is None:
+        elif mask is not None:
+            if   isinstance(model.model.model_config, comfy.supported_models.SD3):
+                text_len_base = 154
+                pooled_len    = 2048
+            elif isinstance(model.model.model_config, comfy.supported_models.Flux) or isinstance(model.model.model_config, comfy.supported_models.FluxSchnell):
+                text_len_base = 256
+                pooled_len    = 768
+                
+            if positive_masked is None:    
+                if positive_masked is None:
+                    positive_masked = [[
+                        torch.zeros((1, text_len_base, 4096)),
+                        {'pooled_output': torch.zeros((1, pooled_len))}
+                        ]]
+            if positive_unmasked is None:    
                 if positive_unmasked is None:
                     positive_unmasked = [[
-                        torch.zeros((1, 256, 4096)),
-                        {'pooled_output': torch.zeros((1, 768))}
+                        torch.zeros((1, text_len_base, 4096)),
+                        {'pooled_output': torch.zeros((1, pooled_len))}
                         ]]
-            cond_regional, mask_inv     = FluxRegionalPrompt().main(cond=positive_masked,                                    mask=mask)
-            cond_regional, mask_inv_inv = FluxRegionalPrompt().main(cond=positive_unmasked    , cond_regional=cond_regional, mask=mask_inv)
+            cond_regional, mask_inv     = RectifiedFlow_RegionalPrompt().main(cond=positive_masked,                                    mask=mask)
+            cond_regional, mask_inv_inv = RectifiedFlow_RegionalPrompt().main(cond=positive_unmasked    , cond_regional=cond_regional, mask=mask_inv)
             
-            positive, = FluxRegionalConditioning().main( conditioning_regional = cond_regional,
+            positive, = RectifiedFlow_RegionalConditioning().main( 
+                                                        conditioning_regional = cond_regional,
                                                         self_attn_floor       = floor,
                                                         self_attn_floors      = floors,
                                                         mask_weight           = weight,
                                                         mask_weights          = weights,
                                                         start_percent         = start_percent,
                                                         end_percent           = end_percent,
-                                                        mask_type             = mask_type)
+                                                        mask_type             = mask_type,
+                                                        model_config          = model.model.model_config,
+                                                        )
+            positive[0][0] = (positive_masked[0][0] + positive_unmasked[0][0]) / 2
+            positive[0][1]['pooled_output'] = (positive_masked[0][1]['pooled_output'] + positive_unmasked[0][1]['pooled_output']) / 2
         else:
             positive = positive_masked
         

@@ -324,7 +324,7 @@ class VAEEncodeAdvanced:
         
         # this is unfortunately required to avoid apparent non-deterministic outputs. 
         # without setting the seed each time, the outputs of the VAE encode will change with every generation.
-        torch.manual_seed(42)          
+        torch     .manual_seed    (42)          
         torch.cuda.manual_seed_all(42)
 
         image_1 = image_1.clone() if image_1 is not None else None
@@ -332,6 +332,8 @@ class VAEEncodeAdvanced:
 
         if latent is not None and resize_to_input == "latent":
             height, width = latent['samples'].shape[-2:]
+
+            #height, width = latent['samples'].shape[2:4]
             height, width = height * ratio, width * ratio
             
         elif image_1 is not None and resize_to_input == "image_1":
