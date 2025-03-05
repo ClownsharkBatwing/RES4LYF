@@ -183,6 +183,57 @@ class ReAuraPatcher:
 
 
 
+class Cascade_StageC_AttentionPatcher:
+    @classmethod
+    def INPUT_TYPES(s):
+        return {
+            "required": { 
+                "model":  ("MODEL",),
+                "enable": ("BOOLEAN", {"default": True}),
+            }
+        }
+    RETURN_TYPES = ("MODEL",)
+    RETURN_NAMES = ("model",)
+    CATEGORY     = "RES4LYF/model_patches"
+    FUNCTION     = "main"
+
+    def main(self, model, enable=True, force=False):
+        
+        if (enable or force) and model.model.diffusion_model.__class__ == MMDiT:
+            m = model.clone()
+            m.model.diffusion_model.__class__     = ReMMDiT
+            m.model.diffusion_model.threshold_inv = False
+            
+            for i, block in enumerate(m.model.diffusion_model.double_layers):
+                block.__class__ = ReMMDiTBlock
+                block.attn.__class__ = ReDoubleAttention
+                block.idx       = i
+                
+            for i, block in enumerate(m.model.diffusion_model.single_layers):
+                block.__class__ = ReDiTBlock
+                block.attn.__class__ = ReSingleAttention
+                block.idx       = i
+
+        elif not enable and model.model.diffusion_model.__class__ == ReMMDiT:
+            m = model.clone()
+            m.model.diffusion_model.__class__ = MMDiT
+            
+            for i, block in enumerate(m.model.diffusion_model.double_layers):
+                block.__class__ = MMDiTBlock
+                block.attn.__class__ = DoubleAttention
+                block.idx       = i
+                
+            for i, block in enumerate(m.model.diffusion_model.single_layers):
+                block.__class__ = DiTBlock
+                block.attn.__class__ = SingleAttention
+                block.idx       = i
+
+        else:
+            m = model
+        
+        return (m,)
+
+
 
 class FluxOrthoCFGPatcher:
     @classmethod
