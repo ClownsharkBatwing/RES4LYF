@@ -620,7 +620,7 @@ def _block_mixing(context, x, context_block, x_block, c, mask=None):
     attn = optimized_attention(
         qkv[0], qkv[1], qkv[2],
         heads = x_block.attn.num_heads,
-        mask  = mask,
+        mask  = mask #> 0 if mask is not None else None,
     )
     context_attn, x_attn = (
         attn[:, : context_qkv[0].shape[1]   ],
