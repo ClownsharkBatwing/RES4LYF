@@ -574,12 +574,16 @@ class RegionalGenerateConditioningsAndMasks:
         w //= 2
         img_len = h * w
 
+        text_register_tokens = 0
         if   isinstance(self.model_config, comfy.supported_models.SD3):
             text_len_base = 154
         elif isinstance(self.model_config, comfy.supported_models.Flux) or isinstance(self.model_config, comfy.supported_models.FluxSchnell):
             text_len_base = 256
+        elif isinstance(self.model_config, comfy.supported_models.AuraFlow):
+            text_len_base = 256
+            text_register_tokens = 8
 
-        cond_r = torch.cat([cond_reg['cond'] for cond_reg in self.conditioning_regional], dim=1)
+        cond_r = torch.cat([cond_reg['cond'] for cond_reg in self.conditioning_regional], dim=1)           #1,256,2048 aura cond     
         
         if self.conditioning is not None:
             text_len = text_len_base + cond_r.shape[1]  # 256 = main prompt tokens... half of t5, comfy issue
@@ -591,7 +595,7 @@ class RegionalGenerateConditioningsAndMasks:
                 *self.conditioning_regional,
             ]
         else:
-            text_len = cond_r.shape[1]  # 256 = main prompt tokens... half of t5, comfy issue        # gets set to 308 with sd35m. 154 * 2 = 308 (THIS IS WITH CFG)
+            text_len              = cond_r.shape[1] + text_register_tokens # 256 = main prompt tokens... half of t5, comfy issue        # gets set to 308 with sd35m. 154 * 2 = 308 (THIS IS WITH CFG)
             conditioning_regional = self.conditioning_regional
         
         all_attn_mask      = torch.zeros((text_len+img_len, text_len+img_len), dtype=torch.float16)
@@ -682,7 +686,7 @@ class RectifiedFlow_RegionalConditioning:
         if   isinstance(model_config, comfy.supported_models.SD3):
             text_len_base = 154
             pooled_len    = 2048
-        elif isinstance(model_config, comfy.supported_models.Flux) or isinstance(model_config, comfy.supported_models.FluxSchnell):
+        elif isinstance(model_config, comfy.supported_models.Flux) or isinstance(model_config, comfy.supported_models.FluxSchnell) or isinstance(model_config, comfy.supported_models.AuraFlow):
             text_len_base = 256
             pooled_len    = 768
 
@@ -770,16 +774,19 @@ class ClownRegionalConditioning:
                                         positive_masked   = positive_masked,
                                         positive_unmasked = positive_unmasked,
                                         )
-        
+        pooled_len = 768
         if positive_masked is not None:
             positive = [[
                 torch.zeros_like(positive_masked[0][0]),
-                {"pooled_output": torch.zeros_like(positive_masked[0][1]['pooled_output'])}
+                {"pooled_output": torch.zeros( (1,pooled_len), dtype=positive_masked[0][0].dtype, device=positive_masked[0][0].device  )},
+                #{}
+                #{"pooled_output": torch.zeros_like(positive_masked[0][1]['pooled_output'])}
             ]]
         elif positive_unmasked is not None:
             positive = [[
                 torch.zeros_like(positive_unmasked[0][0]),
-                {"pooled_output": torch.zeros_like(positive_unmasked[0][1]['pooled_output'])}
+                {"pooled_output": torch.zeros( (1,pooled_len), dtype=positive_unmasked[0][0].dtype, device=positive_unmasked[0][0].device  )},
+                #{"pooled_output": torch.zeros_like(positive_unmasked[0][1]['pooled_output'])}
             ]]
         """positive = [[
             torch.zeros((1, 256, 4096)),
@@ -838,7 +845,9 @@ class ClownRegionalConditioning:
             if   isinstance(model.model.model_config, comfy.supported_models.SD3):
                 text_len_base = 154
                 pooled_len    = 2048
-            elif isinstance(model.model.model_config, comfy.supported_models.Flux) or isinstance(model.model.model_config, comfy.supported_models.FluxSchnell):
+            elif isinstance(model.model.model_config, comfy.supported_models.Flux) \
+                or isinstance(model.model.model_config, comfy.supported_models.FluxSchnell) \
+                or isinstance(model.model.model_config, comfy.supported_models.AuraFlow):
                 text_len_base = 256
                 pooled_len    = 768
                 
@@ -870,7 +879,8 @@ class ClownRegionalConditioning:
                                                         )
             positive_masked_tokens = positive_masked[0][0].shape[1]
             positive[0][0] = (positive_masked[0][0] + positive_unmasked[0][0][:,:positive_masked_tokens,:]) / 2
-            positive[0][1]['pooled_output'] = (positive_masked[0][1]['pooled_output'] + positive_unmasked[0][1]['pooled_output']) / 2
+            #if 'pooled_output' in positive[0][1]:
+            #    positive[0][1]['pooled_output'] = (positive_masked[0][1]['pooled_output'] + positive_unmasked[0][1]['pooled_output']) / 2
         else:
             positive = positive_masked
         

@@ -145,6 +145,7 @@ NODE_CLASS_MAPPINGS = {
     "ReFluxPatcher"                       : models.ReFluxPatcher,
     "FluxOrthoCFGPatcher"                 : models.FluxOrthoCFGPatcher,
     "ReSD35Patcher"                       : models.ReSD35Patcher,
+    "ReAuraPatcher"                       : models.ReAuraPatcher,
 
     
     "UNetSave"                            : models.UNetSave,
