@@ -871,10 +871,10 @@ class ClownRegionalConditioning:
         #weight, weights = mask_weight, mask_weights
         floor, floors = region_bleed, region_bleeds
         
-        weights = initialize_or_scale(weights, weight, MAX_STEPS).to(default_dtype)
+        weights = initialize_or_scale(weights, weight, end_step).to(default_dtype)
         weights = F.pad(weights, (0, MAX_STEPS), value=0.0)
         
-        floors  = initialize_or_scale(floors,  floor,  MAX_STEPS).to(default_dtype)
+        floors  = initialize_or_scale(floors,  floor,  end_step).to(default_dtype)
         floors  = F.pad(floors,  (0, MAX_STEPS), value=0.0)
 
         if (positive_masked is None) and (positive_unmasked is None):
@@ -925,10 +925,11 @@ class ClownRegionalConditioning:
                                                         )
             positive_masked_tokens = positive_masked[0][0].shape[1]
             
-            #positive[0][0] = (positive_masked[0][0] + positive_unmasked[0][0][:,:positive_masked_tokens,:]) / 2
+            positive[0][0] = (positive_masked[0][0] + positive_unmasked[0][0][:,:positive_masked_tokens,:]) / 2
             
-            #if 'pooled_output' in positive[0][1]:
-            #    positive[0][1]['pooled_output'] = (positive_masked[0][1]['pooled_output'] + positive_unmasked[0][1]['pooled_output']) / 2
+            if 'pooled_output' in positive[0][1]:
+                positive_masked_pooled_tokens = positive_masked[0][1]['pooled_output'].shape[1]
+                positive[0][1]['pooled_output'] = (positive_masked[0][1]['pooled_output'][:,:positive_masked_pooled_tokens] + positive_unmasked[0][1]['pooled_output'][:,:positive_masked_pooled_tokens]) / 2
         else:
             positive = positive_masked
         
