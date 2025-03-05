@@ -114,7 +114,7 @@ class LatentGuide:
                 total_steps              = steps_inv_ - start_steps_inv_
                 latent_guide_weights_inv = get_sigmas(self.model, scheduler_inv_, total_steps, 1.0).to(dtype=self.dtype, device=self.device) / self.sigma_max
                 prepend                  = torch.zeros(start_steps_inv_,                               dtype=self.dtype, device=self.device) 
-                latent_guide_weights     = torch.cat((prepend, latent_guide_weights_inv), dim=0)
+                latent_guide_weights_inv = torch.cat((prepend, latent_guide_weights_inv), dim=0)
                 
             latent_guide_weights     = initialize_or_scale(latent_guide_weights,     latent_guide_weight,     self.max_steps)
             latent_guide_weights_inv = initialize_or_scale(latent_guide_weights_inv, latent_guide_weight_inv, self.max_steps)
