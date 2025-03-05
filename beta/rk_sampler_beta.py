@@ -334,7 +334,8 @@ def sample_rk_beta(
             INIT_SAMPLE_LOOP = False
             x_, data_, eps_, eps_prev_  = (torch.zeros(    RK.rows+2,     *x.shape, dtype=default_dtype, device=work_device) for _ in range(4))
             
-            if 'data_prev_' in state_info:
+            data_prev_ = state_info.get('data_prev_')
+            if data_prev_ is not None:
                 data_prev_ = state_info['data_prev_'].clone()
             else:
                 data_prev_              =  torch.zeros(max(RK.rows+2, 4), *x.shape, dtype=default_dtype, device=work_device)

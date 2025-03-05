@@ -195,25 +195,41 @@ class SharkSampler:
                 ultracascade_guide_weight = EO("ultracascade_guide_weight", 0.0)
                 ultracascade_guide_type   = EO("ultracascade_guide_type", "residual")
                 
-                #x_lr = ultracascade_latent_image['samples'].clone() if ultracascade_latent_image is not None else None
                 x_lr = None
                 if ultracascade_latent_height * ultracascade_latent_width > 0:
-                    x_lr = latent_image['samples'].clone() if latent_image is not None else None
-                    x_lr_bs = 1 if x_lr is None else x_lr.shape[-4]
-                    x_lr_dtype = default_dtype if x_lr is None else x_lr.dtype
-                    x_lr_device = 'cuda' if x_lr is None else x_lr.device
+                    x_lr        = latent_image['samples'].clone() if latent_image is not None else None
+                    x_lr_bs     = 1                               if x_lr         is     None else x_lr.shape[-4]
+                    x_lr_dtype  = default_dtype                   if x_lr         is     None else x_lr.dtype
+                    x_lr_device = 'cuda'                          if x_lr         is     None else x_lr.device
                     
-                    #if latent_image is None:
-                    #    latent_image = {}
-                    
+                    ultracascade_stage_up_upscale_align_corners = EO("ultracascade_stage_up_upscale_align_corners", False)
+                    ultracascade_stage_up_upscale_mode          = EO("ultracascade_stage_up_upscale_mode",         "bicubic")
                     latent_x['samples'] = torch.zeros([x_lr_bs, 16, ultracascade_latent_height, ultracascade_latent_width], dtype=x_lr_dtype, device=x_lr_device)
+                
+                    data_prev_ = state_info.get('data_prev_')
+                    if data_prev_ is not None:
+                        data_prev_ = data_prev_.squeeze(1) 
+
+                        if data_prev_.dim() == 4: 
+                            data_prev_ = F.interpolate(
+                                data_prev_,
+                                size=latent_x['samples'].shape[-2:],
+                                mode=ultracascade_stage_up_upscale_mode,
+                                align_corners=ultracascade_stage_up_upscale_align_corners
+                                )
+                        else:
+                            print("data_prev_ upscale failed.")
+                        state_info['data_prev_'] = data_prev_.unsqueeze(1)
+                    
+                    if EO("ultracascade_stage_up_clear_data_prev"):
+                        state_info['data_prev_'] = None
                 
                 if x_lr is not None:
                     if x_lr.shape[-2:] != latent_image['samples'].shape[-2:]:
                         x_height, x_width = latent_image['samples'].shape[-2:]
                         ultracascade_stage_up_upscale_align_corners = EO("ultracascade_stage_up_upscale_align_corners", False)
                         ultracascade_stage_up_upscale_mode          = EO("ultracascade_stage_up_upscale_mode",         "bicubic")
-                        
+
                         x_lr = F.interpolate(x_lr, size=(x_height, x_width), mode=ultracascade_stage_up_upscale_mode, align_corners=ultracascade_stage_up_upscale_align_corners)
                         
                 ultracascade_guide_weights = initialize_or_scale(ultracascade_guide_weights, ultracascade_guide_weight, MAX_STEPS)
@@ -229,6 +245,9 @@ class SharkSampler:
                     work_model.model.diffusion_model.set_x_lr           (x_lr            = x_lr)
                 
             elif work_model.model.model_config.unet_config.get('stable_cascade_stage') == 'b':
+                if sampler_mode != "resample":
+                    state_info['data_prev_'] = None
+                
                 c_pos, c_neg = [], []
                 for t in pos_cond:
                     d_pos = t[1].copy()
@@ -240,7 +259,6 @@ class SharkSampler:
                         latent_x['samples'] = torch.zeros([x_lr.shape[-4], 4, ultracascade_latent_height // 4, ultracascade_latent_width // 4], dtype=x_lr.dtype, device=x_lr.device)
                     
                     d_pos['stable_cascade_prior'] = x_lr
-                    #d_pos['stable_cascade_prior'] = ultracascade_latent_image['samples'].clone()
 
                     pooled_output = d_neg.get("pooled_output", None)
                     if pooled_output is not None:
