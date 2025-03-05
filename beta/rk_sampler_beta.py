@@ -301,10 +301,10 @@ def sample_rk_beta(
     # BEGIN SAMPLING LOOP    
     num_steps = len(sigmas[start_step:])-2 if sigmas[-1] == 0 else len(sigmas[start_step:])-1
     if steps_to_run != -1:
-        current_steps = min(num_steps, steps_to_run)
+        current_steps =              min(num_steps, steps_to_run)
         num_steps     = start_step + min(num_steps, steps_to_run)
     else:
-        current_steps = num_steps
+        current_steps =              num_steps
         num_steps     = start_step + num_steps
     
     INIT_SAMPLE_LOOP = True
@@ -336,9 +336,9 @@ def sample_rk_beta(
             
             data_prev_ = state_info.get('data_prev_')
             if data_prev_ is not None:
-                data_prev_ = state_info['data_prev_'].clone()
+                data_prev_ = state_info['data_prev_'][len(eps_):].clone()
             else:
-                data_prev_              =  torch.zeros(max(RK.rows+2, 4), *x.shape, dtype=default_dtype, device=work_device)
+                data_prev_ =  torch.zeros(max(RK.rows+2, 4), *x.shape, dtype=default_dtype, device=work_device)
             
             recycled_stages = len(data_prev_)-1
 
@@ -355,7 +355,7 @@ def sample_rk_beta(
         
         # RECYCLE STAGES FOR MULTISTEP
         if RK.multistep_stages > 0 or RK.hybrid_stages > 0:
-            for ms in range(len(data_prev_)):
+            for ms in range(max(len(data_prev_), len(eps_))):
                 eps_[ms] = RK.get_epsilon_anchored(x_0, data_prev_[ms], sigma)
             eps_prev_ = eps_.clone()
 

@@ -207,7 +207,7 @@ class SharkSampler:
                     latent_x['samples'] = torch.zeros([x_lr_bs, 16, ultracascade_latent_height, ultracascade_latent_width], dtype=x_lr_dtype, device=x_lr_device)
                 
                     data_prev_ = state_info.get('data_prev_')
-                    if data_prev_ is not None:
+                    if EO("ultracascade_stage_up_preserve_data_prev") and data_prev_ is not None:
                         data_prev_ = data_prev_.squeeze(1) 
 
                         if data_prev_.dim() == 4: 
@@ -221,7 +221,7 @@ class SharkSampler:
                             print("data_prev_ upscale failed.")
                         state_info['data_prev_'] = data_prev_.unsqueeze(1)
                     
-                    if EO("ultracascade_stage_up_clear_data_prev"):
+                    else:
                         state_info['data_prev_'] = None
                 
                 if x_lr is not None:
