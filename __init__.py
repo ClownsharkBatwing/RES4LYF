@@ -65,6 +65,8 @@ NODE_CLASS_MAPPINGS = {
     "SeedGenerator"                       : nodes_misc.SeedGenerator,
     
     "ClownRegionalConditioning"           : conditioning.ClownRegionalConditioning,
+    "ClownRegionalConditioning3"          : conditioning.ClownRegionalConditioning3,
+
     
     "CLIPTextEncodeFluxUnguided"          : conditioning.CLIPTextEncodeFluxUnguided,
     "ConditioningOrthoCollin"             : conditioning.ConditioningOrthoCollin,
@@ -146,7 +148,7 @@ NODE_CLASS_MAPPINGS = {
     "FluxOrthoCFGPatcher"                 : models.FluxOrthoCFGPatcher,
     "ReSD35Patcher"                       : models.ReSD35Patcher,
     "ReAuraPatcher"                       : models.ReAuraPatcher,
-    
+
     
     "UNetSave"                            : models.UNetSave,
 
