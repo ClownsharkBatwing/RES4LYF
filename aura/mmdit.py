@@ -498,8 +498,8 @@ class ReMMDiT(nn.Module):
 
             t = timestep
 
-            c = self.cond_seq_linear(c_seq)  # B, T_c, D
-            c = torch.cat([comfy.ops.cast_to_input(self.register_tokens, c).repeat(c.size(0), 1, 1), c], dim=1)
+            c = self.cond_seq_linear(c_seq)  # B, T_c, D         # 1,256,2048 -> 
+            c = torch.cat([comfy.ops.cast_to_input(self.register_tokens, c).repeat(c.size(0), 1, 1), c], dim=1)   #1,256,3072 -> 1,264,3072
 
             global_cond = self.t_embedder(t, x.dtype)  # B, D
 
@@ -528,16 +528,29 @@ class ReMMDiT(nn.Module):
             mask_obj = transformer_options.get('patches', {}).get('regional_conditioning_mask', None)
             if mask_obj is not None and weight > 0:
                 mask                      = mask_obj[0](transformer_options, weight.item())
+                mask_type_bool = type(mask[0][0].item()) == bool if mask is not None else False
+                if mask_type_bool:
+                    mask = F.pad(mask, (8, 0, 8, 0), value=True)
+                    #mask = F.pad(mask, (0, 8, 0, 8), value=True)
+                else:
+                    mask = F.pad(mask, (8, 0, 8, 0), value=1.0)
+                    #mask = F.pad(mask, (0, 8, 0, 8), value=1.0)
+
+                #    mask = torch.cat([comfy.ops.cast_to_input(self.register_tokens, c).repeat(c.size(0), 1, 1), c], dim=1)
+                
                 text_len                  = mask_obj[0].text_len
                 mask[text_len:,text_len:] = torch.clamp(mask[text_len:,text_len:], min=floor.to(mask.device))
 
+            mask_type_bool = type(mask[0][0].item()) == bool if mask is not None else False
 
-
-
+            total_layers = len(self.double_layers) + len(self.single_layers)
 
             blocks_replace = patches_replace.get("dit", {})       # context 1,259,2048      x 1,4032,3072
             if len(self.double_layers) > 0:
                 for i, layer in enumerate(self.double_layers):
+                    if mask_type_bool and weight < (i / (total_layers-1)) and mask is not None:
+                        mask = mask.to(x.dtype)
+                        
                     if ("double_block", i) in blocks_replace:
                         def block_wrap(args):
                             out = {}
@@ -555,6 +568,9 @@ class ReMMDiT(nn.Module):
                 c_len = c.size(1)
                 cx = torch.cat([c, x], dim=1)
                 for i, layer in enumerate(self.single_layers):
+                    if mask_type_bool and weight < ((len(self.double_layers) + i) / (total_layers-1)) and mask is not None:
+                        mask = mask.to(x.dtype)
+                    
                     if ("single_block", i) in blocks_replace:
                         def block_wrap(args):
                             out = {}
