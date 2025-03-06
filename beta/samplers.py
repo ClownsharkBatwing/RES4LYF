@@ -268,7 +268,9 @@ class SharkSampler:
                     c_neg.append([torch.zeros_like(t[0]), d_neg])
                 pos_cond = c_pos
                 neg_cond = c_neg
-            
+                
+            elif ultracascade_latent_height * ultracascade_latent_width > 0:
+                latent_x['samples'] = torch.zeros([1, 16, ultracascade_latent_height, ultracascade_latent_width], dtype=default_dtype, device=sigmas.device)
             
             
             # NOISE, ORTHOGONALIZE, OR ZERO EMBEDS
@@ -341,7 +343,7 @@ class SharkSampler:
                     sampler.extra_options['regional_conditioning_weights'] = pos_cond[0][1]['regional_conditioning_weights']
                     sampler.extra_options['regional_conditioning_floors']  = pos_cond[0][1]['regional_conditioning_floors']
                     regional_generate_conditionings_and_masks_fn           = pos_cond[0][1]['regional_generate_conditionings_and_masks_fn']
-                    regional_conditioning, regional_mask                   = regional_generate_conditionings_and_masks_fn(latent_image['samples'])
+                    regional_conditioning, regional_mask                   = regional_generate_conditionings_and_masks_fn(latent_x['samples'])
                     regional_conditioning                                  = copy.deepcopy(regional_conditioning)
                     regional_mask                                          = copy.deepcopy(regional_mask)
                     

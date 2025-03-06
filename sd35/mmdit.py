@@ -620,7 +620,7 @@ def _block_mixing(context, x, context_block, x_block, c, mask=None):
     attn = optimized_attention(
         qkv[0], qkv[1], qkv[2],
         heads = x_block.attn.num_heads,
-        mask  = mask,
+        mask  = mask #> 0 if mask is not None else None,
     )
     context_attn, x_attn = (
         attn[:, : context_qkv[0].shape[1]   ],
@@ -935,7 +935,9 @@ class MMDiT(nn.Module):
         self,
         x       : torch.Tensor,
         c_mod   : torch.Tensor,
+        c_mod_base : torch.Tensor,
         context : Optional[torch.Tensor] = None,
+        context_base : Optional[torch.Tensor] = None,
         control                          = None,
         transformer_options              = {},
     ) -> torch.Tensor:
@@ -978,16 +980,24 @@ class MMDiT(nn.Module):
             mask                      = mask_obj[0](transformer_options, weight)
             text_len                  = mask_obj[0].text_len
             mask[text_len:,text_len:] = torch.clamp(mask[text_len:,text_len:], min=floor.to(mask.device))
-
+        mask_type_bool = type(mask[0][0].item()) == bool if mask is not None else False
         #if weight == 0.0:
         #    mask = torch.randint(0, 2, mask.shape, dtype=mask.dtype, device=mask.device)
-
+        if weight <= 0.0:
+            mask = None
+            context = context_base
+            c_mod = c_mod_base
 
         # context is B, L', D
         # x is B, L, D
         blocks_replace = patches_replace.get("dit", {})
         blocks         = len(self.joint_blocks)
         for i in range(blocks):
+            if mask_type_bool and weight < (i / (blocks-1)) and mask is not None:
+                mask = mask.to(torch.float16) # torch.ones((*mask.shape,), dtype=mask.dtype, device=mask.device) #(mask == mask) #set all to false
+                #context = context_base
+                #c_mod = c_mod_base
+                
             if ("double_block", i) in blocks_replace:
                 def block_wrap(args):
                     out                    = {}
@@ -1040,6 +1050,8 @@ class MMDiT(nn.Module):
 
             x = x_orig.clone()
             y = y_orig.clone()
+            
+            context_base = context[i][None,...].clone()
 
             if UNCOND:
                 transformer_options['reg_cond_weight'] = -1
@@ -1050,7 +1062,7 @@ class MMDiT(nn.Module):
                 transformer_options['reg_cond_floor']  = transformer_options.get("regional_conditioning_floor",  0.0) #transformer_options['regional_conditioning_floor'] #if "regional_conditioning_floor" in transformer_options else 0.0
                 regional_conditioning_positive         = transformer_options.get('patches', {}).get('regional_conditioning_positive', None)
                 
-                if regional_conditioning_positive is None or transformer_options['reg_cond_weight'] < 0.0:
+                if regional_conditioning_positive is None or transformer_options['reg_cond_weight'] <= 0.0:
                     context_tmp = context[i][None,...].clone()
                 else:
                     context_tmp = regional_conditioning_positive[0].concat_cond(context[i][None,...], transformer_options)
@@ -1068,17 +1080,34 @@ class MMDiT(nn.Module):
             x  = self.x_embedder(x) + comfy.ops.cast_to_input(self.cropped_pos_embed(hw, device=x.device), x)
             c  = self.t_embedder(t, dtype=x.dtype)  # (N, D)      # c is like vec...
             if y is not None and self.y_embedder is not None:
-                y = self.y_embedder(y)  # (N, D)
+                y = self.y_embedder(y_orig.clone())  # (N, D)
                 c = c + y  # (N, D)                              # vec = vec + y     (y = pooled_output    1,2048)
-
 
             if context_tmp is not None:
                 context_tmp = self.context_embedder(context_tmp)
 
+
+
+            if self.context_processor is not None:
+                context_base = self.context_processor(context_base)
+
+            #hw = x.shape[-2:]
+            #x  = self.x_embedder(x) + comfy.ops.cast_to_input(self.cropped_pos_embed(hw, device=x.device), x)
+            c_base  = self.t_embedder(t, dtype=x.dtype)  # (N, D)      # c is like vec...
+            if y is not None and self.y_embedder is not None:
+                y = self.y_embedder(y_orig.clone())  # (N, D)
+                c_base = c_base + y  # (N, D)                              # vec = vec + y     (y = pooled_output    1,2048)
+
+            if context_base is not None:
+                context_base = self.context_embedder(context_base)
+
+
             x = self.forward_core_with_concat(
                                                 x[i][None,...],
                                                 c[i][None,...],
+                                                c_base[i][None,...],
                                                 context_tmp,
+                                                context_base, #context[i][None,...].clone(),
                                                 control, transformer_options)
 
             x = self.unpatchify(x, hw=hw)  # (N, out_channels, H, W)

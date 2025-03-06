@@ -701,4 +701,3 @@ def prepare_noise(latent_image, seed, noise_type, noise_inds=None, alpha=1.0, k=
     noises = [noises[i] for i in inverse]
     noises = torch.cat(noises, axis=0)
     return noises
-

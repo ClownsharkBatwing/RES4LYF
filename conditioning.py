@@ -479,7 +479,18 @@ class Base64ToConditioning:
 
 
 class RegionalMask(torch.nn.Module):
-    def __init__(self, mask: torch.Tensor, conditioning: torch.Tensor, conditioning_regional: torch.Tensor, latent:torch.Tensor, start_percent: float, end_percent: float, mask_type: str, img_len: int, text_len: int) -> None:
+    def __init__(self,
+                mask                  : torch.Tensor,
+                conditioning          : torch.Tensor,
+                conditioning_regional : torch.Tensor,
+                latent                : torch.Tensor,
+                start_percent         : float,
+                end_percent           : float,
+                mask_type             : str,
+                img_len               : int,
+                text_len              : int,
+                dtype                 : torch.dtype = torch.float16) -> None:
+        
         super().__init__()
         #self.register_buffer('mask', mask)
         self.mask                  = mask.clone().to('cuda')
@@ -491,38 +502,42 @@ class RegionalMask(torch.nn.Module):
         self.mask_type             = mask_type
         self.img_len               = img_len
         self.text_len              = text_len
+        self.dtype                 = dtype
 
     def __call__(self, transformer_options, weight=0, dtype=torch.float16, *args, **kwargs):
         sigma = transformer_options['sigmas'][0]
-        if self.start_percent <= 1 - sigma < self.end_percent:        # could be an issue, 1 - sigma? 
-            if self.mask_type == "gradient":
-                #mask = self.gen_mask(weight)
-                return self.mask.clone().to(sigma.device) * weight
-    
+        #if self.start_percent <= 1 - sigma < self.end_percent:        # could be an issue, 1 - sigma? 
+        if self.mask_type == "gradient":
+            #mask = self.gen_mask(weight)
+            return self.mask.clone().to(sigma.device) * weight
+        elif self.mask_type == "boolean":
+            return self.mask.clone().to(sigma.device) > 0
+
     
 class RegionalConditioning(torch.nn.Module):
-    def __init__(self, conditioning: torch.Tensor, region_cond: torch.Tensor, start_percent: float, end_percent: float) -> None:
+    def __init__(self, conditioning: torch.Tensor, region_cond: torch.Tensor, start_percent: float, end_percent: float, dtype: torch.dtype = torch.float16) -> None:
         super().__init__()
         #self.register_buffer('region_cond', region_cond)
         self.conditioning  = conditioning
         self.region_cond   = region_cond.clone().to('cuda')
         self.start_percent = start_percent
         self.end_percent   = end_percent
+        self.dtype         = dtype
 
     def __call__(self, transformer_options, dtype=torch.float16, *args,  **kwargs):
         sigma = transformer_options['sigmas'][0]
-        if self.start_percent <= 1 - sigma < self.end_percent:
-            return self.region_cond.clone().to(sigma.device).to(dtype)
+        #if self.start_percent <= 1 - sigma < self.end_percent:
+        return self.region_cond.clone().to(sigma.device).to(dtype)
         return None
     
     def concat_cond(self, context, transformer_options, dtype=torch.float16, *args,  **kwargs):
         sigma = transformer_options['sigmas'][0]
-        if self.start_percent <= 1 - sigma < self.end_percent:
-            region_cond = self.region_cond.clone().to(sigma.device).to(dtype)
-            if self.conditioning is None:
-                return self.region_cond.clone().to(sigma.device).to(dtype)
-            else:
-                return torch.cat([context, region_cond.clone().to(torch.float16)], dim=1)
+        #if self.start_percent <= 1 - sigma < self.end_percent:
+        region_cond = self.region_cond.clone().to(sigma.device).to(dtype)
+        if self.conditioning is None:
+            return self.region_cond.clone().to(sigma.device).to(dtype)
+        else:
+            return torch.cat([context, region_cond.clone().to(torch.float16)], dim=1)
         return None
 
 
@@ -568,20 +583,33 @@ class RegionalGenerateConditioningsAndMasks:
         self.mask_type             = mask_type
         self.model_config          = model_config
 
-    def __call__(self, latent):
+    def __call__(self, latent, dtype=torch.float16):
         b, c, h, w = latent.shape
-        h //= 2  # 16x16 PE
-        w //= 2
+        if not isinstance(self.model_config, comfy.supported_models.Stable_Cascade_C):
+            h //= 2  # 16x16 PE
+            w //= 2
         img_len = h * w
 
         text_register_tokens = 0
         if   isinstance(self.model_config, comfy.supported_models.SD3):
             text_len_base = 154
+            num_channels  = 4096
         elif isinstance(self.model_config, comfy.supported_models.Flux) or isinstance(self.model_config, comfy.supported_models.FluxSchnell):
             text_len_base = 256
+            num_channels  = 4096
         elif isinstance(self.model_config, comfy.supported_models.AuraFlow):
             text_len_base = 256
+            num_channels  = 2048
+            #text_register_tokens = 8
+        elif isinstance(self.model_config, comfy.supported_models.Stable_Cascade_C):
+            text_len_base = 77
+            num_channels  = 1280
             text_register_tokens = 8
+        else:
+            # UGLY
+            text_len_base = 154
+            num_channels  = 4096
+
 
         cond_r = torch.cat([cond_reg['cond'] for cond_reg in self.conditioning_regional], dim=1)           #1,256,2048 aura cond     
         
@@ -589,8 +617,8 @@ class RegionalGenerateConditioningsAndMasks:
             text_len = text_len_base + cond_r.shape[1]  # 256 = main prompt tokens... half of t5, comfy issue
             conditioning_regional = [
                 {
-                    'mask': torch.ones((1,             h,    w), dtype=torch.float16),
-                    'cond': torch.ones((1, text_len_base, 4096), dtype=torch.float16),
+                    'mask': torch.ones((1,             h,    w), dtype=dtype),
+                    'cond': torch.ones((1, text_len_base, num_channels), dtype=dtype),
                 },
                 *self.conditioning_regional,
             ]
@@ -598,9 +626,15 @@ class RegionalGenerateConditioningsAndMasks:
             text_len              = cond_r.shape[1] + text_register_tokens # 256 = main prompt tokens... half of t5, comfy issue        # gets set to 308 with sd35m. 154 * 2 = 308 (THIS IS WITH CFG)
             conditioning_regional = self.conditioning_regional
         
-        all_attn_mask      = torch.zeros((text_len+img_len, text_len+img_len), dtype=torch.float16)
-        self_attn_mask     = torch.zeros((         img_len,          img_len), dtype=torch.float16)
-        self_attn_mask_bkg = torch.zeros((         img_len,          img_len), dtype=torch.float16)
+        if isinstance(self.model_config, comfy.supported_models.Stable_Cascade_C):
+            text_off = 0
+        else:
+            text_off = text_len
+        all_attn_mask      = torch.zeros((text_off+img_len, text_len+img_len), dtype=dtype)
+        
+        
+        self_attn_mask     = torch.zeros((         img_len,          img_len), dtype=dtype)
+        self_attn_mask_bkg = torch.zeros((         img_len,          img_len), dtype=dtype)
         
         prev_len = 0
         for cond_reg_dict in conditioning_regional:
@@ -613,21 +647,27 @@ class RegionalGenerateConditioningsAndMasks:
             img2txt_mask_sq = torch.nn.functional.interpolate(region_mask[None, None, :, :], (h, w), mode='nearest-exact').flatten().unsqueeze(1).repeat(1, img_len)
             txt2img_mask_sq = img2txt_mask_sq.transpose(-1, -2)
 
+            #if prev_len == 0:
+            #    curr_len = text_register_tokens + cond_reg.shape[1]
+            #else:
             curr_len = prev_len + cond_reg.shape[1]
             
             all_attn_mask[prev_len:curr_len, prev_len:curr_len] = 1.0           # self             TXT 2 TXT
             all_attn_mask[prev_len:curr_len, text_len:        ] = txt2img_mask  # cross            TXT 2 regional IMG
-            all_attn_mask[text_len:        , prev_len:curr_len] = img2txt_mask  # cross   regional IMG 2 TXT
+            all_attn_mask[text_off:        , prev_len:curr_len] = img2txt_mask  # cross   regional IMG 2 TXT
             
             self_attn_mask     = fp_or(self_attn_mask    , fp_and(                      img2txt_mask_sq,                       txt2img_mask_sq))
             self_attn_mask_bkg = fp_or(self_attn_mask_bkg, fp_and(img2txt_mask_sq.max()-img2txt_mask_sq, txt2img_mask_sq.max()-txt2img_mask_sq))
             
             prev_len = curr_len
 
-        all_attn_mask[text_len:, text_len:] = fp_or(self_attn_mask, self_attn_mask_bkg) #combine foreground/background self-attn
+        all_attn_mask[text_off:, text_len:] = fp_or(self_attn_mask, self_attn_mask_bkg) #combine foreground/background self-attn
 
         all_attn_mask         = RegionalMask(all_attn_mask, self.conditioning, self.conditioning_regional, latent, self.start_percent, self.end_percent, self.mask_type, img_len, text_len)
         regional_conditioning = RegionalConditioning(self.conditioning, cond_r, self.start_percent, self.end_percent)
+
+        if self.mask_type == "boolean":
+            all_attn_mask.mask = all_attn_mask.mask > 0
 
         return regional_conditioning, all_attn_mask
 
@@ -641,7 +681,7 @@ class RectifiedFlow_RegionalConditioning:
                 "self_attn_floor":       ("FLOAT",      {"default": 0.0, "min": -10000.0, "max": 10000.0, "step": 0.01}),
                 "start_percent":         ("FLOAT",      {"default": 0,   "min": 0.0,      "max": 1.0,     "step": 0.01}),
                 "end_percent":           ("FLOAT",      {"default": 1.0, "min": 0.0,      "max": 1.0,     "step": 0.01}),
-                "mask_type":             (["gradient"], {"default": "gradient"}),
+                "mask_type":             (["gradient", "boolean"], {"default": "gradient"}),
             }, 
             "optional": {
                 "conditioning":          ("CONDITIONING",),
@@ -683,13 +723,21 @@ class RectifiedFlow_RegionalConditioning:
 
         regional_generate_conditionings_and_masks_fn = RegionalGenerateConditioningsAndMasks(conditioning, conditioning_regional, weight, start_percent, end_percent, mask_type, model_config)
 
-        if   isinstance(model_config, comfy.supported_models.SD3):
-            text_len_base = 154
-            pooled_len    = 2048
-        elif isinstance(model_config, comfy.supported_models.Flux) or isinstance(model_config, comfy.supported_models.FluxSchnell) or isinstance(model_config, comfy.supported_models.AuraFlow):
-            text_len_base = 256
-            pooled_len    = 768
+        if conditioning is not None:
+            text_len_base = conditioning[0][0].shape[1]
+            pooled_len = conditioning[0][1]['pooled_output'].shape[1] if 'pooled_output' in conditioning[0][1] else 0
 
+        else:
+            if   isinstance(model_config, comfy.supported_models.SD3):
+                text_len_base = 154
+                pooled_len    = 2048
+            elif isinstance(model_config, comfy.supported_models.Flux) or isinstance(model_config, comfy.supported_models.FluxSchnell) or isinstance(model_config, comfy.supported_models.AuraFlow):
+                text_len_base = 256
+                pooled_len    = 768
+
+            elif isinstance(model_config, comfy.supported_models.Stable_Cascade_C):
+                text_len_base = 85
+                pooled_len    = 1280
 
         if conditioning is None:
             conditioning = [
@@ -702,8 +750,8 @@ class RectifiedFlow_RegionalConditioning:
             ]
 
         conditioning[0][1]['regional_generate_conditionings_and_masks_fn'] = regional_generate_conditionings_and_masks_fn
-        conditioning[0][1]['regional_conditioning_weights'] = weights
-        conditioning[0][1]['regional_conditioning_floors'] = floors
+        conditioning[0][1]['regional_conditioning_weights']                = weights
+        conditioning[0][1]['regional_conditioning_floors']                 = floors
         return (copy.deepcopy(conditioning),)
 
 
@@ -718,7 +766,7 @@ class ClownRegionalConditioning:
                 "weight_scheduler":  (["constant"] + get_res4lyf_scheduler_list(), {"default": "beta57"},),
                 "start_step":        ("INT",                                       {"default": 0,   "min": 0,        "max": 10000}),
                 "end_step":          ("INT",                                       {"default": 10,  "min": 1,        "max": 10000}),
-                "mask_type":         (["gradient"],                                {"default": "gradient"}),
+                "mask_type":         (["gradient", "boolean"],                     {"default": "gradient"}),
                 "invert_mask":       ("BOOLEAN",                                   {"default": False}),
             }, 
             "optional": {
@@ -776,6 +824,8 @@ class ClownRegionalConditioning:
                                         )
         pooled_len = 768
         if positive_masked is not None:
+            pooled     = positive_masked[0][1].get('pooled_output')
+            pooled_len = pooled.shape[-1] if pooled is not None else pooled_len
             positive = [[
                 torch.zeros_like(positive_masked[0][0]),
                 {"pooled_output": torch.zeros( (1,pooled_len), dtype=positive_masked[0][0].dtype, device=positive_masked[0][0].device  )},
@@ -783,6 +833,8 @@ class ClownRegionalConditioning:
                 #{"pooled_output": torch.zeros_like(positive_masked[0][1]['pooled_output'])}
             ]]
         elif positive_unmasked is not None:
+            pooled     = positive_unmasked[0][1].get('pooled_output')
+            pooled_len = pooled.shape[-1] if pooled is not None else pooled_len
             positive = [[
                 torch.zeros_like(positive_unmasked[0][0]),
                 {"pooled_output": torch.zeros( (1,pooled_len), dtype=positive_unmasked[0][0].dtype, device=positive_unmasked[0][0].device  )},
@@ -832,10 +884,10 @@ class ClownRegionalConditioning:
         #weight, weights = mask_weight, mask_weights
         floor, floors = region_bleed, region_bleeds
         
-        weights = initialize_or_scale(weights, weight, MAX_STEPS).to(default_dtype)
+        weights = initialize_or_scale(weights, weight, end_step).to(default_dtype)
         weights = F.pad(weights, (0, MAX_STEPS), value=0.0)
         
-        floors  = initialize_or_scale(floors,  floor,  MAX_STEPS).to(default_dtype)
+        floors  = initialize_or_scale(floors,  floor,  end_step).to(default_dtype)
         floors  = F.pad(floors,  (0, MAX_STEPS), value=0.0)
 
         if (positive_masked is None) and (positive_unmasked is None):
@@ -845,22 +897,32 @@ class ClownRegionalConditioning:
             if   isinstance(model.model.model_config, comfy.supported_models.SD3):
                 text_len_base = 154
                 pooled_len    = 2048
+                text_channels = 4096
             elif isinstance(model.model.model_config, comfy.supported_models.Flux) \
-                or isinstance(model.model.model_config, comfy.supported_models.FluxSchnell) \
-                or isinstance(model.model.model_config, comfy.supported_models.AuraFlow):
+                or isinstance(model.model.model_config, comfy.supported_models.FluxSchnell):
                 text_len_base = 256
                 pooled_len    = 768
-                
+                text_channels = 4096
+            elif isinstance(model.model.model_config, comfy.supported_models.AuraFlow):
+                text_len_base = 256
+                pooled_len    = 768
+                text_channels = 2048
+            elif isinstance(model.model.model_config, comfy.supported_models.Stable_Cascade_C):
+                text_len_base = 77
+                pooled_len    = 1280
+                text_channels = 1280
+            
+            #elif isinstance(model.model.model_config, comfy.supported_models.Cascade_StageC):
             if positive_masked is None:    
                 if positive_masked is None:
                     positive_masked = [[
-                        torch.zeros((1, text_len_base, 4096)),
+                        torch.zeros((1, text_len_base, text_channels)),
                         {'pooled_output': torch.zeros((1, pooled_len))}
                         ]]
             if positive_unmasked is None:    
                 if positive_unmasked is None:
                     positive_unmasked = [[
-                        torch.zeros((1, text_len_base, 4096)),
+                        torch.zeros((1, text_len_base, text_channels)),
                         {'pooled_output': torch.zeros((1, pooled_len))}
                         ]]
             cond_regional, mask_inv     = RectifiedFlow_RegionalPrompt().main(cond=positive_masked,                                    mask=mask)
@@ -878,11 +940,254 @@ class ClownRegionalConditioning:
                                                         model_config          = model.model.model_config,
                                                         )
             positive_masked_tokens = positive_masked[0][0].shape[1]
+            
             positive[0][0] = (positive_masked[0][0] + positive_unmasked[0][0][:,:positive_masked_tokens,:]) / 2
-            #if 'pooled_output' in positive[0][1]:
-            #    positive[0][1]['pooled_output'] = (positive_masked[0][1]['pooled_output'] + positive_unmasked[0][1]['pooled_output']) / 2
+            
+            if 'pooled_output' in positive[0][1] and positive_masked[0][1]['pooled_output'] is not None:
+                positive_masked_pooled_tokens = positive_masked[0][1]['pooled_output'].shape[1]
+                positive[0][1]['pooled_output'] = (positive_masked[0][1]['pooled_output'][:,:positive_masked_pooled_tokens] + positive_unmasked[0][1]['pooled_output'][:,:positive_masked_pooled_tokens]) / 2
         else:
             positive = positive_masked
+        
+        return (positive,)
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+class ClownRegionalConditioning3:
+    @classmethod
+    def INPUT_TYPES(s):
+        return {
+            "required": { 
+                "weight":            ("FLOAT",                                     {"default": 1.7, "min": -10000.0, "max": 10000.0, "step": 0.01}),
+                "region_bleed":      ("FLOAT",                                     {"default": 1.0, "min": -10000.0, "max": 10000.0, "step": 0.01}),
+                "weight_scheduler":  (["constant"] + get_res4lyf_scheduler_list(), {"default": "beta57"},),
+                "start_step":        ("INT",                                       {"default": 0,   "min": 0,        "max": 10000}),
+                "end_step":          ("INT",                                       {"default": 10,  "min": 1,        "max": 10000}),
+                "mask_type":         (["gradient", "boolean"],                     {"default": "gradient"}),
+                "invert_mask":       ("BOOLEAN",                                   {"default": False}),
+            }, 
+            "optional": {
+                "positive_A":   ("CONDITIONING", ),
+                "positive_B":   ("CONDITIONING", ),
+                "positive_unmasked": ("CONDITIONING", ),
+                "mask_A":              ("MASK", ),
+                "mask_B":              ("MASK", ),
+                "weights":           ("SIGMAS", ),
+                "region_bleeds":     ("SIGMAS", ),
+            }
+        }
+
+    RETURN_TYPES = ("CONDITIONING",)
+    RETURN_NAMES = ("positive",)
+    FUNCTION     = "main"
+    CATEGORY     = "RES4LYF/conditioning"
+
+    def create_callback(self, **kwargs):
+        def callback(model):
+            kwargs["model"] = model  
+            pos_cond, = self.prepare_regional_cond(**kwargs)
+            return pos_cond
+        return callback
+
+    def main(self,
+            weight                   : float  = 1.0,
+            start_percent            : float  = 0.0,
+            end_percent              : float  = 1.0,
+            weight_scheduler                  = None,
+            start_step               : int    = 0,
+            end_step                 : int    = 10000,
+            positive_A                   = None,
+            positive_B                        = None,
+            positive_unmasked                 = None,
+            weights                  : Tensor = None,
+            region_bleeds            : Tensor = None,
+            region_bleed             : float  = 0.0,
+            mask_type                : str    = "gradient",
+            mask_A                              = None,
+            mask_B                              = None,
+
+            invert_mask              : bool   = False
+            ) -> Tuple[Tensor]:
+        
+        callback = self.create_callback(weight            = weight,
+                                        start_percent     = start_percent,
+                                        end_percent       = end_percent,
+                                        weight_scheduler  = weight_scheduler,
+                                        start_step        = start_step,
+                                        end_step          = end_step,
+                                        weights           = weights,
+                                        region_bleeds     = region_bleeds,
+                                        region_bleed      = region_bleed,
+                                        mask_type         = mask_type,
+                                        mask_A            = mask_A,
+                                        mask_B            = mask_B,
+                                        invert_mask       = invert_mask,
+                                        positive_A        = positive_A,
+                                        positive_B        = positive_B,
+                                        positive_unmasked = positive_unmasked,
+                                        )
+        pooled_len = 768
+        if positive_A is not None:
+            pooled     = positive_A[0][1].get('pooled_output')
+            pooled_len = pooled.shape[-1] if pooled is not None else pooled_len
+            positive = [[
+                torch.zeros_like(positive_A[0][0]),
+                {"pooled_output": torch.zeros( (1,pooled_len), dtype=positive_A[0][0].dtype, device=positive_A[0][0].device  )},
+                #{}
+                #{"pooled_output": torch.zeros_like(positive_masked[0][1]['pooled_output'])}
+            ]]
+            
+        if positive_B is not None:
+            pooled     = positive_B[0][1].get('pooled_output')
+            pooled_len = pooled.shape[-1] if pooled is not None else pooled_len
+            positive = [[
+                torch.zeros_like(positive_B[0][0]),
+                {"pooled_output": torch.zeros( (1,pooled_len), dtype=positive_B[0][0].dtype, device=positive_B[0][0].device  )},
+                #{}
+                #{"pooled_output": torch.zeros_like(positive_masked[0][1]['pooled_output'])}
+            ]]
+            
+        elif positive_unmasked is not None:
+            pooled     = positive_unmasked[0][1].get('pooled_output')
+            pooled_len = pooled.shape[-1] if pooled is not None else pooled_len
+            positive = [[
+                torch.zeros_like(positive_unmasked[0][0]),
+                {"pooled_output": torch.zeros( (1,pooled_len), dtype=positive_unmasked[0][0].dtype, device=positive_unmasked[0][0].device  )},
+                #{"pooled_output": torch.zeros_like(positive_unmasked[0][1]['pooled_output'])}
+            ]]
+        """positive = [[
+            torch.zeros((1, 256, 4096)),
+            {'pooled_output': torch.zeros((1, 768))}
+            ]]"""
+        
+        positive[0][1]['callback_regional'] = callback
+        
+        return (positive,)
+
+
+
+    def prepare_regional_cond(self,
+                                model,
+                                weight            : float  = 1.0,
+                                start_percent     : float  = 0.0,
+                                end_percent       : float  = 1.0,
+                                weight_scheduler           = None,
+                                start_step        : int    = 0,
+                                end_step          : int    = 10000,
+                                positive_A            = None,
+                                positive_B            = None,
+
+                                positive_unmasked          = None,
+                                weights           : Tensor = None,
+                                region_bleeds     : Tensor = None,
+                                region_bleed      : float  = 0.0,
+                                mask_type         : str    = "gradient",
+                                mask_A                       = None,
+                                mask_B                       = None,
+                                invert_mask       : bool   = False
+                                ) -> Tuple[Tensor]:
+
+        default_dtype  = torch.float64
+        default_device = torch.device("cuda") 
+        
+        if weights is None and weight_scheduler != "constant":
+            total_steps = end_step - start_step
+            weights     = get_sigmas(model, weight_scheduler, total_steps, 1.0).to(dtype=default_dtype, device=default_device) #/ model.inner_model.inner_model.model_sampling.sigma_max  #scaling doesn't matter as this is a flux-only node
+            prepend     = torch.zeros(start_step,                                  dtype=default_dtype, device=default_device)
+            weights     = torch.cat((prepend, weights), dim=0)
+        
+        if invert_mask and mask_A is not None:
+            mask_A = 1-mask_A
+            mask_B = 1-mask_B
+        
+        mask_AB_inv = torch.ones_like(mask_A) - mask_A - mask_B
+
+        #weight, weights = mask_weight, mask_weights
+        floor, floors = region_bleed, region_bleeds
+        
+        weights = initialize_or_scale(weights, weight, end_step).to(default_dtype)
+        weights = F.pad(weights, (0, MAX_STEPS), value=0.0)
+        
+        floors  = initialize_or_scale(floors,  floor,  end_step).to(default_dtype)
+        floors  = F.pad(floors,  (0, MAX_STEPS), value=0.0)
+
+        if (positive_A is None) and (positive_B is None) and (positive_unmasked is None):
+            positive = None
+
+        elif mask_A is not None:
+            if   isinstance(model.model.model_config, comfy.supported_models.SD3):
+                text_len_base = 154
+                pooled_len    = 2048
+                text_channels = 4096
+            elif isinstance(model.model.model_config, comfy.supported_models.Flux) \
+                or isinstance(model.model.model_config, comfy.supported_models.FluxSchnell):
+                text_len_base = 256
+                pooled_len    = 768
+                text_channels = 4096
+            elif isinstance(model.model.model_config, comfy.supported_models.AuraFlow):
+                text_len_base = 256
+                pooled_len    = 768
+                text_channels = 2048
+            elif isinstance(model.model.model_config, comfy.supported_models.Stable_Cascade_C):
+                text_len_base = 77
+                pooled_len    = 1280
+                text_channels = 1280
+            
+            #elif isinstance(model.model.model_config, comfy.supported_models.Cascade_StageC):
+            if positive_A is None:    
+                if positive_A is None:
+                    positive_A = [[
+                        torch.zeros((1, text_len_base, text_channels)),
+                        {'pooled_output': torch.zeros((1, pooled_len))}
+                        ]]
+            if positive_B is None:    
+                if positive_B is None:
+                    positive_B = [[
+                        torch.zeros((1, text_len_base, text_channels)),
+                        {'pooled_output': torch.zeros((1, pooled_len))}
+                        ]]
+            if positive_unmasked is None:    
+                if positive_unmasked is None:
+                    positive_unmasked = [[
+                        torch.zeros((1, text_len_base, text_channels)),
+                        {'pooled_output': torch.zeros((1, pooled_len))}
+                        ]]
+            cond_regional, mask_inv     = RectifiedFlow_RegionalPrompt().main(cond=positive_A,                                     mask=mask_A)
+            cond_regional, mask_inv     = RectifiedFlow_RegionalPrompt().main(cond=positive_B,        cond_regional=cond_regional, mask=mask_B)
+            cond_regional, mask_inv_inv = RectifiedFlow_RegionalPrompt().main(cond=positive_unmasked, cond_regional=cond_regional, mask=mask_AB_inv)
+            
+            positive, = RectifiedFlow_RegionalConditioning().main( 
+                                                        conditioning_regional = cond_regional,
+                                                        self_attn_floor       = floor,
+                                                        self_attn_floors      = floors,
+                                                        mask_weight           = weight,
+                                                        mask_weights          = weights,
+                                                        start_percent         = start_percent,
+                                                        end_percent           = end_percent,
+                                                        mask_type             = mask_type,
+                                                        model_config          = model.model.model_config,
+                                                        )
+            positive_masked_tokens = positive_A[0][0].shape[1]
+            
+            positive[0][0] = (positive_A[0][0] + positive_B[0][0] + positive_unmasked[0][0][:,:positive_masked_tokens,:]) / 3
+            
+            if 'pooled_output' in positive[0][1] and positive_A[0][1]['pooled_output'] is not None:
+                positive_masked_pooled_tokens = positive_A[0][1]['pooled_output'].shape[1]
+                positive[0][1]['pooled_output'] = (positive_A[0][1]['pooled_output'][:,:positive_masked_pooled_tokens] + positive_B[0][1]['pooled_output'][:,:positive_masked_pooled_tokens] + positive_unmasked[0][1]['pooled_output'][:,:positive_masked_pooled_tokens]) / 3
+        else:
+            positive = positive_A
         
         return (positive,)
 
