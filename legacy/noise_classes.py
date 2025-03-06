@@ -139,13 +139,13 @@ class BrownianNoiseGenerator(NoiseGenerator):
 
 class FractalNoiseGenerator(NoiseGenerator):
     def __init__(self, x=None, size=None, dtype=None, layout=None, device=None, seed=42, generator=None, sigma_min=None, sigma_max=None, 
-                 alpha=0.0, k=1.0, scale=0.1): 
+                alpha=0.0, k=1.0, scale=0.1): 
         super().__init__(x, size, dtype, layout, device, seed, generator, sigma_min, sigma_max)
         self.update(alpha=alpha, k=k, scale=scale)
 
     def __call__(self, *, alpha=None, k=None, scale=None, **kwargs):
         self.update(alpha=alpha, k=k, scale=scale)
-        if len(self.shape) == 5:
+        if len(self.size) == 5:
             b, c, t, h, w = self.size
         else:
             b, c, h, w = self.size
@@ -155,7 +155,7 @@ class FractalNoiseGenerator(NoiseGenerator):
         y_freq = torch.fft.fftfreq(h, 1/h, device=self.device)
         x_freq = torch.fft.fftfreq(w, 1/w, device=self.device)
 
-        if len(self.shape) == 5:
+        if len(self.size) == 5:
             t_freq = torch.fft.fftfreq(t, 1/t, device=self.device)
             freq = torch.sqrt(y_freq[:, None, None]**2 + x_freq[None, :, None]**2 + t_freq[None, None, :]**2).clamp(min=1e-10)
         else:
