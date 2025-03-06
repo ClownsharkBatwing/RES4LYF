@@ -586,8 +586,8 @@ class RegionalGenerateConditioningsAndMasks:
             num_channels  = 4096
         elif isinstance(self.model_config, comfy.supported_models.AuraFlow):
             text_len_base = 256
-            num_channels  = 4096
-            text_register_tokens = 8
+            num_channels  = 2048
+            #text_register_tokens = 8
         elif isinstance(self.model_config, comfy.supported_models.Stable_Cascade_C):
             text_len_base = 77
             num_channels  = 1280
@@ -886,11 +886,14 @@ class ClownRegionalConditioning:
                 pooled_len    = 2048
                 text_channels = 4096
             elif isinstance(model.model.model_config, comfy.supported_models.Flux) \
-                or isinstance(model.model.model_config, comfy.supported_models.FluxSchnell) \
-                or isinstance(model.model.model_config, comfy.supported_models.AuraFlow):
+                or isinstance(model.model.model_config, comfy.supported_models.FluxSchnell):
                 text_len_base = 256
                 pooled_len    = 768
                 text_channels = 4096
+            elif isinstance(model.model.model_config, comfy.supported_models.AuraFlow):
+                text_len_base = 256
+                pooled_len    = 768
+                text_channels = 2048
             elif isinstance(model.model.model_config, comfy.supported_models.Stable_Cascade_C):
                 text_len_base = 77
                 pooled_len    = 1280
@@ -927,7 +930,7 @@ class ClownRegionalConditioning:
             
             positive[0][0] = (positive_masked[0][0] + positive_unmasked[0][0][:,:positive_masked_tokens,:]) / 2
             
-            if 'pooled_output' in positive[0][1]:
+            if 'pooled_output' in positive[0][1] and positive_masked[0][1]['pooled_output'] is not None:
                 positive_masked_pooled_tokens = positive_masked[0][1]['pooled_output'].shape[1]
                 positive[0][1]['pooled_output'] = (positive_masked[0][1]['pooled_output'][:,:positive_masked_pooled_tokens] + positive_unmasked[0][1]['pooled_output'][:,:positive_masked_pooled_tokens]) / 2
         else:
