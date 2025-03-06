@@ -3,6 +3,7 @@
 import math
 import torch
 from torch import Tensor, nn
+from typing import Optional, Callable, Tuple, Dict, Any, Union, TYPE_CHECKING, TypeVar
 
 import torch.nn.functional as F
 from einops import rearrange
@@ -173,7 +174,7 @@ class DoubleStreamBlock(nn.Module):
     
     # ADDED THIS TIMESTEP = NONE     2-28-25
     #def forward(self, img: Tensor, txt: Tensor, vec: Tensor, pe: Tensor, timestep=None, transformer_options={}, mask=None, weight=1): # vec 1,3072
-    def forward(self, img: Tensor, txt: Tensor, vec: Tensor, pe: Tensor, mask=None): # vec 1,3072
+    def forward(self, img: Tensor, txt: Tensor, vec: Tensor, pe: Tensor, mask=None) -> Tuple[Tensor, Tensor]: # vec 1,3072
 
         img_mod1, img_mod2  = self.img_mod(vec) # -> 3072, 3072
         txt_mod1, txt_mod2  = self.txt_mod(vec)
@@ -185,8 +186,8 @@ class DoubleStreamBlock(nn.Module):
         
         attn = attention(q, k, v, pe=pe, mask=mask)
         
-        txt_attn = attn[:, :txt.shape[1]]                         # 1, 768,3072
-        img_attn = attn[:,  txt.shape[1]:]  
+        txt_attn = attn[:, : txt.shape[1]   ]                         # 1, 768,3072
+        img_attn = attn[:,   txt.shape[1] : ]  
         
         img += img_mod1.gate * self.img_attn.proj(img_attn)
         txt += txt_mod1.gate * self.txt_attn.proj(txt_attn)

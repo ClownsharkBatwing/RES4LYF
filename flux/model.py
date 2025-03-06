@@ -122,12 +122,22 @@ class ReFlux(Flux):
         mask_obj = transformer_options.get('patches', {}).get('regional_conditioning_mask', None)
         if mask_obj is not None and weight > 0:
             mask                      = mask_obj[0](transformer_options, weight.item())
+            
+            mask_type_bool = type(mask[0][0].item()) == bool if mask is not None else False
+            if not mask_type_bool:
+                mask = mask.to(img.dtype)
+            
+            
             text_len                  = mask_obj[0].text_len
             mask[text_len:,text_len:] = torch.clamp(mask[text_len:,text_len:], min=floor.to(mask.device))
 
-
+        total_layers = len(self.double_blocks) + len(self.single_blocks)
 
         for i, block in enumerate(self.double_blocks):
+            if mask_type_bool and weight < (i / (total_layers-1)) and mask is not None:
+                mask = mask.to(img.dtype)
+            
+            
             #img, txt = block(img=img, txt=txt, vec=vec, pe=pe, timestep=timesteps, transformer_options=transformer_options, mask=mask, weight=weight) #, mask=mask)
             img, txt = block(img=img, txt=txt, vec=vec, pe=pe, mask=mask) #, mask=mask)
 
@@ -142,6 +152,9 @@ class ReFlux(Flux):
 
         img = torch.cat((txt, img), 1)   #first 256 is txt embed
         for i, block in enumerate(self.single_blocks):
+            if mask_type_bool and weight < ((len(self.double_blocks) + i) / (total_layers-1)) and mask is not None:
+                mask = mask.to(img.dtype)
+            
             #img = block(img, vec=vec, pe=pe, timestep=timesteps, transformer_options=transformer_options, mask=mask, weight=weight)
             img = block(img, vec=vec, pe=pe, mask=mask)
 
@@ -188,19 +201,22 @@ class ReFlux(Flux):
             img = rearrange(x, "b c (h ph) (w pw) -> b (h w) (c ph pw)", ph=patch_size, pw=patch_size) # img 1,9216,64
 
             if UNCOND:
-                transformer_options['reg_cond_weight'] = -1
+                transformer_options['reg_cond_weight'] = 0.0 # -1
                 context_tmp = context[i][None,...].clone()
-                
+            
             elif UNCOND == False:
-                transformer_options['reg_cond_weight'] = transformer_options['regional_conditioning_weight']
-                transformer_options['reg_cond_floor']  = transformer_options['regional_conditioning_floor'] #if "regional_conditioning_floor" in transformer_options else 0.0
+                transformer_options['reg_cond_weight'] = transformer_options.get("regional_conditioning_weight", 0.0) #transformer_options['regional_conditioning_weight']
+                transformer_options['reg_cond_floor']  = transformer_options.get("regional_conditioning_floor", 0.0) #transformer_options['regional_conditioning_floor'] #if "regional_conditioning_floor" in transformer_options else 0.0
                 regional_conditioning_positive         = transformer_options.get('patches', {}).get('regional_conditioning_positive', None)
                 
-                if regional_conditioning_positive is None or transformer_options['reg_cond_weight'] == 0.0:
+                if regional_conditioning_positive is None or transformer_options['reg_cond_weight'] <= 0.0:
                     context_tmp = context[i][None,...].clone()
                 else:
                     context_tmp = regional_conditioning_positive[0].concat_cond(context[i][None,...], transformer_options)
-                
+            
+            if context_tmp is None:
+                context_tmp = context[i][None,...].clone()
+            context_tmp = context_tmp.to(context.dtype)
             txt_ids      = torch.zeros((bs, context_tmp.shape[1], 3), device=x.device, dtype=x.dtype)      # txt_ids        1, 256,3
             img_ids_orig = self._get_img_ids(x, bs, h_len, w_len, 0, h_len, 0, w_len)                  # img_ids_orig = 1,9216,3
 
