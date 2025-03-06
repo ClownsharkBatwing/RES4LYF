@@ -479,7 +479,18 @@ class Base64ToConditioning:
 
 
 class RegionalMask(torch.nn.Module):
-    def __init__(self, mask: torch.Tensor, conditioning: torch.Tensor, conditioning_regional: torch.Tensor, latent:torch.Tensor, start_percent: float, end_percent: float, mask_type: str, img_len: int, text_len: int) -> None:
+    def __init__(self,
+                mask                  : torch.Tensor,
+                conditioning          : torch.Tensor,
+                conditioning_regional : torch.Tensor,
+                latent                : torch.Tensor,
+                start_percent         : float,
+                end_percent           : float,
+                mask_type             : str,
+                img_len               : int,
+                text_len              : int,
+                dtype                 : torch.dtype = torch.float16) -> None:
+        
         super().__init__()
         #self.register_buffer('mask', mask)
         self.mask                  = mask.clone().to('cuda')
@@ -491,6 +502,7 @@ class RegionalMask(torch.nn.Module):
         self.mask_type             = mask_type
         self.img_len               = img_len
         self.text_len              = text_len
+        self.dtype                 = dtype
 
     def __call__(self, transformer_options, weight=0, dtype=torch.float16, *args, **kwargs):
         sigma = transformer_options['sigmas'][0]
@@ -503,13 +515,14 @@ class RegionalMask(torch.nn.Module):
 
     
 class RegionalConditioning(torch.nn.Module):
-    def __init__(self, conditioning: torch.Tensor, region_cond: torch.Tensor, start_percent: float, end_percent: float) -> None:
+    def __init__(self, conditioning: torch.Tensor, region_cond: torch.Tensor, start_percent: float, end_percent: float, dtype: torch.dtype = torch.float16) -> None:
         super().__init__()
         #self.register_buffer('region_cond', region_cond)
         self.conditioning  = conditioning
         self.region_cond   = region_cond.clone().to('cuda')
         self.start_percent = start_percent
         self.end_percent   = end_percent
+        self.dtype         = dtype
 
     def __call__(self, transformer_options, dtype=torch.float16, *args,  **kwargs):
         sigma = transformer_options['sigmas'][0]
