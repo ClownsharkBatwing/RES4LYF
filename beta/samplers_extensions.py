@@ -902,4 +902,38 @@ class ClownOptions_Combine:
 
         return (options.as_dict(),)
     
-    
+class ClownOptions_Frameweights:
+    @classmethod
+    def INPUT_TYPES(s):
+        return {
+            "optional": {
+                "frame_weights": ("SIGMAS",),
+                "frame_weights_inv": ("SIGMAS",),
+                "options": ("OPTIONS",),
+            },
+        }
+
+    RETURN_TYPES = ("OPTIONS",)
+    RETURN_NAMES = ("options",)
+    FUNCTION = "main"
+    CATEGORY = "RES4LYF/sampler_options"
+
+    def main(self,          
+            frame_weights    = None,
+            frame_weights_inv = None,
+            options          = None
+            ):
+        
+        options_mgr = OptionsManager(options)
+        
+        frame_weights_grp = (frame_weights, frame_weights_inv)
+            
+        if frame_weights_grp[0] is not None or frame_weights_grp[1] is not None:
+            if "automation" in options_mgr and "frame_weights_grp" in options_mgr["automation"]:
+                current_frame_weights_grp = options_mgr["automation"]["frame_weights_grp"]
+                frame_weights_grp[0] = frame_weights_grp[0] if frame_weights_grp[0] is not None else current_frame_weights_grp[0]
+                frame_weights_grp[1] = frame_weights_grp[1] if frame_weights_grp[1] is not None else current_frame_weights_grp[1]
+                
+        options_mgr.update("automation.frame_weights_grp", frame_weights_grp)
+        
+        return (options_mgr.as_dict(),)
