@@ -280,9 +280,9 @@ class PyramidNoiseGenerator(NoiseGenerator):
 class InterpolatedPyramidNoiseGenerator(NoiseGenerator):
     def __init__(self, x=None, size=None, dtype=None, layout=None, device=None, seed=42, generator=None, sigma_min=None, sigma_max=None, 
                  discount=0.7, mode='nearest-exact'):
+        super().__init__(x, size, dtype, layout, device, seed, generator, sigma_min, sigma_max)
         self.update(discount=discount, mode=mode)
 
-        super().__init__(x, size, dtype, layout, device, seed, generator, sigma_min, sigma_max)
 
     def __call__(self, *, discount=None, mode=None, **kwargs):
         self.update(discount=discount, mode=mode)
