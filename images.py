@@ -295,6 +295,87 @@ class Frequency_Separation_Hard_Light_LAB:
         return (high_pass, original, low_pass)
     
     
+class Frame_Select:
+    def __init__(self):
+        pass
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+
+            "required": {
+                "frames": ("IMAGE",),
+                "select": ("INT",  {"default": 0, "min": 0, "max": 10000}),
+                
+            },
+            "optional": {
+            },
+        }
+        
+    RETURN_TYPES = ("IMAGE",)
+    RETURN_NAMES = ("image",)
+    FUNCTION     = "main"
+    CATEGORY     = "RES4LYF/images"
+
+    def main(self, frames=None, select=0):
+        frame = frames[select].unsqueeze(0).clone()
+        return (frame,)
+    
+    
+class Frames_Slice:
+    def __init__(self):
+        pass
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+
+            "required": {
+                "frames": ("IMAGE",),
+                "start":  ("INT",  {"default": 0, "min": 0, "max": 10000}),
+                "stop":   ("INT",  {"default": 1, "min": 1, "max": 10000}),
+            },
+            "optional": {
+            },
+        }
+        
+    RETURN_TYPES = ("IMAGE",)
+    RETURN_NAMES = ("image",)
+    FUNCTION     = "main"
+    CATEGORY     = "RES4LYF/images"
+
+    def main(self, frames=None, start=0, stop=1):
+        frames_slice = frames[start:stop].clone()
+        return (frames_slice,)
+
+
+class Frames_Concat:
+    def __init__(self):
+        pass
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+
+            "required": {
+                "frames_0": ("IMAGE",),
+                "frames_1": ("IMAGE",),
+            },
+            "optional": {
+            },
+        }
+        
+    RETURN_TYPES = ("IMAGE",)
+    RETURN_NAMES = ("image",)
+    FUNCTION     = "main"
+    CATEGORY     = "RES4LYF/images"
+
+    def main(self, frames_0, frames_1):
+        frames_concat = torch.cat((frames_0, frames_1), dim=0).squeeze(0).clone()
+        return (frames_concat,)
+    
+    
+    
 class Image_Channels_LAB:
     def __init__(self):
         pass

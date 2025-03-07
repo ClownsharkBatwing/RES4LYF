@@ -208,6 +208,12 @@ NODE_CLASS_MAPPINGS = {
     "Frequency Separation Linear Light"   : images.Frequency_Separation_Linear_Light,
     "Frequency Separation Hard Light"     : images.Frequency_Separation_Hard_Light,
     "Frequency Separation Hard Light LAB" : images.Frequency_Separation_Hard_Light_LAB,
+    
+    "Frame Select"                        : images.Frame_Select,
+    "Frames Slice"                        : images.Frames_Slice,
+    "Frames Concat"                       : images.Frames_Concat,
+
+
 }
 
 
