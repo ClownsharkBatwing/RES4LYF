@@ -429,7 +429,8 @@ class SharkSampler:
                         noise = noise_sampler_init(sigma=sigma_max * noise_stdev, sigma_next=sigma_min)
 
                     if noise_normalize and noise.std() > 0:
-                        channelwise = EO("init_noise_normalize_channelwise", True)
+                        channelwise = EO("init_noise_normalize_channelwise", "true")
+                        channelwise = True if channelwise == "true" else False
                         noise = normalize_zscore(noise, channelwise=channelwise, inplace=True)
                         
                     noise *= noise_stdev
