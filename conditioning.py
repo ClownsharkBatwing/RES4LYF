@@ -34,7 +34,7 @@ def multiply_nested_tensors(structure, scalar):
 
 class ConditioningOrthoCollin:
     @classmethod
-    def INPUT_TYPES(s):
+    def INPUT_TYPES(cls):
         return {"required": {
             "conditioning_0": ("CONDITIONING", ), 
             "conditioning_1": ("CONDITIONING", ),
@@ -42,8 +42,8 @@ class ConditioningOrthoCollin:
             "clip_strength":  ("FLOAT", {"default": 1.0, "min": -10000, "max": 10000, "step":0.01}),
             }}
     RETURN_TYPES = ("CONDITIONING",)
+    RETURN_NAMES = ("conditioning",)
     FUNCTION = "combine"
-
     CATEGORY = "RES4LYF/conditioning"
 
     def combine(self, conditioning_0, conditioning_1, t5_strength, clip_strength):
@@ -77,16 +77,15 @@ class ConditioningOrthoCollin:
 
 class CLIPTextEncodeFluxUnguided:
     @classmethod
-    def INPUT_TYPES(s):
+    def INPUT_TYPES(cls):
         return {"required": {
             "clip": ("CLIP", ),
             "clip_l": ("STRING", {"multiline": True, "dynamicPrompts": True}),
             "t5xxl": ("STRING", {"multiline": True, "dynamicPrompts": True}),
             }}
-    RETURN_NAMES = ("conditioning", "clip_l_end", "t5xxl_end",)
     RETURN_TYPES = ("CONDITIONING","INT","INT",)
+    RETURN_NAMES = ("conditioning", "clip_l_end", "t5xxl_end",)
     FUNCTION = "encode"
-
     CATEGORY = "RES4LYF/conditioning"
 
     def encode(self, clip, clip_l, t5xxl):
@@ -114,7 +113,7 @@ class CLIPTextEncodeFluxUnguided:
 
 class StyleModelApplyAdvanced: 
     @classmethod
-    def INPUT_TYPES(s):
+    def INPUT_TYPES(cls):
         return {
             "required": {
                 "conditioning":       ("CONDITIONING", ),
@@ -126,9 +125,9 @@ class StyleModelApplyAdvanced:
         
     RETURN_TYPES = ("CONDITIONING",)
     RETURN_NAMES = ("conditioning",)
-    DESCRIPTION  = "Use with Flux Redux."
     FUNCTION     = "main"
     CATEGORY     = "RES4LYF/conditioning"
+    DESCRIPTION  = "Use with Flux Redux."
 
     def main(self, clip_vision_output, style_model, conditioning, strength=1.0):
         cond = style_model.get_cond(clip_vision_output).flatten(start_dim=0, end_dim=1).unsqueeze(dim=0)
@@ -144,14 +143,14 @@ class ConditioningZeroAndTruncate:
     # needs updating to ensure dims are correct for arbitrary models without hardcoding. 
     # vanilla ConditioningZeroOut node doesn't truncate and SD3.5M degrades badly with large embeddings, even if zeroed out, as the negative conditioning
     @classmethod
-    def INPUT_TYPES(s):
+    def INPUT_TYPES(cls):
         return { "required": {"conditioning": ("CONDITIONING", )}}
     RETURN_TYPES = ("CONDITIONING",)
-    FUNCTION = "zero_out"
-
-    CATEGORY = "RES4LYF/conditioning"
-    DESCRIPTION = "Use for negative conditioning with SD3.5. ConditioningZeroOut does not truncate the embedding, \
-                   which results in severe degradation of image quality with SD3.5 when the token limit is exceeded."
+    RETURN_NAMES = ("conditioning",)
+    FUNCTION     = "zero_out"
+    CATEGORY     = "RES4LYF/conditioning"
+    DESCRIPTION  = "Use for negative conditioning with SD3.5. ConditioningZeroOut does not truncate the embedding, \
+                    which results in severe degradation of image quality with SD3.5 when the token limit is exceeded."
 
     def zero_out(self, conditioning):
         c = []
@@ -168,13 +167,13 @@ class ConditioningZeroAndTruncate:
 class ConditioningTruncate: 
     # needs updating to ensure dims are correct for arbitrary models without hardcoding. 
     @classmethod
-    def INPUT_TYPES(s):
+    def INPUT_TYPES(cls):
         return { "required": {"conditioning": ("CONDITIONING", )}}
     RETURN_TYPES = ("CONDITIONING",)
-    FUNCTION = "zero_out"
-
-    CATEGORY = "RES4LYF/conditioning"
-    DESCRIPTION = "Use for positive conditioning with SD3.5. Tokens beyond 77 result in degradation of image quality."
+    RETURN_NAMES = ("conditioning",)
+    FUNCTION     = "zero_out"
+    CATEGORY     = "RES4LYF/conditioning"
+    DESCRIPTION  = "Use for positive conditioning with SD3.5. Tokens beyond 77 result in degradation of image quality."
 
     def zero_out(self, conditioning):
         c = []
@@ -190,14 +189,14 @@ class ConditioningTruncate:
 
 class ConditioningMultiply:
     @classmethod
-    def INPUT_TYPES(s):
+    def INPUT_TYPES(cls):
         return {"required": {"conditioning": ("CONDITIONING", ), 
-                              "multiplier": ("FLOAT", {"default": 1.0, "min": -1000000000.0, "max": 1000000000.0, "step": 0.01})
-                             }}
+                            "multiplier": ("FLOAT", {"default": 1.0, "min": -1000000000.0, "max": 1000000000.0, "step": 0.01})
+                            }}
     RETURN_TYPES = ("CONDITIONING",)
-    FUNCTION = "main"
-
-    CATEGORY = "RES4LYF/conditioning"
+    RETURN_NAMES = ("conditioning",)
+    FUNCTION     = "main"
+    CATEGORY     = "RES4LYF/conditioning"
 
     def main(self, conditioning, multiplier):
         c = multiply_nested_tensors(conditioning, multiplier)
@@ -207,19 +206,19 @@ class ConditioningMultiply:
 
 class ConditioningAdd:
     @classmethod
-    def INPUT_TYPES(s):
+    def INPUT_TYPES(cls):
         return {"required": {"conditioning_1": ("CONDITIONING", ), 
-                             "conditioning_2": ("CONDITIONING", ), 
-                              "multiplier": ("FLOAT", {"default": 1.0, "min": -1000000000.0, "max": 1000000000.0, "step": 0.01})
-                             }}
+                            "conditioning_2": ("CONDITIONING", ), 
+                            "multiplier": ("FLOAT", {"default": 1.0, "min": -1000000000.0, "max": 1000000000.0, "step": 0.01})
+                            }}
     RETURN_TYPES = ("CONDITIONING",)
-    FUNCTION = "main"
-
-    CATEGORY = "RES4LYF/conditioning"
+    RETURN_NAMES = ("conditioning",)
+    FUNCTION     = "main"
+    CATEGORY     = "RES4LYF/conditioning"
 
     def main(self, conditioning_1, conditioning_2, multiplier):
         
-        conditioning_1[0][0] += multiplier * conditioning_2[0][0]
+        conditioning_1[0][0]                  += multiplier * conditioning_2[0][0]
         conditioning_1[0][1]['pooled_output'] += multiplier * conditioning_2[0][1]['pooled_output'] 
         
         return (conditioning_1,)
@@ -229,12 +228,12 @@ class ConditioningAdd:
 
 class ConditioningCombine:
     @classmethod
-    def INPUT_TYPES(s):
+    def INPUT_TYPES(cls):
         return {"required": {"conditioning_1": ("CONDITIONING", ), "conditioning_2": ("CONDITIONING", )}}
     RETURN_TYPES = ("CONDITIONING",)
-    FUNCTION = "combine"
-
-    CATEGORY = "RES4LYF/conditioning"
+    RETURN_NAMES = ("conditioning",)
+    FUNCTION     = "combine"
+    CATEGORY     = "RES4LYF/conditioning"
 
     def combine(self, conditioning_1, conditioning_2):
         return (conditioning_1 + conditioning_2, )
@@ -243,14 +242,18 @@ class ConditioningCombine:
 
 class ConditioningAverage :
     @classmethod
-    def INPUT_TYPES(s):
-        return {"required": {"conditioning_to": ("CONDITIONING", ), "conditioning_from": ("CONDITIONING", ),
-                              "conditioning_to_strength": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 1.0, "step": 0.01})
-                             }}
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "conditioning_to":          ("CONDITIONING", ), 
+                "conditioning_from":        ("CONDITIONING", ),
+                "conditioning_to_strength": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 1.0, "step": 0.01})
+                }
+            }
     RETURN_TYPES = ("CONDITIONING",)
-    FUNCTION = "addWeighted"
-
-    CATEGORY = "RES4LYF/conditioning"
+    RETURN_NAMES = ("conditioning",)
+    CATEGORY     = "RES4LYF/conditioning"
+    FUNCTION     = "addWeighted"
 
     def addWeighted(self, conditioning_to, conditioning_from, conditioning_to_strength):
         out = []
@@ -281,15 +284,15 @@ class ConditioningAverage :
     
 class ConditioningSetTimestepRange:
     @classmethod
-    def INPUT_TYPES(s):
+    def INPUT_TYPES(cls):
         return {"required": {"conditioning": ("CONDITIONING", ),
-                             "start": ("FLOAT", {"default": 0.0, "min": 0.0, "max": 1.0, "step": 0.001}),
-                             "end": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 1.0, "step": 0.001})
-                             }}
+                            "start": ("FLOAT", {"default": 0.0, "min": 0.0, "max": 1.0, "step": 0.001}),
+                            "end": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 1.0, "step": 0.001})
+                            }}
     RETURN_TYPES = ("CONDITIONING",)
-    FUNCTION = "set_range"
-
-    CATEGORY = "RES4LYF/conditioning"
+    RETURN_NAMES = ("conditioning",)
+    FUNCTION     = "set_range"
+    CATEGORY     = "RES4LYF/conditioning"
 
     def set_range(self, conditioning, start, end):
         c = node_helpers.conditioning_set_values(conditioning, {"start_percent": start,
@@ -298,7 +301,7 @@ class ConditioningSetTimestepRange:
 
 class ConditioningAverageScheduler: # don't think this is implemented correctly. needs to be reworked
     @classmethod
-    def INPUT_TYPES(s):
+    def INPUT_TYPES(cls):
         return {
                 "required": {
                     "conditioning_0": ("CONDITIONING", ), 
@@ -308,9 +311,9 @@ class ConditioningAverageScheduler: # don't think this is implemented correctly.
             }
     
     RETURN_TYPES = ("CONDITIONING",)
-    FUNCTION = "main"
-
-    CATEGORY = "RES4LYF/conditioning"
+    RETURN_NAMES = ("conditioning",)
+    FUNCTION     = "main"
+    CATEGORY     = "RES4LYF/conditioning"
 
     @staticmethod
     def addWeighted(conditioning_to, conditioning_from, conditioning_to_strength): #this function borrowed from comfyui
@@ -361,15 +364,17 @@ class ConditioningAverageScheduler: # don't think this is implemented correctly.
 
 class StableCascade_StageB_Conditioning64:
     @classmethod
-    def INPUT_TYPES(s):
-        return {"required": { "conditioning": ("CONDITIONING",),
-                              "stage_c": ("LATENT",),
-                             }}
+    def INPUT_TYPES(cls):
+        return {
+            "required": { 
+                "conditioning": ("CONDITIONING",),
+                "stage_c":      ("LATENT",),
+                }
+            }
     RETURN_TYPES = ("CONDITIONING",)
-
-    FUNCTION = "set_prior"
-
-    CATEGORY = "RES4LYF/conditioning"
+    RETURN_NAMES = ("conditioning",)
+    FUNCTION     = "set_prior"
+    CATEGORY     = "RES4LYF/conditioning"
 
     @precision_tool.cast_tensor
     def set_prior(self, conditioning, stage_c):
@@ -385,17 +390,15 @@ class StableCascade_StageB_Conditioning64:
 
 class Conditioning_Recast64:
     @classmethod
-    def INPUT_TYPES(s):
+    def INPUT_TYPES(cls):
         return {"required": { "cond_0": ("CONDITIONING",),
-                             },
+                            },
                 "optional": { "cond_1": ("CONDITIONING",),}
                 }
     RETURN_TYPES = ("CONDITIONING","CONDITIONING",)
     RETURN_NAMES = ("cond_0_recast","cond_1_recast",)
-
-    FUNCTION = "main"
-
-    CATEGORY = "RES4LYF/precision"
+    FUNCTION     = "main"
+    CATEGORY     = "RES4LYF/precision"
 
     @precision_tool.cast_tensor
     def main(self, cond_0, cond_1 = None):
@@ -411,7 +414,7 @@ class Conditioning_Recast64:
 
 class ConditioningToBase64:
     @classmethod
-    def INPUT_TYPES(s):
+    def INPUT_TYPES(cls):
         return {
             "required": {
                 "conditioning": ("CONDITIONING",),
@@ -422,12 +425,12 @@ class ConditioningToBase64:
             },
         }
 
-    RETURN_TYPES = ("STRING",)
-    FUNCTION = "notify"
-    OUTPUT_NODE = True
+    RETURN_TYPES   = ("STRING",)
+    RETURN_NAMES   = ("string",)
+    FUNCTION       = "notify"
+    OUTPUT_NODE    = True
     OUTPUT_IS_LIST = (True,)
-
-    CATEGORY = "RES4LYF/utilities"
+    CATEGORY       = "RES4LYF/utilities"
 
     def notify(self, unique_id=None, extra_pnginfo=None, conditioning=None):
         
@@ -456,7 +459,7 @@ class ConditioningToBase64:
 
 class Base64ToConditioning:
     @classmethod
-    def INPUT_TYPES(s):
+    def INPUT_TYPES(cls):
         return {
             "required": {
                 "data": ("STRING", {"default": ""}),
@@ -464,9 +467,8 @@ class Base64ToConditioning:
         }
     RETURN_TYPES = ("CONDITIONING",)
     RETURN_NAMES = ("conditioning",)
-    FUNCTION = "main"
-
-    CATEGORY = "RES4LYF/utilities"
+    FUNCTION     = "main"
+    CATEGORY     = "RES4LYF/utilities"
 
     def main(self, data):
         conditioning_pickle = base64.b64decode(data)
@@ -544,7 +546,7 @@ class RegionalConditioning(torch.nn.Module):
 
 class RectifiedFlow_RegionalPrompt:
     @classmethod
-    def INPUT_TYPES(s):
+    def INPUT_TYPES(cls):
         return {"required": { 
             "cond": ("CONDITIONING",),
         }, "optional": {
@@ -554,9 +556,8 @@ class RectifiedFlow_RegionalPrompt:
 
     RETURN_TYPES = ("CONDITIONING_REGIONAL","MASK",)
     RETURN_NAMES = ("cond_regional","mask_inv")
-    FUNCTION = "main"
-
-    CATEGORY = "RES4LYF/conditioning"
+    FUNCTION     = "main"
+    CATEGORY     = "RES4LYF/conditioning"
 
     def main(self, cond, mask, cond_regional=[]):
         cond_regional = [*cond_regional]
@@ -674,7 +675,7 @@ class RegionalGenerateConditioningsAndMasks:
 
 class RectifiedFlow_RegionalConditioning:
     @classmethod
-    def INPUT_TYPES(s):
+    def INPUT_TYPES(cls):
         return {
             "required": { 
                 "mask_weight":           ("FLOAT",      {"default": 1.0, "min": -10000.0, "max": 10000.0, "step": 0.01}),
@@ -758,7 +759,7 @@ class RectifiedFlow_RegionalConditioning:
 
 class ClownRegionalConditioning:
     @classmethod
-    def INPUT_TYPES(s):
+    def INPUT_TYPES(cls):
         return {
             "required": { 
                 "weight":            ("FLOAT",                                     {"default": 1.7, "min": -10000.0, "max": 10000.0, "step": 0.01}),
@@ -967,7 +968,7 @@ class ClownRegionalConditioning:
 
 class ClownRegionalConditioning3:
     @classmethod
-    def INPUT_TYPES(s):
+    def INPUT_TYPES(cls):
         return {
             "required": { 
                 "weight":            ("FLOAT",                                     {"default": 1.7, "min": -10000.0, "max": 10000.0, "step": 0.01}),
@@ -979,11 +980,11 @@ class ClownRegionalConditioning3:
                 "invert_mask":       ("BOOLEAN",                                   {"default": False}),
             }, 
             "optional": {
-                "positive_A":   ("CONDITIONING", ),
-                "positive_B":   ("CONDITIONING", ),
+                "positive_A":        ("CONDITIONING", ),
+                "positive_B":        ("CONDITIONING", ),
                 "positive_unmasked": ("CONDITIONING", ),
-                "mask_A":              ("MASK", ),
-                "mask_B":              ("MASK", ),
+                "mask_A":            ("MASK", ),
+                "mask_B":            ("MASK", ),
                 "weights":           ("SIGMAS", ),
                 "region_bleeds":     ("SIGMAS", ),
             }

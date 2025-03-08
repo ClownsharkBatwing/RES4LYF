@@ -159,7 +159,7 @@ class OptionsManager:
                     self._merged_dict[key] = "\n".join(value)
 
         return self._merged_dict
-    
+
     def update(self, key_or_dict, value=None):
         """Update options with a single key-value pair or a dictionary"""
         if value is not None or isinstance(key_or_dict, (str, list)):
@@ -167,21 +167,21 @@ class OptionsManager:
             key_path = key_or_dict
             if isinstance(key_path, str):
                 key_path = key_path.split('.')
-            
+
             update_dict = {}
             current = update_dict
-            
+
             for i, key in enumerate(key_path[:-1]):
                 current[key] = {}
                 current = current[key]
 
             current[key_path[-1]] = value
-            
+
             self.add_option(update_dict)
         else:
             # dictionary update
             flat_updates = {}
-            
+
             def _flatten_dict(d, prefix=""):
                 for key, value in d.items():
                     full_key = f"{prefix}.{key}" if prefix else key
@@ -189,14 +189,14 @@ class OptionsManager:
                         _flatten_dict(value, full_key)
                     else:
                         flat_updates[full_key] = value
-                        
+
             _flatten_dict(key_or_dict)
-            
+
             for key_path, value in flat_updates.items():
                 self.update(key_path, value)  # Recursive call
-                
+
         return self
-    
+
     def get(self, key, default=None):
         return self.merged.get(key, default)
 

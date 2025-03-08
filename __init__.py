@@ -109,6 +109,7 @@ NODE_CLASS_MAPPINGS = {
     "Latent Match Channelwise"            : nodes_latents.latent_channelwise_match,
     
     "Latent to RawX"                      : nodes_latents.latent_to_raw_x,
+    "Latent Transfer State Info"          : nodes_latents.latent_transfer_state_info,
     "Latent to Cuda"                      : nodes_latents.latent_to_cuda,
     "Latent Batcher"                      : nodes_latents.latent_batch,
     "Latent Normalize Channels"           : nodes_latents.latent_normalize_channels,
@@ -212,6 +213,17 @@ NODE_CLASS_MAPPINGS = {
     "Frame Select"                        : images.Frame_Select,
     "Frames Slice"                        : images.Frames_Slice,
     "Frames Concat"                       : images.Frames_Concat,
+
+
+    "Frame Select Latent"                 : nodes_latents.Frame_Select_Latent,
+    "Frames Slice Latent"                 : nodes_latents.Frames_Slice_Latent,
+    "Frames Concat Latent"                : nodes_latents.Frames_Concat_Latent,
+
+
+    "Frame Select Latent Raw"                 : nodes_latents.Frame_Select_Latent_Raw,
+    "Frames Slice Latent Raw"                 : nodes_latents.Frames_Slice_Latent_Raw,
+    "Frames Concat Latent Raw"                : nodes_latents.Frames_Concat_Latent_Raw,
+
 
 
 }
