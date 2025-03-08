@@ -309,6 +309,7 @@ def sample_rk_beta(
     
     INIT_SAMPLE_LOOP = True
     step = start_step
+    sigma, sigma_next, data_prev_ = None, None, None
     progress_bar = trange(current_steps, disable=disable)
     while step < num_steps:
         sigma, sigma_next = sigmas[step], sigmas[step+1]
@@ -666,7 +667,7 @@ def sample_rk_beta(
     denoised = denoised.to(model_device)
     x        = x       .to(model_device)
 
-    if not (UNSAMPLE and sigmas[1] > sigmas[0]) and not EO("preview_last_step_always"):
+    if not (UNSAMPLE and sigmas[1] > sigmas[0]) and not EO("preview_last_step_always") and sigma is not None:
         preview_callback(x, eps, denoised, x_, eps_, data_, step, sigma, sigma_next, callback, EO, FINAL_STEP=True)
 
     state_info_out['raw_x']             = x#.clone()
