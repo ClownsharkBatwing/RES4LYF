@@ -210,19 +210,10 @@ def sample_rk_beta(
         start_step = state_info['end_step'] if state_info['end_step'] != -1 else 0
         if state_info['sampler_mode'] == "unsample" and sampler_mode == "resample":
             start_step = 0
-            
-    if 'raw_x' in state_info and EO("wan_resume"):
-        x_prior_ = state_info['raw_x'].clone()
-        
-    wan_resume = EO("wan_resume", -1)
-    
-    if wan_resume >= 0:
-        x_prior_ =  x_prior_[:,:,  -wan_resume:, :,:] #              x_prior_[:,:,:wan_resume,:,:]
-        
-    
+
     x      = x     .to(dtype=default_dtype, device=work_device)
     sigmas = sigmas.to(dtype=default_dtype, device=work_device)
-    
+
     c1                          = EO("c1"                         , c1)
     c2                          = EO("c2"                         , c2)
     c3                          = EO("c3"                         , c3)
@@ -265,7 +256,7 @@ def sample_rk_beta(
                             overshoot_mode, overshoot_mode_substep, noise_boost_step, noise_boost_substep, alpha, alpha_substep, k, k_substep)
 
     if 'last_rng' in state_info and sampler_mode == "resample" and noise_seed < 0:
-        NS.noise_sampler .generator.set_state(state_info['last_rng'])
+        NS.noise_sampler.generator.set_state (state_info['last_rng'])
         NS.noise_sampler2.generator.set_state(state_info['last_rng_substep'])
 
     data_               = None
@@ -316,15 +307,14 @@ def sample_rk_beta(
         current_steps =              num_steps
         num_steps     = start_step + num_steps
     
-    x_previous_cache_ = []
-    
     INIT_SAMPLE_LOOP = True
     step = start_step
     sigma, sigma_next, data_prev_ = None, None, None
+
     progress_bar = trange(current_steps, disable=disable)
     while step < num_steps:
         sigma, sigma_next = sigmas[step], sigmas[step+1]
-        
+                
         if regional_conditioning_weights is not None:
             RK.extra_args['model_options']['transformer_options']['regional_conditioning_weight'] = regional_conditioning_weights[step]
             RK.extra_args['model_options']['transformer_options']['regional_conditioning_floor']  = regional_conditioning_floors [step]
@@ -361,7 +351,7 @@ def sample_rk_beta(
                 SDE_NOISE_EXTERNAL=False
             else:
                 sde_noise_t = sde_noise[step]
-                
+        
         x_[0] = x.clone()
         # PRENOISE METHOD HERE!
         x_0 = x_[0].clone()
@@ -399,9 +389,6 @@ def sample_rk_beta(
             # TABLEAU LOOP
             for row in range(RK.rows - RK.multistep_stages - RK.row_offset + 1):
                 for diag_iter in range(implicit_steps_diag+1):
-                    
-                    if EO("cache_previous_x"):
-                        x_previous_cache_.append(x_.clone())
                     
                     if noise_sampler_type_substep == "brownian" and (full_iter > 0 or diag_iter > 0):
                         eta_substep = 0.
@@ -529,10 +516,7 @@ def sample_rk_beta(
                                             x_0, x_, eps_ = RK.bong_iter(x_0, x_, eps_, eps_prev_, data_, sigma, NS.s_, row, RK.row_offset, NS.h)     # TRY WITH h_new ??
                                     x_tmp = x_[row+RK.row_offset]
 
-                        if EO("slice_in_previous_x"):
-                            slice_in_previous_x = EO("slice_in_previous_x", -1)
-                            
-                            x_[row][:,:,  slice_in_previous_x+1:  ,:,:] = x_tmp[:,:,  slice_in_previous_x+1:  ,:,:] = state_info['x_previous_state_info_'][step][row][:,:,  -slice_in_previous_x:  ,:,:]
+
 
                         # MODEL CALL
                         if RK.IMPLICIT   and   row == 0   and   (EO("implicit_lazy_recycle_first_model_call_at_start")   or   EO("radaucycle")):
@@ -604,12 +588,6 @@ def sample_rk_beta(
                             eps_, x_      = LG.process_guides_substep(x_0, x_, eps_,      data_, row, step, NS.sigma, NS.sigma_next, NS.sigma_down, NS.s_, epsilon_scale, RK)
                         if not EO("disable_guides_eps_prev_substep"):
                             eps_prev_, x_ = LG.process_guides_substep(x_0, x_, eps_prev_, data_, row, step, NS.sigma, NS.sigma_next, NS.sigma_down, NS.s_, epsilon_scale, RK)
-                            
-                        if wan_resume >= 0 and step < EO("wan_guide_stop", 10000):
-                            #eps_[:,:,:wan_resume+1,:,:] = x_prior_[:,:,:wan_resume+1,:,:] - x_[:,:,:wan_resume+1,:,:]
-                            #eps_[:,:,:wan_resume+1,:,:] = x_prior_[:,:,:wan_resume+1,:,:] - x_0
-                            #eps_[:,:,:,:wan_resume+1,:,:] = x_prior_[:,:,:wan_resume+1,:,:].repeat(eps_.shape[0],1,1,1,1,1) - x_0[:,:,:wan_resume+1,:,:].unsqueeze(0)
-                            eps_[:,:,:,:wan_resume,:,:] = x_prior_.repeat(eps_.shape[0],1,1,1,1,1) - x_0[:,:,:wan_resume,:,:].unsqueeze(0)
 
                         if (full_iter == 0 and diag_iter == 0)   or   EO("newton_iter_post_use_on_implicit_steps"):
                             x_, eps_ = RK.newton_iter(x_0, x_, eps_, eps_prev_, data_, NS.s_, row, NS.h, sigmas, step, "post")
@@ -690,6 +668,7 @@ def sample_rk_beta(
     denoised = denoised.to(model_device)
     x        = x       .to(model_device)
 
+    #if not (UNSAMPLE and sigmas[1] > sigmas[0]) and not EO("preview_last_step_always"):
     if not (UNSAMPLE and sigmas[1] > sigmas[0]) and not EO("preview_last_step_always") and sigma is not None:
         preview_callback(x, eps, denoised, x_, eps_, data_, step, sigma, sigma_next, callback, EO, FINAL_STEP=True)
 
@@ -700,7 +679,6 @@ def sample_rk_beta(
     state_info_out['last_rng']          = NS.noise_sampler .generator.get_state().clone()
     state_info_out['last_rng_substep']  = NS.noise_sampler2.generator.get_state().clone()
     
-    state_info_out['x_previous_state_info_'] = x_previous_cache_
     
     gc.collect()
 
