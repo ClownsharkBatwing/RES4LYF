@@ -120,16 +120,29 @@ class LatentNoised:
         noise = noise * noise_strength
 
         if mask is not None:
-            mask = F.interpolate(mask.reshape((-1, 1, mask.shape[-2], mask.shape[-1])), 
-                                size=(samples.shape[2], samples.shape[3]), 
+            if len(samples.shape) == 5:
+                b, c, t, h, w = samples.shape
+                mask_resized = F.interpolate(mask.reshape((-1, 1, mask.shape[-2], mask.shape[-1])), 
+                                size=(h, w), 
                                 mode="bilinear")
-            mask = mask.expand((-1, samples.shape[1], -1, -1)).to(samples.device)
-            if mask.shape[0] < samples.shape[0]:
-                mask = mask.repeat((samples.shape[0] - 1) // mask.shape[0] + 1, 1, 1, 1)[:samples.shape[0]]
-            elif mask.shape[0] > samples.shape[0]:
-                mask = mask[:samples.shape[0]]
-            
-            noise = mask * noise + (1 - mask) * torch.zeros_like(noise)
+                if mask_resized.shape[0] < b:
+                    mask_resized = mask_resized.repeat((b - 1) // mask_resized.shape[0] + 1, 1, 1, 1)[:b]
+                elif mask_resized.shape[0] > b:
+                    mask_resized = mask_resized[:b]
+                mask_expanded = mask_resized.expand((-1, c, -1, -1))
+                mask_temporal = mask_expanded.unsqueeze(2).expand(-1, -1, t, -1, -1).to(samples.device)
+                noise = mask_temporal * noise + (1 - mask_temporal) * torch.zeros_like(noise)
+            else:
+                mask = F.interpolate(mask.reshape((-1, 1, mask.shape[-2], mask.shape[-1])), 
+                                    size=(samples.shape[2], samples.shape[3]), 
+                                    mode="bilinear")
+                mask = mask.expand((-1, samples.shape[1], -1, -1)).to(samples.device)
+                if mask.shape[0] < samples.shape[0]:
+                    mask = mask.repeat((samples.shape[0] - 1) // mask.shape[0] + 1, 1, 1, 1)[:samples.shape[0]]
+                elif mask.shape[0] > samples.shape[0]:
+                    mask = mask[:samples.shape[0]]
+                
+                noise = mask * noise + (1 - mask) * torch.zeros_like(noise)
 
         latent_out["samples"] = samples.cpu() + noise
 
