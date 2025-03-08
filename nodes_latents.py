@@ -1,5 +1,7 @@
 import torch.nn.functional as F
 
+import copy
+
 import comfy.samplers
 import comfy.sample
 import comfy.sampler_helpers
@@ -150,6 +152,7 @@ class LatentNoised:
 
 
 
+
 class LatentNoiseList:
     @classmethod
     def INPUT_TYPES(cls):
@@ -255,6 +258,35 @@ class latent_to_raw_x:
 
 
 
+
+
+class latent_transfer_state_info:
+    def __init__(self):
+        pass
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                    "latent_to":   ("LATENT", ),      
+                    "latent_from": ("LATENT", ),      
+                    },
+                }
+
+    RETURN_TYPES = ("LATENT",)
+    RETURN_NAMES = ("latent",)
+    FUNCTION     = "main"
+    CATEGORY     = "RES4LYF/latents"
+
+    def main(self, latent_to, latent_from):
+        #if 'state_info' not in latent:
+        #    latent['state_info'] = {}
+        
+        latent_to['state_info'] = copy.deepcopy(latent_from['state_info'])
+        return (latent_to,)
+
+
+
+
 class latent_to_cuda:
     def __init__(self):
         pass
@@ -306,6 +338,170 @@ class latent_batch:
         for i in range(batch_size):
             batch_latents[i] = latent
         return ({"samples": batch_latents}, )
+
+
+
+class Frame_Select_Latent_Raw:
+    def __init__(self):
+        pass
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+
+            "required": {
+                "frames": ("IMAGE",),
+                "select": ("INT",  {"default": 0, "min": 0, "max": 10000}),
+                
+            },
+            "optional": {
+            },
+        }
+        
+    RETURN_TYPES = ("LATENT",)
+    RETURN_NAMES = ("latent",)
+    FUNCTION     = "main"
+    CATEGORY     = "RES4LYF/latents"
+
+    def main(self, frames=None, select=0):
+        frame = frames['state_info']['raw_x'][:,:,select,:,:].clone().unsqueeze(dim=2)
+        return (frame,)
+    
+
+class Frames_Slice_Latent_Raw:
+    def __init__(self):
+        pass
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+
+            "required": {
+                "frames": ("LATENT",),
+                "start":  ("INT",  {"default": 0, "min": 0, "max": 10000}),
+                "stop":   ("INT",  {"default": 1, "min": 1, "max": 10000}),
+            },
+            "optional": {
+            },
+        }
+        
+    RETURN_TYPES = ("LATENT",)
+    RETURN_NAMES = ("latent",)
+    FUNCTION     = "main"
+    CATEGORY     = "RES4LYF/latents"
+
+    def main(self, frames=None, start=0, stop=1):
+        frames_slice = frames['state_info']['raw_x'][:,:,start:stop,:,:].clone()
+        return (frames_slice,)
+
+
+class Frames_Concat_Latent_Raw:
+    def __init__(self):
+        pass
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+
+            "required": {
+                "frames_0": ("LATENT",),
+                "frames_1": ("LATENT",),
+            },
+            "optional": {
+            },
+        }
+        
+    RETURN_TYPES = ("LATENT",)
+    RETURN_NAMES = ("latent",)
+    FUNCTION     = "main"
+    CATEGORY     = "RES4LYF/latents"
+
+    def main(self, frames_0, frames_1):
+        frames_concat = torch.cat((frames_0, frames_1), dim=2).clone()
+        return (frames_concat,)
+    
+
+
+class Frame_Select_Latent:
+    def __init__(self):
+        pass
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+
+            "required": {
+                "frames": ("IMAGE",),
+                "select": ("INT",  {"default": 0, "min": 0, "max": 10000}),
+                
+            },
+            "optional": {
+            },
+        }
+        
+    RETURN_TYPES = ("LATENT",)
+    RETURN_NAMES = ("latent",)
+    FUNCTION     = "main"
+    CATEGORY     = "RES4LYF/latents"
+
+    def main(self, frames=None, select=0):
+        frame = frames['samples'][:,:,select,:,:].clone().unsqueeze(dim=2)
+        return ({"samples": frame},)
+    
+
+class Frames_Slice_Latent:
+    def __init__(self):
+        pass
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+
+            "required": {
+                "frames": ("LATENT",),
+                "start":  ("INT",  {"default": 0, "min": 0, "max": 10000}),
+                "stop":   ("INT",  {"default": 1, "min": 1, "max": 10000}),
+            },
+            "optional": {
+            },
+        }
+        
+    RETURN_TYPES = ("LATENT",)
+    RETURN_NAMES = ("latent",)
+    FUNCTION     = "main"
+    CATEGORY     = "RES4LYF/latents"
+
+    def main(self, frames=None, start=0, stop=1):
+        frames_slice = frames['samples'][:,:,start:stop,:,:].clone()
+        return ({"samples": frames_slice},)
+
+
+class Frames_Concat_Latent:
+    def __init__(self):
+        pass
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+
+            "required": {
+                "frames_0": ("LATENT",),
+                "frames_1": ("LATENT",),
+            },
+            "optional": {
+            },
+        }
+        
+    RETURN_TYPES = ("LATENT",)
+    RETURN_NAMES = ("latent",)
+    FUNCTION     = "main"
+    CATEGORY     = "RES4LYF/latents"
+
+    def main(self, frames_0, frames_1):
+        frames_concat = torch.cat((frames_0['samples'], frames_1['samples']), dim=2).clone()
+        return ({"samples": frames_concat},)
+    
+
 
 
 
