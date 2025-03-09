@@ -49,8 +49,8 @@ class RK_Method_Beta:
         elif hasattr(model, "inner_model"):
             model_sampling = model.inner_model.inner_model.model_sampling
         
-        self.sigma_min                   : Tensor                   = model_sampling.sigma_min.to(dtype=dtype, device=model_device)
-        self.sigma_max                   : Tensor                   = model_sampling.sigma_max.to(dtype=dtype, device=model_device)
+        self.sigma_min                   : Tensor                   = model_sampling.sigma_min.to(dtype=dtype, device=work_device)
+        self.sigma_max                   : Tensor                   = model_sampling.sigma_max.to(dtype=dtype, device=work_device)
 
         self.rk_type                     : str                      = rk_type
 
