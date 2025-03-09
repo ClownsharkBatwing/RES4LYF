@@ -67,6 +67,8 @@ NODE_CLASS_MAPPINGS = {
     "ClownRegionalConditioning"           : conditioning.ClownRegionalConditioning,
     "ClownRegionalConditioning3"          : conditioning.ClownRegionalConditioning3,
 
+    "ClownRegionalConditioningAdvanced"   : conditioning.ClownRegionalConditioningAdvanced,
+
     
     "CLIPTextEncodeFluxUnguided"          : conditioning.CLIPTextEncodeFluxUnguided,
     "ConditioningOrthoCollin"             : conditioning.ConditioningOrthoCollin,
@@ -85,6 +87,7 @@ NODE_CLASS_MAPPINGS = {
 
     "ConditioningToBase64"                : conditioning.ConditioningToBase64,
     "Base64ToConditioning"                : conditioning.Base64ToConditioning,
+    "ClownScheduler"                      : conditioning.ClownScheduler,
 
 
 

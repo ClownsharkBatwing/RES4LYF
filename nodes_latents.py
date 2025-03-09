@@ -323,7 +323,7 @@ class latent_batch:
             "required": {
                     "latent":     ("LATENT", ),      
                     "batch_size": ("INT", {"default": 0, "min": -10000, "max": 10000}),
-                     },
+                    },
                 }
 
     RETURN_TYPES = ("LATENT",)
@@ -357,7 +357,7 @@ class Frame_Select_Latent_Raw:
             "optional": {
             },
         }
-        
+
     RETURN_TYPES = ("LATENT",)
     RETURN_NAMES = ("latent",)
     FUNCTION     = "main"
@@ -1073,12 +1073,12 @@ class LatentPhaseMagnitudePower:
         return mixed_phase_magnitude.to(dtype)
     
     def main(self,
-             latent_0_batch, latent_0_normal, latent_out_normal,
-             phase_luminosity,           phase_cyan_red,           phase_lime_purple,           phase_pattern_structure, 
-             magnitude_luminosity,       magnitude_cyan_red,       magnitude_lime_purple,       magnitude_pattern_structure, 
-             phase_luminositys=None,     phase_cyan_reds=None,     phase_lime_purples=None,     phase_pattern_structures=None,
-             magnitude_luminositys=None, magnitude_cyan_reds=None, magnitude_lime_purples=None, magnitude_pattern_structures=None
-             ):
+            latent_0_batch, latent_0_normal, latent_out_normal,
+            phase_luminosity,           phase_cyan_red,           phase_lime_purple,           phase_pattern_structure, 
+            magnitude_luminosity,       magnitude_cyan_red,       magnitude_lime_purple,       magnitude_pattern_structure, 
+            phase_luminositys=None,     phase_cyan_reds=None,     phase_lime_purples=None,     phase_pattern_structures=None,
+            magnitude_luminositys=None, magnitude_cyan_reds=None, magnitude_lime_purples=None, magnitude_pattern_structures=None
+            ):
         latent_0_batch = latent_0_batch["samples"].double()
 
         batch_size = latent_0_batch.shape[0]
@@ -1097,7 +1097,7 @@ class LatentPhaseMagnitudePower:
 
         if latent_0_normal == True:
             latent_0_batch = latent_normalize_channels(latent_0_batch)
- 
+
         for i in range(batch_size):
             mixed_phase_magnitude = self.mix_latent_phase_magnitude(latent_0_batch[i:i+1],
 
@@ -1393,7 +1393,7 @@ class LatentNoiseBatch_perlin:
 
     def create_noisy_latents_perlin(self, seed, width, height, batch_size, detail_level, details=None):
         if details is None:
-             details = torch.full((10000,), detail_level)
+            details = torch.full((10000,), detail_level)
         else:
             details = detail_level * details
         torch.manual_seed(seed)
@@ -1451,8 +1451,8 @@ class LatentNoiseBatch_gaussian_channels:
         return x
 
     def main(self, latent, steps, seed, 
-              mean, mean_luminosity, mean_cyan_red, mean_lime_purple, mean_pattern_structure, std,
-              means=None, mean_luminositys=None, mean_cyan_reds=None, mean_lime_purples=None, mean_pattern_structures=None, stds=None):
+            mean, mean_luminosity, mean_cyan_red, mean_lime_purple, mean_pattern_structure, std,
+            means=None, mean_luminositys=None, mean_cyan_reds=None, mean_lime_purples=None, mean_pattern_structures=None, stds=None):
         if steps == 0:
             steps = len(means)
 
@@ -1780,8 +1780,8 @@ class LatentBatch_channels_16:
         return x
 
     def main(self, latent, mode,
-              chan_1, chan_2, chan_3, chan_4, chan_5, chan_6, chan_7, chan_8, chan_9, chan_10, chan_11, chan_12, chan_13, chan_14, chan_15, chan_16,
-              chan_1s=None, chan_2s=None, chan_3s=None, chan_4s=None, chan_5s=None, chan_6s=None, chan_7s=None, chan_8s=None, chan_9s=None, chan_10s=None, chan_11s=None, chan_12s=None, chan_13s=None, chan_14s=None, chan_15s=None, chan_16s=None):
+            chan_1, chan_2, chan_3, chan_4, chan_5, chan_6, chan_7, chan_8, chan_9, chan_10, chan_11, chan_12, chan_13, chan_14, chan_15, chan_16,
+            chan_1s=None, chan_2s=None, chan_3s=None, chan_4s=None, chan_5s=None, chan_6s=None, chan_7s=None, chan_8s=None, chan_9s=None, chan_10s=None, chan_11s=None, chan_12s=None, chan_13s=None, chan_14s=None, chan_15s=None, chan_16s=None):
         
         x = latent["samples"]
         b, c, h, w = x.shape  
@@ -1825,7 +1825,7 @@ class latent_normalize_channels:
                     "latent":     ("LATENT", ),     
                     "mode":      (["full", "channels"],), 
                     "operation": (["normalize", "center", "standardize"],), 
-                     },
+                    },
                 }
 
     RETURN_TYPES = ("LATENT",)

@@ -757,6 +757,201 @@ class RectifiedFlow_RegionalConditioning:
 
 
 
+
+
+
+
+class ClownScheduler:
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": { 
+                "pad_start_value":      ("FLOAT",                                     {"default": 0.0, "min": -10000.0, "max": 10000.0, "step": 0.01}),
+                "start_value":          ("FLOAT",                                     {"default": 1.0, "min": -10000.0, "max": 10000.0, "step": 0.01}),
+                "end_value":            ("FLOAT",                                     {"default": 1.0, "min": -10000.0, "max": 10000.0, "step": 0.01}),
+                "pad_end_value":        ("FLOAT",                                     {"default": 0.0, "min": -10000.0, "max": 10000.0, "step": 0.01}),
+                "scheduler":            (["constant"] + get_res4lyf_scheduler_list(), {"default": "beta57"},),
+                "scheduler_start_step": ("INT",                                       {"default": 0,   "min": 0,        "max": 10000}),
+                "scheduler_end_step":   ("INT",                                       {"default": 30,  "min": 1,        "max": 10000}),
+                "total_steps":          ("INT",                                       {"default": 100, "min": 1,        "max": 10000}),
+                "flip_schedule":        ("BOOLEAN",                                   {"default": False}),
+            }, 
+            "optional": {
+                "model":                ("MODEL", ),
+            }
+        }
+
+    RETURN_TYPES = ("SIGMAS",)
+    RETURN_NAMES = ("sigmas",)
+    FUNCTION     = "main"
+    CATEGORY     = "RES4LYF/sigmas"
+
+    def create_callback(self, **kwargs):
+        def callback(model):
+            kwargs["model"] = model  
+            schedule, = self.prepare_schedule(**kwargs)
+            return schedule
+        return callback
+
+    def main(self,
+            model                        = None,
+            pad_start_value      : float = 1.0,
+            start_value          : float = 0.0,
+            end_value            : float = 1.0,
+            pad_end_value                = None,
+            denoise              : int   = 1.0,
+            scheduler                    = None,
+            scheduler_start_step : int   = 0,
+            scheduler_end_step   : int   = 30,
+            total_steps          : int   = 60,
+            flip_schedule                = False,
+            ) -> Tuple[Tensor]:
+        
+        if model is None:
+            callback = self.create_callback(pad_start_value = pad_start_value,
+                                            start_value     = start_value,
+                                            end_value       = end_value,
+                                            pad_end_value   = pad_end_value,
+                                            
+                                            scheduler       = scheduler,
+                                            start_step      = scheduler_start_step,
+                                            end_step        = scheduler_end_step,
+                                            flip_schedule   = flip_schedule,
+                                            )
+        else:
+            default_dtype  = torch.float64
+            default_device = torch.device("cuda") 
+            
+            scheduler_total_steps = scheduler_end_step - scheduler_start_step
+            
+            end_pad_steps = total_steps - scheduler_end_step
+            
+            if scheduler != "constant":
+                values     = get_sigmas(model, scheduler, scheduler_total_steps, denoise).to(dtype=default_dtype, device=default_device) 
+                values     = ((values - values.min()) * (start_value - end_value))   /   (values.max() - values.min())   +   end_value
+            else:
+                values = torch.linspace(start_value, end_value, scheduler_total_steps, dtype=default_dtype, device=default_device)
+            
+            if flip_schedule:
+                values = torch.flip(values, dims=[0])
+            
+            prepend    = torch.full((scheduler_start_step,),  pad_start_value, dtype=default_dtype, device=default_device)
+            postpend   = torch.full((end_pad_steps,),         pad_end_value,   dtype=default_dtype, device=default_device)
+            
+            values     = torch.cat((prepend, values, postpend), dim=0)
+
+        #ositive[0][1]['callback_regional'] = callback
+        
+        return (values,)
+
+
+
+    def prepare_schedule(self,
+                                model                    = None,
+                                pad_start_value  : float = 1.0,
+                                start_value      : float = 0.0,
+                                end_value        : float = 1.0,
+                                pad_end_value            = None,
+                                weight_scheduler         = None,
+                                start_step       : int   = 0,
+                                end_step         : int   = 30,
+                                flip_schedule            = False,
+                                ) -> Tuple[Tensor]:
+
+        default_dtype  = torch.float64
+        default_device = torch.device("cuda") 
+        
+        return (None,)
+
+
+
+
+
+
+
+
+
+
+class ClownRegionalConditioningAdvanced:
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": { 
+                "weight":            ("FLOAT",                 {"default": 1.0, "min": -10000.0, "max": 10000.0, "step": 0.01}),
+                "region_bleed":      ("FLOAT",                 {"default": 1.0, "min": -10000.0, "max": 10000.0, "step": 0.01}),
+                "mask_type":         (["gradient", "boolean"], {"default": "boolean"}),
+                "invert_mask":       ("BOOLEAN",               {"default": False}),
+            }, 
+            "optional": {
+                "positive_masked":   ("CONDITIONING", ),
+                "positive_unmasked": ("CONDITIONING", ),
+                "mask":              ("MASK", ),
+                "weights":           ("SIGMAS", ),
+                "region_bleeds":     ("SIGMAS", ),
+            }
+        }
+
+    RETURN_TYPES = ("CONDITIONING",)
+    RETURN_NAMES = ("positive",)
+    FUNCTION     = "main"
+    CATEGORY     = "RES4LYF/conditioning"
+
+    def create_callback(self, **kwargs):
+        def callback(model):
+            kwargs["model"] = model  
+            pos_cond, = self.prepare_regional_cond(**kwargs)
+            return pos_cond
+        return callback
+
+    def main(self,
+            weight                   : float  = 1.0,
+            start_percent            : float  = 0.0,
+            end_percent              : float  = 1.0,
+            weight_scheduler                  = None,
+            start_step               : int    = 0,
+            end_step                 : int    = 10000,
+            positive_masked                   = None,
+            positive_unmasked                 = None,
+            weights                  : Tensor = None,
+            region_bleeds            : Tensor = None,
+            region_bleed             : float  = 1.0,
+            mask_type                : str    = "gradient",
+            mask                              = None,
+            invert_mask              : bool   = False
+            ) -> Tuple[Tensor]:
+        
+        default_dtype  = torch.float64
+        default_device = torch.device("cuda") 
+        
+        if weights is None:
+            weights       = torch.full((MAX_STEPS,), weight,       dtype=default_dtype, device=default_device)
+            
+        if region_bleeds is None:
+            region_bleeds = torch.full((MAX_STEPS,), region_bleed, dtype=default_dtype, device=default_device)
+        
+        positive, = ClownRegionalConditioning().main(
+                                                weight            = weight,
+                                                start_percent     = start_percent,
+                                                end_percent       = end_percent,
+                                                weight_scheduler  = weight_scheduler,
+                                                start_step        = start_step,
+                                                end_step          = end_step,
+                                                positive_masked   = positive_masked,
+                                                positive_unmasked = positive_unmasked,
+                                                weights           = weights,
+                                                region_bleeds     = region_bleeds,
+                                                region_bleed      = region_bleed,
+                                                mask_type         = mask_type,
+                                                mask              = mask,
+                                                invert_mask       = invert_mask,
+                                                )
+        return (positive,)
+
+
+
+
+
+
 class ClownRegionalConditioning:
     @classmethod
     def INPUT_TYPES(cls):
@@ -764,6 +959,7 @@ class ClownRegionalConditioning:
             "required": { 
                 "weight":            ("FLOAT",                                     {"default": 1.7, "min": -10000.0, "max": 10000.0, "step": 0.01}),
                 "region_bleed":      ("FLOAT",                                     {"default": 1.0, "min": -10000.0, "max": 10000.0, "step": 0.01}),
+                "region_bleed_start_step": ("INT",                                       {"default": 0,   "min": 0,        "max": 10000}),
                 "weight_scheduler":  (["constant"] + get_res4lyf_scheduler_list(), {"default": "beta57"},),
                 "start_step":        ("INT",                                       {"default": 0,   "min": 0,        "max": 10000}),
                 "end_step":          ("INT",                                       {"default": 10,  "min": 1,        "max": 10000}),
@@ -803,6 +999,7 @@ class ClownRegionalConditioning:
             weights                  : Tensor = None,
             region_bleeds            : Tensor = None,
             region_bleed             : float  = 0.0,
+            region_bleed_start_step  : int    = 0,
             mask_type                : str    = "gradient",
             mask                              = None,
             invert_mask              : bool   = False
@@ -817,6 +1014,7 @@ class ClownRegionalConditioning:
                                         weights           = weights,
                                         region_bleeds     = region_bleeds,
                                         region_bleed      = region_bleed,
+                                        region_bleed_start_step = region_bleed_start_step,
                                         mask_type         = mask_type,
                                         mask              = mask,
                                         invert_mask       = invert_mask,
@@ -865,6 +1063,7 @@ class ClownRegionalConditioning:
                                 weights           : Tensor = None,
                                 region_bleeds     : Tensor = None,
                                 region_bleed      : float  = 0.0,
+                                region_bleed_start_step : int = 0,
                                 mask_type         : str    = "gradient",
                                 mask                       = None,
                                 invert_mask       : bool   = False
@@ -885,11 +1084,13 @@ class ClownRegionalConditioning:
         #weight, weights = mask_weight, mask_weights
         floor, floors = region_bleed, region_bleeds
         
-        weights = initialize_or_scale(weights, weight, end_step).to(default_dtype)
+        weights = initialize_or_scale(weights, weight, end_step).to(default_dtype).to(default_device)
         weights = F.pad(weights, (0, MAX_STEPS), value=0.0)
         
-        floors  = initialize_or_scale(floors,  floor,  end_step).to(default_dtype)
+        prepend    = torch.full((region_bleed_start_step,),  0.0, dtype=default_dtype, device=default_device)
+        floors  = initialize_or_scale(floors,  floor,  end_step).to(default_dtype).to(default_device)
         floors  = F.pad(floors,  (0, MAX_STEPS), value=0.0)
+        floors  = torch.cat((prepend, floors), dim=0)
 
         if (positive_masked is None) and (positive_unmasked is None):
             positive = None

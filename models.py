@@ -1,7 +1,7 @@
 import torch
 import types
 from typing import Optional, Callable, Tuple, Dict, Any, Union, TYPE_CHECKING, TypeVar
-
+import re
 
 import folder_paths
 import os
@@ -40,6 +40,7 @@ def time_snr_shift_linear(alpha, t):
     if alpha == 1.0:
         return t
     return alpha * t / (1 + (alpha - 1) * t)
+
 
 
 

@@ -161,13 +161,13 @@ class FluxLoader(BaseModelLoader):
     @classmethod
     def INPUT_TYPES(s):
         return {"required": {
-            "model_name": (s.get_model_files(),),
-            "weight_dtype": (s.get_weight_options(),),
-            "clip_name1": (s.get_clip_options(),),
-            "clip_name2_opt": ([".none"] + folder_paths.get_filename_list("text_encoders"),),
-            "vae_name": ([".use_ckpt_vae"] + s.vae_list(),),
-            "clip_vision_name": ([".none"] + folder_paths.get_filename_list("clip_vision"),),
-            "style_model_name": ([".none"] + folder_paths.get_filename_list("style_models"),),
+            "model_name":       (s.get_model_files(),),
+            "weight_dtype":     (s.get_weight_options(),),
+            "clip_name1":       (s.get_clip_options(),),
+            "clip_name2_opt":   ([".none"]         + folder_paths.get_filename_list("text_encoders"),),
+            "vae_name":         ([".use_ckpt_vae"] + s.vae_list(),),
+            "clip_vision_name": ([".none"]         + folder_paths.get_filename_list("clip_vision"),),
+            "style_model_name": ([".none"]         + folder_paths.get_filename_list("style_models"),),
         }}
 
     RETURN_TYPES = ("MODEL", "CLIP", "VAE", "CLIP_VISION", "STYLE_MODEL")
@@ -175,8 +175,7 @@ class FluxLoader(BaseModelLoader):
     FUNCTION = "main"
     CATEGORY = "RES4LYF/loaders"
 
-    def main(self, model_name, weight_dtype, clip_name1, clip_name2_opt, vae_name, 
-             clip_vision_name, style_model_name):
+    def main(self, model_name, weight_dtype, clip_name1, clip_name2_opt, vae_name, clip_vision_name, style_model_name):
         model_options = self.process_weight_dtype(weight_dtype)
         
         torch.manual_seed(42)
