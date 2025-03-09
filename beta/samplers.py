@@ -380,7 +380,7 @@ class SharkSampler:
             if batch_size > 1:
                 latent_x['samples'] = latent_x['samples'].repeat(batch_size, 1, 1, 1) 
             
-            latent_image_batch = {"samples": latent_x['samples']}
+            latent_image_batch = {"samples": latent_x['samples'].clone()}
             
             
             
@@ -388,11 +388,14 @@ class SharkSampler:
             
             out_samples          = []
             out_denoised_samples = []
+
             
             for batch_num in range(latent_image_batch['samples'].shape[0]):
                 latent_unbatch            = copy.deepcopy(latent_x)
                 latent_unbatch['samples'] = latent_image_batch['samples'][batch_num].clone().unsqueeze(0)
                 
+                if 'BONGMATH' in sampler.extra_options:
+                    sampler.extra_options['batch_num'] = batch_num
 
 
                 if noise_seed == -1:

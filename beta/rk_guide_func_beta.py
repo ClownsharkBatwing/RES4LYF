@@ -3,6 +3,7 @@ import torch.nn.functional as F
 from torch import Tensor
 
 import itertools
+import copy
 
 from typing          import Optional, Callable, Tuple, Dict, Any, Union, TYPE_CHECKING, TypeVar
 
@@ -73,7 +74,7 @@ class LatentGuide:
         self.EO                       = ExtraOptions(extra_options)
 
 
-    def init_guides(self, x:Tensor, RK_IMPLICIT:bool, guides:Optional[Tensor]=None, noise_sampler:Optional["NoiseGeneratorSubclass"]=None) -> Tensor:
+    def init_guides(self, x:Tensor, RK_IMPLICIT:bool, guides:Optional[Tensor]=None, noise_sampler:Optional["NoiseGeneratorSubclass"]=None, batch_num:int=0) -> Tensor:
         latent_guide_weight      = 0.0
         latent_guide_weight_inv  = 0.0
         latent_guide_weights     = torch.zeros_like(self.sigmas, dtype=self.dtype, device=self.device)
@@ -98,8 +99,18 @@ class LatentGuide:
             steps_, 
             steps_inv_, 
             self.guide_cossim_cutoff_, 
-            self.guide_bkg_cossim_cutoff_) = guides
-
+            self.guide_bkg_cossim_cutoff_) = copy.deepcopy(guides)
+            
+            #if latent_guide    ['samples'].shape[0] > 1:
+            #    latent_guide['samples']     = latent_guide    ['samples'][batch_num].unsqueeze(0)
+            #if latent_guide_inv['samples'].shape[0] > 1:
+            #    latent_guide_inv['samples'] = latent_guide_inv['samples'][batch_num].unsqueeze(0)
+                
+            if self.mask     is not None and self.mask.shape    [0] > 1:
+                self.mask     = self.mask    [batch_num].unsqueeze(0)
+            if self.mask_inv is not None and self.mask_inv.shape[0] > 1:
+                self.mask_inv = self.mask_inv[batch_num].unsqueeze(0)
+                
             if self.guide_mode.startswith("fully_") and not RK_IMPLICIT:
                 self.guide_mode = self.guide_mode[6:]   # fully_pseudoimplicit is only supported for implicit samplers, default back to pseudoimplicit
             
@@ -137,6 +148,8 @@ class LatentGuide:
         if latent_guide is not None:
             self.HAS_LATENT_GUIDE = True
             if type(latent_guide) is dict:
+                if latent_guide    ['samples'].shape[0] > 1:
+                    latent_guide['samples']     = latent_guide    ['samples'][batch_num].unsqueeze(0)
                 latent_guide_samples = self.model.inner_model.inner_model.process_latent_in(latent_guide['samples']).clone().to(dtype=self.dtype, device=self.device)
             elif type(latent_guide) is torch.Tensor:
                 latent_guide_samples = latent_guide.to(dtype=self.dtype, device=self.device)
@@ -159,6 +172,8 @@ class LatentGuide:
         if latent_guide_inv is not None:
             self.HAS_LATENT_GUIDE_INV = True
             if type(latent_guide_inv) is dict:
+                if latent_guide_inv['samples'].shape[0] > 1:
+                    latent_guide_inv['samples'] = latent_guide_inv['samples'][batch_num].unsqueeze(0)
                 latent_guide_inv_samples = self.model.inner_model.inner_model.process_latent_in(latent_guide_inv['samples']).clone().to(dtype=self.dtype, device=self.device)
             elif type(latent_guide_inv) is torch.Tensor:
                 latent_guide_inv_samples = latent_guide_inv.to(dtype=self.dtype, device=self.device)

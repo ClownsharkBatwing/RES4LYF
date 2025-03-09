@@ -187,6 +187,8 @@ def sample_rk_beta(
         rk_swap_print                 : bool               = False,
         
         steps_to_run                  : int                = -1,
+        
+        batch_num                     : int                = 0,
 
         extra_options                 : str                = "",
         ):
@@ -274,7 +276,7 @@ def sample_rk_beta(
 
     # SETUP GUIDES
     LG = LatentGuide(model, sigmas, UNSAMPLE, LGW_MASK_RESCALE_MIN, extra_options, device=work_device, dtype=default_dtype, frame_weights_grp=frame_weights_grp)
-    x = LG.init_guides(x, RK.IMPLICIT, guides, NS.noise_sampler)
+    x = LG.init_guides(x, RK.IMPLICIT, guides, NS.noise_sampler, batch_num)
     if torch.norm(LG.mask - torch.ones_like(LG.mask)) != 0   and   (LG.y0.sum() == 0 or LG.y0_inv.sum() == 0):
         SKIP_PSEUDO = True
         RESplain("skipping pseudo...")
@@ -314,7 +316,7 @@ def sample_rk_beta(
     progress_bar = trange(current_steps, disable=disable)
     while step < num_steps:
         sigma, sigma_next = sigmas[step], sigmas[step+1]
-                
+        
         if regional_conditioning_weights is not None:
             RK.extra_args['model_options']['transformer_options']['regional_conditioning_weight'] = regional_conditioning_weights[step]
             RK.extra_args['model_options']['transformer_options']['regional_conditioning_floor']  = regional_conditioning_floors [step]
