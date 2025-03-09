@@ -445,7 +445,11 @@ class RK_Method_Beta:
                     row       : int,
                     row_offset: int,
                     h         : Tensor,
+                    step      : int,
                     ) -> Tuple[Tensor, Tensor, Tensor]:
+        
+        if self.EO("bong_start_step", 0) > step or step > self.EO("bong_stop_step", 10000):
+            return x_0, x_, eps_
         
         bong_iter_max_row = self.rows - row_offset
         if self.EO("bong_iter_max_row_full"):

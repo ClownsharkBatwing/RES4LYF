@@ -227,7 +227,7 @@ def sample_rk_beta(
     
     pseudoimplicit_row_weights  = EO("pseudoimplicit_row_weights" , [1. for _ in range(100)])
     pseudoimplicit_step_weights = EO("pseudoimplicit_step_weights", [1. for _ in range(max(implicit_steps_diag, implicit_steps_full)+1)])
-    
+
 
     # SETUP SAMPLER
     if implicit_sampler_name not in ("use_explicit", "none"):
@@ -343,9 +343,18 @@ def sample_rk_beta(
                 data_prev_ = state_info['data_prev_'].clone()
                 #data_prev_ = state_info['data_prev_'][len(eps_):].clone()
             else:
-                data_prev_ =  torch.zeros(max(RK.rows+2, 4), *x.shape, dtype=default_dtype, device=work_device)
+                #data_prev_ =  torch.zeros(max(RK.rows+2, 4), *x.shape, dtype=default_dtype, device=work_device)
+                data_prev_ =  torch.zeros(4, *x.shape, dtype=default_dtype, device=work_device) # multistep max is 4m... so 4 needed
             
             recycled_stages = len(data_prev_)-1
+            
+        if RK.rows+2 > x_.shape[0]:
+            row_gap = RK.rows+2 - x_.shape[0]
+            x_gap_, data_gap_, eps_gap_, eps_prev_gap_  = (torch.zeros(row_gap,     *x.shape, dtype=default_dtype, device=work_device) for _ in range(4))
+            x_        = torch.cat((x_       ,x_gap_)       , dim=0)
+            data_     = torch.cat((data_    ,data_gap_)    , dim=0)
+            eps_      = torch.cat((eps_     ,eps_gap_)     , dim=0)
+            eps_prev_ = torch.cat((eps_prev_,eps_prev_gap_), dim=0)
 
         sde_noise_t = None
         if SDE_NOISE_EXTERNAL:
@@ -360,7 +369,7 @@ def sample_rk_beta(
         
         # RECYCLE STAGES FOR MULTISTEP
         if RK.multistep_stages > 0 or RK.hybrid_stages > 0:
-            for ms in range(max(len(data_prev_), len(eps_))):
+            for ms in range(min(len(data_prev_), len(eps_))):
                 eps_[ms] = RK.get_epsilon_anchored(x_0, data_prev_[ms], sigma)
             eps_prev_ = eps_.clone()
 
@@ -515,7 +524,7 @@ def sample_rk_beta(
                                     if row > 0:
                                         x_[row+RK.row_offset] = NS.swap_noise_substep(x_0, x_[row+RK.row_offset])
                                         if BONGMATH and step < sigmas.shape[0]-1 and not EO("disable_implicit_prebong"):
-                                            x_0, x_, eps_ = RK.bong_iter(x_0, x_, eps_, eps_prev_, data_, sigma, NS.s_, row, RK.row_offset, NS.h)     # TRY WITH h_new ??
+                                            x_0, x_, eps_ = RK.bong_iter(x_0, x_, eps_, eps_prev_, data_, sigma, NS.s_, row, RK.row_offset, NS.h, step)     # TRY WITH h_new ??
                                     x_tmp = x_[row+RK.row_offset]
 
 
@@ -608,7 +617,7 @@ def sample_rk_beta(
                         if step == 0 and UNSAMPLE:
                             pass
                         elif full_iter == implicit_steps_full or not EO("disable_fully_explicit_bongmath_except_final"):
-                            x_0, x_, eps_ = RK.bong_iter(x_0, x_, eps_, eps_prev_, data_, sigma, NS.s_, row, RK.row_offset, NS.h)
+                            x_0, x_, eps_ = RK.bong_iter(x_0, x_, eps_, eps_prev_, data_, sigma, NS.s_, row, RK.row_offset, NS.h, step)
 
             x_next = x_[RK.rows - RK.multistep_stages - RK.row_offset + 1]
             x_next = NS.rebound_overshoot_step(x_0, x_next)
