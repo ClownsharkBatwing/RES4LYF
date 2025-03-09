@@ -134,7 +134,7 @@ class ReFlux(Flux):
         total_layers = len(self.double_blocks) + len(self.single_blocks)
 
         for i, block in enumerate(self.double_blocks):
-            if mask_type_bool and weight < (i / (total_layers-1)) and mask is not None:
+            if mask is not None and mask_type_bool and weight < (i / (total_layers-1)):
                 mask = mask.to(img.dtype)
             
             
@@ -152,7 +152,7 @@ class ReFlux(Flux):
 
         img = torch.cat((txt, img), 1)   #first 256 is txt embed
         for i, block in enumerate(self.single_blocks):
-            if mask_type_bool and weight < ((len(self.double_blocks) + i) / (total_layers-1)) and mask is not None:
+            if mask is not None and mask_type_bool and weight < ((len(self.double_blocks) + i) / (total_layers-1)):
                 mask = mask.to(img.dtype)
             
             #img = block(img, vec=vec, pe=pe, timestep=timesteps, transformer_options=transformer_options, mask=mask, weight=weight)
@@ -174,12 +174,19 @@ class ReFlux(Flux):
     
     
     def _get_img_ids(self, x, bs, h_len, w_len, h_start, h_end, w_start, w_end):
+        img_ids          = torch.zeros(  (h_len,   w_len, 3),              device=x.device, dtype=x.dtype)
+        img_ids[..., 1] += torch.linspace(h_start, h_end - 1, steps=h_len, device=x.device, dtype=x.dtype)[:, None]
+        img_ids[..., 2] += torch.linspace(w_start, w_end - 1, steps=w_len, device=x.device, dtype=x.dtype)[None, :]
+        img_ids          = repeat(img_ids, "h w c -> b (h w) c", b=bs)
+        return img_ids
+
+
+    """def _get_img_ids(self, x, bs, h_len, w_len, h_start, h_end, w_start, w_end):
         img_ids = torch.zeros((h_len, w_len, 3), device=x.device, dtype=x.dtype)
         img_ids[..., 1] = img_ids[..., 1] + torch.linspace(h_start, h_end - 1, steps=h_len, device=x.device, dtype=x.dtype)[:, None]
         img_ids[..., 2] = img_ids[..., 2] + torch.linspace(w_start, w_end - 1, steps=w_len, device=x.device, dtype=x.dtype)[None, :]
         img_ids = repeat(img_ids, "h w c -> b (h w) c", b=bs)
-        return img_ids
-
+        return img_ids"""
 
 
     def forward(self, x, timestep, context, y, guidance, control=None, transformer_options={}, **kwargs):

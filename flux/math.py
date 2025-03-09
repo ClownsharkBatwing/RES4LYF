@@ -1,14 +1,20 @@
 import torch
 from einops import rearrange
 from torch import Tensor
-from comfy.ldm.modules.attention import optimized_attention
+from comfy.ldm.modules.attention import attention_pytorch
+
 import comfy.model_management
 
 def attention(q: Tensor, k: Tensor, v: Tensor, pe: Tensor, mask=None) -> Tensor:
     q, k = apply_rope(q, k, pe)
 
     heads = q.shape[1]
-    x = optimized_attention(q, k, v, heads, skip_reshape=True, mask=mask)
+    x = attention_pytorch(q, k, v, heads, skip_reshape=True, mask=mask)
+    #if mask is not None:
+    #    x = attention_pytorch(q, k, v, heads, skip_reshape=True, mask=mask)
+    #else:
+    #    from comfy.ldm.modules.attention import optimized_attention
+    #    x = optimized_attention(q, k, v, heads, skip_reshape=True, mask=None)
     return x
 
 
