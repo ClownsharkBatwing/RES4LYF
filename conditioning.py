@@ -957,12 +957,12 @@ class ClownRegionalConditioning:
     def INPUT_TYPES(cls):
         return {
             "required": { 
-                "weight":            ("FLOAT",                                     {"default": 1.7, "min": -10000.0, "max": 10000.0, "step": 0.01}),
+                "weight":            ("FLOAT",                                     {"default": 1.0, "min": -10000.0, "max": 10000.0, "step": 0.01}),
                 "region_bleed":      ("FLOAT",                                     {"default": 1.0, "min": -10000.0, "max": 10000.0, "step": 0.01}),
                 "region_bleed_start_step": ("INT",                                       {"default": 0,   "min": 0,        "max": 10000}),
-                "weight_scheduler":  (["constant"] + get_res4lyf_scheduler_list(), {"default": "beta57"},),
+                "weight_scheduler":  (["constant"] + get_res4lyf_scheduler_list(), {"default": "constant"},),
                 "start_step":        ("INT",                                       {"default": 0,   "min": 0,        "max": 10000}),
-                "end_step":          ("INT",                                       {"default": 10,  "min": 1,        "max": 10000}),
+                "end_step":          ("INT",                                       {"default": 100,  "min": 1,        "max": 10000}),
                 "mask_type":         (["gradient", "boolean"],                     {"default": "gradient"}),
                 "invert_mask":       ("BOOLEAN",                                   {"default": False}),
             }, 
@@ -1143,7 +1143,7 @@ class ClownRegionalConditioning:
                                                         )
             positive_masked_tokens = positive_masked[0][0].shape[1]
             
-            positive[0][0] = (positive_masked[0][0] + positive_unmasked[0][0][:,:positive_masked_tokens,:]) / 2
+            positive[0][0] = (positive_masked[0][0][:,:positive_masked_tokens,:] + positive_unmasked[0][0][:,:positive_masked_tokens,:]) / 2
             
             if 'pooled_output' in positive[0][1] and positive_masked[0][1]['pooled_output'] is not None:
                 positive_masked_pooled_tokens = positive_masked[0][1]['pooled_output'].shape[1]
@@ -1172,11 +1172,11 @@ class ClownRegionalConditioning3:
     def INPUT_TYPES(cls):
         return {
             "required": { 
-                "weight":            ("FLOAT",                                     {"default": 1.7, "min": -10000.0, "max": 10000.0, "step": 0.01}),
+                "weight":            ("FLOAT",                                     {"default": 1.0, "min": -10000.0, "max": 10000.0, "step": 0.01}),
                 "region_bleed":      ("FLOAT",                                     {"default": 1.0, "min": -10000.0, "max": 10000.0, "step": 0.01}),
-                "weight_scheduler":  (["constant"] + get_res4lyf_scheduler_list(), {"default": "beta57"},),
+                "weight_scheduler":  (["constant"] + get_res4lyf_scheduler_list(), {"default": "constant"},),
                 "start_step":        ("INT",                                       {"default": 0,   "min": 0,        "max": 10000}),
-                "end_step":          ("INT",                                       {"default": 10,  "min": 1,        "max": 10000}),
+                "end_step":          ("INT",                                       {"default": 100,  "min": 1,        "max": 10000}),
                 "mask_type":         (["gradient", "boolean"],                     {"default": "gradient"}),
                 "invert_mask":       ("BOOLEAN",                                   {"default": False}),
             }, 
@@ -1383,7 +1383,7 @@ class ClownRegionalConditioning3:
                                                         )
             positive_masked_tokens = positive_A[0][0].shape[1]
             
-            positive[0][0] = (positive_A[0][0] + positive_B[0][0] + positive_unmasked[0][0][:,:positive_masked_tokens,:]) / 3
+            positive[0][0] = (positive_A[0][0][:,:positive_masked_tokens,:] + positive_B[0][0][:,:positive_masked_tokens,:] + positive_unmasked[0][0][:,:positive_masked_tokens,:]) / 3
             
             if 'pooled_output' in positive[0][1] and positive_A[0][1]['pooled_output'] is not None:
                 positive_masked_pooled_tokens = positive_A[0][1]['pooled_output'].shape[1]
