@@ -252,9 +252,9 @@ try:
     NODE_CLASS_MAPPINGS, extra_samplers = add_zamplers(NODE_CLASS_MAPPINGS, extra_samplers)
     flags["zampler"] = True
     RESplain("Importing zampler.")
-except ImportError:
-    RESplain("Failed to import zampler.", debug=True)
-    #print(f"Failed to import zamplers: {e}")
+except ImportError as e:
+    #RESplain("Failed to import zampler.", debug=True)
+    print(f"Failed to import zamplers: {e}")
     pass
 
 

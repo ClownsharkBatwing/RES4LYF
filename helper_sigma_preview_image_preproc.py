@@ -352,7 +352,14 @@ class VAEEncodeAdvanced:
                 c = 4
             else:
                 c = 16
-            latent = {"samples": torch.zeros((1, c, height // ratio, width // ratio))}
+            if   image_1 is not None:
+                b = image_1.shape[0]
+            elif image_2 is not None:
+                b = image_2.shape[0]
+            else:
+                b = 1
+                
+            latent = {"samples": torch.zeros((b, c, height // ratio, width // ratio))}
         
         latent_1, latent_2 = None, None
         if image_1 is not None:
