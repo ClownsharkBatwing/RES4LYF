@@ -20,7 +20,7 @@ from ..helper               import initialize_or_scale, get_res4lyf_scheduler_li
 from ..res4lyf              import RESplain
 from ..latents              import normalize_zscore, get_orthogonal
 from ..sigmas               import get_sigmas
-import RES4LYF.models              # import ReFluxPatcher
+#import ..models              # import ReFluxPatcher
 
 from .constants             import MAX_STEPS, IMPLICIT_TYPE_NAMES
 from .noise_classes         import NOISE_GENERATOR_CLASSES_SIMPLE, NOISE_GENERATOR_NAMES_SIMPLE, NOISE_GENERATOR_NAMES
@@ -347,18 +347,19 @@ class SharkSampler:
                     regional_conditioning                                  = copy.deepcopy(regional_conditioning)
                     regional_mask                                          = copy.deepcopy(regional_mask)
                     
-                    if EO("enable_auto_enable_reflux"):
-                        work_model, = RES4LYF.models.ReFluxPatcher().main(work_model, enable=True) #, force=True)
-                        if EO("compile_reflux_model"):
-                            work_model, = RES4LYF.models.TorchCompileModelFluxAdvanced().main(work_model)
+                    #if EO("enable_auto_enable_reflux"):
+                    #    work_model, = RES4LYF.models.ReFluxPatcher().main(work_model, enable=True) #, force=True)
+                    #    if EO("compile_reflux_model"):
+                    #        work_model, = RES4LYF.models.TorchCompileModelFluxAdvanced().main(work_model)
 
                     work_model.set_model_patch(regional_conditioning, 'regional_conditioning_positive')
                     work_model.set_model_patch(regional_mask,         'regional_conditioning_mask')
                 else:
-                    if EO("enable_auto_disable_reflux"):
-                        work_model, = RES4LYF.models.ReFluxPatcher().main(work_model, enable=False)
-                        if EO("compile_reflux_model"):
-                            work_model, = RES4LYF.models.TorchCompileModelFluxAdvanced().main(work_model)
+                    #if EO("enable_auto_disable_reflux"):
+                    #    work_model, = RES4LYF.models.ReFluxPatcher().main(work_model, enable=False)
+                    #    if EO("compile_reflux_model"):
+                    #        work_model, = RES4LYF.models.TorchCompileModelFluxAdvanced().main(work_model)
+                    pass
             
             
             if "noise_seed" in sampler.extra_options:
