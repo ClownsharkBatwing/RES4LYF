@@ -9,7 +9,7 @@ from .rk_coefficients_beta   import RK_SAMPLER_NAMES_BETA_FOLDERS, get_default_s
 
 from .noise_classes          import NOISE_GENERATOR_NAMES_SIMPLE
 from .rk_noise_sampler_beta  import NOISE_MODE_NAMES
-from .constants              import IMPLICIT_TYPE_NAMES, GUIDE_MODE_NAMES_BETA_MISC, GUIDE_MODE_NAMES_BETA_SIMPLE
+from .constants              import IMPLICIT_TYPE_NAMES, GUIDE_MODE_NAMES_BETA_MISC, GUIDE_MODE_NAMES_BETA_SIMPLE, MAX_STEPS
 
 
 
@@ -711,9 +711,7 @@ class ClownGuides_Beta:
             ):
         
         default_dtype = torch.float64
-        
-        max_steps = 10000
-        
+                
         if invert_mask and mask is not None:
             mask = 1-mask
                 
@@ -730,11 +728,11 @@ class ClownGuides_Beta:
         
         if weight_scheduler_masked == "constant" and weights_masked == None: 
             weights_masked = initialize_or_scale(None, weight_masked, end_step_masked).to(default_dtype)
-            weights_masked = F.pad(weights_masked, (0, max_steps), value=0.0)
+            weights_masked = F.pad(weights_masked, (0, MAX_STEPS), value=0.0)
         
         if weight_scheduler_unmasked == "constant" and weights_unmasked == None: 
             weights_unmasked = initialize_or_scale(None, weight_unmasked, end_step_unmasked).to(default_dtype)
-            weights_unmasked = F.pad(weights_unmasked, (0, max_steps), value=0.0)
+            weights_unmasked = F.pad(weights_unmasked, (0, MAX_STEPS), value=0.0)
     
         guides = (
                 guide_mode,
@@ -821,9 +819,7 @@ class ClownGuidesAB_Beta:
             ):
         
         default_dtype = torch.float64
-        
-        max_steps = 10000
-                
+                        
         if projection_mode:
             guide_mode = guide_mode + "_projection"
         
@@ -837,11 +833,11 @@ class ClownGuidesAB_Beta:
         
         if weight_scheduler_A == "constant" and weights_A == None: 
             weights_A = initialize_or_scale(None, weight_A, end_step_A).to(default_dtype)
-            weights_A = F.pad(weights_A, (0, max_steps), value=0.0)
+            weights_A = F.pad(weights_A, (0, MAX_STEPS), value=0.0)
         
         if weight_scheduler_B == "constant" and weights_B == None: 
             weights_B = initialize_or_scale(None, weight_B, end_step_B).to(default_dtype)
-            weights_B = F.pad(weights_B, (0, max_steps), value=0.0)
+            weights_B = F.pad(weights_B, (0, MAX_STEPS), value=0.0)
     
         guides = (
                 guide_mode,

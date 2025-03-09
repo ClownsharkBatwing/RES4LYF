@@ -1434,3 +1434,309 @@ class ClownSampler_Beta:
             
         return (sampler,)
     
+
+
+
+
+
+
+
+
+class BongSampler:
+    @classmethod
+    def INPUT_TYPES(cls):
+        inputs = {"required":
+                    {
+                        
+                    "model":        ("MODEL",),
+                    "seed":         ("INT",                        {"default": 0,   "min": -1,     "max": 0xffffffffffffffff}),
+                    "steps":        ("INT",                        {"default": 30,  "min":  1,     "max": MAX_STEPS}),
+                    "cfg":          ("FLOAT",                      {"default": 5.5, "min": -100.0, "max": 100.0,     "step":0.01, "round": False, }),
+
+                    #"eta":          ("FLOAT",                      {"default": 0.5, "min": -100.0, "max": 100.0,     "step":0.01, "round": False, "tooltip": "Calculated noise amount to be added, then removed, after each step."}),
+                    "sampler_name": (["res_2m", "res_3m", "res_2s", "res_3s","res_2m_sde", "res_3m_sde", "res_2s_sde", "res_3s_sde"], {"default": "res_2s_sde"}), 
+                    "scheduler":    (get_res4lyf_scheduler_list(), {"default": "beta57"},),
+                    #"steps_to_run": ("INT",                        {"default": -1,  "min": -1,     "max": MAX_STEPS}),
+                    "denoise":      ("FLOAT",                      {"default": 1.0, "min": -10000, "max": MAX_STEPS, "step":0.01}),
+                    #"sampler_mode": (['unsample', 'standard', 'resample'], {"default": "standard"}),
+                    #"bongmath":     ("BOOLEAN",                    {"default": True}),
+                    },
+                "optional": 
+                    {
+                    "positive":     ("CONDITIONING",),
+                    "negative":     ("CONDITIONING",),
+                    "latent_image": ("LATENT",),
+                    #"sigmas":       ("SIGMAS",), 
+                    #"guides":       ("GUIDES",), 
+                    #"options":      ("OPTIONS", {}),   
+                    }
+                }
+        
+        return inputs
+
+    RETURN_TYPES = ("LATENT", )
+    
+    RETURN_NAMES = ("output", )
+    
+    FUNCTION = "main"
+    CATEGORY = "RES4LYF/samplers"
+    
+    def main(self, 
+            model                                                  = None,
+            denoise                       : float                  = 1.0, 
+            scheduler                     : str                    = "beta57", 
+            cfg                           : float                  = 1.0, 
+            seed                          : int                    = 42, 
+            positive                                               = None, 
+            negative                                               = None, 
+            latent_image                  : Optional[dict[Tensor]] = None, 
+            steps                         : int                    = 30,
+            steps_to_run                  : int                    = -1,
+            bongmath                      : bool                   = True,
+            sampler_mode                  : str                    = "standard",
+            
+            noise_type_sde                : str                    = "brownian", 
+            noise_type_sde_substep        : str                    = "brownian", 
+            noise_mode_sde                : str                    = "hard",
+            noise_mode_sde_substep        : str                    = "hard",
+
+            
+            overshoot_mode                : str                    = "hard", 
+            overshoot_mode_substep        : str                    = "hard",
+            overshoot                     : float                  = 0.0, 
+            overshoot_substep             : float                  = 0.0,
+            
+            eta                           : float                  = 0.5, 
+            eta_substep                   : float                  = 0.5,
+            d_noise                       : float                  = 1.0, 
+            s_noise                       : float                  = 1.0, 
+            s_noise_substep               : float                  = 1.0, 
+            
+            alpha_sde                     : float                  = -1.0, 
+            k_sde                         : float                  = 1.0,
+            cfgpp                         : float                  = 0.0,
+            c1                            : float                  = 0.0, 
+            c2                            : float                  = 0.5, 
+            c3                            : float                  = 1.0,
+            noise_seed_sde                : int                    = -1,
+            sampler_name                  : str                    = "res_2m", 
+            implicit_sampler_name         : str                    = "use_explicit",
+            
+            implicit_type                 : str                    = "bongmath",
+            implicit_type_substeps        : str                    = "bongmath",
+            implicit_steps                : int                    = 0,
+            implicit_substeps             : int                    = 0, 
+
+            sigmas                        : Optional[Tensor]       = None,
+            sigmas_override               : Optional[Tensor]       = None, 
+            guides                                                 = None, 
+            options                                                = None, 
+            sde_noise                                              = None,
+            sde_noise_steps               : int                    = 1, 
+            extra_options                 : str                    = "", 
+            automation                                             = None, 
+
+            epsilon_scales                : Optional[Tensor]       = None, 
+            regional_conditioning_weights : Optional[Tensor]       = None,
+            frame_weights_grp                                      = None, 
+            noise_boost_step              : float                  = 0.0, 
+            noise_boost_substep           : float                  = 0.0, 
+            noise_anchor                  : float                  = 1.0,
+
+            rescale_floor                 : bool                   = True, 
+            
+            rk_swap_step                  : int                    = MAX_STEPS,
+            rk_swap_print                 : bool                   = False,
+            rk_swap_threshold             : float                  = 0.0,
+            rk_swap_type                  : str                    = "",
+            
+            #start_at_step                 : int                    = 0,
+            #stop_at_step                  : int                    = MAX_STEPS,
+                        
+            **kwargs
+            ): 
+        
+        options_mgr = OptionsManager(options, **kwargs)
+        extra_options    += "\n" + options_mgr.get('extra_options', "")
+        
+        if model.model.model_config.unet_config.get('stable_cascade_stage') == 'b':
+            noise_type_sde         = "pyramid-cascade_B"
+            noise_type_sde_substep = "pyramid-cascade_B"
+        
+        if sampler_name.endswith("_sde"):
+            sampler_name = sampler_name[:-4]
+            eta = 0.5
+        else:
+            eta = 0.0
+        
+        # defaults for ClownSampler
+        eta_substep = eta
+        
+        # defaults for SharkSampler
+        noise_type_init = "gaussian"
+        noise_stdev     = 1.0
+        denoise_alt     = 1.0
+        channelwise_cfg = 1.0
+        
+        
+        #if options is not None:
+        #options_mgr = OptionsManager(options_inputs)
+        noise_type_sde         = options_mgr.get('noise_type_sde'        , noise_type_sde)
+        noise_type_sde_substep = options_mgr.get('noise_type_sde_substep', noise_type_sde_substep)
+        
+        noise_mode_sde         = options_mgr.get('noise_mode_sde'        , noise_mode_sde)
+        noise_mode_sde_substep = options_mgr.get('noise_mode_sde_substep', noise_mode_sde_substep)
+        
+        overshoot_mode         = options_mgr.get('overshoot_mode'        , overshoot_mode)
+        overshoot_mode_substep = options_mgr.get('overshoot_mode_substep', overshoot_mode_substep)
+
+        eta                    = options_mgr.get('eta'                   , eta)
+        eta_substep            = options_mgr.get('eta_substep'           , eta_substep)
+
+        overshoot              = options_mgr.get('overshoot'             , overshoot)
+        overshoot_substep      = options_mgr.get('overshoot_substep'     , overshoot_substep)
+        
+        noise_boost_step       = options_mgr.get('noise_boost_step'      , noise_boost_step)
+        noise_boost_substep    = options_mgr.get('noise_boost_substep'   , noise_boost_substep)
+        
+        noise_anchor           = options_mgr.get('noise_anchor'          , noise_anchor)
+
+        s_noise                = options_mgr.get('s_noise'               , s_noise)
+        s_noise_substep        = options_mgr.get('s_noise_substep'       , s_noise_substep)
+
+        d_noise                = options_mgr.get('d_noise'               , d_noise)
+        
+        implicit_type          = options_mgr.get('implicit_type'         , implicit_type)
+        implicit_type_substeps = options_mgr.get('implicit_type_substeps', implicit_type_substeps)
+        implicit_steps         = options_mgr.get('implicit_steps'        , implicit_steps)
+        implicit_substeps      = options_mgr.get('implicit_substeps'     , implicit_substeps)
+        
+        alpha_sde              = options_mgr.get('alpha_sde'             , alpha_sde)
+        k_sde                  = options_mgr.get('k_sde'                 , k_sde)
+        c1                     = options_mgr.get('c1'                    , c1)
+        c2                     = options_mgr.get('c2'                    , c2)
+        c3                     = options_mgr.get('c3'                    , c3)
+
+        frame_weights_grp      = options_mgr.get('frame_weights_grp'     , frame_weights_grp)
+        
+        sde_noise              = options_mgr.get('sde_noise'             , sde_noise)
+        sde_noise_steps        = options_mgr.get('sde_noise_steps'       , sde_noise_steps)
+        
+        extra_options          = options_mgr.get('extra_options'         , extra_options)
+        
+        automation             = options_mgr.get('automation'            , automation)
+        
+        # SharkSampler Options
+        noise_type_init        = options_mgr.get('noise_type_init'       , noise_type_init)
+        noise_stdev            = options_mgr.get('noise_stdev'           , noise_stdev)
+        sampler_mode           = options_mgr.get('sampler_mode'          , sampler_mode)
+        denoise_alt            = options_mgr.get('denoise_alt'           , denoise_alt)
+        
+        channelwise_cfg        = options_mgr.get('channelwise_cfg'       , channelwise_cfg)
+        
+        sigmas                 = options_mgr.get('sigmas'                , sigmas)
+        
+        rk_swap_type           = options_mgr.get('rk_swap_type'          , rk_swap_type)
+        rk_swap_step           = options_mgr.get('rk_swap_step'          , rk_swap_step)
+        rk_swap_threshold      = options_mgr.get('rk_swap_threshold'     , rk_swap_threshold)
+        rk_swap_print          = options_mgr.get('rk_swap_print'         , rk_swap_print)
+        
+        #start_at_step          = options_mgr.get('start_at_step'         , start_at_step)
+        #stop_at_ste            = options_mgr.get('stop_at_step'          , stop_at_step)
+                
+        if channelwise_cfg != 1.0:
+            cfg = -abs(cfg)  # set cfg negative for shark, to flag as cfg_cw
+
+
+
+
+        sampler, = ClownSamplerAdvanced_Beta().main(
+            noise_type_sde                = noise_type_sde,
+            noise_type_sde_substep        = noise_type_sde_substep,
+            noise_mode_sde                = noise_mode_sde,
+            noise_mode_sde_substep        = noise_mode_sde_substep,
+            
+            eta                           = eta,
+            eta_substep                   = eta_substep,
+            
+            s_noise                       = s_noise,
+            s_noise_substep               = s_noise_substep,
+            
+            overshoot                     = overshoot,
+            overshoot_substep             = overshoot_substep,
+            
+            overshoot_mode                = overshoot_mode,
+            overshoot_mode_substep        = overshoot_mode_substep,
+            
+            d_noise                       = d_noise,
+
+            alpha_sde                     = alpha_sde,
+            k_sde                         = k_sde,
+            cfgpp                         = cfgpp,
+            c1                            = c1,
+            c2                            = c2,
+            c3                            = c3,
+            sampler_name                  = sampler_name,
+            implicit_sampler_name         = implicit_sampler_name,
+
+            implicit_type                 = implicit_type,
+            implicit_type_substeps        = implicit_type_substeps,
+            implicit_steps                = implicit_steps,
+            implicit_substeps             = implicit_substeps,
+
+            rescale_floor                 = rescale_floor,
+            sigmas_override               = sigmas_override,
+            
+            noise_seed_sde                = noise_seed_sde,
+            
+            guides                        = guides,
+            options                       = options_mgr.as_dict(),
+
+            extra_options                 = extra_options,
+            automation                    = automation,
+
+            noise_boost_step              = noise_boost_step,
+            noise_boost_substep           = noise_boost_substep,
+            
+            epsilon_scales                = epsilon_scales,
+            regional_conditioning_weights = regional_conditioning_weights,
+            frame_weights_grp             = frame_weights_grp,
+            
+            sde_noise                     = sde_noise,
+            sde_noise_steps               = sde_noise_steps,
+            
+            rk_swap_step                  = rk_swap_step,
+            rk_swap_print                 = rk_swap_print,
+            rk_swap_threshold             = rk_swap_threshold,
+            rk_swap_type                  = rk_swap_type,
+            
+            steps_to_run                  = steps_to_run,
+            
+            bongmath                      = bongmath,
+            )
+            
+        
+        output, denoised, sde_noise = SharkSampler().main(
+            model           = model, 
+            cfg             = cfg, 
+            scheduler       = scheduler,
+            steps           = steps, 
+            denoise         = denoise,
+            latent_image    = latent_image, 
+            positive        = positive,
+            negative        = negative, 
+            sampler         = sampler, 
+            cfgpp           = cfgpp, 
+            noise_seed      = seed, 
+            options         = options_mgr.as_dict(), 
+            sde_noise       = sde_noise, 
+            sde_noise_steps = sde_noise_steps, 
+            noise_type_init = noise_type_init,
+            noise_stdev     = noise_stdev,
+            sampler_mode    = sampler_mode,
+            denoise_alt     = denoise_alt,
+            sigmas          = sigmas,
+
+            extra_options   = extra_options)
+        
+        return (output, )
