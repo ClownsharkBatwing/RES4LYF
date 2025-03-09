@@ -272,10 +272,14 @@ class RK_NoiseSampler:
                                                                                                                                     noise_mode_override = self.noise_mode_sde_substep,
                                                                                                                                     DOWN                = self.DOWN_SUBSTEP)
 
-        self.h_new      = self.h * self.h_fn(self.sub_sigma_down,     self.sigma) / self.h_fn(self.sub_sigma_next, self.sigma) 
-        self.h_eta      = self.h * self.h_fn(self.sub_sigma_down_eta, self.sigma) / self.h_fn(self.sub_sigma_next, self.sigma) 
-        self.h_new_orig = self.h_new.clone()
-        self.h_new      = self.h_new + self.noise_boost_substep * (self.h - self.h_eta)
+        if self.h_fn(self.sub_sigma_next, self.sigma) != 0:
+            self.h_new      = self.h * self.h_fn(self.sub_sigma_down,     self.sigma) / self.h_fn(self.sub_sigma_next, self.sigma) 
+            self.h_eta      = self.h * self.h_fn(self.sub_sigma_down_eta, self.sigma) / self.h_fn(self.sub_sigma_next, self.sigma) 
+            self.h_new_orig = self.h_new.clone()
+            self.h_new      = self.h_new + self.noise_boost_substep * (self.h - self.h_eta)
+        else:
+            self.h_new = self.h_eta = self.h
+            self.h_new_orig = self.h_new.clone()
         
         
         
@@ -613,9 +617,10 @@ class RK_NoiseSampler:
         return x
     
     def rebound_overshoot_substep(self, x_0:Tensor, x:Tensor) -> Tensor:
-        sub_eps      = (x_0 - x) / (self.sigma - self.sub_sigma_down)
-        sub_denoised =  x_0 - self.sigma * sub_eps
-        x            = sub_denoised + self.sub_sigma_next * sub_eps
+        if self.sigma - self.sub_sigma_down > 0:
+            sub_eps      = (x_0 - x) / (self.sigma - self.sub_sigma_down)
+            sub_denoised =  x_0 - self.sigma * sub_eps
+            x            = sub_denoised + self.sub_sigma_next * sub_eps
         return x
 
     def prepare_sigmas(self,

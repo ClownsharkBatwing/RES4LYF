@@ -379,7 +379,7 @@ def sample_rk_beta(
                 if full_iter > 0 and EO("fully_implicit_reupdate_x"):
                     x_[0] = NS.sigma_from_to(x_0, x, sigma, sigma_next, NS.s_[0])
                     x_0   = NS.sigma_from_to(x_0, x, sigma, sigma_next, sigma)
-                    
+                
                 if EO("fully_pseudo_init") and full_iter == 0:
                     guide_mode_tmp = LG.guide_mode
                     LG.guide_mode = "fully_" + LG.guide_mode
@@ -521,7 +521,7 @@ def sample_rk_beta(
 
 
                         # MODEL CALL
-                        if RK.IMPLICIT   and   row == 0   and   (EO("implicit_lazy_recycle_first_model_call_at_start")   or   EO("radaucycle")):
+                        if RK.IMPLICIT   and   row == 0   and   (EO("implicit_lazy_recycle_first_model_call_at_start")   or   EO("radaucycle")  or RK.C[0] == 0.0):
                             pass
                         else: 
                             if s_tmp == 0:
