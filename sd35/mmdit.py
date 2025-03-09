@@ -5,10 +5,18 @@ import numpy as np
 import torch
 import torch.nn as nn
 from comfy.ldm.modules.attention import optimized_attention
+from comfy.ldm.modules.attention import attention_pytorch #as optimized_attention
 from einops import rearrange, repeat
 from comfy.ldm.modules.diffusionmodules.util import timestep_embedding
 import comfy.ops
 import comfy.ldm.common_dit
+
+
+#from .attention import optimized_attention
+#from .util import timestep_embedding
+#import ops
+#import common_dit
+
 
 def default(x, y):
     if x is not None:
@@ -617,11 +625,19 @@ def _block_mixing(context, x, context_block, x_block, c, mask=None):
         o.append(torch.cat((context_qkv[t], x_qkv[t]), dim=1))
     qkv = tuple(o)
 
-    attn = optimized_attention(
-        qkv[0], qkv[1], qkv[2],
-        heads = x_block.attn.num_heads,
-        mask  = mask #> 0 if mask is not None else None,
-    )
+    if mask is not None:
+        attn = attention_pytorch(      #1,4186,1536    
+            qkv[0], qkv[1], qkv[2],
+            heads = x_block.attn.num_heads,
+            mask  = mask #> 0 if mask is not None else None,
+        )
+    else:
+        attn = optimized_attention(      #1,4186,1536    
+            qkv[0], qkv[1], qkv[2],
+            heads = x_block.attn.num_heads,
+            mask  = None #> 0 if mask is not None else None,
+        )
+    
     context_attn, x_attn = (
         attn[:, : context_qkv[0].shape[1]   ],
         attn[:,   context_qkv[0].shape[1] : ],
@@ -994,7 +1010,7 @@ class MMDiT(nn.Module):
         blocks         = len(self.joint_blocks)
         for i in range(blocks):
             if mask_type_bool and weight < (i / (blocks-1)) and mask is not None:
-                mask = mask.to(torch.float16) # torch.ones((*mask.shape,), dtype=mask.dtype, device=mask.device) #(mask == mask) #set all to false
+                mask = mask.to(x.dtype) # torch.ones((*mask.shape,), dtype=mask.dtype, device=mask.device) #(mask == mask) #set all to false
                 #context = context_base
                 #c_mod = c_mod_base
                 
