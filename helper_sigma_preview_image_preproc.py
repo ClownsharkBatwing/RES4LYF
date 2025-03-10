@@ -477,15 +477,15 @@ class SigmasSchedulePreview(SaveImage):
         
         rk_type = "res_2s"
         noise_anchor = 1.0
-        
-        RK = RK_Method_Beta.create(model, rk_type, noise_anchor, model_device=sigmas.device, work_device=sigmas.device, dtype=sigmas.dtype, extra_options="")
-        NS = RK_NoiseSampler(RK, model, device=sigmas.device, dtype=sigmas.dtype, extra_options="")
-        
+
         if sigmas is not None:
             sigmas = sigmas.clone()
         else: 
             sigmas = get_sigmas(model, scheduler, steps, denoise)
         sigmas *= denoise_alt
+
+        RK = RK_Method_Beta.create(model, rk_type, noise_anchor, model_device=sigmas.device, work_device=sigmas.device, dtype=sigmas.dtype, extra_options="")
+        NS = RK_NoiseSampler(RK, model, device=sigmas.device, dtype=sigmas.dtype, extra_options="")
 
         for i in range(len(sigmas) - 1):
             sigma = sigmas[i]
