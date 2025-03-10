@@ -221,12 +221,13 @@ def sample_rk_beta(
             if state_info['sampler_mode'] == "unsample"              and sampler_mode == "resample":
                 sigmas = torch.flip(state_info['sigmas'], dims=[0])
                 start_step = (len(sigmas)-1) - (state_info['end_step']-1)
-        
-        elif state_info['sampler_mode'] == "standard"                and sampler_mode == "resample":
-            start_step = state_info['end_step'] if state_info['end_step'] != -1 else 0
-                
         elif state_info['sampler_mode'] == "unsample" and sampler_mode == "resample":
             start_step = 0
+        
+        if state_info['sampler_mode'] in {"standard", "resample"}    and sampler_mode == "resample":
+            start_step = state_info['end_step'] if state_info['end_step'] != -1 else 0
+            
+
 
     x      = x     .to(dtype=default_dtype, device=work_device)
     sigmas = sigmas.to(dtype=default_dtype, device=work_device)
