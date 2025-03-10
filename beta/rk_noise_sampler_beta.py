@@ -115,6 +115,8 @@ class RK_NoiseSampler:
                             k2                     : float = 1.0,
                             scale                  : float = 0.1,
                             scale2                 : float = 0.1,
+                            last_rng                       = None,
+                            last_rng_substep               = None,
                             ) -> None:
         
         self.noise_sampler_type     = noise_sampler_type
@@ -127,12 +129,16 @@ class RK_NoiseSampler:
         self.noise_boost_substep    = noise_boost_substep
         self.s_in                   = x.new_ones([1], dtype=self.dtype, device=self.device)
         
-        if noise_seed < 0:
+        if noise_seed < 0 and last_rng is None:
             seed = torch.initial_seed()+1 
             RESplain("SDE noise seed: ", seed, " (set via torch.initial_seed()+1)")
+        if noise_seed < 0 and last_rng is not None:
+            seed = torch.initial_seed() 
+            RESplain("SDE noise seed: ", seed, " (set via torch.initial_seed())")
         else:
             seed = noise_seed
             RESplain("SDE noise seed: ", seed)
+
             
         #seed2 = seed + MAX_STEPS #for substep noise generation. offset needed to ensure seeds are not reused
             
@@ -150,6 +156,9 @@ class RK_NoiseSampler:
             self.noise_sampler  = NOISE_GENERATOR_CLASSES_SIMPLE.get(noise_sampler_type )(x=x, seed=seed,               sigma_min=self.sigma_min, sigma_max=self.sigma_max)
             self.noise_sampler2 = NOISE_GENERATOR_CLASSES_SIMPLE.get(noise_sampler_type2)(x=x, seed=noise_seed_substep, sigma_min=self.sigma_min, sigma_max=self.sigma_max)
             
+        if last_rng is not None:
+            self.noise_sampler .generator.set_state(last_rng)
+            self.noise_sampler2.generator.set_state(last_rng_substep)
             
             
     def set_substep_list(self, RK:Union["RK_Method_Exponential", "RK_Method_Linear"]) -> None:

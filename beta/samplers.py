@@ -142,11 +142,11 @@ class SharkSampler:
                 sampler.extra_options.pop("cfg_cw", None) 
 
             if 'positive' in latent_image and positive is None:
-                positive = latent_image['positive']
+                positive = copy.deepcopy(latent_image['positive'])
             if 'negative' in latent_image and negative is None:
-                negative = latent_image['negative']
+                negative = copy.deepcopy(latent_image['negative'])
             if 'model' in latent_image and model is None:
-                model = latent_image['model']
+                model = latent_image['model'].clone()
 
             work_model   = model.clone()
             sigma_min    = work_model.model.model_sampling.sigma_min
@@ -407,7 +407,10 @@ class SharkSampler:
 
 
                 if noise_seed == -1:
-                    seed = torch.initial_seed() + 1 + batch_num
+                    if latent_image.get('state_info', {}).get('last_rng', None) is not None:
+                        seed = torch.initial_seed() + batch_num
+                    else:
+                        seed = torch.initial_seed() + 1 + batch_num
                 else:
                     seed = noise_seed + batch_num
                     torch.manual_seed(seed)
@@ -488,7 +491,8 @@ class SharkSampler:
                     
                     # INCREMENT BATCH LOOP
                     seed += 1
-                    torch.manual_seed(seed)
+                    if latent_image.get('state_info', {}).get('last_rng', None) is None:
+                        torch.manual_seed(seed)
 
 
 
@@ -996,11 +1000,11 @@ class ClownsharKSampler_Beta:
         extra_options    += "\n" + options_mgr.get('extra_options', "")
         
         if 'positive' in latent_image and positive is None:
-            positive = latent_image['positive']
+            positive = copy.deepcopy(latent_image['positive'])
         if 'negative' in latent_image and negative is None:
-            negative = latent_image['negative']
+            negative = copy.deepcopy(latent_image['negative'])
         if 'model' in latent_image and model is None:
-            model = latent_image['model']
+            model = latent_image['model'].clone()
         
         if model.model.model_config.unet_config.get('stable_cascade_stage') == 'b':
             noise_type_sde         = "pyramid-cascade_B"

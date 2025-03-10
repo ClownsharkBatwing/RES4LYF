@@ -271,12 +271,20 @@ def sample_rk_beta(
                 sigma_up_total += sigmas[i+1]
             etas = torch.full_like(sigmas, eta / sigma_up_total)
     
+    if 'last_rng' in state_info and sampler_mode in {"resample", "unsample"} and noise_seed < 0:
+        last_rng         = state_info['last_rng'].clone()
+        last_rng_substep = state_info['last_rng_substep'].clone()
+    else:
+        last_rng         = None
+        last_rng_substep = None
+    
     NS.init_noise_samplers(x, noise_seed, noise_seed_substep, noise_sampler_type, noise_sampler_type_substep, noise_mode_sde, noise_mode_sde_substep, \
-                            overshoot_mode, overshoot_mode_substep, noise_boost_step, noise_boost_substep, alpha, alpha_substep, k, k_substep)
+                            overshoot_mode, overshoot_mode_substep, noise_boost_step, noise_boost_substep, alpha, alpha_substep, k, k_substep, \
+                            last_rng=last_rng, last_rng_substep=last_rng_substep,)
 
-    if 'last_rng' in state_info and sampler_mode == "resample" and noise_seed < 0:
-        NS.noise_sampler.generator.set_state (state_info['last_rng'])
-        NS.noise_sampler2.generator.set_state(state_info['last_rng_substep'])
+    #if 'last_rng' in state_info and sampler_mode in {"resample", "unsample"} and noise_seed < 0:
+    #    NS.noise_sampler.generator.set_state (state_info['last_rng'].clone())
+    #    NS.noise_sampler2.generator.set_state(state_info['last_rng_substep'].clone())
 
     data_               = None
     eps_                = None
