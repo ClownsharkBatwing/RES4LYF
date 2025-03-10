@@ -31,8 +31,8 @@ class ClownSamplerSelector_Beta:
     CATEGORY     = "RES4LYF/sampler_options"
     
     def main(self,
-             sampler_name = "res_2m",
-             ):
+            sampler_name = "res_2m",
+            ):
         
         sampler_name, implicit_sampler_name = process_sampler_name(sampler_name)
         
@@ -53,7 +53,8 @@ class ClownOptions_SDE_Beta:
                     "noise_mode_sde_substep": (NOISE_MODE_NAMES,             {"default": 'hard',                                                        "tooltip": "How noise scales with the sigma schedule. Hard is the most aggressive, the others start strong and drop rapidly."}),
                     "eta":                    ("FLOAT",                      {"default": 0.5, "min": -100.0, "max": 100.0, "step":0.01, "round": False, "tooltip": "Calculated noise amount to be added, then removed, after each step."}),
                     "eta_substep":            ("FLOAT",                      {"default": 0.5, "min": -100.0, "max": 100.0, "step":0.01, "round": False, "tooltip": "Calculated noise amount to be added, then removed, after each step."}),
-                     },
+                    "seed":                   ("INT",                        {"default": -1, "min": -1, "max": 0xffffffffffffffff}),
+                    },
                 "optional": 
                     {
                     "options":                ("OPTIONS", ),   
@@ -72,6 +73,7 @@ class ClownOptions_SDE_Beta:
             noise_mode_sde_substep = "hard",
             eta                    = 0.5,
             eta_substep            = 0.5,
+            seed             : int = -1,
             options                = None,
             ): 
         
@@ -83,6 +85,7 @@ class ClownOptions_SDE_Beta:
         options['noise_mode_sde_substep'] = noise_mode_sde_substep
         options['eta']                    = eta
         options['eta_substep']            = eta_substep
+        options['noise_seed_sde']         = seed
 
         return (options,)
 

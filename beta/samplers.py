@@ -146,7 +146,7 @@ class SharkSampler:
             if 'negative' in latent_image and negative is None:
                 negative = copy.deepcopy(latent_image['negative'])
             if 'model' in latent_image and model is None:
-                model = latent_image['model'].clone()
+                model = latent_image['model']  #.clone()
 
             work_model   = model.clone()
             sigma_min    = work_model.model.model_sampling.sigma_min
@@ -780,6 +780,8 @@ class ClownSamplerAdvanced_Beta:
             rk_swap_type      = options_mgr.get('rk_swap_type'     , rk_swap_type)
 
             steps_to_run      = options_mgr.get('steps_to_run'     , steps_to_run)
+            
+            noise_seed_sde    = options_mgr.get('noise_seed_sde'   , noise_seed_sde)
 
 
             rescale_floor = EO("rescale_floor")
@@ -1022,6 +1024,8 @@ class ClownsharKSampler_Beta:
         
         #if options is not None:
         #options_mgr = OptionsManager(options_inputs)
+        noise_seed_sde         = options_mgr.get('noise_seed_sde'        , noise_seed_sde)
+        
         noise_type_sde         = options_mgr.get('noise_type_sde'        , noise_type_sde)
         noise_type_sde_substep = options_mgr.get('noise_type_sde_substep', noise_type_sde_substep)
         
