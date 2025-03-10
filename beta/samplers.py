@@ -35,7 +35,6 @@ class SharkSampler:
     def INPUT_TYPES(cls):
         return {
             "required": {
-                "model":           ("MODEL",),
                 "noise_type_init": (NOISE_GENERATOR_NAMES_SIMPLE, {"default": "gaussian"}),
                 "noise_stdev":     ("FLOAT",                      {"default": 1.0, "min": -10000.0, "max": 10000.0, "step":0.01, "round": False, }),
                 "noise_seed":      ("INT",                        {"default": 0,   "min": -1,       "max": 0xffffffffffffffff}),
@@ -47,6 +46,7 @@ class SharkSampler:
                 "cfg":             ("FLOAT",                      {"default": 5.5, "min": -10000.0, "max": 10000.0, "step":0.01, "round": False, "tooltip": "Negative values use channelwise CFG." }),
                 },
             "optional": {
+                "model":           ("MODEL",),
                 "positive":        ("CONDITIONING", ),
                 "negative":        ("CONDITIONING", ),
                 "sampler":         ("SAMPLER", ),
@@ -69,32 +69,32 @@ class SharkSampler:
     CATEGORY     = "RES4LYF/samplers"
     
     def main(self, 
-            model,
-            cfg : float, 
-            scheduler, 
-            steps : int, 
-            sampler_mode       : str = "standard",
-            denoise            : float = 1.0, 
-            denoise_alt        : float = 1.0,
-            noise_type_init    : str = "gaussian",
+            model                                       = None,
+            cfg                : float                  =  5.5, 
+            scheduler          : str                    = "beta57", 
+            steps              : int                    = 30, 
+            sampler_mode       : str                    = "standard",
+            denoise            : float                  =  1.0, 
+            denoise_alt        : float                  =  1.0,
+            noise_type_init    : str                    = "gaussian",
             latent_image       : Optional[dict[Tensor]] = None,
             
-            positive           = None,
-            negative           = None,
-            sampler            = None,
-            sigmas             : Optional[Tensor] = None,
-            noise_stdev        : float = 1.0,
-            noise_mean         : float = 0.0,
-            noise_normalize    : bool = True,
+            positive                                    = None,
+            negative                                    = None,
+            sampler                                     = None,
+            sigmas             : Optional[Tensor]       = None,
+            noise_stdev        : float                  =  1.0,
+            noise_mean         : float                  =  0.0,
+            noise_normalize    : bool                   = True,
             
-            d_noise            : float =  1.0,
-            alpha_init         : float = -1.0,
-            k_init             : float = 1.0,
-            cfgpp              : float = 0.0,
-            noise_seed         : int = -1,
-            options            = None,
-            sde_noise          = None,
-            sde_noise_steps    : int = 1,
+            d_noise            : float                  =  1.0,
+            alpha_init         : float                  = -1.0,
+            k_init             : float                  =  1.0,
+            cfgpp              : float                  =  0.0,
+            noise_seed         : int                    = -1,
+            options                                     = None,
+            sde_noise                                   = None,
+            sde_noise_steps    : int                    =  1,
             
             #ultracascade_stage : str = "stage_UP",
             ultracascade_latent_image : Optional[dict[str,Any]] = None,
@@ -141,6 +141,13 @@ class SharkSampler:
             else:
                 sampler.extra_options.pop("cfg_cw", None) 
 
+            if 'positive' in latent_image and positive is None:
+                positive = latent_image['positive']
+            if 'negative' in latent_image and negative is None:
+                negative = latent_image['negative']
+            if 'model' in latent_image and model is None:
+                model = latent_image['model']
+
             work_model   = model.clone()
             sigma_min    = work_model.model.model_sampling.sigma_min
             sigma_max    = work_model.model.model_sampling.sigma_max
@@ -183,7 +190,7 @@ class SharkSampler:
             
             
             # SETUP CONDITIONING EMBEDS
-            
+                        
             pos_cond    = copy.deepcopy(positive)
             neg_cond    = copy.deepcopy(negative)
             
@@ -495,6 +502,10 @@ class SharkSampler:
 
             out['state_info']       = copy.deepcopy(state_info_out)
             state_info              = {}
+            
+            out['positive'] = positive
+            out['negative'] = negative
+            out['model']    = model
             
             gc.collect()
 
@@ -871,7 +882,6 @@ class ClownsharKSampler_Beta:
     def INPUT_TYPES(cls):
         inputs = {"required":
                     {
-                    "model":        ("MODEL",),
                     "eta":          ("FLOAT",                      {"default": 0.5, "min": -100.0, "max": 100.0,     "step":0.01, "round": False, "tooltip": "Calculated noise amount to be added, then removed, after each step."}),
                     "sampler_name": (get_sampler_name_list     (), {"default": get_default_sampler_name()}), 
                     "scheduler":    (get_res4lyf_scheduler_list(), {"default": "beta57"},),
@@ -885,6 +895,7 @@ class ClownsharKSampler_Beta:
                     },
                 "optional": 
                     {
+                    "model":        ("MODEL",),
                     "positive":     ("CONDITIONING",),
                     "negative":     ("CONDITIONING",),
                     "latent_image": ("LATENT",),
@@ -983,6 +994,13 @@ class ClownsharKSampler_Beta:
         
         options_mgr = OptionsManager(options, **kwargs)
         extra_options    += "\n" + options_mgr.get('extra_options', "")
+        
+        if 'positive' in latent_image and positive is None:
+            positive = latent_image['positive']
+        if 'negative' in latent_image and negative is None:
+            negative = latent_image['negative']
+        if 'model' in latent_image and model is None:
+            model = latent_image['model']
         
         if model.model.model_config.unet_config.get('stable_cascade_stage') == 'b':
             noise_type_sde         = "pyramid-cascade_B"
