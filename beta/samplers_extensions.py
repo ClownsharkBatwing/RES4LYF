@@ -544,6 +544,20 @@ class ClownGuide_Misc_Beta:
         
         mask = 1-mask if mask is not None else None
         
+        if guide is not None:
+            raw_x = guide.get('state_info', {}).get('raw_x', None)
+            if raw_x is not None:
+                guide          = {'samples': guide['state_info']['raw_x'].clone()}
+            else:
+                guide          = {'samples': guide['samples'].clone()}
+                
+        if guide_unmasked is not None:
+            raw_x = guide_unmasked.get('state_info', {}).get('raw_x', None)
+            if raw_x is not None:
+                guide_unmasked = {'samples': guide_unmasked['state_info']['raw_x'].clone()}
+            else:
+                guide_unmasked = {'samples': guide_unmasked['samples'].clone()}
+        
         guides = CG.main(
                         weight_scheduler,
                         weight_scheduler_unmasked,
@@ -627,6 +641,20 @@ class ClownGuide_Beta:
         CG = ClownGuides_Beta()
         
         mask = 1-mask if mask is not None else None
+        
+        if guide is not None:
+            raw_x = guide.get('state_info', {}).get('raw_x', None)
+            if raw_x is not None:
+                guide          = {'samples': guide['state_info']['raw_x'].clone()}
+            else:
+                guide          = {'samples': guide['samples'].clone()}
+                
+        if guide_unmasked is not None:
+            raw_x = guide_unmasked.get('state_info', {}).get('raw_x', None)
+            if raw_x is not None:
+                guide_unmasked = {'samples': guide_unmasked['state_info']['raw_x'].clone()}
+            else:
+                guide_unmasked = {'samples': guide_unmasked['samples'].clone()}
         
         guides = CG.main(
                         weight_scheduler,
@@ -738,8 +766,20 @@ class ClownGuides_Beta:
             weights_unmasked          = None
             #unmask                    = None
         
-            
-                
+        if guide_masked is not None:
+            raw_x = guide_masked.get('state_info', {}).get('raw_x', None)
+            if raw_x is not None:
+                guide_masked   = {'samples': guide_masked['state_info']['raw_x'].clone()}
+            else:
+                guide_masked   = {'samples': guide_masked['samples'].clone()}
+        
+        if guide_unmasked is not None:
+            raw_x = guide_unmasked.get('state_info', {}).get('raw_x', None)
+            if raw_x is not None:
+                guide_unmasked = {'samples': guide_unmasked['state_info']['raw_x'].clone()}
+            else:
+                guide_unmasked = {'samples': guide_unmasked['samples'].clone()}
+        
         if invert_mask and mask is not None:
             mask = 1-mask
                 
@@ -849,6 +889,20 @@ class ClownGuidesAB_Beta:
             ):
         
         default_dtype = torch.float64
+        
+        if guide_A is not None:
+            raw_x = guide_A.get('state_info', {}).get('raw_x', None)
+            if raw_x is not None:
+                guide_A          = {'samples': guide_A['state_info']['raw_x'].clone()}
+            else:
+                guide_A          = {'samples': guide_A['samples'].clone()}
+                
+        if guide_B is not None:
+            raw_x = guide_B.get('state_info', {}).get('raw_x', None)
+            if raw_x is not None:
+                guide_B = {'samples': guide_B['state_info']['raw_x'].clone()}
+            else:
+                guide_B = {'samples': guide_B['samples'].clone()}
         
         if guide_A is None:
             guide_A  = guide_B
