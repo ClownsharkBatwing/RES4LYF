@@ -841,6 +841,13 @@ class ClownGuidesAB_Beta:
             ):
         
         default_dtype = torch.float64
+        
+        if guide_A is None:
+            guide_A  = guide_B
+            guide_B  = None
+            mask_A   = mask_B
+            mask_B   = None
+            weight_B = 0.0
                         
         if projection_mode:
             guide_mode = guide_mode + "_projection"
