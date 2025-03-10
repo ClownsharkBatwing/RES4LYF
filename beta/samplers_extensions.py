@@ -848,6 +848,9 @@ class ClownGuidesAB_Beta:
             mask_A   = mask_B
             mask_B   = None
             weight_B = 0.0
+            
+        if guide_B is None:
+            weight_B = 0.0
                         
         if projection_mode:
             guide_mode = guide_mode + "_projection"
