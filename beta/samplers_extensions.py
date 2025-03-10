@@ -800,6 +800,7 @@ class ClownGuidesAB_Beta:
                     "start_step_B":       ("INT",                                       {"default": 0,    "min": 0,      "max": 10000}),
                     "end_step_A":         ("INT",                                       {"default": 15,   "min": 1,      "max": 10000}),
                     "end_step_B":         ("INT",                                       {"default": 15,   "min": 1,      "max": 10000}),
+                    "invert_masks":       ("BOOLEAN",                                   {"default": False}),
                     },
                 "optional": 
                     {
@@ -838,6 +839,7 @@ class ClownGuidesAB_Beta:
             weights_B          = None,
             mask_A             = None,
             mask_B             = None,
+            invert_masks       : bool = False,
             ):
         
         default_dtype = torch.float64
@@ -873,6 +875,10 @@ class ClownGuidesAB_Beta:
         if weight_scheduler_B == "constant" and weights_B == None: 
             weights_B = initialize_or_scale(None, weight_B, end_step_B).to(default_dtype)
             weights_B = F.pad(weights_B, (0, MAX_STEPS), value=0.0)
+            
+        if invert_masks:
+            mask_A = 1-mask_A if mask_A is not None else None
+            mask_B = 1-mask_B if mask_B is not None else None
     
         guides = (
                 guide_mode,
