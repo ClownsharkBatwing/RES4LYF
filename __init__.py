@@ -254,7 +254,18 @@ try:
     RESplain("Importing zampler.")
 except ImportError as e:
     #RESplain("Failed to import zampler.", debug=True)
-    print(f"Failed to import zamplers: {e}")
+    try:
+        zampler_module = importlib.import_module("res4lyf.zampler")
+        from .zampler import add_zamplers
+        NODE_CLASS_MAPPINGS, extra_samplers = add_zamplers(NODE_CLASS_MAPPINGS, extra_samplers)
+        flags["zampler"] = True
+        RESplain("Importing zampler.")
+    except ImportError as e:
+        #RESplain("Failed to import zampler.", debug=True)
+        print(f"Failed to import zamplers: {e}")
+        pass
+
+    #print(f"Failed to import zamplers: {e}")
     pass
 
 
@@ -266,8 +277,18 @@ try:
     flags["legacy_samplers"] = True
     RESplain("Importing legacy samplers.")
 except Exception as e:
+    try:
+        legacy_module = importlib.import_module("res4lyf.legacy")
+        from .legacy import add_legacy
+        NODE_CLASS_MAPPINGS, extra_samplers = add_legacy(NODE_CLASS_MAPPINGS, extra_samplers)
+        flags["legacy_samplers"] = True
+        RESplain("Importing legacy samplers.")
+    except Exception as e:
+        #RESplain("Failed to import legacy samplers", debug=False)
+        print(f"(RES4LYF) Failed to import legacy samplers: {e}")
+
     #RESplain("Failed to import legacy samplers", debug=False)
-    print(f"(RES4LYF) Failed to import legacy samplers: {e}")
+    #print(f"(RES4LYF) Failed to import legacy samplers: {e}")
 
 
 
@@ -278,8 +299,28 @@ try:
     flags["beta_samplers"] = True
     RESplain("Importing beta samplers.")
 except Exception as e:
+    try:
+        beta_module = importlib.import_module("res4lyf.beta")
+        from .beta import add_beta
+        NODE_CLASS_MAPPINGS, extra_samplers = add_beta(NODE_CLASS_MAPPINGS, extra_samplers)
+        flags["beta_samplers"] = True
+        RESplain("Importing beta samplers.")
+    except Exception as e:
+        #RESplain("Failed to import legacy samplers", debug=False)
+        print(f"(RES4LYF) Failed to import beta samplers: {e}")
+
     #RESplain("Failed to import legacy samplers", debug=False)
-    print(f"(RES4LYF) Failed to import beta samplers: {e}")
+    #print(f"(RES4LYF) Failed to import beta samplers: {e}")
+
+
+
+
+
+
+
+
+
+
 
 
 
