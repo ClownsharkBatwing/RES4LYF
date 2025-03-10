@@ -203,14 +203,29 @@ def sample_rk_beta(
     state_info     = {} if state_info     is None else state_info
     state_info_out = {} if state_info_out is None else state_info_out
 
-    if 'raw_x' in state_info and sampler_mode == "resample":
+    if 'raw_x' in state_info and sampler_mode in {"resample", "unsample"}:
         x = state_info['raw_x'].clone()
         RESplain("Continuing from raw latent from previous sampler.", debug=False)
     
+
+    
     start_step = 0
     if 'end_step' in state_info and (sampler_mode == "resample" or sampler_mode == "unsample"):
-        start_step = state_info['end_step'] if state_info['end_step'] != -1 else 0
-        if state_info['sampler_mode'] == "unsample" and sampler_mode == "resample":
+
+        if state_info['end_step'] != 0 and state_info['end_step'] != -1 and state_info['end_step'] < len(state_info['sigmas'])-1 :   #incomplete run in previous sampler node
+            
+            if state_info['sampler_mode'] in {"standard","resample"} and sampler_mode == "unsample":
+                sigmas = torch.flip(state_info['sigmas'], dims=[0])
+                start_step = (len(sigmas)-1) - (state_info['end_step']-1)
+                
+            if state_info['sampler_mode'] == "unsample"              and sampler_mode == "resample":
+                sigmas = torch.flip(state_info['sigmas'], dims=[0])
+                start_step = (len(sigmas)-1) - (state_info['end_step']-1)
+        
+        elif state_info['sampler_mode'] == "standard"                and sampler_mode == "resample":
+            start_step = state_info['end_step'] if state_info['end_step'] != -1 else 0
+                
+        elif state_info['sampler_mode'] == "unsample" and sampler_mode == "resample":
             start_step = 0
 
     x      = x     .to(dtype=default_dtype, device=work_device)
@@ -308,12 +323,23 @@ def sample_rk_beta(
     else:
         current_steps =              num_steps
         num_steps     = start_step + num_steps
+        
+    #if sampler_mode == "unsample":
+    #    current_steps = (len(sigmas)-1) - current_steps
     
     INIT_SAMPLE_LOOP = True
     step = start_step
     sigma, sigma_next, data_prev_ = None, None, None
-
-    progress_bar = trange(current_steps, disable=disable)
+    
+    if (num_steps-1) == len(sigmas)-2 and sigmas[-1] == 0 and sigmas[-2] == NS.sigma_min:
+        progress_bar = trange(current_steps+1, disable=disable)
+    else:
+        progress_bar = trange(current_steps, disable=disable)
+    #progress_bar = trange(len(sigmas)-1, disable=disable)
+    
+    #pbar_step = len(sigmas)-1 - step if sampler_mode == "unsample" else step
+    #progress_bar.n = pbar_step
+    #progress_bar.refresh()
     while step < num_steps:
         sigma, sigma_next = sigmas[step], sigmas[step+1]
         
@@ -628,7 +654,8 @@ def sample_rk_beta(
             x_next = LG.process_guides_poststep(x_next, denoised, eps, step)
             x      = NS.swap_noise_step(x_0, x_next)
             
-            preview_callback(x, eps, denoised, x_, eps_, data_, step, sigma, sigma_next, callback, EO)
+            callback_step = len(sigmas)-1 - step if sampler_mode == "unsample" else step
+            preview_callback(x, eps, denoised, x_, eps_, data_, callback_step, sigma, sigma_next, callback, EO)
             
             h_prev = NS.h
             x_prev = x_0
@@ -664,32 +691,40 @@ def sample_rk_beta(
             LG.y0     = orig_y0     + pseudo_mix_strength * (denoised - orig_y0)
             LG.y0_inv = orig_y0_inv + pseudo_mix_strength * (denoised - orig_y0_inv)
             
-            
+        #if sampler_mode == "unsample":
+        #    progress_bar.n -= 1 
+        #    progress_bar.refresh() 
+        #else:
+        #    progress_bar.update(1)
         progress_bar.update(1)
         step += 1
         # end sampling loop
 
-    progress_bar.close()
+    #progress_bar.close()
 
     if step == len(sigmas)-2 and sigmas[-1] == 0 and sigmas[-2] == NS.sigma_min:
         eps, denoised = RK(x, NS.sigma_min, x, NS.sigma_min)
         x = denoised
+        #progress_bar.update(1)
 
     eps      = eps     .to(model_device)
     denoised = denoised.to(model_device)
     x        = x       .to(model_device)
+    
+    progress_bar.close()
 
     #if not (UNSAMPLE and sigmas[1] > sigmas[0]) and not EO("preview_last_step_always"):
     if not (UNSAMPLE and sigmas[1] > sigmas[0]) and not EO("preview_last_step_always") and sigma is not None:
-        preview_callback(x, eps, denoised, x_, eps_, data_, step, sigma, sigma_next, callback, EO, FINAL_STEP=True)
+        callback_step = len(sigmas)-1 - step if sampler_mode == "unsample" else step
+        preview_callback(x, eps, denoised, x_, eps_, data_, callback_step, sigma, sigma_next, callback, EO, FINAL_STEP=True)
 
     state_info_out['raw_x']             = x#.clone()
     state_info_out['data_prev_']        = data_prev_#.clone()
     state_info_out['end_step']          = step
+    state_info_out['sigmas']            = sigmas
     state_info_out['sampler_mode']      = sampler_mode
     state_info_out['last_rng']          = NS.noise_sampler .generator.get_state().clone()
     state_info_out['last_rng_substep']  = NS.noise_sampler2.generator.get_state().clone()
-    
     
     gc.collect()
 
