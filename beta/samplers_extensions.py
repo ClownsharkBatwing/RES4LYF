@@ -979,28 +979,10 @@ class ClownOptions_Combine:
     FUNCTION = "main"
     CATEGORY = "RES4LYF/sampler_options"
 
-    def main(self, **kwargs):
+    def main(self, options, **kwargs):
+        options_mgr = OptionsManager(options, **kwargs)
+        return (options_mgr.as_dict(),)
 
-        options_inputs = []
-
-        if "options" in kwargs and kwargs["options"] is not None:
-            options_inputs.append(kwargs["options"])
-
-        i = 2
-        while True:
-            option_name = f"options {i}"
-            if option_name in kwargs and kwargs[option_name] is not None:
-                options_inputs.append(kwargs[option_name])
-                i += 1
-            else:
-                break
-
-        options = OptionsManager(options_inputs)
-
-        return (options.as_dict(),)
-    
-    
-    
     
 
 class ClownOptions_Frameweights:
