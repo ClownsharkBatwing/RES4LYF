@@ -97,7 +97,7 @@ class ClownOptions_StepSize_Beta:
                     "overshoot_mode_substep": (NOISE_MODE_NAMES, {"default": 'hard',                                                        "tooltip": "How substep size overshoot scales with the sigma schedule. Hard is the most aggressive, the others start strong and drop rapidly."}),
                     "overshoot":              ("FLOAT",          {"default": 0.0, "min": -100.0, "max": 100.0, "step":0.01, "round": False, "tooltip": "Boost the size of each denoising step, then rescale to match the original. Has a softening effect."}),
                     "overshoot_substep":      ("FLOAT",          {"default": 0.0, "min": -100.0, "max": 100.0, "step":0.01, "round": False, "tooltip": "Boost the size of each denoising substep, then rescale to match the original. Has a softening effect."}),
-                     },
+                    },
                 "optional": 
                     {
                     "options":                ("OPTIONS", ),   
@@ -134,16 +134,17 @@ class ClownOptions_DetailBoost_Beta:
     def INPUT_TYPES(cls):
         return {"required":
                     {
-                    "noise_boost_step":    ("FLOAT", {"default": 0.0, "min": -100.0, "max": 100.0, "step":0.01, "round": False, "tooltip": "Set to positive values to create a sharper, grittier, more detailed image. Set to negative values to soften and deepen the colors."}),
-                    "noise_boost_substep": ("FLOAT", {"default": 0.0, "min": -100.0, "max": 100.0, "step":0.01, "round": False, "tooltip": "Set to positive values to create a sharper, grittier, more detailed image. Set to negative values to soften and deepen the colors."}),
-                    "noise_anchor":        ("FLOAT", {"default": 1.0, "min": -100.0, "max": 100.0, "step":0.01, "round": False, "tooltip": "Typically set to between 1.0 and 0.0. Lower values cerate a grittier, more detailed image."}),
-                    "s_noise":             ("FLOAT", {"default": 1.0, "min": -10000, "max": 10000, "step":0.01,                 "tooltip": "Adds extra SDE noise. Values around 1.03-1.07 can lead to a moderate boost in detail and paint textures."}),
-                    "s_noise_substep":     ("FLOAT", {"default": 1.0, "min": -10000, "max": 10000, "step":0.01,                 "tooltip": "Adds extra SDE noise. Values around 1.03-1.07 can lead to a moderate boost in detail and paint textures."}),
-                    "d_noise":             ("FLOAT", {"default": 1.0, "min": -10000, "max": 10000, "step":0.01,                 "tooltip": "Downscales the sigma schedule. Values around 0.98-0.95 can lead to a large boost in detail and paint textures."}),
-                     },
+                    "noise_scaling_substep": ("FLOAT", {"default": 0.0, "min": -100.0, "max": 100.0, "step":0.01, "round": False, "tooltip": "Set to positive values to create a sharper, grittier, more detailed image. Set to negative values to soften and deepen the colors."}),
+                    "noise_boost_step":      ("FLOAT", {"default": 0.0, "min": -100.0, "max": 100.0, "step":0.01, "round": False, "tooltip": "Set to positive values to create a sharper, grittier, more detailed image. Set to negative values to soften and deepen the colors."}),
+                    "noise_boost_substep":   ("FLOAT", {"default": 0.0, "min": -100.0, "max": 100.0, "step":0.01, "round": False, "tooltip": "Set to positive values to create a sharper, grittier, more detailed image. Set to negative values to soften and deepen the colors."}),
+                    "noise_anchor":          ("FLOAT", {"default": 1.0, "min": -100.0, "max": 100.0, "step":0.01, "round": False, "tooltip": "Typically set to between 1.0 and 0.0. Lower values cerate a grittier, more detailed image."}),
+                    "s_noise":               ("FLOAT", {"default": 1.0, "min": -10000, "max": 10000, "step":0.01,                 "tooltip": "Adds extra SDE noise. Values around 1.03-1.07 can lead to a moderate boost in detail and paint textures."}),
+                    "s_noise_substep":       ("FLOAT", {"default": 1.0, "min": -10000, "max": 10000, "step":0.01,                 "tooltip": "Adds extra SDE noise. Values around 1.03-1.07 can lead to a moderate boost in detail and paint textures."}),
+                    "d_noise":               ("FLOAT", {"default": 1.0, "min": -10000, "max": 10000, "step":0.01,                 "tooltip": "Downscales the sigma schedule. Values around 0.98-0.95 can lead to a large boost in detail and paint textures."}),
+                    },
                 "optional": 
                     {
-                    "options":             ("OPTIONS", ),   
+                    "options":               ("OPTIONS", ),   
                     }
                 }
 
@@ -153,23 +154,25 @@ class ClownOptions_DetailBoost_Beta:
     CATEGORY     = "RES4LYF/sampler_options"
     
     def main(self,
-            noise_boost_step    = 0.0,
-            noise_boost_substep = 0.0,
-            noise_anchor        = 1.0,
-            s_noise             = 1.0,
-            s_noise_substep     = 1.0,
-            d_noise             = 1.0,
-            options             = None
+            noise_scaling_substep = 0.0,
+            noise_boost_step      = 0.0,
+            noise_boost_substep   = 0.0,
+            noise_anchor          = 1.0,
+            s_noise               = 1.0,
+            s_noise_substep       = 1.0,
+            d_noise               = 1.0,
+            options               = None
             ):
         
         options = options if options is not None else {}
             
-        options['noise_boost_step']    = noise_boost_step
-        options['noise_boost_substep'] = noise_boost_substep
-        options['noise_anchor']        = noise_anchor
-        options['s_noise']             = s_noise
-        options['s_noise_substep']     = s_noise_substep
-        options['d_noise']             = d_noise
+        options['noise_scaling_substep'] = noise_scaling_substep
+        options['noise_boost_step']      = noise_boost_step
+        options['noise_boost_substep']   = noise_boost_substep
+        options['noise_anchor']          = noise_anchor
+        options['s_noise']               = s_noise
+        options['s_noise_substep']       = s_noise_substep
+        options['d_noise']               = d_noise
 
         return (options,)
 
@@ -184,7 +187,7 @@ class ClownOptions_ImplicitSteps_Beta:
                     "implicit_type_substeps": (IMPLICIT_TYPE_NAMES, {"default": "bongmath"}), 
                     "implicit_steps":         ("INT",               {"default": 0, "min": 0, "max": 10000}),
                     "implicit_substeps":      ("INT",               {"default": 0, "min": 0, "max": 10000}),
-                     },
+                    },
                 "optional": 
                     {
                     "options":                ("OPTIONS", ),   
@@ -226,7 +229,7 @@ class ClownOptions_ExtraOptions_Beta:
                     {
                     "options": ("OPTIONS", ),   
                     }  
-               }
+            }
         
     RETURN_TYPES = ("OPTIONS",)
     RETURN_NAMES = ("options",)

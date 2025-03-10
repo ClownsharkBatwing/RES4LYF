@@ -139,6 +139,7 @@ def sample_rk_beta(
         k_substep                     : float              =  1.0,
         
         d_noise                       : float              =  1.0,
+        noise_scaling_substep         : float              =  0.0,
         noise_boost_step              : float              =  0.0,
         noise_boost_substep           : float              =  0.0,
 
@@ -565,6 +566,18 @@ def sample_rk_beta(
                             x_, eps_ = RK.newton_iter(x_0, x_, eps_, eps_prev_, data_, NS.s_, row, NS.h, sigmas, step, "pre") # will this do anything? not x_tmp
 
                             eps_[row], data_[row] = RK(x_tmp, s_tmp, x_0, sigma)
+                            
+                            
+                            if eta_substep > 0 and row < RK.rows: # and ((row < rk.rows - rk.multistep_stages - 1))   and   (sub_sigma_down > 0) and sigma_next > 0:
+                                
+                                substep_noise_scaling_ratio = NS.s_[row+1]/NS.sub_sigma_down_eta
+                                eps_[row] *= 1 + noise_scaling_substep*(substep_noise_scaling_ratio-1)
+                                
+                                #substep_noise_scaling_ratio = NS.s_[row+1]/NS.sub_sigma_down
+                                #eps_[row] *= 1 + EO("substep_noise_scaling",1.0)*(substep_noise_scaling_ratio-1)
+                                
+                                #substep_noise_scaling_ratio = NS.s_[row+1]/NS.sub_sigma_down_eta
+                                #eps_[row] *= 1 + EO("substep_noise_scaling_eta",1.0)*(substep_noise_scaling_ratio-1)
 
 
                         if EO("bong2m") and RK.multistep_stages > 0 and step < len(sigmas)-4:
