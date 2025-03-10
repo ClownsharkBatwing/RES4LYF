@@ -709,8 +709,30 @@ class ClownGuides_Beta:
             unmask                    = None,
             invert_mask               = False,
             ):
-        
+
         default_dtype = torch.float64
+        
+        if guide_masked is None:
+            weight_scheduler_masked = "constant"
+            start_step_masked       = 0
+            end_step_masked         = 30
+            cutoff_masked           = 1.0
+            guide_masked            = None
+            weight_masked           = 0.0
+            weights_masked          = None
+            #mask                    = None
+        
+        if guide_unmasked is None:
+            weight_scheduler_unmasked = "constant"
+            start_step_unmasked       = 0
+            end_step_unmasked         = 30
+            cutoff_unmasked           = 1.0
+            guide_unmasked            = None
+            weight_unmasked           = 0.0
+            weights_unmasked          = None
+            #unmask                    = None
+        
+            
                 
         if invert_mask and mask is not None:
             mask = 1-mask
