@@ -30,12 +30,13 @@ def get_epsilon_from_step(x:Tensor, x_next:Tensor, sigma:Tensor, sigma_next:Tens
 class RK_Method_Beta:
     def __init__(self,
                 model,
-                rk_type       : str,
-                noise_anchor  : float,
-                model_device  : str         = 'cuda',
-                work_device   : str         = 'cpu',
-                dtype         : torch.dtype = torch.float64,
-                extra_options : str         = ""
+                rk_type               : str,
+                noise_anchor          : float,
+                noise_boost_normalize : bool        = True,
+                model_device          : str         = 'cuda',
+                work_device           : str         = 'cpu',
+                dtype                 : torch.dtype = torch.float64,
+                extra_options         : str         = ""
                 ):
         
         self.work_device                 = work_device
@@ -56,8 +57,8 @@ class RK_Method_Beta:
 
         self.IMPLICIT                    : str                      = rk_type in get_implicit_sampler_name_list(nameOnly=True)
         self.EXPONENTIAL                 : bool                     = RK_Method_Beta.is_exponential(rk_type)
-        self.LINEAR_ANCHOR_X_0           : float                    = 1.0
-        self.SYNC_SUBSTEP_MEAN_CW        : bool                     = True
+
+        self.SYNC_SUBSTEP_MEAN_CW        : bool                     = noise_boost_normalize
 
         self.A                           : Optional[Tensor]         = None
         self.B                           : Optional[Tensor]         = None
@@ -104,6 +105,7 @@ class RK_Method_Beta:
     def create(model,
             rk_type       : str,
             noise_anchor  : float       = 1.0,
+            noise_boost_normalize  : bool = True,
             model_device  : str         = 'cuda',
             work_device   : str         = 'cpu',
             dtype         : torch.dtype = torch.float64,
@@ -111,9 +113,9 @@ class RK_Method_Beta:
             ) -> "Union[RK_Method_Exponential, RK_Method_Linear]":
         
         if RK_Method_Beta.is_exponential(rk_type):
-            return RK_Method_Exponential(model, rk_type, noise_anchor, model_device, work_device, dtype, extra_options)
+            return RK_Method_Exponential(model, rk_type, noise_anchor, noise_boost_normalize, model_device, work_device, dtype, extra_options)
         else:
-            return RK_Method_Linear     (model, rk_type, noise_anchor, model_device, work_device, dtype, extra_options)
+            return RK_Method_Linear     (model, rk_type, noise_anchor, noise_boost_normalize, model_device, work_device, dtype, extra_options)
                 
     def __call__(self):
         raise NotImplementedError("This method got clownsharked!")
@@ -600,6 +602,8 @@ class RK_Method_Exponential(RK_Method_Beta):
                 model,
                 rk_type       : str,
                 noise_anchor  : float,
+                noise_boost_normalize  : bool,
+
                 model_device  : str         = 'cuda',
                 work_device   : str         = 'cpu',
                 dtype         : torch.dtype = torch.float64,
@@ -609,6 +613,7 @@ class RK_Method_Exponential(RK_Method_Beta):
         super().__init__(model,
                         rk_type,
                         noise_anchor,
+                        noise_boost_normalize,
                         model_device  = model_device,
                         work_device   = work_device,
                         dtype         = dtype,
@@ -712,6 +717,7 @@ class RK_Method_Linear(RK_Method_Beta):
                 model,
                 rk_type       : str,
                 noise_anchor  : float,
+                noise_boost_normalize  : bool,
                 model_device  : str         = 'cuda',
                 work_device   : str         = 'cpu',
                 dtype         : torch.dtype = torch.float64,
@@ -721,6 +727,7 @@ class RK_Method_Linear(RK_Method_Beta):
         super().__init__(model,
                         rk_type,
                         noise_anchor,
+                        noise_boost_normalize,
                         model_device  = model_device,
                         work_device   = work_device,
                         dtype         = dtype,

@@ -707,9 +707,27 @@ class ClownSamplerAdvanced_Beta:
             eta_substep                   : float = 0.5,
             momentum                      : float = 0.0,
 
-            d_noise                       : float = 1.0,
+
+
+            noise_scaling_substep         : float = 0.0,
+            noise_scaling_type            : str   = "sampler",
+            noise_scaling_mode            : str   = "linear",
+            noise_scaling_eta             : float = 0.0,
+            noise_scaling_cycles          : int   = 1,
+            
+            noise_boost_step              : float = 0.0,
+            noise_boost_substep           : float = 0.0,
+            noise_boost_normalize         : bool  = True,
+            noise_anchor                  : float = 1.0,
+            
             s_noise                       : float = 1.0,
             s_noise_substep               : float = 1.0,
+            d_noise                       : float = 1.0,
+            d_noise_mode                  : str   = "middle",
+
+            
+            
+            
             alpha_sde                     : float = -1.0,
             k_sde                         : float = 1.0,
             cfgpp                         : float = 0.0,
@@ -744,11 +762,8 @@ class ClownSamplerAdvanced_Beta:
             
             overshoot                     : float = 0.0,
             overshoot_substep             : float = 0.0,
-            noise_scaling_substep         : float = 0.0,
-            noise_boost_step              : float = 0.0,
-            noise_boost_substep           : float = 0.0,
+
             bongmath                      : bool = True,
-            noise_anchor                  : float = 1.0,
             
             implicit_type                 : str = "predictor-corrector",
             implicit_type_substeps        : str = "predictor-corrector",
@@ -784,8 +799,28 @@ class ClownSamplerAdvanced_Beta:
             noise_type_sde    = options_mgr.get('noise_type_sde'   , noise_type_sde)
             noise_mode_sde    = options_mgr.get('noise_mode_sde'   , noise_mode_sde)
             eta               = options_mgr.get('eta'              , eta)
-            s_noise           = options_mgr.get('s_noise'          , s_noise)
-            d_noise           = options_mgr.get('d_noise'          , d_noise)
+            eta_substep       = options_mgr.get('eta_substep'      , eta_substep)
+            
+            
+            
+            noise_scaling_substep  = options_mgr.get('noise_scaling_substep' , noise_scaling_substep)
+            noise_scaling_type     = options_mgr.get('noise_scaling_type'    , noise_scaling_type)
+            noise_scaling_mode     = options_mgr.get('noise_scaling_mode'    , noise_scaling_mode)
+            noise_scaling_eta      = options_mgr.get('noise_scaling_eta'     , noise_scaling_eta)
+            noise_scaling_cycles   = options_mgr.get('noise_scaling_cycles'  , noise_scaling_cycles)
+            
+            noise_boost_step       = options_mgr.get('noise_boost_step'      , noise_boost_step)
+            noise_boost_substep    = options_mgr.get('noise_boost_substep'   , noise_boost_substep)
+            noise_boost_normalize  = options_mgr.get('noise_boost_normalize' , noise_boost_normalize)
+            noise_anchor           = options_mgr.get('noise_anchor'          , noise_anchor)
+            
+            s_noise                = options_mgr.get('s_noise'               , s_noise)
+            s_noise_substep        = options_mgr.get('s_noise_substep'       , s_noise_substep)
+            d_noise                = options_mgr.get('d_noise'               , d_noise)
+            d_noise_mode           = options_mgr.get('d_noise_mode'          , d_noise_mode)
+
+            
+            
             alpha_sde         = options_mgr.get('alpha_sde'        , alpha_sde)
             k_sde             = options_mgr.get('k_sde'            , k_sde)
             c1                = options_mgr.get('c1'               , c1)
@@ -813,7 +848,7 @@ class ClownSamplerAdvanced_Beta:
                 etas              = automation['etas']              if 'etas'              in automation else None
                 etas_substep      = automation['etas_substep']      if 'etas_substep'      in automation else None
                 s_noises          = automation['s_noises']          if 's_noises'          in automation else None
-                s_noises_substep  = automation['s_noise_substep']   if 's_noise_substep'   in automation else None
+                s_noises_substep  = automation['s_noises_substep']  if 's_noises_substep'  in automation else None
                 epsilon_scales    = automation['epsilon_scales']    if 'epsilon_scales'    in automation else None
                 frame_weights_grp = automation['frame_weights_grp'] if 'frame_weights_grp' in automation else None
 
@@ -837,9 +872,8 @@ class ClownSamplerAdvanced_Beta:
             sampler = comfy.samplers.ksampler("rk_beta", 
                 {
                     "eta"                           : eta,
-                    "s_noise"                       : s_noise,
-                    "s_noise_substep"               : s_noise_substep,
-                    "d_noise"                       : d_noise,
+                    "eta_substep"                   : eta_substep,
+
                     "alpha"                         : alpha_sde,
                     "k"                             : k_sde,
                     "c1"                            : c1,
@@ -866,6 +900,9 @@ class ClownSamplerAdvanced_Beta:
 
                     "etas"                          : etas,
                     "etas_substep"                  : etas_substep,
+                    
+                    
+                    
                     "s_noises"                      : s_noises,
                     "s_noises_substep"              : s_noises_substep,
                     "epsilon_scales"                : epsilon_scales,
@@ -875,16 +912,33 @@ class ClownSamplerAdvanced_Beta:
                     "frame_weights_grp"             : frame_weights_grp,
                     "eta_substep"                   : eta_substep,
                     "noise_mode_sde_substep"        : noise_mode_sde_substep,
+                    
+                    
+                    
                     "noise_scaling_substep"         : noise_scaling_substep,
+                    "noise_scaling_type"            : noise_scaling_type,
+                    "noise_scaling_mode"            : noise_scaling_mode,
+                    "noise_scaling_eta"             : noise_scaling_eta,
+                    "noise_scaling_cycles"          : noise_scaling_cycles,
+                    
                     "noise_boost_step"              : noise_boost_step,
                     "noise_boost_substep"           : noise_boost_substep,
+                    "noise_boost_normalize"         : noise_boost_normalize,
+                    "noise_anchor"                  : noise_anchor,
+                    
+                    "s_noise"                       : s_noise,
+                    "s_noise_substep"               : s_noise_substep,
+                    "d_noise"                       : d_noise,
+                    "d_noise_mode"                  : d_noise_mode,
+
+
+
 
                     "overshoot_mode"                : overshoot_mode,
                     "overshoot_mode_substep"        : overshoot_mode_substep,
                     "overshoot"                     : overshoot,
                     "overshoot_substep"             : overshoot_substep,
                     "BONGMATH"                      : bongmath,
-                    "noise_anchor"                  : noise_anchor,
 
                     "implicit_type"                 : implicit_type,
                     "implicit_type_substeps"        : implicit_type_substeps,
@@ -977,9 +1031,26 @@ class ClownsharKSampler_Beta:
             eta                           : float                  = 0.5, 
             eta_substep                   : float                  = 0.5,
             momentum                      : float                  = 0.0,
-            d_noise                       : float                  = 1.0, 
-            s_noise                       : float                  = 1.0, 
-            s_noise_substep               : float                  = 1.0, 
+            
+            
+            
+            noise_scaling_substep         : float = 0.0,
+            noise_scaling_type            : str   = "sampler",
+            noise_scaling_mode            : str   = "linear",
+            noise_scaling_eta             : float = 0.0,
+            noise_scaling_cycles          : int   = 1,
+            
+            noise_boost_step              : float = 0.0,
+            noise_boost_substep           : float = 0.0,
+            noise_boost_normalize         : bool  = True,
+            noise_anchor                  : float = 1.0,
+            
+            s_noise                       : float = 1.0,
+            s_noise_substep               : float = 1.0,
+            d_noise                       : float = 1.0,
+            d_noise_mode                  : str   = "middle",
+
+            
             
             alpha_sde                     : float                  = -1.0, 
             k_sde                         : float                  = 1.0,
@@ -1008,10 +1079,7 @@ class ClownsharKSampler_Beta:
             epsilon_scales                : Optional[Tensor]       = None, 
             regional_conditioning_weights : Optional[Tensor]       = None,
             frame_weights_grp                                      = None, 
-            noise_scaling_substep         : float                  = 0.0, 
-            noise_boost_step              : float                  = 0.0, 
-            noise_boost_substep           : float                  = 0.0, 
-            noise_anchor                  : float                  = 1.0,
+
 
             rescale_floor                 : bool                   = True, 
             
@@ -1076,16 +1144,25 @@ class ClownsharKSampler_Beta:
         overshoot              = options_mgr.get('overshoot'             , overshoot)
         overshoot_substep      = options_mgr.get('overshoot_substep'     , overshoot_substep)
         
+        
+    
         noise_scaling_substep  = options_mgr.get('noise_scaling_substep' , noise_scaling_substep)
+        noise_scaling_type     = options_mgr.get('noise_scaling_type'    , noise_scaling_type)
+        noise_scaling_mode     = options_mgr.get('noise_scaling_mode'    , noise_scaling_mode)
+        noise_scaling_eta      = options_mgr.get('noise_scaling_eta'     , noise_scaling_eta)
+        noise_scaling_cycles   = options_mgr.get('noise_scaling_cycles'  , noise_scaling_cycles)
+        
         noise_boost_step       = options_mgr.get('noise_boost_step'      , noise_boost_step)
         noise_boost_substep    = options_mgr.get('noise_boost_substep'   , noise_boost_substep)
-        
+        noise_boost_normalize  = options_mgr.get('noise_boost_normalize' , noise_boost_normalize)
         noise_anchor           = options_mgr.get('noise_anchor'          , noise_anchor)
-
+        
         s_noise                = options_mgr.get('s_noise'               , s_noise)
         s_noise_substep        = options_mgr.get('s_noise_substep'       , s_noise_substep)
-
         d_noise                = options_mgr.get('d_noise'               , d_noise)
+        d_noise_mode           = options_mgr.get('d_noise_mode'          , d_noise_mode)
+        
+        
         
         momentum               = options_mgr.get('momentum'              , momentum)
 
@@ -1148,8 +1225,7 @@ class ClownsharKSampler_Beta:
             eta                           = eta,
             eta_substep                   = eta_substep,
             
-            s_noise                       = s_noise,
-            s_noise_substep               = s_noise_substep,
+
             
             overshoot                     = overshoot,
             overshoot_substep             = overshoot_substep,
@@ -1157,7 +1233,6 @@ class ClownsharKSampler_Beta:
             overshoot_mode                = overshoot_mode,
             overshoot_mode_substep        = overshoot_mode_substep,
             
-            d_noise                       = d_noise,
             
             momentum                      = momentum,
 
@@ -1186,9 +1261,25 @@ class ClownsharKSampler_Beta:
             extra_options                 = extra_options,
             automation                    = automation,
 
+
+
             noise_scaling_substep         = noise_scaling_substep,
+            noise_scaling_type            = noise_scaling_type,
+            noise_scaling_mode            = noise_scaling_mode,
+            noise_scaling_eta             = noise_scaling_eta,
+            noise_scaling_cycles          = noise_scaling_cycles,
+
             noise_boost_step              = noise_boost_step,
             noise_boost_substep           = noise_boost_substep,
+            noise_boost_normalize         = noise_boost_normalize,
+            noise_anchor                  = noise_anchor,
+            
+            s_noise                       = s_noise,
+            s_noise_substep               = s_noise_substep,
+            d_noise                       = d_noise,
+            d_noise_mode                   = d_noise_mode,
+
+            
             
             epsilon_scales                = epsilon_scales,
             regional_conditioning_weights = regional_conditioning_weights,
@@ -1213,6 +1304,7 @@ class ClownsharKSampler_Beta:
             cfg             = cfg, 
             scheduler       = scheduler,
             steps           = steps, 
+            steps_to_run    = steps_to_run,
             denoise         = denoise,
             latent_image    = latent_image, 
             positive        = positive,
@@ -1809,6 +1901,7 @@ class BongSampler:
             cfg             = cfg, 
             scheduler       = scheduler,
             steps           = steps, 
+            steps_to_run    = steps_to_run,
             denoise         = denoise,
             latent_image    = latent_image, 
             positive        = positive,
