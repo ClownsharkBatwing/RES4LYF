@@ -548,12 +548,12 @@ class SharkSampler_Beta:
             }
 
     RETURN_TYPES = ("LATENT", 
-                    "LATENT",)  
-                    #"LATENT",)
+                    "LATENT", 
+                    "OPTIONS",)
     
     RETURN_NAMES = ("output", 
-                    "denoised",)
-                    #"sde_noise",) 
+                    "denoised",
+                    "options",) 
     
     FUNCTION     = "main"
     CATEGORY     = "RES4LYF/samplers"
@@ -591,8 +591,12 @@ class SharkSampler_Beta:
             **kwargs,
             ): 
         
+
+        options_mgr = OptionsManager(options, **kwargs)
+        
         if 'steps_to_run' in sampler.extra_options:
             sampler.extra_options['steps_to_run'] = steps_to_run
+        
         
         output, denoised, sde_noise = SharkSampler().main(
             model           = model, 
@@ -617,7 +621,7 @@ class SharkSampler_Beta:
 
             extra_options   = extra_options)
         
-        return (output, denoised,)
+        return (output, denoised,options_mgr.as_dict())
 
 
 
@@ -920,10 +924,12 @@ class ClownsharKSampler_Beta:
         return inputs
 
     RETURN_TYPES = ("LATENT", 
-                    "LATENT",)
+                    "LATENT",
+                    "OPTIONS",)
     
     RETURN_NAMES = ("output", 
-                    "denoised",) 
+                    "denoised",
+                    "options",) 
     
     FUNCTION = "main"
     CATEGORY = "RES4LYF/samplers"
@@ -1033,8 +1039,12 @@ class ClownsharKSampler_Beta:
         #options_mgr = OptionsManager(options_inputs)
         noise_seed_sde         = options_mgr.get('noise_seed_sde'        , noise_seed_sde)
         
+        
         noise_type_sde         = options_mgr.get('noise_type_sde'        , noise_type_sde)
         noise_type_sde_substep = options_mgr.get('noise_type_sde_substep', noise_type_sde_substep)
+        
+        options_mgr.update('noise_type_sde',         noise_type_sde)
+        options_mgr.update('noise_type_sde_substep', noise_type_sde_substep)
         
         noise_mode_sde         = options_mgr.get('noise_mode_sde'        , noise_mode_sde)
         noise_mode_sde_substep = options_mgr.get('noise_mode_sde_substep', noise_mode_sde_substep)
@@ -1044,6 +1054,9 @@ class ClownsharKSampler_Beta:
 
         eta                    = options_mgr.get('eta'                   , eta)
         eta_substep            = options_mgr.get('eta_substep'           , eta_substep)
+        
+        options_mgr.update('eta',         eta)
+        options_mgr.update('eta_substep', eta_substep)
 
         overshoot              = options_mgr.get('overshoot'             , overshoot)
         overshoot_substep      = options_mgr.get('overshoot_substep'     , overshoot_substep)
@@ -1089,6 +1102,11 @@ class ClownsharKSampler_Beta:
         denoise_alt            = options_mgr.get('denoise_alt'           , denoise_alt)
         
         channelwise_cfg        = options_mgr.get('channelwise_cfg'       , channelwise_cfg)
+        
+        options_mgr.update('noise_type_init', noise_type_init)
+        options_mgr.update('noise_stdev',     noise_stdev)
+        options_mgr.update('denoise_alt',     denoise_alt)
+        options_mgr.update('channelwise_cfg', channelwise_cfg)
         
         sigmas                 = options_mgr.get('sigmas'                , sigmas)
         
@@ -1198,7 +1216,7 @@ class ClownsharKSampler_Beta:
 
             extra_options   = extra_options)
         
-        return (output, denoised,)
+        return (output, denoised, options_mgr.as_dict())
 
 
 
