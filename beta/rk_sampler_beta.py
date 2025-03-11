@@ -575,7 +575,7 @@ def sample_rk_beta(
 
                             eps_[row], data_[row] = RK(x_tmp, s_tmp, x_0, sigma)
                             
-                            data_[row] = data_[row] + EO("momentum", 0.0) * (data_prev_[0] - data_[row])
+                            data_[row] = data_[row] - EO("momentum", 0.0) * (data_prev_[0] - data_[row])  #negative!
                             eps_[row]  = RK.get_epsilon(x_0, x_tmp, data_[row], sigma, s_tmp)
 
                             if eta_substep > 0 and row < RK.rows: # and ((row < rk.rows - rk.multistep_stages - 1))   and   (sub_sigma_down > 0) and sigma_next > 0:
