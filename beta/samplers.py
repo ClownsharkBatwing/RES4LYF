@@ -653,7 +653,7 @@ class SharkChainsampler_Beta(SharkSampler_Beta):
             "required": {
                 "steps_to_run":    ("INT",                        {"default": -1,  "min": -1,       "max": MAX_STEPS}),
                 "cfg":             ("FLOAT",                      {"default": 5.5, "min": -10000.0, "max": 10000.0, "step":0.01, "round": False, "tooltip": "Negative values use channelwise CFG." }),
-                "sampler_mode": (['unsample', 'standard', 'resample'], {"default": "standard"}),
+                "sampler_mode": (['unsample', 'resample'], {"default": "resample"}),
                 },
             "optional": {
                 "model":           ("MODEL",),
@@ -1408,7 +1408,7 @@ class ClownsharkChainsampler_Beta(ClownsharKSampler_Beta):
                 "sampler_name": (get_sampler_name_list     (), {"default": get_default_sampler_name()}), 
                 "steps_to_run": ("INT",                        {"default": -1,  "min": -1,       "max": MAX_STEPS}),
                 "cfg":          ("FLOAT",                      {"default": 5.5, "min": -10000.0, "max": 10000.0, "step":0.01, "round": False, "tooltip": "Negative values use channelwise CFG." }),
-                "sampler_mode": (['unsample', 'standard', 'resample'], {"default": "standard"}),
+                "sampler_mode": (['unsample', 'resample'], {"default": "resample"}),
                 "bongmath":     ("BOOLEAN",                    {"default": True}),
                 },
             "optional": {
