@@ -11,10 +11,18 @@ def add_beta(NODE_CLASS_MAPPINGS, extra_samplers):
         "SharkSamplerAdvanced_Beta"       : samplers.SharkSampler, #SharkSamplerAdvanced_Beta,
 
         "SharkSampler_Beta"               : samplers.SharkSampler_Beta,
+        
+        "SharkChainsampler_Beta"          : samplers.SharkChainsampler_Beta,
+        #"SharkUnsampler_Beta"             : samplers.SharkUnsampler_Beta,
+
 
         "BongSampler"                     : samplers.BongSampler,
 
         "ClownsharKSampler_Beta"          : samplers.ClownsharKSampler_Beta,
+        "ClownsharkChainsampler_Beta"      : samplers.ClownsharkChainsampler_Beta,
+        #"ClownsharkUnsampler_Beta"        : samplers.ClownsharkUnsampler_Beta,
+
+        
         
         "ClownSampler_Beta"               : samplers.ClownSampler_Beta,
         "ClownSamplerAdvanced_Beta"       : samplers.ClownSamplerAdvanced_Beta,

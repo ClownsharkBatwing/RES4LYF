@@ -467,9 +467,13 @@ class SharkSampler:
 
                     x0_output = {}
 
+                    if 'state_info' in latent_image:
+                        steps_len = max(sigmas.shape[-1] - 1,    latent_image['state_info']['sigmas'].shape[-1]-1)
+                    else:
+                        steps_len = sigmas.shape[-1]-1
+                    callback     = latent_preview.prepare_callback(work_model, steps_len, x0_output)
+                    #callback     = latent_preview.prepare_callback(work_model, sigmas.shape[-1] - 1, x0_output)
 
-                    callback     = latent_preview.prepare_callback(work_model, sigmas.shape[-1] - 1, x0_output)
-                    
                     if 'BONGMATH' in sampler.extra_options:
                         sampler.extra_options['state_info']     = state_info
                         sampler.extra_options['state_info_out'] = state_info_out
@@ -642,9 +646,69 @@ class SharkSampler_Beta:
 
 
 
+class SharkChainsampler_Beta(SharkSampler_Beta):  
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "steps_to_run":    ("INT",                        {"default": -1,  "min": -1,       "max": MAX_STEPS}),
+                "cfg":             ("FLOAT",                      {"default": 5.5, "min": -10000.0, "max": 10000.0, "step":0.01, "round": False, "tooltip": "Negative values use channelwise CFG." }),
+                "sampler_mode": (['unsample', 'standard', 'resample'], {"default": "standard"}),
+                },
+            "optional": {
+                "model":           ("MODEL",),
+                "positive":        ("CONDITIONING", ),
+                "negative":        ("CONDITIONING", ),
+                "sampler":         ("SAMPLER", ),
+                "sigmas":          ("SIGMAS", ),
+                "latent_image":    ("LATENT", ),     
+                "options":         ("OPTIONS", ),   
+                }
+            }
+
+    def main(self, 
+            model=None,
+            steps_to_run=-1, 
+            cfg=5.5, 
+            latent_image=None,
+             **kwargs):  
+        
+        steps = latent_image['state_info']['sigmas'].shape[-1] - 3
+        
+        return super().main(model=model, steps_to_run=steps_to_run, steps=steps, cfg=cfg, latent_image=latent_image, **kwargs)
 
 
 
+
+class SharkUnsampler_Beta(SharkSampler_Beta):  
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "steps_to_run":    ("INT",                        {"default": -1,  "min": -1,       "max": MAX_STEPS}),
+                },
+            "optional": {
+                "model":           ("MODEL",),
+                "positive":        ("CONDITIONING", ),
+                #"negative":        ("CONDITIONING", ),
+                "sampler":         ("SAMPLER", ),
+                "sigmas":          ("SIGMAS", ),
+                "latent_image":    ("LATENT", ),     
+                "options":         ("OPTIONS", ),   
+                }
+            }
+
+    def main(self, 
+            model=None,
+            steps_to_run=-1, 
+            cfg=1.0, 
+            sampler_mode="unsample",
+            latent_image=None,
+             **kwargs):  
+        
+        steps = latent_image['state_info']['sigmas'].shape[-1] - 3
+        
+        return super().main(model=model, steps_to_run=steps_to_run, steps=steps, cfg=cfg, sampler_mode="resample", latent_image=latent_image, **kwargs)
 
 
 
@@ -1008,7 +1072,7 @@ class ClownsharKSampler_Beta:
             denoise                       : float                  = 1.0, 
             scheduler                     : str                    = "beta57", 
             cfg                           : float                  = 1.0, 
-            seed                          : int                    = 42, 
+            seed                          : int                    = -1, 
             positive                                               = None, 
             negative                                               = None, 
             latent_image                  : Optional[dict[Tensor]] = None, 
@@ -1335,7 +1399,86 @@ class ClownsharKSampler_Beta:
 
 
 
+class ClownsharkChainsampler_Beta(ClownsharKSampler_Beta):  
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "eta":          ("FLOAT",                      {"default": 0.5, "min": -100.0, "max": 100.0,     "step":0.01, "round": False, "tooltip": "Calculated noise amount to be added, then removed, after each step."}),
+                "sampler_name": (get_sampler_name_list     (), {"default": get_default_sampler_name()}), 
+                "steps_to_run": ("INT",                        {"default": -1,  "min": -1,       "max": MAX_STEPS}),
+                "cfg":          ("FLOAT",                      {"default": 5.5, "min": -10000.0, "max": 10000.0, "step":0.01, "round": False, "tooltip": "Negative values use channelwise CFG." }),
+                "sampler_mode": (['unsample', 'standard', 'resample'], {"default": "standard"}),
+                "bongmath":     ("BOOLEAN",                    {"default": True}),
+                },
+            "optional": {
+                "model":           ("MODEL",),
+                "positive":        ("CONDITIONING", ),
+                "negative":        ("CONDITIONING", ),
+                "sampler":         ("SAMPLER", ),
+                "sigmas":          ("SIGMAS", ),
+                "latent_image":    ("LATENT", ),     
+                "options":         ("OPTIONS", ),   
+                }
+            }
 
+    def main(self, 
+            eta = 0.5,
+            sampler_name = "res_2m",
+            steps_to_run=-1, 
+            cfg=5.5, 
+            bongmath=True,
+            seed            : int = -1, 
+            latent_image=None,
+             **kwargs):  
+        
+        steps = latent_image['state_info']['sigmas'].shape[-1] - 3
+        
+        return super().main(eta=eta, sampler_name=sampler_name, steps_to_run=steps_to_run, steps=steps, cfg=cfg, bongmath=bongmath, seed=seed, latent_image=latent_image, **kwargs)
+
+
+
+
+
+
+
+
+
+class ClownsharkUnsampler_Beta(ClownsharKSampler_Beta):  
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "eta":          ("FLOAT",                      {"default": 0.5, "min": -100.0, "max": 100.0,     "step":0.01, "round": False, "tooltip": "Calculated noise amount to be added, then removed, after each step."}),
+                "sampler_name": (get_sampler_name_list     (), {"default": get_default_sampler_name()}), 
+                "steps_to_run": ("INT",                        {"default": -1,  "min": -1,       "max": MAX_STEPS}),
+                #"cfg":          ("FLOAT",                      {"default": 5.5, "min": -10000.0, "max": 10000.0, "step":0.01, "round": False, "tooltip": "Negative values use channelwise CFG." }),
+                "bongmath":     ("BOOLEAN",                    {"default": True}),
+                },
+            "optional": {
+                "model":           ("MODEL",),
+                "positive":        ("CONDITIONING", ),
+                #"negative":        ("CONDITIONING", ),
+                "sampler":         ("SAMPLER", ),
+                "sigmas":          ("SIGMAS", ),
+                "latent_image":    ("LATENT", ),     
+                "options":         ("OPTIONS", ),   
+                }
+            }
+
+    def main(self, 
+            eta = 0.5,
+            sampler_name = "res_2m",
+            steps_to_run=-1, 
+            cfg=1.0, 
+            bongmath=True,
+            seed            : int = -1, 
+            latent_image=None,
+             **kwargs):  
+        
+        steps = latent_image['state_info']['sigmas'].shape[-1] - 3
+        
+        return super().main(eta=eta, sampler_name=sampler_name, steps_to_run=steps_to_run, steps=steps, cfg=cfg, bongmath=bongmath, seed=seed, sampler_mode="unsample", latent_image=latent_image, **kwargs)
 
 
 
@@ -1385,7 +1528,7 @@ class ClownSampler_Beta:
             denoise                       : float                  = 1.0, 
             scheduler                     : str                    = "beta57", 
             cfg                           : float                  = 1.0, 
-            seed                          : int                    = 42, 
+            seed                          : int                    = -1, 
             positive                                               = None, 
             negative                                               = None, 
             latent_image                  : Optional[dict[Tensor]] = None, 
