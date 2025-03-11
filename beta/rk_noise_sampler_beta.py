@@ -169,6 +169,10 @@ class RK_NoiseSampler:
         self.s_ = self.sigma_fn(self.t_fn(self.sigma) + self.h * self.C)
     
     
+    def get_substep_list(self, RK:Union["RK_Method_Exponential", "RK_Method_Linear"], sigma, h) -> None:
+        s_ = RK.sigma_fn(RK.t_fn(sigma) + h * RK.C)
+        return s_
+    
     
     def get_sde_coeff(self, sigma_next:Tensor, sigma_down:Tensor=None, sigma_up:Tensor=None, eta:float=0.0) -> Tuple[Tensor,Tensor,Tensor]:
         if self.VARIANCE_PRESERVING:
@@ -214,7 +218,7 @@ class RK_NoiseSampler:
             
         self.sigma_up, self.sigma, self.sigma_down, self.alpha_ratio \
             = self.get_sde_step(sigma, sigma_next, overshoot, self.overshoot_mode, self.DOWN_STEP, SUBSTEP=False)
-            
+        
         self.h          = self.h_fn(self.sigma_down, self.sigma)
         self.h_no_eta   = self.h_fn(self.sigma_next, self.sigma)
         self.h          = self.h + self.noise_boost_step * (self.h_no_eta - self.h)
@@ -343,7 +347,7 @@ class RK_NoiseSampler:
             case "soft-linear":
                 eta_ratio = 1-eta * (sigma_next - sigma)
             case "sinusoidal":
-                eta_ratio = torch.sin(torch.pi * sigma_next) ** 2
+                eta_ratio = eta * torch.sin(torch.pi * sigma_next) ** 2
             case "eps":
                 eta_ratio = eta * torch.sqrt((sigma_next/sigma) ** 2 * (sigma ** 2 - sigma_next ** 2) ) 
                 
@@ -639,7 +643,7 @@ class RK_NoiseSampler:
                         sampler_mode    : str) -> Tuple[Tensor,bool]:
         
         if sigmas_override is not None:
-            sigmas = sigmas_override.clone()
+            sigmas = sigmas_override.clone().to(sigmas.device).to(sigmas.dtype)
         sigmas = sigmas.clone() * d_noise
         
         if sigmas[0] == 0.0:      #remove padding used to prevent comfy from adding noise to the latent (for unsampling, etc.)

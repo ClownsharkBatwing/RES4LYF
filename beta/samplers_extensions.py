@@ -1013,7 +1013,7 @@ class ClownOptions_Combine:
         options_mgr = OptionsManager(options, **kwargs)
         return (options_mgr.as_dict(),)
 
-    
+
 
 class ClownOptions_Frameweights:
     @classmethod

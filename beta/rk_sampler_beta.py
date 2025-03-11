@@ -368,6 +368,11 @@ def sample_rk_beta(
         RK.set_coeff(rk_type, NS.h, c1, c2, c3, step, sigmas, NS.sigma_down)
         NS.set_substep_list(RK)
 
+        lying_su, lying_sigma, lying_sd, lying_alpha_ratio = NS.get_sde_step(sigma, NS.sigma_down, EO("lying_eta", 0.0), EO("lying_mode", "hard"))
+        lying_s_ = NS.get_substep_list(RK, sigma, RK.h_fn(lying_sd, lying_sigma))
+        if EO("lying_model"):
+            NS.s_ = lying_s_
+
         rk_swap_stages = 3 if rk_swap_type != "" else 0
         recycled_stages = max(rk_swap_stages, RK.multistep_stages, RK.hybrid_stages)
         
@@ -585,6 +590,11 @@ def sample_rk_beta(
                                 
                                 substep_noise_scaling_ratio = NS.s_[row+1]/NS.sub_sigma_down_eta
                                 eps_[row] *= 1 + noise_scaling_substep*(substep_noise_scaling_ratio-1)
+                                
+                            if eta_substep > 0 and row < RK.rows and EO("lying_substep"):
+                                substep_noise_scaling_ratio = lying_s_[row+1]/NS.sub_sigma_down
+                                eps_[row] *= 1 + EO("lying_substep",0.0)*(substep_noise_scaling_ratio-1)
+                                
                             
                             if overshoot_substep > 0 and row < RK.rows:    
                                 substep_noise_scaling_ratio = NS.s_[row+1]/NS.sub_sigma_down

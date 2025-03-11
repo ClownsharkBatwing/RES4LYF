@@ -73,6 +73,7 @@ class SharkSampler:
             cfg                : float                  =  5.5, 
             scheduler          : str                    = "beta57", 
             steps              : int                    = 30, 
+            steps_to_run       : int                    = -1,
             sampler_mode       : str                    = "standard",
             denoise            : float                  =  1.0, 
             denoise_alt        : float                  =  1.0,
@@ -135,11 +136,6 @@ class SharkSampler:
             ultracascade_latent_height = options_mgr.get('ultracascade_latent_height', ultracascade_latent_height)
 
         
-            if cfg < 0:
-                sampler.extra_options['cfg_cw'] = -cfg
-                cfg = 1.0
-            else:
-                sampler.extra_options.pop("cfg_cw", None) 
 
             if 'positive' in latent_image and positive is None:
                 positive = copy.deepcopy(latent_image['positive'])
@@ -147,6 +143,16 @@ class SharkSampler:
                 negative = copy.deepcopy(latent_image['negative'])
             if 'model' in latent_image and model is None:
                 model = latent_image['model']  #.clone()
+            if 'sampler' in latent_image and sampler is None:
+                sampler = latent_image['sampler']  #.clone()
+            if 'steps_to_run' in sampler.extra_options:
+                sampler.extra_options['steps_to_run'] = steps_to_run
+                
+            if cfg < 0:
+                sampler.extra_options['cfg_cw'] = -cfg
+                cfg = 1.0
+            else:
+                sampler.extra_options.pop("cfg_cw", None) 
 
             work_model   = model.clone()
             sigma_min    = work_model.model.model_sampling.sigma_min
@@ -165,6 +171,13 @@ class SharkSampler:
             else: 
                 sigmas = get_sigmas(model, scheduler, steps, denoise).to(default_dtype)
             sigmas *= denoise_alt
+            
+            if 'd_noise' in sampler.extra_options:
+                if EO("lying_curve"):
+                    sigmas_curve = ((sigmas.to(sigma_max.device).to(sigma_max.dtype) - sigma_max / 2).abs() - sigma_max/2).abs()
+                    sigmas_override = sigmas.to(sigma_max.device).to(sigma_max.dtype)   +   sigmas_curve * (sampler.extra_options['d_noise'] * sigmas.to(sigma_max.device).to(sigma_max.dtype) - sigmas.to(sigma_max.device).to(sigma_max.dtype))
+                    sampler.extra_options['sigmas_override'] = sigmas_override
+
 
             # USE NULL FLOATS AS "FLAGS" TO PREVENT COMFY NOISE ADDITION
             if sampler_mode.startswith("unsample"): 
@@ -510,6 +523,7 @@ class SharkSampler:
             out['positive'] = positive
             out['negative'] = negative
             out['model']    = model
+            out['sampler']  = sampler
             
             gc.collect()
 
@@ -528,7 +542,6 @@ class SharkSampler_Beta:
     def INPUT_TYPES(cls):
         return {
             "required": {
-                "model":           ("MODEL",),
                 "scheduler":       (get_res4lyf_scheduler_list(), {"default": "beta57"},),
                 "steps":           ("INT",                        {"default": 30,  "min": 1,        "max": 10000.0}),
                 "steps_to_run":    ("INT",                        {"default": -1,  "min": -1,       "max": MAX_STEPS}),
@@ -538,6 +551,7 @@ class SharkSampler_Beta:
                 "sampler_mode": (['unsample', 'standard', 'resample'], {"default": "standard"}),
                 },
             "optional": {
+                "model":           ("MODEL",),
                 "positive":        ("CONDITIONING", ),
                 "negative":        ("CONDITIONING", ),
                 "sampler":         ("SAMPLER", ),
@@ -559,43 +573,43 @@ class SharkSampler_Beta:
     CATEGORY     = "RES4LYF/samplers"
     
     def main(self, 
-            model,
-            cfg : float, 
-            scheduler, 
-            steps              : int = 30, 
-            steps_to_run       : int = -1,
-            sampler_mode       : str = "standard",
-            denoise            : float = 1.0, 
-            denoise_alt        : float = 1.0,
-            noise_type_init    : str = "gaussian",
+            model                                       = None,
+            cfg                : float                  = 5.5, 
+            scheduler          : str                    = "beta57", 
+            steps              : int                    = 30, 
+            steps_to_run       : int                    = -1,
+            sampler_mode       : str                    = "standard",
+            denoise            : float                  = 1.0, 
+            denoise_alt        : float                  = 1.0,
+            noise_type_init    : str                    = "gaussian",
             latent_image       : Optional[dict[Tensor]] = None,
             
-            positive           = None,
-            negative           = None,
-            sampler            = None,
-            sigmas             : Optional[Tensor] = None,
-            noise_stdev        : float = 1.0,
-            noise_mean         : float = 0.0,
-            noise_normalize    : bool = True,
+            positive                                    = None,
+            negative                                    = None,
+            sampler                                     = None,
+            sigmas             : Optional[Tensor]       = None,
+            noise_stdev        : float                  = 1.0,
+            noise_mean         : float                  = 0.0,
+            noise_normalize    : bool                   = True,
             
-            d_noise            : float =  1.0,
-            alpha_init         : float = -1.0,
-            k_init             : float = 1.0,
-            cfgpp              : float = 0.0,
-            seed               : int = -1,
-            options            = None,
-            sde_noise          = None,
-            sde_noise_steps    : int = 1,
+            d_noise            : float                  =  1.0,
+            alpha_init         : float                  = -1.0,
+            k_init             : float                  = 1.0,
+            cfgpp              : float                  = 0.0,
+            seed               : int                    = -1,
+            options                                     = None,
+            sde_noise                                   = None,
+            sde_noise_steps    : int                    = 1,
         
-            extra_options      : str = "", 
+            extra_options      : str                    = "", 
             **kwargs,
             ): 
         
 
         options_mgr = OptionsManager(options, **kwargs)
         
-        if 'steps_to_run' in sampler.extra_options:
-            sampler.extra_options['steps_to_run'] = steps_to_run
+        #if 'steps_to_run' in sampler.extra_options:
+        #    sampler.extra_options['steps_to_run'] = steps_to_run
         
         
         output, denoised, sde_noise = SharkSampler().main(
@@ -603,6 +617,7 @@ class SharkSampler_Beta:
             cfg             = cfg, 
             scheduler       = scheduler,
             steps           = steps, 
+            steps_to_run    = steps_to_run,
             denoise         = denoise,
             latent_image    = latent_image, 
             positive        = positive,
