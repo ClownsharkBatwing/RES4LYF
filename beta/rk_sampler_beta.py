@@ -6,7 +6,7 @@ from typing import Optional, Callable, Tuple, Dict, Any, Union
 
 from ..res4lyf              import RESplain
 from ..helper               import ExtraOptions
-from ..latents              import lagrange_interpolation
+from ..latents              import lagrange_interpolation, get_collinear, get_orthogonal
 
 from .rk_method_beta        import RK_Method_Beta
 from .rk_noise_sampler_beta import RK_NoiseSampler
@@ -575,18 +575,17 @@ def sample_rk_beta(
 
                             eps_[row], data_[row] = RK(x_tmp, s_tmp, x_0, sigma)
                             
-                            
+                            data_[row] = data_[row] + EO("momentum", 0.0) * (data_prev_[0] - data_[row])
+                            eps_[row]  = RK.get_epsilon(x_0, x_tmp, data_[row], sigma, s_tmp)
+
                             if eta_substep > 0 and row < RK.rows: # and ((row < rk.rows - rk.multistep_stages - 1))   and   (sub_sigma_down > 0) and sigma_next > 0:
                                 
                                 substep_noise_scaling_ratio = NS.s_[row+1]/NS.sub_sigma_down_eta
                                 eps_[row] *= 1 + noise_scaling_substep*(substep_noise_scaling_ratio-1)
-                                
-                                #substep_noise_scaling_ratio = NS.s_[row+1]/NS.sub_sigma_down
-                                #eps_[row] *= 1 + EO("substep_noise_scaling",1.0)*(substep_noise_scaling_ratio-1)
-                                
-                                #substep_noise_scaling_ratio = NS.s_[row+1]/NS.sub_sigma_down_eta
-                                #eps_[row] *= 1 + EO("substep_noise_scaling_eta",1.0)*(substep_noise_scaling_ratio-1)
-
+                            
+                            if overshoot_substep > 0 and row < RK.rows:    
+                                substep_noise_scaling_ratio = NS.s_[row+1]/NS.sub_sigma_down
+                                eps_[row] *= 1 + EO("substep_overshoot_scaling",1.0)*(substep_noise_scaling_ratio-1)
 
                         if EO("bong2m") and RK.multistep_stages > 0 and step < len(sigmas)-4:
                             h_no_eta       = -torch.log(sigmas[step+1]/sigmas[step])
