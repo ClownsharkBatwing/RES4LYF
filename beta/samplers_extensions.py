@@ -180,6 +180,36 @@ class ClownOptions_DetailBoost_Beta:
         return (options,)
 
 
+class ClownOptions_Momentum_Beta:
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {"required":
+                    {
+                    "momentum": ("FLOAT", {"default": 0.0, "min": -10000.0, "max": 10000.0, "step":0.01, "round": False, "tooltip": "Accelerate convergence with positive values when sampling, negative values when unsampling."}),
+                    },
+                "optional": 
+                    {
+                    "options":               ("OPTIONS", ),   
+                    }
+                }
+
+    RETURN_TYPES = ("OPTIONS",)
+    RETURN_NAMES = ("options",)
+    FUNCTION     = "main"
+    CATEGORY     = "RES4LYF/sampler_options"
+    
+    def main(self,
+            momentum = 0.0,
+            options  = None
+            ):
+        
+        options = options if options is not None else {}
+            
+        options['momentum'] = momentum
+
+        return (options,)
+
+
 
 class ClownOptions_ImplicitSteps_Beta:
     @classmethod

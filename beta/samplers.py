@@ -653,6 +653,7 @@ class ClownSamplerAdvanced_Beta:
                     "s_noise":                ("FLOAT",                      {"default": 1.0, "min": -10000, "max": 10000, "step":0.01,                 "tooltip": "Adds extra SDE noise. Values around 1.03-1.07 can lead to a moderate boost in detail and paint textures."}),
                     "s_noise_substep":        ("FLOAT",                      {"default": 1.0, "min": -10000, "max": 10000, "step":0.01,                 "tooltip": "Adds extra SDE noise. Values around 1.03-1.07 can lead to a moderate boost in detail and paint textures."}),
                     "d_noise":                ("FLOAT",                      {"default": 1.0, "min": -10000, "max": 10000, "step":0.01,                 "tooltip": "Downscales the sigma schedule. Values around 0.98-0.95 can lead to a large boost in detail and paint textures."}),
+                    "momentum":               ("FLOAT",                      {"default": 1.0, "min": -10000, "max": 10000, "step":0.01,                 "tooltip": "Accelerate convergence with positive values when sampling, negative values when unsampling."}),
                     "noise_seed_sde":         ("INT",                        {"default": -1, "min": -1, "max": 0xffffffffffffffff}),
                     "sampler_name":           (get_sampler_name_list(),      {"default": get_default_sampler_name()}), 
 
@@ -685,6 +686,8 @@ class ClownSamplerAdvanced_Beta:
             
             eta                           : float = 0.5,
             eta_substep                   : float = 0.5,
+            momentum                      : float = 0.0,
+
             d_noise                       : float = 1.0,
             s_noise                       : float = 1.0,
             s_noise_substep               : float = 1.0,
@@ -782,6 +785,7 @@ class ClownSamplerAdvanced_Beta:
             steps_to_run      = options_mgr.get('steps_to_run'     , steps_to_run)
             
             noise_seed_sde    = options_mgr.get('noise_seed_sde'   , noise_seed_sde)
+            momentum          = options_mgr.get('momentum'         , momentum)
 
 
             rescale_floor = EO("rescale_floor")
@@ -872,6 +876,8 @@ class ClownSamplerAdvanced_Beta:
                     "rk_swap_type"                  : rk_swap_type,
                     
                     "steps_to_run"                  : steps_to_run,
+                    
+                    "momentum"                      : momentum,
                 })
 
 
@@ -949,6 +955,7 @@ class ClownsharKSampler_Beta:
             
             eta                           : float                  = 0.5, 
             eta_substep                   : float                  = 0.5,
+            momentum                      : float                  = 0.0,
             d_noise                       : float                  = 1.0, 
             s_noise                       : float                  = 1.0, 
             s_noise_substep               : float                  = 1.0, 
@@ -1052,6 +1059,9 @@ class ClownsharKSampler_Beta:
 
         d_noise                = options_mgr.get('d_noise'               , d_noise)
         
+        momentum               = options_mgr.get('momentum'              , momentum)
+
+        
         implicit_type          = options_mgr.get('implicit_type'         , implicit_type)
         implicit_type_substeps = options_mgr.get('implicit_type_substeps', implicit_type_substeps)
         implicit_steps         = options_mgr.get('implicit_steps'        , implicit_steps)
@@ -1115,6 +1125,8 @@ class ClownsharKSampler_Beta:
             overshoot_mode_substep        = overshoot_mode_substep,
             
             d_noise                       = d_noise,
+            
+            momentum                      = momentum,
 
             alpha_sde                     = alpha_sde,
             k_sde                         = k_sde,
