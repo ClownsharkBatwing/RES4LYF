@@ -1510,24 +1510,13 @@ class ClownSampler_Beta:
     def INPUT_TYPES(cls):
         inputs = {"required":
                     {
-                    #"model":        ("MODEL",),
                     "eta":          ("FLOAT",                      {"default": 0.5, "min": -100.0, "max": 100.0,     "step":0.01, "round": False, "tooltip": "Calculated noise amount to be added, then removed, after each step."}),
                     "sampler_name": (get_sampler_name_list     (), {"default": get_default_sampler_name()}), 
-                    #"scheduler":    (get_res4lyf_scheduler_list(), {"default": "beta57"},),
-                    #"steps":        ("INT",                        {"default": 30,  "min":  1,     "max": MAX_STEPS}),
-                    #"steps_to_run": ("INT",                        {"default": -1,  "min": -1,     "max": MAX_STEPS}),
-                    #"denoise":      ("FLOAT",                      {"default": 1.0, "min": -10000, "max": MAX_STEPS, "step":0.01}),
-                    #"cfg":          ("FLOAT",                      {"default": 5.5, "min": -100.0, "max": 100.0,     "step":0.01, "round": False, }),
                     "seed":         ("INT",                        {"default": -1,   "min": -1,     "max": 0xffffffffffffffff}),
-                    #"sampler_mode": (['standard', 'unsample', 'resample'],),
                     "bongmath":     ("BOOLEAN",                    {"default": True}),
                     },
                 "optional": 
                     {
-                    #"positive":     ("CONDITIONING",),
-                    #"negative":     ("CONDITIONING",),
-                    #"latent_image": ("LATENT",),
-                    #"sigmas":       ("SIGMAS",), 
                     "guides":       ("GUIDES",), 
                     "options":      ("OPTIONS", {}),   
                     }

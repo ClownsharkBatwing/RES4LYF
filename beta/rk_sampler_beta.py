@@ -290,7 +290,7 @@ def sample_rk_beta(
                 sigmas[i+1] = lying_sd
                 
         sigmas = (1+noise_scaling_substep) * sigmas.clone()
-        sigmas, UNSAMPLE = NS.prepare_sigmas(sigmas, sigmas_override, d_noise, sampler_mode)
+        sigmas, UNSAMPLE = NS.prepare_sigmas(sigmas, sigmas_override, d_noise, d_noise_start_step, sampler_mode)
     #elif noise_scaling_mode == "linear" and noise_scaling_type == "model_d":
     #    sigmas = (1-noise_scaling_eta) * sigmas.clone()
     #    sigmas, UNSAMPLE = NS.prepare_sigmas(sigmas, sigmas_override, d_noise, sampler_mode)
@@ -415,12 +415,7 @@ def sample_rk_beta(
                 
                 lying_s_ = NS.get_substep_list(RK, sigma, RK.h_fn(lying_sd, lying_sigma))
             if noise_scaling_type == "model":
-                lying_s_ = lying_s_ * (1+noise_scaling_substep)
-                NS.s_ = lying_s_
-        #if noise_scaling_type == "sampler_substep":
-        #    sub_lying_su, sub_lying_sigma, sub_lying_sd, sub_lying_alpha_ratio = NS.get_sde_substep(NS.s_[row], NS.s_[row+RK.row_offset+RK.multistep_stages], noise_scaling_eta, noise_scaling_mode)
-        #    #lying_s_[row]   = sub_lying_sigma
-        #    lying_s_[row+1] = sub_lying_sd
+                NS.s_ = NS.s_ + noise_scaling_substep * (lying_s_ - NS.s_) 
 
         rk_swap_stages = 3 if rk_swap_type != "" else 0
         recycled_stages = max(rk_swap_stages, RK.multistep_stages, RK.hybrid_stages)
@@ -630,7 +625,13 @@ def sample_rk_beta(
                                 break
                             x_, eps_ = RK.newton_iter(x_0, x_, eps_, eps_prev_, data_, NS.s_, row, NS.h, sigmas, step, "pre") # will this do anything? not x_tmp
 
+                            if noise_scaling_type == "model_alpha": # EO("lying_alpha"):
+                                s_tmp = s_tmp * lying_alpha_ratio
                             eps_[row], data_[row] = RK(x_tmp, s_tmp, x_0, sigma)
+                            
+                            
+
+                    
                             
                             #data_[row] = data_[row] - EO("momentum", 0.0) * (data_prev_[0] - data_[row])  #negative!
                             data_[row] = data_[row] - momentum * (data_prev_[0] - data_[row])  #negative!
@@ -647,7 +648,7 @@ def sample_rk_beta(
                                             sub_lying_su, sub_lying_sigma, sub_lying_sd, sub_lying_alpha_ratio = NS.get_sde_substep(NS.s_[row], sub_lying_sd, noise_scaling_eta, noise_scaling_mode)
                                         lying_s_[row+1] = sub_lying_sd
                                 substep_noise_scaling_ratio = NS.s_[row+1]/lying_s_[row+1]
-                                eps_[row] *= 1 + noise_scaling_substep*(substep_noise_scaling_ratio-1)
+                                eps_[row] *= 1 - noise_scaling_substep*(substep_noise_scaling_ratio-1)
 
                             """if eta_substep > 0 and row < RK.rows: # and ((row < rk.rows - rk.multistep_stages - 1))   and   (sub_sigma_down > 0) and sigma_next > 0:
                                 
@@ -811,8 +812,12 @@ def sample_rk_beta(
 
         if d_noise_start_step     == step:
             sigmas = sigmas.clone() * d_noise
+            if sigmas.max() > NS.sigma_max:
+                sigmas = sigmas / NS.sigma_max
         if d_noise_inv_start_step == step:
             sigmas = sigmas.clone() / d_noise_inv
+            if sigmas.max() > NS.sigma_max:
+                sigmas = sigmas / NS.sigma_max
         # end sampling loop
 
     #progress_bar.close()

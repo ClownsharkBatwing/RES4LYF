@@ -143,13 +143,14 @@ class DetailBoostOptions:
     s_noise_substep       : float = 1.0
     d_noise               : float = 1.0
 
+
 class ClownOptions_DetailBoost_Beta:
     @classmethod
     def INPUT_TYPES(cls):
         return {"required":
                     {
                     "noise_scaling_substep": ("FLOAT",            {"default": 0.0, "min": -100.0, "max": 100.0, "step":0.01, "round": False, "tooltip": "Set to positive values to create a sharper, grittier, more detailed image. Set to negative values to soften and deepen the colors."}),
-                    "noise_scaling_type":    (['sampler','sampler_substep','model','model_d'],{"default": "sampler",                                                     "tooltip": "Determines whether the sampler or the model underestimates the noise level."}),
+                    "noise_scaling_type":    (['sampler','sampler_substep','model','model_alpha','model_d'],{"default": "sampler",                                                     "tooltip": "Determines whether the sampler or the model underestimates the noise level."}),
                     "noise_scaling_mode":    (['linear'] + NOISE_MODE_NAMES,  {"default": 'hard',                                          "tooltip": "Changes the steps where the effect is greatest. Most affect early steps, sinusoidal affects middle steps."}),
                     #"noise_scaling_mode":    (NOISE_MODE_NAMES,   {"default": 'hard',                                                        "tooltip": "Changes the steps where the effect is greatest. Most affect early steps, sinusoidal affects middle steps."}),
                     "noise_scaling_eta":     ("FLOAT",            {"default": 0.5, "min": -100.0, "max": 100.0, "step":0.01, "round": False, "tooltip": "The strength of the effect of the noise_scaling_mode. Linear ignores this parameter."}),
@@ -167,7 +168,7 @@ class ClownOptions_DetailBoost_Beta:
                     "d_noise_start_step":    ("INT",              {"default": 0, "min": 0, "max": MAX_STEPS}),
 
                     "d_noise_inv":           ("FLOAT",            {"default": 1.0, "min": -10000, "max": 10000, "step":0.01,                 "tooltip": "Upscales the sigma schedule. Will soften the image and deepen colors. Use after d_noise to counteract desaturation."}),
-                    "d_noise_inv_start_step":("INT",              {"default": 0, "min": 0, "max": MAX_STEPS}),
+                    "d_noise_inv_start_step":("INT",              {"default": 1, "min": 0, "max": MAX_STEPS}),
 
                     #"d_noise_mode":          (['early','middle'], {"default": "middle",                                                      "tooltip": "Determines area of emphasis for downscaling the sigma schedule."}),
                     },
