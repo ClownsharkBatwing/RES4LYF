@@ -414,7 +414,7 @@ def sample_rk_beta(
                 
                 lying_s_ = NS.get_substep_list(RK, sigma, RK.h_fn(lying_sd, lying_sigma))
             if noise_scaling_type == "model":
-                lying_s_ = lying_s_ * (1-noise_scaling_substep)
+                lying_s_ = lying_s_ * (1+noise_scaling_substep)
                 NS.s_ = lying_s_
         #if noise_scaling_type == "sampler_substep":
         #    sub_lying_su, sub_lying_sigma, sub_lying_sd, sub_lying_alpha_ratio = NS.get_sde_substep(NS.s_[row], NS.s_[row+RK.row_offset+RK.multistep_stages], noise_scaling_eta, noise_scaling_mode)
