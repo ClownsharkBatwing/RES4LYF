@@ -626,7 +626,7 @@ def sample_rk_beta(
                             x_, eps_ = RK.newton_iter(x_0, x_, eps_, eps_prev_, data_, NS.s_, row, NS.h, sigmas, step, "pre") # will this do anything? not x_tmp
 
                             if noise_scaling_type == "model_alpha": # EO("lying_alpha"):
-                                s_tmp = s_tmp * lying_alpha_ratio
+                                s_tmp = s_tmp + noise_scaling_substep * (s_tmp * lying_alpha_ratio   -   s_tmp)
                             eps_[row], data_[row] = RK(x_tmp, s_tmp, x_0, sigma)
                             
                             
