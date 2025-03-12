@@ -90,6 +90,8 @@ NODE_CLASS_MAPPINGS = {
     "ClownScheduler"                      : conditioning.ClownScheduler,
 
     "ConditioningBatch4"                  : conditioning.ConditioningBatch4,
+    "ConditioningBatch8"                  : conditioning.ConditioningBatch8,
+
 
     "Set Precision"                       : nodes_precision.set_precision,
     "Set Precision Universal"             : nodes_precision.set_precision_universal,
