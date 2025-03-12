@@ -612,6 +612,10 @@ class SharkSampler_Beta:
 
         options_mgr = OptionsManager(options, **kwargs)
         
+        if denoise < 0:
+            denoise_alt = -denoise
+            denoise = 1.0
+        
         #if 'steps_to_run' in sampler.extra_options:
         #    sampler.extra_options['steps_to_run'] = steps_to_run
         
@@ -671,11 +675,12 @@ class SharkChainsampler_Beta(SharkSampler_Beta):
             steps_to_run=-1, 
             cfg=5.5, 
             latent_image=None,
+            seed            : int = -1, 
              **kwargs):  
         
         steps = latent_image['state_info']['sigmas'].shape[-1] - 3
         
-        return super().main(model=model, steps_to_run=steps_to_run, steps=steps, cfg=cfg, latent_image=latent_image, **kwargs)
+        return super().main(model=model, steps_to_run=steps_to_run, steps=steps, cfg=cfg, seed=seed, latent_image=latent_image, **kwargs)
 
 
 
