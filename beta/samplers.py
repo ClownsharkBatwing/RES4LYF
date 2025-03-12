@@ -529,7 +529,7 @@ class SharkSampler:
             
             out['positive'] = positive
             out['negative'] = negative
-            out['model']    = model
+            out['model']    = model.clone()
             out['sampler']  = sampler
             
             gc.collect()

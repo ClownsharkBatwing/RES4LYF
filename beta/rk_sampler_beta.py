@@ -747,8 +747,9 @@ def sample_rk_beta(
                             x_0, x_, eps_ = RK.bong_iter(x_0, x_, eps_, eps_prev_, data_, sigma, NS.s_, row, RK.row_offset, NS.h, step)
                             
                     #progress_bar.update( round(1 / implicit_steps_total, 2) )
-                    step_update = round(1 / implicit_steps_total, 2)
-                    progress_bar.update(float(f"{step_update:.2f}")) 
+                    
+                    #step_update = round(1 / implicit_steps_total, 2)
+                    #progress_bar.update(float(f"{step_update:.2f}")) 
 
             x_next = x_[RK.rows - RK.multistep_stages - RK.row_offset + 1]
             x_next = NS.rebound_overshoot_step(x_0, x_next)
@@ -801,7 +802,7 @@ def sample_rk_beta(
         #    progress_bar.refresh() 
         #else:
         #    progress_bar.update(1)
-        #progress_bar.update(1)  #THIS WAS HERE
+        progress_bar.update(1)  #THIS WAS HERE
         step += 1
         # end sampling loop
 
@@ -826,7 +827,7 @@ def sample_rk_beta(
     state_info_out['raw_x']             = x#.clone()
     state_info_out['data_prev_']        = data_prev_#.clone()
     state_info_out['end_step']          = step
-    state_info_out['sigmas']            = sigmas
+    state_info_out['sigmas']            = sigmas.clone()
     state_info_out['sampler_mode']      = sampler_mode
     state_info_out['last_rng']          = NS.noise_sampler .generator.get_state().clone()
     state_info_out['last_rng_substep']  = NS.noise_sampler2.generator.get_state().clone()
