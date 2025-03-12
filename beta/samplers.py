@@ -1166,6 +1166,10 @@ class ClownsharKSampler_Beta:
         options_mgr = OptionsManager(options, **kwargs)
         extra_options    += "\n" + options_mgr.get('extra_options', "")
         
+        if denoise < 0:
+            denoise_alt = -denoise
+            denoised = 1.0
+        
         if 'positive' in latent_image and positive is None:
             positive = copy.deepcopy(latent_image['positive'])
         if 'negative' in latent_image and negative is None:
