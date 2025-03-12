@@ -89,7 +89,7 @@ NODE_CLASS_MAPPINGS = {
     "Base64ToConditioning"                : conditioning.Base64ToConditioning,
     "ClownScheduler"                      : conditioning.ClownScheduler,
 
-
+    "ConditioningBatch4"                  : conditioning.ConditioningBatch4,
 
     "Set Precision"                       : nodes_precision.set_precision,
     "Set Precision Universal"             : nodes_precision.set_precision_universal,
