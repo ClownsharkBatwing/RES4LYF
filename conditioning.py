@@ -1502,24 +1502,24 @@ class ClownRegionalConditioning3:
             positive[0][0] = (positive_A[0][0][:,:positive_min_tokens,:] + positive_B[0][0][:,:positive_min_tokens,:] + positive_unmasked[0][0][:,:positive_min_tokens,:]) / 3
             
             if   positive_A_tokens        != positive_min_tokens and positive_A_tokens != positive_max_tokens:
-                positive[0][0] = torch.cat((positive[0][0], positive_A_tokens       [0][0][:,positive_min_tokens:,:]), dim=1)
+                positive[0][0] = torch.cat((positive[0][0], positive_A       [0][0][:,positive_min_tokens:,:]), dim=1)
                 
             elif positive_B_tokens        != positive_min_tokens and positive_B_tokens != positive_max_tokens:
-                positive[0][0] = torch.cat((positive[0][0], positive_B_tokens       [0][0][:,positive_min_tokens:,:]), dim=1)
+                positive[0][0] = torch.cat((positive[0][0], positive_B       [0][0][:,positive_min_tokens:,:]), dim=1)
                 
             elif positive_unmasked_tokens != positive_min_tokens and positive_unmasked_tokens != positive_max_tokens:
-                positive[0][0] = torch.cat((positive[0][0], positive_unmasked_tokens[0][0][:,positive_min_tokens:,:]), dim=1)
+                positive[0][0] = torch.cat((positive[0][0], positive_unmasked[0][0][:,positive_min_tokens:,:]), dim=1)
                 
                 
                 
             if   positive_A_tokens        == positive_mid_tokens and positive_mid_tokens != positive_max_tokens:
-                positive[0][0] = torch.cat((positive[0][0], positive_A_tokens       [0][0][:,positive_mid_tokens:,:]), dim=1)
+                positive[0][0] = torch.cat((positive[0][0], positive_A       [0][0][:,positive_mid_tokens:,:]), dim=1)
                 
             elif positive_B_tokens        == positive_mid_tokens and positive_mid_tokens != positive_max_tokens:
-                positive[0][0] = torch.cat((positive[0][0], positive_B_tokens       [0][0][:,positive_mid_tokens:,:]), dim=1)
+                positive[0][0] = torch.cat((positive[0][0], positive_B       [0][0][:,positive_mid_tokens:,:]), dim=1)
                 
             elif positive_unmasked_tokens == positive_mid_tokens and positive_mid_tokens != positive_max_tokens:
-                positive[0][0] = torch.cat((positive[0][0], positive_unmasked_tokens[0][0][:,positive_mid_tokens:,:]), dim=1)
+                positive[0][0] = torch.cat((positive[0][0], positive_unmasked[0][0][:,positive_mid_tokens:,:]), dim=1)
             
             
             
