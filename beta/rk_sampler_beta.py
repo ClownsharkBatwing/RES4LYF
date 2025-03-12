@@ -147,8 +147,9 @@ def sample_rk_beta(
         s_noise                       : float = 1.0,
         s_noise_substep               : float = 1.0,
         d_noise                       : float = 1.0,
-        d_noise_mode                  : str   = "middle",
-        
+        d_noise_start_step            : int   = 0,
+        d_noise_inv                   : float                  = 1.0,
+        d_noise_inv_start_step        : int                    = 0,
         
         
         
@@ -278,7 +279,7 @@ def sample_rk_beta(
     
     # SETUP SIGMAS
     NS               = RK_NoiseSampler(RK, model, device=work_device, dtype=default_dtype, extra_options=extra_options)
-    sigmas, UNSAMPLE = NS.prepare_sigmas(sigmas, sigmas_override, d_noise, sampler_mode)
+    sigmas, UNSAMPLE = NS.prepare_sigmas(sigmas, sigmas_override, d_noise, d_noise_start_step, sampler_mode)
     
     if noise_scaling_mode != "linear" and noise_scaling_type == "model_d":
         #sigmas = sigmas.clone()
@@ -804,6 +805,14 @@ def sample_rk_beta(
         #    progress_bar.update(1)
         progress_bar.update(1)  #THIS WAS HERE
         step += 1
+        
+        if EO("skip_step", -1) == step:
+            step += 1
+
+        if d_noise_start_step     == step:
+            sigmas = sigmas.clone() * d_noise
+        if d_noise_inv_start_step == step:
+            sigmas = sigmas.clone() / d_noise_inv
         # end sampling loop
 
     #progress_bar.close()

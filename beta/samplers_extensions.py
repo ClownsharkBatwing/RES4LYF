@@ -153,7 +153,7 @@ class ClownOptions_DetailBoost_Beta:
                     "noise_scaling_mode":    (['linear'] + NOISE_MODE_NAMES,  {"default": 'hard',                                          "tooltip": "Changes the steps where the effect is greatest. Most affect early steps, sinusoidal affects middle steps."}),
                     #"noise_scaling_mode":    (NOISE_MODE_NAMES,   {"default": 'hard',                                                        "tooltip": "Changes the steps where the effect is greatest. Most affect early steps, sinusoidal affects middle steps."}),
                     "noise_scaling_eta":     ("FLOAT",            {"default": 0.5, "min": -100.0, "max": 100.0, "step":0.01, "round": False, "tooltip": "The strength of the effect of the noise_scaling_mode. Linear ignores this parameter."}),
-                    "noise_scaling_cycles":  ("INT",              {"default": 1, "min": 1, "max": 10000}),
+                    "noise_scaling_cycles":  ("INT",              {"default": 1, "min": 1, "max": MAX_STEPS}),
 
                     "noise_boost_step":      ("FLOAT",            {"default": 0.0, "min": -100.0, "max": 100.0, "step":0.01, "round": False, "tooltip": "Set to positive values to create a sharper, grittier, more detailed image. Set to negative values to soften and deepen the colors."}),
                     "noise_boost_substep":   ("FLOAT",            {"default": 0.0, "min": -100.0, "max": 100.0, "step":0.01, "round": False, "tooltip": "Set to positive values to create a sharper, grittier, more detailed image. Set to negative values to soften and deepen the colors."}),
@@ -164,7 +164,12 @@ class ClownOptions_DetailBoost_Beta:
                     "s_noise_substep":       ("FLOAT",            {"default": 1.0, "min": -10000, "max": 10000, "step":0.01,                 "tooltip": "Adds extra SDE noise. Values around 1.03-1.07 can lead to a moderate boost in detail and paint textures."}),
                     
                     "d_noise":               ("FLOAT",            {"default": 1.0, "min": -10000, "max": 10000, "step":0.01,                 "tooltip": "Downscales the sigma schedule. Values around 0.98-0.95 can lead to a large boost in detail and paint textures."}),
-                    "d_noise_mode":          (['early','middle'], {"default": "middle",                                                      "tooltip": "Determines area of emphasis for downscaling the sigma schedule."}),
+                    "d_noise_start_step":    ("INT",              {"default": 0, "min": 0, "max": MAX_STEPS}),
+
+                    "d_noise_inv":           ("FLOAT",            {"default": 1.0, "min": -10000, "max": 10000, "step":0.01,                 "tooltip": "Upscales the sigma schedule. Will soften the image and deepen colors. Use after d_noise to counteract desaturation."}),
+                    "d_noise_inv_start_step":("INT",              {"default": 0, "min": 0, "max": MAX_STEPS}),
+
+                    #"d_noise_mode":          (['early','middle'], {"default": "middle",                                                      "tooltip": "Determines area of emphasis for downscaling the sigma schedule."}),
                     },
                 "optional": 
                     {
@@ -178,43 +183,47 @@ class ClownOptions_DetailBoost_Beta:
     CATEGORY     = "RES4LYF/sampler_options"
     
     def main(self,
-            noise_scaling_substep = 0.0,
-            noise_scaling_type    = "sampler",
-            noise_scaling_mode    = "linear",
-            noise_scaling_eta     = 0.5,
-            noise_scaling_cycles  = 1,
+            noise_scaling_substep  = 0.0,
+            noise_scaling_type     = "sampler",
+            noise_scaling_mode     = "linear",
+            noise_scaling_eta      = 0.5,
+            noise_scaling_cycles   = 1,
 
-            noise_boost_step      = 0.0,
-            noise_boost_substep   = 0.0,
-            noise_boost_normalize = True,
-            noise_anchor          = 1.0,
+            noise_boost_step       = 0.0,
+            noise_boost_substep    = 0.0,
+            noise_boost_normalize  = True,
+            noise_anchor           = 1.0,
             
-            s_noise               = 1.0,
-            s_noise_substep       = 1.0,
-            d_noise               = 1.0,
-            d_noise_mode          = "middle",
+            s_noise                = 1.0,
+            s_noise_substep        = 1.0,
+            d_noise                = 1.0,
+            d_noise_start_step     = 0,
             
-            options               = None
+            d_noise_inv            = 1.0,
+            d_noise_inv_start_step = 1,
+            
+            options                = None
             ):
         
         options = options if options is not None else {}
         
-        options['noise_scaling_substep'] = noise_scaling_substep
-        options['noise_scaling_type']    = noise_scaling_type
-        options['noise_scaling_mode']    = noise_scaling_mode
-        options['noise_scaling_eta']     = noise_scaling_eta
-        options['noise_scaling_cycles']  = noise_scaling_cycles
+        options['noise_scaling_substep']  = noise_scaling_substep
+        options['noise_scaling_type']     = noise_scaling_type
+        options['noise_scaling_mode']     = noise_scaling_mode
+        options['noise_scaling_eta']      = noise_scaling_eta
+        options['noise_scaling_cycles']   = noise_scaling_cycles
         
-        options['noise_boost_step']      = noise_boost_step
-        options['noise_boost_substep']   = noise_boost_substep
-        options['noise_boost_normalize'] = noise_boost_normalize
-        options['noise_anchor']          = noise_anchor
+        options['noise_boost_step']       = noise_boost_step
+        options['noise_boost_substep']    = noise_boost_substep
+        options['noise_boost_normalize']  = noise_boost_normalize
+        options['noise_anchor']           = noise_anchor
         
-        options['s_noise']               = s_noise
-        options['s_noise_substep']       = s_noise_substep
-        options['d_noise']               = d_noise
-        options['d_noise_mode']          = d_noise
-        
+        options['s_noise']                = s_noise
+        options['s_noise_substep']        = s_noise_substep
+        options['d_noise']                = d_noise
+        options['d_noise_start_step']     = d_noise_start_step
+        options['d_noise_inv']            = d_noise_inv
+        options['d_noise_inv_start_step'] = d_noise_inv_start_step
         
         """options['DetailBoostOptions'] = DetailBoostOptions(
             noise_scaling_substep = noise_scaling_substep,
@@ -230,7 +239,7 @@ class ClownOptions_DetailBoost_Beta:
             s_noise               = s_noise,
             s_noise_substep       = s_noise_substep,
             d_noise               = d_noise
-            d_noise_mode          = d_noise_mode
+            d_noise_start_step    = d_noise_start_step
         )"""
 
         return (options,)

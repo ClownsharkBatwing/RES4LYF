@@ -637,14 +637,17 @@ class RK_NoiseSampler:
         return x
 
     def prepare_sigmas(self,
-                        sigmas          : Tensor,
-                        sigmas_override : Tensor,
-                        d_noise         : float,
-                        sampler_mode    : str) -> Tuple[Tensor,bool]:
+                        sigmas             : Tensor,
+                        sigmas_override    : Tensor,
+                        d_noise            : float,
+                        d_noise_start_step : int,
+                        sampler_mode       : str) -> Tuple[Tensor,bool]:
         
         if sigmas_override is not None:
             sigmas = sigmas_override.clone().to(sigmas.device).to(sigmas.dtype)
-        sigmas = sigmas.clone() * d_noise
+            
+        if d_noise_start_step == 0:
+            sigmas = sigmas.clone() * d_noise
         
         if sigmas[0] == 0.0:      #remove padding used to prevent comfy from adding noise to the latent (for unsampling, etc.)
             UNSAMPLE = True
