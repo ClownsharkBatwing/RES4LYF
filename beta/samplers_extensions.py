@@ -149,7 +149,7 @@ class ClownOptions_DetailBoost_Beta:
     def INPUT_TYPES(cls):
         return {"required":
                     {
-                    "noise_scaling_substep": ("FLOAT",            {"default": 0.0, "min": -100.0, "max": 100.0, "step":0.01, "round": False, "tooltip": "Set to positive values to create a sharper, grittier, more detailed image. Set to negative values to soften and deepen the colors."}),
+                    "noise_scaling_weight": ("FLOAT",            {"default": 0.0, "min": -100.0, "max": 100.0, "step":0.01, "round": False, "tooltip": "Set to positive values to create a sharper, grittier, more detailed image. Set to negative values to soften and deepen the colors."}),
                     "noise_scaling_type":    (['sampler','sampler_substep','model','model_alpha','model_d'],{"default": "sampler",                                                     "tooltip": "Determines whether the sampler or the model underestimates the noise level."}),
                     "noise_scaling_mode":    (['linear'] + NOISE_MODE_NAMES,  {"default": 'hard',                                          "tooltip": "Changes the steps where the effect is greatest. Most affect early steps, sinusoidal affects middle steps."}),
                     #"noise_scaling_mode":    (NOISE_MODE_NAMES,   {"default": 'hard',                                                        "tooltip": "Changes the steps where the effect is greatest. Most affect early steps, sinusoidal affects middle steps."}),
@@ -184,7 +184,7 @@ class ClownOptions_DetailBoost_Beta:
     CATEGORY     = "RES4LYF/sampler_options"
     
     def main(self,
-            noise_scaling_substep  = 0.0,
+            noise_scaling_weight   = 0.0,
             noise_scaling_type     = "sampler",
             noise_scaling_mode     = "linear",
             noise_scaling_eta      = 0.5,
@@ -208,7 +208,7 @@ class ClownOptions_DetailBoost_Beta:
         
         options = options if options is not None else {}
         
-        options['noise_scaling_substep']  = noise_scaling_substep
+        options['noise_scaling_substep']  = noise_scaling_weight
         options['noise_scaling_type']     = noise_scaling_type
         options['noise_scaling_mode']     = noise_scaling_mode
         options['noise_scaling_eta']      = noise_scaling_eta
