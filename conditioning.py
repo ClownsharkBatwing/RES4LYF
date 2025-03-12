@@ -1537,24 +1537,24 @@ class ClownRegionalConditioning3:
                 positive[0][1]['pooled_output'] = (positive_A[0][1]['pooled_output'][:,:positive_min_pooled_tokens] + positive_B[0][1]['pooled_output'][:,:positive_min_pooled_tokens] + positive_unmasked[0][1]['pooled_output'][:,:positive_min_pooled_tokens]) / 3
                 
                 if   positive_A_pooled_tokens        != positive_min_pooled_tokens and positive_A_pooled_tokens != positive_max_pooled_tokens:
-                    positive[0][1]['pooled_output'] = torch.cat((positive[0][1]['pooled_output'], positive_A_pooled_tokens       [0][1]['pooled_output'][:,positive_min_pooled_tokens:,:]), dim=1)
+                    positive[0][1]['pooled_output'] = torch.cat((positive[0][1]['pooled_output'], positive_A       [0][1]['pooled_output'][:,positive_min_pooled_tokens:,:]), dim=1)
                     
                 elif positive_B_pooled_tokens        != positive_min_pooled_tokens and positive_B_pooled_tokens != positive_max_pooled_tokens:
-                    positive[0][1]['pooled_output'] = torch.cat((positive[0][1]['pooled_output'], positive_B_pooled_tokens       [0][1]['pooled_output'][:,positive_min_pooled_tokens:,:]), dim=1)
+                    positive[0][1]['pooled_output'] = torch.cat((positive[0][1]['pooled_output'], positive_B       [0][1]['pooled_output'][:,positive_min_pooled_tokens:,:]), dim=1)
                     
                 elif positive_unmasked_pooled_tokens != positive_min_pooled_tokens and positive_unmasked_pooled_tokens != positive_max_pooled_tokens:
-                    positive[0][1]['pooled_output'] = torch.cat((positive[0][1]['pooled_output'], positive_unmasked_pooled_tokens[0][1]['pooled_output'][:,positive_min_pooled_tokens:,:]), dim=1)
+                    positive[0][1]['pooled_output'] = torch.cat((positive[0][1]['pooled_output'], positive_unmasked[0][1]['pooled_output'][:,positive_min_pooled_tokens:,:]), dim=1)
                     
                     
                     
                 if   positive_A_pooled_tokens        == positive_mid_pooled_tokens and positive_mid_pooled_tokens != positive_max_pooled_tokens:
-                    positive[0][1]['pooled_output'] = torch.cat((positive[0][1]['pooled_output'], positive_A_pooled_tokens       [0][1]['pooled_output'][:,positive_mid_pooled_tokens:,:]), dim=1)
+                    positive[0][1]['pooled_output'] = torch.cat((positive[0][1]['pooled_output'], positive_A       [0][1]['pooled_output'][:,positive_mid_pooled_tokens:,:]), dim=1)
                     
                 elif positive_B_pooled_tokens        == positive_mid_pooled_tokens and positive_mid_pooled_tokens != positive_max_pooled_tokens:
-                    positive[0][1]['pooled_output'] = torch.cat((positive[0][1]['pooled_output'], positive_B_pooled_tokens       [0][1]['pooled_output'][:,positive_mid_pooled_tokens:,:]), dim=1)
+                    positive[0][1]['pooled_output'] = torch.cat((positive[0][1]['pooled_output'], positive_B       [0][1]['pooled_output'][:,positive_mid_pooled_tokens:,:]), dim=1)
                     
                 elif positive_unmasked_pooled_tokens == positive_mid_pooled_tokens and positive_mid_pooled_tokens != positive_max_pooled_tokens:
-                    positive[0][1]['pooled_output'] = torch.cat((positive[0][1]['pooled_output'], positive_unmasked_pooled_tokens[0][1]['pooled_output'][:,positive_mid_pooled_tokens:,:]), dim=1)
+                    positive[0][1]['pooled_output'] = torch.cat((positive[0][1]['pooled_output'], positive_unmasked[0][1]['pooled_output'][:,positive_mid_pooled_tokens:,:]), dim=1)
                 
         else:
             positive = positive_A
