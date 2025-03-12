@@ -360,7 +360,9 @@ def sample_rk_beta(
 
     # BEGIN SAMPLING LOOP    
     num_steps = len(sigmas[start_step:])-2 if sigmas[-1] == 0 else len(sigmas[start_step:])-1
-    if steps_to_run != -1:
+    
+    #steps_to_run -= 1
+    if steps_to_run >= 0:
         current_steps =              min(num_steps, steps_to_run)
         num_steps     = start_step + min(num_steps, steps_to_run)
     else:
@@ -464,6 +466,8 @@ def sample_rk_beta(
         # INITIALIZE IMPLICIT SAMPLING
         if RK.IMPLICIT:
             x_, eps_, data_ = init_implicit_sampling(RK, x_0, x_, eps_, eps_prev_, data_, eps, denoised, denoised_prev2, step, sigmas, NS.h, NS.s_, EO)
+
+        implicit_steps_total = (implicit_steps_full + 1) * (implicit_steps_diag + 1)
 
         # BEGIN FULLY IMPLICIT LOOP
         for full_iter in range(implicit_steps_full + 1):
@@ -741,6 +745,10 @@ def sample_rk_beta(
                             pass
                         elif full_iter == implicit_steps_full or not EO("disable_fully_explicit_bongmath_except_final"):
                             x_0, x_, eps_ = RK.bong_iter(x_0, x_, eps_, eps_prev_, data_, sigma, NS.s_, row, RK.row_offset, NS.h, step)
+                            
+                    #progress_bar.update( round(1 / implicit_steps_total, 2) )
+                    step_update = round(1 / implicit_steps_total, 2)
+                    progress_bar.update(float(f"{step_update:.2f}")) 
 
             x_next = x_[RK.rows - RK.multistep_stages - RK.row_offset + 1]
             x_next = NS.rebound_overshoot_step(x_0, x_next)
@@ -793,7 +801,7 @@ def sample_rk_beta(
         #    progress_bar.refresh() 
         #else:
         #    progress_bar.update(1)
-        progress_bar.update(1)
+        #progress_bar.update(1)  #THIS WAS HERE
         step += 1
         # end sampling loop
 
