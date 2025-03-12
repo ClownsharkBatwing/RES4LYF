@@ -402,7 +402,7 @@ def sample_rk_beta(
         RK.set_coeff(rk_type, NS.h, c1, c2, c3, step, sigmas, NS.sigma_down)
         NS.set_substep_list(RK)
 
-        if noise_scaling_eta > 0 and noise_scaling_type != "model_d":
+        if (noise_scaling_eta > 0 or noise_scaling_substep != 0) and noise_scaling_type != "model_d":
             lying_s_ = NS.s_
             #if noise_scaling_type == "sampler":
             if noise_scaling_mode == "linear":
