@@ -480,6 +480,45 @@ class Base64ToConditioning:
 
 
 
+class ConditioningBatch4:
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": { 
+                "conditioning_0": ("CONDITIONING",),
+                },
+            "optional": {
+                "conditioning_1": ("CONDITIONING",),
+                "conditioning_2": ("CONDITIONING",),
+                "conditioning_3": ("CONDITIONING",),
+            }
+            }
+        
+    RETURN_TYPES = ("CONDITIONING",)
+    RETURN_NAMES = ("conditioning",)
+    FUNCTION     = "main"
+    CATEGORY     = "RES4LYF/conditioning"
+
+    def main(self, conditioning_0, conditioning_1=None, conditioning_2=None, conditioning_3=None, ):
+        c = []
+        c.append(conditioning_0[0])
+        
+        if conditioning_1 is not None:
+            c.append(conditioning_1[0])
+            
+        if conditioning_2 is not None:
+            c.append(conditioning_2[0])
+            
+        if conditioning_3 is not None:
+            c.append(conditioning_3[0])
+            
+        return (c, )
+
+
+
+
+
+
 class RegionalMask(torch.nn.Module):
     def __init__(self,
                 mask                  : torch.Tensor,
