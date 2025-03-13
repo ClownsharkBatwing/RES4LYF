@@ -342,6 +342,8 @@ class RK_NoiseSampler:
         eta_ratio   = None
         sigma_base  = sigma_next
         
+        sigmax      = self.sigma_max if VP_OVERRIDE is None else 1
+        
         match noise_mode:
             case "hard":
                 eta_ratio = eta
@@ -355,7 +357,7 @@ class RK_NoiseSampler:
             case "soft-linear":
                 eta_ratio = 1-eta * (sigma_next - sigma)
             case "sinusoidal":
-                eta_ratio = eta * torch.sin(torch.pi * sigma_next) ** 2
+                eta_ratio = eta * torch.sin(torch.pi * (sigma_next / sigmax)) ** 2
             case "eps":
                 eta_ratio = eta * torch.sqrt((sigma_next/sigma) ** 2 * (sigma ** 2 - sigma_next ** 2) ) 
                 
@@ -372,7 +374,7 @@ class RK_NoiseSampler:
                 else:
                     eta_ratio  = eta
                     sigma_base = torch.sqrt((sigma - sigma_next).abs() + 1e-10)
-                    
+            
             case "hard_sq":
                 sigma_hat = sigma * (1 + eta)
                 su        = (sigma_hat ** 2 - sigma ** 2) ** .5    #su

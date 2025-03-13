@@ -282,18 +282,13 @@ def sample_rk_beta(
     sigmas, UNSAMPLE = NS.prepare_sigmas(sigmas, sigmas_override, d_noise, d_noise_start_step, sampler_mode)
     
     if noise_scaling_mode != "linear" and noise_scaling_type == "model_d":
-        #sigmas = sigmas.clone()
-        #scaling_cycles = EO("scaling_cycles", 1)
+        sigmas = sigmas.clone()
         for _ in range(noise_scaling_cycles):
             for i in range(len(sigmas)-1):
                 lying_su, lying_sigma, lying_sd, lying_alpha_ratio = NS.get_sde_step(sigmas[i], sigmas[i+1], noise_scaling_eta, noise_scaling_mode, VP_OVERRIDE=True)
                 sigmas[i+1] = lying_sd
-                
         sigmas = (1+noise_scaling_substep) * sigmas.clone()
         sigmas, UNSAMPLE = NS.prepare_sigmas(sigmas, sigmas_override, d_noise, d_noise_start_step, sampler_mode)
-    #elif noise_scaling_mode == "linear" and noise_scaling_type == "model_d":
-    #    sigmas = (1-noise_scaling_eta) * sigmas.clone()
-    #    sigmas, UNSAMPLE = NS.prepare_sigmas(sigmas, sigmas_override, d_noise, sampler_mode)
 
     
     SDE_NOISE_EXTERNAL = False
@@ -315,10 +310,6 @@ def sample_rk_beta(
     NS.init_noise_samplers(x, noise_seed, noise_seed_substep, noise_sampler_type, noise_sampler_type_substep, noise_mode_sde, noise_mode_sde_substep, \
                             overshoot_mode, overshoot_mode_substep, noise_boost_step, noise_boost_substep, alpha, alpha_substep, k, k_substep, \
                             last_rng=last_rng, last_rng_substep=last_rng_substep,)
-
-    #if 'last_rng' in state_info and sampler_mode in {"resample", "unsample"} and noise_seed < 0:
-    #    NS.noise_sampler.generator.set_state (state_info['last_rng'].clone())
-    #    NS.noise_sampler2.generator.set_state(state_info['last_rng_substep'].clone())
 
     data_               = None
     eps_                = None
@@ -405,24 +396,33 @@ def sample_rk_beta(
 
         if (noise_scaling_eta > 0 or noise_scaling_substep != 0) and noise_scaling_type != "model_d":
             lying_s_ = NS.s_
+            """if noise_scaling_type == "model_alpha":
+                VP_OVERRIDE=True
+            else:
+                VP_OVERRIDE=False"""
             #if noise_scaling_type == "sampler":
             if noise_scaling_mode == "linear":
                 lying_s_ *= (1-noise_scaling_eta)
+                
+            elif noise_scaling_type == "sampler":
+                lying_su, lying_sigma, lying_sd, lying_alpha_ratio = NS.get_sde_step(sigma, NS.sigma_down, noise_scaling_eta, noise_scaling_mode)
+                for _ in range(noise_scaling_cycles-1):
+                    lying_su, lying_sigma, lying_sd, lying_alpha_ratio = NS.get_sde_step(sigma, lying_sd, noise_scaling_eta, noise_scaling_mode)
+                lying_s_ = NS.get_substep_list(RK, sigma, RK.h_fn(lying_sd, lying_sigma))    
                 
             elif noise_scaling_type == "model":
                 lying_su, lying_sigma, lying_sd, lying_alpha_ratio = NS.get_sde_step(sigma, NS.sigma_down, noise_scaling_eta, noise_scaling_mode)
                 for _ in range(noise_scaling_cycles-1):
                     lying_su, lying_sigma, lying_sd, lying_alpha_ratio = NS.get_sde_step(sigma, lying_sd, noise_scaling_eta, noise_scaling_mode)
                 lying_s_ = NS.get_substep_list(RK, sigma, RK.h_fn(lying_sd, lying_sigma))
+                NS.s_ = NS.s_ + noise_scaling_substep * (lying_s_ - NS.s_) 
                 
             elif noise_scaling_type == "model_alpha":
                 lying_su, lying_sigma, lying_sd, lying_alpha_ratio = NS.get_sde_step(sigma/NS.sigma_max, NS.sigma_down/NS.sigma_max, noise_scaling_eta, noise_scaling_mode, VP_OVERRIDE=True)
                 for _ in range(noise_scaling_cycles-1):
                     lying_su, lying_sigma, lying_sd, lying_alpha_ratio = NS.get_sde_step(sigma/NS.sigma_max, lying_sd/NS.sigma_max, noise_scaling_eta, noise_scaling_mode, VP_OVERRIDE=True)
                 #lying_s_ = NS.get_substep_list(RK, sigma, RK.h_fn(lying_sd, lying_sigma))
-                
-            if noise_scaling_type == "model":
-                NS.s_ = NS.s_ + noise_scaling_substep * (lying_s_ - NS.s_) 
+                                
 
         rk_swap_stages = 3 if rk_swap_type != "" else 0
         recycled_stages = max(rk_swap_stages, RK.multistep_stages, RK.hybrid_stages)
@@ -632,15 +632,11 @@ def sample_rk_beta(
                                 break
                             x_, eps_ = RK.newton_iter(x_0, x_, eps_, eps_prev_, data_, NS.s_, row, NS.h, sigmas, step, "pre") # will this do anything? not x_tmp
 
-                            if noise_scaling_type == "model_alpha" and noise_scaling_substep != 0 and noise_scaling_eta > 0: # EO("lying_alpha"):
+                            if noise_scaling_type == "model_alpha" and noise_scaling_substep != 0 and noise_scaling_eta > 0:
                                 s_tmp = s_tmp + noise_scaling_substep * (s_tmp * lying_alpha_ratio   -   s_tmp)
+                            
                             eps_[row], data_[row] = RK(x_tmp, s_tmp, x_0, sigma)
                             
-                            
-
-                    
-                            
-                            #data_[row] = data_[row] - EO("momentum", 0.0) * (data_prev_[0] - data_[row])  #negative!
                             data_[row] = data_[row] - momentum * (data_prev_[0] - data_[row])  #negative!
 
                             eps_[row]  = RK.get_epsilon(x_0, x_tmp, data_[row], sigma, s_tmp)
@@ -657,21 +653,6 @@ def sample_rk_beta(
                                 substep_noise_scaling_ratio = NS.s_[row+1]/lying_s_[row+1]
                                 eps_[row] *= 1 - noise_scaling_substep*(substep_noise_scaling_ratio-1)
 
-                            """if eta_substep > 0 and row < RK.rows: # and ((row < rk.rows - rk.multistep_stages - 1))   and   (sub_sigma_down > 0) and sigma_next > 0:
-                                
-                                substep_noise_scaling_ratio = NS.s_[row+1]/NS.sub_sigma_down_eta
-                                eps_[row] *= 1 + noise_scaling_substep*(substep_noise_scaling_ratio-1)
-                                
-                            if eta_substep > 0 and row < RK.rows and EO("lying_substep"):
-                                substep_noise_scaling_ratio = lying_s_[row+1]/NS.sub_sigma_down
-                                eps_[row] *= 1 + EO("lying_substep",0.0)*(substep_noise_scaling_ratio-1)
-                                
-                            
-                            if overshoot_substep > 0 and row < RK.rows:    
-                                substep_noise_scaling_ratio = NS.s_[row+1]/NS.sub_sigma_down
-                                eps_[row] *= 1 + EO("substep_overshoot_scaling",1.0)*(substep_noise_scaling_ratio-1)"""
-                                
-                            
                             if eta_substep > 0 and row < RK.rows and EO("substep_noise_scaling"):    
                                 substep_noise_scaling_ratio = NS.s_[row+1]/NS.sub_sigma_down_eta
                                 eps_[row] *= 1 + EO("substep_noise_scaling",0.0)*(substep_noise_scaling_ratio-1)
