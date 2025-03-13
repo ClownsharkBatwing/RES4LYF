@@ -116,6 +116,7 @@ class SharkSampler:
             # INIT EXTENDABLE OPTIONS INPUTS
             
             options_mgr    = OptionsManager(options, **kwargs)
+                        
             extra_options += "\n" + options_mgr.get('extra_options', "")
             EO = ExtraOptions(extra_options)
             default_dtype = EO("default_dtype", torch.float64)
@@ -147,6 +148,8 @@ class SharkSampler:
                 sampler = latent_image['sampler']  #.clone()
             if 'steps_to_run' in sampler.extra_options:
                 sampler.extra_options['steps_to_run'] = steps_to_run
+                
+            #sampler.extra_options.update(options_mgr.as_dict())
                 
             if cfg < 0:
                 sampler.extra_options['cfg_cw'] = -cfg
