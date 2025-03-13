@@ -206,17 +206,35 @@ class RK_Method_Beta:
                         row_offset : int,
                         h_new      : Tensor,
                         h_new_orig : Tensor,
+                        lying_eps_row_factor : float = 1.0,
                         ) -> Tensor:
-            
+        
         if row < self.rows - row_offset   and   self.multistep_stages == 0:
             row_tmp_offset = row + row_offset
 
         else:
             row_tmp_offset = row + 1
                 
+        zr_base   = self.zum(row+row_offset+self.multistep_stages, eps_, eps_prev_)
+        
+        if self.SYNC_SUBSTEP_MEAN_CW and lying_eps_row_factor != 1.0:
+            zr_orig = self.zum(row+row_offset+self.multistep_stages, eps_, eps_prev_)
+            x_orig_row = x_0 + h_new * zr_orig
+        
+        #eps_row      = eps_     [row].clone()
+        #eps_prev_row = eps_prev_[row].clone()
+        
+        eps_     [row] *= lying_eps_row_factor
+        eps_prev_[row] *= lying_eps_row_factor
         zr = self.zum(row+row_offset+self.multistep_stages, eps_, eps_prev_)
         
         x_[row_tmp_offset] = x_0 + h_new * zr
+        
+        if self.SYNC_SUBSTEP_MEAN_CW and lying_eps_row_factor != 1.0:
+            x_[row_tmp_offset] = x_[row_tmp_offset] - x_[row_tmp_offset].mean(dim=(-2,-1), keepdim=True) + x_orig_row.mean(dim=(-2,-1), keepdim=True)
+        
+        #eps_     [row] = eps_row
+        #eps_prev_[row] = eps_prev_row
         
         if (self.SYNC_SUBSTEP_MEAN_CW and h_new != h_new_orig) or self.EO("sync_mean_noise"):
             if not self.EO("disable_sync_mean_noise"):
