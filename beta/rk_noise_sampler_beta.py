@@ -174,8 +174,10 @@ class RK_NoiseSampler:
         return s_
     
     
-    def get_sde_coeff(self, sigma_next:Tensor, sigma_down:Tensor=None, sigma_up:Tensor=None, eta:float=0.0) -> Tuple[Tensor,Tensor,Tensor]:
-        if self.VARIANCE_PRESERVING:
+    def get_sde_coeff(self, sigma_next:Tensor, sigma_down:Tensor=None, sigma_up:Tensor=None, eta:float=0.0, VP_OVERRIDE=None) -> Tuple[Tensor,Tensor,Tensor]:
+        VARIANCE_PRESERVING = VP_OVERRIDE if VP_OVERRIDE is not None else self.VARIANCE_PRESERVING
+
+        if VARIANCE_PRESERVING:
             if sigma_down is not None:
                 alpha_ratio = (1 - sigma_next) / (1 - sigma_down)
                 sigma_up = (sigma_next ** 2 - sigma_down ** 2 * alpha_ratio ** 2) ** 0.5 
@@ -188,7 +190,10 @@ class RK_NoiseSampler:
                     else:
                         sigma_up = sigma_next * eta 
                     
-                sigma_signal   = self.sigma_max - sigma_next
+                if VP_OVERRIDE is not None:
+                    sigma_signal   =              1 - sigma_next
+                else:
+                    sigma_signal   = self.sigma_max - sigma_next
                 sigma_residual = (sigma_next ** 2 - sigma_up ** 2) ** .5
                 alpha_ratio    = sigma_signal + sigma_residual
                 sigma_down     = sigma_residual / alpha_ratio     
@@ -314,7 +319,10 @@ class RK_NoiseSampler:
                         noise_mode_override :Optional[str] = None ,
                         DOWN                :bool          = False,
                         SUBSTEP             :bool          = False,
+                        VP_OVERRIDE                        = None,
                         ) -> Tuple[Tensor,Tensor,Tensor,Tensor]:
+        
+        VARIANCE_PRESERVING = VP_OVERRIDE if VP_OVERRIDE is not None else self.VARIANCE_PRESERVING
             
         if noise_mode_override is not None:
             noise_mode = noise_mode_override
@@ -369,8 +377,8 @@ class RK_NoiseSampler:
                 sigma_hat = sigma * (1 + eta)
                 su        = (sigma_hat ** 2 - sigma ** 2) ** .5    #su
                 
-                if self.VARIANCE_PRESERVING:
-                    alpha_ratio, sd, su = self.get_sde_coeff(sigma_next, None, su, eta)
+                if VARIANCE_PRESERVING:
+                    alpha_ratio, sd, su = self.get_sde_coeff(sigma_next, None, su, eta, VARIANCE_PRESERVING)
                 else:
                     sd          = sigma_next
                     sigma       = sigma_hat
@@ -381,7 +389,7 @@ class RK_NoiseSampler:
                 
         if eta_ratio is not None:
             sud = sigma_base * eta_fn(eta_ratio)
-            alpha_ratio, sd, su = self.get_sde_coeff(sigma_next, *sud_fn(sud), eta)
+            alpha_ratio, sd, su = self.get_sde_coeff(sigma_next, *sud_fn(sud), eta, VARIANCE_PRESERVING)
         
         su          = torch.nan_to_num(su,          0.0)
         sd          = torch.nan_to_num(sd,    float(sigma_next))

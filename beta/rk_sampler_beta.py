@@ -286,7 +286,7 @@ def sample_rk_beta(
         #scaling_cycles = EO("scaling_cycles", 1)
         for _ in range(noise_scaling_cycles):
             for i in range(len(sigmas)-1):
-                lying_su, lying_sigma, lying_sd, lying_alpha_ratio = NS.get_sde_step(sigmas[i], sigmas[i+1], noise_scaling_eta, noise_scaling_mode)
+                lying_su, lying_sigma, lying_sd, lying_alpha_ratio = NS.get_sde_step(sigmas[i], sigmas[i+1], noise_scaling_eta, noise_scaling_mode, VP_OVERRIDE=True)
                 sigmas[i+1] = lying_sd
                 
         sigmas = (1+noise_scaling_substep) * sigmas.clone()
@@ -408,12 +408,19 @@ def sample_rk_beta(
             #if noise_scaling_type == "sampler":
             if noise_scaling_mode == "linear":
                 lying_s_ *= (1-noise_scaling_eta)
-            else:
+                
+            elif noise_scaling_type == "model":
                 lying_su, lying_sigma, lying_sd, lying_alpha_ratio = NS.get_sde_step(sigma, NS.sigma_down, noise_scaling_eta, noise_scaling_mode)
                 for _ in range(noise_scaling_cycles-1):
                     lying_su, lying_sigma, lying_sd, lying_alpha_ratio = NS.get_sde_step(sigma, lying_sd, noise_scaling_eta, noise_scaling_mode)
-                
                 lying_s_ = NS.get_substep_list(RK, sigma, RK.h_fn(lying_sd, lying_sigma))
+                
+            elif noise_scaling_type == "model_alpha":
+                lying_su, lying_sigma, lying_sd, lying_alpha_ratio = NS.get_sde_step(sigma/NS.sigma_max, NS.sigma_down/NS.sigma_max, noise_scaling_eta, noise_scaling_mode, VP_OVERRIDE=True)
+                for _ in range(noise_scaling_cycles-1):
+                    lying_su, lying_sigma, lying_sd, lying_alpha_ratio = NS.get_sde_step(sigma/NS.sigma_max, lying_sd/NS.sigma_max, noise_scaling_eta, noise_scaling_mode, VP_OVERRIDE=True)
+                #lying_s_ = NS.get_substep_list(RK, sigma, RK.h_fn(lying_sd, lying_sigma))
+                
             if noise_scaling_type == "model":
                 NS.s_ = NS.s_ + noise_scaling_substep * (lying_s_ - NS.s_) 
 
