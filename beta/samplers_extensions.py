@@ -158,6 +158,7 @@ class ClownOptions_DetailBoost_Beta:
                     "noise_scaling_mode":    (NOISE_MODE_NAMES,   {"default": 'sinusoidal',                                                   "tooltip": "Changes the steps where the effect is greatest. Most affect early steps, sinusoidal affects middle steps."}),
                     "noise_scaling_eta":     ("FLOAT",            {"default": 0.5, "min": -100.0, "max": 100.0, "step":0.01, "round": False, "tooltip": "The strength of the effect of the noise_scaling_mode. Linear ignores this parameter."}),
                     "noise_scaling_start_step": ("INT",              {"default": 0, "min": 0, "max": MAX_STEPS}),
+                    "noise_scaling_end_step":   ("INT",              {"default": -1, "min": -1, "max": MAX_STEPS}),
 
                     #"noise_scaling_cycles":  ("INT",              {"default": 1, "min": 1, "max": MAX_STEPS}),
 
@@ -196,6 +197,8 @@ class ClownOptions_DetailBoost_Beta:
             noise_scaling_mode        : str              = "linear",
             noise_scaling_eta         : float            = 0.5,
             noise_scaling_start_step  : int              = 0,
+            noise_scaling_end_step    : int              = -1,
+
 
             noise_scaling_cycles      : int              = 1,
 
@@ -223,20 +226,28 @@ class ClownOptions_DetailBoost_Beta:
         default_dtype = torch.float64
         default_device = torch.device('cuda')
         
+        if noise_scaling_end_step == -1:
+            noise_scaling_end_step = MAX_STEPS
+        
         if noise_scaling_weights == None: 
             noise_scaling_weights = initialize_or_scale(None, noise_scaling_weight, MAX_STEPS).to(default_dtype).to(default_device)
-        noise_scaling_weights = F.pad(noise_scaling_weights, (0, MAX_STEPS), value=0.0)
         
         if noise_scaling_etas == None: 
             noise_scaling_etas = initialize_or_scale(None, noise_scaling_eta, MAX_STEPS).to(default_dtype).to(default_device)
-        noise_scaling_etas = F.pad(noise_scaling_etas, (0, MAX_STEPS), value=0.0)
         
         noise_scaling_prepend = torch.zeros((noise_scaling_start_step,), dtype=default_dtype, device=default_device)
         
         noise_scaling_weights = torch.cat((noise_scaling_prepend, noise_scaling_weights), dim=0)
         noise_scaling_etas    = torch.cat((noise_scaling_prepend, noise_scaling_etas),    dim=0)
 
+        if noise_scaling_weights.shape[-1] > noise_scaling_end_step:
+            noise_scaling_weights = noise_scaling_weights[:noise_scaling_end_step]
+            
+        if noise_scaling_etas.shape[-1] > noise_scaling_end_step:
+            noise_scaling_etas = noise_scaling_etas[:noise_scaling_end_step]
         
+        noise_scaling_weights = F.pad(noise_scaling_weights, (0, MAX_STEPS), value=0.0)
+        noise_scaling_etas = F.pad(noise_scaling_etas, (0, MAX_STEPS), value=0.0)
         
         options['noise_scaling_weight']  = noise_scaling_weight
         options['noise_scaling_type']     = noise_scaling_type
