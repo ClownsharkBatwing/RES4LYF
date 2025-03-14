@@ -407,7 +407,7 @@ class RK_NoiseSampler:
         return sigma_up, sigma_down, alpha_ratio
         
 
-    def swap_noise_step(self, x_0:Tensor, x_next:Tensor, brownian_sigma:Optional[Tensor]=None, brownian_sigma_next:Optional[Tensor]=None,) -> Tensor:
+    def swap_noise_step(self, x_0:Tensor, x_next:Tensor, brownian_sigma:Optional[Tensor]=None, brownian_sigma_next:Optional[Tensor]=None, mask:Optional[Tensor]=None) -> Tensor:
         if self.sigma_up_eta == 0   or   self.sigma_next == 0:
             return x_next
 
@@ -426,11 +426,17 @@ class RK_NoiseSampler:
         noise = self.noise_sampler(sigma=brownian_sigma, sigma_next=brownian_sigma_next)
         noise = normalize_zscore(noise, channelwise=True, inplace=True)
 
-        x = self.alpha_ratio_eta * (denoised_next + self.sigma_down_eta * eps_next) + self.sigma_up_eta * noise * self.s_noise
+        x_noised = self.alpha_ratio_eta * (denoised_next + self.sigma_down_eta * eps_next) + self.sigma_up_eta * noise * self.s_noise
+        
+        if mask is not None:
+            x = mask * x_noised + (1-mask) * x_next
+        else:
+            x = x_noised
+        
         return x
 
 
-    def swap_noise_substep(self, x_0:Tensor, x_next:Tensor, brownian_sigma:Optional[Tensor]=None, brownian_sigma_next:Optional[Tensor]=None,) -> Tensor:
+    def swap_noise_substep(self, x_0:Tensor, x_next:Tensor, brownian_sigma:Optional[Tensor]=None, brownian_sigma_next:Optional[Tensor]=None, mask:Optional[Tensor]=None) -> Tensor:
         if self.sub_sigma_up_eta == 0   or   self.sub_sigma_next == 0:
             return x_next
         
@@ -449,7 +455,13 @@ class RK_NoiseSampler:
         noise = self.noise_sampler2(sigma=brownian_sigma, sigma_next=brownian_sigma_next)
         noise = normalize_zscore(noise, channelwise=True, inplace=True)
 
-        x = self.sub_alpha_ratio_eta * (denoised_next + self.sub_sigma_down_eta * eps_next) + self.sub_sigma_up_eta * noise * self.s_noise_substep
+        x_noised = self.sub_alpha_ratio_eta * (denoised_next + self.sub_sigma_down_eta * eps_next) + self.sub_sigma_up_eta * noise * self.s_noise_substep
+        
+        if mask is not None:
+            x = mask * x_noised + (1-mask) * x_next
+        else:
+            x = x_noised
+        
         return x
 
 

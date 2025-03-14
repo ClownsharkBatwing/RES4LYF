@@ -209,6 +209,8 @@ def sample_rk_beta(
         
         steps_to_run                  : int                = -1,
         
+        sde_mask                      : Optional[Tensor]   = None,
+        
         batch_num                     : int                = 0,
 
         extra_options                 : str                = "",
@@ -250,7 +252,10 @@ def sample_rk_beta(
             if start_step > 0:
                 sigmas = state_info['sigmas'].clone()
             
-
+    if sde_mask is not None:
+        from .rk_guide_func_beta import prepare_mask
+        sde_mask, _ = prepare_mask(x, sde_mask, LGW_MASK_RESCALE_MIN)
+        sde_mask = sde_mask.to(x.device).to(x.dtype)
 
     x      = x     .to(dtype=default_dtype, device=work_device)
     sigmas = sigmas.to(dtype=default_dtype, device=work_device)
@@ -771,7 +776,7 @@ def sample_rk_beta(
                     x_[row+RK.row_offset] = NS.rebound_overshoot_substep(x_0, x_[row+RK.row_offset])
                     
                     if not RK.IMPLICIT and NS.noise_mode_sde_substep != "hard_sq":
-                        x_[row+RK.row_offset] = NS.swap_noise_substep(x_0, x_[row+RK.row_offset])
+                        x_[row+RK.row_offset] = NS.swap_noise_substep(x_0, x_[row+RK.row_offset], mask=sde_mask)
 
                     if BONGMATH and NS.s_[row] > RK.sigma_min and NS.h < RK.sigma_max/2   and   (diag_iter == implicit_steps_diag or EO("enable_diag_explicit_bongmath_all"))   and not EO("disable_terminal_bongmath"):
                         if step == 0 and UNSAMPLE:
@@ -791,13 +796,8 @@ def sample_rk_beta(
             denoised = x_0 - sigma * eps
             
             x_next = LG.process_guides_poststep(x_next, denoised, eps, step)
-            x      = NS.swap_noise_step(x_0, x_next)
-            
-            if EO("mean_guide"):
-                eps_premean = (x - denoised) / sigma_next
-                denoised_mean = denoised - denoised.mean(dim=(-2,-1), keepdim=True) + LG.y0.mean(dim=(-2,-1), keepdim=True)
-                x = denoised_mean + sigma_next * eps_premean
-                
+            x      = NS.swap_noise_step(x_0, x_next, mask=sde_mask)
+
             
             callback_step = len(sigmas)-1 - step if sampler_mode == "unsample" else step
             preview_callback(x, eps, denoised, x_, eps_, data_, callback_step, sigma, sigma_next, callback, EO)

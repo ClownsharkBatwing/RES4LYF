@@ -172,7 +172,7 @@ class SharkSampler:
             if sigmas is not None:
                 sigmas = sigmas.clone().to(default_dtype) # does this type carry into clown after passing through comfy?
             else: 
-                sigmas = get_sigmas(model, scheduler, steps, denoise).to(default_dtype)
+                sigmas = get_sigmas(model, scheduler, steps, abs(denoise)).to(default_dtype)
             sigmas *= denoise_alt
             
             #if 'd_noise' in sampler.extra_options:
@@ -860,6 +860,8 @@ class ClownSamplerAdvanced_Beta:
             
             steps_to_run                  : int = -1,
             
+            sde_mask                      : Optional[Tensor] = None,
+            
             **kwargs,
             ): 
         
@@ -929,6 +931,8 @@ class ClownSamplerAdvanced_Beta:
             
             noise_seed_sde    = options_mgr.get('noise_seed_sde'   , noise_seed_sde)
             momentum          = options_mgr.get('momentum'         , momentum)
+
+            sde_mask          = options_mgr.get('sde_mask'         , sde_mask)
 
 
             rescale_floor = EO("rescale_floor")
@@ -1042,6 +1046,8 @@ class ClownSamplerAdvanced_Beta:
                     "rk_swap_type"                  : rk_swap_type,
                     
                     "steps_to_run"                  : steps_to_run,
+                    
+                    "sde_mask"                      : sde_mask,
                     
                     "momentum"                      : momentum,
                 })
@@ -1186,6 +1192,8 @@ class ClownsharKSampler_Beta:
             rk_swap_threshold             : float                  = 0.0,
             rk_swap_type                  : str                    = "",
             
+            sde_mask                      : Optional[Tensor]       = None,
+
             #start_at_step                 : int                    = 0,
             #stop_at_step                  : int                    = MAX_STEPS,
                         
@@ -1313,6 +1321,9 @@ class ClownsharKSampler_Beta:
         rk_swap_threshold      = options_mgr.get('rk_swap_threshold'     , rk_swap_threshold)
         rk_swap_print          = options_mgr.get('rk_swap_print'         , rk_swap_print)
         
+        sde_mask               = options_mgr.get('sde_mask'              , sde_mask)
+
+        
         #start_at_step          = options_mgr.get('start_at_step'         , start_at_step)
         #stop_at_ste            = options_mgr.get('stop_at_step'          , stop_at_step)
                 
@@ -1404,6 +1415,8 @@ class ClownsharKSampler_Beta:
             rk_swap_type                  = rk_swap_type,
             
             steps_to_run                  = steps_to_run,
+            
+            sde_mask                      = sde_mask,
             
             bongmath                      = bongmath,
             )
@@ -1635,6 +1648,9 @@ class ClownSampler_Beta:
             rk_swap_threshold             : float                  = 0.0,
             rk_swap_type                  : str                    = "",
             
+            sde_mask                      : Optional[Tensor] = None,
+
+            
             #start_at_step                 : int                    = 0,
             #stop_at_step                  : int                    = MAX_STEPS,
                         
@@ -1721,6 +1737,9 @@ class ClownSampler_Beta:
         rk_swap_threshold      = options_mgr.get('rk_swap_threshold'     , rk_swap_threshold)
         rk_swap_print          = options_mgr.get('rk_swap_print'         , rk_swap_print)
         
+        sde_mask               = options_mgr.get('sde_mask'              , sde_mask)
+
+        
         #start_at_step          = options_mgr.get('start_at_step'         , start_at_step)
         #stop_at_ste            = options_mgr.get('stop_at_step'          , stop_at_step)
                 
@@ -1795,6 +1814,8 @@ class ClownSampler_Beta:
             rk_swap_type                  = rk_swap_type,
             
             steps_to_run                  = steps_to_run,
+            
+            sde_mask                      = sde_mask,
             
             bongmath                      = bongmath,
             )

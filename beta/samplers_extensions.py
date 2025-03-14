@@ -625,6 +625,45 @@ class ClownOptions_StepsToRun_Beta:
 
 
 
+    
+    
+class ClownOptions_SDE_Mask_Beta:
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                #"steps_to_run":  ("INT", {"default": -1,  "min": -1, "max": 10000}),
+                "invert_mask":          ("BOOLEAN",                                   {"default": False}),
+                },
+            "optional": {
+                "mask":                 ("MASK", ),
+                "options":            ("OPTIONS", ),   
+                }
+            }
+
+    RETURN_TYPES = ("OPTIONS",)
+    RETURN_NAMES = ("options",)
+    FUNCTION     = "main"
+    CATEGORY     = "RES4LYF/sampler_options"
+    
+    def main(self,
+            invert_mask = False,
+            mask     = None,
+            options      = None,
+            ): 
+        
+        options = copy.deepcopy(options) if options is not None else {}
+        
+        if invert_mask:
+            mask = 1-mask
+            
+        options['sde_mask'] = mask
+
+        return (options,)
+
+
+
+
 class ClownGuide_Misc_Beta:
     @classmethod
     def INPUT_TYPES(cls):
