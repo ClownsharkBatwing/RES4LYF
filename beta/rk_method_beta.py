@@ -482,7 +482,7 @@ class RK_Method_Beta:
                 x_0_tmp  = x_0.clone()
                 x_tmp_   = x_.clone()
                 eps_tmp_ = eps_.clone()
-                
+            
             for i in range(100):
                 x_0 = x_[row+row_offset] - h * self.zum(row+row_offset, eps_, eps_prev_)
                 for rr in range(row+row_offset):

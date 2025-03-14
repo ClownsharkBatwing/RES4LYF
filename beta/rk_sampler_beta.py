@@ -228,7 +228,7 @@ def sample_rk_beta(
         x = state_info['raw_x'].clone()
         RESplain("Continuing from raw latent from previous sampler.", debug=False)
     
-
+    
     
     start_step = 0
     if 'end_step' in state_info and (sampler_mode == "resample" or sampler_mode == "unsample"):
@@ -644,8 +644,8 @@ def sample_rk_beta(
                                     lying_s_[row+1] = sub_lying_sd
                                 substep_noise_scaling_ratio = NS.s_[row+1]/lying_s_[row+1]
                                 if RK.multistep_stages > 0:
-                                    substep_noise_scaling_ratio = sigma_next/lying_sd
-                                #eps_[row] *= 1 - noise_scaling_substep*(substep_noise_scaling_ratio-1)
+                                    substep_noise_scaling_ratio = sigma_next/lying_sd                   #fails with resample?
+                                
                                 lying_eps_row_factor = (1 - noise_scaling_weight*(substep_noise_scaling_ratio-1))
 
 

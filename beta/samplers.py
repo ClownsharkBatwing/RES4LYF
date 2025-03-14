@@ -481,6 +481,12 @@ class SharkSampler:
                         sampler.extra_options['state_info']     = state_info
                         sampler.extra_options['state_info_out'] = state_info_out
                     
+                    if 'control' in neg_cond[0][1]:
+                        neg_cond[0][1]['control'] = positive[0][1]['control']
+                        [pos_cond[batch_num]][0][1]['control'] = positive[0][1]['control']
+                        neg_cond[0][1]['control'].base = positive[0][1]['control'].base
+                        [pos_cond[batch_num]][0][1]['control'].base = positive[0][1]['control'].base
+                        
                     if batch_num < len(pos_cond):
                         samples = comfy.sample.sample_custom(work_model, noise, cfg, sampler, sigmas, [pos_cond[batch_num]], neg_cond, x.clone(), noise_mask=noise_mask, callback=callback, disable_pbar=disable_pbar, seed=noise_seed)
                     else:
