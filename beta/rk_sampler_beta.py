@@ -228,7 +228,7 @@ def sample_rk_beta(
         x = state_info['raw_x'].clone()
         RESplain("Continuing from raw latent from previous sampler.", debug=False)
     
-    
+
     
     start_step = 0
     if 'end_step' in state_info and (sampler_mode == "resample" or sampler_mode == "unsample"):
@@ -718,6 +718,48 @@ def sample_rk_beta(
                         if not EO("disable_guides_eps_prev_substep"):
                             eps_prev_, x_ = LG.process_guides_substep(x_0, x_, eps_prev_, data_, row, step, NS.sigma, NS.sigma_next, NS.sigma_down, NS.s_, epsilon_scale, RK)
 
+                        if EO("mean_eps_guide"):
+                            mean_eps_guide = EO("mean_eps_guide", 0.5)
+                            eps_row_mean = eps_[row] - eps_[row].mean(dim=(-2,-1), keepdim=True) + (LG.y0_inv - x_[row]).mean(dim=(-2,-1), keepdim=True)
+                            
+                            eps_[row] = LG.mask * eps_row_mean + (1 - LG.mask) * eps_[row]
+                            
+                        #if EO("mean_eps_guide_x_0"):
+                        if LG.y0_mean is not None and LG.y0_mean.sum() != 0.0:
+                            #mean_eps_guide = EO("mean_eps_guide_x_0", 0.5)
+                            eps_row_mean = eps_[row] - eps_[row].mean(dim=(-2,-1), keepdim=True) + (LG.y0_mean - x_0).mean(dim=(-2,-1), keepdim=True)
+                            
+                            if LG.mask_mean is not None:
+                                eps_row_mean = LG.mask_mean * eps_row_mean + (1 - LG.mask_mean) * eps_[row]
+                            
+                            eps_[row] = eps_[row] + LG.lgw_mean[step] * (eps_row_mean - eps_[row])
+                            
+                            
+                        if EO("std_eps_guide_x_0"):
+                            std_eps_guide = EO("std_eps_guide_x_0", 0.5)
+                            eps_row_std = eps_[row] - eps_[row].std(dim=(-2,-1), keepdim=True) + (LG.y0_inv - x_0).std(dim=(-2,-1), keepdim=True)
+                            
+                            eps_[row] = LG.mask * eps_row_std + (1 - LG.mask) * eps_[row]
+                            
+                            
+                            
+                        if EO("mean_eps_tile"):
+                            mean_eps_tile = EO("mean_eps_tile", 1.0)
+                            mean_tile_size = EO("mean_eps_tile_size", 8)
+                            from einops          import rearrange
+
+                            
+                            y0_tiled       = rearrange(LG.y0,     "b c (h t1) (w t2) -> (t1 t2) b c h w", t1=mean_tile_size, t2=mean_tile_size)
+                            eps_row_tiled  = rearrange(eps_[row], "b c (h t1) (w t2) -> (t1 t2) b c h w", t1=mean_tile_size, t2=mean_tile_size)
+                            x_row_tiled    = rearrange(x_  [row], "b c (h t1) (w t2) -> (t1 t2) b c h w", t1=mean_tile_size, t2=mean_tile_size)
+                            
+                            eps_row_tiled_mean = eps_row_tiled - eps_row_tiled.mean(dim=(-2,-1), keepdim=True) + (y0_tiled - x_row_tiled).mean(dim=(-2,-1), keepdim=True)
+                            eps_row_mean     = rearrange(eps_row_tiled_mean,     "(t1 t2) b c h w -> b c (h t1) (w t2)", t1=mean_tile_size, t2=mean_tile_size)
+                            
+                            eps_[row] = eps_[row] + mean_eps_tile * (eps_row_mean - eps_[row])
+                            
+                            
+
                         if (full_iter == 0 and diag_iter == 0)   or   EO("newton_iter_post_use_on_implicit_steps"):
                             x_, eps_ = RK.newton_iter(x_0, x_, eps_, eps_prev_, data_, NS.s_, row, NS.h, sigmas, step, "post")
 
@@ -750,6 +792,12 @@ def sample_rk_beta(
             
             x_next = LG.process_guides_poststep(x_next, denoised, eps, step)
             x      = NS.swap_noise_step(x_0, x_next)
+            
+            if EO("mean_guide"):
+                eps_premean = (x - denoised) / sigma_next
+                denoised_mean = denoised - denoised.mean(dim=(-2,-1), keepdim=True) + LG.y0.mean(dim=(-2,-1), keepdim=True)
+                x = denoised_mean + sigma_next * eps_premean
+                
             
             callback_step = len(sigmas)-1 - step if sampler_mode == "unsample" else step
             preview_callback(x, eps, denoised, x_, eps_, data_, callback_step, sigma, sigma_next, callback, EO)

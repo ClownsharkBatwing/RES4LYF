@@ -4,7 +4,7 @@ import torch.nn.functional as F
 
 from dataclasses import dataclass, asdict
 from typing import Optional, Callable, Tuple, Dict, Any, Union
-
+import copy
 
 from nodes import MAX_RESOLUTION
 
@@ -405,7 +405,7 @@ class ClownOptions_Automation_Beta:
                     "frame_weights":    ("SIGMAS", ),
                     "options":          ("OPTIONS",),  
                     }  
-               }
+                }
     RETURN_TYPES = ("OPTIONS",)
     RETURN_NAMES = ("options",)
     FUNCTION     = "main"
@@ -726,12 +726,94 @@ class ClownGuide_Misc_Beta:
 
 
 
+
+class ClownGuide_Mean_Beta:
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {"required":
+                    {
+                    #"guide_mode":           (GUIDE_MODE_NAMES_BETA_SIMPLE+['mean'],                {"default": 'epsilon',                                                      "tooltip": "Recommended: epsilon or mean/mean_std with sampler_mode = standard, and unsample/resample with sampler_mode = unsample/resample. Epsilon_dynamic_mean, etc. are only used with two latent inputs and a mask. Blend/hard_light/mean/mean_std etc. require low strengths, start with 0.01-0.02."}),
+                    "channelwise_mode":     ("BOOLEAN",                                   {"default": True}),
+                    "projection_mode":      ("BOOLEAN",                                   {"default": True}),
+                    "weight":               ("FLOAT",                                     {"default": 0.75, "min": -100.0, "max": 100.0, "step":0.01, "round": False, "tooltip": "Set the strength of the guide."}),
+                    "cutoff":               ("FLOAT",                                     {"default": 1.0,  "min": 0.0,    "max": 1.0,   "step":0.01, "round": False, "tooltip": "Disables the guide for the next step when the denoised image is similar to the guide. Higher values will strengthen the effect."}),
+                    "weight_scheduler":     (["constant"] + get_res4lyf_scheduler_list(), {"default": "beta57"},),
+                    "start_step":           ("INT",                                       {"default": 0,    "min": 0,      "max": 10000}),
+                    "end_step":             ("INT",                                       {"default": 15,   "min": 1,      "max": 10000}),
+                    "invert_mask":          ("BOOLEAN",                                   {"default": False}),
+                    },
+                "optional": 
+                    {
+                    "guide":                ("LATENT", ),
+                    "mask":                 ("MASK", ),
+                    "weights":              ("SIGMAS", ),
+                    "guides":               ("GUIDES", ),
+                    }  
+                }
+        
+    RETURN_TYPES = ("GUIDES",)
+    RETURN_NAMES = ("guides",)
+    FUNCTION     = "main"
+    CATEGORY     = "RES4LYF/sampler_extensions"
+
+    def main(self,
+            weight_scheduler          = "constant",
+            start_step                = 0,
+            end_step                  = 30,
+            cutoff                    = 1.0,
+            guide                     = None,
+            weight                    = 0.0,
+
+            guide_mode                = "epsilon",
+            channelwise_mode          = False,
+            projection_mode           = False,
+            weights                   = None,
+            mask                      = None,
+            invert_mask               = False,
+            
+            guides                    = None,
+            ):
+        
+        
+        
+        mask = 1-mask if mask is not None else None
+        
+        if guide is not None:
+            raw_x = guide.get('state_info', {}).get('raw_x', None)
+            if raw_x is not None:
+                guide          = {'samples': guide['state_info']['raw_x'].clone()}
+            else:
+                guide          = {'samples': guide['samples'].clone()}
+        
+        if weight_scheduler == "constant" and weights == None: 
+            weights = initialize_or_scale(None, weights, end_step).to(default_dtype)
+            weights = F.pad(weights, (0, MAX_STEPS), value=0.0)
+        
+        guides = copy.deepcopy(guides) if guides is not None else {}
+        
+        guides['weight_mean']           = weight
+        guides['weights_mean']          = weights
+        guides['guide_mean']            = guide
+        guides['mask_mean']             = mask
+        
+        guides['weight_scheduler_mean'] = weight_scheduler
+        guides['start_step_mean']       = start_step
+        guides['end_step_mean']         = end_step
+        
+        guides['cutoff_mean']           = cutoff
+        
+        return (guides, )
+
+
+
+
+
 class ClownGuide_Beta:
     @classmethod
     def INPUT_TYPES(cls):
         return {"required":
                     {
-                    "guide_mode":           (GUIDE_MODE_NAMES_BETA_SIMPLE,                {"default": 'epsilon',                                                      "tooltip": "Recommended: epsilon or mean/mean_std with sampler_mode = standard, and unsample/resample with sampler_mode = unsample/resample. Epsilon_dynamic_mean, etc. are only used with two latent inputs and a mask. Blend/hard_light/mean/mean_std etc. require low strengths, start with 0.01-0.02."}),
+                    "guide_mode":           (GUIDE_MODE_NAMES_BETA_SIMPLE+['mean'],                {"default": 'epsilon',                                                      "tooltip": "Recommended: epsilon or mean/mean_std with sampler_mode = standard, and unsample/resample with sampler_mode = unsample/resample. Epsilon_dynamic_mean, etc. are only used with two latent inputs and a mask. Blend/hard_light/mean/mean_std etc. require low strengths, start with 0.01-0.02."}),
                     "channelwise_mode":     ("BOOLEAN",                                   {"default": True}),
                     "projection_mode":      ("BOOLEAN",                                   {"default": True}),
                     "weight":               ("FLOAT",                                     {"default": 0.75, "min": -100.0, "max": 100.0, "step":0.01, "round": False, "tooltip": "Set the strength of the guide."}),
@@ -796,31 +878,34 @@ class ClownGuide_Beta:
             else:
                 guide_unmasked = {'samples': guide_unmasked['samples'].clone()}
         
-        guides = CG.main(
-                        weight_scheduler,
-                        weight_scheduler_unmasked,
-                        start_step,
-                        start_step_unmasked,
-                        end_step,
-                        end_step_unmasked,
-                        cutoff,
-                        cutoff_unmasked,
-                        guide,
-                        guide_unmasked,
-                        weight,
-                        weight_unmasked,
+        guides, = CG.main(
+            weight_scheduler          = weight_scheduler,
+            weight_scheduler_unmasked = weight_scheduler_unmasked,
+            start_step_masked         = start_step,
+            start_step_unmasked       = start_step_unmasked,
+            end_step_masked           = end_step,
+            end_step_unmasked         = end_step_unmasked,
+            cutoff_masked             = cutoff,
+            cutoff_unmasked           = cutoff_unmasked,
+            guide_masked              = guide,
+            guide_unmasked            = guide_unmasked,
+            weight_masked             = weight,
+            weight_unmasked           = weight_unmasked,
 
-                        guide_mode,
-                        channelwise_mode,
-                        projection_mode,
-                        weights,
-                        weights_unmasked,
-                        mask,
-                        unmask,
-                        invert_mask,
-                        )
-        
-        return (guides[0], )
+            guide_mode                = guide_mode,
+            channelwise_mode          = channelwise_mode,
+            projection_mode           = projection_mode,
+            weights_masked            = weights,
+            weights_unmasked          = weights_unmasked,
+            mask                      = mask,
+            unmask                    = unmask,
+            invert_mask               = invert_mask
+        )
+
+        return (guides, )
+
+
+        #return (guides[0], )
 
 
 
@@ -942,7 +1027,7 @@ class ClownGuides_Beta:
             weights_unmasked = initialize_or_scale(None, weight_unmasked, end_step_unmasked).to(default_dtype)
             weights_unmasked = F.pad(weights_unmasked, (0, MAX_STEPS), value=0.0)
     
-        guides = (
+        """guides = (
                 guide_mode,
                 weight_masked,
                 weight_unmasked,
@@ -961,7 +1046,29 @@ class ClownGuides_Beta:
                 end_step_unmasked,
                 cutoff_masked,
                 cutoff_unmasked
-                )
+                )"""
+        
+        guides = {
+            "guide_mode"                : guide_mode,
+            "weight_masked"             : weight_masked,
+            "weight_unmasked"           : weight_unmasked,
+            "weights_masked"            : weights_masked,
+            "weights_unmasked"          : weights_unmasked,
+            "guide_masked"              : guide_masked,
+            "guide_unmasked"            : guide_unmasked,
+            "mask"                      : mask,
+            "unmask"                    : unmask,
+
+            "weight_scheduler_masked"   : weight_scheduler_masked,
+            "weight_scheduler_unmasked" : weight_scheduler_unmasked,
+            "start_step_masked"         : start_step_masked,
+            "start_step_unmasked"       : start_step_unmasked,
+            "end_step_masked"           : end_step_masked,
+            "end_step_unmasked"         : end_step_unmasked,
+            "cutoff_masked"             : cutoff_masked,
+            "cutoff_unmasked"           : cutoff_unmasked
+        }
+        
         
         return (guides, )
 
@@ -1080,7 +1187,7 @@ class ClownGuidesAB_Beta:
             mask_A = 1-mask_A if mask_A is not None else None
             mask_B = 1-mask_B if mask_B is not None else None
     
-        guides = (
+        """guides = (
                 guide_mode,
                 weight_A,
                 weight_B,
@@ -1099,7 +1206,28 @@ class ClownGuidesAB_Beta:
                 end_step_B,
                 cutoff_A,
                 cutoff_B
-                )
+                )"""
+        
+        guides = {
+            "guide_mode"                : guide_mode,
+            "weight_masked"             : weight_A,
+            "weight_unmasked"           : weight_B,
+            "weights_masked"            : weights_A,
+            "weights_unmasked"          : weights_B,
+            "guide_masked"              : guide_A,
+            "guide_unmasked"            : guide_B,
+            "mask"                      : mask_A,
+            "unmask"                    : mask_B,
+
+            "weight_scheduler_masked"   : weight_scheduler_A,
+            "weight_scheduler_unmasked" : weight_scheduler_B,
+            "start_step_masked"         : start_step_A,
+            "start_step_unmasked"       : start_step_B,
+            "end_step_masked"           : end_step_A,
+            "end_step_unmasked"         : end_step_B,
+            "cutoff_masked"             : cutoff_A,
+            "cutoff_unmasked"           : cutoff_B
+        }
         
         return (guides, )
     
