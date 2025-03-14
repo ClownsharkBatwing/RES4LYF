@@ -482,9 +482,9 @@ class SharkSampler:
                         sampler.extra_options['state_info_out'] = state_info_out
                     
                     if 'control' in neg_cond[0][1]:
-                        neg_cond[0][1]['control'] = positive[0][1]['control']
+                        neg_cond[0][1]['control'] = negative[0][1]['control']
                         [pos_cond[batch_num]][0][1]['control'] = positive[0][1]['control']
-                        neg_cond[0][1]['control'].base = positive[0][1]['control'].base
+                        neg_cond[0][1]['control'].base = negative[0][1]['control'].base
                         [pos_cond[batch_num]][0][1]['control'].base = positive[0][1]['control'].base
                         
                     if batch_num < len(pos_cond):
