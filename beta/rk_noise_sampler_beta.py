@@ -30,6 +30,7 @@ NOISE_MODE_NAMES = ["none",
                     "sinusoidal",
                     "exp", 
                     "vpsde",
+                    "er4",
                     "hard_var", 
                     ]
 
@@ -388,6 +389,15 @@ class RK_NoiseSampler:
                     
             case "vpsde":
                 alpha_ratio, sd, su = self.get_vpsde_step_RF(sigma, sigma_next, eta)
+                
+            case "er4":
+                #def noise_scaler(sigma):
+                #    return sigma * ((sigma ** 0.3).exp() + 10.0)
+                noise_scaler = lambda sigma: sigma * ((sigma ** eta).exp() + 10.0)
+                alpha_ratio = noise_scaler(sigma_next) / noise_scaler(sigma)
+                sigma_up    = (sigma_next ** 2 - sigma ** 2 * alpha_ratio ** 2) ** 0.5
+                eta_ratio = sigma_up / sigma_next
+
                 
         if eta_ratio is not None:
             sud = sigma_base * eta_fn(eta_ratio)

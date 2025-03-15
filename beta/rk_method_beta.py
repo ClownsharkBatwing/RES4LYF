@@ -474,6 +474,15 @@ class RK_Method_Beta:
         bong_iter_max_row = self.rows - row_offset
         if self.EO("bong_iter_max_row_full"):
             bong_iter_max_row = self.rows
+            
+        if self.EO("bong_iter_lock_x_0_ch_means"):
+            x_0_ch_means = x_0.mean(dim=(-2,-1), keepdim=True)
+            
+        if self.EO("bong_iter_lock_x_row_ch_means"):
+            x_row_means = []
+            for rr in range(row+row_offset):
+                x_row_mean = x_[rr].mean(dim=(-2,-1), keepdim=True)
+                x_row_means.append(x_row_mean)
         
         if row < bong_iter_max_row   and   self.multistep_stages == 0:
             bong_strength = self.EO("bong_strength", 1.0)
@@ -485,8 +494,17 @@ class RK_Method_Beta:
             
             for i in range(100):
                 x_0 = x_[row+row_offset] - h * self.zum(row+row_offset, eps_, eps_prev_)
+                
+                if self.EO("bong_iter_lock_x_0_ch_means"):
+                    x_0 = x_0 - x_0.mean(dim=(-2,-1), keepdim=True) + x_0_ch_means
+                    
                 for rr in range(row+row_offset):
                     x_[rr] = x_0 + h * self.zum(rr, eps_, eps_prev_)
+                    
+                if self.EO("bong_iter_lock_x_row_ch_means"):
+                    for rr in range(row+row_offset):
+                        x_[rr] = x_[rr] - x_[rr].mean(dim=(-2,-1), keepdim=True) + x_row_means[rr]
+                    
                 for rr in range(row+row_offset):
                     if self.EO("zonkytar"):
                         #eps_[rr] = self.get_unsample_epsilon(x_[rr], x_0, data_[rr], sigma, s_[rr])

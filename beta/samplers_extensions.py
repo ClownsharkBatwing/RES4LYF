@@ -818,7 +818,7 @@ class ClownGuide_Mean_Beta:
             guides                    = None,
             ):
         
-        
+        default_dtype = torch.float64
         
         mask = 1-mask if mask is not None else None
         

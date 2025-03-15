@@ -2061,9 +2061,9 @@ class BongSampler:
             overshoot_mode_substep        = overshoot_mode_substep,
             
             d_noise                       = d_noise,
-            d_noise_start_step            = d_noise_start_step,
-            d_noise_inv                   = d_noise_inv,
-            d_noise_inv_start_step        = d_noise_inv_start_step,
+            #d_noise_start_step            = d_noise_start_step,
+            #d_noise_inv                   = d_noise_inv,
+            #d_noise_inv_start_step        = d_noise_inv_start_step,
 
             alpha_sde                     = alpha_sde,
             k_sde                         = k_sde,

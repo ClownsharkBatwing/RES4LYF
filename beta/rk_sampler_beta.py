@@ -256,6 +256,7 @@ def sample_rk_beta(
         from .rk_guide_func_beta import prepare_mask
         sde_mask, _ = prepare_mask(x, sde_mask, LGW_MASK_RESCALE_MIN)
         sde_mask = sde_mask.to(x.device).to(x.dtype)
+        
 
     x      = x     .to(dtype=default_dtype, device=work_device)
     sigmas = sigmas.to(dtype=default_dtype, device=work_device)
@@ -749,7 +750,7 @@ def sample_rk_beta(
                             
                             
                         if EO("mean_eps_tile"):
-                            mean_eps_tile = EO("mean_eps_tile", 1.0)
+                            mean_eps_tile  = EO("mean_eps_tile",      1.0)
                             mean_tile_size = EO("mean_eps_tile_size", 8)
                             from einops          import rearrange
 
@@ -776,7 +777,87 @@ def sample_rk_beta(
                     x_[row+RK.row_offset] = NS.rebound_overshoot_substep(x_0, x_[row+RK.row_offset])
                     
                     if not RK.IMPLICIT and NS.noise_mode_sde_substep != "hard_sq":
+                        if EO("dynamic_sde_mask") and denoised_prev is not None and denoised_prev.sum() != 0:
+                            sde_mask = torch.norm(data_[row] - denoised_prev, p=2, dim=0, keepdim=True)
+                            sde_mask = sde_mask / sde_mask.max()
+                        if EO("dynamic_eps_mask"):
+                            sde_mask = eps_[row] ** 2
+                            sde_mask = sde_mask / sde_mask.max()
+                        if EO("dynamic_scaled_eps_mask"):
+                            sde_mask = eps_[row] ** 2
+                            sde_mask = sde_mask - sde_mask.min()
+                            sde_mask = sde_mask / sde_mask.max()
+                        if EO("dynamic_inv_eps_mask"):
+                            sde_mask = eps_[row] ** 2
+                            sde_mask = sde_mask / sde_mask.max()
+                            sde_mask = 1-sde_mask
+                        if EO("dynamic_scaled_inv_eps_mask"):
+                            sde_mask = eps_[row] ** 2
+                            sde_mask = sde_mask - sde_mask.min()
+                            sde_mask = sde_mask / sde_mask.max()
+                            sde_mask = 1-sde_mask
+                        if EO("dynamic_scaled_mean_inv_eps_mask"):
+                            sde_mask = eps_[row] ** 2
+                            sde_mask = sde_mask - sde_mask.min()
+                            sde_mask = sde_mask / sde_mask.max()
+                            sde_mask = 1-sde_mask
+                            dyn_scale = EO("dynamic_scaled_mean_inv_eps_mask", 2.0)
+                            sde_mask = ((dyn_scale-1) + sde_mask) / dyn_scale
+
+                            #sde_mask = (1 + sde_mask) / 2
+                            
+                        if EO("dynamic_scaled_mean_inv_eps_mask_abs"):
+                            sde_mask = eps_[row].abs()
+                            sde_mask = sde_mask - sde_mask.min()
+                            sde_mask = sde_mask / sde_mask.max()
+                            sde_mask = 1-sde_mask
+                            dyn_scale = EO("dynamic_scaled_mean_inv_eps_mask", 2.0)
+                            sde_mask = ((dyn_scale-1) + sde_mask) / dyn_scale
+                            
+                        if EO("dynamic_scaled_mean_batch_inv_eps_mask"):
+                            sde_mask = eps_[row] ** 2
+                            sde_mask = sde_mask - sde_mask.mean(dim=(-2,-1), keepdim=True)
+                            sde_mask = sde_mask - sde_mask.min()
+                            sde_mask = sde_mask / sde_mask.max()
+                            sde_mask = 1-sde_mask
+                            dyn_scale = EO("dynamic_scaled_mean_inv_eps_mask", 2.0)
+                            sde_mask = ((dyn_scale-1) + sde_mask) / dyn_scale
+
+                            #sde_mask = (1 + sde_mask) / 2
+                            
+                        if EO("dynamic_scaled_mean_batch2_inv_eps_mask"):
+                            sde_mask = eps_[row].mean(dim=-3, keepdim=True) ** 2
+                            sde_mask = sde_mask.expand_as(x)
+                            sde_mask = sde_mask - sde_mask.mean(dim=(-2,-1), keepdim=True)
+                            sde_mask = sde_mask - sde_mask.min()
+                            sde_mask = sde_mask / sde_mask.max()
+                            sde_mask = 1-sde_mask
+                            dyn_scale = EO("dynamic_scaled_mean_inv_eps_mask", 2.0)
+                            sde_mask = ((dyn_scale-1) + sde_mask) / dyn_scale
+                            
+
+                        
+                        if EO("dynamic_tiled_mean_inv_eps_mask"):
+                            mean_tile_size=EO("dynamic_tiled_mean_inv_eps_mask", 8)
+                            from einops import rearrange
+                            eps_row_tiled  = rearrange(eps_[row], "b c (h t1) (w t2) -> (t1 t2) b c h w", t1=mean_tile_size, t2=mean_tile_size)
+                            
+                            sde_mask = eps_row_tiled ** 2
+                            sde_mask = sde_mask - sde_mask.min()
+                            sde_mask = sde_mask / sde_mask.max()
+                            sde_mask = 1-sde_mask
+                            sde_mask = (1 + sde_mask) / 2
+                            
+                            sde_mask[:,...] = sde_mask.mean(dim=(-2,-1), keepdim=True)
+                            
+                            sde_mask = rearrange(sde_mask,     "(t1 t2) b c h w -> b c (h t1) (w t2)", t1=mean_tile_size, t2=mean_tile_size)
+                            
+                            
+                        x_means_per_substep = x_[row+RK.row_offset].mean(dim=(-2,-1), keepdim=True)
                         x_[row+RK.row_offset] = NS.swap_noise_substep(x_0, x_[row+RK.row_offset], mask=sde_mask)
+                        
+                        if EO("keep_substep_means"):
+                            x_[row+RK.row_offset] = x_[row+RK.row_offset] - x_[row+RK.row_offset].mean(dim=(-2,-1), keepdim=True) + x_means_per_substep
 
                     if BONGMATH and NS.s_[row] > RK.sigma_min and NS.h < RK.sigma_max/2   and   (diag_iter == implicit_steps_diag or EO("enable_diag_explicit_bongmath_all"))   and not EO("disable_terminal_bongmath"):
                         if step == 0 and UNSAMPLE:
@@ -796,7 +877,40 @@ def sample_rk_beta(
             denoised = x_0 - sigma * eps
             
             x_next = LG.process_guides_poststep(x_next, denoised, eps, step)
+            
+            if EO("kill_step_sde_mask"):
+                sde_mask = None
+                
+            if EO("dynamic_step_scaled_mean_inv_eps_mask"):
+                sde_mask = eps ** 2
+                sde_mask = sde_mask - sde_mask.min()
+                sde_mask = sde_mask / sde_mask.max()
+                sde_mask = 1-sde_mask
+                dyn_scale = EO("dynamic_step_scaled_mean_inv_eps_mask", 2.0)
+                sde_mask = ((dyn_scale-1) + sde_mask) / dyn_scale
+                
+            if EO("dynamic_expstep_scaled_mean_inv_eps_mask"):
+                eps_exp = denoised - x_0
+                sde_mask = eps_exp ** 2
+                sde_mask = sde_mask - sde_mask.min()
+                sde_mask = sde_mask / sde_mask.max()
+                sde_mask = 1-sde_mask
+                dyn_scale = EO("dynamic_step_scaled_mean_inv_eps_mask", 2.0)
+                sde_mask = ((dyn_scale-1) + sde_mask) / dyn_scale
+                
+            if EO("dynamic_step_scaled_mean_inv_eps_mask_abs"):
+                sde_mask = eps.abs()
+                sde_mask = sde_mask - sde_mask.min()
+                sde_mask = sde_mask / sde_mask.max()
+                sde_mask = 1-sde_mask
+                dyn_scale = EO("dynamic_step_scaled_mean_inv_eps_mask", 2.0)
+                sde_mask = ((dyn_scale-1) + sde_mask) / dyn_scale
+                
+                
+            x_means_per_step = x_next.mean(dim=(-2,-1), keepdim=True)
             x      = NS.swap_noise_step(x_0, x_next, mask=sde_mask)
+            if EO("keep_step_means"):
+                x = x - x.mean(dim=(-2,-1), keepdim=True) + x_means_per_step
 
             
             callback_step = len(sigmas)-1 - step if sampler_mode == "unsample" else step
