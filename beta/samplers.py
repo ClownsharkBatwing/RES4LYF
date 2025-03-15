@@ -1474,9 +1474,10 @@ class ClownsharkChainsampler_Beta(ClownsharKSampler_Beta):
                 "model":           ("MODEL",),
                 "positive":        ("CONDITIONING", ),
                 "negative":        ("CONDITIONING", ),
-                "sampler":         ("SAMPLER", ),
+                #"sampler":         ("SAMPLER", ),
                 "sigmas":          ("SIGMAS", ),
                 "latent_image":    ("LATENT", ),     
+                "guides":          ("GUIDES", ),   
                 "options":         ("OPTIONS", ),   
                 }
             }
