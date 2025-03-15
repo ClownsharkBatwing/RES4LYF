@@ -632,12 +632,13 @@ class ClownOptions_SDE_Mask_Beta:
     def INPUT_TYPES(cls):
         return {
             "required": {
-                #"steps_to_run":  ("INT", {"default": -1,  "min": -1, "max": 10000}),
-                "invert_mask":          ("BOOLEAN",                                   {"default": False}),
+                "max":               ("FLOAT",                                     {"default": 1.0, "min": -100.0, "max": 100.0, "step":0.01, "round": False, "tooltip": "Clamp the max value for the mask."}),
+                "min":               ("FLOAT",                                     {"default": 0.0, "min": -100.0, "max": 100.0, "step":0.01, "round": False, "tooltip": "Clamp the min value for the mask."}),
+                "invert_mask":       ("BOOLEAN",                                   {"default": False}),
                 },
             "optional": {
-                "mask":                 ("MASK", ),
-                "options":            ("OPTIONS", ),   
+                "mask":              ("MASK", ),
+                "options":           ("OPTIONS", ),   
                 }
             }
 
@@ -647,6 +648,8 @@ class ClownOptions_SDE_Mask_Beta:
     CATEGORY     = "RES4LYF/sampler_options"
     
     def main(self,
+            max = 1.0,
+            min = 0.0,
             invert_mask = False,
             mask     = None,
             options      = None,
@@ -656,7 +659,9 @@ class ClownOptions_SDE_Mask_Beta:
         
         if invert_mask:
             mask = 1-mask
-            
+        
+        mask = ((mask - mask.min()) * (max - min)) / (mask.max() - mask.min()) + min    
+        
         options['sde_mask'] = mask
 
         return (options,)
