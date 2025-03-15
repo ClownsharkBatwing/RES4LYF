@@ -287,6 +287,54 @@ class latent_transfer_state_info:
 
 
 
+class latent_mean_channels_from_to:
+    def __init__(self):
+        pass
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                    "latent_to":   ("LATENT", ),      
+                    "latent_from": ("LATENT", ),      
+                    },
+                }
+
+    RETURN_TYPES = ("LATENT",)
+    RETURN_NAMES = ("latent",)
+    FUNCTION     = "main"
+    CATEGORY     = "RES4LYF/latents"
+
+    def main(self, latent_to, latent_from):
+        latent_to['samples'] = latent_to['samples'] - latent_to['samples'].mean(dim=(-2,-1), keepdim=True) + latent_from['samples'].mean(dim=(-2,-1), keepdim=True)
+        return (latent_to,)
+
+
+
+class latent_get_channel_means:
+    def __init__(self):
+        pass
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                    "latent":   ("LATENT", ),      
+                    },
+                }
+
+    RETURN_TYPES = ("SIGMAS",)
+    RETURN_NAMES = ("channel_means",)
+    FUNCTION     = "main"
+    CATEGORY     = "RES4LYF/latents"
+
+    def main(self, latent):
+        channel_means = latent['samples'].mean(dim=(-2,-1)).squeeze(0)
+        return (channel_means,)
+
+
+
+
+
+
 class latent_to_cuda:
     def __init__(self):
         pass

@@ -111,6 +111,8 @@ NODE_CLASS_MAPPINGS = {
     "LatentBatch_channels"                : nodes_latents.LatentBatch_channels,
     "LatentBatch_channels_16"             : nodes_latents.LatentBatch_channels_16,
     
+    "Latent Get Channel Means"            : nodes_latents.latent_get_channel_means,
+    
     "Latent Match Channelwise"            : nodes_latents.latent_channelwise_match,
     
     "Latent to RawX"                      : nodes_latents.latent_to_raw_x,
@@ -118,6 +120,7 @@ NODE_CLASS_MAPPINGS = {
     "Latent to Cuda"                      : nodes_latents.latent_to_cuda,
     "Latent Batcher"                      : nodes_latents.latent_batch,
     "Latent Normalize Channels"           : nodes_latents.latent_normalize_channels,
+    "Latent Channels From To"             : nodes_latents.latent_mean_channels_from_to,
 
 
 
