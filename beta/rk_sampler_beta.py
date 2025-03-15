@@ -243,7 +243,7 @@ def sample_rk_beta(
                 
             if state_info['sampler_mode'] == "unsample"              and sampler_mode == "resample":
                 sigmas = torch.flip(state_info['sigmas'], dims=[0])
-                start_step = (len(sigmas)-1) - (state_info['end_step']-1)
+                start_step = (len(sigmas)-1) - state_info['end_step'] #-1)
         elif state_info['sampler_mode'] == "unsample" and sampler_mode == "resample":
             start_step = 0
         
@@ -878,6 +878,7 @@ def sample_rk_beta(
     state_info_out['raw_x']             = x#.clone()
     state_info_out['data_prev_']        = data_prev_#.clone()
     state_info_out['end_step']          = step
+    state_info_out['sigma_next']        = sigma_next
     state_info_out['sigmas']            = sigmas.clone()
     state_info_out['sampler_mode']      = sampler_mode
     state_info_out['last_rng']          = NS.noise_sampler .generator.get_state().clone()
