@@ -923,7 +923,7 @@ class ClownGuide_Beta:
                 guide_unmasked = {'samples': guide_unmasked['samples'].clone()}
         
         guides, = CG.main(
-            weight_scheduler          = weight_scheduler,
+            weight_scheduler_masked   = weight_scheduler,
             weight_scheduler_unmasked = weight_scheduler_unmasked,
             start_step_masked         = start_step,
             start_step_unmasked       = start_step_unmasked,
