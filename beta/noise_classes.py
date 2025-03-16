@@ -660,6 +660,10 @@ NOISE_GENERATOR_CLASSES_SIMPLE = {
     "white"                 : noise_generator_factory(FractalNoiseGenerator,      alpha=0.0),
     "blue"                  : noise_generator_factory(FractalNoiseGenerator,      alpha=-1.0),
     "violet"                : noise_generator_factory(FractalNoiseGenerator,      alpha=-2.0),
+    "ultraviolet_A"         : noise_generator_factory(FractalNoiseGenerator,      alpha=-3.0),
+    "ultraviolet_B"         : noise_generator_factory(FractalNoiseGenerator,      alpha=-4.0),
+    "ultraviolet_C"         : noise_generator_factory(FractalNoiseGenerator,      alpha=-5.0),
+
     "hires-pyramid-bicubic" : noise_generator_factory(HiresPyramidNoiseGenerator, mode='bicubic'),   
     "hires-pyramid-bilinear": noise_generator_factory(HiresPyramidNoiseGenerator, mode='bilinear'),
     "hires-pyramid-nearest" : noise_generator_factory(HiresPyramidNoiseGenerator, mode='nearest'),  
