@@ -793,7 +793,7 @@ class RectifiedFlow_RegionalConditioning:
             start_percent    = 0.0,
             end_percent      = 1.0,
             start_step       = 0,
-            end_step         = 10000,
+            end_step         = -1,
             conditioning     = None,
             mask_weights     = None,
             self_attn_floors = None,
@@ -801,6 +801,9 @@ class RectifiedFlow_RegionalConditioning:
             mask_type        = "gradient",
             model_config     = None,
             ):
+        
+        if end_step == -1:
+            end_step = MAX_STEPS
         
         weight, weights = mask_weight, mask_weights
         floor, floors = self_attn_floor, self_attn_floors
@@ -856,14 +859,14 @@ class ClownScheduler:
     def INPUT_TYPES(cls):
         return {
             "required": { 
-                "pad_start_value":      ("FLOAT",                                     {"default": 0.0, "min": -10000.0, "max": 10000.0, "step": 0.01}),
-                "start_value":          ("FLOAT",                                     {"default": 1.0, "min": -10000.0, "max": 10000.0, "step": 0.01}),
-                "end_value":            ("FLOAT",                                     {"default": 1.0, "min": -10000.0, "max": 10000.0, "step": 0.01}),
-                "pad_end_value":        ("FLOAT",                                     {"default": 0.0, "min": -10000.0, "max": 10000.0, "step": 0.01}),
+                "pad_start_value":      ("FLOAT",                                     {"default": 0.0, "min":  -10000.0, "max": 10000.0, "step": 0.01}),
+                "start_value":          ("FLOAT",                                     {"default": 1.0, "min":  -10000.0, "max": 10000.0, "step": 0.01}),
+                "end_value":            ("FLOAT",                                     {"default": 1.0, "min":  -10000.0, "max": 10000.0, "step": 0.01}),
+                "pad_end_value":        ("FLOAT",                                     {"default": 0.0, "min":  -10000.0, "max": 10000.0, "step": 0.01}),
                 "scheduler":            (["constant"] + get_res4lyf_scheduler_list(), {"default": "beta57"},),
-                "scheduler_start_step": ("INT",                                       {"default": 0,   "min": 0,        "max": 10000}),
-                "scheduler_end_step":   ("INT",                                       {"default": 30,  "min": 1,        "max": 10000}),
-                "total_steps":          ("INT",                                       {"default": 100, "min": 1,        "max": 10000}),
+                "scheduler_start_step": ("INT",                                       {"default": 0,   "min":  0,        "max": 10000}),
+                "scheduler_end_step":   ("INT",                                       {"default": 30,  "min": -1,        "max": 10000}),
+                "total_steps":          ("INT",                                       {"default": 100, "min": -1,        "max": 10000}),
                 "flip_schedule":        ("BOOLEAN",                                   {"default": False}),
             }, 
             "optional": {
@@ -874,7 +877,7 @@ class ClownScheduler:
     RETURN_TYPES = ("SIGMAS",)
     RETURN_NAMES = ("sigmas",)
     FUNCTION     = "main"
-    CATEGORY     = "RES4LYF/sigmas"
+    CATEGORY     = "RES4LYF/schedulers"
 
     def create_callback(self, **kwargs):
         def callback(model):
@@ -912,7 +915,13 @@ class ClownScheduler:
             default_dtype  = torch.float64
             default_device = torch.device("cuda") 
             
-            scheduler_total_steps = scheduler_end_step - scheduler_start_step
+            if scheduler_end_step == -1:
+                scheduler_total_steps = total_steps - scheduler_start_step
+            else:
+                scheduler_total_steps = scheduler_end_step - scheduler_start_step
+            
+            if total_steps == -1:
+                total_steps = scheduler_start_step + scheduler_end_step
             
             end_pad_steps = total_steps - scheduler_end_step
             
@@ -1047,21 +1056,24 @@ class ClownRegionalConditioning:
     def INPUT_TYPES(cls):
         return {
             "required": { 
-                "weight":            ("FLOAT",                                     {"default": 1.0, "min": -10000.0, "max": 10000.0, "step": 0.01}),
-                "region_bleed":      ("FLOAT",                                     {"default": 1.0, "min": -10000.0, "max": 10000.0, "step": 0.01}),
-                "region_bleed_start_step": ("INT",                                       {"default": 0,   "min": 0,        "max": 10000}),
-                "weight_scheduler":  (["constant"] + get_res4lyf_scheduler_list(), {"default": "constant"},),
-                "start_step":        ("INT",                                       {"default": 0,   "min": 0,        "max": 10000}),
-                "end_step":          ("INT",                                       {"default": 100,  "min": 1,        "max": 10000}),
-                "mask_type":         (["gradient", "boolean"],                     {"default": "gradient"}),
-                "invert_mask":       ("BOOLEAN",                                   {"default": False}),
+                "weight":                  ("FLOAT",                                     {"default": 1.0, "min":  -10000.0, "max": 10000.0, "step": 0.01}),
+                "region_bleed":            ("FLOAT",                                     {"default": 0.0, "min":  -10000.0, "max": 10000.0, "step": 0.01}),
+                "region_bleed_start_step": ("INT",                                       {"default": 0,   "min":  0,        "max": 10000}),
+                "weight_scheduler":        (["constant"] + get_res4lyf_scheduler_list(), {"default": "constant"},),
+                "start_step":              ("INT",                                       {"default": 0,   "min":  0,        "max": 10000}),
+                "end_step":                ("INT",                                       {"default": -1,  "min": -1,        "max": 10000}),
+                "mask_type":               (["gradient", "boolean"],                     {"default": "boolean"}),
+                "crosself_attn_area":      (["masked", "unmasked", "off"],               {"default": "masked"}),
+                "crosself_attn_start_step":("INT",                                       {"default": 0,   "min": -1,        "max": 10000}),
+                "crosself_attn_end_step":  ("INT",                                       {"default": 5,   "min": -1,        "max": 10000}),
+                "invert_mask":             ("BOOLEAN",                                   {"default": False}),
             }, 
             "optional": {
-                "positive_masked":   ("CONDITIONING", ),
-                "positive_unmasked": ("CONDITIONING", ),
-                "mask":              ("MASK", ),
-                "weights":           ("SIGMAS", ),
-                "region_bleeds":     ("SIGMAS", ),
+                "positive_masked":         ("CONDITIONING", ),
+                "positive_unmasked":       ("CONDITIONING", ),
+                "mask":                    ("MASK", ),
+                "weights":                 ("SIGMAS", ),
+                "region_bleeds":           ("SIGMAS", ),
             }
         }
 
@@ -1083,7 +1095,7 @@ class ClownRegionalConditioning:
             end_percent              : float  = 1.0,
             weight_scheduler                  = None,
             start_step               : int    = 0,
-            end_step                 : int    = 10000,
+            end_step                 : int    = -1,
             positive_masked                   = None,
             positive_unmasked                 = None,
             weights                  : Tensor = None,
@@ -1092,24 +1104,36 @@ class ClownRegionalConditioning:
             region_bleed_start_step  : int    = 0,
             mask_type                : str    = "gradient",
             mask                              = None,
+            crosself_attn_area       : str    = "masked",
+            crosself_attn_start_step : int    = 0,
+            crosself_attn_end_step   : int    = 5,
             invert_mask              : bool   = False
             ) -> Tuple[Tensor]:
         
-        callback = self.create_callback(weight            = weight,
-                                        start_percent     = start_percent,
-                                        end_percent       = end_percent,
-                                        weight_scheduler  = weight_scheduler,
-                                        start_step        = start_step,
-                                        end_step          = end_step,
-                                        weights           = weights,
-                                        region_bleeds     = region_bleeds,
-                                        region_bleed      = region_bleed,
-                                        region_bleed_start_step = region_bleed_start_step,
-                                        mask_type         = mask_type,
-                                        mask              = mask,
-                                        invert_mask       = invert_mask,
-                                        positive_masked   = positive_masked,
-                                        positive_unmasked = positive_unmasked,
+        if end_step == -1:
+            end_step = MAX_STEPS
+            
+        if crosself_attn_end_step == -1:
+            crosself_attn_end_step = MAX_STEPS
+        
+        callback = self.create_callback(weight                   = weight,
+                                        start_percent            = start_percent,
+                                        end_percent              = end_percent,
+                                        weight_scheduler         = weight_scheduler,
+                                        start_step               = start_step,
+                                        end_step                 = end_step,
+                                        weights                  = weights,
+                                        region_bleeds            = region_bleeds,
+                                        region_bleed             = region_bleed,
+                                        region_bleed_start_step  = region_bleed_start_step,
+                                        mask_type                = mask_type,
+                                        mask                     = mask,
+                                        invert_mask              = invert_mask,
+                                        positive_masked          = positive_masked,
+                                        positive_unmasked        = positive_unmasked,
+                                        crosself_attn_area       = crosself_attn_area,
+                                        crosself_attn_start_step = crosself_attn_start_step,
+                                        crosself_attn_end_step   = crosself_attn_end_step,
                                         )
         pooled_len = 768
         if positive_masked is not None:
@@ -1142,25 +1166,31 @@ class ClownRegionalConditioning:
 
     def prepare_regional_cond(self,
                                 model,
-                                weight            : float  = 1.0,
-                                start_percent     : float  = 0.0,
-                                end_percent       : float  = 1.0,
-                                weight_scheduler           = None,
-                                start_step        : int    = 0,
-                                end_step          : int    = 10000,
-                                positive_masked            = None,
-                                positive_unmasked          = None,
-                                weights           : Tensor = None,
-                                region_bleeds     : Tensor = None,
-                                region_bleed      : float  = 0.0,
-                                region_bleed_start_step : int = 0,
-                                mask_type         : str    = "gradient",
-                                mask                       = None,
-                                invert_mask       : bool   = False
+                                weight                   : float  = 1.0,
+                                start_percent            : float  = 0.0,
+                                end_percent              : float  = 1.0,
+                                weight_scheduler                  = None,
+                                start_step               : int    = 0,
+                                end_step                 : int    = -1,
+                                positive_masked                   = None,
+                                positive_unmasked                 = None,
+                                weights                  : Tensor = None,
+                                region_bleeds            : Tensor = None,
+                                region_bleed             : float  = 0.0,
+                                region_bleed_start_step  : int    = 0,
+                                mask_type                : str    = "gradient",
+                                mask                              = None,
+                                invert_mask              : bool   = False,
+                                crosself_attn_area       : str    = "on",
+                                crosself_attn_start_step : int    = 0,
+                                crosself_attn_end_step   : int    = 5,
                                 ) -> Tuple[Tensor]:
 
         default_dtype  = torch.float64
         default_device = torch.device("cuda") 
+        
+        if end_step == -1:
+            end_step = MAX_STEPS
         
         if weights is None and weight_scheduler != "constant":
             total_steps = end_step - start_step
@@ -1258,7 +1288,19 @@ class ClownRegionalConditioning:
                 
         else:
             positive = positive_masked
+            
+        if   mask is not None and crosself_attn_area == "masked":
+            positive[0][1]['regional_conditioning_mask_orig'] = 1-mask.clone()
+            
+        elif mask is not None and crosself_attn_area == "unmasked":
+            positive[0][1]['regional_conditioning_mask_orig'] = mask.clone()
+            
+        else:
+            positive[0][1]['regional_conditioning_mask_orig'] = None
         
+        positive[0][1]['crosself_attn_start_step'] = crosself_attn_start_step
+        positive[0][1]['crosself_attn_end_step']   = crosself_attn_end_step
+                
         return (positive,)
 
 
@@ -1280,11 +1322,11 @@ class ClownRegionalConditioning3:
     def INPUT_TYPES(cls):
         return {
             "required": { 
-                "weight":            ("FLOAT",                                     {"default": 1.0, "min": -10000.0, "max": 10000.0, "step": 0.01}),
-                "region_bleed":      ("FLOAT",                                     {"default": 1.0, "min": -10000.0, "max": 10000.0, "step": 0.01}),
+                "weight":            ("FLOAT",                                     {"default": 1.0,  "min": -10000.0, "max": 10000.0, "step": 0.01}),
+                "region_bleed":      ("FLOAT",                                     {"default": 1.0,  "min": -10000.0, "max": 10000.0, "step": 0.01}),
                 "weight_scheduler":  (["constant"] + get_res4lyf_scheduler_list(), {"default": "constant"},),
-                "start_step":        ("INT",                                       {"default": 0,   "min": 0,        "max": 10000}),
-                "end_step":          ("INT",                                       {"default": 100,  "min": 1,        "max": 10000}),
+                "start_step":        ("INT",                                       {"default": 0,    "min":  0,        "max": 10000}),
+                "end_step":          ("INT",                                       {"default": 100,  "min": -1,        "max": 10000}),
                 "mask_type":         (["gradient", "boolean"],                     {"default": "gradient"}),
                 "invert_mask":       ("BOOLEAN",                                   {"default": False}),
             }, 
@@ -1317,7 +1359,7 @@ class ClownRegionalConditioning3:
             end_percent              : float  = 1.0,
             weight_scheduler                  = None,
             start_step               : int    = 0,
-            end_step                 : int    = 10000,
+            end_step                 : int    = -1,
             positive_A                   = None,
             positive_B                        = None,
             positive_unmasked                 = None,
@@ -1330,6 +1372,9 @@ class ClownRegionalConditioning3:
 
             invert_mask              : bool   = False
             ) -> Tuple[Tensor]:
+        
+        if end_step == -1:
+            end_step = MAX_STEPS
         
         callback = self.create_callback(weight            = weight,
                                         start_percent     = start_percent,
@@ -1394,8 +1439,8 @@ class ClownRegionalConditioning3:
                                 start_percent     : float  = 0.0,
                                 end_percent       : float  = 1.0,
                                 weight_scheduler           = None,
-                                start_step        : int    = 0,
-                                end_step          : int    = 10000,
+                                start_step        : int    =  0,
+                                end_step          : int    = -1,
                                 positive_A            = None,
                                 positive_B            = None,
 
@@ -1411,6 +1456,9 @@ class ClownRegionalConditioning3:
 
         default_dtype  = torch.float64
         default_device = torch.device("cuda") 
+        
+        if end_step == -1:
+            end_step = MAX_STEPS
         
         if weights is None and weight_scheduler != "constant":
             total_steps = end_step - start_step
