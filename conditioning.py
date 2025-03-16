@@ -1328,6 +1328,9 @@ class ClownRegionalConditioning3:
                 "start_step":        ("INT",                                       {"default": 0,    "min":  0,        "max": 10000}),
                 "end_step":          ("INT",                                       {"default": 100,  "min": -1,        "max": 10000}),
                 "mask_type":         (["gradient", "boolean"],                     {"default": "gradient"}),
+                "crosself_attn_area":      (["A", "B", "unmasked", "off"],         {"default": "masked"}),
+                "crosself_attn_start_step":("INT",                                 {"default": 0,   "min": -1,        "max": 10000}),
+                "crosself_attn_end_step":  ("INT",                                 {"default": 5,   "min": -1,        "max": 10000}),
                 "invert_mask":       ("BOOLEAN",                                   {"default": False}),
             }, 
             "optional": {

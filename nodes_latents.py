@@ -277,7 +277,7 @@ class latent_clear_state_info:
         latent_out = copy.deepcopy(latent)
         latent_out['state_info'] = {}
         return (latent_out,)
-    
+
 
 class latent_replace_state_info:
     def __init__(self):
@@ -306,7 +306,7 @@ class latent_replace_state_info:
         if replace_end_step != 0:
             latent_out['state_info']['end_step'] = replace_end_step
         return (latent_out,)
-    
+
 
 class latent_display_state_info:
     def __init__(self):
