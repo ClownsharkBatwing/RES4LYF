@@ -257,7 +257,87 @@ class latent_to_raw_x:
         return (latent,)
 
 
+class latent_clear_state_info:
+    def __init__(self):
+        pass
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                    "latent": ("LATENT", ),      
+                     },
+                }
 
+    RETURN_TYPES = ("LATENT",)
+    RETURN_NAMES = ("latent",)
+    FUNCTION     = "main"
+    CATEGORY     = "RES4LYF/latents"
+
+    def main(self, latent,):
+        latent_out = copy.deepcopy(latent)
+        latent_out['state_info'] = {}
+        return (latent_out,)
+    
+
+class latent_replace_state_info:
+    def __init__(self):
+        pass
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                    "latent": ("LATENT", ),
+                    "clear_raw_x": ("BOOLEAN", {"default": False}),
+                    "replace_end_step": ("INT", {"default": 0, "min": -10000, "max": 10000}),
+                     },
+                }
+
+    RETURN_TYPES = ("LATENT",)
+    RETURN_NAMES = ("latent",)
+    FUNCTION     = "main"
+    CATEGORY     = "RES4LYF/latents"
+
+    def main(self, latent, clear_raw_x, replace_end_step):
+        latent_out = copy.deepcopy(latent)
+        if 'state_info' not in latent_out:
+            latent_out['state_info'] = {}
+        if clear_raw_x:
+            latent_out['state_info']['raw_x'] = None
+        if replace_end_step != 0:
+            latent_out['state_info']['end_step'] = replace_end_step
+        return (latent_out,)
+    
+
+class latent_display_state_info:
+    def __init__(self):
+        pass
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                    "latent": ("LATENT", ),      
+                     },
+                }
+
+    RETURN_TYPES = ("STRING",)
+    FUNCTION     = "execute"
+    CATEGORY     = "RES4LYF/latents"
+    OUTPUT_NODE  = True
+
+    def execute(self, latent):
+        text = ""
+        if 'state_info' in latent:
+            for key, value in latent['state_info'].items():
+                if isinstance(value, torch.Tensor):
+                    value_text = f"shape: {value.shape}, dtype: {value.dtype}, mean: {value.float().mean().item():.3f}, std: {value.float().std().item():.3f}"
+                else:
+                    value_text = str(value)
+
+                text += f"{key}: {value_text}\n"
+        else:
+            text = "No state info in latent"
+
+        return {"ui": {"text": text}, "result": (text,)}
 
 
 class latent_transfer_state_info:
