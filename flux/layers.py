@@ -3,6 +3,7 @@
 import math
 import torch
 from torch import Tensor, nn
+
 from typing import Optional, Callable, Tuple, Dict, Any, Union, TYPE_CHECKING, TypeVar
 
 import torch.nn.functional as F
@@ -172,9 +173,9 @@ class DoubleStreamBlock(nn.Module):
         txt_q, txt_k        = self.txt_attn.norm(txt_q, txt_k, txt_v)
         return txt_q, txt_k, txt_v
     
-    # ADDED THIS TIMESTEP = NONE     2-28-25
-    #def forward(self, img: Tensor, txt: Tensor, vec: Tensor, pe: Tensor, timestep=None, transformer_options={}, mask=None, weight=1): # vec 1,3072
-    def forward(self, img: Tensor, txt: Tensor, vec: Tensor, pe: Tensor, mask=None) -> Tuple[Tensor, Tensor]: # vec 1,3072
+    # ADDED THIS TIMESTEP = NONE     2-28-25          mask.shape 4608,4608
+    #def forward(self, img: Tensor, txt: Tensor, vec: Tensor, pe: Tensor, timestep=None, transformer_options={}, mask=None, weight=1): # vec 1,3072      #img_attn.shape 1,4096,3072    txt_attn.shape 1,512,3072
+    def forward(self, img: Tensor, txt: Tensor, vec: Tensor, pe: Tensor, mask=None, reg_cond_mask=None, ) -> Tuple[Tensor, Tensor]: # vec 1,3072
 
         img_mod1, img_mod2  = self.img_mod(vec) # -> 3072, 3072
         txt_mod1, txt_mod2  = self.txt_mod(vec)
@@ -184,22 +185,68 @@ class DoubleStreamBlock(nn.Module):
 
         q, k, v = torch.cat((txt_q, img_q), dim=2), torch.cat((txt_k, img_k), dim=2), torch.cat((txt_v, img_v), dim=2)
         
-        attn = attention(q, k, v, pe=pe, mask=mask)
+        #reg_cond_mask = None
         
-        txt_attn = attn[:, : txt.shape[1]   ]                         # 1, 768,3072
-        img_attn = attn[:,   txt.shape[1] : ]  
+        if reg_cond_mask is None:
+            attn = attention(q, k, v, pe=pe, mask=mask)
+            
+            txt_attn = attn[:, : txt.shape[1]   ]                         # 1, 768,3072
+            img_attn = attn[:,   txt.shape[1] : ]  
+            
+            img += img_mod1.gate * self.img_attn.proj(img_attn)
+            txt += txt_mod1.gate * self.txt_attn.proj(txt_attn)
+            
+            img += img_mod2.gate * self.img_mlp((1 + img_mod2.scale) * self.img_norm2(img) + img_mod2.shift)
+            txt += txt_mod2.gate * self.txt_mlp((1 + txt_mod2.scale) * self.txt_norm2(txt) + txt_mod2.shift)
+            
+        else:
+            #reg_cond_mask = reg_cond_mask.unsqueeze(0)
+            mask_inv_selfattn = mask.clone()
+            #mask_inv_selfattn[txt.shape[1]:,txt.shape[1]:] = torch.clamp(mask_inv_selfattn[txt.shape[1]:,txt.shape[1]:], max=0.0)
+            mask_inv_selfattn[txt.shape[1]:,txt.shape[1]:] = True
+            
+            #mask_inv_selfattn[txt.shape[1]:, txt.shape[1]:] = mask[txt.shape[1]:, txt.shape[1]:] == False
+            
+            attn = attention(q, k, v, pe=pe, mask=mask)
+            
+            txt_attn = attn[:, : txt.shape[1]   ]                         # 1, 768,3072
+            img_attn = attn[:,   txt.shape[1] : ]  
+            
+            #mask_inv_selfattn = mask[]
+            
+            attn_maskless = attention(q, k, v, pe=pe, mask=mask_inv_selfattn)
+            
+            txt_attn_maskless = attn_maskless[:, : txt.shape[1]   ]                         # 1, 768,3072
+            img_attn_maskless = attn_maskless[:,   txt.shape[1] : ]  
+            
+            img_attn = reg_cond_mask * img_attn + (1-reg_cond_mask) * img_attn_maskless
+            #img_attn = (1-reg_cond_mask) * img_attn + reg_cond_mask * img_attn_maskless
+            
+            #img_maskless = img.clone()
+            #txt_maskless = txt.clone()
         
-        img += img_mod1.gate * self.img_attn.proj(img_attn)
-        txt += txt_mod1.gate * self.txt_attn.proj(txt_attn)
-        
-        img += img_mod2.gate * self.img_mlp((1 + img_mod2.scale) * self.img_norm2(img) + img_mod2.shift)
-        txt += txt_mod2.gate * self.txt_mlp((1 + txt_mod2.scale) * self.txt_norm2(txt) + txt_mod2.shift)
+            img += img_mod1.gate * self.img_attn.proj(img_attn)
+            txt += txt_mod1.gate * self.txt_attn.proj(txt_attn)
+            
+            img += img_mod2.gate * self.img_mlp((1 + img_mod2.scale) * self.img_norm2(img) + img_mod2.shift)
+            txt += txt_mod2.gate * self.txt_mlp((1 + txt_mod2.scale) * self.txt_norm2(txt) + txt_mod2.shift)
+            
+            
+            
+            #img_maskless += img_mod1.gate * self.img_attn.proj(img_attn_maskless)
+            #txt_maskless += txt_mod1.gate * self.txt_attn.proj(txt_attn_maskless)
+            
+            #img_maskless += img_mod2.gate * self.img_mlp((1 + img_mod2.scale) * self.img_norm2(img_maskless) + img_mod2.shift)
+            #txt_maskless += txt_mod2.gate * self.txt_mlp((1 + txt_mod2.scale) * self.txt_norm2(txt_maskless) + txt_mod2.shift)
+            
+            #img = reg_cond_mask * img + (1-reg_cond_mask) * img_maskless
+            
         
         return img, txt #, mask_resized
 
 
 
-class SingleStreamBlock(nn.Module):
+class SingleStreamBlock(nn.Module):      #attn.shape = 1,4608,3072       mlp.shape = 1,4608,12288     4096*3 = 12288
     """
     A DiT block with parallel linear layers as described in
     https://arxiv.org/abs/2302.05442 and adapted modulation interface.
@@ -226,7 +273,7 @@ class SingleStreamBlock(nn.Module):
         self.mlp_act        = nn.GELU(approximate="tanh")
         self.modulation     = Modulation(hidden_size, double=False,                                 dtype=dtype, device=device, operations=operations)
         
-    def img_attn(self, img, mod, pe, mask):
+    def img_attn(self, img, mod, pe, mask, reg_cond_mask=None, txt_len=None):
         img_mod  = (1 + mod.scale) * self.pre_norm(img) + mod.shift   # mod => vec
         qkv, mlp = torch.split(self.linear1(img_mod), [3 * self.hidden_size, self.mlp_hidden_dim], dim=-1)
 
@@ -234,12 +281,41 @@ class SingleStreamBlock(nn.Module):
         q, k     = self.norm(q, k, v)
 
         attn     = attention(q, k, v, pe=pe, mask=mask)
+        
+        #reg_cond_mask = None
+        
+        if reg_cond_mask is not None:
+            
+            mask_inv_selfattn = mask.clone()
+            #mask_inv_selfattn[txt_len:, txt_len:] = mask[txt_len:, txt_len:] == False
+            #mask_inv_selfattn[txt_len:, txt_len:] = torch.clamp(mask_inv_selfattn[txt_len:, txt_len:], max=0.0)
+            mask_inv_selfattn[txt_len:,txt_len:] = True
+            
+            attn_maskless = attention(q, k, v, pe=pe, mask=mask_inv_selfattn)
+            
+            txt_attn_maskless = attn_maskless[:, : txt_len   ]                         # 1, 768,3072
+            img_attn_maskless = attn_maskless[:,   txt_len : ]
+            
+            img_attn = attn[:,   txt_len : ]
+
+            img_attn = reg_cond_mask * img_attn + (1-reg_cond_mask) * img_attn_maskless
+            #img_attn = (1-reg_cond_mask) * img_attn + reg_cond_mask * img_attn_maskless
+            
+            attn[:,   txt_len : ] = img_attn
+        
+        
+        
         return attn, mlp
 
     # vec 1,3072    x 1,9984,3072
-    def forward(self, img: Tensor, vec: Tensor, pe: Tensor, mask=None, ) -> Tensor:   # x 1,9984,3072 if 2 reg embeds, 1,9472,3072 if none    # 9216x4096 = 16x1536x1536
+    def forward(self, img: Tensor, vec: Tensor, pe: Tensor, mask=None, reg_cond_mask=None, ) -> Tensor:   # x 1,9984,3072 if 2 reg embeds, 1,9472,3072 if none    # 9216x4096 = 16x1536x1536
         mod, _    = self.modulation(vec)
-        attn, mlp = self.img_attn(img, mod, pe, mask)
+        
+        txt_len = None
+        if reg_cond_mask is not None:
+            txt_len = img.shape[-2] - reg_cond_mask.shape[-2]
+        
+        attn, mlp = self.img_attn(img, mod, pe, mask, reg_cond_mask, txt_len)
         output    = self.linear2(torch.cat((attn, self.mlp_act(mlp)), 2))
 
         img      += mod.gate * output

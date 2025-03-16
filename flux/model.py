@@ -1,6 +1,7 @@
 # Adapted from: https://github.com/black-forest-labs/flux
 
 import torch
+import torch.nn.functional as F
 from torch import Tensor, nn
 from dataclasses import dataclass
 import copy
@@ -109,6 +110,16 @@ class ReFlux(Flux):
         
         weight    = transformer_options['reg_cond_weight'] if 'reg_cond_weight' in transformer_options else 0.0
         floor     = transformer_options['reg_cond_floor']  if 'reg_cond_floor'  in transformer_options else 0.0
+        reg_cond_mask_expanded = transformer_options.get('reg_cond_mask_expanded')
+        reg_cond_mask_expanded = reg_cond_mask_expanded.to(img.dtype).to(img.device) if reg_cond_mask_expanded is not None else None
+        reg_cond_mask = None
+        
+        if floor < 0:
+            floor = abs(floor)
+            floor_bkg = False
+        else:
+            floor_bkg = True
+        
         mask_orig = None
         mask_self = None
         mask_obj  = transformer_options.get('patches', {}).get('regional_conditioning_mask', None)
@@ -129,7 +140,9 @@ class ReFlux(Flux):
             
             
             text_len                  = mask_obj[0].text_len
-            mask[text_len:,text_len:] = torch.clamp(mask[text_len:,text_len:], min=floor.to(mask.device))
+            
+            mask[text_len:,text_len:] = torch.clamp(mask[text_len:,text_len:], min=floor.to(mask.device))   #ORIGINAL SELF-ATTN REGION BLEED
+            reg_cond_mask = reg_cond_mask_expanded.unsqueeze(0).clone() if reg_cond_mask_expanded is not None else None
 
         total_layers = len(self.double_blocks) + len(self.single_blocks)
 
@@ -139,7 +152,7 @@ class ReFlux(Flux):
             
             
             #img, txt = block(img=img, txt=txt, vec=vec, pe=pe, timestep=timesteps, transformer_options=transformer_options, mask=mask, weight=weight) #, mask=mask)
-            img, txt = block(img=img, txt=txt, vec=vec, pe=pe, mask=mask) #, mask=mask)
+            img, txt = block(img=img, txt=txt, vec=vec, pe=pe, mask=mask, reg_cond_mask=reg_cond_mask) #, mask=mask)
 
             if control is not None: # Controlnet
                 control_i = control.get("input")
@@ -156,7 +169,7 @@ class ReFlux(Flux):
                 mask = mask.to(img.dtype)
             
             #img = block(img, vec=vec, pe=pe, timestep=timesteps, transformer_options=transformer_options, mask=mask, weight=weight)
-            img = block(img, vec=vec, pe=pe, mask=mask)
+            img = block(img, vec=vec, pe=pe, mask=mask, reg_cond_mask=reg_cond_mask)
 
             if control is not None: # Controlnet
                 control_o = control.get("output")
@@ -214,6 +227,19 @@ class ReFlux(Flux):
             elif UNCOND == False:
                 transformer_options['reg_cond_weight'] = transformer_options.get("regional_conditioning_weight", 0.0) #transformer_options['regional_conditioning_weight']
                 transformer_options['reg_cond_floor']  = transformer_options.get("regional_conditioning_floor", 0.0) #transformer_options['regional_conditioning_floor'] #if "regional_conditioning_floor" in transformer_options else 0.0
+                
+                mask_orig = transformer_options.get('regional_conditioning_mask_orig')
+                if mask_orig is not None:
+                    mask_resized = F.interpolate(mask_orig.unsqueeze(0), size=(h, w), mode="bilinear", align_corners=False).squeeze()
+                    mask_expand = mask_resized.repeat(repeats=(1,48*c,1,1))
+                    mask_expand = comfy.ldm.common_dit.pad_to_patch_size(mask_expand, (patch_size, patch_size))
+                    mskz = rearrange(mask_expand, "b c (h ph) (w pw) -> b (h w) (c ph pw)", ph=patch_size, pw=patch_size) # img 1,9216,64
+                    transformer_options['reg_cond_mask_expanded'] = mskz.squeeze(0)
+                    #mask_expanded2 = F.interpolate(mskz, size=(3072,), mode='linear', align_corners=True).squeeze(0)
+                    #transformer_options['reg_cond_mask_expanded'] = mask_expanded2
+
+                transformer_options['reg_cond_mask_orig'] = transformer_options.get('regional_conditioning_mask_orig')
+                
                 regional_conditioning_positive         = transformer_options.get('patches', {}).get('regional_conditioning_positive', None)
                 
                 if regional_conditioning_positive is None or transformer_options['reg_cond_weight'] <= 0.0:
