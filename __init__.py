@@ -116,6 +116,9 @@ NODE_CLASS_MAPPINGS = {
     "Latent Match Channelwise"            : nodes_latents.latent_channelwise_match,
     
     "Latent to RawX"                      : nodes_latents.latent_to_raw_x,
+    "Latent Clear State Info"             : nodes_latents.latent_clear_state_info,
+    "Latent Replace State Info"           : nodes_latents.latent_replace_state_info,
+    "Latent Display State Info"           : nodes_latents.latent_display_state_info,
     "Latent Transfer State Info"          : nodes_latents.latent_transfer_state_info,
     "Latent to Cuda"                      : nodes_latents.latent_to_cuda,
     "Latent Batcher"                      : nodes_latents.latent_batch,
