@@ -678,10 +678,10 @@ class ClownGuide_Misc_Beta:
                 "channelwise_mode":     ("BOOLEAN",                                   {"default": False}),
                 "projection_mode":      ("BOOLEAN",                                   {"default": False}),
                 "weight":               ("FLOAT",                                     {"default": 0.05, "min": -100.0, "max": 100.0, "step":0.01, "round": False, "tooltip": "Set the strength of the guide."}),
-                "cutoff":               ("FLOAT",                                     {"default": 1.0,  "min": 0.0, "   max": 1.0,   "step":0.01, "round": False, "tooltip": "Disables the guide for the next step when the denoised image is similar to the guide. Higher values will strengthen the effect."}),
+                "cutoff":               ("FLOAT",                                     {"default": 1.0,  "min": 0.0,    "max": 1.0,   "step":0.01, "round": False, "tooltip": "Disables the guide for the next step when the denoised image is similar to the guide. Higher values will strengthen the effect."}),
                 "weight_scheduler":     (["constant"] + get_res4lyf_scheduler_list(), {"default": "beta57"},),
-                "start_step":           ("INT",                                       {"default": 0,    "min": 0, "     max": 10000}),
-                "end_step":             ("INT",                                       {"default": 15,   "min": 1, "     max": 10000}),
+                "start_step":           ("INT",                                       {"default": 0,    "min":  0,     "max": 10000}),
+                "end_step":             ("INT",                                       {"default": 15,   "min": -1,     "max": 10000}),
                 "invert_mask":          ("BOOLEAN",                                   {"default": False}),
                 },
             "optional": {
@@ -727,6 +727,9 @@ class ClownGuide_Misc_Beta:
         CG = ClownGuides_Beta()
         
         mask = 1-mask if mask is not None else None
+        
+        if end_step == -1:
+            end_step = MAX_STEPS
         
         if guide is not None:
             raw_x = guide.get('state_info', {}).get('raw_x', None)
@@ -779,11 +782,11 @@ class ClownGuide_Mean_Beta:
                     #"guide_mode":           (GUIDE_MODE_NAMES_BETA_SIMPLE+['mean'],                {"default": 'epsilon',                                                      "tooltip": "Recommended: epsilon or mean/mean_std with sampler_mode = standard, and unsample/resample with sampler_mode = unsample/resample. Epsilon_dynamic_mean, etc. are only used with two latent inputs and a mask. Blend/hard_light/mean/mean_std etc. require low strengths, start with 0.01-0.02."}),
                     "channelwise_mode":     ("BOOLEAN",                                   {"default": True}),
                     "projection_mode":      ("BOOLEAN",                                   {"default": True}),
-                    "weight":               ("FLOAT",                                     {"default": 0.75, "min": -100.0, "max": 100.0, "step":0.01, "round": False, "tooltip": "Set the strength of the guide."}),
-                    "cutoff":               ("FLOAT",                                     {"default": 1.0,  "min": 0.0,    "max": 1.0,   "step":0.01, "round": False, "tooltip": "Disables the guide for the next step when the denoised image is similar to the guide. Higher values will strengthen the effect."}),
+                    "weight":               ("FLOAT",                                     {"default": 0.75, "min":  -100.0, "max": 100.0, "step":0.01, "round": False, "tooltip": "Set the strength of the guide."}),
+                    "cutoff":               ("FLOAT",                                     {"default": 1.0,  "min":  0.0,    "max": 1.0,   "step":0.01, "round": False, "tooltip": "Disables the guide for the next step when the denoised image is similar to the guide. Higher values will strengthen the effect."}),
                     "weight_scheduler":     (["constant"] + get_res4lyf_scheduler_list(), {"default": "beta57"},),
-                    "start_step":           ("INT",                                       {"default": 0,    "min": 0,      "max": 10000}),
-                    "end_step":             ("INT",                                       {"default": 15,   "min": 1,      "max": 10000}),
+                    "start_step":           ("INT",                                       {"default": 0,    "min":  0,      "max": 10000}),
+                    "end_step":             ("INT",                                       {"default": 15,   "min": -1,      "max": 10000}),
                     "invert_mask":          ("BOOLEAN",                                   {"default": False}),
                     },
                 "optional": 
@@ -822,6 +825,9 @@ class ClownGuide_Mean_Beta:
         
         mask = 1-mask if mask is not None else None
         
+        if end_step == -1:
+            end_step = MAX_STEPS
+        
         if guide is not None:
             raw_x = guide.get('state_info', {}).get('raw_x', None)
             if raw_x is not None:
@@ -857,14 +863,14 @@ class ClownGuide_Beta:
     def INPUT_TYPES(cls):
         return {"required":
                     {
-                    "guide_mode":           (GUIDE_MODE_NAMES_BETA_SIMPLE+['mean'],                {"default": 'epsilon',                                                      "tooltip": "Recommended: epsilon or mean/mean_std with sampler_mode = standard, and unsample/resample with sampler_mode = unsample/resample. Epsilon_dynamic_mean, etc. are only used with two latent inputs and a mask. Blend/hard_light/mean/mean_std etc. require low strengths, start with 0.01-0.02."}),
+                    "guide_mode":           (GUIDE_MODE_NAMES_BETA_SIMPLE+['mean'],       {"default": 'epsilon',                                                      "tooltip": "Recommended: epsilon or mean/mean_std with sampler_mode = standard, and unsample/resample with sampler_mode = unsample/resample. Epsilon_dynamic_mean, etc. are only used with two latent inputs and a mask. Blend/hard_light/mean/mean_std etc. require low strengths, start with 0.01-0.02."}),
                     "channelwise_mode":     ("BOOLEAN",                                   {"default": True}),
                     "projection_mode":      ("BOOLEAN",                                   {"default": True}),
                     "weight":               ("FLOAT",                                     {"default": 0.75, "min": -100.0, "max": 100.0, "step":0.01, "round": False, "tooltip": "Set the strength of the guide."}),
                     "cutoff":               ("FLOAT",                                     {"default": 1.0,  "min": 0.0,    "max": 1.0,   "step":0.01, "round": False, "tooltip": "Disables the guide for the next step when the denoised image is similar to the guide. Higher values will strengthen the effect."}),
                     "weight_scheduler":     (["constant"] + get_res4lyf_scheduler_list(), {"default": "beta57"},),
-                    "start_step":           ("INT",                                       {"default": 0,    "min": 0,      "max": 10000}),
-                    "end_step":             ("INT",                                       {"default": 15,   "min": 1,      "max": 10000}),
+                    "start_step":           ("INT",                                       {"default": 0,    "min":  0,      "max": 10000}),
+                    "end_step":             ("INT",                                       {"default": 15,   "min": -1,      "max": 10000}),
                     "invert_mask":          ("BOOLEAN",                                   {"default": False}),
                     },
                 "optional": 
@@ -907,6 +913,9 @@ class ClownGuide_Beta:
         CG = ClownGuides_Beta()
         
         mask = 1-mask if mask is not None else None
+        
+        if end_step == -1:
+            end_step = MAX_STEPS
         
         if guide is not None:
             raw_x = guide.get('state_info', {}).get('raw_x', None)
@@ -968,10 +977,10 @@ class ClownGuides_Beta:
                     "cutoff_unmasked":             ("FLOAT",                                     {"default": 1.0,  "min": -100.0, "max": 100.0, "step":0.01, "round": False, "tooltip": "Disables the guide for the next step when the denoised image is similar to the guide. Higher values will strengthen the effect."}),
                     "weight_scheduler_masked":     (["constant"] + get_res4lyf_scheduler_list(), {"default": "beta57"},),
                     "weight_scheduler_unmasked":   (["constant"] + get_res4lyf_scheduler_list(), {"default": "constant"},),
-                    "start_step_masked":           ("INT",                                       {"default": 0,    "min": 0,      "max": 10000}),
-                    "start_step_unmasked":         ("INT",                                       {"default": 0,    "min": 0,      "max": 10000}),
-                    "end_step_masked":             ("INT",                                       {"default": 15,   "min": 1,      "max": 10000}),
-                    "end_step_unmasked":           ("INT",                                       {"default": 15,   "min": 1,      "max": 10000}),
+                    "start_step_masked":           ("INT",                                       {"default": 0,    "min":  0,      "max": 10000}),
+                    "start_step_unmasked":         ("INT",                                       {"default": 0,    "min":  0,      "max": 10000}),
+                    "end_step_masked":             ("INT",                                       {"default": 15,   "min": -1,      "max": 10000}),
+                    "end_step_unmasked":           ("INT",                                       {"default": 15,   "min": -1,      "max": 10000}),
                     "invert_mask":                 ("BOOLEAN",                                   {"default": False}),
                     },
                 "optional": 
@@ -1014,6 +1023,11 @@ class ClownGuides_Beta:
             ):
 
         default_dtype = torch.float64
+        
+        if end_step_masked   == -1:
+            end_step_masked   = MAX_STEPS
+        if end_step_unmasked == -1:
+            end_step_unmasked = MAX_STEPS
         
         if guide_masked is None:
             weight_scheduler_masked = "constant"
@@ -1133,10 +1147,10 @@ class ClownGuidesAB_Beta:
                     "cutoff_B":           ("FLOAT",                                     {"default": 1.0,  "min": -100.0, "max": 100.0, "step":0.01, "round": False, "tooltip": "Disables the guide for the next step when the denoised image is similar to the guide. Higher values will strengthen the effect."}),
                     "weight_scheduler_A": (["constant"] + get_res4lyf_scheduler_list(), {"default": "beta57"},),
                     "weight_scheduler_B": (["constant"] + get_res4lyf_scheduler_list(), {"default": "constant"},),
-                    "start_step_A":       ("INT",                                       {"default": 0,    "min": 0,      "max": 10000}),
-                    "start_step_B":       ("INT",                                       {"default": 0,    "min": 0,      "max": 10000}),
-                    "end_step_A":         ("INT",                                       {"default": 15,   "min": 1,      "max": 10000}),
-                    "end_step_B":         ("INT",                                       {"default": 15,   "min": 1,      "max": 10000}),
+                    "start_step_A":       ("INT",                                       {"default": 0,    "min":  0,      "max": 10000}),
+                    "start_step_B":       ("INT",                                       {"default": 0,    "min":  0,      "max": 10000}),
+                    "end_step_A":         ("INT",                                       {"default": 15,   "min": -1,      "max": 10000}),
+                    "end_step_B":         ("INT",                                       {"default": 15,   "min": -1,      "max": 10000}),
                     "invert_masks":       ("BOOLEAN",                                   {"default": False}),
                     },
                 "optional": 
@@ -1180,6 +1194,11 @@ class ClownGuidesAB_Beta:
             ):
         
         default_dtype = torch.float64
+        
+        if end_step_A == -1:
+            end_step_A = MAX_STEPS
+        if end_step_B == -1:
+            end_step_B = MAX_STEPS
         
         if guide_A is not None:
             raw_x = guide_A.get('state_info', {}).get('raw_x', None)

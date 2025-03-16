@@ -184,6 +184,9 @@ def sample_rk_beta(
 
         regional_conditioning_weights : Optional[Tensor]   = None,
         regional_conditioning_floors  : Optional[Tensor]   = None,
+        regional_conditioning_mask_orig : Optional[Tensor] = None,
+        crosself_attn_start_step      : int                = 0,
+        crosself_attn_end_step        : int                = 5,
                 
         LGW_MASK_RESCALE_MIN          : bool               = True,
         guides                        : Optional[Tuple[Any, ...]]    = None,
@@ -291,6 +294,14 @@ def sample_rk_beta(
     RK.extra_args['model_options']['transformer_options']['regional_conditioning_weight'] = 0.0
     RK.extra_args['model_options']['transformer_options']['regional_conditioning_floor']  = 0.0
     
+    if EO("no_reg_cond_mask"):
+        regional_conditioning_mask_orig = None
+    if EO("inv_reg_cond_mask"):
+        regional_conditioning_mask_orig = 1-regional_conditioning_mask_orig
+        
+        
+    #RK.extra_args['model_options']['transformer_options']['regional_conditioning_mask_orig'] = regional_conditioning_mask_orig
+    
     # SETUP SIGMAS
     NS               = RK_NoiseSampler(RK, model, device=work_device, dtype=default_dtype, extra_options=extra_options)
     sigmas, UNSAMPLE = NS.prepare_sigmas(sigmas, sigmas_override, d_noise, d_noise_start_step, sampler_mode)
@@ -382,6 +393,12 @@ def sample_rk_beta(
         if regional_conditioning_weights is not None:
             RK.extra_args['model_options']['transformer_options']['regional_conditioning_weight'] = regional_conditioning_weights[step]
             RK.extra_args['model_options']['transformer_options']['regional_conditioning_floor']  = regional_conditioning_floors [step]
+            
+            if   step >= crosself_attn_start_step and step < crosself_attn_end_step and regional_conditioning_mask_orig is not None:
+                RK.extra_args['model_options']['transformer_options']['regional_conditioning_mask_orig'] = regional_conditioning_mask_orig
+                #RK.extra_args['model_options']['transformer_options']['regional_conditioning_floor']    *= 0
+            else:
+                RK.extra_args['model_options']['transformer_options']['regional_conditioning_mask_orig'] = None
         
         epsilon_scale   = float(epsilon_scales[step]) if epsilon_scales   is not None else None
         eta             = etas                [step]  if etas             is not None else eta
@@ -854,6 +871,12 @@ def sample_rk_beta(
                             
                             
                         x_means_per_substep = x_[row+RK.row_offset].mean(dim=(-2,-1), keepdim=True)
+                                                
+                        if EO("sde_mask_floor"):
+                            sde_mask_floor = EO("sde_mask_floor", 0.0)
+                            sde_mask_ceiling = EO("sde_mask_ceiling", 1.0)
+                            sde_mask = ((sde_mask - sde_mask.min()) * (sde_mask_floor - sde_mask_ceiling)) / (sde_mask.max() - sde_mask.min()) + sde_mask_ceiling     
+                            
                         x_[row+RK.row_offset] = NS.swap_noise_substep(x_0, x_[row+RK.row_offset], mask=sde_mask)
                         
                         if EO("keep_substep_means"):
@@ -908,6 +931,10 @@ def sample_rk_beta(
                 
                 
             x_means_per_step = x_next.mean(dim=(-2,-1), keepdim=True)
+            if EO("sde_mask_floor"):
+                sde_mask_floor = EO("sde_mask_floor", 0.0)
+                sde_mask_ceiling = EO("sde_mask_ceiling", 1.0)
+                sde_mask = ((sde_mask - sde_mask.min()) * (sde_mask_floor - sde_mask_ceiling)) / (sde_mask.max() - sde_mask.min()) + sde_mask_ceiling    
             x      = NS.swap_noise_step(x_0, x_next, mask=sde_mask)
             if EO("keep_step_means"):
                 x = x - x.mean(dim=(-2,-1), keepdim=True) + x_means_per_step

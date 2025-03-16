@@ -363,12 +363,16 @@ class SharkSampler:
                     pos_cond = pos_cond[0][1]['callback_regional'](model)
                 
                 if "regional_conditioning_weights" in pos_cond[0][1]:
-                    sampler.extra_options['regional_conditioning_weights'] = pos_cond[0][1]['regional_conditioning_weights']
-                    sampler.extra_options['regional_conditioning_floors']  = pos_cond[0][1]['regional_conditioning_floors']
-                    regional_generate_conditionings_and_masks_fn           = pos_cond[0][1]['regional_generate_conditionings_and_masks_fn']
-                    regional_conditioning, regional_mask                   = regional_generate_conditionings_and_masks_fn(latent_x['samples'])
-                    regional_conditioning                                  = copy.deepcopy(regional_conditioning)
-                    regional_mask                                          = copy.deepcopy(regional_mask)
+                    sampler.extra_options['regional_conditioning_weights']   = pos_cond[0][1]['regional_conditioning_weights']
+                    sampler.extra_options['regional_conditioning_floors']    = pos_cond[0][1]['regional_conditioning_floors']
+                    sampler.extra_options['regional_conditioning_mask_orig'] = pos_cond[0][1]['regional_conditioning_mask_orig']
+                    sampler.extra_options['crosself_attn_start_step']        = pos_cond[0][1].get('crosself_attn_start_step', 0)
+                    sampler.extra_options['crosself_attn_end_step']          = pos_cond[0][1].get('crosself_attn_end_step', 5)
+                    
+                    regional_generate_conditionings_and_masks_fn             = pos_cond[0][1]['regional_generate_conditionings_and_masks_fn']
+                    regional_conditioning, regional_mask                     = regional_generate_conditionings_and_masks_fn(latent_x['samples'])
+                    regional_conditioning                                    = copy.deepcopy(regional_conditioning)
+                    regional_mask                                            = copy.deepcopy(regional_mask)
                     
                     #if EO("enable_auto_enable_reflux"):
                     #    work_model, = RES4LYF.models.ReFluxPatcher().main(work_model, enable=True) #, force=True)
