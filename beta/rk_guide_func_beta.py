@@ -160,21 +160,23 @@ class LatentGuide:
             if self.guide_mode.startswith("fully_") and not RK_IMPLICIT:
                 self.guide_mode = self.guide_mode[6:]   # fully_pseudoimplicit is only supported for implicit samplers, default back to pseudoimplicit
             
+            guide_sigma_shift = self.EO("guide_sigma_shift", 0.0)
+
             if latent_guide_weights is None and self.guide_mode != "none":
                 total_steps          = steps_ - start_steps_
-                latent_guide_weights = get_sigmas(self.model, scheduler_, total_steps, 1.0).to(dtype=self.dtype, device=self.device) / self.sigma_max
+                latent_guide_weights = get_sigmas(self.model, scheduler_, total_steps, 1.0, shift=guide_sigma_shift).to(dtype=self.dtype, device=self.device) / self.sigma_max
                 prepend              = torch.zeros(start_steps_,                               dtype=self.dtype, device=self.device)
                 latent_guide_weights = torch.cat((prepend, latent_guide_weights), dim=0)
                 
             if latent_guide_weights_inv is None and self.guide_mode != "none":
                 total_steps              = steps_inv_ - start_steps_inv_
-                latent_guide_weights_inv = get_sigmas(self.model, scheduler_inv_, total_steps, 1.0).to(dtype=self.dtype, device=self.device) / self.sigma_max
+                latent_guide_weights_inv = get_sigmas(self.model, scheduler_inv_, total_steps, 1.0, shift=guide_sigma_shift).to(dtype=self.dtype, device=self.device) / self.sigma_max
                 prepend                  = torch.zeros(start_steps_inv_,                               dtype=self.dtype, device=self.device) 
                 latent_guide_weights_inv = torch.cat((prepend, latent_guide_weights_inv), dim=0)
                 
             if latent_guide_weights_mean is None and scheduler_mean_ is not None:
                 total_steps              = steps_mean_ - start_steps_mean_
-                latent_guide_weights_mean = get_sigmas(self.model, scheduler_mean_, total_steps, 1.0).to(dtype=self.dtype, device=self.device) / self.sigma_max
+                latent_guide_weights_mean = get_sigmas(self.model, scheduler_mean_, total_steps, 1.0, shift=guide_sigma_shift).to(dtype=self.dtype, device=self.device) / self.sigma_max
                 prepend                  = torch.zeros(start_steps_mean_,                               dtype=self.dtype, device=self.device) 
                 latent_guide_weights_mean = torch.cat((prepend, latent_guide_weights_mean), dim=0)
                 

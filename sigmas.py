@@ -11,6 +11,8 @@ import torch.optim as optim
 from comfy.k_diffusion.sampling import get_sigmas_polyexponential, get_sigmas_karras
 import comfy.samplers
 
+from .res4lyf import RESplain
+
 def rescale_linear(input, input_min, input_max, output_min, output_max):
     output = ((input - input_min) / (input_max - input_min)) * (output_max - output_min) + output_min;
     return output
@@ -1239,23 +1241,32 @@ extra_schedulers = {
 
 
 
-def get_sigmas(model, scheduler, steps, denoise, lq_inflection_percent=0.5): #adapted from comfyui
+def get_sigmas(model, scheduler, steps, denoise, shift=0.0, lq_inflection_percent=0.5): #adapted from comfyui
     total_steps = steps
     if denoise < 1.0:
         if denoise <= 0.0:
             return (torch.FloatTensor([]),)
         total_steps = int(steps/denoise)
 
-    #model_sampling = model.get_model_object("model_sampling")
-    if hasattr(model, "model"):
-        model_sampling = model.model.model_sampling
-    elif hasattr(model, "inner_model"):
-        model_sampling = model.inner_model.inner_model.model_sampling
+    try:
+        model_sampling = model.get_model_object("model_sampling")
+    except:
+        if hasattr(model, "model"):
+            model_sampling = model.model.model_sampling
+        elif hasattr(model, "inner_model"):
+            model_sampling = model.inner_model.inner_model.model_sampling
+        else:
+            raise Exception("get_sigmas: Could not get model_sampling")
+
+    if shift > 1e-6:
+        model_sampling.shift = shift
+        RESplain("model_sampling shift manually set to " + str(shift), debug=True)
+    
     if scheduler == "beta57":
-        sigmas = comfy.samplers.beta_scheduler(model_sampling, total_steps, alpha=0.5, beta=0.7)
+        sigmas = comfy.samplers.beta_scheduler(model_sampling, total_steps, alpha=0.5, beta=0.7).cpu()
     elif scheduler == "linear_quadratic":
         linear_steps = int(total_steps * lq_inflection_percent)
-        sigmas = comfy.samplers.linear_quadratic_schedule(model_sampling, total_steps, threshold_noise=0.025, linear_steps=linear_steps)
+        sigmas = comfy.samplers.linear_quadratic_schedule(model_sampling, total_steps, threshold_noise=0.025, linear_steps=linear_steps).cpu()
     else:
         sigmas = comfy.samplers.calculate_sigmas(model_sampling, scheduler, total_steps).cpu()
     
