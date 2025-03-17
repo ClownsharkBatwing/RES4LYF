@@ -93,24 +93,6 @@ class LatentGuide:
         latent_guide_mean         = None
 
         if guides is not None:
-            """(self.guide_mode, 
-            latent_guide_weight, 
-            latent_guide_weight_inv, 
-            latent_guide_weights, 
-            latent_guide_weights_inv, 
-            latent_guide, 
-            latent_guide_inv, 
-            self.mask, 
-            self.mask_inv, 
-            scheduler_, 
-            scheduler_inv_, 
-            start_steps_, 
-            start_steps_inv_, 
-            steps_, 
-            steps_inv_, 
-            self.guide_cossim_cutoff_, 
-            self.guide_bkg_cossim_cutoff_) = copy.deepcopy(guides)"""
-            
             self.guide_mode               = guides.get("guide_mode", "none")
             latent_guide_weight           = guides.get("weight_masked", 0.)
             latent_guide_weight_inv       = guides.get("weight_unmasked", 0.)
@@ -140,7 +122,6 @@ class LatentGuide:
             steps_inv_                    = guides.get("end_step_unmasked", 1)
             steps_mean_                   = guides.get("end_step_mean", 1)
 
-            
             self.guide_cossim_cutoff_     = guides.get("cutoff_masked", 1.)
             self.guide_bkg_cossim_cutoff_ = guides.get("cutoff_unmasked", 1.)
             self.guide_mean_cossim_cutoff_= guides.get("cutoff_mean", 1.)
@@ -175,16 +156,16 @@ class LatentGuide:
             if latent_guide_weights_mean is None and scheduler_mean_ is not None:
                 total_steps              = steps_mean_ - start_steps_mean_
                 latent_guide_weights_mean = get_sigmas(self.model, scheduler_mean_, total_steps, 1.0).to(dtype=self.dtype, device=self.device) / self.sigma_max
-                prepend                  = torch.zeros(start_steps_mean_,                               dtype=self.dtype, device=self.device) 
+                prepend                  = torch.zeros(start_steps_mean_,                                dtype=self.dtype, device=self.device) 
                 latent_guide_weights_mean = torch.cat((prepend, latent_guide_weights_mean), dim=0)
                 
             latent_guide_weights      = initialize_or_scale(latent_guide_weights,      latent_guide_weight,      self.max_steps)
             latent_guide_weights_inv  = initialize_or_scale(latent_guide_weights_inv,  latent_guide_weight_inv,  self.max_steps)
             latent_guide_weights_mean = initialize_or_scale(latent_guide_weights_mean, latent_guide_weight_mean, self.max_steps)
 
-            latent_guide_weights     [steps_      - 1:] = 0
-            latent_guide_weights_inv [steps_inv_  - 1:] = 0
-            latent_guide_weights_mean[steps_mean_ - 1:] = 0
+            latent_guide_weights     [steps_     :] = 0
+            latent_guide_weights_inv [steps_inv_ :] = 0
+            latent_guide_weights_mean[steps_mean_:] = 0
                 
         self.lgw      = F.pad(latent_guide_weights,      (0, self.max_steps), value=0.0)
         self.lgw_inv  = F.pad(latent_guide_weights_inv,  (0, self.max_steps), value=0.0)
