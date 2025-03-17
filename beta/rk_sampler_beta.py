@@ -185,8 +185,8 @@ def sample_rk_beta(
         regional_conditioning_weights : Optional[Tensor]   = None,
         regional_conditioning_floors  : Optional[Tensor]   = None,
         regional_conditioning_mask_orig : Optional[Tensor] = None,
-        crosself_attn_start_step      : int                = 0,
-        crosself_attn_end_step        : int                = 5,
+        narcissism_start_step      : int                = 0,
+        narcissism_end_step        : int                = 5,
                 
         LGW_MASK_RESCALE_MIN          : bool               = True,
         guides                        : Optional[Tuple[Any, ...]]    = None,
@@ -218,6 +218,9 @@ def sample_rk_beta(
 
         extra_options                 : str                = "",
         ):
+    
+    if sampler_mode == "NULL":
+        return x
     
     EO             = ExtraOptions(extra_options)
     default_dtype  = EO("default_dtype", torch.float64)
@@ -394,7 +397,7 @@ def sample_rk_beta(
             RK.extra_args['model_options']['transformer_options']['regional_conditioning_weight'] = regional_conditioning_weights[step]
             RK.extra_args['model_options']['transformer_options']['regional_conditioning_floor']  = regional_conditioning_floors [step]
             
-            if   step >= crosself_attn_start_step and step < crosself_attn_end_step and regional_conditioning_mask_orig is not None:
+            if   step >= narcissism_start_step and step < narcissism_end_step and regional_conditioning_mask_orig is not None:
                 RK.extra_args['model_options']['transformer_options']['regional_conditioning_mask_orig'] = regional_conditioning_mask_orig
                 #RK.extra_args['model_options']['transformer_options']['regional_conditioning_floor']    *= 0
             else:

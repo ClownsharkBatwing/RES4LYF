@@ -126,13 +126,6 @@ class LatentGuide:
             self.guide_bkg_cossim_cutoff_ = guides.get("cutoff_unmasked", 1.)
             self.guide_mean_cossim_cutoff_= guides.get("cutoff_mean", 1.)
 
-
-            
-            #if latent_guide    ['samples'].shape[0] > 1:
-            #    latent_guide['samples']     = latent_guide    ['samples'][batch_num].unsqueeze(0)
-            #if latent_guide_inv['samples'].shape[0] > 1:
-            #    latent_guide_inv['samples'] = latent_guide_inv['samples'][batch_num].unsqueeze(0)
-                
             if self.mask     is not None and self.mask.shape    [0] > 1:
                 self.mask     = self.mask    [batch_num].unsqueeze(0)
             if self.mask_inv is not None and self.mask_inv.shape[0] > 1:
@@ -142,7 +135,7 @@ class LatentGuide:
                 self.guide_mode = self.guide_mode[6:]   # fully_pseudoimplicit is only supported for implicit samplers, default back to pseudoimplicit
             
             guide_sigma_shift = self.EO("guide_sigma_shift", 0.0)
-
+            
             if latent_guide_weights is None and self.guide_mode != "none":
                 total_steps          = steps_ - start_steps_
                 latent_guide_weights = get_sigmas(self.model, scheduler_, total_steps, 1.0, shift=guide_sigma_shift).to(dtype=self.dtype, device=self.device) / self.sigma_max
@@ -156,9 +149,9 @@ class LatentGuide:
                 latent_guide_weights_inv = torch.cat((prepend, latent_guide_weights_inv), dim=0)
                 
             if latent_guide_weights_mean is None and scheduler_mean_ is not None:
-                total_steps              = steps_mean_ - start_steps_mean_
+                total_steps               = steps_mean_ - start_steps_mean_
                 latent_guide_weights_mean = get_sigmas(self.model, scheduler_mean_, total_steps, 1.0, shift=guide_sigma_shift).to(dtype=self.dtype, device=self.device) / self.sigma_max
-                prepend                  = torch.zeros(start_steps_mean_,                                                         dtype=self.dtype, device=self.device) 
+                prepend                   = torch.zeros(start_steps_mean_,                                                        dtype=self.dtype, device=self.device) 
                 latent_guide_weights_mean = torch.cat((prepend, latent_guide_weights_mean), dim=0)
                 
             latent_guide_weights      = initialize_or_scale(latent_guide_weights,      latent_guide_weight,      self.max_steps)

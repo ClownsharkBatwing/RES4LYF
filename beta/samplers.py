@@ -158,6 +158,15 @@ class SharkSampler:
                 sampler.extra_options.pop("cfg_cw", None) 
 
             work_model   = model.clone()
+            
+            if not EO("disable_dummy_sampler_init"):
+                sampler_null = comfy.samplers.ksampler("rk_beta", 
+                    {
+                        "sampler_mode": "NULL",
+                    })
+                x_null = torch.zeros_like(latent_image['samples'])
+                _ = comfy.sample.sample_custom(work_model, x_null, cfg, sampler_null, torch.linspace(1, 0, 10).to(x_null.dtype).to(x_null.device), positive, positive, x_null, noise_mask=None, callback=None, disable_pbar=disable_pbar, seed=noise_seed)
+
             sigma_min    = work_model.model.model_sampling.sigma_min
             sigma_max    = work_model.model.model_sampling.sigma_max
         
@@ -366,8 +375,8 @@ class SharkSampler:
                     sampler.extra_options['regional_conditioning_weights']   = pos_cond[0][1]['regional_conditioning_weights']
                     sampler.extra_options['regional_conditioning_floors']    = pos_cond[0][1]['regional_conditioning_floors']
                     sampler.extra_options['regional_conditioning_mask_orig'] = pos_cond[0][1]['regional_conditioning_mask_orig']
-                    sampler.extra_options['crosself_attn_start_step']        = pos_cond[0][1].get('crosself_attn_start_step', 0)
-                    sampler.extra_options['crosself_attn_end_step']          = pos_cond[0][1].get('crosself_attn_end_step', 5)
+                    sampler.extra_options['narcissism_start_step']        = pos_cond[0][1].get('narcissism_start_step', 0)
+                    sampler.extra_options['narcissism_end_step']          = pos_cond[0][1].get('narcissism_end_step', 5)
                     
                     regional_generate_conditionings_and_masks_fn             = pos_cond[0][1]['regional_generate_conditionings_and_masks_fn']
                     regional_conditioning, regional_mask                     = regional_generate_conditionings_and_masks_fn(latent_x['samples'])
