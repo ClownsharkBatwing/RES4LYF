@@ -167,8 +167,8 @@ class SharkSampler:
                 x_null = torch.zeros_like(latent_image['samples'])
                 _ = comfy.sample.sample_custom(work_model, x_null, cfg, sampler_null, torch.linspace(1, 0, 10).to(x_null.dtype).to(x_null.device), positive, positive, x_null, noise_mask=None, callback=None, disable_pbar=disable_pbar, seed=noise_seed)
 
-            sigma_min    = work_model.model.model_sampling.sigma_min
-            sigma_max    = work_model.model.model_sampling.sigma_max
+            sigma_min    = work_model.get_model_object('model_sampling').sigma_min
+            sigma_max    = work_model.get_model_object('model_sampling').sigma_max
         
             if sampler is None:
                 raise ValueError("sampler is required")
