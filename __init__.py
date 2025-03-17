@@ -50,8 +50,9 @@ NODE_CLASS_MAPPINGS = {
     "SD35Loader"                          : loaders.SD35Loader,
     
     
-    
+
     "TextBox1"                            : nodes_misc.TextBox1,
+    "TextBox2"                            : nodes_misc.TextBox2,
     "TextBox3"                            : nodes_misc.TextBox3,
     
     "TextConcatenate"                     : nodes_misc.TextConcatenate,
@@ -64,12 +65,13 @@ NODE_CLASS_MAPPINGS = {
 
     "SeedGenerator"                       : nodes_misc.SeedGenerator,
     
+    
+    
     "ClownRegionalConditioning"           : conditioning.ClownRegionalConditioning,
     "ClownRegionalConditioning3"          : conditioning.ClownRegionalConditioning3,
 
     "ClownRegionalConditioningAdvanced"   : conditioning.ClownRegionalConditioningAdvanced,
 
-    
     "CLIPTextEncodeFluxUnguided"          : conditioning.CLIPTextEncodeFluxUnguided,
     "ConditioningOrthoCollin"             : conditioning.ConditioningOrthoCollin,
 
@@ -91,6 +93,7 @@ NODE_CLASS_MAPPINGS = {
 
     "ConditioningBatch4"                  : conditioning.ConditioningBatch4,
     "ConditioningBatch8"                  : conditioning.ConditioningBatch8,
+
 
 
     "Set Precision"                       : nodes_precision.set_precision,
@@ -139,7 +142,7 @@ NODE_CLASS_MAPPINGS = {
     "EmptyLatentImage64"                  : nodes_latents.EmptyLatentImage64,
     "EmptyLatentImageCustom"              : nodes_latents.EmptyLatentImageCustom,
     "StableCascade_StageC_VAEEncode_Exact": nodes_latents.StableCascade_StageC_VAEEncode_Exact,
-
+    
     
     
     "PrepForUnsampling"                   : helper_sigma_preview_image_preproc.VAEEncodeAdvanced,
@@ -149,10 +152,10 @@ NODE_CLASS_MAPPINGS = {
     "SigmasSchedulePreview"               : helper_sigma_preview_image_preproc.SigmasSchedulePreview,
 
 
-    "ModelSamplingAdvanced"               : models.ModelSamplingAdvanced,
-    "ModelTimestepPatcher"                : models.ModelSamplingAdvanced,
     "TorchCompileModelFluxAdv"            : models.TorchCompileModelFluxAdvanced,
 
+    "ModelTimestepPatcher"                : models.ModelSamplingAdvanced,
+    "ModelSamplingAdvanced"               : models.ModelSamplingAdvanced,
     "ModelSamplingAdvancedResolution"     : models.ModelSamplingAdvancedResolution,
     "FluxGuidanceDisable"                 : models.FluxGuidanceDisable,
 

@@ -11,12 +11,12 @@ class TextBox1:
     def INPUT_TYPES(cls):
         return {"required":
                     {
-                     "text1": ("STRING", {"default": "", "multiline": True}),
+                    "text1": ("STRING", {"default": "", "multiline": True}),
                     },
-                     "optional": 
+                    "optional": 
                     {
                     }  
-               }
+                }
     RETURN_TYPES = ("STRING",)
     RETURN_NAMES = ("text1",)
     FUNCTION = "main"
@@ -28,19 +28,42 @@ class TextBox1:
 
         return (text1,)
 
+class TextBox2:
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {"required":
+                    {
+                    "text1": ("STRING", {"default": "", "multiline": True}),
+                    "text2": ("STRING", {"default": "", "multiline": True}),
+                    },
+                    "optional": 
+                    {
+                    }  
+                }
+    RETURN_TYPES = ("STRING", "STRING",)
+    RETURN_NAMES = ("text1", "text2",)
+    FUNCTION = "main"
+    
+    CATEGORY = "RES4LYF/text"
+    DESCRIPTION = "Multiline textbox."
+
+    def main(self, text1, text2,):
+
+        return (text1, text2,)
+
 class TextBox3:
     @classmethod
     def INPUT_TYPES(cls):
         return {"required":
                     {
-                     "text1": ("STRING", {"default": "", "multiline": True}),
-                     "text2": ("STRING", {"default": "", "multiline": True}),
-                     "text3": ("STRING", {"default": "", "multiline": True}),
+                    "text1": ("STRING", {"default": "", "multiline": True}),
+                    "text2": ("STRING", {"default": "", "multiline": True}),
+                    "text3": ("STRING", {"default": "", "multiline": True}),
                     },
-                     "optional": 
+                    "optional": 
                     {
                     }  
-               }
+                }
     RETURN_TYPES = ("STRING", "STRING","STRING",)
     RETURN_NAMES = ("text1", "text2", "text3",)
     FUNCTION = "main"
@@ -59,7 +82,7 @@ class TextLoadFile:
     def INPUT_TYPES(cls):
         input_dir = folder_paths.get_input_directory()
         files = [f for f in os.listdir(input_dir)
-                 if os.path.isfile(os.path.join(input_dir, f)) and f.lower().endswith('.txt')]
+                if os.path.isfile(os.path.join(input_dir, f)) and f.lower().endswith('.txt')]
         return {
             "required": {
                 "text_file": (sorted(files), {"text_upload": True})
@@ -246,7 +269,7 @@ class TextTruncateTokens:
 
 class TextConcatenate:
 
-    @ classmethod
+    @classmethod
     def INPUT_TYPES(cls):
         return {
             "required": {
@@ -271,11 +294,11 @@ class TextConcatenate:
 
 class TextBoxConcatenate:
 
-    @ classmethod
+    @classmethod
     def INPUT_TYPES(cls):
         return {
             "required": {
-                 "text": ("STRING", {"default": "", "multiline": True}),
+                "text": ("STRING", {"default": "", "multiline": True}),
             },
             "optional": {
                 "text_external": ("STRING", {"multiline": False, "default": "", "forceInput": True}),                

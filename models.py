@@ -429,7 +429,7 @@ class ModelSamplingAdvancedResolution:
                     "base_shift":   ("FLOAT",                   {"default": 0.85, "min": -100.0, "max": 100.0, "step":0.01, "round": False}),
                     "latent_image": ("LATENT",),
                 }
-               }
+                }
     
     RETURN_TYPES = ("MODEL",)
     RETURN_NAMES = ("model",)
