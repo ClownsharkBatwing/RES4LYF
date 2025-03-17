@@ -1273,28 +1273,4 @@ def get_sigmas(model, scheduler, steps, denoise, shift=0.0, lq_inflection_percen
     return sigmas
 
 
-def get_sigmas(model, scheduler, steps, denoise, lq_inflection_percent=0.5): #adapted from comfyui
-    total_steps = steps
-    if denoise < 1.0:
-        if denoise <= 0.0:
-            return (torch.FloatTensor([]),)
-        total_steps = int(steps/denoise)
-
-    #model_sampling = model.get_model_object("model_sampling")
-    if hasattr(model, "model"):
-        model_sampling = model.model.model_sampling
-    elif hasattr(model, "inner_model"):
-        model_sampling = model.inner_model.inner_model.model_sampling
-    if scheduler == "beta57":
-        sigmas = comfy.samplers.beta_scheduler(model_sampling, total_steps, alpha=0.5, beta=0.7)
-    elif scheduler == "linear_quadratic":
-        linear_steps = int(total_steps * lq_inflection_percent)
-        sigmas = comfy.samplers.linear_quadratic_schedule(model_sampling, total_steps, threshold_noise=0.025, linear_steps=linear_steps)
-    else:
-        sigmas = comfy.samplers.calculate_sigmas(model_sampling, scheduler, total_steps).cpu()
-    
-    sigmas = sigmas[-(steps + 1):]
-    return sigmas
-
-
 
