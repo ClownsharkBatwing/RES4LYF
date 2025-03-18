@@ -142,12 +142,14 @@ class SharkSampler:
                 positive = copy.deepcopy(latent_image['positive'])
             if 'negative' in latent_image and negative is None:
                 negative = copy.deepcopy(latent_image['negative'])
-            if 'model' in latent_image and model is None:
-                model = latent_image['model']  #.clone()
             if 'sampler' in latent_image and sampler is None:
-                sampler = latent_image['sampler']  #.clone()
+                sampler = copy.deepcopy(latent_image['sampler'])  #.clone()
             if 'steps_to_run' in sampler.extra_options:
                 sampler.extra_options['steps_to_run'] = steps_to_run
+                
+            #if 'model' in latent_image and model is None:
+            #    model = latent_image['model'].clone()
+            
                 
             #sampler.extra_options.update(options_mgr.as_dict())
                 
@@ -181,7 +183,7 @@ class SharkSampler:
             if sigmas is not None:
                 sigmas = sigmas.clone().to(default_dtype) # does this type carry into clown after passing through comfy?
             else: 
-                sigmas = get_sigmas(model, scheduler, steps, abs(denoise)).to(default_dtype)
+                sigmas = get_sigmas(work_model, scheduler, steps, abs(denoise)).to(default_dtype)
             sigmas *= denoise_alt
             
             #if 'd_noise' in sampler.extra_options:
@@ -369,14 +371,14 @@ class SharkSampler:
                         text_len_base = 256
                         pooled_len    = 768
                     
-                    pos_cond = pos_cond[0][1]['callback_regional'](model)
+                    pos_cond = pos_cond[0][1]['callback_regional'](work_model)
                 
                 if "regional_conditioning_weights" in pos_cond[0][1]:
                     sampler.extra_options['regional_conditioning_weights']   = pos_cond[0][1]['regional_conditioning_weights']
                     sampler.extra_options['regional_conditioning_floors']    = pos_cond[0][1]['regional_conditioning_floors']
                     sampler.extra_options['regional_conditioning_mask_orig'] = pos_cond[0][1]['regional_conditioning_mask_orig']
-                    sampler.extra_options['narcissism_start_step']        = pos_cond[0][1].get('narcissism_start_step', 0)
-                    sampler.extra_options['narcissism_end_step']          = pos_cond[0][1].get('narcissism_end_step', 5)
+                    sampler.extra_options['narcissism_start_step']           = pos_cond[0][1].get('narcissism_start_step', 0)
+                    sampler.extra_options['narcissism_end_step']             = pos_cond[0][1].get('narcissism_end_step',   5)
                     
                     regional_generate_conditionings_and_masks_fn             = pos_cond[0][1]['regional_generate_conditionings_and_masks_fn']
                     regional_conditioning, regional_mask                     = regional_generate_conditionings_and_masks_fn(latent_x['samples'])
@@ -500,6 +502,10 @@ class SharkSampler:
                         neg_cond[0][1]['control'].base = negative[0][1]['control'].base
                         [pos_cond[batch_num]][0][1]['control'].base = positive[0][1]['control'].base
                         
+                    #if 'model' in latent_image:
+                    #    blah_model = latent_image['model'].clone()
+                    #    sampler.extra_options['blah_model'] = blah_model
+                    
                     if batch_num < len(pos_cond):
                         samples = comfy.sample.sample_custom(work_model, noise, cfg, sampler, sigmas, [pos_cond[batch_num]], neg_cond, x.clone(), noise_mask=noise_mask, callback=callback, disable_pbar=disable_pbar, seed=noise_seed)
                     else:
@@ -551,7 +557,7 @@ class SharkSampler:
             
             out['positive'] = positive
             out['negative'] = negative
-            out['model']    = model.clone()
+            out['model']    = work_model.clone()
             out['sampler']  = sampler
             
             gc.collect()
@@ -643,7 +649,19 @@ class SharkSampler_Beta:
         
         #if 'steps_to_run' in sampler.extra_options:
         #    sampler.extra_options['steps_to_run'] = steps_to_run
-        
+        if 'positive' in latent_image and positive is None:
+            positive = latent_image['positive']
+        if 'negative' in latent_image and negative is None:
+            negative = latent_image['negative']
+        if 'sampler'  in latent_image and sampler  is None:
+            sampler  = latent_image['sampler']
+        if 'model' in latent_image and model is None:
+            model = latent_image['model']
+            
+        #if model.model.model_config.unet_config.get('stable_cascade_stage') == 'b':
+        #    if 'noise_type_sde' in sampler.extra_options:
+        #        noise_type_sde         = "pyramid-cascade_B"
+        #        noise_type_sde_substep = "pyramid-cascade_B"
         
         output, denoised, sde_noise = SharkSampler().main(
             model           = model, 
@@ -1106,11 +1124,15 @@ class ClownsharKSampler_Beta:
 
     RETURN_TYPES = ("LATENT", 
                     "LATENT",
-                    "OPTIONS",)
+                    "OPTIONS",
+                    #"MODEL",
+                    )
     
     RETURN_NAMES = ("output", 
                     "denoised",
-                    "options",) 
+                    "options",
+                    #"model",
+                    ) 
     
     FUNCTION = "main"
     CATEGORY = "RES4LYF/samplers"
@@ -1215,17 +1237,20 @@ class ClownsharKSampler_Beta:
         
         options_mgr = OptionsManager(options, **kwargs)
         extra_options    += "\n" + options_mgr.get('extra_options', "")
+
+        #if model is None:
+        #    model = latent_image['model']
         
         if denoise < 0:
             denoise_alt = -denoise
             denoised = 1.0
         
         if 'positive' in latent_image and positive is None:
-            positive = copy.deepcopy(latent_image['positive'])
+            positive = latent_image['positive']
         if 'negative' in latent_image and negative is None:
-            negative = copy.deepcopy(latent_image['negative'])
+            negative = latent_image['negative']
         if 'model' in latent_image and model is None:
-            model = latent_image['model'].clone()
+            model = latent_image['model']
         
         if model.model.model_config.unet_config.get('stable_cascade_stage') == 'b':
             noise_type_sde         = "pyramid-cascade_B"
@@ -1459,7 +1484,7 @@ class ClownsharKSampler_Beta:
 
             extra_options   = extra_options)
         
-        return (output, denoised, options_mgr.as_dict())
+        return (output, denoised, options_mgr.as_dict(),) # {'model':model,},)
 
 
 

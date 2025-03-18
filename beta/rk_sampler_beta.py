@@ -217,6 +217,8 @@ def sample_rk_beta(
         batch_num                     : int                = 0,
 
         extra_options                 : str                = "",
+        
+        blah_model = None,
         ):
     
     if sampler_mode == "NULL":
@@ -369,7 +371,7 @@ def sample_rk_beta(
 
     gc.collect()
 
-    prev_lying_sd = None
+
 
     # BEGIN SAMPLING LOOP    
     num_steps = len(sigmas[start_step:])-2 if sigmas[-1] == 0 else len(sigmas[start_step:])-1
@@ -825,7 +827,7 @@ def sample_rk_beta(
                             sde_mask = ((dyn_scale-1) + sde_mask) / dyn_scale
 
                             #sde_mask = (1 + sde_mask) / 2
-                            
+                        
                         if EO("dynamic_scaled_mean_inv_eps_mask_abs"):
                             sde_mask = eps_[row].abs()
                             sde_mask = sde_mask - sde_mask.min()
@@ -1019,10 +1021,10 @@ def sample_rk_beta(
         callback_step = len(sigmas)-1 - step if sampler_mode == "unsample" else step
         preview_callback(x, eps, denoised, x_, eps_, data_, callback_step, sigma, sigma_next, callback, EO, FINAL_STEP=True)
 
-    state_info_out['raw_x']             = x#.clone()
-    state_info_out['data_prev_']        = data_prev_#.clone()
+    state_info_out['raw_x']             = x.clone()
+    state_info_out['data_prev_']        = data_prev_.clone()
     state_info_out['end_step']          = step
-    state_info_out['sigma_next']        = sigma_next
+    state_info_out['sigma_next']        = sigma_next.clone()
     state_info_out['sigmas']            = sigmas.clone()
     state_info_out['sampler_mode']      = sampler_mode
     state_info_out['last_rng']          = NS.noise_sampler .generator.get_state().clone()
