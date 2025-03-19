@@ -706,8 +706,10 @@ class LatentGuide:
                 elif self.guide_mode in {"epsilon"}: 
                     #eps_[row] = slerp(lgw_mask.mean().item(), eps_[row], eps_substep_guide)
                     if self.EO("slerp_epsilon_guide"):
-                        eps_[row] = slerp_tensor(lgw_mask, eps_[row], eps_substep_guide)
-                        eps_[row] = slerp_tensor(lgw_mask_inv, eps_[row], eps_substep_guide_inv)
+                        if eps_substep_guide.sum() != 0:
+                            eps_[row] = slerp_tensor(lgw_mask, eps_[row], eps_substep_guide)
+                        if eps_substep_guide_inv.sum() != 0:
+                            eps_[row] = slerp_tensor(lgw_mask_inv, eps_[row], eps_substep_guide_inv)
                     else:
                         eps_[row] = eps_[row] + lgw_mask * (eps_substep_guide - eps_[row]) + lgw_mask_inv * (eps_substep_guide_inv - eps_[row])
                     
@@ -715,8 +717,10 @@ class LatentGuide:
                     
                 elif self.guide_mode in {"epsilon_projection"}:
                     if self.EO("slerp_epsilon_guide"):
-                        eps_row_slerp = slerp_tensor(self.mask, eps_[row], eps_substep_guide)
-                        eps_row_slerp = slerp_tensor((1-self.mask), eps_row_slerp, eps_substep_guide_inv)
+                        if eps_substep_guide.sum() != 0:
+                            eps_row_slerp = slerp_tensor(self.mask, eps_[row], eps_substep_guide)
+                        if eps_substep_guide_inv.sum() != 0:
+                            eps_row_slerp = slerp_tensor((1-self.mask), eps_row_slerp, eps_substep_guide_inv)
 
                         eps_collinear_eps_slerp = get_collinear(eps_[row], eps_row_slerp)
                         eps_slerp_ortho_eps     = get_orthogonal(eps_row_slerp, eps_[row])
