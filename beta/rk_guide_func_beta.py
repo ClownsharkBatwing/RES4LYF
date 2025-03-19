@@ -1603,15 +1603,24 @@ def slerp(val, low, high):
     return res
 
 
-
-def slerp_tensor(val: torch.Tensor, low: torch.Tensor, high: torch.Tensor, dim=-1) -> torch.Tensor:
-
+def slerp_tensor(val: torch.Tensor, low: torch.Tensor, high: torch.Tensor, dim=-3) -> torch.Tensor:
+    #dim = (2,3)
+    if low.ndim >= 4 and low.shape[-3] > 1:
+        dim=-3
+    elif low.ndim == 2:
+        dim=(-2,-1)
+        
     low_norm = low / (torch.norm(low, dim=dim, keepdim=True))
     high_norm = high / (torch.norm(high, dim=dim, keepdim=True))
     
     dot = (low_norm * high_norm).sum(dim=dim, keepdim=True).clamp(-1.0, 1.0)
     
+    #near = ~(-0.9995 < dot < 0.9995) #dot > 0.9995 or dot < -0.9995
     near = dot > 0.9995
+    opposite = dot < -0.9995
+
+    condition = torch.logical_or(near, opposite)
+    
     omega = torch.acos(dot)
     so = torch.sin(omega)
 
@@ -1622,5 +1631,103 @@ def slerp_tensor(val: torch.Tensor, low: torch.Tensor, high: torch.Tensor, dim=-
     factor_high = torch.sin(val * omega) / so
 
     res = factor_low * low + factor_high * high
-    res = torch.where(near, low * (1 - val) + high * val, res)
+    res = torch.where(condition, low * (1 - val) + high * val, res)
     return res
+
+
+
+
+
+# pytorch slerp implementation from https://gist.github.com/Birch-san/230ac46f99ec411ed5907b0a3d728efa
+from torch import FloatTensor, LongTensor, Tensor, Size, lerp, zeros_like
+from torch.linalg import norm
+
+# adapted to PyTorch from:
+# https://gist.github.com/dvschultz/3af50c40df002da3b751efab1daddf2c
+# most of the extra complexity is to support:
+# - many-dimensional vectors
+# - v0 or v1 with last dim all zeroes, or v0 ~colinear with v1
+#   - falls back to lerp()
+#   - conditional logic implemented with parallelism rather than Python loops
+# - many-dimensional tensor for t
+#   - you can ask for batches of slerp outputs by making t more-dimensional than the vectors
+#   -   slerp(
+#         v0:   torch.Size([2,3]),
+#         v1:   torch.Size([2,3]),
+#         t:  torch.Size([4,1,1]), 
+#       )
+#   - this makes it interface-compatible with lerp()
+
+#def slerp(v0: FloatTensor, v1: FloatTensor, t: float|FloatTensor, DOT_THRESHOLD=0.9995):
+
+from torch import FloatTensor, LongTensor, Tensor, Size, lerp, zeros_like
+from torch.linalg import norm
+
+def slerp_tensor2(t: torch.Tensor, v0: torch.Tensor, v1: torch.Tensor, DOT_THRESHOLD=0.9995, dim=-1) -> torch.Tensor:
+
+    '''
+    Spherical linear interpolation
+    Args:
+        v0: Starting vector
+        v1: Final vector
+        t: Float value between 0.0 and 1.0
+        DOT_THRESHOLD: Threshold for considering the two vectors as
+        colinear. Not recommended to alter this.
+    Returns:
+        Interpolation vector between v0 and v1
+    '''
+
+    assert v0.shape == v1.shape, "shapes of v0 and v1 must match"
+    v0_shape = v0.shape
+    if v0.ndim == 2:
+        v0 = v0.unsqueeze(0).unsqueeze(0)
+        v1 = v1.unsqueeze(0).unsqueeze(0)
+    # Normalize the vectors to get the directions and angles
+    v0_norm: FloatTensor = norm(v0, dim=dim)
+    v1_norm: FloatTensor = norm(v1, dim=dim)
+    
+    v0_normed: FloatTensor = v0 / v0_norm.unsqueeze(-1)
+    v1_normed: FloatTensor = v1 / v1_norm.unsqueeze(-1)
+    
+    # Dot product with the normalized vectors
+    dot: FloatTensor = (v0_normed * v1_normed).sum(-1)
+    dot_mag: FloatTensor = dot.abs()
+    
+    # if dp is NaN, it's because the v0 or v1 row was filled with 0s
+    # If absolute value of dot product is almost 1, vectors are ~colinear, so use lerp
+    gotta_lerp: LongTensor = dot_mag.isnan() | (dot_mag > DOT_THRESHOLD)
+    can_slerp: LongTensor = ~gotta_lerp
+    
+    t_batch_dim_count: int = max(0, t.dim()-v0.dim()) if isinstance(t, Tensor) else 0
+    t_batch_dims: Size = t.shape[:t_batch_dim_count] if isinstance(t, Tensor) else Size([])
+    out: FloatTensor = zeros_like(v0.expand(*t_batch_dims, *[-1]*v0.dim()))
+    
+    # if no elements are lerpable, our vectors become 0-dimensional, preventing broadcasting
+    if gotta_lerp.any():
+        lerped: FloatTensor = lerp(v0, v1, t)
+    
+        out: FloatTensor = lerped.where(gotta_lerp.unsqueeze(-1), out)
+    
+    # if no elements are slerpable, our vectors become 0-dimensional, preventing broadcasting
+    if can_slerp.any():
+    
+        # Calculate initial angle between v0 and v1
+        theta_0: FloatTensor = dot.arccos().unsqueeze(-1)
+        sin_theta_0: FloatTensor = theta_0.sin()
+        
+        #t = torch.asin(t * sin_theta_0) / theta_0
+        
+        # Angle at timestep t
+        theta_t: FloatTensor = theta_0 * t
+        sin_theta_t: FloatTensor = theta_t.sin()
+        # Finish the slerp algorithm
+        s0: FloatTensor = (theta_0 - theta_t).sin() / sin_theta_0
+        s1: FloatTensor = sin_theta_t / sin_theta_0
+        slerped: FloatTensor = s0 * v0 + s1 * v1
+    
+        out: FloatTensor = slerped.where(can_slerp.unsqueeze(-1), out)
+    
+    out = out.view(v0_shape)
+    return out
+
+

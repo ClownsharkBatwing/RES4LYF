@@ -6,7 +6,7 @@ from typing import Optional, Callable, Tuple, Dict, Any, Union
 
 from ..res4lyf              import RESplain
 from ..helper               import ExtraOptions
-from ..latents              import lagrange_interpolation, get_collinear, get_orthogonal
+from ..latents              import lagrange_interpolation, get_collinear, get_orthogonal, get_cosine_similarity
 
 from .rk_method_beta        import RK_Method_Beta
 from .rk_noise_sampler_beta import RK_NoiseSampler
@@ -474,6 +474,7 @@ def sample_rk_beta(
         x_[0] = x.clone()
         # PRENOISE METHOD HERE!
         x_0 = x_[0].clone()
+        x_0_orig = x_0.clone()
         
         # RECYCLE STAGES FOR MULTISTEP
         if RK.multistep_stages > 0 or RK.hybrid_stages > 0:
@@ -488,7 +489,9 @@ def sample_rk_beta(
         implicit_steps_total = (implicit_steps_full + 1) * (implicit_steps_diag + 1)
 
         # BEGIN FULLY IMPLICIT LOOP
-        for full_iter in range(implicit_steps_full + 1):
+        #for full_iter in range(implicit_steps_full + 1):
+        full_iter = 0
+        while full_iter < implicit_steps_full+1:
 
             if RK.IMPLICIT:
                 x_, eps_ = RK.newton_iter(x_0, x_, eps_, eps_prev_, data_, NS.s_, 0, NS.h, sigmas, step, "init")
@@ -882,7 +885,9 @@ def sample_rk_beta(
                             sde_mask_ceiling = EO("sde_mask_ceiling", 1.0)
                             sde_mask = ((sde_mask - sde_mask.min()) * (sde_mask_floor - sde_mask_ceiling)) / (sde_mask.max() - sde_mask.min()) + sde_mask_ceiling     
                             
-                        x_[row+RK.row_offset] = NS.swap_noise_substep(x_0, x_[row+RK.row_offset], mask=sde_mask)
+                        x_[row+RK.row_offset] = NS.swap_noise_substep(x_0, x_[row+RK.row_offset], mask=sde_mask, guide=LG.y0)
+                        if EO("swap_noise_substep_update_eps"):
+                            eps_[row+RK.row_offset] = RK.get_epsilon(x_0, x_[row+RK.row_offset], data_[row+RK.row_offset], sigma, NS.s_[row+RK.row_offset])
                         
                         if EO("keep_substep_means"):
                             x_[row+RK.row_offset] = x_[row+RK.row_offset] - x_[row+RK.row_offset].mean(dim=(-2,-1), keepdim=True) + x_means_per_substep
@@ -891,8 +896,10 @@ def sample_rk_beta(
                         if step == 0 and UNSAMPLE:
                             pass
                         elif full_iter == implicit_steps_full or not EO("disable_fully_explicit_bongmath_except_final"):
+                            if EO("convergelord"):
+                                x_0 = x_[0] = NS.sigma_from_to(x_0, x_[row+RK.row_offset], sigma, NS.s_[row+RK.row_offset+RK.multistep_stages], sigma)
                             x_0, x_, eps_ = RK.bong_iter(x_0, x_, eps_, eps_prev_, data_, sigma, NS.s_, row, RK.row_offset, NS.h, step)
-                            
+                    
                     #progress_bar.update( round(1 / implicit_steps_total, 2) )
                     
                     #step_update = round(1 / implicit_steps_total, 2)
@@ -953,6 +960,23 @@ def sample_rk_beta(
             
             denoised_prev2 = denoised_prev
             denoised_prev  = denoised
+            
+            full_iter += 1
+            
+            if EO("guide_cutoff") or EO("guide_min"):
+                guide_cutoff = EO("guide_cutoff", 1.0)
+                #denoised_norm = denoised - denoised.mean(dim=(-2,-1), keepdim=True)
+                denoised_norm = data_[0] - data_[0].mean(dim=(-2,-1), keepdim=True)
+                y0_norm       = LG.y0    - LG.y0   .mean(dim=(-2,-1), keepdim=True)
+                y0_cossim     = get_cosine_similarity(denoised_norm, y0_norm)
+                if y0_cossim > guide_cutoff and LG.lgw[step] > EO("guide_cutoff_floor", 0.0):
+                    LG.lgw[step] *= EO("guide_cutoff_factor", 0.9)
+                    full_iter -= 1
+                if y0_cossim < EO("guide_min", 0.0) and LG.lgw[step] < EO("guide_min_ceiling", 1.0):
+                    LG.lgw[step] *= EO("guide_min_factor", 1.1)
+                    full_iter -= 1
+                    
+                
 
 
 
@@ -1001,6 +1025,23 @@ def sample_rk_beta(
             sigmas = sigmas.clone() / d_noise_inv
             if sigmas.max() > NS.sigma_max:
                 sigmas = sigmas / NS.sigma_max
+                
+        if EO("guide_step_cutoff") or EO("guide_step_min"):
+            guide_cutoff = EO("guide_step_cutoff", 1.0)
+            #denoised_norm = denoised - denoised.mean(dim=(-2,-1), keepdim=True)
+            eps_trash, data_trash = RK(x, sigma_next, x_0, sigma)
+            #denoised_norm = data_[0] - data_[0].mean(dim=(-2,-1), keepdim=True)
+            denoised_norm = data_trash - data_trash.mean(dim=(-2,-1), keepdim=True)
+            y0_norm       = LG.y0    - LG.y0   .mean(dim=(-2,-1), keepdim=True)
+            y0_cossim     = get_cosine_similarity(denoised_norm, y0_norm)
+            if y0_cossim > guide_cutoff and LG.lgw[step] > EO("guide_step_cutoff_floor", 0.0):
+                LG.lgw[step] *= EO("guide_step_cutoff_factor", 0.9)
+                step -= 1
+                x_0 = x = x_[0] = x_0_orig.clone()
+            if y0_cossim < EO("guide_step_min", 0.0) and LG.lgw[step] < EO("guide_step_min_ceiling", 1.0):
+                LG.lgw[step] *= EO("guide_step_min_factor", 1.1)
+                step -= 1
+                x_0 = x = x_[0] = x_0_orig.clone()
         # end sampling loop
 
     #progress_bar.close()

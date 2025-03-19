@@ -437,16 +437,22 @@ class RK_NoiseSampler:
         noise = normalize_zscore(noise, channelwise=True, inplace=True)
 
         x_noised = self.alpha_ratio_eta * (denoised_next + self.sigma_down_eta * eps_next) + self.sigma_up_eta * noise * self.s_noise
-        
+        if self.EO("swap_noise_slerp_step"):
+            x_noised = slerp_tensor(1, x_next, x_noised)
+
         if mask is not None:
-            x = mask * x_noised + (1-mask) * x_next
+            #x = mask * x_noised + (1-mask) * x_next
+            if self.EO("swap_noise_slerp_mask"):
+                x = slerp_tensor(mask, x_next, x_noised)
+            else:
+                x = mask * x_noised + (1-mask) * x_next
         else:
             x = x_noised
         
         return x
 
 
-    def swap_noise_substep(self, x_0:Tensor, x_next:Tensor, brownian_sigma:Optional[Tensor]=None, brownian_sigma_next:Optional[Tensor]=None, mask:Optional[Tensor]=None) -> Tensor:
+    def swap_noise_substep(self, x_0:Tensor, x_next:Tensor, brownian_sigma:Optional[Tensor]=None, brownian_sigma_next:Optional[Tensor]=None, mask:Optional[Tensor]=None, guide:Optional[Tensor]=None) -> Tensor:
         if self.sub_sigma_up_eta == 0   or   self.sub_sigma_next == 0:
             return x_next
         
@@ -464,11 +470,30 @@ class RK_NoiseSampler:
         
         noise = self.noise_sampler2(sigma=brownian_sigma, sigma_next=brownian_sigma_next)
         noise = normalize_zscore(noise, channelwise=True, inplace=True)
-
-        x_noised = self.sub_alpha_ratio_eta * (denoised_next + self.sub_sigma_down_eta * eps_next) + self.sub_sigma_up_eta * noise * self.s_noise_substep
         
+        if guide is not None and self.EO("swap_noise_substep_guide"):
+            guide_weight = self.EO("swap_noise_substep_guide", 0.5)
+            guide = guide.clone()
+            #guide = guide - guide.mean(dim=(-2,-1), keepdim=True) + denoised_next.mean(dim=(-2,-1), keepdim=True)
+            #guide = guide - guide.std(dim=(-2,-1), keepdim=True) + denoised_next.std(dim=(-2,-1), keepdim=True)
+            denoised_next = slerp_tensor2(guide_weight, denoised_next, guide)
+
+        if self.EO("crazy_swap_noise_substep_guide"):
+            guide_weight = self.EO("crazy_swap_noise_substep_guide", 0.5)
+            guide_noised = self.sub_alpha_ratio_eta * (guide.clone() + self.sub_sigma_down_eta * eps_next) + self.sub_sigma_up_eta * noise * self.s_noise_substep
+            x_noised = slerp_tensor2(guide_weight, x_next, guide_noised)
+        else:
+            x_noised = self.sub_alpha_ratio_eta * (denoised_next + self.sub_sigma_down_eta * eps_next) + self.sub_sigma_up_eta * noise * self.s_noise_substep
+            if self.EO("swap_noise_slerp_substep"):
+                x_noised = slerp_tensor(1, x_next, x_noised)
+
         if mask is not None:
-            x = mask * x_noised + (1-mask) * x_next
+            #x = mask * x_noised + (1-mask) * x_next
+            if self.EO("swap_noise_slerp_mask"):
+                x = slerp_tensor(mask, x_next, x_noised)
+            else:
+                x = mask * x_noised + (1-mask) * x_next
+                
         else:
             x = x_noised
         
@@ -709,4 +734,115 @@ class RK_NoiseSampler:
         
         return sigmas, UNSAMPLE
     
+    
+    
+
+
+def slerp_tensor2(val: torch.Tensor, low: torch.Tensor, high: torch.Tensor, dim=-3) -> torch.Tensor:
+    #dim = (2,3)
+    if type(val) == float:
+        val = torch.Tensor([val]).to(torch.float64).to('cuda')
+        val = val.expand(low.shape)
+    
+    if low.ndim >= 4 and low.shape[-3] > 1:
+        dim=-3
+    elif low.ndim == 2:
+        dim=(-2,-1)
+        
+    low_norm = low / (torch.norm(low, dim=dim, keepdim=True))
+    high_norm = high / (torch.norm(high, dim=dim, keepdim=True))
+    
+    dot = (low_norm * high_norm).sum(dim=dim, keepdim=True).clamp(-1.0, 1.0)
+    
+    #near = ~(-0.9995 < dot < 0.9995) #dot > 0.9995 or dot < -0.9995
+    near = dot > 0.9995
+    opposite = dot < -0.9995
+
+    condition = torch.logical_or(near, opposite)
+    
+    omega = torch.acos(dot)
+    so = torch.sin(omega)
+
+    if val.dim() < low.dim():
+        val = val.unsqueeze(dim)
+    
+    factor_low = torch.sin((1 - val) * omega) / so
+    factor_high = torch.sin(val * omega) / so
+
+    res = factor_low * low + factor_high * high
+    res = torch.where(condition, low * (1 - val) + high * val, res)
+    return res
+
+
+    
+    
+
+# pytorch slerp implementation from https://gist.github.com/Birch-san/230ac46f99ec411ed5907b0a3d728efa
+
+from torch import FloatTensor, LongTensor, Tensor, Size, lerp, zeros_like
+from torch.linalg import norm
+
+def slerp_tensor(t: torch.Tensor, v0: torch.Tensor, v1: torch.Tensor, DOT_THRESHOLD=0.9995) -> torch.Tensor:
+
+    '''
+    Spherical linear interpolation
+    Args:
+        v0: Starting vector
+        v1: Final vector
+        t: Float value between 0.0 and 1.0
+        DOT_THRESHOLD: Threshold for considering the two vectors as
+        colinear. Not recommended to alter this.
+    Returns:
+        Interpolation vector between v0 and v1
+    '''
+    assert v0.shape == v1.shape, "shapes of v0 and v1 must match"
+    
+    # Normalize the vectors to get the directions and angles
+    v0_norm: FloatTensor = norm(v0, dim=-1)
+    v1_norm: FloatTensor = norm(v1, dim=-1)
+    
+    v0_normed: FloatTensor = v0 / v0_norm.unsqueeze(-1)
+    v1_normed: FloatTensor = v1 / v1_norm.unsqueeze(-1)
+    
+    # Dot product with the normalized vectors
+    dot: FloatTensor = (v0_normed * v1_normed).sum(-1)
+    dot_mag: FloatTensor = dot.abs()
+    
+    # if dp is NaN, it's because the v0 or v1 row was filled with 0s
+    # If absolute value of dot product is almost 1, vectors are ~colinear, so use lerp
+    gotta_lerp: LongTensor = dot_mag.isnan() | (dot_mag > DOT_THRESHOLD)
+    can_slerp: LongTensor = ~gotta_lerp
+    
+    t_batch_dim_count: int = max(0, t.dim()-v0.dim()) if isinstance(t, Tensor) else 0
+    t_batch_dims: Size = t.shape[:t_batch_dim_count] if isinstance(t, Tensor) else Size([])
+    out: FloatTensor = zeros_like(v0.expand(*t_batch_dims, *[-1]*v0.dim()))
+    
+    # if no elements are lerpable, our vectors become 0-dimensional, preventing broadcasting
+    if gotta_lerp.any():
+        lerped: FloatTensor = lerp(v0, v1, t)
+    
+        out: FloatTensor = lerped.where(gotta_lerp.unsqueeze(-1), out)
+    
+    # if no elements are slerpable, our vectors become 0-dimensional, preventing broadcasting
+    if can_slerp.any():
+    
+        # Calculate initial angle between v0 and v1
+        theta_0: FloatTensor = dot.arccos().unsqueeze(-1)
+        sin_theta_0: FloatTensor = theta_0.sin()
+        
+        
+        t = torch.asin(t * sin_theta_0) / theta_0
+        
+        
+        # Angle at timestep t
+        theta_t: FloatTensor = theta_0 * t
+        sin_theta_t: FloatTensor = theta_t.sin()
+        # Finish the slerp algorithm
+        s0: FloatTensor = (theta_0 - theta_t).sin() / sin_theta_0
+        s1: FloatTensor = sin_theta_t / sin_theta_0
+        slerped: FloatTensor = s0 * v0 + s1 * v1
+    
+        out: FloatTensor = slerped.where(can_slerp.unsqueeze(-1), out)
+    
+    return out
 
