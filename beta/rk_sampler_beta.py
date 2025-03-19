@@ -963,7 +963,7 @@ def sample_rk_beta(
             
             full_iter += 1
             
-            if EO("guide_cutoff") or EO("guide_min"):
+            if LG.lgw[step] > 0 and (EO("guide_cutoff") or EO("guide_min")):
                 guide_cutoff = EO("guide_cutoff", 1.0)
                 #denoised_norm = denoised - denoised.mean(dim=(-2,-1), keepdim=True)
                 denoised_norm = data_[0] - data_[0].mean(dim=(-2,-1), keepdim=True)
@@ -1026,7 +1026,7 @@ def sample_rk_beta(
             if sigmas.max() > NS.sigma_max:
                 sigmas = sigmas / NS.sigma_max
                 
-        if EO("guide_step_cutoff") or EO("guide_step_min"):
+        if LG.lgw[step] > 0 and (EO("guide_step_cutoff") or EO("guide_step_min")):
             guide_cutoff = EO("guide_step_cutoff", 1.0)
             #denoised_norm = denoised - denoised.mean(dim=(-2,-1), keepdim=True)
             eps_trash, data_trash = RK(x, sigma_next, x_0, sigma)
