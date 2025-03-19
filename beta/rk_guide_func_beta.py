@@ -704,17 +704,40 @@ class LatentGuide:
                         eps_[row][b][c]    = eps_[row][b][c] + lgw_mask_clamp[b][c] * (eps_substep_guide[b][c] - eps_[row][b][c]) + lgw_mask_clamp_inv[b][c] * (eps_substep_guide_inv[b][c] - eps_[row][b][c])
                 
                 elif self.guide_mode in {"epsilon"}: 
-                    eps_[row] = eps_[row] + lgw_mask * (eps_substep_guide - eps_[row]) + lgw_mask_inv * (eps_substep_guide_inv - eps_[row])
+                    #eps_[row] = slerp(lgw_mask.mean().item(), eps_[row], eps_substep_guide)
+                    if self.EO("slerp_epsilon_guide"):
+                        eps_[row] = slerp_tensor(lgw_mask, eps_[row], eps_substep_guide)
+                        eps_[row] = slerp_tensor(lgw_mask_inv, eps_[row], eps_substep_guide_inv)
+                    else:
+                        eps_[row] = eps_[row] + lgw_mask * (eps_substep_guide - eps_[row]) + lgw_mask_inv * (eps_substep_guide_inv - eps_[row])
+                    
+                    #eps_[row] = slerp_barycentric(eps_[row].norm(), eps_substep_guide.norm(), eps_substep_guide_inv.norm(), 1-lgw_mask-lgw_mask_inv, lgw_mask, lgw_mask_inv)
                     
                 elif self.guide_mode in {"epsilon_projection"}:
-                    eps_row_lerp           = eps_[row]   +   self.mask * (eps_substep_guide-eps_[row])   +   (1-self.mask) * (eps_substep_guide_inv-eps_[row])
+                    if self.EO("slerp_epsilon_guide"):
+                        eps_row_slerp = slerp_tensor(self.mask, eps_[row], eps_substep_guide)
+                        eps_row_slerp = slerp_tensor((1-self.mask), eps_row_slerp, eps_substep_guide_inv)
 
-                    eps_collinear_eps_lerp = get_collinear(eps_[row], eps_row_lerp)
-                    eps_lerp_ortho_eps     = get_orthogonal(eps_row_lerp, eps_[row])
+                        eps_collinear_eps_slerp = get_collinear(eps_[row], eps_row_slerp)
+                        eps_slerp_ortho_eps     = get_orthogonal(eps_row_slerp, eps_[row])
 
-                    eps_sum                = eps_collinear_eps_lerp + eps_lerp_ortho_eps
+                        eps_sum                = eps_collinear_eps_slerp + eps_slerp_ortho_eps
 
-                    eps_[row]              = eps_[row] + lgw_mask * (eps_sum - eps_[row]) + lgw_mask_inv * (eps_sum - eps_[row])
+                        eps_[row] = slerp_tensor(lgw_mask, eps_[row] , eps_sum)
+                        eps_[row] = slerp_tensor(lgw_mask_inv, eps_[row], eps_sum)
+                    else:
+                        eps_row_lerp           = eps_[row]   +   self.mask * (eps_substep_guide-eps_[row])   +   (1-self.mask) * (eps_substep_guide_inv-eps_[row])
+
+                        eps_collinear_eps_lerp = get_collinear(eps_[row], eps_row_lerp)
+                        eps_lerp_ortho_eps     = get_orthogonal(eps_row_lerp, eps_[row])
+
+                        eps_sum                = eps_collinear_eps_lerp + eps_lerp_ortho_eps
+
+                        eps_[row]              = eps_[row] + lgw_mask * (eps_sum - eps_[row]) + lgw_mask_inv * (eps_sum - eps_[row])
+                    
+                    
+                    #eps_row_slerp          = eps_[row]   +   self.mask * (eps_substep_guide-eps_[row])   +   (1-self.mask) * (eps_substep_guide_inv-eps_[row])
+
                     
                 elif self.guide_mode in {"epsilon_cw", "epsilon_projection_cw"}:
                     eps_ = self.process_channelwise(x_0,
@@ -1537,3 +1560,38 @@ def get_masked_epsilon_projection(x_0, x_, eps_, y0, y0_inv, s_, row, row_offset
 
 
 
+def slerp(val, low, high):
+    low_norm = low/torch.norm(low, dim=1, keepdim=True)
+    high_norm = high/torch.norm(high, dim=1, keepdim=True)
+    dot = (low_norm*high_norm).sum(1)
+
+    if dot.mean() > 0.9995:
+        return low * val + high * (1 - val)
+
+    omega = torch.acos(dot)
+    so = torch.sin(omega)
+    res = (torch.sin((1.0-val)*omega)/so).unsqueeze(1)*low + (torch.sin(val*omega)/so).unsqueeze(1) * high
+    return res
+
+
+
+def slerp_tensor(val: torch.Tensor, low: torch.Tensor, high: torch.Tensor, dim=-1) -> torch.Tensor:
+
+    low_norm = low / (torch.norm(low, dim=dim, keepdim=True))
+    high_norm = high / (torch.norm(high, dim=dim, keepdim=True))
+    
+    dot = (low_norm * high_norm).sum(dim=dim, keepdim=True).clamp(-1.0, 1.0)
+    
+    near = dot > 0.9995
+    omega = torch.acos(dot)
+    so = torch.sin(omega)
+
+    if val.dim() < low.dim():
+        val = val.unsqueeze(dim)
+    
+    factor_low = torch.sin((1 - val) * omega) / so
+    factor_high = torch.sin(val * omega) / so
+
+    res = factor_low * low + factor_high * high
+    res = torch.where(near, low * (1 - val) + high * val, res)
+    return res
