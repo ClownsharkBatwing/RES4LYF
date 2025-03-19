@@ -808,19 +808,44 @@ class LatentGuide:
                 ratio     = 1.
                 ratio_inv = 1.
                     
-            eps_[row][b][c]            = eps_[row][b][c]   +   ratio * lgw_mask[b][c] * (eps_substep_guide[b][c] - eps_[row][b][c])   +   ratio_inv * lgw_mask_inv[b][c] * (eps_substep_guide_inv[b][c] - eps_[row][b][c])
+            if self.EO("slerp_epsilon_guide"):
+                if eps_substep_guide[b][c].sum() != 0:
+                    eps_[row][b][c] = slerp_tensor(ratio * lgw_mask[b][c], eps_[row][b][c], eps_substep_guide[b][c])
+                if eps_substep_guide_inv[b][c].sum() != 0:
+                    eps_[row][b][c] = slerp_tensor(ratio_inv * lgw_mask_inv[b][c], eps_[row][b][c], eps_substep_guide_inv[b][c])
+            else:
+                eps_[row][b][c]            = eps_[row][b][c]   +   ratio * lgw_mask[b][c] * (eps_substep_guide[b][c] - eps_[row][b][c])   +   ratio_inv * lgw_mask_inv[b][c] * (eps_substep_guide_inv[b][c] - eps_[row][b][c])
             
             if use_projection:
-                eps_row_lerp           = eps_[row][b][c]   +          self.mask[b][c] * (eps_substep_guide[b][c] - eps_[row][b][c])   +              (1-self.mask[b][c]) * (eps_substep_guide_inv[b][c] - eps_[row][b][c]) # should this ever be self.mask_inv?
+                if self.EO("slerp_epsilon_guide"):
+                    if eps_substep_guide[b][c].sum() != 0:
+                        eps_row_lerp = slerp_tensor(self.mask[b][c], eps_[row][b][c], eps_substep_guide[b][c])
+                    if eps_substep_guide_inv[b][c].sum() != 0:
+                        eps_row_lerp = slerp_tensor((1-self.mask[b][c]), eps_[row][b][c], eps_substep_guide_inv[b][c])
+                else:
+                    eps_row_lerp           = eps_[row][b][c]   +          self.mask[b][c] * (eps_substep_guide[b][c] - eps_[row][b][c])   +              (1-self.mask[b][c]) * (eps_substep_guide_inv[b][c] - eps_[row][b][c]) # should this ever be self.mask_inv?
 
                 eps_collinear_eps_lerp = get_collinear (eps_[row][b][c], eps_row_lerp)
                 eps_lerp_ortho_eps     = get_orthogonal(eps_row_lerp   , eps_[row][b][c])
 
                 eps_sum                = eps_collinear_eps_lerp + eps_lerp_ortho_eps
 
-                eps_[row][b][c]        = eps_[row][b][c]   +   ratio * lgw_mask[b][c] * (eps_sum                 - eps_[row][b][c])   +   ratio_inv * lgw_mask_inv[b][c] * (eps_sum                     - eps_[row][b][c])
+
+                if self.EO("slerp_epsilon_guide"):
+                    if eps_substep_guide[b][c].sum() != 0:
+                        eps_[row][b][c] = slerp_tensor(ratio * lgw_mask[b][c], eps_[row][b][c], eps_sum)
+                    if eps_substep_guide_inv[b][c].sum() != 0:
+                        eps_[row][b][c] = slerp_tensor(ratio_inv * lgw_mask_inv[b][c], eps_[row][b][c], eps_sum)
+                else:
+                    eps_[row][b][c]        = eps_[row][b][c]   +   ratio * lgw_mask[b][c] * (eps_sum                 - eps_[row][b][c])   +   ratio_inv * lgw_mask_inv[b][c] * (eps_sum                     - eps_[row][b][c])
             else:
-                eps_[row][b][c]        = eps_[row][b][c]   +   ratio * lgw_mask[b][c] * (eps_substep_guide[b][c] - eps_[row][b][c])   +   ratio_inv * lgw_mask_inv[b][c] * (eps_substep_guide_inv[b][c] - eps_[row][b][c])
+                if self.EO("slerp_epsilon_guide"):
+                    if eps_substep_guide[b][c].sum() != 0:
+                        eps_[row][b][c] = slerp_tensor(ratio * lgw_mask[b][c], eps_[row][b][c], eps_substep_guide[b][c])
+                    if eps_substep_guide_inv[b][c].sum() != 0:
+                        eps_[row][b][c] = slerp_tensor(ratio_inv * lgw_mask_inv[b][c], eps_[row][b][c], eps_substep_guide_inv[b][c])
+                else:
+                    eps_[row][b][c]        = eps_[row][b][c]   +   ratio * lgw_mask[b][c] * (eps_substep_guide[b][c] - eps_[row][b][c])   +   ratio_inv * lgw_mask_inv[b][c] * (eps_substep_guide_inv[b][c] - eps_[row][b][c])
                 
         return eps_
 
