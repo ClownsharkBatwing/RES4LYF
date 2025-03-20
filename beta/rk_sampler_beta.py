@@ -1043,14 +1043,14 @@ def sample_rk_beta(
             y0_norm       = LG.y0    - LG.y0   .mean(dim=(-2,-1), keepdim=True)
             y0_cossim     = get_cosine_similarity(denoised_norm, y0_norm)
             if y0_cossim > guide_cutoff and LG.lgw[step] > EO("guide_step_cutoff_floor", 0.0):
-                if not EO("guide_step_cutoff_fast")
+                if not EO("guide_step_cutoff_fast"):
                     LG.lgw[step] *= EO("guide_step_cutoff_factor", 0.9)
                 else:
                     LG.lgw *= EO("guide_step_cutoff_factor", 0.9)
                 step -= 1
                 x_0 = x = x_[0] = x_0_orig.clone()
             if y0_cossim < EO("guide_step_min", 0.0) and LG.lgw[step] < EO("guide_step_min_ceiling", 1.0):
-                if not EO("guide_step_cutoff_fast")
+                if not EO("guide_step_cutoff_fast"):
                     LG.lgw[step] *= EO("guide_step_min_factor", 1.1)
                 else:
                     LG.lgw *= EO("guide_step_min_factor", 1.1)
