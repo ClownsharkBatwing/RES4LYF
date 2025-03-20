@@ -490,6 +490,8 @@ def sample_rk_beta(
 
         # BEGIN FULLY IMPLICIT LOOP
         #for full_iter in range(implicit_steps_full + 1):
+        cossim_counter = 0
+        adaptive_lgw = LG.lgw.clone()
         full_iter = 0
         while full_iter < implicit_steps_full+1:
 
@@ -963,17 +965,23 @@ def sample_rk_beta(
             
             full_iter += 1
             
-            if LG.lgw[step] > 0 and step >= EO("guide_cutoff_start_step", 0) and (EO("guide_cutoff") or EO("guide_min")):
+            if LG.lgw[step] > 0 and step >= EO("guide_cutoff_start_step", 0) and cossim_counter < EO("guide_cutoff_max_iter", 10) and (EO("guide_cutoff") or EO("guide_min")):
                 guide_cutoff = EO("guide_cutoff", 1.0)
                 #denoised_norm = denoised - denoised.mean(dim=(-2,-1), keepdim=True)
                 denoised_norm = data_[0] - data_[0].mean(dim=(-2,-1), keepdim=True)
                 y0_norm       = LG.y0    - LG.y0   .mean(dim=(-2,-1), keepdim=True)
                 y0_cossim     = get_cosine_similarity(denoised_norm, y0_norm)
                 if y0_cossim > guide_cutoff and LG.lgw[step] > EO("guide_cutoff_floor", 0.0):
-                    LG.lgw[step] *= EO("guide_cutoff_factor", 0.9)
+                    if not EO("guide_cutoff_fast"):
+                        LG.lgw[step] *= EO("guide_cutoff_factor", 0.9)
+                    else:
+                        LG.lgw *= EO("guide_cutoff_factor", 0.9)
                     full_iter -= 1
                 if y0_cossim < EO("guide_min", 0.0) and LG.lgw[step] < EO("guide_min_ceiling", 1.0):
-                    LG.lgw[step] *= EO("guide_min_factor", 1.1)
+                    if not EO("guide_cutoff_fast"):
+                        LG.lgw[step] *= EO("guide_min_factor", 1.1)
+                    else:
+                        LG.lgw *= EO("guide_min_factor", 1.1)
                     full_iter -= 1
                     
                 
@@ -1026,7 +1034,7 @@ def sample_rk_beta(
             if sigmas.max() > NS.sigma_max:
                 sigmas = sigmas / NS.sigma_max
                 
-        if LG.lgw[step] > 0 and step >= EO("guide_step_cutoff_start_step", 0) and (EO("guide_step_cutoff") or EO("guide_step_min")):
+        if LG.lgw[step] > 0 and step >= EO("guide_step_cutoff_start_step", 0) and cossim_counter < EO("guide_step_cutoff_max_iter", 10) and (EO("guide_step_cutoff") or EO("guide_step_min")):
             guide_cutoff = EO("guide_step_cutoff", 1.0)
             #denoised_norm = denoised - denoised.mean(dim=(-2,-1), keepdim=True)
             eps_trash, data_trash = RK(x, sigma_next, x_0, sigma)
@@ -1035,11 +1043,17 @@ def sample_rk_beta(
             y0_norm       = LG.y0    - LG.y0   .mean(dim=(-2,-1), keepdim=True)
             y0_cossim     = get_cosine_similarity(denoised_norm, y0_norm)
             if y0_cossim > guide_cutoff and LG.lgw[step] > EO("guide_step_cutoff_floor", 0.0):
-                LG.lgw[step] *= EO("guide_step_cutoff_factor", 0.9)
+                if not EO("guide_step_cutoff_fast")
+                    LG.lgw[step] *= EO("guide_step_cutoff_factor", 0.9)
+                else:
+                    LG.lgw *= EO("guide_step_cutoff_factor", 0.9)
                 step -= 1
                 x_0 = x = x_[0] = x_0_orig.clone()
             if y0_cossim < EO("guide_step_min", 0.0) and LG.lgw[step] < EO("guide_step_min_ceiling", 1.0):
-                LG.lgw[step] *= EO("guide_step_min_factor", 1.1)
+                if not EO("guide_step_cutoff_fast")
+                    LG.lgw[step] *= EO("guide_step_min_factor", 1.1)
+                else:
+                    LG.lgw *= EO("guide_step_min_factor", 1.1)
                 step -= 1
                 x_0 = x = x_[0] = x_0_orig.clone()
         # end sampling loop
