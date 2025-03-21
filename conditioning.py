@@ -599,19 +599,20 @@ class RegionalMask(torch.nn.Module):
     def __call__(self, transformer_options, weight=0, dtype=torch.float16, *args, **kwargs):
         sigma = transformer_options['sigmas'][0]
         #if self.start_percent <= 1 - sigma < self.end_percent:        # could be an issue, 1 - sigma? 
-        if self.mask_type == "gradient":
+        if self.mask_type.startswith("gradient"):
             #mask = self.gen_mask(weight)
             return self.mask.clone().to(sigma.device) * weight
-        elif self.mask_type == "boolean":
+        elif self.mask_type.startswith("boolean"):
             return self.mask.clone().to(sigma.device) > 0
 
     
 class RegionalConditioning(torch.nn.Module):
-    def __init__(self, conditioning: torch.Tensor, region_cond: torch.Tensor, start_percent: float, end_percent: float, dtype: torch.dtype = torch.float16) -> None:
+    def __init__(self, conditioning: torch.Tensor, region_cond: torch.Tensor, region_pooled: torch.Tensor, start_percent: float, end_percent: float, dtype: torch.dtype = torch.float16) -> None:
         super().__init__()
         #self.register_buffer('region_cond', region_cond)
         self.conditioning  = conditioning
         self.region_cond   = region_cond.clone().to('cuda')
+        self.region_pooled = region_pooled.clone().to('cuda')
         self.start_percent = start_percent
         self.end_percent   = end_percent
         self.dtype         = dtype
@@ -629,10 +630,18 @@ class RegionalConditioning(torch.nn.Module):
         if self.conditioning is None:
             return self.region_cond.clone().to(sigma.device).to(dtype)
         else:
-            return torch.cat([context, region_cond.clone().to(torch.float16)], dim=1)
+            return torch.cat([context, region_cond.clone().to(dtype)], dim=1)
         return None
 
-
+    def concat_pooled(self, vec, transformer_options, dtype=torch.float16, *args,  **kwargs):
+        sigma = transformer_options['sigmas'][0]
+        #if self.start_percent <= 1 - sigma < self.end_percent:
+        region_pooled = self.region_pooled.clone().to(sigma.device).to(dtype)
+        if self.conditioning is None:
+            return self.region_pooled.clone().to(sigma.device).to(dtype)
+        else:
+            return torch.cat([vec, region_pooled.clone().to(dtype)], dim=1)
+        return None
 
 class RectifiedFlow_RegionalPrompt:
     @classmethod
@@ -651,7 +660,9 @@ class RectifiedFlow_RegionalPrompt:
 
     def main(self, cond, mask, cond_regional=[]):
         cond_regional = [*cond_regional]
-        cond_regional.append({'mask': mask, 'cond': cond[0][0]})
+        if 'cond_pooled' not in cond[0][1]:
+            cond[0][1]['cond_pooled'] = None
+        cond_regional.append({'mask': mask, 'cond': cond[0][0], 'cond_pooled': cond[0][1]['pooled_output']})
         mask_inv      = 1-mask
         return (cond_regional,mask_inv,)
 
@@ -677,7 +688,7 @@ class RegionalGenerateConditioningsAndMasks:
     def __call__(self, latent, dtype=torch.float16):
         b, c, h, w = latent.shape
         if not isinstance(self.model_config, comfy.supported_models.Stable_Cascade_C):
-            h //= 2  # 16x16 PE
+            h //= 2  # 16x16 PE      patch_size = 2  1024x1024 rgb -> 128x128 16ch latent -> 64x64 img
             w //= 2
         img_len = h * w
 
@@ -697,10 +708,10 @@ class RegionalGenerateConditioningsAndMasks:
             num_channels  = 1280
             text_register_tokens = 8
         else:
-            # UGLY
-            text_len_base = 154
+            text_len_base = 154    #UGLY
             num_channels  = 4096
-
+        
+        cond_pooled = torch.cat([cond_reg['cond_pooled'] for cond_reg in self.conditioning_regional], dim=1)
 
         cond_r = torch.cat([cond_reg['cond'] for cond_reg in self.conditioning_regional], dim=1)           #1,256,2048 aura cond     
         
@@ -732,7 +743,7 @@ class RegionalGenerateConditioningsAndMasks:
             cond_reg    = cond_reg_dict['cond']
             region_mask = cond_reg_dict['mask'][0]
             
-            img2txt_mask    = torch.nn.functional.interpolate(region_mask[None, None, :, :], (h, w), mode='nearest-exact').flatten().unsqueeze(1).repeat(1, cond_reg.size(1))
+            img2txt_mask    = torch.nn.functional.interpolate(region_mask[None, None, :, :], (h, w), mode='nearest-exact').flatten().unsqueeze(1).repeat(1, cond_reg.shape[1])  #cond_reg.shape(1) = 256   4096/256 = 16
             txt2img_mask    = img2txt_mask   .transpose(-1, -2)
             
             img2txt_mask_sq = torch.nn.functional.interpolate(region_mask[None, None, :, :], (h, w), mode='nearest-exact').flatten().unsqueeze(1).repeat(1, img_len)
@@ -755,9 +766,17 @@ class RegionalGenerateConditioningsAndMasks:
         all_attn_mask[text_off:, text_len:] = fp_or(self_attn_mask, self_attn_mask_bkg) #combine foreground/background self-attn
 
         all_attn_mask         = RegionalMask(all_attn_mask, self.conditioning, self.conditioning_regional, latent, self.start_percent, self.end_percent, self.mask_type, img_len, text_len)
-        regional_conditioning = RegionalConditioning(self.conditioning, cond_r, self.start_percent, self.end_percent)
+        regional_conditioning = RegionalConditioning(self.conditioning, cond_r, cond_pooled, self.start_percent, self.end_percent)
 
-        if self.mask_type == "boolean":
+        if self.mask_type.endswith("_masked"):
+            trimask = torch.tril(torch.ones(img_len, img_len)).to(all_attn_mask.mask.dtype).to(all_attn_mask.mask.device)
+            all_attn_mask.mask[text_off:,text_len:] = fp_or(trimask, all_attn_mask.mask[text_off:,text_len:])
+            
+        if self.mask_type.endswith("_unmasked"):
+            trimask = 1-torch.tril(torch.ones(img_len, img_len)).to(all_attn_mask.mask.dtype).to(all_attn_mask.mask.device)
+            all_attn_mask.mask[text_off:,text_len:] = fp_or(trimask, all_attn_mask.mask[text_off:,text_len:])
+
+        if self.mask_type.startswith("boolean"):
             all_attn_mask.mask = all_attn_mask.mask > 0
 
         return regional_conditioning, all_attn_mask
@@ -1062,10 +1081,10 @@ class ClownRegionalConditioning:
                 "weight_scheduler":        (["constant"] + get_res4lyf_scheduler_list(), {"default": "constant"},),
                 "start_step":              ("INT",                                       {"default": 0,   "min":  0,        "max": 10000}),
                 "end_step":                ("INT",                                       {"default": -1,  "min": -1,        "max": 10000}),
-                "mask_type":               (["gradient", "boolean"],                     {"default": "boolean"}),
-                "narcissism_area":      (["masked", "unmasked", "off"],               {"default": "masked"}),
-                "narcissism_start_step":("INT",                                       {"default": 0,   "min": -1,        "max": 10000}),
-                "narcissism_end_step":  ("INT",                                       {"default": 5,   "min": -1,        "max": 10000}),
+                "mask_type":               (["gradient", "gradient_masked", "gradient_unmasked", "boolean", "boolean_masked", "boolean_unmasked"],                     {"default": "gradient"}),
+                "narcissism_area":         (["masked", "unmasked", "off"],               {"default": "masked"}),
+                "narcissism_start_step":   ("INT",                                       {"default": 0,   "min": -1,        "max": 10000}),
+                "narcissism_end_step":     ("INT",                                       {"default": 5,   "min": -1,        "max": 10000}),
                 "invert_mask":             ("BOOLEAN",                                   {"default": False}),
             }, 
             "optional": {
@@ -1104,15 +1123,15 @@ class ClownRegionalConditioning:
             region_bleed_start_step  : int    = 0,
             mask_type                : str    = "boolean",
             mask                              = None,
-            narcissism_area       : str    = "masked",
-            narcissism_start_step : int    = 0,
-            narcissism_end_step   : int    = 5,
+            narcissism_area          : str    = "masked",
+            narcissism_start_step    : int    = 0,
+            narcissism_end_step      : int    = 5,
             invert_mask              : bool   = False
             ) -> Tuple[Tensor]:
         
         if end_step == -1:
             end_step = MAX_STEPS
-            
+        
         if narcissism_end_step == -1:
             narcissism_end_step = MAX_STEPS
         
@@ -1291,16 +1310,18 @@ class ClownRegionalConditioning:
             
         if   mask is not None and narcissism_area == "masked":
             positive[0][1]['regional_conditioning_mask_orig'] = 1-mask.clone()
+            positive[0][1]['pooled_output'] = positive_unmasked[0][1]['pooled_output']
             
         elif mask is not None and narcissism_area == "unmasked":
             positive[0][1]['regional_conditioning_mask_orig'] = mask.clone()
+            positive[0][1]['pooled_output'] = positive_masked[0][1]['pooled_output']
             
         else:
             positive[0][1]['regional_conditioning_mask_orig'] = None
         
         positive[0][1]['narcissism_start_step'] = narcissism_start_step
         positive[0][1]['narcissism_end_step']   = narcissism_end_step
-                
+        
         return (positive,)
 
 
@@ -1328,7 +1349,7 @@ class ClownRegionalConditioning3:
                 "weight_scheduler":  (["constant"] + get_res4lyf_scheduler_list(), {"default": "constant"},),
                 "start_step":        ("INT",                                       {"default": 0,    "min":  0,        "max": 10000}),
                 "end_step":          ("INT",                                       {"default": 100,  "min": -1,        "max": 10000}),
-                "mask_type":         (["gradient", "boolean"],                     {"default": "gradient"}),
+                "mask_type":         (["gradient", "gradient_masked", "gradient_unmasked", "boolean", "boolean_masked", "boolean_unmasked"],                     {"default": "gradient"}),
                 "narcissism_area":      (["A", "B", "AB", "unmasked", "off"],         {"default": "masked"}),
                 "narcissism_start_step":("INT",                                 {"default": 0,   "min": -1,        "max": 10000}),
                 "narcissism_end_step":  ("INT",                                 {"default": 5,   "min": -1,        "max": 10000}),
