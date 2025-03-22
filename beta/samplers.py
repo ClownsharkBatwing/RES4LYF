@@ -508,7 +508,7 @@ class SharkSampler:
 
                     x0_output = {}
 
-                    if 'state_info' in latent_image:
+                    if 'state_info' in latent_image and 'sigmas' in latent_image['state_info']:
                         steps_len = max(sigmas.shape[-1] - 1,    latent_image['state_info']['sigmas'].shape[-1]-1)
                     else:
                         steps_len = sigmas.shape[-1]-1

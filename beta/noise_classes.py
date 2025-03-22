@@ -164,7 +164,7 @@ class FractalNoiseGenerator(NoiseGenerator):
 
         if len(self.size) == 5:
             t_freq = torch.fft.fftfreq(t, 1/t, device=self.device)
-            freq = torch.sqrt(y_freq[:, None, None]**2 + x_freq[None, :, None]**2 + t_freq[None, None, :]**2).clamp(min=1e-10)
+            freq = torch.sqrt(t_freq[:, None, None]**2 + y_freq[None, :, None]**2 + x_freq[None, None, :]**2).clamp(min=1e-10)
         else:
             freq = torch.sqrt(y_freq[:, None]**2 + x_freq[None, :]**2).clamp(min=1e-10)
         
