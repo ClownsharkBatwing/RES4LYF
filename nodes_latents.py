@@ -329,7 +329,22 @@ class latent_display_state_info:
         if 'state_info' in latent:
             for key, value in latent['state_info'].items():
                 if isinstance(value, torch.Tensor):
-                    value_text = f"shape: {value.shape}, dtype: {value.dtype}, mean: {value.float().mean().item():.3f}, std: {value.float().std().item():.3f}"
+                    if value.numel() == 0:
+                        value_text = "empty tensor"
+                    elif value.numel() == 1:
+                        value_text = f"str(value.item()), dtype: {value.dtype}"
+                    else:
+                        shape_str = str(list(value.shape)).replace(" ", "")
+                        dtype = value.dtype
+                        
+                        if torch.is_floating_point(value) is False:
+                            max_val = value.float().max().item()
+                            min_val = value.float().min().item()
+                            value_text = f"shape: {shape_str}, dtype: {dtype}, max: {max_val:.3f}, min: {min_val:.3f}"
+                        else:
+                            mean = value.float().mean().item()
+                            std = value.float().std().item()
+                            value_text = f"shape: {shape_str}, dtype: {dtype}, mean: {mean:.3f}, std: {std:.3f}"
                 else:
                     value_text = str(value)
 
