@@ -53,6 +53,7 @@ RK_SAMPLER_NAMES_BETA_FOLDERS = ["none",
                     "exponential/etdrk3_a_3s",
                     "exponential/etdrk3_b_3s",
                     "exponential/etdrk4_4s",
+                    "exponential/etdrk4_4s_alt",
                     
                     "hybrid/pec423_2h2s",
                     "hybrid/pec433_2h3s",
@@ -1629,7 +1630,7 @@ def get_rk_methods_beta(rk_type       : str,
             
 
 
-        case "pec423_2h2s":
+        case "pec423_2h2s": #https://ora.ox.ac.uk/objects/uuid:cc001282-4285-4ca2-ad06-31787b540c61/files/m611df1a355ca243beb09824b70e5e774
             
             c1,c2 = 0,1
             ci = [c1, c2]
@@ -1674,7 +1675,7 @@ def get_rk_methods_beta(rk_type       : str,
 
 
 
-        case "pec433_2h3s":
+        case "pec433_2h3s": #https://ora.ox.ac.uk/objects/uuid:cc001282-4285-4ca2-ad06-31787b540c61/files/m611df1a355ca243beb09824b70e5e774
             
             c1,c2,c3 = 0, 1, 1
             ci = [c1,c2,c3]
@@ -1705,12 +1706,12 @@ def get_rk_methods_beta(rk_type       : str,
                 φ2 = Phi(h_prev2_no_eta, ci)
                 
             u2_1 = -2*φ1(2) - 2*φ1(3)
-            u3_1 = -φ1(2) + φ1(3) + 3*φ1(4)
-            v1 = -φ1(2) + φ1(3) + 3*φ1(4)
+            u3_1 =   -φ1(2) +   φ1(3) + 3*φ1(4)
+            v1   =   -φ1(2) +   φ1(3) + 3*φ1(4)
             
             u2_2 = (1/2)*φ2(2) + φ2(3)
             u3_2 = (1/6)*φ2(2) - φ2(4)
-            v2 = (1/6)*φ2(2) - φ2(4)
+            v2   = (1/6)*φ2(2) - φ2(4)
 
             
             u = [
@@ -2471,6 +2472,36 @@ def get_rk_methods_beta(rk_type       : str,
             ]
 
             a, b = gen_first_col_exp(a,b,ci,φ)
+
+
+        case "etdrk4_4s_alt": # pg 70 col 1 computed with (4.9) https://ora.ox.ac.uk/objects/uuid:cc001282-4285-4ca2-ad06-31787b540c61/files/m611df1a355ca243beb09824b70e5e774
+            c1,c2,c3,c4 = 0, 1/2, 1/2, 1
+            ci = [c1,c2,c3,c4]
+            φ = Phi(h, ci)
+            
+            a2_1 = φ(1,2)
+            a3_1 = 0
+            a4_1 = φ(1) - 2*φ(1,2)
+            
+            a3_2 =   φ(1,2)
+            a4_3 = 2*φ(1,2)
+
+            b1 = φ(1) - 3*φ(2) + 4*φ(3)
+            b2 = 2*φ(2) - 4*φ(3)
+            b3 = 2*φ(2) - 4*φ(3)
+            b4 =  -φ(2) + 4*φ(3)
+
+            a = [
+                    [   0, 0,      0,0],
+                    [a2_1, 0,      0,0],
+                    [a3_1, a3_2,   0,0],
+                    [a4_1, 0,   a4_3,0],
+            ]
+            b = [
+                    [0, b2, b3, b4],
+            ]
+
+            #a, b = gen_first_col_exp(a,b,ci,φ)
 
             
         case "dpmpp_2s":

@@ -643,7 +643,7 @@ def sample_rk_beta(
                                     x_tmp = x_[row+RK.row_offset]
 
 
-
+                        lying_eps_row_factor = 1.0
                         # MODEL CALL
                         if RK.IMPLICIT   and   row == 0   and   (EO("implicit_lazy_recycle_first_model_call_at_start")   or   EO("radaucycle")  or RK.C[0] == 0.0):
                             pass
@@ -668,7 +668,6 @@ def sample_rk_beta(
 
                             eps_[row]  = RK.get_epsilon(x_0, x_tmp, data_[row], sigma, s_tmp)
 
-                            lying_eps_row_factor = 1.0
                             if row < RK.rows and noise_scaling_weight != 0 and noise_scaling_type in {"sampler", "sampler_substep"}:
                                 if noise_scaling_type == "sampler_substep":
                                     sub_lying_su, sub_lying_sigma, sub_lying_sd, sub_lying_alpha_ratio = NS.get_sde_substep(NS.s_[row], NS.s_[row+RK.row_offset+RK.multistep_stages], noise_scaling_eta, noise_scaling_mode)
