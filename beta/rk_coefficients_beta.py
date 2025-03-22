@@ -30,7 +30,9 @@ RK_SAMPLER_NAMES_BETA_FOLDERS = ["none",
 
                     "exponential/res_3s_strehmel_weiner",
                     "exponential/res_4s_krogstad",
+                    "exponential/res_4s_krogstad_alt",
                     "exponential/res_4s_strehmel_weiner",
+                    "exponential/res_4s_strehmel_weiner_alt",
                     "exponential/res_4s_cox_matthews",
                     "exponential/res_4s_cfree4",
                     "exponential/res_4s_friedli",
@@ -38,6 +40,7 @@ RK_SAMPLER_NAMES_BETA_FOLDERS = ["none",
                     "exponential/res_4s_munthe-kaas",
 
                     "exponential/res_5s",
+                    "exponential/res_5s_hochbruck-ostermann",
                     "exponential/res_6s",
                     "exponential/res_8s",
                     "exponential/res_8s_alt",
@@ -865,7 +868,7 @@ rk_coeff = {
         [0, 1]
     ),
 
-    "kraaijevanger_spijker_2s": (
+    "kraaijevanger_spijker_2s": ( #overshoots step
         [    
             [1/2, 0],
             [-1/2, 2],
@@ -997,7 +1000,7 @@ rk_coeff = {
         ],
     ),
 
-    "dormand-prince_13s": (
+    "dormand-prince_13s": ( #non-monotonic
         [
             [],
             [1/18],
@@ -1074,7 +1077,7 @@ rk_coeff = {
         ],
         [0.0, 0.161, 0.327, 0.9, 0.9800255409045097, 1.0, 1.0],
     ),
-    "rk6_7s": ( #5th order
+    "rk6_7s": ( #non-monotonic #5th order
         [
             [],
             [1/3],
@@ -1104,8 +1107,8 @@ rk_coeff = {
         ],
         [0, 1/5, 3/10, 4/5, 8/9, 1, 1],
     ),
-    "ssprk4_4s": ( #https://link.springer.com/article/10.1007/s41980-022-00731-x
-        [
+    "ssprk4_4s": ( #non-monotonic #https://link.springer.com/article/10.1007/s41980-022-00731-x
+        [ 
             [],
             [1/2],
             [1/2, 1/2],
@@ -1196,7 +1199,7 @@ rk_coeff = {
         ],
         [0, 8/15, 2/3],
     ),
-    "ssprk3_3s": (
+    "ssprk3_3s": ( #non-monotonic
         [
             [],
             [1],
@@ -1205,7 +1208,7 @@ rk_coeff = {
         [
             [1/6, 1/6, 2/3],
         ],
-        [0, 1, 1/2],
+        [0, 1, 1/2], 
     ),
     "midpoint_2s": (
         [
@@ -1770,7 +1773,7 @@ def get_rk_methods_beta(rk_type       : str,
             
             a, b = gen_first_col_exp(a,b,ci,φ)
             
-        case "res_3s_strehmel_weiner": # weak 4th order, Krogstad
+        case "res_3s_strehmel_weiner": # 
             c2 = 1/2
             c2 = float(get_extra_options_kv("c2", str(c2), extra_options))
 
@@ -1946,6 +1949,27 @@ def get_rk_methods_beta(rk_type       : str,
             #a = [row + [0] * (len(ci) - len(row)) for row in a]
             a, b = gen_first_col_exp(a,b,ci,φ)
             
+        case "res_4s_krogstad_alt": # weak 4th order, Krogstad https://ora.ox.ac.uk/objects/uuid:cc001282-4285-4ca2-ad06-31787b540c61/files/m611df1a355ca243beb09824b70e5e774
+            c1,c2,c3,c4 = 0, 1/2, 1/2, 1
+            ci = [c1,c2,c3,c4]
+            φ = Phi(h, ci)
+            
+            a = [
+                    [0, 0,        0,      0],
+                    [0, 0,        0,      0],
+                    [0, 4*φ(2,2), 0,      0],
+                    [0, 0,        2*φ(2), 0],
+            ]
+            b = [
+                    [0, 
+                     2*φ(2) - 4*φ(3),
+                     2*φ(2) - 4*φ(3),
+                     -φ(2)  + 4*φ(3)],
+            ]
+            
+            #a = [row + [0] * (len(ci) - len(row)) for row in a]
+            a, b = gen_first_col_exp(a,b,ci,φ)
+            
         case "res_4s_minchev": # https://ora.ox.ac.uk/objects/uuid:cc001282-4285-4ca2-ad06-31787b540c61/files/m611df1a355ca243beb09824b70e5e774
             c1,c2,c3,c4 = 0, 1/2, 1/2, 1
             ci = [c1,c2,c3,c4]
@@ -1991,6 +2015,27 @@ def get_rk_methods_beta(rk_type       : str,
             ]
             
             a, b = gen_first_col_exp(a,b,ci,φ)
+            
+        case "res_4s_strehmel_weiner_alt": # weak 4th order, Strehmel & Weiner https://ora.ox.ac.uk/objects/uuid:cc001282-4285-4ca2-ad06-31787b540c61/files/m611df1a355ca243beb09824b70e5e774
+            c1,c2,c3,c4 = 0, 1/2, 1/2, 1
+            ci = [c1,c2,c3,c4]
+            φ = Phi(h, ci)
+            
+            a = [
+                    [0, 0,        0,      0],
+                    [0, 0,        0,      0],
+                    [0, 2*φ(2,2), 0,      0],
+                    [0,  -2*φ(2), 4*φ(2), 0],
+            ]
+            b = [
+                    [0, 
+                     0,
+                     4*φ(2) - 8*φ(3), 
+                     -φ(2) +  4*φ(3)],
+            ]
+            
+            a, b = gen_first_col_exp(a,b,ci,φ)
+            
             
         case "lawson2a_2s": # based on midpoint rule, stiff order 1 https://cds.cern.ch/record/848126/files/cer-002531460.pdf
             c1,c2 = 0,1/2
@@ -2359,7 +2404,7 @@ def get_rk_methods_beta(rk_type       : str,
                     [φ(1)-φ(2), φ(2)],
             ]
 
-        case "etdrk3_a_3s": # https://arxiv.org/pdf/2402.15142v1
+        case "etdrk3_a_3s": #non-monotonic # https://arxiv.org/pdf/2402.15142v1
             c1,c2,c3 = 0, 1, 2/3
             ci = [c1,c2,c3]
             φ = Phi(h, ci)   
@@ -2480,7 +2525,7 @@ def get_rk_methods_beta(rk_type       : str,
             ]
             ci = [0, c2, c3]
             
-        case "res_5s": #4th order
+        case "res_5s": #non-monotonic #4th order
                 
             c1, c2, c3, c4, c5 = 0, 1/2, 1/2, 1, 1/2
             
@@ -2515,6 +2560,39 @@ def get_rk_methods_beta(rk_type       : str,
                     [b1, b2, b3, b4, b5],
             ]
             ci = [0., 0.5, 0.5, 1., 0.5]
+            
+            
+        case "res_5s_hochbruck-ostermann": #non-monotonic #4th order
+                
+            c1, c2, c3, c4, c5 = 0, 1/2, 1/2, 1, 1/2
+            ci = [c1,c2,c3,c4,c5]
+            φ = Phi(h, ci)   
+            
+            a3_2 = 4*φ(2,2)
+            a4_2 = φ(2)
+            a5_2 = (1/4)*φ(2) - φ(3) + 2*φ(2,2) - 4*φ(3,2)
+            
+            a4_3 = φ(2)
+            a5_3 = a5_2
+            
+            a5_4 = φ(2,2) - a5_2
+            
+            b4 =  -φ(2) + 4*φ(3)
+            b5 = 4*φ(2) - 8*φ(3)
+
+            a = [
+                    [0, 0   , 0   , 0   , 0],
+                    [0, 0   , 0   , 0   , 0],
+                    [0, a3_2, 0   , 0   , 0],
+                    [0, a4_2, a4_3, 0   , 0],
+                    [0, a5_2, a5_3, a5_4, 0],
+            ]
+            b = [
+                    [0, 0, 0, b4, b5],
+            ]
+            
+            a, b = gen_first_col_exp(a,b,ci,φ)
+
             
         case "res_6s": #4th order
                 
@@ -2606,7 +2684,7 @@ def get_rk_methods_beta(rk_type       : str,
             a8_1 = c8*φ(1,8) - a8_5 - a8_6 - a8_7 
             b1   =    φ(1)   - b6 - b7 - b8
             
-            a = [
+            """a = [
                     [0,    0, 0, 0, 0, 0, 0, 0],
                     [a2_1, 0, 0, 0, 0, 0, 0, 0],
                     
@@ -2621,25 +2699,25 @@ def get_rk_methods_beta(rk_type       : str,
             ]
             b = [
                     [b1,   0, 0, 0, 0, b6, b7, b8],
-            ]
-             
+            ]"""
+            
             a = [
-                    [0, 0, 0, 0, 0, 0, 0, 0],
-                    [0, 0, 0, 0, 0, 0, 0, 0],
+                    [0 , 0   , 0   , 0   , 0   , 0   , 0   , 0],
+                    [0 , 0   , 0   , 0   , 0   , 0   , 0   , 0],
                     
-                    [0, a3_2, 0, 0, 0, 0, 0, 0],
-                    [0, 0, a4_3, 0, 0, 0, 0, 0],
+                    [0 , a3_2, 0   , 0   , 0   , 0   , 0   , 0],
+                    [0 , 0   , a4_3, 0   , 0   , 0   , 0   , 0],
                     
-                    [0, 0, a5_3, a5_4, 0, 0, 0, 0],
-                    [0, 0, 0, a6_4, a6_5, 0, 0, 0],
+                    [0 , 0   , a5_3, a5_4, 0   , 0   , 0   , 0],
+                    [0 , 0   , 0   , a6_4, a6_5, 0   , 0   , 0],
                     
-                    [0 , 0, 0, a7_4, a7_5, a7_6, 0,    0],
-                    [0 , 0, 0, 0,    a8_5, a8_6, a8_7, 0],
+                    [0 , 0   , 0   , a7_4, a7_5, a7_6, 0   , 0],
+                    [0 , 0   , 0   , 0   , a8_5, a8_6, a8_7, 0],
             ]
             b = [
-                    [0,   0, 0, 0, 0, b6, b7, b8],
+                    [0, 0, 0, 0, 0, b6, b7, b8],
             ]
-             
+            
             for i in range(len(a)): 
                 a[i][0] = ci[i] * φ(1,i+1) - sum(a[i])
             for i in range(len(b)): 
@@ -2657,8 +2735,8 @@ def get_rk_methods_beta(rk_type       : str,
             
             a4_3 = 2*φ(2,4)
 
-            a5_3 = 2*φ(2,2) + 16*φ(3,2)
-            a5_4 = 8*φ(2,2) - 32*φ(3,2)
+            a5_3 = -2*φ(2,2) + 16*φ(3,2)
+            a5_4 =  8*φ(2,2) - 32*φ(3,2)
             
             a6_4 =  8*φ(2,6) - 32*φ(3,6)
             a6_5 = -2*φ(2,6) + 16*φ(3,6)
@@ -2669,30 +2747,29 @@ def get_rk_methods_beta(rk_type       : str,
             
             Φ = (5/32)*a6_4 - (25/28)*φ(2,6) + (81/175)*φ(2,7) - (162/25)*φ(3,7) + (150/7)*φ(4,6) + (972/35)*φ(4,7) + 6*φ(4)
             
-            a8_5 =  -(16/3)*φ(2) + (203/3)*φ(3)  -    40*Φ
+            a8_5 =  -(16/3)*φ(2) + (208/3)*φ(3) -      40*Φ
             a8_6 = (250/21)*φ(2) - (250/3)*φ(3) + (250/7)*Φ
-            a8_7 =  (27/14)*φ(2) +      27*φ(3) + (135/7)*Φ
+            a8_7 =  (27/14)*φ(2) -      27*φ(3) + (135/7)*Φ
             
             b6 = (125/14)*φ(2) - (625/14)*φ(3) + (1125/14)*φ(4)
             b7 = (-27/14)*φ(2) + (162/7) *φ(3) -  (405/7) *φ(4)
             b8 =   (1/2) *φ(2) -  (13/2) *φ(3) +   (45/2) *φ(4)
             
-             
             a = [
-                    [0, 0, 0, 0, 0, 0, 0, 0],
-                    [0, 0, 0, 0, 0, 0, 0, 0],
+                    [0 , 0   , 0   , 0   , 0   , 0   , 0   , 0],
+                    [0 , 0   , 0   , 0   , 0   , 0   , 0   , 0],
                     
-                    [0, a3_2, 0, 0, 0, 0, 0, 0],
-                    [0, 0, a4_3, 0, 0, 0, 0, 0],
+                    [0 , a3_2, 0   , 0   , 0   , 0   , 0   , 0],
+                    [0 , 0   , a4_3, 0   , 0   , 0   , 0   , 0],
                     
-                    [0, 0, a5_3, a5_4, 0, 0, 0, 0],
-                    [0, 0, 0, a6_4, a6_5, 0, 0, 0],
+                    [0 , 0   , a5_3, a5_4, 0   , 0   , 0   , 0],
+                    [0 , 0   , 0   , a6_4, a6_5, 0   , 0   , 0],
                     
-                    [0 , 0, 0, a7_4, a7_5, a7_6, 0,    0],
-                    [0 , 0, 0, 0,    a8_5, a8_6, a8_7, 0],
+                    [0 , 0   , 0   , a7_4, a7_5, a7_6, 0   , 0],
+                    [0 , 0   , 0   , 0   , a8_5, a8_6, a8_7, 0],
             ]
             b = [
-                    [0,   0, 0, 0, 0, b6, b7, b8],
+                    [0, 0, 0, 0, 0, b6, b7, b8],
             ]
 
             a, b = gen_first_col_exp(a,b,ci,φ)

@@ -382,6 +382,29 @@ class SharkSampler:
                     
                     regional_generate_conditionings_and_masks_fn             = pos_cond[0][1]['regional_generate_conditionings_and_masks_fn']
                     regional_conditioning, regional_mask                     = regional_generate_conditionings_and_masks_fn(latent_x['samples'])
+                    
+                    if EO("edge_mask"):
+                        dilation = EO("edge_mask", 5)
+                        orig_mask = regional_generate_conditionings_and_masks_fn.conditioning_regional[0]['mask'].clone()
+                        orig_mask1 = regional_generate_conditionings_and_masks_fn.conditioning_regional[1]['mask'].clone()
+                        edge_mask = get_edge_mask(orig_mask.squeeze(0).squeeze(0), dilation=dilation)
+                        
+                        edge_mask = torch.nn.functional.interpolate(edge_mask[None,None,...], size=orig_mask.shape[-2:])
+                        regional_generate_conditionings_and_masks_fn.conditioning_regional[0]['mask'] = edge_mask.squeeze(0)
+                        regional_generate_conditionings_and_masks_fn.conditioning_regional[1]['mask'] = edge_mask.squeeze(0)
+                        
+                        regional_conditioning1, regional_mask1 = regional_generate_conditionings_and_masks_fn(latent_x['samples'])
+                        regional_generate_conditionings_and_masks_fn.conditioning_regional[0]['mask'] = orig_mask
+                        regional_generate_conditionings_and_masks_fn.conditioning_regional[1]['mask'] = orig_mask1
+                        
+                        if EO("edge_mask_selfattn_only"):
+                            regional_mask.mask[512:,512:] = torch.logical_or(regional_mask.mask[512:,512:], regional_mask1.mask[512:,512:])
+                        else:
+                            regional_mask.mask = torch.logical_or(regional_mask.mask, regional_mask1.mask)
+                        
+                    
+                    
+                    
                     regional_conditioning                                    = copy.deepcopy(regional_conditioning)
                     regional_mask                                            = copy.deepcopy(regional_mask)
                     
@@ -563,6 +586,26 @@ class SharkSampler:
             gc.collect()
 
             return (out, out_denoised, sde_noise,)
+
+
+
+
+def get_edge_mask(mask: torch.Tensor, dilation: int = 3) -> torch.Tensor:
+
+    mask = mask.float()
+    
+    eroded = -F.max_pool2d(-mask.unsqueeze(0).unsqueeze(0), kernel_size=3, stride=1, padding=1)
+    eroded = eroded.squeeze(0).squeeze(0)
+    
+    edge = mask - eroded
+    edge = (edge > 0).float()
+    
+    dilated_edge = F.max_pool2d(edge.unsqueeze(0).unsqueeze(0), kernel_size=dilation, stride=1, padding=dilation//2)
+    dilated_edge = dilated_edge.squeeze(0).squeeze(0)
+    
+    return dilated_edge
+
+
 
 
 
