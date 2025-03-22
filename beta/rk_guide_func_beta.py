@@ -126,9 +126,9 @@ class LatentGuide:
             self.guide_bkg_cossim_cutoff_ = guides.get("cutoff_unmasked", 1.)
             self.guide_mean_cossim_cutoff_= guides.get("cutoff_mean", 1.)
 
-            if self.mask     is not None and self.mask.shape    [0] > 1:
+            if self.mask     is not None and self.mask.shape    [0] > 1 and self.VIDEO is False:
                 self.mask     = self.mask    [batch_num].unsqueeze(0)
-            if self.mask_inv is not None and self.mask_inv.shape[0] > 1:
+            if self.mask_inv is not None and self.mask_inv.shape[0] > 1 and self.VIDEO is False:
                 self.mask_inv = self.mask_inv[batch_num].unsqueeze(0)
                 
             if self.guide_mode.startswith("fully_") and not RK_IMPLICIT:
