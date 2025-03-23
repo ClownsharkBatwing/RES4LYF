@@ -675,6 +675,17 @@ def fp_or(tensor1, tensor2):
 def fp_and(tensor1, tensor2):
     return torch.minimum(tensor1, tensor2)
 
+def fp_and2(tensor1, tensor2):
+    triu = torch.triu(torch.ones_like(tensor1))
+    tril = torch.tril(torch.ones_like(tensor2))
+    triu.diagonal().fill_(0.0)
+    tril.diagonal().fill_(0.0)
+    new_tensor = tensor1 * triu + tensor2 * tril
+    new_tensor.diagonal().fill_(1.0)
+    
+    return new_tensor
+
+
 class RegionalGenerateConditioningsAndMasks:
     def __init__(self, conditioning, conditioning_regional, weight, start_percent, end_percent, mask_type, model_config):
         self.conditioning          = conditioning
@@ -690,7 +701,9 @@ class RegionalGenerateConditioningsAndMasks:
         if not isinstance(self.model_config, comfy.supported_models.Stable_Cascade_C):
             h //= 2  # 16x16 PE      patch_size = 2  1024x1024 rgb -> 128x128 16ch latent -> 64x64 img
             w //= 2
-        img_len = h * w
+        self.img_len = img_len = h * w
+        self.h = h
+        self.w = w
 
         text_register_tokens = 0
         if   isinstance(self.model_config, comfy.supported_models.SD3):
@@ -716,7 +729,7 @@ class RegionalGenerateConditioningsAndMasks:
         cond_r = torch.cat([cond_reg['cond'] for cond_reg in self.conditioning_regional], dim=1)           #1,256,2048 aura cond     
         
         if self.conditioning is not None:
-            text_len = text_len_base + cond_r.shape[1]  # 256 = main prompt tokens... half of t5, comfy issue
+            self.text_len = text_len = text_len_base + cond_r.shape[1]  # 256 = main prompt tokens... half of t5, comfy issue
             conditioning_regional = [
                 {
                     'mask': torch.ones((1,             h,    w), dtype=dtype),
@@ -725,13 +738,13 @@ class RegionalGenerateConditioningsAndMasks:
                 *self.conditioning_regional,
             ]
         else:
-            text_len              = cond_r.shape[1] + text_register_tokens # 256 = main prompt tokens... half of t5, comfy issue        # gets set to 308 with sd35m. 154 * 2 = 308 (THIS IS WITH CFG)
+            self.text_len = text_len              = cond_r.shape[1] + text_register_tokens # 256 = main prompt tokens... half of t5, comfy issue        # gets set to 308 with sd35m. 154 * 2 = 308 (THIS IS WITH CFG)
             conditioning_regional = self.conditioning_regional
         
         if isinstance(self.model_config, comfy.supported_models.Stable_Cascade_C):
-            text_off = 0
+            self.text_off = text_off = 0
         else:
-            text_off = text_len
+            self.text_off = text_off = text_len
         all_attn_mask      = torch.zeros((text_off+img_len, text_len+img_len), dtype=dtype)
         
         
@@ -742,6 +755,9 @@ class RegionalGenerateConditioningsAndMasks:
         for cond_reg_dict in conditioning_regional:
             cond_reg    = cond_reg_dict['cond']
             region_mask = cond_reg_dict['mask'][0]
+            
+            
+            
             
             img2txt_mask    = torch.nn.functional.interpolate(region_mask[None, None, :, :], (h, w), mode='nearest-exact').flatten().unsqueeze(1).repeat(1, cond_reg.shape[1])  #cond_reg.shape(1) = 256   4096/256 = 16
             txt2img_mask    = img2txt_mask   .transpose(-1, -2)
@@ -754,12 +770,17 @@ class RegionalGenerateConditioningsAndMasks:
             #else:
             curr_len = prev_len + cond_reg.shape[1]
             
+            
             all_attn_mask[prev_len:curr_len, prev_len:curr_len] = 1.0           # self             TXT 2 TXT
             all_attn_mask[prev_len:curr_len, text_len:        ] = txt2img_mask  # cross            TXT 2 regional IMG
             all_attn_mask[text_off:        , prev_len:curr_len] = img2txt_mask  # cross   regional IMG 2 TXT
             
+            region_mask_flat    = torch.nn.functional.interpolate(region_mask[None, None, :, :], (h, w), mode='nearest-exact').flatten()
+            #self_attn_mask     = fp_or(self_attn_mask    ,                          region_mask_flat.unsqueeze(0) * region_mask_flat.unsqueeze(1))
+            #self_attn_mask_bkg = fp_or(self_attn_mask_bkg, (region_mask_flat.max() - region_mask_flat.unsqueeze(0)) * (region_mask_flat.max() - region_mask_flat.unsqueeze(1)))
+            
             self_attn_mask     = fp_or(self_attn_mask    , fp_and(                      img2txt_mask_sq,                       txt2img_mask_sq))
-            self_attn_mask_bkg = fp_or(self_attn_mask_bkg, fp_and(img2txt_mask_sq.max()-img2txt_mask_sq, txt2img_mask_sq.max()-txt2img_mask_sq))
+            #self_attn_mask_bkg = fp_or(self_attn_mask_bkg, fp_and(img2txt_mask_sq.max()-img2txt_mask_sq, txt2img_mask_sq.max()-txt2img_mask_sq))
             
             prev_len = curr_len
 
@@ -770,10 +791,12 @@ class RegionalGenerateConditioningsAndMasks:
 
         if self.mask_type.endswith("_masked"):
             trimask = torch.tril(torch.ones(img_len, img_len)).to(all_attn_mask.mask.dtype).to(all_attn_mask.mask.device)
+            trimask.diagonal().fill_(0.0)
             all_attn_mask.mask[text_off:,text_len:] = fp_or(trimask, all_attn_mask.mask[text_off:,text_len:])
             
         if self.mask_type.endswith("_unmasked"):
             trimask = 1-torch.tril(torch.ones(img_len, img_len)).to(all_attn_mask.mask.dtype).to(all_attn_mask.mask.device)
+            trimask.diagonal().fill_(0.0)
             all_attn_mask.mask[text_off:,text_len:] = fp_or(trimask, all_attn_mask.mask[text_off:,text_len:])
 
         if self.mask_type.startswith("boolean"):
