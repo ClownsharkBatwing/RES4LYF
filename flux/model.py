@@ -3,6 +3,8 @@
 import torch
 import torch.nn.functional as F
 from torch import Tensor, nn
+from typing import Optional, Callable, Tuple, Dict, Any, Union
+
 from dataclasses import dataclass
 import copy
 
@@ -86,6 +88,7 @@ class ReFlux(Flux):
                         y        : Tensor,
                         guidance : Tensor   = None,
                         control             = None,
+                        reg_vec             = None,
                         transformer_options = {},
                         ) -> Tensor:
         
@@ -102,8 +105,33 @@ class ReFlux(Flux):
             else:
                 vec = vec + self.guidance_in(timestep_embedding(guidance, 256).to(img.dtype))
 
+        vec_orig = vec.clone()
         vec = vec + self.vector_in(y)  #y.shape=1,768  y==all 0s
+        
+        txt_a, txt_b = None, None
+        if txt.shape[1] > 256:
+            txt_a = self.txt_in(txt[:,:256,:])
+            txt_b = self.txt_in(txt[:,256:,:])
+            #txt_a = self.txt_in(txt[:,0:1,:])
+            #txt_b = self.txt_in(txt[:,256:257:,:])
+        
         txt = self.txt_in(txt)         #
+        
+        txt_ids_a = txt_ids[:,256:,:]
+        txt_ids_b = txt_ids[:,:256,:]
+        #txt_ids_a = txt_ids[:,0:1,:]
+        #txt_ids_b = txt_ids[:,:256:257,:]
+        
+        ids_a = torch.cat((txt_ids_a, img_ids), dim=1)
+        ids_b = torch.cat((txt_ids_b, img_ids), dim=1)
+        pe_a  = self.pe_embedder(ids_a)
+        pe_b  = self.pe_embedder(ids_b)
+        
+        if reg_vec is not None:
+            reg_vec_a = vec_orig + self.vector_in(reg_vec[:,:768].to(torch.bfloat16))
+            reg_vec_b = vec_orig + self.vector_in(reg_vec[:,768:1536].to(torch.bfloat16))
+            #reg_vec_c = vec_orig + self.vector_in(reg_vec[:,1536:2304].to(torch.bfloat16))
+            #reg_vec = torch.cat((reg_vec_a, reg_vec_b), dim=-1)
 
         ids = torch.cat((txt_ids, img_ids), dim=1) # img_ids.shape=1,8192,3    txt_ids.shape=1,512,3    #ids.shape=1,8704,3
         pe  = self.pe_embedder(ids)                 # pe.shape 1,1,8704,64,2,2
@@ -143,16 +171,26 @@ class ReFlux(Flux):
             
             mask[text_len:,text_len:] = torch.clamp(mask[text_len:,text_len:], min=floor.to(mask.device))   #ORIGINAL SELF-ATTN REGION BLEED
             reg_cond_mask = reg_cond_mask_expanded.unsqueeze(0).clone() if reg_cond_mask_expanded is not None else None
-
+        #heatmaps_a, heatmaps_b = [], []
+        #cdicts = []
         total_layers = len(self.double_blocks) + len(self.single_blocks)
-
+        img_a, img_b = img.clone(), img.clone()
+        attn_mask = None
         for i, block in enumerate(self.double_blocks):
             if mask is not None and mask_type_bool and weight < (i / (total_layers-1)):
                 mask = mask.to(img.dtype)
             
+            if attn_mask is not None and timesteps < 0.9:
+                mask = attn_mask & mask
+            img, txt, attn_mask = block(img=img, txt=txt, vec=vec, pe=pe, mask=mask, reg_cond_mask=reg_cond_mask, idx=i) #, weight=weight) #, mask=mask)
+            #img_a, txt_a, _, _ = block(img=img.clone(), txt=txt_a, vec=reg_vec_a, pe=pe_a, mask=None, reg_cond_mask=None, reg_vec=None) #, mask=mask)
+            #img_b, txt_b, _, _ = block(img=img.clone(), txt=txt_b, vec=reg_vec_b, pe=pe_b, mask=None, reg_cond_mask=None, reg_vec=None) #, mask=mask)
             
-            #img, txt = block(img=img, txt=txt, vec=vec, pe=pe, timestep=timesteps, transformer_options=transformer_options, mask=mask, weight=weight) #, mask=mask)
-            img, txt = block(img=img, txt=txt, vec=vec, pe=pe, mask=mask, reg_cond_mask=reg_cond_mask) #, mask=mask)
+            #img, txt, heatmap_a, heatmap_b = block(img=img, txt=txt, vec=vec, pe=pe, mask=mask, reg_cond_mask=reg_cond_mask, reg_vec=reg_vec, vec_a=reg_vec_a, vec_b=reg_vec_b, txt_a=txt_a, txt_b=txt_b, pe_a=pe_a, pe_b=pe_b, ) #, mask=mask)
+            
+            #img, txt, txt_a, c_attention_dict = block(img=img, txt=txt, vec=vec, pe=pe, c_txt=txt_a, c_vec=reg_vec_a, c_pe=pe_a) #, mask=mask)
+
+            
 
             if control is not None: # Controlnet
                 control_i = control.get("input")
@@ -160,8 +198,9 @@ class ReFlux(Flux):
                     add = control_i[i]
                     if add is not None:
                         img[:1] += add
-
-
+            #heatmaps_a.append(heatmap_a)
+            #heatmaps_b.append(heatmap_b)
+            #cdicts.append(c_attention_dict)
 
         img = torch.cat((txt, img), 1)   #first 256 is txt embed
         for i, block in enumerate(self.single_blocks):
@@ -169,7 +208,7 @@ class ReFlux(Flux):
                 mask = mask.to(img.dtype)
             
             #img = block(img, vec=vec, pe=pe, timestep=timesteps, transformer_options=transformer_options, mask=mask, weight=weight)
-            img = block(img, vec=vec, pe=pe, mask=mask, reg_cond_mask=reg_cond_mask)
+            img = block(img, vec=vec, pe=pe, mask=mask, reg_cond_mask=reg_cond_mask, reg_vec=reg_vec, idx=i)
 
             if control is not None: # Controlnet
                 control_o = control.get("output")
@@ -202,8 +241,21 @@ class ReFlux(Flux):
         return img_ids"""
 
 
-    def forward(self, x, timestep, context, y, guidance, control=None, transformer_options={}, **kwargs):
+    def forward(self,
+                x,
+                timestep,
+                context,
+                y,
+                guidance,
+                control             = None,
+                transformer_options = {},
+                cs:    Optional[Tensor] = None,
+                c_ids: Optional[Tensor] = None,
+                c_vec: Optional[Tensor] = None,
+                **kwargs
+                ):
 
+        #y_orig = y.clone()
         out_list = []
         for i in range(len(transformer_options['cond_or_uncond'])):
             UNCOND = transformer_options['cond_or_uncond'][i] == 1
@@ -211,6 +263,8 @@ class ReFlux(Flux):
             bs, c, h, w = x.shape
             patch_size  = 2
             x           = comfy.ldm.common_dit.pad_to_patch_size(x, (patch_size, patch_size))    # 1,16,192,192
+            #y = y_orig.clone()
+            #vec_tmp = None
             
             transformer_options['original_shape'] = x.shape
             transformer_options['patch_size']     = patch_size
@@ -218,15 +272,15 @@ class ReFlux(Flux):
             h_len = ((h + (patch_size // 2)) // patch_size) # h_len 96
             w_len = ((w + (patch_size // 2)) // patch_size) # w_len 96
 
-            img = rearrange(x, "b c (h ph) (w pw) -> b (h w) (c ph pw)", ph=patch_size, pw=patch_size) # img 1,9216,64
-
+            img = rearrange(x, "b c (h ph) (w pw) -> b (h w) (c ph pw)", ph=patch_size, pw=patch_size) # img 1,9216,64     1,16,128,128 -> 1,4096,64
+            vec_full=None
             if UNCOND:
                 transformer_options['reg_cond_weight'] = 0.0 # -1
                 context_tmp = context[i][None,...].clone()
             
             elif UNCOND == False:
                 transformer_options['reg_cond_weight'] = transformer_options.get("regional_conditioning_weight", 0.0) #transformer_options['regional_conditioning_weight']
-                transformer_options['reg_cond_floor']  = transformer_options.get("regional_conditioning_floor", 0.0) #transformer_options['regional_conditioning_floor'] #if "regional_conditioning_floor" in transformer_options else 0.0
+                transformer_options['reg_cond_floor']  = transformer_options.get("regional_conditioning_floor",  0.0) #transformer_options['regional_conditioning_floor'] #if "regional_conditioning_floor" in transformer_options else 0.0
                 
                 mask_orig = transformer_options.get('regional_conditioning_mask_orig')
                 if mask_orig is not None:
@@ -246,6 +300,8 @@ class ReFlux(Flux):
                     context_tmp = context[i][None,...].clone()
                 else:
                     context_tmp = regional_conditioning_positive[0].concat_cond(context[i][None,...], transformer_options)
+                    vec_full    = regional_conditioning_positive[0].concat_pooled(y    [i][None,...], transformer_options)
+                    #vec_tmp = vec_full[:,:768]
             
             if context_tmp is None:
                 context_tmp = context[i][None,...].clone()
@@ -253,14 +309,19 @@ class ReFlux(Flux):
             txt_ids      = torch.zeros((bs, context_tmp.shape[1], 3), device=x.device, dtype=x.dtype)      # txt_ids        1, 256,3
             img_ids_orig = self._get_img_ids(x, bs, h_len, w_len, 0, h_len, 0, w_len)                  # img_ids_orig = 1,9216,3
 
+            #vec_tmp = vec_tmp if vec_tmp is not None else y[i][None,...]
+
             out_tmp = self.forward_blocks(img       [i][None,...].clone(), 
                                         img_ids_orig[i][None,...].clone(), 
                                         context_tmp,
                                         txt_ids     [i][None,...].clone(), 
                                         timestep    [i][None,...].clone(), 
+                                        #y,
                                         y           [i][None,...].clone(),
                                         guidance    [i][None,...].clone(),
-                                        control, transformer_options=transformer_options)  # context 1,256,4096   y 1,768
+                                        control, 
+                                        vec_full, 
+                                        transformer_options=transformer_options)  # context 1,256,4096   y 1,768
             out_list.append(out_tmp)
             
         out = torch.stack(out_list, dim=0).squeeze(dim=1)
