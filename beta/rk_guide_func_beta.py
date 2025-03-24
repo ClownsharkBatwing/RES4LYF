@@ -1014,7 +1014,7 @@ def prepare_mask(x, mask, LGW_MASK_RESCALE_MIN) -> tuple[torch.Tensor, bool]:
     target_height = x.shape[-2]
     target_width = x.shape[-1]
 
-    if x.dim() == 5 and mask.shape[0] > 1:
+    if x.dim() == 5 and mask.shape[0] > 1 and mask.ndim < 4:
         target_frames = x.shape[-3]
         spatial_mask = mask.unsqueeze(0).unsqueeze(0)  # [B, H, W] -> [1, 1, B, H, W]
         spatial_mask = F.interpolate(spatial_mask, 
@@ -1025,6 +1025,8 @@ def prepare_mask(x, mask, LGW_MASK_RESCALE_MIN) -> tuple[torch.Tensor, bool]:
         for i in range(1, x.dim() - 3):
             repeat_shape.append(x.shape[i])
         repeat_shape.extend([1, 1, 1])  # frames, height, width
+    elif mask.ndim == 4:
+        mask = mask.unsqueeze(0)
     else:
         spatial_mask = mask.unsqueeze(1)
         spatial_mask = F.interpolate(spatial_mask, size=(target_height, target_width), mode='bilinear', align_corners=False)

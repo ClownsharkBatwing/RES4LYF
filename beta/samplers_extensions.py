@@ -920,14 +920,14 @@ class ClownGuide_Beta:
         if guide is not None:
             raw_x = guide.get('state_info', {}).get('raw_x', None)
             
-            if False # raw_x is not None:
+            if False: # raw_x is not None:
                 guide          = {'samples': guide['state_info']['raw_x'].clone()}
             else:
                 guide          = {'samples': guide['samples'].clone()}
                 
         if guide_unmasked is not None:
             raw_x = guide_unmasked.get('state_info', {}).get('raw_x', None)
-            if False #raw_x is not None:
+            if False: #raw_x is not None:
                 guide_unmasked = {'samples': guide_unmasked['state_info']['raw_x'].clone()}
             else:
                 guide_unmasked = {'samples': guide_unmasked['samples'].clone()}
@@ -1052,14 +1052,14 @@ class ClownGuides_Beta:
         
         if guide_masked is not None:
             raw_x = guide_masked.get('state_info', {}).get('raw_x', None)
-            if False #raw_x is not None:
+            if False: #raw_x is not None:
                 guide_masked   = {'samples': guide_masked['state_info']['raw_x'].clone()}
             else:
                 guide_masked   = {'samples': guide_masked['samples'].clone()}
         
         if guide_unmasked is not None:
             raw_x = guide_unmasked.get('state_info', {}).get('raw_x', None)
-            if False #raw_x is not None:
+            if False: #raw_x is not None:
                 guide_unmasked = {'samples': guide_unmasked['state_info']['raw_x'].clone()}
             else:
                 guide_unmasked = {'samples': guide_unmasked['samples'].clone()}
@@ -1203,14 +1203,14 @@ class ClownGuidesAB_Beta:
         
         if guide_A is not None:
             raw_x = guide_A.get('state_info', {}).get('raw_x', None)
-            if False #raw_x is not None:
+            if False: #raw_x is not None:
                 guide_A          = {'samples': guide_A['state_info']['raw_x'].clone()}
             else:
                 guide_A          = {'samples': guide_A['samples'].clone()}
                 
         if guide_B is not None:
             raw_x = guide_B.get('state_info', {}).get('raw_x', None)
-            if False #raw_x is not None:
+            if False: #raw_x is not None:
                 guide_B = {'samples': guide_B['state_info']['raw_x'].clone()}
             else:
                 guide_B = {'samples': guide_B['samples'].clone()}
