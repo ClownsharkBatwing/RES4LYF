@@ -264,7 +264,7 @@ def sample_rk_beta(
         from .rk_guide_func_beta import prepare_mask
         sde_mask, _ = prepare_mask(x, sde_mask, LGW_MASK_RESCALE_MIN)
         sde_mask = sde_mask.to(x.device).to(x.dtype)
-        
+    
 
     x      = x     .to(dtype=default_dtype, device=work_device)
     sigmas = sigmas.to(dtype=default_dtype, device=work_device)
