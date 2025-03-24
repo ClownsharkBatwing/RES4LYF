@@ -227,6 +227,8 @@ NODE_CLASS_MAPPINGS = {
     "Frame Select"                        : images.Frame_Select,
     "Frames Slice"                        : images.Frames_Slice,
     "Frames Concat"                       : images.Frames_Concat,
+    
+    "Frames Concat Masks"                 : nodes_latents.Frames_Concat_Masks,
 
 
     "Frame Select Latent"                 : nodes_latents.Frame_Select_Latent,

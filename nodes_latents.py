@@ -336,7 +336,7 @@ class latent_display_state_info:
                     else:
                         shape_str = str(list(value.shape)).replace(" ", "")
                         dtype = value.dtype
-                        
+
                         if torch.is_floating_point(value) is False:
                             max_val = value.float().max().item()
                             min_val = value.float().min().item()
@@ -643,6 +643,54 @@ class Frames_Concat_Latent:
     def main(self, frames_0, frames_1):
         frames_concat = torch.cat((frames_0['samples'], frames_1['samples']), dim=2).clone()
         return ({"samples": frames_concat},)
+    
+
+
+
+
+class Frames_Concat_Masks:
+    def __init__(self):
+        pass
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+
+            "required": {
+                "frames_0": ("LATENT",),
+                "frames_1": ("LATENT",),
+                "frames_2": ("LATENT",),
+                "frames_3": ("LATENT",),
+                "frames_4": ("LATENT",),
+                "frames_5": ("LATENT",),
+                "frames_6": ("LATENT",),
+                "frames_7": ("LATENT",),
+                "frames_8": ("LATENT",),
+                "frames_9": ("LATENT",),
+
+            },
+            "optional": {
+            },
+        }
+        
+    RETURN_TYPES = ("LATENT",)
+    RETURN_NAMES = ("latent",)
+    FUNCTION     = "main"
+    CATEGORY     = "RES4LYF/latents"
+
+    def main(self, frames_0, frames_1, frames_2=None, frames_3=None, frames_4=None, frames_5=None, frames_6=None, frames_7=None, frames_8=None, frames_9=None):
+        frames_concat = torch.cat((frames_0,      frames_1), dim=0).clone()
+        
+        frames_concat = torch.cat((frames_concat, frames_2), dim=0).clone() if frames_2 is not None else None
+        frames_concat = torch.cat((frames_concat, frames_3), dim=0).clone() if frames_3 is not None else None
+        frames_concat = torch.cat((frames_concat, frames_4), dim=0).clone() if frames_4 is not None else None
+        frames_concat = torch.cat((frames_concat, frames_5), dim=0).clone() if frames_5 is not None else None
+        frames_concat = torch.cat((frames_concat, frames_6), dim=0).clone() if frames_6 is not None else None
+        frames_concat = torch.cat((frames_concat, frames_7), dim=0).clone() if frames_7 is not None else None
+        frames_concat = torch.cat((frames_concat, frames_8), dim=0).clone() if frames_8 is not None else None
+        frames_concat = torch.cat((frames_concat, frames_9), dim=0).clone() if frames_9 is not None else None
+
+        return (frames_concat,)
     
 
 
