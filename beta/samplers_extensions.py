@@ -8,13 +8,13 @@ import copy
 
 from nodes import MAX_RESOLUTION
 
-from ..helper                import OptionsManager, initialize_or_scale, get_res4lyf_scheduler_list
+from ..helper                import OptionsManager, FrameWeightsManager, initialize_or_scale, get_res4lyf_scheduler_list
 
 from .rk_coefficients_beta   import RK_SAMPLER_NAMES_BETA_FOLDERS, get_default_sampler_name, get_sampler_name_list, process_sampler_name
 
 from .noise_classes          import NOISE_GENERATOR_NAMES_SIMPLE
 from .rk_noise_sampler_beta  import NOISE_MODE_NAMES
-from .constants              import IMPLICIT_TYPE_NAMES, GUIDE_MODE_NAMES_BETA_MISC, GUIDE_MODE_NAMES_BETA_SIMPLE, MAX_STEPS
+from .constants              import IMPLICIT_TYPE_NAMES, GUIDE_MODE_NAMES_BETA_MISC, GUIDE_MODE_NAMES_BETA_SIMPLE, MAX_STEPS, FRAME_WEIGHTS_SCHEDULER_NAMES, FRAME_WEIGHTS_CHANGE_RATE_NAMES
 
 
 
@@ -423,7 +423,7 @@ class ClownOptions_Automation_Beta:
                 
         options = options if options is not None else {}
             
-        frame_weights_grp = (frame_weights, frame_weights)
+        frame_weights_mgr = (frame_weights, frame_weights)
 
         automation = {
             "etas"              : etas,
@@ -431,7 +431,7 @@ class ClownOptions_Automation_Beta:
             "s_noises"          : s_noises,
             "s_noises_substep"  : s_noises_substep,
             "epsilon_scales"    : epsilon_scales,
-            "frame_weights_grp" : frame_weights_grp,
+            "frame_weights_mgr" : frame_weights_mgr,
         }
         
         options["automation"] = automation
@@ -1321,9 +1321,16 @@ class ClownOptions_Frameweights:
     @classmethod
     def INPUT_TYPES(s):
         return {
+            "required": {
+                "apply_to": (["frame_weights", "frame_weights_inv"], {"default": "frame_weights", "tooltip": "Apply the frame weights to the foreground mask or the inverse mask of the guides"}),
+                "schedule": (FRAME_WEIGHTS_SCHEDULER_NAMES, {"default": "ease_out", "tooltip": "The schedule type used for the dynamic period. constant: no change, linear: steady change, ease_out: starts fast, ease_in: starts slow"}),
+                "dynamics": (FRAME_WEIGHTS_CHANGE_RATE_NAMES, {"default": "moderate_early", "tooltip": "fast_early: fast change starts immediately, slow_late: slow change starts later"}),
+                "scale": ("FLOAT", {"default": 0.5, "min": 0.0, "max": 1.0, "step": 0.01, "tooltip": "The amount of change over the course of the schedule. 1.0 means that the guides have no influence by the end of the schedule."}),
+                "reverse": ("BOOLEAN", {"default": False, "tooltip": "Reverse the schedule"}),
+            },
             "optional": {
-                "frame_weights": ("SIGMAS",),
-                "frame_weights_inv": ("SIGMAS",),
+                # Keep these for optional manual override
+                "frame_weights": ("SIGMAS", {"tooltip": "Overrides all other settings EXCEPT reverse."}),
                 "options": ("OPTIONS",),
             },
         }
@@ -1333,24 +1340,38 @@ class ClownOptions_Frameweights:
     FUNCTION = "main"
     CATEGORY = "RES4LYF/sampler_options"
 
-    def main(self,          
-            frame_weights    = None,
-            frame_weights_inv = None,
-            options          = None
-            ):
-
+    def main(self,
+             apply_to,
+             schedule,
+             dynamics,
+             scale,
+             reverse,
+             frame_weights=None,
+             options=None,
+             ):
+        
         options_mgr = OptionsManager(options)
 
-        frame_weights_grp = (frame_weights, frame_weights_inv)
+        frame_weights_mgr = options_mgr.get("frame_weights_mgr")
+        if frame_weights_mgr is None:
+            frame_weights_mgr = FrameWeightsManager()
+        
+        if apply_to == "frame_weights":
+            frame_weights_mgr.schedule = schedule
+            frame_weights_mgr.dynamics = dynamics
+            frame_weights_mgr.scale = scale
+            frame_weights_mgr.is_reversed = reverse
+        elif apply_to == "frame_weights_inv":
+            frame_weights_mgr.schedule_inv = schedule
+            frame_weights_mgr.dynamics_inv = dynamics
+            frame_weights_mgr.scale_inv = scale
+            frame_weights_mgr.is_reversed_inv = reverse
 
-        if frame_weights_grp[0] is not None or frame_weights_grp[1] is not None:
-            if "automation" in options_mgr and "frame_weights_grp" in options_mgr["automation"]:
-                current_frame_weights_grp = options_mgr["automation"]["frame_weights_grp"]
-                frame_weights_grp[0] = frame_weights_grp[0] if frame_weights_grp[0] is not None else current_frame_weights_grp[0]
-                frame_weights_grp[1] = frame_weights_grp[1] if frame_weights_grp[1] is not None else current_frame_weights_grp[1]
-
-        options_mgr.update("automation.frame_weights_grp", frame_weights_grp)
-
+        if frame_weights is not None:
+            frame_weights_mgr.frame_weights = frame_weights
+        
+        # Store the manager in options
+        options_mgr.update("frame_weights_mgr", frame_weights_mgr)
+        
         return (options_mgr.as_dict(),)
-
 
