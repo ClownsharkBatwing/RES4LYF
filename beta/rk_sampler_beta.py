@@ -243,7 +243,7 @@ def sample_rk_beta(
     start_step = 0
     if 'end_step' in state_info and (sampler_mode == "resample" or sampler_mode == "unsample"):
 
-        if state_info['end_step'] != 0 and state_info['end_step'] != -1 and state_info['end_step'] < len(state_info['sigmas'])-1 :   #incomplete run in previous sampler node
+        if state_info['completed'] != True and state_info['end_step'] != 0 and state_info['end_step'] != -1 and state_info['end_step'] < len(state_info['sigmas'])-1 :   #incomplete run in previous sampler node
             
             if state_info['sampler_mode'] in {"standard","resample"} and sampler_mode == "unsample":
                 sigmas = torch.flip(state_info['sigmas'], dims=[0])
@@ -1086,6 +1086,7 @@ def sample_rk_beta(
         state_info_out['sampler_mode']      = sampler_mode
         state_info_out['last_rng']          = NS.noise_sampler .generator.get_state().clone()
         state_info_out['last_rng_substep']  = NS.noise_sampler2.generator.get_state().clone()
+        state_info_out['completed']         = step == len(sigmas)-2 and sigmas[-1] == 0 and sigmas[-2] == NS.sigma_min
     
     gc.collect()
 
