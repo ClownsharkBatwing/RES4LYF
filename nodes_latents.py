@@ -332,7 +332,7 @@ class latent_display_state_info:
                     if value.numel() == 0:
                         value_text = "empty tensor"
                     elif value.numel() == 1:
-                        value_text = f"str(value.item()), dtype: {value.dtype}"
+                        value_text = f"str({value.item():.3f}), dtype: {value.dtype}"
                     else:
                         shape_str = str(list(value.shape)).replace(" ", "")
                         dtype = value.dtype
