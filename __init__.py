@@ -136,7 +136,7 @@ NODE_CLASS_MAPPINGS = {
     "LatentPhaseMagnitudePower"           : nodes_latents.LatentPhaseMagnitudePower,
     
     "MaskToggle"                          : nodes_latents.MaskToggle,
-    
+    "Frames Masks Uninterpolate"          : nodes_latents.Frames_Masks_Uninterpolate,
     
     
     "EmptyLatentImage64"                  : nodes_latents.EmptyLatentImage64,

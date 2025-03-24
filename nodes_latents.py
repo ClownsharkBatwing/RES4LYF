@@ -699,6 +699,41 @@ class Frames_Concat_Masks:
 
 
 
+class Frames_Masks_Uninterpolate:
+    def __init__(self):
+        pass
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+
+            "required": {
+                "raw_temporal_mask": ("MASK",),
+                "frame_chunk_size" : ("INT", {"default": 4, "min": 1, "max": 10000, "step": 1}),
+            },
+            "optional": {
+            },
+        }
+        
+    RETURN_TYPES = ("MASK",)
+    RETURN_NAMES = ("temporal_mask",)
+    FUNCTION     = "main"
+    CATEGORY     = "RES4LYF/masks"
+
+    def main(self, raw_temporal_mask, frame_chunk_size):
+        #assert raw_temporal_mask.ndim == 3, "Not a raw temporal mask!"
+        
+        raw_frames = raw_temporal_mask.shape[-3]
+        raw_frames_offset = raw_frames - 1
+        frames = raw_frames_offset // frame_chunk_size + 1
+        indices = torch.linspace(0, raw_frames_offset, steps=frames).long()
+        
+        temporal_mask = raw_temporal_mask[...,indices,:,:].unsqueeze(0)
+        return (temporal_mask,)
+    
+
+
+
 class LatentPhaseMagnitude:
     @classmethod
     def INPUT_TYPES(cls):
