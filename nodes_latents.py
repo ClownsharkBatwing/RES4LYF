@@ -332,15 +332,21 @@ class latent_display_state_info:
                     if value.numel() == 0:
                         value_text = "empty tensor"
                     elif value.numel() == 1:
-                        value_text = f"str({value.item():.3f}), dtype: {value.dtype}"
+                        if value.dtype == torch.bool:
+                            value_text = f"bool({value.item()})"
+                        else:
+                            value_text = f"str({value.item():.3f}), dtype: {value.dtype}"
                     else:
                         shape_str = str(list(value.shape)).replace(" ", "")
                         dtype = value.dtype
 
                         if torch.is_floating_point(value) is False:
-                            max_val = value.float().max().item()
-                            min_val = value.float().min().item()
-                            value_text = f"shape: {shape_str}, dtype: {dtype}, max: {max_val:.3f}, min: {min_val:.3f}"
+                            if value.dtype == torch.bool:
+                                value_text = f"shape: {shape_str}, dtype: {dtype}, true: {value.sum().item()}, false: {(~value).sum().item()}"
+                            else:
+                                max_val = value.float().max().item()
+                                min_val = value.float().min().item()
+                                value_text = f"shape: {shape_str}, dtype: {dtype}, max: {max_val}, min: {min_val}"
                         else:
                             mean = value.float().mean().item()
                             std = value.float().std().item()
