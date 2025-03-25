@@ -1246,7 +1246,6 @@ def get_sigmas(model, scheduler, steps, denoise, shift=0.0, lq_inflection_percen
         if denoise <= 0.0:
             return (torch.FloatTensor([]),)
         total_steps = int(steps/denoise)
-
     try:
         model_sampling = model.get_model_object("model_sampling")
     except:
@@ -1258,7 +1257,9 @@ def get_sigmas(model, scheduler, steps, denoise, shift=0.0, lq_inflection_percen
             raise Exception("get_sigmas: Could not get model_sampling")
 
     if shift > 1e-6:
-        model_sampling.shift = shift
+        import copy
+        model_sampling = copy.deepcopy(model_sampling)
+        model_sampling.set_parameters(shift=shift)
         RESplain("model_sampling shift manually set to " + str(shift), debug=True)
     
     if scheduler == "beta57":
