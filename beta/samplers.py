@@ -923,7 +923,7 @@ class ClownSamplerAdvanced_Beta:
             s_noises_substep              : Optional[Tensor] = None,
             epsilon_scales                : Optional[Tensor] = None,
             regional_conditioning_weights : Optional[Tensor] = None,
-            frame_weights_grp             = None,
+            frame_weights_mgr             = None,
             noise_mode_sde_substep        : str = "hard",
             
             overshoot                     : float = 0.0,
@@ -999,7 +999,7 @@ class ClownSamplerAdvanced_Beta:
             c2                = options_mgr.get('c2'               , c2)
             c3                = options_mgr.get('c3'               , c3)
 
-            frame_weights_grp = options_mgr.get('frame_weights_grp', frame_weights_grp)
+            frame_weights_mgr = options_mgr.get('frame_weights_mgr', frame_weights_mgr)
             sde_noise         = options_mgr.get('sde_noise'        , sde_noise)
             sde_noise_steps   = options_mgr.get('sde_noise_steps'  , sde_noise_steps)
             
@@ -1024,7 +1024,7 @@ class ClownSamplerAdvanced_Beta:
                 s_noises          = automation['s_noises']          if 's_noises'          in automation else None
                 s_noises_substep  = automation['s_noises_substep']  if 's_noises_substep'  in automation else None
                 epsilon_scales    = automation['epsilon_scales']    if 'epsilon_scales'    in automation else None
-                frame_weights_grp = automation['frame_weights_grp'] if 'frame_weights_grp' in automation else None
+                frame_weights_mgr = automation['frame_weights_mgr'] if 'frame_weights_mgr' in automation else None
 
             etas             = initialize_or_scale(etas,             eta,             MAX_STEPS).to(default_dtype)
             etas_substep     = initialize_or_scale(etas_substep,     eta_substep,     MAX_STEPS).to(default_dtype)
@@ -1083,7 +1083,7 @@ class ClownSamplerAdvanced_Beta:
                     "regional_conditioning_weights" : regional_conditioning_weights,
 
                     "guides"                        : guides,
-                    "frame_weights_grp"             : frame_weights_grp,
+                    "frame_weights_mgr"             : frame_weights_mgr,
                     "eta_substep"                   : eta_substep,
                     "noise_mode_sde_substep"        : noise_mode_sde_substep,
                     
@@ -1267,7 +1267,7 @@ class ClownsharKSampler_Beta:
 
             epsilon_scales                : Optional[Tensor]       = None, 
             regional_conditioning_weights : Optional[Tensor]       = None,
-            frame_weights_grp                                      = None, 
+            frame_weights_mgr                                      = None, 
 
 
             rescale_floor                 : bool                   = True, 
@@ -1380,7 +1380,7 @@ class ClownsharKSampler_Beta:
         c2                     = options_mgr.get('c2'                    , c2)
         c3                     = options_mgr.get('c3'                    , c3)
 
-        frame_weights_grp      = options_mgr.get('frame_weights_grp'     , frame_weights_grp)
+        frame_weights_mgr      = options_mgr.get('frame_weights_mgr'     , frame_weights_mgr)
         
         sde_noise              = options_mgr.get('sde_noise'             , sde_noise)
         sde_noise_steps        = options_mgr.get('sde_noise_steps'       , sde_noise_steps)
@@ -1492,7 +1492,7 @@ class ClownsharKSampler_Beta:
             
             epsilon_scales                = epsilon_scales,
             regional_conditioning_weights = regional_conditioning_weights,
-            frame_weights_grp             = frame_weights_grp,
+            frame_weights_mgr             = frame_weights_mgr,
             
             sde_noise                     = sde_noise,
             sde_noise_steps               = sde_noise_steps,
@@ -1727,7 +1727,7 @@ class ClownSampler_Beta:
 
             epsilon_scales                : Optional[Tensor]       = None, 
             regional_conditioning_weights : Optional[Tensor]       = None,
-            frame_weights_grp                                      = None, 
+            frame_weights_mgr                                      = None, 
 
 
             rescale_floor                 : bool                   = True, 
@@ -1802,7 +1802,7 @@ class ClownSampler_Beta:
         c2                     = options_mgr.get('c2'                    , c2)
         c3                     = options_mgr.get('c3'                    , c3)
 
-        frame_weights_grp      = options_mgr.get('frame_weights_grp'     , frame_weights_grp)
+        frame_weights_mgr      = options_mgr.get('frame_weights_mgr'     , frame_weights_mgr)
         
         sde_noise              = options_mgr.get('sde_noise'             , sde_noise)
         sde_noise_steps        = options_mgr.get('sde_noise_steps'       , sde_noise_steps)
@@ -1892,7 +1892,7 @@ class ClownSampler_Beta:
             
             epsilon_scales                = epsilon_scales,
             regional_conditioning_weights = regional_conditioning_weights,
-            frame_weights_grp             = frame_weights_grp,
+            frame_weights_mgr             = frame_weights_mgr,
             
             sde_noise                     = sde_noise,
             sde_noise_steps               = sde_noise_steps,
@@ -2015,7 +2015,7 @@ class BongSampler:
 
             epsilon_scales                : Optional[Tensor]       = None, 
             regional_conditioning_weights : Optional[Tensor]       = None,
-            frame_weights_grp                                      = None, 
+            frame_weights_mgr                                      = None, 
             noise_scaling_weight         : float                  = 0.0, 
             noise_boost_step              : float                  = 0.0, 
             noise_boost_substep           : float                  = 0.0, 
@@ -2097,7 +2097,7 @@ class BongSampler:
         c2                     = options_mgr.get('c2'                    , c2)
         c3                     = options_mgr.get('c3'                    , c3)
 
-        frame_weights_grp      = options_mgr.get('frame_weights_grp'     , frame_weights_grp)
+        frame_weights_mgr      = options_mgr.get('frame_weights_mgr'     , frame_weights_mgr)
         
         sde_noise              = options_mgr.get('sde_noise'             , sde_noise)
         sde_noise_steps        = options_mgr.get('sde_noise_steps'       , sde_noise_steps)
@@ -2184,7 +2184,7 @@ class BongSampler:
             
             epsilon_scales                = epsilon_scales,
             regional_conditioning_weights = regional_conditioning_weights,
-            frame_weights_grp             = frame_weights_grp,
+            frame_weights_mgr             = frame_weights_mgr,
             
             sde_noise                     = sde_noise,
             sde_noise_steps               = sde_noise_steps,

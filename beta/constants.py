@@ -33,6 +33,23 @@ GUIDE_MODE_NAMES_BETA_SIMPLE = [
 ]
 
 
+FRAME_WEIGHTS_SCHEDULER_NAMES = [
+    "constant",
+    "linear",
+    "ease_out",
+    "ease_in"
+]
+
+
+FRAME_WEIGHTS_CHANGE_RATE_NAMES = [
+    "moderate_early",
+    "moderate_late",
+    "fast_early",
+    "fast_late",
+    "slow_early",
+    "slow_late",
+]
+
 
 
 GUIDE_MODE_NAMES_PSEUDOIMPLICIT = [

@@ -5,7 +5,7 @@ import gc
 from typing import Optional, Callable, Tuple, Dict, Any, Union
 
 from ..res4lyf              import RESplain
-from ..helper               import ExtraOptions
+from ..helper               import ExtraOptions, FrameWeightsManager
 from ..latents              import lagrange_interpolation, get_collinear, get_orthogonal, get_cosine_similarity
 
 from .rk_method_beta        import RK_Method_Beta
@@ -191,7 +191,7 @@ def sample_rk_beta(
         LGW_MASK_RESCALE_MIN          : bool               = True,
         guides                        : Optional[Tuple[Any, ...]]    = None,
         epsilon_scales                : Optional[Tensor]   = None,
-        frame_weights_grp             : Optional[Tuple[Tensor, Tensor]] = None,
+        frame_weights_mgr             : Optional[FrameWeightsManager] = None,
 
         sde_noise                     : list    [Tensor]   = [],
 
@@ -346,7 +346,7 @@ def sample_rk_beta(
     
 
     # SETUP GUIDES
-    LG = LatentGuide(model, sigmas, UNSAMPLE, LGW_MASK_RESCALE_MIN, extra_options, device=work_device, dtype=default_dtype, frame_weights_grp=frame_weights_grp)
+    LG = LatentGuide(model, sigmas, UNSAMPLE, LGW_MASK_RESCALE_MIN, extra_options, device=work_device, dtype=default_dtype, frame_weights_mgr=frame_weights_mgr)
     x = LG.init_guides(x, RK.IMPLICIT, guides, NS.noise_sampler, batch_num)
     if torch.norm(LG.mask - torch.ones_like(LG.mask)) != 0   and   (LG.y0.sum() == 0 or LG.y0_inv.sum() == 0):
         SKIP_PSEUDO = True

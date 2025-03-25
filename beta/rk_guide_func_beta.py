@@ -14,7 +14,7 @@ if TYPE_CHECKING:
 from einops          import rearrange
 
 from ..sigmas        import get_sigmas
-from ..helper        import ExtraOptions, initialize_or_scale, is_video_model
+from ..helper        import ExtraOptions, FrameWeightsManager, initialize_or_scale, is_video_model
 from ..latents       import normalize_zscore, get_cosine_similarity, normalize_latent, hard_light_blend
 
 from .rk_method_beta import RK_Method_Beta
@@ -34,7 +34,7 @@ class LatentGuide:
                 extra_options        : str,
                 device               : str = 'cpu',
                 dtype                : torch.dtype = torch.float64,
-                frame_weights_grp = None
+                frame_weights_mgr    : FrameWeightsManager = None,
                 ):
         
         self.dtype                    = dtype
@@ -73,10 +73,10 @@ class LatentGuide:
         self.guide_cossim_cutoff_     = 1.0
         self.guide_bkg_cossim_cutoff_ = 1.0
         self.guide_mean_cossim_cutoff_= 1.0
-
-        self.frame_weights            = frame_weights_grp[0] if frame_weights_grp is not None else None
-        self.frame_weights_inv        = frame_weights_grp[1] if frame_weights_grp is not None else None
-        
+        self.frame_weights_mgr        = frame_weights_mgr
+        self.frame_weights            = None
+        self.frame_weights_inv        = None
+                
         self.extra_options            = extra_options
         self.EO                       = ExtraOptions(extra_options)
 
@@ -247,18 +247,16 @@ class LatentGuide:
         else:
             self.y0_mean = torch.zeros_like(x, dtype=self.dtype, device=self.device)
 
-        if self.frame_weights is not None:
-            self.frame_weights     = initialize_or_scale(self.frame_weights,     1.0, self.max_steps).to(dtype=self.dtype, device=self.device)
-            self.frame_weights     = F.pad              (self.frame_weights,     (0,  self.max_steps), value=0.0)
-        if self.frame_weights_inv is not None:
-            self.frame_weights_inv = initialize_or_scale(self.frame_weights_inv, 1.0, self.max_steps).to(dtype=self.dtype, device=self.device)
-            self.frame_weights_inv = F.pad              (self.frame_weights_inv, (0,  self.max_steps), value=0.0)
-
         if self.UNSAMPLE and not self.SAMPLE: #sigma_next > sigma:
             self.y0     = noise_sampler(sigma=self.sigma_max, sigma_next=self.sigma_min).to(dtype=self.dtype, device=self.device)
             self.y0     = normalize_zscore(self.y0,     channelwise=True, inplace=True)
             self.y0_inv = noise_sampler(sigma=self.sigma_max, sigma_next=self.sigma_min).to(dtype=self.dtype, device=self.device)
             self.y0_inv = normalize_zscore(self.y0_inv, channelwise=True, inplace=True)
+
+        if self.VIDEO and self.frame_weights_mgr is not None and x.shape[2] > 1:
+            num_frames = x.shape[2]
+            self.frame_weights     = self.frame_weights_mgr.get_frame_weights(num_frames)
+            self.frame_weights_inv = self.frame_weights_mgr.get_frame_weights_inv(num_frames)
             
         x, self.y0, self.y0_inv = self.normalize_inputs(x, self.y0, self.y0_inv)       # ???
 
@@ -294,14 +292,12 @@ class LatentGuide:
 
     def get_masks_for_step(self, step:int) -> Tuple[Tensor, Tensor]:
         lgw_mask, lgw_mask_inv = self.prepare_weighted_masks(step)
-        if self.VIDEO:
-            if self.frame_weights     is not None:
-                apply_frame_weights(lgw_mask,     self.frame_weights)
-            if self.frame_weights_inv is not None:
-                apply_frame_weights(lgw_mask_inv, self.frame_weights_inv)
+        if self.VIDEO and self.frame_weights_mgr is not None:
+            num_frames = lgw_mask.shape[2]
+            apply_frame_weights(lgw_mask, self.frame_weights)
+            apply_frame_weights(lgw_mask_inv, self.frame_weights_inv)
 
         return lgw_mask.to(self.device), lgw_mask_inv.to(self.device)
-
 
 
     def get_cossim_adjusted_lgw_masks(self, data:Tensor, step:int) -> Tuple[Tensor, Tensor, Tensor, Tensor]:
@@ -1736,5 +1732,3 @@ def slerp_tensor2(t: torch.Tensor, v0: torch.Tensor, v1: torch.Tensor, DOT_THRES
     
     out = out.view(v0_shape)
     return out
-
-

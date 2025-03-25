@@ -362,4 +362,154 @@ class PrecisionTool:
 precision_tool = PrecisionTool(cast_type='fp64')
 
 
+class FrameWeightsManager:
+    def __init__(self):
+        self.frame_weights = None
+        self.frame_weights_inv = None
+        self.schedule = "constant"
+        self.schedule_inv = "constant"
+        self.dynamics = "moderate_early"
+        self.dynamics_inv = "moderate_early"
+        self.scale = 0.5
+        self.scale_inv = 0.5
+        self.is_reversed = False
+        self.is_reversed_inv = False
+        self.dtype = torch.float64
+        self.device = torch.device('cpu')
+        
+    def set_device_and_dtype(self, device=None, dtype=None):
+        """Set the device and dtype for generated weights"""
+        if device is not None:
+            self.device = device
+        if dtype is not None:
+            self.dtype = dtype
+        return self
+    
+    def _generate_frame_weights(self, num_frames, schedule, dynamics, scale, is_reversed, frame_weights):
+        if "fast" in dynamics:
+            rate_factor = 0.25
+        elif "slow" in dynamics:
+            rate_factor = 1.0
+        else: # moderate
+            rate_factor = 0.5
 
+        if "early" in dynamics:
+            start_change_factor = 0.0
+        elif "late" in dynamics:
+            start_change_factor = 0.2
+        else:
+            start_change_factor = 0.0
+
+        change_frames = max(round(num_frames * rate_factor), 2)
+        change_start = round(num_frames * start_change_factor)
+        low_value = 1.0 - scale
+
+        if frame_weights is not None:
+            weights = torch.cat([frame_weights, torch.full((num_frames,), frame_weights[-1])])
+            weights = weights[:num_frames]
+        else:
+            if schedule == "constant":
+                weights = self._generate_constant_schedule(change_frames)
+            elif schedule == "linear":
+                weights = self._generate_linear_schedule(change_frames)
+            elif schedule == "ease_out":
+                weights = self._generate_easeout_schedule(change_frames)
+            elif schedule == "ease_in":
+                weights = self._generate_easein_schedule(change_frames)
+            else:
+                raise ValueError(f"Invalid schedule: {schedule}")
+
+        # Prepend with change_start frames of 1.0 (unless constant)
+        if schedule != "constant":
+            weights = torch.cat([torch.full((change_start,), 1.0), weights])
+        # Fill remaining with final value
+        weights = torch.cat([weights, torch.full((num_frames,), weights[-1])])
+        weights = weights[:num_frames]
+
+        weights = torch.flip(weights, [0]) if is_reversed else weights
+        weights = weights.to(dtype=self.dtype, device=self.device)
+
+        return weights
+
+    def get_frame_weights_inv(self, num_frames):
+        return self._generate_frame_weights(
+            num_frames,
+            self.schedule_inv,
+            self.dynamics_inv,
+            self.scale_inv,
+            self.is_reversed_inv,
+            self.frame_weights_inv
+        )
+    
+    def get_frame_weights(self, num_frames):
+        return self._generate_frame_weights(
+            num_frames,
+            self.schedule,
+            self.dynamics,
+            self.scale,
+            self.is_reversed,
+            self.frame_weights
+        )
+
+    def _generate_constant_schedule(self, timepoints):
+        """constant schedule with the scale as the low weight"""
+        low_weight = self.scale
+        return torch.ones(timepoints) * low_weight
+    
+    def _generate_linear_schedule(self, timepoints):
+        """linear schedule from 1 to the low weight
+        1.0 |^
+            | \
+            |  \
+            |   \
+            |    \
+            |     \
+            |      \
+            |       \
+        low |        \
+        0.0 +----------
+             0        1
+                time
+        """
+        low_weight = 1.0 - self.scale
+        return torch.linspace(1, low_weight, timepoints)
+    
+    def _generate_easeout_schedule(self, timepoints):
+        """exponential schedule from 1 to the low weight
+        1.0 |^\_
+            |   \\_
+            |     \\__
+            |        \\_
+            |          \\__
+            |             \\____
+            |                   \\________
+        low |                             \______
+        0.0 +----------------------------------------
+             0                                     1
+                              time
+        """
+        timepoints = max(timepoints, 4)
+        low_weight = 1.0 - self.scale
+        t = torch.linspace(0, 1, timepoints, dtype=self.dtype, device=self.device)
+        weights = torch.pow(low_weight, t)
+        return weights
+
+    def _generate_easein_schedule(self, timepoints):
+        """a monomial power schedule from 1 to the low weight
+        1.0 |^--_____
+            |         \_____
+            |                \____
+            |                      \___
+            |                          \__
+            |                             \_
+            |                               \
+        low |                                 \
+        0.0 +----------------------------------
+             0                                1
+                            time
+        """
+        timepoints = max(timepoints, 4)
+        low_weight = 1.0 - self.scale
+        t = torch.linspace(0, 1, timepoints, dtype=self.dtype, device=self.device)
+        weights = 1 - (1 - low_weight) * torch.pow(t, 2)
+        return weights
