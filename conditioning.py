@@ -689,9 +689,11 @@ def fp_and2(tensor1, tensor2):
 
 
 class RegionalGenerateConditioningsAndMasks:
-    def __init__(self, conditioning, conditioning_regional, weight, mask_type, model_config):
+    def __init__(self, conditioning, conditioning_regional, weight, start_percent, end_percent, mask_type, model_config):
         self.conditioning          = conditioning
         self.conditioning_regional = conditioning_regional
+        self.start_percent         = self.start_percent
+        self.end_percent           = self.end_percent
         self.weight                = weight
         self.mask_type             = mask_type
         self.model_config          = model_config
