@@ -366,10 +366,10 @@ class FrameWeightsManager:
     def __init__(self):
         self.frame_weights = None
         self.frame_weights_inv = None
-        self.schedule = "constant"
-        self.schedule_inv = "constant"
-        self.dynamics = "moderate_early"
-        self.dynamics_inv = "moderate_early"
+        self.dynamics = "linear"
+        self.dynamics_inv = "linear"
+        self.schedule = "moderate_early"
+        self.schedule_inv = "moderate_early"
         self.scale = 0.5
         self.scale_inv = 0.5
         self.is_reversed = False
@@ -385,17 +385,17 @@ class FrameWeightsManager:
             self.dtype = dtype
         return self
     
-    def _generate_frame_weights(self, num_frames, schedule, dynamics, scale, is_reversed, frame_weights):
-        if "fast" in dynamics:
+    def _generate_frame_weights(self, num_frames, dynamics, schedule, scale, is_reversed, frame_weights):
+        if "fast" in schedule:
             rate_factor = 0.25
-        elif "slow" in dynamics:
+        elif "slow" in schedule:
             rate_factor = 1.0
         else: # moderate
             rate_factor = 0.5
 
-        if "early" in dynamics:
+        if "early" in schedule:
             start_change_factor = 0.0
-        elif "late" in dynamics:
+        elif "late" in schedule:
             start_change_factor = 0.2
         else:
             start_change_factor = 0.0
@@ -408,19 +408,19 @@ class FrameWeightsManager:
             weights = torch.cat([frame_weights, torch.full((num_frames,), frame_weights[-1])])
             weights = weights[:num_frames]
         else:
-            if schedule == "constant":
-                weights = self._generate_constant_schedule(change_frames)
-            elif schedule == "linear":
-                weights = self._generate_linear_schedule(change_frames)
-            elif schedule == "ease_out":
-                weights = self._generate_easeout_schedule(change_frames)
-            elif schedule == "ease_in":
-                weights = self._generate_easein_schedule(change_frames)
+            if dynamics == "constant":
+                weights = self._generate_constant_schedule(change_frames, low_value)
+            elif dynamics == "linear":
+                weights = self._generate_linear_schedule(change_frames, low_value)
+            elif dynamics == "ease_out":
+                weights = self._generate_easeout_schedule(change_frames, low_value)
+            elif dynamics == "ease_in":
+                weights = self._generate_easein_schedule(change_frames, low_value)
             else:
-                raise ValueError(f"Invalid schedule: {schedule}")
+                raise ValueError(f"Invalid schedule: {dynamics}")
 
         # Prepend with change_start frames of 1.0 (unless constant)
-        if schedule != "constant":
+        if dynamics != "constant":
             weights = torch.cat([torch.full((change_start,), 1.0), weights])
         # Fill remaining with final value
         weights = torch.cat([weights, torch.full((num_frames,), weights[-1])])
@@ -434,8 +434,8 @@ class FrameWeightsManager:
     def get_frame_weights_inv(self, num_frames):
         return self._generate_frame_weights(
             num_frames,
-            self.schedule_inv,
             self.dynamics_inv,
+            self.schedule_inv,
             self.scale_inv,
             self.is_reversed_inv,
             self.frame_weights_inv
@@ -444,19 +444,18 @@ class FrameWeightsManager:
     def get_frame_weights(self, num_frames):
         return self._generate_frame_weights(
             num_frames,
-            self.schedule,
             self.dynamics,
+            self.schedule,
             self.scale,
             self.is_reversed,
             self.frame_weights
         )
 
-    def _generate_constant_schedule(self, timepoints):
+    def _generate_constant_schedule(self, timepoints, low_value):
         """constant schedule with the scale as the low weight"""
-        low_weight = self.scale
-        return torch.ones(timepoints) * low_weight
+        return torch.ones(timepoints) * low_value
     
-    def _generate_linear_schedule(self, timepoints):
+    def _generate_linear_schedule(self, timepoints, low_value):
         """linear schedule from 1 to the low weight
         1.0 |^
             | \
@@ -471,10 +470,9 @@ class FrameWeightsManager:
              0        1
                 time
         """
-        low_weight = 1.0 - self.scale
-        return torch.linspace(1, low_weight, timepoints)
+        return torch.linspace(1, low_value, timepoints)
     
-    def _generate_easeout_schedule(self, timepoints):
+    def _generate_easeout_schedule(self, timepoints, low_value):
         """exponential schedule from 1 to the low weight
         1.0 |^\_
             |   \\_
@@ -489,12 +487,11 @@ class FrameWeightsManager:
                               time
         """
         timepoints = max(timepoints, 4)
-        low_weight = 1.0 - self.scale
         t = torch.linspace(0, 1, timepoints, dtype=self.dtype, device=self.device)
-        weights = torch.pow(low_weight, t)
+        weights = torch.pow(low_value, t)
         return weights
 
-    def _generate_easein_schedule(self, timepoints):
+    def _generate_easein_schedule(self, timepoints, low_value):
         """a monomial power schedule from 1 to the low weight
         1.0 |^--_____
             |         \_____
@@ -509,7 +506,6 @@ class FrameWeightsManager:
                             time
         """
         timepoints = max(timepoints, 4)
-        low_weight = 1.0 - self.scale
         t = torch.linspace(0, 1, timepoints, dtype=self.dtype, device=self.device)
-        weights = 1 - (1 - low_weight) * torch.pow(t, 2)
+        weights = 1 - (1 - low_value) * torch.pow(t, 2)
         return weights
