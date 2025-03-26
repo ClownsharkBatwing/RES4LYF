@@ -14,7 +14,7 @@ from .rk_coefficients_beta   import RK_SAMPLER_NAMES_BETA_FOLDERS, get_default_s
 
 from .noise_classes          import NOISE_GENERATOR_NAMES_SIMPLE
 from .rk_noise_sampler_beta  import NOISE_MODE_NAMES
-from .constants              import IMPLICIT_TYPE_NAMES, GUIDE_MODE_NAMES_BETA_MISC, GUIDE_MODE_NAMES_BETA_SIMPLE, MAX_STEPS, FRAME_WEIGHTS_SCHEDULER_NAMES, FRAME_WEIGHTS_CHANGE_RATE_NAMES
+from .constants              import IMPLICIT_TYPE_NAMES, GUIDE_MODE_NAMES_BETA_MISC, GUIDE_MODE_NAMES_BETA_SIMPLE, MAX_STEPS, FRAME_WEIGHTS_DYNAMICS_NAMES, FRAME_WEIGHTS_SCHEDULE_NAMES
 
 
 
@@ -1323,10 +1323,10 @@ class ClownOptions_Frameweights:
         return {
             "required": {
                 "apply_to": (["frame_weights", "frame_weights_inv"], {"default": "frame_weights", "tooltip": "Apply the frame weights to the foreground mask or the inverse mask of the guides"}),
-                "schedule": (FRAME_WEIGHTS_SCHEDULER_NAMES, {"default": "ease_out", "tooltip": "The schedule type used for the dynamic period. constant: no change, linear: steady change, ease_out: starts fast, ease_in: starts slow"}),
-                "dynamics": (FRAME_WEIGHTS_CHANGE_RATE_NAMES, {"default": "moderate_early", "tooltip": "fast_early: fast change starts immediately, slow_late: slow change starts later"}),
-                "scale": ("FLOAT", {"default": 0.5, "min": 0.0, "max": 1.0, "step": 0.01, "tooltip": "The amount of change over the course of the schedule. 1.0 means that the guides have no influence by the end of the schedule."}),
-                "reverse": ("BOOLEAN", {"default": False, "tooltip": "Reverse the schedule"}),
+                "dynamics": (FRAME_WEIGHTS_DYNAMICS_NAMES, {"default": "ease_out", "tooltip": "The function type used for the dynamic period. constant: no change, linear: steady change, ease_out: starts fast, ease_in: starts slow"}),
+                "schedule": (FRAME_WEIGHTS_SCHEDULE_NAMES, {"default": "moderate_early", "tooltip": "fast_early: fast change starts immediately, slow_late: slow change starts later"}),
+                "scale": ("FLOAT", {"default": 0.5, "min": 0.0, "max": 1.0, "step": 0.01, "tooltip": "The amount of change over the course of the frame weights. 1.0 means that the guides have no influence by the end."}),
+                "reverse": ("BOOLEAN", {"default": False, "tooltip": "Reverse the frame weights"}),
             },
             "optional": {
                 # Keep these for optional manual override
@@ -1342,8 +1342,8 @@ class ClownOptions_Frameweights:
 
     def main(self,
              apply_to,
-             schedule,
              dynamics,
+             schedule,
              scale,
              reverse,
              frame_weights=None,
@@ -1357,13 +1357,13 @@ class ClownOptions_Frameweights:
             frame_weights_mgr = FrameWeightsManager()
         
         if apply_to == "frame_weights":
-            frame_weights_mgr.schedule = schedule
             frame_weights_mgr.dynamics = dynamics
+            frame_weights_mgr.schedule = schedule
             frame_weights_mgr.scale = scale
             frame_weights_mgr.is_reversed = reverse
         elif apply_to == "frame_weights_inv":
-            frame_weights_mgr.schedule_inv = schedule
             frame_weights_mgr.dynamics_inv = dynamics
+            frame_weights_mgr.schedule_inv = schedule
             frame_weights_mgr.scale_inv = scale
             frame_weights_mgr.is_reversed_inv = reverse
 
