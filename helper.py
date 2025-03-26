@@ -362,6 +362,8 @@ class PrecisionTool:
 precision_tool = PrecisionTool(cast_type='fp64')
 
 
+
+
 class FrameWeightsManager:
     def __init__(self):
         self.frame_weights = None
@@ -513,3 +515,7 @@ class FrameWeightsManager:
         t = torch.linspace(0, 1, timepoints, dtype=self.dtype, device=self.device)
         weights = 1 - (1 - low_weight) * torch.pow(t, 2)
         return weights
+    
+    
+    
+    

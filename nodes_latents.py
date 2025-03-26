@@ -736,7 +736,66 @@ class Frames_Masks_Uninterpolate:
         
         temporal_mask = raw_temporal_mask[...,indices,:,:].unsqueeze(0)
         return (temporal_mask,)
-    
+
+
+
+class Frames_Masks_ZeroOut:
+    def __init__(self):
+        pass
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+
+            "required": {
+                "temporal_mask": ("MASK",),
+                "zero_out_frame" : ("INT", {"default": 0, "min": 0, "max": 10000, "step": 1}),
+            },
+            "optional": {
+            },
+        }
+        
+    RETURN_TYPES = ("MASK",)
+    RETURN_NAMES = ("temporal_mask",)
+    FUNCTION     = "main"
+    CATEGORY     = "RES4LYF/masks"
+
+    def main(self, temporal_mask, zero_out_frame):
+        temporal_mask[...,zero_out_frame:zero_out_frame+1,:,:] = 1.0
+        return (temporal_mask,)
+
+
+class Frames_Latent_ReverseOrder:
+    def __init__(self):
+        pass
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+
+            "required": {
+                "frames": ("LATENT",),
+            },
+            "optional": {
+            },
+        }
+        
+    RETURN_TYPES = ("LATENT",)
+    RETURN_NAMES = ("frames_reversed",)
+    FUNCTION     = "main"
+    CATEGORY     = "RES4LYF/masks"
+
+    def main(self, frames,):
+        samples = frames['samples']
+        flipped_frames = torch.zeros_like(samples)
+        
+        t_len = samples.shape[-3]
+        
+        for i in range(t_len):
+            flipped_frames[:,:,t_len-i-1,:,:] = samples[:,:,i,:,:]
+        return (  {"samples": flipped_frames },)
+        
+        #return (  {"samples": torch.flip(frames['samples'], dims=[-3]) },)
 
 
 

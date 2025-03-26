@@ -137,7 +137,9 @@ NODE_CLASS_MAPPINGS = {
     
     "MaskToggle"                          : nodes_latents.MaskToggle,
     "Frames Masks Uninterpolate"          : nodes_latents.Frames_Masks_Uninterpolate,
-    
+    "Frames Masks ZeroOut"                : nodes_latents.Frames_Masks_ZeroOut,
+    "Frames Latent ReverseOrder"          : nodes_latents.Frames_Latent_ReverseOrder,
+
     
     "EmptyLatentImage64"                  : nodes_latents.EmptyLatentImage64,
     "EmptyLatentImageCustom"              : nodes_latents.EmptyLatentImageCustom,

@@ -369,19 +369,25 @@ class ModelSamplingAdvanced:
             timesteps = 1000
             sampling_base = comfy.model_sampling.ModelSamplingDiscreteFlow
             sampling_type = comfy.model_sampling.CONST
-
-        elif isinstance(m.model.model_config, comfy.supported_models.HunyuanVideo):
-            self.multiplier = 1000
-            timesteps = 1000
-            sampling_base = comfy.model_sampling.ModelSamplingDiscreteFlow
-            sampling_type = comfy.model_sampling.CONST
-
+            
         elif isinstance(m.model.model_config, comfy.supported_models.SD3):
             self.multiplier = 1000
             timesteps = 1000
             sampling_base = comfy.model_sampling.ModelSamplingDiscreteFlow
             sampling_type = comfy.model_sampling.CONST
-
+            
+        elif isinstance(m.model.model_config, comfy.supported_models.HunyuanVideo):
+            self.multiplier = 1000
+            timesteps = 1000
+            sampling_base = comfy.model_sampling.ModelSamplingDiscreteFlow
+            sampling_type = comfy.model_sampling.CONST
+            
+        if isinstance(m.model.model_config, comfy.supported_models.WAN21_T2V) or isinstance(m.model.model_config, comfy.supported_models.WAN21_I2V):
+            self.multiplier = 1000
+            timesteps = 1000
+            sampling_base = comfy.model_sampling.ModelSamplingDiscreteFlow
+            sampling_type = comfy.model_sampling.CONST
+            
         elif isinstance(m.model.model_config, comfy.supported_models.CosmosT2V) or isinstance(m.model.model_config, comfy.supported_models.CosmosI2V):
             self.multiplier = 1
             timesteps = 1000
@@ -445,13 +451,14 @@ class ModelSamplingAdvancedResolution:
     def main(self, model, scaling, max_shift, base_shift, latent_image):
         m = model.clone()
         
-        height, width = latent_image['samples'].shape[2:]
+        height, width = latent_image['samples'].shape[-2:]
+        frames = latent_image['samples'].shape[-3] if latent_image['samples'].ndim == 5 else 1
         
         x1    = 256
         x2    = 4096
         mm    = (max_shift - base_shift) / (x2 - x1)
         b     = base_shift - mm * x1
-        shift = (width * height / (8 * 8 * 2 * 2)) * mm + b
+        shift = (1 * width * height / (8 * 8 * 2 * 2)) * mm + b
         
         self.timestep_shift = shift
         self.multiplier     = 1000
@@ -462,7 +469,6 @@ class ModelSamplingAdvancedResolution:
             timesteps = 10000
             sampling_base = comfy.model_sampling.ModelSamplingFlux
             sampling_type = comfy.model_sampling.CONST
-
             
         elif isinstance(m.model.model_config, comfy.supported_models.AuraFlow):
             self.multiplier = 1
@@ -474,6 +480,30 @@ class ModelSamplingAdvancedResolution:
             self.multiplier = 1000
             timesteps = 1000
             sampling_base = comfy.model_sampling.ModelSamplingDiscreteFlow
+            sampling_type = comfy.model_sampling.CONST
+            
+        elif isinstance(m.model.model_config, comfy.supported_models.HunyuanVideo):
+            self.multiplier = 1000
+            timesteps = 1000
+            sampling_base = comfy.model_sampling.ModelSamplingDiscreteFlow
+            sampling_type = comfy.model_sampling.CONST
+            
+        if isinstance(m.model.model_config, comfy.supported_models.WAN21_T2V) or isinstance(m.model.model_config, comfy.supported_models.WAN21_I2V):
+            self.multiplier = 1000
+            timesteps = 1000
+            sampling_base = comfy.model_sampling.ModelSamplingDiscreteFlow
+            sampling_type = comfy.model_sampling.CONST
+            
+        elif isinstance(m.model.model_config, comfy.supported_models.CosmosT2V) or isinstance(m.model.model_config, comfy.supported_models.CosmosI2V):
+            self.multiplier = 1
+            timesteps = 1000
+            sampling_base = comfy.model_sampling.ModelSamplingContinuousEDM
+            sampling_type = comfy.model_sampling.CONST
+
+        elif isinstance(m.model.model_config, comfy.supported_models.LTXV):
+            self.multiplier = 1000
+            timesteps = 1000
+            sampling_base = comfy.model_sampling.ModelSamplingFlux
             sampling_type = comfy.model_sampling.CONST
 
         class ModelSamplingAdvanced(sampling_base, sampling_type):
