@@ -1374,4 +1374,3 @@ class ClownOptions_Frameweights:
         options_mgr.update("frame_weights_mgr", frame_weights_mgr)
         
         return (options_mgr.as_dict(),)
-

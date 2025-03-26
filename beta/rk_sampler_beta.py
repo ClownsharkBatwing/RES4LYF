@@ -371,7 +371,9 @@ def sample_rk_beta(
 
     gc.collect()
 
-
+    if EO("fedit") or EO("zedit"):
+        #fedit_noise = torch.randn_like(LG.y0)
+        fedit_noise = x.clone()
 
     # BEGIN SAMPLING LOOP    
     num_steps = len(sigmas[start_step:])-2 if sigmas[-1] == 0 else len(sigmas[start_step:])-1
@@ -661,8 +663,50 @@ def sample_rk_beta(
                                     s_tmp = lying_sd #prev_lying_sd
                                 #prev_lying_sd = lying_sd
                                 #s_tmp = s_tmp + noise_scaling_substep * (lying_s_[row]   -   s_tmp)
+                            fedit_end_step = EO("zedit_end_step", -1)
+                            if step < fedit_end_step:
+                                if EO("zedit"):
+                                    if EO("zedit_renoise"):
+                                        fedit_noise = torch.randn_like(LG.y0)
+                                    x_tmp         = LG.y0 + s_tmp * (fedit_noise - LG.y0)
+                                    x_[row]       = x_tmp
+                                
+                            fedit_end_step = EO("fedit_end_step", -1)
+                            if step < fedit_end_step:
+                                if EO("fedit"):
+                                    if EO("fedit_renoise"):
+                                        fedit_noise = torch.randn_like(LG.y0)
+                                    y0_noised     = (1-s_tmp) * LG.y0 + s_tmp * fedit_noise
+                                    y_0           = (1-sigma) * LG.y0 + sigma * fedit_noise
+                                    eps_y, data_y = RK(y0_noised, s_tmp, y_0, sigma)
+                                    x_tmp_orig    = x_tmp.clone()
+                                    if step==0:
+                                        zbot = LG.y0.clone()
+                                    x_tmp         = zbot + s_tmp * (fedit_noise - LG.y0)
+                                    #x_tmp[:,:,1:] = x_tmp_new[:,:,1:]
+                                    #if step == fedit_end_step-1:
+                                    #if LG.y0.ndim == 5:
+                                    #    x_tmp[:,:,0:1] = x_tmp_orig[:,:,0:1] 
+                                    x_[row]       = x_tmp
+                                
+                            if step < EO("direct_pre_pseudo_guide", 0) and step > 0:
+                                for i_pseudo in range(EO("direct_pre_pseudo_guide_iter", 1)):
+                                    x_tmp = x_tmp + EO("direct_pre_pseudo_guide_weight", 0.5) * (1 - s_tmp) * (LG.y0 - denoised)
+                                    eps_[row], data_[row] = RK(x_tmp, s_tmp, x_0, sigma)
                             
                             eps_[row], data_[row] = RK(x_tmp, s_tmp, x_0, sigma)
+                            
+                            if step < EO("direct_pseudo_guide", 0):
+                                for i_pseudo in range(EO("direct_pseudo_guide_iter", 1)):
+                                    x_tmp = x_tmp + EO("direct_pseudo_guide_weight", 0.5) * (1 - s_tmp) * (LG.y0 - data_[row])
+                                    eps_[row], data_[row] = RK(x_tmp, s_tmp, x_0, sigma)
+                                
+                            if step < fedit_end_step:
+                                if EO("fedit"):
+                                    #eps_[row] -= eps_y
+                                    zbot = zbot + NS.h * (eps_[row] - eps_y)
+                                    #zbot = zbot + NS.h * RK.zum(row+RK.row_offset, (eps_[row] - eps_y), eps_prev_)
+
                             
                             data_[row] = data_[row] - momentum * (data_prev_[0] - data_[row])  #negative!
 
@@ -892,6 +936,9 @@ def sample_rk_beta(
                         
                         if EO("keep_substep_means"):
                             x_[row+RK.row_offset] = x_[row+RK.row_offset] - x_[row+RK.row_offset].mean(dim=(-2,-1), keepdim=True) + x_means_per_substep
+
+                    if step < EO("direct_guide", 0):
+                        x_[row+RK.row_offset] = x_[row+RK.row_offset] + EO("direct_guide_weight", 0.5) * (1 - NS.s_[row]) * (LG.y0 - data_[row])
 
                     if BONGMATH and NS.s_[row] > RK.sigma_min and NS.h < RK.sigma_max/2   and   (diag_iter == implicit_steps_diag or EO("enable_diag_explicit_bongmath_all"))   and not EO("disable_terminal_bongmath"):
                         if step == 0 and UNSAMPLE:

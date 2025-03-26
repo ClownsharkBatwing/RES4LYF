@@ -1275,6 +1275,7 @@ def get_rk_methods_beta(rk_type       : str,
     v                = None
     
     EO                            = ExtraOptions(extra_options)
+    use_analytic_solution         = not EO("disable_analytic_solution")
     multistep_initial_sampler     = EO("multistep_initial_sampler", "")
     multistep_extra_initial_steps = EO("multistep_extra_initial_steps", 1)
     
@@ -1456,7 +1457,7 @@ def get_rk_methods_beta(rk_type       : str,
             c2 = float(get_extra_options_kv("c2", str(c2), extra_options))
 
             ci = [0, c2]
-            φ = Phi(h, ci)
+            φ = Phi(h, ci, use_analytic_solution)
             
             a2_1 = c2 * φ(1,2)
             b2 = φ(2)/c2
@@ -1473,7 +1474,7 @@ def get_rk_methods_beta(rk_type       : str,
         case "res_2s_rkmk2e":
 
             ci = [0, 1]
-            φ = Phi(h, ci)
+            φ = Phi(h, ci, use_analytic_solution)
             
             b2 = φ(2)
 
@@ -1493,7 +1494,7 @@ def get_rk_methods_beta(rk_type       : str,
 
             c1, c2 = 0, 1
             ci = [c1, c2]
-            φ = Phi(h, ci)
+            φ = Phi(h, ci, use_analytic_solution)
 
             b1 = φ(1) #+ φ(2)
 
@@ -1508,7 +1509,7 @@ def get_rk_methods_beta(rk_type       : str,
             if extra_options_flag("h_prev_h_h_no_eta", extra_options):
                 φ1 = Phi(h_prev1_no_eta * h/h_no_eta, ci)
             elif extra_options_flag("h_only", extra_options):
-                φ1 = Phi(h, ci)
+                φ1 = Phi(h, ci, use_analytic_solution)
             else:
                 φ1 = Phi(h_prev1_no_eta, ci)
 
@@ -1531,7 +1532,7 @@ def get_rk_methods_beta(rk_type       : str,
 
             c1, c2 = 0, 1
             ci = [c1, c2]
-            φ = Phi(h, ci)
+            φ = Phi(h, ci, use_analytic_solution)
 
             a = [
                     [0, 0],
@@ -1548,7 +1549,7 @@ def get_rk_methods_beta(rk_type       : str,
 
             c1, c2, c3 = 0, 0, 1
             ci = [c1, c2, c3]
-            φ = Phi(h, ci)
+            φ = Phi(h, ci, use_analytic_solution)
 
             a = [
                     [0, 0, 0],
@@ -1567,7 +1568,7 @@ def get_rk_methods_beta(rk_type       : str,
 
             c1, c2, c3, c4 = 0, 0, 0, 1
             ci = [c1, c2, c3, c4]
-            φ = Phi(h, ci)
+            φ = Phi(h, ci, use_analytic_solution)
 
             a = [
                     [0, 0, 0, 0],
@@ -1590,7 +1591,7 @@ def get_rk_methods_beta(rk_type       : str,
             
             c1,c2 = 0,1
             ci = [c1, c2]
-            φ = Phi(h, ci)
+            φ = Phi(h, ci, use_analytic_solution)
             
             b2 = 0
 
@@ -1606,8 +1607,8 @@ def get_rk_methods_beta(rk_type       : str,
                 φ1 = Phi(h_prev1_no_eta * h/h_no_eta, ci)
                 φ2 = Phi(h_prev2_no_eta * h/h_no_eta, ci)
             elif extra_options_flag("h_only", extra_options):
-                φ1 = Phi(h, ci)
-                φ2 = Phi(h, ci)
+                φ1 = Phi(h, ci, use_analytic_solution)
+                φ2 = Phi(h, ci, use_analytic_solution)
             else:
                 φ1 = Phi(h_prev1_no_eta, ci)
                 φ2 = Phi(h_prev2_no_eta, ci)
@@ -1634,7 +1635,7 @@ def get_rk_methods_beta(rk_type       : str,
             
             c1,c2 = 0,1
             ci = [c1, c2]
-            φ = Phi(h, ci)
+            φ = Phi(h, ci, use_analytic_solution)
             
             b2 = (1/3)*φ(2) + φ(3) + φ(4)
 
@@ -1650,8 +1651,8 @@ def get_rk_methods_beta(rk_type       : str,
                 φ1 = Phi(h_prev1_no_eta * h/h_no_eta, ci)
                 φ2 = Phi(h_prev2_no_eta * h/h_no_eta, ci)
             elif extra_options_flag("h_only", extra_options):
-                φ1 = Phi(h, ci)
-                φ2 = Phi(h, ci)
+                φ1 = Phi(h, ci, use_analytic_solution)
+                φ2 = Phi(h, ci, use_analytic_solution)
             else:
                 φ1 = Phi(h_prev1_no_eta, ci)
                 φ2 = Phi(h_prev2_no_eta, ci)
@@ -1679,7 +1680,7 @@ def get_rk_methods_beta(rk_type       : str,
             
             c1,c2,c3 = 0, 1, 1
             ci = [c1,c2,c3]
-            φ = Phi(h, ci)
+            φ = Phi(h, ci, use_analytic_solution)
             
             a3_2 = (1/3)*φ(2) + φ(3) + φ(4)
             
@@ -1699,8 +1700,8 @@ def get_rk_methods_beta(rk_type       : str,
                 φ1 = Phi(h_prev1_no_eta * h/h_no_eta, ci)
                 φ2 = Phi(h_prev2_no_eta * h/h_no_eta, ci)
             elif extra_options_flag("h_only", extra_options):
-                φ1 = Phi(h, ci)
-                φ2 = Phi(h, ci)
+                φ1 = Phi(h, ci, use_analytic_solution)
+                φ2 = Phi(h, ci, use_analytic_solution)
             else:
                 φ1 = Phi(h_prev1_no_eta, ci)
                 φ2 = Phi(h_prev2_no_eta, ci)
@@ -1731,29 +1732,26 @@ def get_rk_methods_beta(rk_type       : str,
             c2 = float(get_extra_options_kv("c2", str(c2), extra_options))
             c3 = float(get_extra_options_kv("c3", str(c3), extra_options))
             
-            gamma = calculate_gamma(c2, c3)
-            #a2_1 = c2 * phi(1, -h*c2)
-            #a3_2 = gamma * c2 * phi(2, -h*c2) + (c3 ** 2 / c2) * phi(2, -h*c3) #phi_2_c3_h  # a32 from k2 to k3
-            #a3_1 = c3 * phi(1, -h*c3) - a3_2 # a31 from k1 to k3
             ci = [0,c2,c3]
-            φ = Phi(h, ci)
-            a2_1 = c2 * φ(1,2)
-            a3_2 = gamma * c2 * φ(2,2) + (c3 ** 2 / c2) * φ(2, 3)
-            a3_1 = c3 * φ(1,3) - a3_2
+            φ = Phi(h, ci, use_analytic_solution)
             
-            b3 = (1 / (gamma * c2 + c3)) * phi(2, -h)      
+            gamma = calculate_gamma(c2, c3)
+
+            a3_2 = gamma * c2 * φ(2,2) + (c3 ** 2 / c2) * φ(2, 3)
+            
+            b3 = (1 / (gamma * c2 + c3)) * φ(2)   
             b2 = gamma * b3  #simplified version of: b2 = (gamma / (gamma * c2 + c3)) * phi_2_h  
-            b1 = phi(1, -h) - b2 - b3     
             
             a = [
                     [0, 0, 0],
-                    [a2_1, 0, 0],
-                    [a3_1, a3_2, 0],
+                    [0, 0, 0],
+                    [0, a3_2, 0],
             ]
             b = [
-                    [b1, b2, b3],
+                    [0, b2, b3],
             ]
-            ci = [c1, c2, c3]
+            
+            a, b = gen_first_col_exp(a,b,ci,φ)
             
         case "res_3s_alt":
             c2 = 1/3
@@ -1761,7 +1759,7 @@ def get_rk_methods_beta(rk_type       : str,
             
             c1,c2,c3 = 0, c2, 2/3
             ci = [c1,c2,c3]
-            φ = Phi(h, ci)
+            φ = Phi(h, ci, use_analytic_solution)
             
             a = [
                     [0, 0,                   0],
@@ -1779,7 +1777,7 @@ def get_rk_methods_beta(rk_type       : str,
             c2 = float(get_extra_options_kv("c2", str(c2), extra_options))
 
             ci = [0,c2,1]
-            φ = Phi(h, ci)
+            φ = Phi(h, ci, use_analytic_solution)
             
             a = [
                     [0, 0, 0],
@@ -1798,7 +1796,7 @@ def get_rk_methods_beta(rk_type       : str,
         case "res_3s_cox_matthews": # Cox & Matthews; known as ETD3RK
             c2 = 1/2 # must be 1/2
             ci = [0,c2,1]
-            φ = Phi(h, ci)
+            φ = Phi(h, ci, use_analytic_solution)
             
             a = [
                     [0, 0, 0],
@@ -1816,7 +1814,7 @@ def get_rk_methods_beta(rk_type       : str,
         case "res_3s_lie": # Lie; known as ETD2CF3
             c1,c2,c3 = 0, 1/3, 2/3
             ci = [c1,c2,c3]
-            φ = Phi(h, ci)
+            φ = Phi(h, ci, use_analytic_solution)
             
             a = [
                     [0, 0, 0],
@@ -1835,7 +1833,7 @@ def get_rk_methods_beta(rk_type       : str,
         case "res_4s_cox_matthews": # weak 4th order, Cox & Matthews; unresolved issue, see below
             c1,c2,c3,c4 = 0, 1/2, 1/2, 1
             ci = [c1,c2,c3,c4]
-            φ = Phi(h, ci)
+            φ = Phi(h, ci, use_analytic_solution)
             
             a2_1 = c2 * φ(1,2)
             a3_2 = c3 * φ(1,3)
@@ -1862,7 +1860,7 @@ def get_rk_methods_beta(rk_type       : str,
         case "res_4s_cfree4": # weak 4th order, Cox & Matthews; unresolved issue, see below
             c1,c2,c3,c4 = 0, 1/2, 1/2, 1
             ci = [c1,c2,c3,c4]
-            φ = Phi(h, ci)
+            φ = Phi(h, ci, use_analytic_solution)
             
             a2_1 = c2 * φ(1,2)
             a3_2 = c3 * φ(1,2)
@@ -1888,7 +1886,7 @@ def get_rk_methods_beta(rk_type       : str,
         case "res_4s_friedli": # https://ora.ox.ac.uk/objects/uuid:cc001282-4285-4ca2-ad06-31787b540c61/files/m611df1a355ca243beb09824b70e5e774
             c1,c2,c3,c4 = 0, 1/2, 1/2, 1
             ci = [c1,c2,c3,c4]
-            φ = Phi(h, ci)
+            φ = Phi(h, ci, use_analytic_solution)
             
             a3_2 = 2*φ(2,2)
             a4_2 = -(26/25)*φ(1) +  (2/25)*φ(2)
@@ -1914,7 +1912,7 @@ def get_rk_methods_beta(rk_type       : str,
         case "res_4s_munthe-kaas": # unstable RKMK4t
             c1,c2,c3,c4 = 0, 1/2, 1/2, 1
             ci = [c1,c2,c3,c4]
-            φ = Phi(h, ci)
+            φ = Phi(h, ci, use_analytic_solution)
 
             a = [
                     [0, 0,      0,        0],
@@ -1932,7 +1930,7 @@ def get_rk_methods_beta(rk_type       : str,
         case "res_4s_krogstad": # weak 4th order, Krogstad
             c1,c2,c3,c4 = 0, 1/2, 1/2, 1
             ci = [c1,c2,c3,c4]
-            φ = Phi(h, ci)
+            φ = Phi(h, ci, use_analytic_solution)
             
             a = [
                     [0, 0,      0,        0],
@@ -1953,7 +1951,7 @@ def get_rk_methods_beta(rk_type       : str,
         case "res_4s_krogstad_alt": # weak 4th order, Krogstad https://ora.ox.ac.uk/objects/uuid:cc001282-4285-4ca2-ad06-31787b540c61/files/m611df1a355ca243beb09824b70e5e774
             c1,c2,c3,c4 = 0, 1/2, 1/2, 1
             ci = [c1,c2,c3,c4]
-            φ = Phi(h, ci)
+            φ = Phi(h, ci, use_analytic_solution)
             
             a = [
                     [0, 0,        0,      0],
@@ -1974,7 +1972,7 @@ def get_rk_methods_beta(rk_type       : str,
         case "res_4s_minchev": # https://ora.ox.ac.uk/objects/uuid:cc001282-4285-4ca2-ad06-31787b540c61/files/m611df1a355ca243beb09824b70e5e774
             c1,c2,c3,c4 = 0, 1/2, 1/2, 1
             ci = [c1,c2,c3,c4]
-            φ = Phi(h, ci)
+            φ = Phi(h, ci, use_analytic_solution)
             
             a3_2 = (4/25)*φ(1,2) + (24/25)*φ(2,2)
             a4_2 = (21/5)*φ(2) - (108/5)*φ(3)
@@ -2000,7 +1998,7 @@ def get_rk_methods_beta(rk_type       : str,
         case "res_4s_strehmel_weiner": # weak 4th order, Strehmel & Weiner
             c1,c2,c3,c4 = 0, 1/2, 1/2, 1
             ci = [c1,c2,c3,c4]
-            φ = Phi(h, ci)
+            φ = Phi(h, ci, use_analytic_solution)
             
             a = [
                     [0, 0,         0,        0],
@@ -2020,7 +2018,7 @@ def get_rk_methods_beta(rk_type       : str,
         case "res_4s_strehmel_weiner_alt": # weak 4th order, Strehmel & Weiner https://ora.ox.ac.uk/objects/uuid:cc001282-4285-4ca2-ad06-31787b540c61/files/m611df1a355ca243beb09824b70e5e774
             c1,c2,c3,c4 = 0, 1/2, 1/2, 1
             ci = [c1,c2,c3,c4]
-            φ = Phi(h, ci)
+            φ = Phi(h, ci, use_analytic_solution)
             
             a = [
                     [0, 0,        0,      0],
@@ -2041,7 +2039,7 @@ def get_rk_methods_beta(rk_type       : str,
         case "lawson2a_2s": # based on midpoint rule, stiff order 1 https://cds.cern.ch/record/848126/files/cer-002531460.pdf
             c1,c2 = 0,1/2
             ci = [c1, c2]
-            φ = Phi(h, ci)
+            φ = Phi(h, ci, use_analytic_solution)
             
             a2_1 = c2 * φ(0,2)
             b2 = φ(0,2)
@@ -2058,7 +2056,7 @@ def get_rk_methods_beta(rk_type       : str,
         case "lawson2b_2s": # based on trapezoidal rule, stiff order 1 https://cds.cern.ch/record/848126/files/cer-002531460.pdf
             c1,c2 = 0,1
             ci = [c1, c2]
-            φ = Phi(h, ci)
+            φ = Phi(h, ci, use_analytic_solution)
             
             a2_1 = φ(0)
             b2 = 1/2
@@ -2076,7 +2074,7 @@ def get_rk_methods_beta(rk_type       : str,
         case "lawson4_4s": 
             c1,c2,c3,c4 = 0, 1/2, 1/2, 1
             ci = [c1,c2,c3,c4]
-            φ = Phi(h, ci)
+            φ = Phi(h, ci, use_analytic_solution)
             
             a2_1 = c2 * φ(0,2)
             a3_2 = 1/2
@@ -2100,7 +2098,7 @@ def get_rk_methods_beta(rk_type       : str,
         case "lawson41-gen_4s": # GenLawson4 https://ora.ox.ac.uk/objects/uuid:cc001282-4285-4ca2-ad06-31787b540c61/files/m611df1a355ca243beb09824b70e5e774
             c1,c2,c3,c4 = 0, 1/2, 1/2, 1
             ci = [c1,c2,c3,c4]
-            φ = Phi(h, ci)
+            φ = Phi(h, ci, use_analytic_solution)
 
 
             a3_2 = 1/2
@@ -2128,7 +2126,7 @@ def get_rk_methods_beta(rk_type       : str,
         case "lawson41-gen-mod_4s": # GenLawson4 https://ora.ox.ac.uk/objects/uuid:cc001282-4285-4ca2-ad06-31787b540c61/files/m611df1a355ca243beb09824b70e5e774
             c1,c2,c3,c4 = 0, 1/2, 1/2, 1
             ci = [c1,c2,c3,c4]
-            φ = Phi(h, ci)
+            φ = Phi(h, ci, use_analytic_solution)
 
 
             a3_2 = 1/2
@@ -2158,7 +2156,7 @@ def get_rk_methods_beta(rk_type       : str,
         case "lawson42-gen-mod_1h4s": # GenLawson4 https://ora.ox.ac.uk/objects/uuid:cc001282-4285-4ca2-ad06-31787b540c61/files/m611df1a355ca243beb09824b70e5e774
             c1,c2,c3,c4 = 0, 1/2, 1/2, 1
             ci = [c1,c2,c3,c4]
-            φ = Phi(h, ci)
+            φ = Phi(h, ci, use_analytic_solution)
 
             a3_2 = 1/2
             a4_3 = φ(0,2)
@@ -2178,11 +2176,11 @@ def get_rk_methods_beta(rk_type       : str,
             ]
 
             if extra_options_flag("h_prev_h_h_no_eta", extra_options):
-                φ1 = Phi(h_prev1_no_eta * h/h_no_eta, ci)
+                φ1 = Phi(h_prev1_no_eta * h/h_no_eta, ci, use_analytic_solution)
             elif extra_options_flag("h_only", extra_options):
-                φ1 = Phi(h, ci)
+                φ1 = Phi(h, ci, use_analytic_solution)
             else:
-                φ1 = Phi(h_prev1_no_eta, ci)
+                φ1 = Phi(h_prev1_no_eta, ci, use_analytic_solution)
 
             u2_1 = -φ1(2,2)
             u3_1 = -φ1(2,2) + 1/4
@@ -2206,7 +2204,7 @@ def get_rk_methods_beta(rk_type       : str,
         case "lawson43-gen-mod_2h4s": # GenLawson4 https://ora.ox.ac.uk/objects/uuid:cc001282-4285-4ca2-ad06-31787b540c61/files/m611df1a355ca243beb09824b70e5e774
             c1,c2,c3,c4 = 0, 1/2, 1/2, 1
             ci = [c1,c2,c3,c4]
-            φ = Phi(h, ci)
+            φ = Phi(h, ci, use_analytic_solution)
 
             a3_2 = 1/2
             a4_3 = φ(0,2)
@@ -2225,14 +2223,14 @@ def get_rk_methods_beta(rk_type       : str,
             ]
 
             if extra_options_flag("h_prev_h_h_no_eta", extra_options):
-                φ1 = Phi(h_prev1_no_eta * h/h_no_eta, ci)
-                φ2 = Phi(h_prev2_no_eta * h/h_no_eta, ci)
+                φ1 = Phi(h_prev1_no_eta * h/h_no_eta, ci, use_analytic_solution)
+                φ2 = Phi(h_prev2_no_eta * h/h_no_eta, ci, use_analytic_solution)
             elif extra_options_flag("h_only", extra_options):
-                φ1 = Phi(h, ci)
-                φ2 = Phi(h, ci)
+                φ1 = Phi(h, ci, use_analytic_solution)
+                φ2 = Phi(h, ci, use_analytic_solution)
             else:
-                φ1 = Phi(h_prev1_no_eta, ci)
-                φ2 = Phi(h_prev2_no_eta, ci)
+                φ1 = Phi(h_prev1_no_eta, ci, use_analytic_solution)
+                φ2 = Phi(h_prev2_no_eta, ci, use_analytic_solution)
 
             u2_1 = -2*φ1(2,2) - 2*φ1(3,2)
             u3_1 = -2*φ1(2,2) - 2*φ1(3,2) + 5/8
@@ -2260,7 +2258,7 @@ def get_rk_methods_beta(rk_type       : str,
         case "lawson44-gen-mod_3h4s": # GenLawson4 https://ora.ox.ac.uk/objects/uuid:cc001282-4285-4ca2-ad06-31787b540c61/files/m611df1a355ca243beb09824b70e5e774
             c1,c2,c3,c4 = 0, 1/2, 1/2, 1
             ci = [c1,c2,c3,c4]
-            φ = Phi(h, ci)
+            φ = Phi(h, ci, use_analytic_solution)
 
             a3_2 = 1/2
             a4_3 = φ(0,2)
@@ -2279,17 +2277,17 @@ def get_rk_methods_beta(rk_type       : str,
             ]
 
             if extra_options_flag("h_prev_h_h_no_eta", extra_options):
-                φ1 = Phi(h_prev1_no_eta * h/h_no_eta, ci)
-                φ2 = Phi(h_prev2_no_eta * h/h_no_eta, ci)
-                φ3 = Phi(h_prev3_no_eta * h/h_no_eta, ci)
+                φ1 = Phi(h_prev1_no_eta * h/h_no_eta, ci, use_analytic_solution)
+                φ2 = Phi(h_prev2_no_eta * h/h_no_eta, ci, use_analytic_solution)
+                φ3 = Phi(h_prev3_no_eta * h/h_no_eta, ci, use_analytic_solution)
             elif extra_options_flag("h_only", extra_options):
-                φ1 = Phi(h, ci)
-                φ2 = Phi(h, ci)
-                φ3 = Phi(h, ci)
+                φ1 = Phi(h, ci, use_analytic_solution)
+                φ2 = Phi(h, ci, use_analytic_solution)
+                φ3 = Phi(h, ci, use_analytic_solution)
             else:
-                φ1 = Phi(h_prev1_no_eta, ci)
-                φ2 = Phi(h_prev2_no_eta, ci)
-                φ3 = Phi(h_prev3_no_eta, ci)
+                φ1 = Phi(h_prev1_no_eta, ci, use_analytic_solution)
+                φ2 = Phi(h_prev2_no_eta, ci, use_analytic_solution)
+                φ3 = Phi(h_prev3_no_eta, ci, use_analytic_solution)
                 
             u2_1 = -3*φ1(2,2) - 5*φ1(3,2) - 3*φ1(4,2)
             u3_1 = u2_1 + 35/32
@@ -2323,7 +2321,7 @@ def get_rk_methods_beta(rk_type       : str,
         case "lawson45-gen-mod_4h4s": # GenLawson4 https://ora.ox.ac.uk/objects/uuid:cc001282-4285-4ca2-ad06-31787b540c61/files/m611df1a355ca243beb09824b70e5e774
             c1,c2,c3,c4 = 0, 1/2, 1/2, 1
             ci = [c1,c2,c3,c4]
-            φ = Phi(h, ci)
+            φ = Phi(h, ci, use_analytic_solution)
 
             a3_2 = 1/2
             a4_3 = φ(0,2)
@@ -2343,20 +2341,20 @@ def get_rk_methods_beta(rk_type       : str,
             ]
 
             if extra_options_flag("h_prev_h_h_no_eta", extra_options):
-                φ1 = Phi(h_prev1_no_eta * h/h_no_eta, ci)
-                φ2 = Phi(h_prev2_no_eta * h/h_no_eta, ci)
-                φ3 = Phi(h_prev3_no_eta * h/h_no_eta, ci)
-                φ4 = Phi(h_prev4_no_eta * h/h_no_eta, ci)
+                φ1 = Phi(h_prev1_no_eta * h/h_no_eta, ci, use_analytic_solution)
+                φ2 = Phi(h_prev2_no_eta * h/h_no_eta, ci, use_analytic_solution)
+                φ3 = Phi(h_prev3_no_eta * h/h_no_eta, ci, use_analytic_solution)
+                φ4 = Phi(h_prev4_no_eta * h/h_no_eta, ci, use_analytic_solution)
             elif extra_options_flag("h_only", extra_options):
-                φ1 = Phi(h, ci)
-                φ2 = Phi(h, ci)
-                φ3 = Phi(h, ci)
-                φ4 = Phi(h, ci)
+                φ1 = Phi(h, ci, use_analytic_solution)
+                φ2 = Phi(h, ci, use_analytic_solution)
+                φ3 = Phi(h, ci, use_analytic_solution)
+                φ4 = Phi(h, ci, use_analytic_solution)
             else:
-                φ1 = Phi(h_prev1_no_eta, ci)
-                φ2 = Phi(h_prev2_no_eta, ci)
-                φ3 = Phi(h_prev3_no_eta, ci)
-                φ4 = Phi(h_prev4_no_eta, ci)
+                φ1 = Phi(h_prev1_no_eta, ci, use_analytic_solution)
+                φ2 = Phi(h_prev2_no_eta, ci, use_analytic_solution)
+                φ3 = Phi(h_prev3_no_eta, ci, use_analytic_solution)
+                φ4 = Phi(h_prev4_no_eta, ci, use_analytic_solution)
                 
             u2_1 = -4*φ1(2,2) - (26/3)*φ1(3,2) - 9*φ1(4,2) - 4*φ1(5,2)
             u3_1 = u2_1 + 105/64
@@ -2395,7 +2393,7 @@ def get_rk_methods_beta(rk_type       : str,
         case "etdrk2_2s": # https://arxiv.org/pdf/2402.15142v1
             c1,c2 = 0, 1
             ci = [c1,c2]
-            φ = Phi(h, ci)   
+            φ = Phi(h, ci, use_analytic_solution)   
                      
             a = [
                     [0, 0],
@@ -2408,7 +2406,7 @@ def get_rk_methods_beta(rk_type       : str,
         case "etdrk3_a_3s": #non-monotonic # https://arxiv.org/pdf/2402.15142v1
             c1,c2,c3 = 0, 1, 2/3
             ci = [c1,c2,c3]
-            φ = Phi(h, ci)   
+            φ = Phi(h, ci, use_analytic_solution)   
             
             a2_1 = c2*φ(1)
             a3_2 = (4/9)*φ(2,3)
@@ -2430,7 +2428,7 @@ def get_rk_methods_beta(rk_type       : str,
         case "etdrk3_b_3s": # https://arxiv.org/pdf/2402.15142v1
             c1,c2,c3 = 0, 4/9, 2/3
             ci = [c1,c2,c3]
-            φ = Phi(h, ci)   
+            φ = Phi(h, ci, use_analytic_solution)   
             
             a2_1 = c2*φ(1,2)
             a3_2 = φ(2,3)
@@ -2452,7 +2450,7 @@ def get_rk_methods_beta(rk_type       : str,
         case "etdrk4_4s": # https://ora.ox.ac.uk/objects/uuid:cc001282-4285-4ca2-ad06-31787b540c61/files/m611df1a355ca243beb09824b70e5e774
             c1,c2,c3,c4 = 0, 1/2, 1/2, 1
             ci = [c1,c2,c3,c4]
-            φ = Phi(h, ci)
+            φ = Phi(h, ci, use_analytic_solution)
             
             a3_2 =   φ(1,2)
             a4_3 = 2*φ(1,2)
@@ -2477,9 +2475,9 @@ def get_rk_methods_beta(rk_type       : str,
         case "etdrk4_4s_alt": # pg 70 col 1 computed with (4.9) https://ora.ox.ac.uk/objects/uuid:cc001282-4285-4ca2-ad06-31787b540c61/files/m611df1a355ca243beb09824b70e5e774
             c1,c2,c3,c4 = 0, 1/2, 1/2, 1
             ci = [c1,c2,c3,c4]
-            φ = Phi(h, ci)
+            φ = Phi(h, ci, use_analytic_solution)
             
-            a2_1 = φ(1,2)
+            a2_1 = φ(1,2)  #unsure about this, looks bad and is pretty different from col #1 implementations for everything else except the other 4s alt and 5s ostermann??? from the link
             a3_1 = 0
             a4_1 = φ(1) - 2*φ(1,2)
             
@@ -2507,97 +2505,96 @@ def get_rk_methods_beta(rk_type       : str,
         case "dpmpp_2s":
             c2 = float(get_extra_options_kv("c2", str(c2), extra_options))
             
-            a2_1 =         c2   * phi(1, -h*c2)
-            b1 = (1 - 1/(2*c2)) * phi(1, -h)
-            b2 =     (1/(2*c2)) * phi(1, -h)
+            ci = [0,c2]
+            φ = Phi(h, ci, use_analytic_solution)
+            
+            b2 = (1/(2*c2)) * φ(1)
 
             a = [
                     [0, 0],
-                    [a2_1, 0],
+                    [0, 0],
             ]
             b = [
-                    [b1, b2],
+                    [0, b2],
             ]
-            ci = [0, c2]
+            
+            a, b = gen_first_col_exp(a,b,ci,φ)
             
         case "dpmpp_sde_2s":
             c2 = 1.0 #hardcoded to 1.0 to more closely emulate the configuration for k-diffusion's implementation
-            a2_1 =         c2   * phi(1, -h*c2)
-            b1 = (1 - 1/(2*c2)) * phi(1, -h)
-            b2 =     (1/(2*c2)) * phi(1, -h)
+            
+            ci = [0,c2]
+            φ = Phi(h, ci, use_analytic_solution)
+            
+            b2 = (1/(2*c2)) * φ(1)
 
             a = [
                     [0, 0],
-                    [a2_1, 0],
+                    [0, 0],
             ]
             b = [
-                    [b1, b2],
+                    [0, b2],
             ]
-            ci = [0, c2]
+            
+            a, b = gen_first_col_exp(a,b,ci,φ)
 
         case "dpmpp_3s":
             c2 = float(get_extra_options_kv("c2", str(c2), extra_options))
             c3 = float(get_extra_options_kv("c3", str(c3), extra_options))
             
-            a2_1 = c2 * phi(1, -h*c2)
-            a3_2 = (c3**2 / c2) * phi(2, -h*c3)
-            a3_1 = c3 * phi(1, -h*c3) - a3_2
-            b2 = 0
-            b3 = (1/c3) * phi(2, -h)
-            b1 = phi(1, -h) - b2 - b3
+            ci = [0,c2,c3]
+            φ = Phi(h, ci, use_analytic_solution)   
+            
+            a3_2 = (c3**2 / c2) * φ(2,3)
+            b3 = (1/c3) * φ(2)
 
             a = [
                     [0, 0, 0],
-                    [a2_1, 0, 0],
-                    [a3_1, a3_2, 0],  
+                    [0, 0, 0],
+                    [0, a3_2, 0],  
             ]
             b = [
-                    [b1, b2, b3],
+                    [0, 0, b3],
             ]
-            ci = [0, c2, c3]
+            
+            a, b = gen_first_col_exp(a,b,ci,φ)
             
         case "res_5s": #non-monotonic #4th order
                 
             c1, c2, c3, c4, c5 = 0, 1/2, 1/2, 1, 1/2
-            
-            a2_1 = c2 * phi(1, -h * c2)
-            
-            a3_2 = phi(2, -h * c3)
-            a3_1 = c3 * phi(1, -h * c3) - a3_2
-            #a3_1 = c3 * phi(1, -h * c3) - phi(2, -h * c3)
+            ci = [c1,c2,c3,c4,c5]
+            φ = Phi(h, ci, use_analytic_solution)   
 
-            a4_2 = a4_3 = phi(2, -h * c4)
-            a4_1 = c4 * phi(1, -h * c4) - a4_2 - a4_3
-            #a4_1 = phi(1, -h * c4) - 2 * phi(2, -h * c4)
+            a3_2 = φ(2,3)
+            a4_2 = φ(2,4)
+            a5_2 = (1/2)*φ(2,5) - φ(3,4) + (1/4)*φ(2,4) - (1/2)*φ(3,5)
             
-            a5_2 = a5_3 = 0.5 * phi(2, -h * c5) - phi(3, -h * c4) + 0.25 * phi(2, -h * c4) - 0.5 * phi(3, -h * c5)
-            a5_4 = 0.25 * phi(2, -h * c5) - a5_2
-            a5_1 = c5 * phi(1, -h * c5) - a5_2 - a5_3 - a5_4
-                    
-            b2 = b3 = 0
-            b4 = -phi(2, -h) + 4*phi(3, -h)
-            b5 = 4 * phi(2, -h) - 8 * phi(3, -h)
-            #b1 = phi(1, -h) - 3 * phi(2, -h) + 4 * phi(3, -h)
-            b1 = phi(1,-h) - b2 - b3 - b4 - b5
-
+            a4_3 = a4_2
+            a5_3 = a5_2
+            
+            a5_4 = (1/4)*φ(2,5) - a5_2
+            
+            b4 = -φ(2) + 4*φ(3)
+            b5 = 4*φ(2) - 8*φ(3)
+            
             a = [
                     [0, 0, 0, 0, 0],
-                    [a2_1, 0, 0, 0, 0],
-                    [a3_1, a3_2, 0, 0, 0],
-                    [a4_1, a4_2, a4_3, 0, 0],
-                    [a5_1, a5_2, a5_3, a5_4, 0],
+                    [0, 0, 0, 0, 0],
+                    [0, a3_2, 0, 0, 0],
+                    [0, a4_2, a4_3, 0, 0],
+                    [0, a5_2, a5_3, a5_4, 0],
             ]
             b = [
-                    [b1, b2, b3, b4, b5],
+                    [0, 0, 0, b4, b5],
             ]
-            ci = [0., 0.5, 0.5, 1., 0.5]
             
+            a, b = gen_first_col_exp(a,b,ci,φ)
             
         case "res_5s_hochbruck-ostermann": #non-monotonic #4th order
                 
             c1, c2, c3, c4, c5 = 0, 1/2, 1/2, 1, 1/2
             ci = [c1,c2,c3,c4,c5]
-            φ = Phi(h, ci)   
+            φ = Phi(h, ci, use_analytic_solution)   
             
             a3_2 = 4*φ(2,2)
             a4_2 = φ(2)
@@ -2629,7 +2626,7 @@ def get_rk_methods_beta(rk_type       : str,
                 
             c1, c2, c3, c4, c5, c6 = 0, 1/2, 1/2, 1/3, 1/3, 5/6
             ci = [c1, c2, c3, c4, c5, c6]
-            φ = Phi(h, ci)
+            φ = Phi(h, ci, use_analytic_solution)
             
             a2_1 = c2 * φ(1,2)
             
@@ -2670,17 +2667,14 @@ def get_rk_methods_beta(rk_type       : str,
             b = [
                     [0, b2, b3, b4, b5, b6],
             ]
-             
-            for i in range(len(ci)): 
-                a[i][0] = ci[i] * φ(1,i+1) - sum(a[i])
-            for i in range(len(b)): 
-                b[i][0] =         φ(1)     - sum(b[i])
+            
+            a, b = gen_first_col_exp(a,b,ci,φ)
 
         case "res_8s": # this is not EXPRK5S8 https://ora.ox.ac.uk/objects/uuid:cc001282-4285-4ca2-ad06-31787b540c61/files/m611df1a355ca243beb09824b70e5e774
                 
             c1, c2, c3, c4, c5, c6, c7, c8 = 0, 1/2, 1/2, 1/4,    1/2, 1/5, 2/3, 1
             ci = [c1, c2, c3, c4, c5, c6, c7, c8]
-            φ = Phi(h, ci, analytic_solution=True)
+            φ = Phi(h, ci, analytic_solution=use_analytic_solution)
             
             a3_2 = (1/2) * φ(2,3)
             
@@ -2706,31 +2700,7 @@ def get_rk_methods_beta(rk_type       : str,
             b7 = (-27/14)*φ(2) + (162/7) *φ(3) -  (405/7) *φ(4)
             b8 =   (1/2) *φ(2) -  (13/2) *φ(3) +   (45/2) *φ(4)
             
-            a2_1 = c2*φ(1,2) 
-            a3_1 = c3*φ(1,3) - a3_2
-            a4_1 = c4*φ(1,4) - a4_3
-            a5_1 = c5*φ(1,5) - a5_3 - a5_4 
-            a6_1 = c6*φ(1,6) - a6_4 - a6_5
-            a7_1 = c7*φ(1,7) - a7_4 - a7_5 - a7_6
-            a8_1 = c8*φ(1,8) - a8_5 - a8_6 - a8_7 
             b1   =    φ(1)   - b6 - b7 - b8
-            
-            """a = [
-                    [0,    0, 0, 0, 0, 0, 0, 0],
-                    [a2_1, 0, 0, 0, 0, 0, 0, 0],
-                    
-                    [a3_1, a3_2, 0, 0, 0, 0, 0, 0],
-                    [a4_1, 0, a4_3, 0, 0, 0, 0, 0],
-                    
-                    [a5_1, 0, a5_3, a5_4, 0, 0, 0, 0],
-                    [a6_1, 0, 0, a6_4, a6_5, 0, 0, 0],
-                    
-                    [a7_1 , 0, 0, a7_4, a7_5, a7_6, 0,    0],
-                    [a8_1 , 0, 0, 0,    a8_5, a8_6, a8_7, 0],
-            ]
-            b = [
-                    [b1,   0, 0, 0, 0, b6, b7, b8],
-            ]"""
             
             a = [
                     [0 , 0   , 0   , 0   , 0   , 0   , 0   , 0],
@@ -2749,18 +2719,14 @@ def get_rk_methods_beta(rk_type       : str,
                     [0, 0, 0, 0, 0, b6, b7, b8],
             ]
             
-            for i in range(len(a)): 
-                a[i][0] = ci[i] * φ(1,i+1) - sum(a[i])
-            for i in range(len(b)): 
-                b[i][0] =         φ(1)     - sum(b[i])
-
+            a, b = gen_first_col_exp(a,b,ci,φ)
 
 
         case "res_8s_alt": # this is EXPRK5S8 https://ora.ox.ac.uk/objects/uuid:cc001282-4285-4ca2-ad06-31787b540c61/files/m611df1a355ca243beb09824b70e5e774
                 
             c1, c2, c3, c4, c5, c6, c7, c8 = 0, 1/2, 1/2, 1/4,    1/2, 1/5, 2/3, 1
             ci = [c1, c2, c3, c4, c5, c6, c7, c8]
-            φ = Phi(h, ci, analytic_solution=True)
+            φ = Phi(h, ci, analytic_solution=use_analytic_solution)
             
             a3_2 = 2*φ(2,2)
             
@@ -2811,7 +2777,7 @@ def get_rk_methods_beta(rk_type       : str,
                 
             c1, c2, c3, c4, c5, c6, c7, c8, c9, c10 = 0, 1/2, 1/2, 1/3, 1/2,     1/3, 1/4, 3/10, 3/4, 1
             ci = [c1, c2, c3, c4, c5, c6, c7, c8, c9, c10]
-            φ = Phi(h, ci, analytic_solution=False)        
+            φ = Phi(h, ci, analytic_solution=use_analytic_solution)
                 
             a3_2 = (c3**2 / c2) * φ(2,3)
             a4_2 = (c4**2 / c2) * φ(2,4)
@@ -2851,11 +2817,8 @@ def get_rk_methods_beta(rk_type       : str,
                 jkl = list(permutations([5, 6, 7], 3)) 
                 for j,k,l in jkl:
                     a[i-1][j-1] = (ci[i-1]**2 * ci[k-1] * ci[l-1] * φ(2,i)   -   2*ci[i-1]**3 * (ci[k-1] + ci[l-1]) * φ(3,i)   +   6*ci[i-1]**4 * φ(4,i))    /    (ci[j-1] * (ci[j-1] - ci[k-1]) * (ci[j-1] - ci[l-1]))
-
-            for i in range(len(a)): 
-                a[i][0] = ci[i] * φ(1,i+1) - sum(a[i])
-            for i in range(len(b)): 
-                b[i][0] =         φ(1)     - sum(b[i])
+            
+            gen_first_col_exp(a, b, ci, φ)
 
 
 
@@ -2873,7 +2836,7 @@ def get_rk_methods_beta(rk_type       : str,
             c12 = 90/103
             c15 = 1/5
             ci = [c1, c2, c3, c4, c5, c6, c7, c8, c9, c10, c11, c12, c13, c14, c15]
-            φ = Phi(h, ci, analytic_solution=False)
+            φ = Phi(h, ci, analytic_solution=use_analytic_solution)
             
             a = [[0 for _ in range(15)] for _ in range(15)]
             b = [[0 for _ in range(15)]]
@@ -2954,12 +2917,8 @@ def get_rk_methods_beta(rk_type       : str,
                 print(f"  Selected Theta: {theta_value:.6f}, Permutation: {permutation}")
              
              
-             
-            for i in range(len(a)): 
-                a[i][0] = ci[i] * φ(1,i+1) - sum(a[i])
-            for i in range(len(b)): 
-                b[i][0] =         φ(1)     - sum(b[i])
-            
+            gen_first_col_exp(a, b, ci, φ)
+
             
 
         case "res_16s": # 6th order without weakened order conditions
@@ -2971,7 +2930,7 @@ def get_rk_methods_beta(rk_type       : str,
             c7 = c10 = c14 = 1/4
             c16 = 1
             ci = [c1, c2, c3, c4, c5, c6, c7, c8, c9, c10, c11, c12, c13, c14, c15, c16]
-            φ = Phi(h, ci, analytic_solution=True)
+            φ = Phi(h, ci, analytic_solution=use_analytic_solution)
             
             a3_2 = (1/2) * φ(2,3)
 
@@ -3022,14 +2981,8 @@ def get_rk_methods_beta(rk_type       : str,
                 #print(i,j,d,k,l)
                 b[0][i-1] = numerator / (ci[i-1] *   (ci[i-1] - ci[k-1])   *   (ci[i-1] - ci[j-1]   *   (ci[i-1] - ci[d-1])   *   (ci[i-1] - ci[l-1])))
 
-                
-            for i in range(len(a)): 
-                a[i][0] = ci[i] * φ(1,i+1) - sum(a[i])
-            for i in range(len(b)): 
-                b[i][0] =         φ(1)     - sum(b[i])
-            
-            
-            
+            gen_first_col_exp(a, b, ci, φ)
+
 
             
         case "irk_exp_diag_2s":

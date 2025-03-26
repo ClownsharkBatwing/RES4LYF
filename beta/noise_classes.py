@@ -84,7 +84,7 @@ def scale_to_range(x, scaled_min = -1.73, scaled_max = 1.73): #1.73 is roughly t
     return scaled_min + (x - x.min()) * (scaled_max - scaled_min) / (x.max() - x.min())
 
 def normalize(x):
-     return (x - x.mean())/ x.std()
+    return (x - x.mean())/ x.std()
 
 class NoiseGenerator:
     def __init__(self, x=None, size=None, dtype=None, layout=None, device=None, seed=42, generator=None, sigma_min=None, sigma_max=None):
