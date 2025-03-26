@@ -387,7 +387,19 @@ class SharkSampler:
                         dilation = EO("edge_mask", 50)
                         edge_mask = get_edge_mask(regional_generate_conditionings_and_masks_fn.conditioning_regional[0]['mask'].squeeze(0).squeeze(0).to('cuda'), dilation=dilation)
                         blahmask = torch.nn.functional.interpolate(edge_mask[None, None, :, :], (regional_generate_conditionings_and_masks_fn.h, regional_generate_conditionings_and_masks_fn.w), mode='nearest-exact').flatten().to(torch.bool).to('cuda')
-                        regional_mask.mask[regional_generate_conditionings_and_masks_fn.text_off:,regional_generate_conditionings_and_masks_fn.text_len:] = torch.logical_or(regional_mask.mask[regional_generate_conditionings_and_masks_fn.text_off:,regional_generate_conditionings_and_masks_fn.text_len:], torch.logical_and(blahmask.unsqueeze(1).repeat(1,regional_generate_conditionings_and_masks_fn.img_len), blahmask.unsqueeze(1).repeat(1,regional_generate_conditionings_and_masks_fn.img_len).transpose(-2,-1)))
+                        
+                        
+                        
+                        if latent_image['samples'].ndim == 4:
+                            regional_mask.mask[regional_generate_conditionings_and_masks_fn.text_off:,regional_generate_conditionings_and_masks_fn.text_len:] = torch.logical_or(regional_mask.mask[regional_generate_conditionings_and_masks_fn.text_off:,regional_generate_conditionings_and_masks_fn.text_len:], torch.logical_and(blahmask.unsqueeze(1).repeat(1,regional_generate_conditionings_and_masks_fn.img_len), blahmask.unsqueeze(1).repeat(1,regional_generate_conditionings_and_masks_fn.img_len).transpose(-2,-1)))
+                        elif latent_image['samples'].ndim == 5:
+                            selfattn_offset = regional_mask.mask.shape[-1] - regional_mask.mask.shape[-2]
+                            selfattn_len    = regional_mask.mask.shape[-2]
+                            t_dim = latent_image['samples'].shape[-3]
+                            
+                            regional_mask.mask[:,selfattn_offset:] = torch.logical_or(regional_mask.mask[:,selfattn_offset:],   blahmask.repeat(t_dim).unsqueeze(0) * blahmask.repeat(t_dim).unsqueeze(1))
+                            
+
 
                     
                     if EO("edge_mask_b"):

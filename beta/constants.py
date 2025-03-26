@@ -33,6 +33,21 @@ GUIDE_MODE_NAMES_BETA_SIMPLE = [
 ]
 
 
+
+
+GUIDE_MODE_NAMES_PSEUDOIMPLICIT = [
+    "pseudoimplicit",
+    "pseudoimplicit_cw",
+    "pseudoimplicit_projection",
+    "pseudoimplicit_projection_cw",
+    "fully_pseudoimplicit",
+    "fully_pseudoimplicit_projection",
+    "fully_pseudoimplicit_cw", 
+    "fully_pseudoimplicit_projection_cw"
+]
+
+
+
 FRAME_WEIGHTS_SCHEDULER_NAMES = [
     "constant",
     "linear",
@@ -48,19 +63,6 @@ FRAME_WEIGHTS_CHANGE_RATE_NAMES = [
     "fast_late",
     "slow_early",
     "slow_late",
-]
-
-
-
-GUIDE_MODE_NAMES_PSEUDOIMPLICIT = [
-    "pseudoimplicit",
-    "pseudoimplicit_cw",
-    "pseudoimplicit_projection",
-    "pseudoimplicit_projection_cw",
-    "fully_pseudoimplicit",
-    "fully_pseudoimplicit_projection",
-    "fully_pseudoimplicit_cw", 
-    "fully_pseudoimplicit_projection_cw"
 ]
 
 
