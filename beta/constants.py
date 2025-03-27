@@ -29,6 +29,7 @@ GUIDE_MODE_NAMES_BETA_SIMPLE = [
     "epsilon",
     "pseudoimplicit",
     "fully_pseudoimplicit",
+    "data",
     "none",
 ]
 
@@ -62,6 +63,4 @@ GUIDE_MODE_NAMES_PSEUDOIMPLICIT = [
     "fully_pseudoimplicit_cw", 
     "fully_pseudoimplicit_projection_cw"
 ]
-
-
 

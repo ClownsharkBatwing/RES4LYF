@@ -468,6 +468,11 @@ class RK_Method_Beta:
                     step      : int,
                     ) -> Tuple[Tensor, Tensor, Tensor]:
         
+        if x_0.ndim == 4:
+            norm_dim = (-2,-1)
+        elif x_0.ndim == 5:
+            norm_dim = (-4,-2,-1)
+        
         if self.EO("bong_start_step", 0) > step or step > self.EO("bong_stop_step", 10000):
             return x_0, x_, eps_
         
@@ -476,12 +481,12 @@ class RK_Method_Beta:
             bong_iter_max_row = self.rows
             
         if self.EO("bong_iter_lock_x_0_ch_means"):
-            x_0_ch_means = x_0.mean(dim=(-2,-1), keepdim=True)
+            x_0_ch_means = x_0.mean(dim=norm_dim, keepdim=True)
             
         if self.EO("bong_iter_lock_x_row_ch_means"):
             x_row_means = []
             for rr in range(row+row_offset):
-                x_row_mean = x_[rr].mean(dim=(-2,-1), keepdim=True)
+                x_row_mean = x_[rr].mean(dim=norm_dim, keepdim=True)
                 x_row_means.append(x_row_mean)
         
         if row < bong_iter_max_row   and   self.multistep_stages == 0:
@@ -496,14 +501,14 @@ class RK_Method_Beta:
                 x_0 = x_[row+row_offset] - h * self.zum(row+row_offset, eps_, eps_prev_)
                 
                 if self.EO("bong_iter_lock_x_0_ch_means"):
-                    x_0 = x_0 - x_0.mean(dim=(-2,-1), keepdim=True) + x_0_ch_means
+                    x_0 = x_0 - x_0.mean(dim=norm_dim, keepdim=True) + x_0_ch_means
                     
                 for rr in range(row+row_offset):
                     x_[rr] = x_0 + h * self.zum(rr, eps_, eps_prev_)
                     
                 if self.EO("bong_iter_lock_x_row_ch_means"):
                     for rr in range(row+row_offset):
-                        x_[rr] = x_[rr] - x_[rr].mean(dim=(-2,-1), keepdim=True) + x_row_means[rr]
+                        x_[rr] = x_[rr] - x_[rr].mean(dim=norm_dim, keepdim=True) + x_row_means[rr]
                     
                 for rr in range(row+row_offset):
                     if self.EO("zonkytar"):

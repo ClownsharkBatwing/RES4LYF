@@ -15,13 +15,13 @@ from einops          import rearrange
 
 from ..sigmas        import get_sigmas
 from ..helper        import ExtraOptions, FrameWeightsManager, initialize_or_scale, is_video_model
-from ..latents       import normalize_zscore, get_cosine_similarity, normalize_latent, hard_light_blend
+from ..latents       import normalize_zscore, get_collinear, get_orthogonal, get_cosine_similarity, get_pearson_similarity, \
+                            get_slerp_weight_for_cossim, normalize_latent, hard_light_blend, slerp_tensor, get_orthogonal_noise_from_channelwise
 
 from .rk_method_beta import RK_Method_Beta
 from .constants      import MAX_STEPS
 
 #from ..latents import hard_light_blend, normalize_latent
-
 
 
 
@@ -63,13 +63,19 @@ class LatentGuide:
         self.mask_mean                = None
         self.x_lying_                 = None
         self.s_lying_                 = None
+        
         self.LGW_MASK_RESCALE_MIN     = LGW_MASK_RESCALE_MIN
         self.HAS_LATENT_GUIDE         = False
         self.HAS_LATENT_GUIDE_INV     = False
         self.HAS_LATENT_GUIDE_MEAN    = False
+        
         self.lgw                      = torch.full_like(sigmas, 0., dtype=dtype) 
         self.lgw_inv                  = torch.full_like(sigmas, 0., dtype=dtype)
         self.lgw_mean                 = torch.full_like(sigmas, 0., dtype=dtype)
+        
+        self.cossim_tgt               = torch.full_like(sigmas, 0., dtype=dtype) 
+        self.cossim_tgt_inv           = torch.full_like(sigmas, 0., dtype=dtype) 
+        
         self.guide_cossim_cutoff_     = 1.0
         self.guide_bkg_cossim_cutoff_ = 1.0
         self.guide_mean_cossim_cutoff_= 1.0
@@ -137,13 +143,13 @@ class LatentGuide:
             
             guide_sigma_shift = self.EO("guide_sigma_shift", 0.0)
             
-            if latent_guide_weights is None and self.guide_mode != "none":
+            if latent_guide_weights is None:# and self.guide_mode != "none":
                 total_steps          = steps_ - start_steps_
                 latent_guide_weights = get_sigmas(self.model, scheduler_, total_steps, 1.0, shift=guide_sigma_shift).to(dtype=self.dtype, device=self.device) / self.sigma_max
                 prepend              = torch.zeros(start_steps_,                               dtype=self.dtype, device=self.device)
                 latent_guide_weights = torch.cat((prepend, latent_guide_weights), dim=0)
                 
-            if latent_guide_weights_inv is None and self.guide_mode != "none":
+            if latent_guide_weights_inv is None:# and self.guide_mode != "none":
                 total_steps              = steps_inv_ - start_steps_inv_
                 latent_guide_weights_inv = get_sigmas(self.model, scheduler_inv_, total_steps, 1.0, shift=guide_sigma_shift).to(dtype=self.dtype, device=self.device) / self.sigma_max
                 prepend                  = torch.zeros(start_steps_inv_,                               dtype=self.dtype, device=self.device) 
@@ -326,19 +332,11 @@ class LatentGuide:
         
         lgw_mask, lgw_mask_inv = self.get_masks_for_step(step)
         
-        data_norm         = data   - data  .mean(dim=(-2,-1), keepdim=True)
-        
+        y0_cossim, y0_cossim_inv  = 1.0, 1.0
         if self.HAS_LATENT_GUIDE:
-            y0_norm       = y0     - y0    .mean(dim=(-2,-1), keepdim=True)
-            y0_cossim     = get_cosine_similarity(data_norm * lgw_mask,     y0_norm     * lgw_mask)
-        else:
-            y0_cossim     = 1.0
-        
+            y0_cossim     = get_pearson_similarity(data, y0,     mask=lgw_mask)
         if self.HAS_LATENT_GUIDE_INV:
-            y0_inv_norm   = y0_inv - y0_inv.mean(dim=(-2,-1), keepdim=True)
-            y0_cossim_inv = get_cosine_similarity(data_norm * lgw_mask_inv, y0_inv_norm * lgw_mask_inv)
-        else:
-            y0_cossim_inv = 1.0
+            y0_cossim_inv = get_pearson_similarity(data, y0_inv, mask=lgw_mask_inv)
         
         #if y0_cossim < self.guide_cossim_cutoff_ or y0_cossim_inv < self.guide_bkg_cossim_cutoff_:
         if y0_cossim     >= self.guide_cossim_cutoff_:
@@ -347,6 +345,15 @@ class LatentGuide:
             lgw_mask_inv *= 0
         
         return y0, y0_inv, lgw_mask, lgw_mask_inv
+
+
+
+
+
+
+
+
+
 
 
 
@@ -624,6 +631,346 @@ class LatentGuide:
 
 
     @torch.no_grad
+    def process_guides_data_substep(self,
+                                x_row         : Tensor,
+                                data_row      : Tensor,
+                                step          : int,
+                                sigma_row     : Tensor,
+                                frame_targets : Optional[Tensor] = None,
+                                ):
+
+        y0, y0_inv, lgw_mask, lgw_mask_inv = self.get_cossim_adjusted_lgw_masks(data_row, step)
+        
+        if not (lgw_mask.any() != 0 or lgw_mask_inv.any() != 0):  # cossim score too similar! deactivate guide for this step
+            return x_row
+
+        if data_row.ndim == 5 and frame_targets is None:
+            frame_targets = self.EO("frame_targets", [1.0])
+
+        if self.guide_mode in {"data", "data_projection"}:
+            if frame_targets is None:
+                x_row = self.get_data_substep(x_row, data_row, y0, y0_inv, lgw_mask, lgw_mask_inv, step, sigma_row)
+            else:
+                t_dim = x_row.shape[-3]
+                for t in range(t_dim): #temporal dimension
+                    frame_target = frame_targets[t] if len(frame_targets) > t else frame_targets[-1]
+                    x_row[...,t:t+1,:,:] = self.get_data_substep(
+                                                                x_row       [...,t:t+1,:,:], 
+                                                                data_row    [...,t:t+1,:,:],
+                                                                y0          [...,t:t+1,:,:], 
+                                                                y0_inv      [...,t:t+1,:,:], 
+                                                                lgw_mask    [...,t:t+1,:,:], 
+                                                                lgw_mask_inv[...,t:t+1,:,:], 
+                                                                step, 
+                                                                sigma_row, 
+                                                                frame_target)
+        
+        return x_row
+
+
+
+
+    @torch.no_grad
+    def get_data_substep(self,
+                        x_row         : Tensor,
+                        data_row      : Tensor,
+                        y0            : Tensor,
+                        y0_inv        : Tensor,
+                        lgw_mask      : Tensor,
+                        lgw_mask_inv  : Tensor,
+                        step          : int,
+                        sigma_row     : Tensor,
+                        frame_target  : float = 1.0,
+                        ):
+
+        if self.guide_mode in {"data", "data_projection"}:
+            data_targets = self.EO("data_targets", [1.0])
+            step_target = step if len(data_targets) > step else len(data_targets)-1
+            
+            cossim_target = frame_target * data_targets[step_target]
+            
+            if self.HAS_LATENT_GUIDE:
+                if self.guide_mode == "data_projection":
+                    d_collinear_d_lerp = get_collinear(data_row, y0)  
+                    d_lerp_ortho_d     = get_orthogonal(y0, data_row)  
+                    y0                 = d_collinear_d_lerp + d_lerp_ortho_d
+                    
+                if   cossim_target == 1.0:
+                    d_slerped = y0
+                elif cossim_target == 0.0:
+                    d_slerped = data_row
+                else:
+                    y0_pearsim    = get_pearson_similarity(data_row, y0,     mask=self.mask)
+                    slerp_weight  = get_slerp_weight_for_cossim(y0_pearsim.item(), cossim_target)
+                    d_slerped     = slerp_tensor(slerp_weight, data_row, y0) # lgw_mask * slerp_weight same as using mask below
+                    
+                """if self.guide_mode == "data_projection":
+                    d_collinear_d_lerp = get_collinear(data_row, d_slerped)  
+                    d_lerp_ortho_d     = get_orthogonal(d_slerped, data_row)  
+                    d_slerped          = d_collinear_d_lerp + d_lerp_ortho_d"""
+                    
+                x_row = x_row + lgw_mask     * (self.sigma_max - sigma_row) * (d_slerped - data_row) 
+
+                
+            if self.HAS_LATENT_GUIDE_INV:
+                if self.guide_mode == "data_projection":
+                    d_collinear_d_lerp = get_collinear(data_row, y0_inv)  
+                    d_lerp_ortho_d     = get_orthogonal(y0_inv, data_row)  
+                    y0_inv             = d_collinear_d_lerp + d_lerp_ortho_d
+                
+                if   cossim_target == 1.0:
+                    d_slerped_inv = y0_inv
+                elif cossim_target == 0.0:
+                    d_slerped_inv = data_row
+                else:
+                    y0_pearsim    = get_pearson_similarity(data_row, y0_inv, mask=self.mask_inv)
+                    slerp_weight  = get_slerp_weight_for_cossim(y0_pearsim.item(), cossim_target)
+                    d_slerped_inv = slerp_tensor(slerp_weight, data_row, y0_inv)
+                    
+                """if self.guide_mode == "data_projection":
+                    d_collinear_d_lerp = get_collinear(data_row, d_slerped_inv)  
+                    d_lerp_ortho_d     = get_orthogonal(d_slerped_inv, data_row)  
+                    d_slerped_inv      = d_collinear_d_lerp + d_lerp_ortho_d"""
+                    
+                x_row = x_row + lgw_mask_inv * (self.sigma_max - sigma_row) * (d_slerped_inv - data_row) 
+
+                    
+        return x_row
+
+
+
+    @torch.no_grad
+    def process_guides_eps_substep(self,
+                                x_0           : Tensor,
+                                x_row         : Tensor,
+                                data_row      : Tensor,
+                                eps_row       : Tensor,
+                                step          : int,
+                                sigma         : Tensor,
+                                sigma_down    : Tensor,
+                                sigma_row     : Tensor,
+                                frame_targets : Optional[Tensor] = None,
+                                RK=None,
+                                ):
+
+        y0, y0_inv, lgw_mask, lgw_mask_inv = self.get_cossim_adjusted_lgw_masks(data_row, step)
+        
+        if not (lgw_mask.any() != 0 or lgw_mask_inv.any() != 0):  # cossim score too similar! deactivate guide for this step
+            return eps_row
+
+        if data_row.ndim == 5 and frame_targets is None:
+            frame_targets = self.EO("frame_targets", [1.0])
+            
+        eps_y0     = torch.zeros_like(x_0)
+        eps_y0_inv = torch.zeros_like(x_0)
+        
+        if self.HAS_LATENT_GUIDE:
+            eps_y0     = RK.get_guide_epsilon(x_0, x_row, y0,     sigma, sigma_row, sigma_down, None)  
+            
+        if self.HAS_LATENT_GUIDE_INV:
+            eps_y0_inv = RK.get_guide_epsilon(x_0, x_row, y0_inv, sigma, sigma_row, sigma_down, None)  
+
+        if self.guide_mode in {"epsilon", "epsilon_projection"}:
+            if frame_targets is None:
+                eps_row = self.get_eps_substep(eps_row, eps_y0, eps_y0_inv, lgw_mask, lgw_mask_inv, step, sigma_row)
+            else:
+                t_dim = x_row.shape[-3]
+                for t in range(t_dim): #temporal dimension
+                    frame_target = frame_targets[t] if len(frame_targets) > t else frame_targets[-1]
+                    eps_row[...,t:t+1,:,:] = self.get_eps_substep(
+                                                                eps_row     [...,t:t+1,:,:],
+                                                                eps_y0      [...,t:t+1,:,:], 
+                                                                eps_y0_inv  [...,t:t+1,:,:], 
+                                                                lgw_mask    [...,t:t+1,:,:], 
+                                                                lgw_mask_inv[...,t:t+1,:,:], 
+                                                                step, 
+                                                                sigma_row, 
+                                                                frame_target)
+                    
+        return eps_row
+
+
+
+    @torch.no_grad
+    def get_eps_substep(self,
+                        eps_row       : Tensor,
+                        eps_y0        : Tensor,
+                        eps_y0_inv    : Tensor,
+                        lgw_mask      : Tensor,
+                        lgw_mask_inv  : Tensor,
+                        step          : int,
+                        sigma_row     : Tensor,
+                        frame_target  : float = 1.0,
+                        ):
+
+        if self.guide_mode in {"epsilon", "epsilon_projection"}:
+            eps_targets = self.EO("eps_targets", [1.0])
+            step_target = step if len(eps_targets) > step else len(eps_targets)-1
+            
+            cossim_target = frame_target * eps_targets[step_target]
+            
+            if self.HAS_LATENT_GUIDE:
+                if self.guide_mode == "epsilon_projection":
+                    d_collinear_d_lerp = get_collinear(eps_row, eps_y0)  
+                    d_lerp_ortho_d     = get_orthogonal(eps_y0, eps_row)  
+                    eps_y0             = d_collinear_d_lerp + d_lerp_ortho_d
+                    
+                if   cossim_target == 1.0:
+                    d_slerped = eps_y0
+                elif cossim_target == 0.0:
+                    d_slerped = eps_row
+                else:
+                    y0_pearsim    = get_pearson_similarity(eps_row, eps_y0,     mask=self.mask)
+                    slerp_weight  = get_slerp_weight_for_cossim(y0_pearsim.item(), cossim_target)
+                    d_slerped     = slerp_tensor(slerp_weight, eps_row, eps_y0) # lgw_mask * slerp_weight same as using mask below
+                    
+                """if self.guide_mode == "data_projection":
+                    d_collinear_d_lerp = get_collinear(data_row, d_slerped)  
+                    d_lerp_ortho_d     = get_orthogonal(d_slerped, data_row)  
+                    d_slerped          = d_collinear_d_lerp + d_lerp_ortho_d"""
+                    
+                eps_row = eps_row + lgw_mask * (d_slerped - eps_row) 
+
+                
+            if self.HAS_LATENT_GUIDE_INV:
+                if self.guide_mode == "epsilon_projection":
+                    d_collinear_d_lerp = get_collinear(eps_row, eps_y0_inv)  
+                    d_lerp_ortho_d     = get_orthogonal(eps_y0_inv, eps_row)  
+                    eps_y0_inv             = d_collinear_d_lerp + d_lerp_ortho_d
+                
+                if   cossim_target == 1.0:
+                    d_slerped_inv = eps_y0_inv
+                elif cossim_target == 0.0:
+                    d_slerped_inv = eps_row
+                else:
+                    y0_pearsim    = get_pearson_similarity(eps_row, eps_y0_inv, mask=self.mask_inv)
+                    slerp_weight  = get_slerp_weight_for_cossim(y0_pearsim.item(), cossim_target)
+                    d_slerped_inv = slerp_tensor(slerp_weight, eps_row, eps_y0_inv)
+                    
+                """if self.guide_mode == "data_projection":
+                    d_collinear_d_lerp = get_collinear(data_row, d_slerped_inv)  
+                    d_lerp_ortho_d     = get_orthogonal(d_slerped_inv, data_row)  
+                    d_slerped_inv      = d_collinear_d_lerp + d_lerp_ortho_d"""
+                    
+                eps_row = eps_row + lgw_mask_inv * (d_slerped_inv - eps_row) 
+
+        return eps_row
+
+
+
+
+    @torch.no_grad
+    def get_eps_substep_bagel(self,
+                                x_0           : Tensor,
+                                x_            : Tensor,
+                                eps_          : Tensor,
+                                data_         : Tensor,
+                                row           :  int,
+                                step          :  int,
+                                sigma         : Tensor,
+                                sigma_next    : Tensor,
+                                sigma_down    : Tensor,
+                                s_            : Tensor,
+                                epsilon_scale :  float,
+                                RK,
+                                ):
+
+        y0, y0_inv, lgw_mask, lgw_mask_inv = self.get_cossim_adjusted_lgw_masks(data_[row], step)
+        
+        if not (lgw_mask.any() != 0 or lgw_mask_inv.any() != 0):  # cossim score too similar! deactivate guide for this step
+            return eps_, x_ 
+
+        elif (self.UNSAMPLE or self.guide_mode in {"epsilon", "epsilon_cw", "epsilon_projection", "epsilon_projection_cw"}) and (self.lgw[step] > 0 or self.lgw_inv[step] > 0):
+            if sigma_down < sigma   or   s_[row] < RK.sigma_max:
+                                
+                eps_substep_guide     = torch.zeros_like(x_0)
+                eps_substep_guide_inv = torch.zeros_like(x_0)
+                
+                if self.HAS_LATENT_GUIDE:
+                    eps_substep_guide     = RK.get_guide_epsilon(x_0, x_[row], y0,     sigma, s_[row], sigma_down, epsilon_scale)  
+                    
+                if self.HAS_LATENT_GUIDE_INV:
+                    eps_substep_guide_inv = RK.get_guide_epsilon(x_0, x_[row], y0_inv, sigma, s_[row], sigma_down, epsilon_scale)  
+
+                tol_value = self.EO("tol", -1.0)
+                if tol_value >= 0:
+                    for b, c in itertools.product(range(x_0.shape[0]), range(x_0.shape[1])):
+                        current_diff       = torch.norm(data_[row][b][c] - y0    [b][c]) 
+                        current_diff_inv   = torch.norm(data_[row][b][c] - y0_inv[b][c]) 
+                        
+                        lgw_scaled         = torch.nan_to_num(1-(tol_value/current_diff),     0)
+                        lgw_scaled_inv     = torch.nan_to_num(1-(tol_value/current_diff_inv), 0)
+                        
+                        lgw_tmp            = min(self.lgw[step]    , lgw_scaled)
+                        lgw_tmp_inv        = min(self.lgw_inv[step], lgw_scaled_inv)
+
+                        lgw_mask_clamp     = torch.clamp(lgw_mask,     max=lgw_tmp)
+                        lgw_mask_clamp_inv = torch.clamp(lgw_mask_inv, max=lgw_tmp_inv)
+
+                        eps_[row][b][c]    = eps_[row][b][c] + lgw_mask_clamp[b][c] * (eps_substep_guide[b][c] - eps_[row][b][c]) + lgw_mask_clamp_inv[b][c] * (eps_substep_guide_inv[b][c] - eps_[row][b][c])
+                
+                elif self.guide_mode in {"epsilon"}: 
+                    #eps_[row] = slerp(lgw_mask.mean().item(), eps_[row], eps_substep_guide)
+                    if self.EO("slerp_epsilon_guide"):
+                        if eps_substep_guide.sum() != 0:
+                            eps_[row] = slerp_tensor(lgw_mask, eps_[row], eps_substep_guide)
+                        if eps_substep_guide_inv.sum() != 0:
+                            eps_[row] = slerp_tensor(lgw_mask_inv, eps_[row], eps_substep_guide_inv)
+                    else:
+                        eps_[row] = eps_[row] + lgw_mask * (eps_substep_guide - eps_[row]) + lgw_mask_inv * (eps_substep_guide_inv - eps_[row])
+                    
+                    #eps_[row] = slerp_barycentric(eps_[row].norm(), eps_substep_guide.norm(), eps_substep_guide_inv.norm(), 1-lgw_mask-lgw_mask_inv, lgw_mask, lgw_mask_inv)
+                    
+                elif self.guide_mode in {"epsilon_projection"}:
+                    if self.EO("slerp_epsilon_guide"):
+                        if eps_substep_guide.sum() != 0:
+                            eps_row_slerp = slerp_tensor(self.mask, eps_[row], eps_substep_guide)
+                        if eps_substep_guide_inv.sum() != 0:
+                            eps_row_slerp = slerp_tensor((1-self.mask), eps_row_slerp, eps_substep_guide_inv)
+
+                        eps_collinear_eps_slerp = get_collinear(eps_[row], eps_row_slerp)
+                        eps_slerp_ortho_eps     = get_orthogonal(eps_row_slerp, eps_[row])
+
+                        eps_sum                = eps_collinear_eps_slerp + eps_slerp_ortho_eps
+
+                        eps_[row] = slerp_tensor(lgw_mask, eps_[row] , eps_sum)
+                        eps_[row] = slerp_tensor(lgw_mask_inv, eps_[row], eps_sum)
+                    else:
+                        eps_row_lerp           = eps_[row]   +   self.mask * (eps_substep_guide-eps_[row])   +   (1-self.mask) * (eps_substep_guide_inv-eps_[row])
+
+                        eps_collinear_eps_lerp = get_collinear(eps_[row], eps_row_lerp)
+                        eps_lerp_ortho_eps     = get_orthogonal(eps_row_lerp, eps_[row])
+
+                        eps_sum                = eps_collinear_eps_lerp + eps_lerp_ortho_eps
+
+                        eps_[row]              = eps_[row] + lgw_mask * (eps_sum - eps_[row]) + lgw_mask_inv * (eps_sum - eps_[row])
+
+                    
+                elif self.guide_mode in {"epsilon_cw", "epsilon_projection_cw"}:
+                    eps_ = self.process_channelwise(x_0,
+                                                    eps_,
+                                                    data_,
+                                                    row,
+                                                    eps_substep_guide,
+                                                    eps_substep_guide_inv,
+                                                    y0,
+                                                    y0_inv,
+                                                    lgw_mask,
+                                                    lgw_mask_inv,
+                                                    use_projection = self.guide_mode == "epsilon_projection_cw",
+                                                    channelwise    = True
+                                                    )
+
+        temporal_smoothing = self.EO("temporal_smoothing", 0.0)
+        if temporal_smoothing > 0:
+            eps_[row] = apply_temporal_smoothing(eps_[row], temporal_smoothing)
+        
+        return eps_, x_
+
+
+
+
+    @torch.no_grad
     def process_guides_substep(self,
                                 x_0           : Tensor,
                                 x_            : Tensor,
@@ -644,7 +991,8 @@ class LatentGuide:
         if not (lgw_mask.any() != 0 or lgw_mask_inv.any() != 0):  # cossim score too similar! deactivate guide for this step
             return eps_, x_ 
 
-        eps_orig = eps_.clone()
+        if self.EO(["substep_eps_ch_mean_std", "substep_eps_ch_mean", "substep_eps_ch_std", "substep_eps_mean_std", "substep_eps_mean", "substep_eps_std"]):
+            eps_orig = eps_.clone()
         
         if self.EO("dynamic_guides_mean_std"):
             y_shift, y_inv_shift = normalize_latent([y0, y0_inv], [data_, data_])
@@ -659,14 +1007,15 @@ class LatentGuide:
                 y0_inv = y_inv_shift
 
 
-        if "data" == self.guide_mode:
+
+        if "data_old" == self.guide_mode:
             y0_tmp = y0.clone()
             if self.HAS_LATENT_GUIDE:
                 y0_tmp = (1-lgw_mask) * data_[row] + lgw_mask * y0
                 y0_tmp = (1-lgw_mask_inv) * y0_tmp + lgw_mask_inv * y0_inv
             x_[row+1] = y0_tmp + eps_[row]
             
-        if self.guide_mode == "data_projection":
+        if self.guide_mode == "data_old_projection":
 
             d_lerp             = data_[row]   +   lgw_mask * (y0-data_[row])   +   lgw_mask_inv * (y0_inv-data_[row])
             
@@ -856,7 +1205,7 @@ class LatentGuide:
 
 
     @torch.no_grad
-    def process_guides_poststep(self, x:Tensor, denoised:Tensor, eps:Tensor, step:int) -> Tuple[Tensor, Tensor, Tensor]:
+    def process_guides_poststep(self, x:Tensor, denoised:Tensor, eps:Tensor, data:Tensor, sigma_curr:Tensor, step:int) -> Tuple[Tensor, Tensor, Tensor]:
         x_orig = x.clone()
         mean_weight = self.EO("mean_weight", 0.01)
 
@@ -955,6 +1304,8 @@ class LatentGuide:
                     denoised_shifted = normalize_latent(denoised_shifted, denoised, mean=False, channelwise=False)
 
                 x = denoised_shifted + eps
+                
+
 
         if self.EO("poststep_x_ch_mean_std"):
             x = normalize_latent(x, x_orig)
@@ -1020,7 +1371,7 @@ def prepare_mask(x, mask, LGW_MASK_RESCALE_MIN) -> tuple[torch.Tensor, bool]:
     target_width = x.shape[-1]
 
     spatial_mask = None
-    if x.dim() == 5 and mask.shape[0] > 1 and mask.ndim < 4:
+    if x.ndim == 5 and mask.shape[0] > 1 and mask.ndim < 4:
         target_frames = x.shape[-3]
         spatial_mask = mask.unsqueeze(0).unsqueeze(0)  # [B, H, W] -> [1, 1, B, H, W]
         spatial_mask = F.interpolate(spatial_mask, 
@@ -1028,7 +1379,7 @@ def prepare_mask(x, mask, LGW_MASK_RESCALE_MIN) -> tuple[torch.Tensor, bool]:
                                     mode='trilinear', 
                                     align_corners=False)  # [1, 1, F, H, W]
         repeat_shape = [1]  # batch
-        for i in range(1, x.dim() - 3):
+        for i in range(1, x.ndim - 3):
             repeat_shape.append(x.shape[i])
         repeat_shape.extend([1, 1, 1])  # frames, height, width
     elif mask.ndim == 4: #temporal mask batch
@@ -1040,11 +1391,11 @@ def prepare_mask(x, mask, LGW_MASK_RESCALE_MIN) -> tuple[torch.Tensor, bool]:
         spatial_mask = mask.unsqueeze(1)
         spatial_mask = F.interpolate(spatial_mask, size=(target_height, target_width), mode='bilinear', align_corners=False)
 
-        while spatial_mask.dim() < x.dim():
+        while spatial_mask.ndim < x.ndim:
             spatial_mask = spatial_mask.unsqueeze(2)
         
         repeat_shape = [1]  # batch
-        for i in range(1, x.dim() - 2):
+        for i in range(1, x.ndim - 2):
             repeat_shape.append(x.shape[i])
         repeat_shape.extend([1, 1])  # height and width
 
@@ -1055,7 +1406,7 @@ def prepare_mask(x, mask, LGW_MASK_RESCALE_MIN) -> tuple[torch.Tensor, bool]:
     return mask, LGW_MASK_RESCALE_MIN
     
 def apply_temporal_smoothing(tensor, temporal_smoothing):
-    if temporal_smoothing <= 0 or tensor.dim() != 5:
+    if temporal_smoothing <= 0 or tensor.ndim != 5:
         return tensor
 
     kernel_size = 5
@@ -1348,76 +1699,7 @@ def noise_cossim_guide_eps_tiled(x_0, x_list, y0, noise_list, cossim_mode="forwa
 
 
 
-def get_collinear(x, y):
 
-    y_flat = y.view(y.size(0), -1).clone()
-    x_flat = x.view(x.size(0), -1).clone()
-
-    y_flat /= y_flat.norm(dim=-1, keepdim=True)
-    x_proj_y = torch.sum(x_flat * y_flat, dim=-1, keepdim=True) * y_flat
-
-    return x_proj_y.view_as(x)
-
-
-def get_orthogonal(x, y):
-
-    y_flat = y.view(y.size(0), -1).clone()
-    x_flat = x.view(x.size(0), -1).clone()
-
-    y_flat /= y_flat.norm(dim=-1, keepdim=True)
-    x_proj_y = torch.sum(x_flat * y_flat, dim=-1, keepdim=True) * y_flat
-    
-    x_ortho_y = x_flat - x_proj_y 
-
-    return x_ortho_y.view_as(x)
-
-
-
-def get_orthogonal_noise_from_channelwise(*refs, max_iter=500, max_score=1e-15):
-    noise, *refs = refs
-    noise_tmp = noise.clone()
-    #b,c,h,w = noise.shape
-    if (noise.dim() == 4):
-        b,ch,h,w = noise.shape
-    elif (noise.dim() == 5):
-        b,ch,t,h,w = noise.shape
-    
-    for i in range(max_iter):
-        noise_tmp = gram_schmidt_channels_optimized(noise_tmp, *refs)
-        
-        cossim_scores = []
-        for ref in refs:
-            #for c in range(noise.shape[-3]):
-            for c in range(ch):
-                cossim_scores.append(get_cosine_similarity(noise_tmp[0][c], ref[0][c]).abs())
-            cossim_scores.append(get_cosine_similarity(noise_tmp[0], ref[0]).abs())
-            
-        if max(cossim_scores) < max_score:
-            break
-    
-    return noise_tmp
-
-
-
-def gram_schmidt_channels_optimized(A, *refs):
-    if (A.dim() == 4):
-        b,c,h,w = A.shape
-    elif (A.dim() == 5):
-        b,c,t,h,w = A.shape
-
-    A_flat = A.view(b, c, -1)  
-    
-    for ref in refs:
-        ref_flat = ref.view(b, c, -1).clone()  
-
-        ref_flat /= ref_flat.norm(dim=-1, keepdim=True) 
-
-        proj_coeff = torch.sum(A_flat * ref_flat, dim=-1, keepdim=True)  
-        projection = proj_coeff * ref_flat 
-
-        A_flat -= projection
-
-    return A_flat.view_as(A)
 
 
 
@@ -1471,6 +1753,9 @@ class NoiseStepHandlerOSDE:
         noise = get_orthogonal_noise_from_channelwise(*params, max_iter=max_iter, max_score=max_score)
         
         return noise
+
+
+
 
 
 # NOTE: NS AND SUBSTEP ADDED!
@@ -1598,148 +1883,4 @@ def get_masked_epsilon_projection(x_0, x_, eps_, y0, y0_inv, s_, row, row_offset
     lgw_mask, lgw_mask_inv = LG.get_masks_for_step(step)
     eps_substep_guide = eps_[row] + lgw_mask * (eps_sum - eps_[row]) + lgw_mask_inv * (eps_sum - eps_[row])
     return eps_substep_guide
-
-
-
-def slerp(val, low, high):
-    low_norm = low/torch.norm(low, dim=1, keepdim=True)
-    high_norm = high/torch.norm(high, dim=1, keepdim=True)
-    dot = (low_norm*high_norm).sum(1)
-
-    if dot.mean() > 0.9995:
-        return low * val + high * (1 - val)
-
-    omega = torch.acos(dot)
-    so = torch.sin(omega)
-    res = (torch.sin((1.0-val)*omega)/so).unsqueeze(1)*low + (torch.sin(val*omega)/so).unsqueeze(1) * high
-    return res
-
-
-def slerp_tensor(val: torch.Tensor, low: torch.Tensor, high: torch.Tensor, dim=-3) -> torch.Tensor:
-    #dim = (2,3)
-    if low.ndim >= 4 and low.shape[-3] > 1:
-        dim=-3
-    elif low.ndim == 2:
-        dim=(-2,-1)
-        
-    low_norm = low / (torch.norm(low, dim=dim, keepdim=True))
-    high_norm = high / (torch.norm(high, dim=dim, keepdim=True))
-    
-    dot = (low_norm * high_norm).sum(dim=dim, keepdim=True).clamp(-1.0, 1.0)
-    
-    #near = ~(-0.9995 < dot < 0.9995) #dot > 0.9995 or dot < -0.9995
-    near = dot > 0.9995
-    opposite = dot < -0.9995
-
-    condition = torch.logical_or(near, opposite)
-    
-    omega = torch.acos(dot)
-    so = torch.sin(omega)
-
-    if val.dim() < low.dim():
-        val = val.unsqueeze(dim)
-    
-    factor_low = torch.sin((1 - val) * omega) / so
-    factor_high = torch.sin(val * omega) / so
-
-    res = factor_low * low + factor_high * high
-    res = torch.where(condition, low * (1 - val) + high * val, res)
-    return res
-
-
-
-
-
-# pytorch slerp implementation from https://gist.github.com/Birch-san/230ac46f99ec411ed5907b0a3d728efa
-from torch import FloatTensor, LongTensor, Tensor, Size, lerp, zeros_like
-from torch.linalg import norm
-
-# adapted to PyTorch from:
-# https://gist.github.com/dvschultz/3af50c40df002da3b751efab1daddf2c
-# most of the extra complexity is to support:
-# - many-dimensional vectors
-# - v0 or v1 with last dim all zeroes, or v0 ~colinear with v1
-#   - falls back to lerp()
-#   - conditional logic implemented with parallelism rather than Python loops
-# - many-dimensional tensor for t
-#   - you can ask for batches of slerp outputs by making t more-dimensional than the vectors
-#   -   slerp(
-#         v0:   torch.Size([2,3]),
-#         v1:   torch.Size([2,3]),
-#         t:  torch.Size([4,1,1]), 
-#       )
-#   - this makes it interface-compatible with lerp()
-
-#def slerp(v0: FloatTensor, v1: FloatTensor, t: float|FloatTensor, DOT_THRESHOLD=0.9995):
-
-from torch import FloatTensor, LongTensor, Tensor, Size, lerp, zeros_like
-from torch.linalg import norm
-
-def slerp_tensor2(t: torch.Tensor, v0: torch.Tensor, v1: torch.Tensor, DOT_THRESHOLD=0.9995, dim=-1) -> torch.Tensor:
-
-    '''
-    Spherical linear interpolation
-    Args:
-        v0: Starting vector
-        v1: Final vector
-        t: Float value between 0.0 and 1.0
-        DOT_THRESHOLD: Threshold for considering the two vectors as
-        colinear. Not recommended to alter this.
-    Returns:
-        Interpolation vector between v0 and v1
-    '''
-
-    assert v0.shape == v1.shape, "shapes of v0 and v1 must match"
-    v0_shape = v0.shape
-    if v0.ndim == 2:
-        v0 = v0.unsqueeze(0).unsqueeze(0)
-        v1 = v1.unsqueeze(0).unsqueeze(0)
-    # Normalize the vectors to get the directions and angles
-    v0_norm: FloatTensor = norm(v0, dim=dim)
-    v1_norm: FloatTensor = norm(v1, dim=dim)
-    
-    v0_normed: FloatTensor = v0 / v0_norm.unsqueeze(-1)
-    v1_normed: FloatTensor = v1 / v1_norm.unsqueeze(-1)
-    
-    # Dot product with the normalized vectors
-    dot: FloatTensor = (v0_normed * v1_normed).sum(-1)
-    dot_mag: FloatTensor = dot.abs()
-    
-    # if dp is NaN, it's because the v0 or v1 row was filled with 0s
-    # If absolute value of dot product is almost 1, vectors are ~colinear, so use lerp
-    gotta_lerp: LongTensor = dot_mag.isnan() | (dot_mag > DOT_THRESHOLD)
-    can_slerp: LongTensor = ~gotta_lerp
-    
-    t_batch_dim_count: int = max(0, t.dim()-v0.dim()) if isinstance(t, Tensor) else 0
-    t_batch_dims: Size = t.shape[:t_batch_dim_count] if isinstance(t, Tensor) else Size([])
-    out: FloatTensor = zeros_like(v0.expand(*t_batch_dims, *[-1]*v0.dim()))
-    
-    # if no elements are lerpable, our vectors become 0-dimensional, preventing broadcasting
-    if gotta_lerp.any():
-        lerped: FloatTensor = lerp(v0, v1, t)
-    
-        out: FloatTensor = lerped.where(gotta_lerp.unsqueeze(-1), out)
-    
-    # if no elements are slerpable, our vectors become 0-dimensional, preventing broadcasting
-    if can_slerp.any():
-    
-        # Calculate initial angle between v0 and v1
-        theta_0: FloatTensor = dot.arccos().unsqueeze(-1)
-        sin_theta_0: FloatTensor = theta_0.sin()
-        
-        #t = torch.asin(t * sin_theta_0) / theta_0
-        
-        # Angle at timestep t
-        theta_t: FloatTensor = theta_0 * t
-        sin_theta_t: FloatTensor = theta_t.sin()
-        # Finish the slerp algorithm
-        s0: FloatTensor = (theta_0 - theta_t).sin() / sin_theta_0
-        s1: FloatTensor = sin_theta_t / sin_theta_0
-        slerped: FloatTensor = s0 * v0 + s1 * v1
-    
-        out: FloatTensor = slerped.where(can_slerp.unsqueeze(-1), out)
-    
-    out = out.view(v0_shape)
-    return out
-
 

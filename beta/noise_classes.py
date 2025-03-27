@@ -479,7 +479,7 @@ class WaveletNoiseGenerator(NoiseGenerator):
         # orig_h, orig_w = h, w
 
         # noise for spatial dimensions only
-        coeffs = pywt.wavedecn(torch.randn(self.size, dtype=self.dtype, layout=self.layout, device=self.device, generator=self.generator).to(self.device), wavelet=self.wavelet, mode='periodization')
+        coeffs = pywt.wavedecn(torch.randn(self.size, dtype=self.dtype, layout=self.layout, device=self.device, generator=self.generator).to('cpu'), wavelet=self.wavelet, mode='periodization')
         noise = pywt.waverecn(coeffs, wavelet=self.wavelet, mode='periodization')
         noise_tensor = torch.tensor(noise, dtype=self.dtype, device=self.device)
 

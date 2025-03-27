@@ -3,17 +3,17 @@ from torch import Tensor
 from tqdm.auto import trange
 import gc
 from typing import Optional, Callable, Tuple, Dict, Any, Union
+import math
 
 from ..res4lyf              import RESplain
 from ..helper               import ExtraOptions, FrameWeightsManager
-from ..latents              import lagrange_interpolation, get_collinear, get_orthogonal, get_cosine_similarity
+from ..latents              import lagrange_interpolation, get_collinear, get_orthogonal, get_cosine_similarity, get_slerp_weight_for_cossim, get_slerp_ratio, slerp_tensor
 
 from .rk_method_beta        import RK_Method_Beta
 from .rk_noise_sampler_beta import RK_NoiseSampler
 from .rk_guide_func_beta    import LatentGuide
 from .phi_functions         import Phi
 from .constants             import MAX_STEPS, GUIDE_MODE_NAMES_PSEUDOIMPLICIT
-
 
 def init_implicit_sampling(
         RK             : RK_Method_Beta,
@@ -215,6 +215,10 @@ def sample_rk_beta(
         sde_mask                      : Optional[Tensor]   = None,
         
         batch_num                     : int                = 0,
+        
+        DATA_LURE                     : bool               = False,
+        EPS_LURE                      : bool               = False,
+
 
         extra_options                 : str                = "",
         
@@ -285,7 +289,7 @@ def sample_rk_beta(
     noise_boost_step     = EO("noise_boost_step",     0.0)
     noise_boost_substep  = EO("noise_boost_substep",  0.0)
     
-    
+    eps_lure_, x_lure_ = None, None
 
     # SETUP SAMPLER
     if implicit_sampler_name not in ("use_explicit", "none"):
@@ -374,6 +378,11 @@ def sample_rk_beta(
     if EO("fedit") or EO("zedit"):
         #fedit_noise = torch.randn_like(LG.y0)
         fedit_noise = x.clone()
+        
+    if EO("DATA_LURE"):
+        DATA_LURE = True
+    if EO("EPS_LURE"):
+        EPS_LURE = True
 
     # BEGIN SAMPLING LOOP    
     num_steps = len(sigmas[start_step:])-2 if sigmas[-1] == 0 else len(sigmas[start_step:])-1
@@ -407,13 +416,13 @@ def sample_rk_beta(
             else:
                 RK.extra_args['model_options']['transformer_options']['regional_conditioning_mask_orig'] = None
         
-        epsilon_scale   = float(epsilon_scales[step]) if epsilon_scales   is not None else None
-        eta             = etas                [step]  if etas             is not None else eta
-        eta_substep     = etas_substep        [step]  if etas_substep     is not None else eta_substep
-        s_noise         = s_noises            [step]  if s_noises         is not None else s_noise
-        s_noise_substep = s_noises_substep    [step]  if s_noises_substep is not None else s_noise_substep
-        noise_scaling_eta = noise_scaling_etas[step]  if noise_scaling_etas is not None else noise_scaling_eta
-        noise_scaling_weight = noise_scaling_weights[step] if noise_scaling_weights is not None else noise_scaling_weight
+        epsilon_scale        = float(epsilon_scales [step]) if epsilon_scales        is not None else None
+        eta                  = etas                 [step]  if etas                  is not None else eta
+        eta_substep          = etas_substep         [step]  if etas_substep          is not None else eta_substep
+        s_noise              = s_noises             [step]  if s_noises              is not None else s_noise
+        s_noise_substep      = s_noises_substep     [step]  if s_noises_substep      is not None else s_noise_substep
+        noise_scaling_eta    = noise_scaling_etas   [step]  if noise_scaling_etas    is not None else noise_scaling_eta
+        noise_scaling_weight = noise_scaling_weights[step]  if noise_scaling_weights is not None else noise_scaling_weight
         
         NS.set_sde_step(sigma, sigma_next, eta, overshoot, s_noise)
         RK.set_coeff(rk_type, NS.h, c1, c2, c3, step, sigmas, NS.sigma_down)
@@ -475,7 +484,7 @@ def sample_rk_beta(
         
         x_[0] = x.clone()
         # PRENOISE METHOD HERE!
-        x_0 = x_[0].clone()
+        x_0      = x_[0].clone()
         x_0_orig = x_0.clone()
         
         # RECYCLE STAGES FOR MULTISTEP
@@ -533,7 +542,6 @@ def sample_rk_beta(
                             x_0, x_, eps_, x_row_pseudoimplicit, sub_sigma_pseudoimplicit = LG.process_pseudoimplicit_guides_substep(x_0, x_, eps_, eps_prev_, data_, denoised_prev, row, step, sigmas, NS, RK, \
                                                                                                                         pseudoimplicit_row_weights, pseudoimplicit_step_weights, full_iter, BONGMATH)
                         
-
                         # PREPARE MODEL CALL
                         if LG.guide_mode in GUIDE_MODE_NAMES_PSEUDOIMPLICIT and (step > 0 or not SKIP_PSEUDO) and (LG.lgw[step] > 0 or LG.lgw_inv[step] > 0) and x_row_pseudoimplicit is not None:
 
@@ -646,7 +654,7 @@ def sample_rk_beta(
 
 
                         lying_eps_row_factor = 1.0
-                        # MODEL CALL
+                        # MODEL CALL MODEL CALL MODEL CALL MODEL CALL MODEL CALL MODEL CALL MODEL CALL MODEL CALL MODEL CALL MODEL CALL MODEL CALL MODEL CALL MODEL CALL MODEL CALL MODEL CALL MODEL CALL MODEL CALL MODEL CALL
                         if RK.IMPLICIT   and   row == 0   and   (EO("implicit_lazy_recycle_first_model_call_at_start")   or   EO("radaucycle")  or RK.C[0] == 0.0):
                             pass
                         else: 
@@ -660,9 +668,8 @@ def sample_rk_beta(
                             if noise_scaling_type == "model"       and noise_scaling_weight != 0 and noise_scaling_eta > 0:
                                 s_tmp = lying_s_[row]
                                 if RK.multistep_stages > 0:
-                                    s_tmp = lying_sd #prev_lying_sd
-                                #prev_lying_sd = lying_sd
-                                #s_tmp = s_tmp + noise_scaling_substep * (lying_s_[row]   -   s_tmp)
+                                    s_tmp = lying_sd
+
                             fedit_end_step = EO("zedit_end_step", -1)
                             if step < fedit_end_step:
                                 if EO("zedit"):
@@ -688,19 +695,20 @@ def sample_rk_beta(
                                     #if LG.y0.ndim == 5:
                                     #    x_tmp[:,:,0:1] = x_tmp_orig[:,:,0:1] 
                                     x_[row]       = x_tmp
-                                
+                            
                             if step < EO("direct_pre_pseudo_guide", 0) and step > 0:
                                 for i_pseudo in range(EO("direct_pre_pseudo_guide_iter", 1)):
-                                    x_tmp = x_tmp + EO("direct_pre_pseudo_guide_weight", 0.5) * (1 - s_tmp) * (LG.y0 - denoised)
+                                    x_tmp += LG.lgw[step] * LG.mask * (NS.sigma_max - s_tmp) * (LG.y0 - denoised)     +     LG.lgw_inv[step] * LG.mask_inv * (NS.sigma_max - s_tmp) * (LG.y0_inv - denoised)
                                     eps_[row], data_[row] = RK(x_tmp, s_tmp, x_0, sigma)
+                            
+                            # MODEL CALL MODEL CALL MODEL CALL MODEL CALL MODEL CALL MODEL CALL MODEL CALL MODEL CALL MODEL CALL MODEL CALL MODEL CALL MODEL CALL MODEL CALL MODEL CALL MODEL CALL MODEL CALL MODEL CALL
                             
                             eps_[row], data_[row] = RK(x_tmp, s_tmp, x_0, sigma)
                             
-                            if step < EO("direct_pseudo_guide", 0):
-                                for i_pseudo in range(EO("direct_pseudo_guide_iter", 1)):
-                                    x_tmp = x_tmp + EO("direct_pseudo_guide_weight", 0.5) * (1 - s_tmp) * (LG.y0 - data_[row])
-                                    eps_[row], data_[row] = RK(x_tmp, s_tmp, x_0, sigma)
-                                
+                            if DATA_LURE:
+                                x_tmp = LG.process_guides_data_substep(x_tmp, data_[row], step, s_tmp)
+                                eps_[row], data_[row] = RK(x_tmp, s_tmp, x_0, sigma)
+                            
                             if step < fedit_end_step:
                                 if EO("fedit"):
                                     #eps_[row] -= eps_y
@@ -723,14 +731,6 @@ def sample_rk_beta(
                                     substep_noise_scaling_ratio = sigma_next/lying_sd                   #fails with resample?
                                 
                                 lying_eps_row_factor = (1 - noise_scaling_weight*(substep_noise_scaling_ratio-1))
-
-
-
-                            if eta_substep > 0 and row < RK.rows and EO("substep_noise_scaling"):    
-                                substep_noise_scaling_ratio = NS.s_[row+1]/NS.sub_sigma_down_eta
-                                eps_[row] *= 1 + EO("substep_noise_scaling",0.0)*(substep_noise_scaling_ratio-1)
-
-
 
 
 
@@ -793,14 +793,8 @@ def sample_rk_beta(
                             eps_, x_      = LG.process_guides_substep(x_0, x_, eps_,      data_, row, step, NS.sigma, NS.sigma_next, NS.sigma_down, NS.s_, epsilon_scale, RK)
                         if not EO("disable_guides_eps_prev_substep"):
                             eps_prev_, x_ = LG.process_guides_substep(x_0, x_, eps_prev_, data_, row, step, NS.sigma, NS.sigma_next, NS.sigma_down, NS.s_, epsilon_scale, RK)
+                        
 
-                        if EO("mean_eps_guide"):
-                            mean_eps_guide = EO("mean_eps_guide", 0.5)
-                            eps_row_mean = eps_[row] - eps_[row].mean(dim=(-2,-1), keepdim=True) + (LG.y0_inv - x_[row]).mean(dim=(-2,-1), keepdim=True)
-                            
-                            eps_[row] = LG.mask * eps_row_mean + (1 - LG.mask) * eps_[row]
-                            
-                        #if EO("mean_eps_guide_x_0"):
                         if LG.y0_mean is not None and LG.y0_mean.sum() != 0.0:
                             #mean_eps_guide = EO("mean_eps_guide_x_0", 0.5)
                             eps_row_mean = eps_[row] - eps_[row].mean(dim=(-2,-1), keepdim=True) + (LG.y0_mean - x_0).mean(dim=(-2,-1), keepdim=True)
@@ -810,40 +804,14 @@ def sample_rk_beta(
                             
                             eps_[row] = eps_[row] + LG.lgw_mean[step] * (eps_row_mean - eps_[row])
                             
-                            
-                        if EO("std_eps_guide_x_0"):
-                            std_eps_guide = EO("std_eps_guide_x_0", 0.5)
-                            eps_row_std = eps_[row] - eps_[row].std(dim=(-2,-1), keepdim=True) + (LG.y0_inv - x_0).std(dim=(-2,-1), keepdim=True)
-                            
-                            eps_[row] = LG.mask * eps_row_std + (1 - LG.mask) * eps_[row]
-                            
-                            
-                            
-                        if EO("mean_eps_tile"):
-                            mean_eps_tile  = EO("mean_eps_tile",      1.0)
-                            mean_tile_size = EO("mean_eps_tile_size", 8)
-                            from einops          import rearrange
-
-                            
-                            y0_tiled       = rearrange(LG.y0,     "b c (h t1) (w t2) -> (t1 t2) b c h w", t1=mean_tile_size, t2=mean_tile_size)
-                            eps_row_tiled  = rearrange(eps_[row], "b c (h t1) (w t2) -> (t1 t2) b c h w", t1=mean_tile_size, t2=mean_tile_size)
-                            x_row_tiled    = rearrange(x_  [row], "b c (h t1) (w t2) -> (t1 t2) b c h w", t1=mean_tile_size, t2=mean_tile_size)
-                            
-                            eps_row_tiled_mean = eps_row_tiled - eps_row_tiled.mean(dim=(-2,-1), keepdim=True) + (y0_tiled - x_row_tiled).mean(dim=(-2,-1), keepdim=True)
-                            eps_row_mean     = rearrange(eps_row_tiled_mean,     "(t1 t2) b c h w -> b c (h t1) (w t2)", t1=mean_tile_size, t2=mean_tile_size)
-                            
-                            eps_[row] = eps_[row] + mean_eps_tile * (eps_row_mean - eps_[row])
-                            
-                            
 
                         if (full_iter == 0 and diag_iter == 0)   or   EO("newton_iter_post_use_on_implicit_steps"):
                             x_, eps_ = RK.newton_iter(x_0, x_, eps_, eps_prev_, data_, NS.s_, row, NS.h, sigmas, step, "post")
 
 
-
                     # UPDATE
                     x_ = RK.update_substep(x_0, x_, eps_, eps_prev_, row, RK.row_offset, NS.h_new, NS.h_new_orig, lying_eps_row_factor=lying_eps_row_factor)   #modifies eps_[row] if lying_eps_row_factor != 1.0
-
+                    
                     x_[row+RK.row_offset] = NS.rebound_overshoot_substep(x_0, x_[row+RK.row_offset])
                     
                     if not RK.IMPLICIT and NS.noise_mode_sde_substep != "hard_sq":
@@ -904,9 +872,7 @@ def sample_rk_beta(
                             sde_mask = 1-sde_mask
                             dyn_scale = EO("dynamic_scaled_mean_inv_eps_mask", 2.0)
                             sde_mask = ((dyn_scale-1) + sde_mask) / dyn_scale
-                            
 
-                        
                         if EO("dynamic_tiled_mean_inv_eps_mask"):
                             mean_tile_size=EO("dynamic_tiled_mean_inv_eps_mask", 8)
                             from einops import rearrange
@@ -937,16 +903,17 @@ def sample_rk_beta(
                         if EO("keep_substep_means"):
                             x_[row+RK.row_offset] = x_[row+RK.row_offset] - x_[row+RK.row_offset].mean(dim=(-2,-1), keepdim=True) + x_means_per_substep
 
-                    if step < EO("direct_guide", 0):
-                        x_[row+RK.row_offset] = x_[row+RK.row_offset] + EO("direct_guide_weight", 0.5) * (1 - NS.s_[row]) * (LG.y0 - data_[row])
+
+
+                    if not DATA_LURE:
+                        x_[row+RK.row_offset] = LG.process_guides_data_substep(x_[row+RK.row_offset], data_[row], step, NS.s_[row])
 
                     if BONGMATH and NS.s_[row] > RK.sigma_min and NS.h < RK.sigma_max/2   and   (diag_iter == implicit_steps_diag or EO("enable_diag_explicit_bongmath_all"))   and not EO("disable_terminal_bongmath"):
                         if step == 0 and UNSAMPLE:
                             pass
                         elif full_iter == implicit_steps_full or not EO("disable_fully_explicit_bongmath_except_final"):
-                            if EO("convergelord"):
-                                x_0 = x_[0] = NS.sigma_from_to(x_0, x_[row+RK.row_offset], sigma, NS.s_[row+RK.row_offset+RK.multistep_stages], sigma)
                             x_0, x_, eps_ = RK.bong_iter(x_0, x_, eps_, eps_prev_, data_, sigma, NS.s_, row, RK.row_offset, NS.h, step)
+
                     
                     #progress_bar.update( round(1 / implicit_steps_total, 2) )
                     
@@ -959,7 +926,7 @@ def sample_rk_beta(
             eps = (x_0 - x_next) / (sigma - sigma_next)
             denoised = x_0 - sigma * eps
             
-            x_next = LG.process_guides_poststep(x_next, denoised, eps, step)
+            #x_next = LG.process_guides_poststep(x_next, denoised, eps, step)
             
             if EO("kill_step_sde_mask"):
                 sde_mask = None
@@ -1185,7 +1152,6 @@ def preview_callback(
     callback({'x': x, 'i': step, 'sigma': sigma, 'sigma_next': sigma_next, 'denoised': denoised_callback.to(torch.float32)}) if callback is not None else None
     
     return
-
 
 
 
