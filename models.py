@@ -28,6 +28,9 @@ from .sd35.mmdit import ReOpenAISignatureMMDITWrapper, ReJointBlock
 from comfy.ldm.aura.mmdit import MMDiT, DiTBlock, MMDiTBlock, SingleAttention, DoubleAttention
 from .aura.mmdit import ReMMDiT, ReDiTBlock, ReMMDiTBlock, ReSingleAttention, ReDoubleAttention
 
+from comfy.ldm.wan.model import WanAttentionBlock, WanI2VCrossAttention, WanModel, WanSelfAttention, WanT2VCrossAttention
+from .wan.model import ReWanAttentionBlock, ReWanI2VCrossAttention, ReWanModel, ReWanSelfAttention, ReWanT2VCrossAttention
+
 from .latents import get_orthogonal, get_cosine_similarity
 from .res4lyf import RESplain
 
@@ -41,6 +44,49 @@ def time_snr_shift_linear(alpha, t):
         return t
     return alpha * t / (1 + (alpha - 1) * t)
 
+
+
+class ReWanPatcher:
+    @classmethod
+    def INPUT_TYPES(s):
+        return {
+            "required": { 
+                "model":  ("MODEL",),
+                "enable": ("BOOLEAN", {"default": True}),
+            }
+        }
+    RETURN_TYPES = ("MODEL",)
+    RETURN_NAMES = ("model",)
+    CATEGORY     = "RES4LYF/model_patches"
+    FUNCTION     = "main"
+
+    def main(self, model, enable=True, force=False):
+        
+        if (enable or force) and model.model.diffusion_model.__class__ == WanModel:
+            m = model.clone()
+            m.model.diffusion_model.__class__     = ReWanModel
+            m.model.diffusion_model.threshold_inv = False
+            
+            for i, block in enumerate(m.model.diffusion_model.blocks):
+                block.__class__            = ReWanAttentionBlock
+                block.self_attn.__class__  = ReWanSelfAttention
+                block.cross_attn.__class__ = ReWanT2VCrossAttention
+                block.idx       = i
+        
+        elif not enable and model.model.diffusion_model.__class__ == ReWanModel:
+            m = model.clone()
+            m.model.diffusion_model.__class__ = WanModel
+            
+            for i, block in enumerate(m.model.diffusion_model.blocks):
+                block.__class__            = WanAttentionBlock
+                block.self_attn.__class__  = WanSelfAttention
+                block.cross_attn.__class__ = WanT2VCrossAttention
+                block.idx       = i
+
+        else:
+            m = model
+        
+        return (m,)
 
 
 

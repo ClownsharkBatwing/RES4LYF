@@ -161,6 +161,7 @@ NODE_CLASS_MAPPINGS = {
     "ModelSamplingAdvancedResolution"     : models.ModelSamplingAdvancedResolution,
     "FluxGuidanceDisable"                 : models.FluxGuidanceDisable,
 
+    "ReWanPatcher"                        : models.ReWanPatcher,
     "ReFluxPatcher"                       : models.ReFluxPatcher,
     "FluxOrthoCFGPatcher"                 : models.FluxOrthoCFGPatcher,
     "ReSD35Patcher"                       : models.ReSD35Patcher,

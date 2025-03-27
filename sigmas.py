@@ -1246,6 +1246,7 @@ def get_sigmas(model, scheduler, steps, denoise, shift=0.0, lq_inflection_percen
         if denoise <= 0.0:
             return (torch.FloatTensor([]),)
         total_steps = int(steps/denoise)
+
     try:
         model_sampling = model.get_model_object("model_sampling")
     except:

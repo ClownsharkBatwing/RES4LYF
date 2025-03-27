@@ -513,5 +513,3 @@ class FrameWeightsManager:
         return weights
     
     
-    
-    

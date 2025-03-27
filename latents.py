@@ -3,41 +3,151 @@ import torch.nn.functional as F
 
 
 
-
 # TENSOR PROJECTION OPS
 
 def get_cosine_similarity_manual(a, b):
     return (a * b).sum() / (torch.norm(a) * torch.norm(b))
 
-def get_cosine_similarity(a, b):
-    if a.dim() == 5 and b.dim() == 5 and b.shape[2] == 1:
+def get_cosine_similarity(a, b, mask=None, dim=0):
+    if a.ndim == 5 and b.ndim == 5 and b.shape[2] == 1:
         b = b.expand(-1, -1, a.shape[2], -1, -1)
-    return F.cosine_similarity(a.flatten(), b.flatten(), dim=0)
-
-def get_pearson_similarity(a, b):
-    a = a.mean(dim=(-2,-1))
-    b = b.mean(dim=(-2,-1))
-    if a.dim() == 5 and b.dim() == 5 and b.shape[2] == 1:
+        
+    if mask is not None:
+        return F.cosine_similarity((mask * a).flatten(), (mask * b).flatten(), dim=dim)
+    else:
+        return F.cosine_similarity(a.flatten(), b.flatten(), dim=dim)
+    
+def get_pearson_similarity(a, b, mask=None, dim=0, norm_dim=None):
+    if a.ndim == 5 and b.ndim == 5 and b.shape[2] == 1:
         b = b.expand(-1, -1, a.shape[2], -1, -1)
-    return F.cosine_similarity(a.flatten(), b.flatten(), dim=0)
-
+    
+    if norm_dim is None:
+        if   a.ndim == 4:
+            norm_dim=(-2,-1)
+        elif a.ndim == 5:
+            norm_dim=(-4,-2,-1)
+    
+    a = a - a.mean(dim=norm_dim, keepdim=True)
+    b = b - b.mean(dim=norm_dim, keepdim=True)
+    
+    if mask is not None:
+        return F.cosine_similarity((mask * a).flatten(), (mask * b).flatten(), dim=dim)
+    else:
+        return F.cosine_similarity(a.flatten(), b.flatten(), dim=dim)
+    
+    
+    
 def get_collinear(x, y):
-    return get_collinear_flat(x, y).view_as(x)
+    return get_collinear_flat(x, y).reshape_as(x)
 
 def get_orthogonal(x, y):
-    x_flat = x.view(x.size(0), -1).clone()
+    x_flat = x.reshape(x.size(0), -1).clone()
     x_ortho_y = x_flat - get_collinear_flat(x, y)  
     return x_ortho_y.view_as(x)
 
 def get_collinear_flat(x, y):
 
-    y_flat = y.view(y.size(0), -1).clone()
-    x_flat = x.view(x.size(0), -1).clone()
+    y_flat = y.reshape(y.size(0), -1).clone()
+    x_flat = x.reshape(x.size(0), -1).clone()
 
     y_flat /= y_flat.norm(dim=-1, keepdim=True)
     x_proj_y = torch.sum(x_flat * y_flat, dim=-1, keepdim=True) * y_flat
 
     return x_proj_y
+
+
+
+def get_orthogonal_noise_from_channelwise(*refs, max_iter=500, max_score=1e-15):
+    noise, *refs = refs
+    noise_tmp = noise.clone()
+    #b,c,h,w = noise.shape
+    if (noise.ndim == 4):
+        b,ch,h,w = noise.shape
+    elif (noise.ndim == 5):
+        b,ch,t,h,w = noise.shape
+    
+    for i in range(max_iter):
+        noise_tmp = gram_schmidt_channels_optimized(noise_tmp, *refs)
+        
+        cossim_scores = []
+        for ref in refs:
+            #for c in range(noise.shape[-3]):
+            for c in range(ch):
+                cossim_scores.append(get_cosine_similarity(noise_tmp[0][c], ref[0][c]).abs())
+            cossim_scores.append(get_cosine_similarity(noise_tmp[0], ref[0]).abs())
+            
+        if max(cossim_scores) < max_score:
+            break
+    
+    return noise_tmp
+
+
+
+def gram_schmidt_channels_optimized(A, *refs):
+    if (A.ndim == 4):
+        b,c,h,w = A.shape
+    elif (A.ndim == 5):
+        b,c,t,h,w = A.shape
+
+    A_flat = A.view(b, c, -1)  
+    
+    for ref in refs:
+        ref_flat = ref.view(b, c, -1).clone()  
+
+        ref_flat /= ref_flat.norm(dim=-1, keepdim=True) 
+
+        proj_coeff = torch.sum(A_flat * ref_flat, dim=-1, keepdim=True)  
+        projection = proj_coeff * ref_flat 
+
+        A_flat -= projection
+
+    return A_flat.view_as(A)
+
+
+
+# calculate slerp ratio needed to hit a target cosine similarity score
+def get_slerp_weight_for_cossim(cos_sim, target_cos):
+    # assumes unit vector matrices used for cossim
+    import math
+    c = cos_sim
+    T = target_cos
+    K = 1 - c
+
+    A = K**2 - 2 * T**2 * K
+    B = 2 * (1 - c) * (c + T**2)
+    C = c**2 - T**2
+
+    if abs(A) < 1e-8: # nearly collinear
+        return 0.5  # just mix 50:50
+
+    disc = B**2 - 4*A*C
+    if disc < 0:
+        return None  # no valid solution... blow up somewhere to get user's attention
+
+    sqrt_disc = math.sqrt(disc)
+    w1 = (-B + sqrt_disc) / (2 * A)
+    w2 = (-B - sqrt_disc) / (2 * A)
+
+    candidates = [w for w in [w1, w2] if 0 <= w <= 1]
+    if candidates:
+        return candidates[0]
+    else:
+        return max(0.0, min(1.0, w1))
+
+
+
+def get_slerp_ratio(cos_sim_A, cos_sim_B, target_cos):
+    import math
+    alpha = math.acos(cos_sim_A)
+    beta  = math.acos(cos_sim_B)
+    delta = math.acos(target_cos)
+    
+    if abs(beta - alpha) < 1e-6:
+        return 0.5
+    
+    t = (delta - alpha) / (beta - alpha)
+    t = max(0.0, min(1.0, t))
+    return t
 
 
 
@@ -113,6 +223,50 @@ def lagrange_interpolation(x_values, y_values, x_new):
 
 
 
+
+
+def slerp_tensor(val: torch.Tensor, low: torch.Tensor, high: torch.Tensor, dim=-3) -> torch.Tensor:
+    #dim = (2,3)
+    if low.ndim == 4 and low.shape[-3] > 1:
+        dim=-3
+    elif low.ndim == 5 and low.shape[-3] > 1:
+        dim=-4
+    elif low.ndim == 2:
+        dim=(-2,-1)
+        
+    if type(val) == float:
+        val = torch.Tensor([val]).expand_as(low).to(low.dtype).to(low.device)
+        
+    if val.shape != low.shape:
+        val = val.expand_as(low)
+        
+    low_norm = low / (torch.norm(low, dim=dim, keepdim=True))
+    high_norm = high / (torch.norm(high, dim=dim, keepdim=True))
+    
+    dot = (low_norm * high_norm).sum(dim=dim, keepdim=True).clamp(-1.0, 1.0)
+    
+    #near = ~(-0.9995 < dot < 0.9995) #dot > 0.9995 or dot < -0.9995
+    near = dot > 0.9995
+    opposite = dot < -0.9995
+
+    condition = torch.logical_or(near, opposite)
+    
+    omega = torch.acos(dot)
+    so = torch.sin(omega)
+
+    if val.ndim < low.ndim:
+        val = val.unsqueeze(dim)
+    
+    factor_low = torch.sin((1 - val) * omega) / so
+    factor_high = torch.sin(val * omega) / so
+
+    res = factor_low * low + factor_high * high
+    res = torch.where(condition, low * (1 - val) + high * val, res)
+    return res
+
+
+
+
 # pytorch slerp implementation from https://gist.github.com/Birch-san/230ac46f99ec411ed5907b0a3d728efa
 from torch import FloatTensor, LongTensor, Tensor, Size, lerp, zeros_like
 from torch.linalg import norm
@@ -163,9 +317,9 @@ def slerp(v0: FloatTensor, v1: FloatTensor, t: float|FloatTensor, DOT_THRESHOLD=
     gotta_lerp: LongTensor = dot_mag.isnan() | (dot_mag > DOT_THRESHOLD)
     can_slerp: LongTensor = ~gotta_lerp
     
-    t_batch_dim_count: int = max(0, t.dim()-v0.dim()) if isinstance(t, Tensor) else 0
+    t_batch_dim_count: int = max(0, t.ndim-v0.ndim) if isinstance(t, Tensor) else 0
     t_batch_dims: Size = t.shape[:t_batch_dim_count] if isinstance(t, Tensor) else Size([])
-    out: FloatTensor = zeros_like(v0.expand(*t_batch_dims, *[-1]*v0.dim()))
+    out: FloatTensor = zeros_like(v0.expand(*t_batch_dims, *[-1]*v0.ndim))
     
     # if no elements are lerpable, our vectors become 0-dimensional, preventing broadcasting
     if gotta_lerp.any():
