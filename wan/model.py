@@ -27,6 +27,65 @@ def sinusoidal_embedding_1d(dim, position):
     return x
 
 
+
+class ReWanRawSelfAttention(nn.Module):
+
+    def __init__(self,
+                dim,
+                num_heads,
+                window_size        = (-1, -1),
+                qk_norm            = True,
+                eps                = 1e-6, 
+                operation_settings = {}):
+        assert dim % num_heads == 0
+        super().__init__()
+        self.dim         = dim
+        self.num_heads   = num_heads
+        self.head_dim    = dim // num_heads
+        self.window_size = window_size
+        self.qk_norm     = qk_norm
+        self.eps         = eps
+
+        # layers
+        self.q = operation_settings.get("operations").Linear(dim, dim, device=operation_settings.get("device"), dtype=operation_settings.get("dtype"))
+        self.k = operation_settings.get("operations").Linear(dim, dim, device=operation_settings.get("device"), dtype=operation_settings.get("dtype"))
+        self.v = operation_settings.get("operations").Linear(dim, dim, device=operation_settings.get("device"), dtype=operation_settings.get("dtype"))
+        self.o = operation_settings.get("operations").Linear(dim, dim, device=operation_settings.get("device"), dtype=operation_settings.get("dtype"))
+        self.norm_q = RMSNorm(dim, eps=eps, elementwise_affine=True, device=operation_settings.get("device"), dtype=operation_settings.get("dtype")) if qk_norm else nn.Identity()
+        self.norm_k = RMSNorm(dim, eps=eps, elementwise_affine=True, device=operation_settings.get("device"), dtype=operation_settings.get("dtype")) if qk_norm else nn.Identity()
+
+    def forward(self, x, freqs, mask=None):
+        r"""
+        Args:
+            x(Tensor): Shape [B, L, num_heads, C / num_heads]
+            freqs(Tensor): Rope freqs, shape [1024, C / num_heads / 2]
+        """
+        b, s, n, d = *x.shape[:2], self.num_heads, self.head_dim
+
+        # query, key, value function
+        def qkv_fn(x):
+            q = self.norm_q(self.q(x)).view(b, s, n, d)
+            k = self.norm_k(self.k(x)).view(b, s, n, d)
+            v = self.v(x).view(b, s, n * d)
+            return q, k, v
+
+        q, k, v = qkv_fn(x)
+        q, k    = apply_rope(q, k, freqs)
+        # q,k.shape = 2,14040,12,128      v.shape = 2,14040,1536
+
+        x = optimized_attention(
+            q.view(b, s, n * d),
+            k.view(b, s, n * d),
+            v,
+            heads=self.num_heads,
+        )
+
+        x = self.o(x)
+        return x
+
+
+
+
 class ReWanSelfAttention(nn.Module):
 
     def __init__(self,
@@ -73,14 +132,14 @@ class ReWanSelfAttention(nn.Module):
         # q,k.shape = 2,14040,12,128      v.shape = 2,14040,1536
         
         if mask is not None:
-            dtype = mask.dtype if mask.dtype == torch.bool else q.dtype
-            txt_len = mask.shape[1] - mask.shape[0]
+            #dtype = mask.dtype if mask.dtype == torch.bool else q.dtype
+            #txt_len = mask.shape[1] - mask.shape[0]
             x = attention_pytorch(
                 q.view(b, s, n * d),
                 k.view(b, s, n * d),
                 v,
                 heads=self.num_heads,
-                mask=mask[:,txt_len:].to(dtype)
+                mask=mask#[:,txt_len:].to(dtype)
             )
         else:
             x = optimized_attention(
@@ -113,7 +172,9 @@ class ReWanT2VCrossAttention(ReWanSelfAttention):
         if mask is not None and (mask.shape[-1] - mask.shape[-2]) == k.shape[-2]:  # need mask shape 11664,5120
             #dtype = mask.dtype if mask.dtype == torch.bool else q.dtype
             dtype = torch.bool
-            x = attention_pytorch(q, k, v, heads=self.num_heads, mask=mask[:,:k.shape[-2]].to(q.device).to(dtype))
+            x = attention_pytorch(q, k, v, heads=self.num_heads, mask=mask.to(q.device).bool())
+
+            #x = attention_pytorch(q, k, v, heads=self.num_heads, mask=mask[:,:k.shape[-2]].to(q.device).bool())
         else:
             x = optimized_attention(q, k, v, heads=self.num_heads, mask=None)
 
@@ -192,7 +253,7 @@ class ReWanAttentionBlock(nn.Module):
         self.norm1     = operation_settings.get("operations").LayerNorm(dim, eps, elementwise_affine=False, device=operation_settings.get("device"), dtype=operation_settings.get("dtype"))
         self.self_attn = ReWanSelfAttention(  dim, num_heads, window_size, qk_norm,
                                             eps, operation_settings=operation_settings)
-        self.norm3 = operation_settings.get("operations").LayerNorm(
+        self.norm3     = operation_settings.get("operations").LayerNorm(
             dim, eps,
             elementwise_affine=True, device=operation_settings.get("device"), dtype=operation_settings.get("dtype")) if cross_attn_norm else nn.Identity()
         
@@ -218,7 +279,9 @@ class ReWanAttentionBlock(nn.Module):
         e,
         freqs,
         context,
-        mask=None,
+        self_mask=None,
+        cross_mask=None,
+        #mask=None,
     ):
         r"""
         Args:
@@ -227,7 +290,7 @@ class ReWanAttentionBlock(nn.Module):
             freqs(Tensor): Rope freqs, shape [1024, C / num_heads / 2]
         """
         # assert e.dtype == torch.float32
-
+        
         e = (comfy.model_management.cast_to(self.modulation, dtype=x.dtype, device=x.device) + e).chunk(6, dim=1)
         # assert e[0].dtype == torch.float32
         # e = tuple with 6 elem, shape = 2,1,1536    # with length = 33 so 9 frames
@@ -235,12 +298,12 @@ class ReWanAttentionBlock(nn.Module):
         y = self.self_attn(
             self.norm1(x) * (1 + e[1]) + e[0],
             freqs,
-            mask=mask)
+            mask=self_mask) # mask[:,txt_len:])
 
         x = x + y * e[2]
 
         # cross-attention & ffn   # x,y.shape 2,14040,1536   
-        x = x + self.cross_attn(self.norm3(x), context, mask=mask)
+        x = x + self.cross_attn(self.norm3(x), context, mask=cross_mask) #mask[:,:txt_len])
         y = self.ffn(self.norm2(x) * (1 + e[4]) + e[3])
         x = x + y * e[5]
         return x
@@ -389,7 +452,7 @@ class ReWanModel(torch.nn.Module):
         cross_attn_type = 't2v_cross_attn' if model_type == 't2v' else 'i2v_cross_attn'
         
         self.blocks = nn.ModuleList([
-            WanAttentionBlock(
+            ReWanAttentionBlock(
                                 cross_attn_type,
                                 dim, 
                                 ffn_dim, num_heads,
@@ -487,8 +550,9 @@ class ReWanModel(torch.nn.Module):
         
         if mask_obj is not None and weight >= 0:                 #THIS WAS WEIGHT >= 0 2-28-25
 
-            mask_orig = mask_obj[0](transformer_options, weight)
-            mask_self = mask_orig.clone()
+            mask_self = mask_obj[0](transformer_options, weight)
+            #mask_orig = mask_obj[0](transformer_options, weight)
+            #mask_self = mask_orig.clone()
             #mask_self[mask_obj[0].text_len:,   mask_obj[0].text_len:] = mask_self.max()
 
         mask     = None
@@ -498,21 +562,24 @@ class ReWanModel(torch.nn.Module):
             text_len                  = mask_obj[0].text_len
             if type(floor) == torch.Tensor:
                 floor = floor.to(mask.device)
-            mask[:,text_len:] = torch.clamp(mask[:,text_len:], min=floor)
+            #mask[:,text_len:] = torch.clamp(mask[:,text_len:], min=floor)
+            #mask[:,text_len:].clamp_(min=floor)    # ?????????????????????????????????
         mask_type_bool = type(mask[0][0].item()) == bool if mask is not None else False
 
 
 
 
 
-
+        txt_len = mask.shape[-1] - mask.shape[-2] if mask is not None else "Unlogic Condition"
 
         i = 0
         for block in self.blocks:
             if mask_type_bool and weight < (i / (len(self.blocks)-1)) and mask is not None:
                 mask = mask.to(x.dtype)
             
-            x = block(x, mask=mask, **kwargs)
+            x = block(x, self_mask=mask[:,txt_len:], cross_mask=mask[:,:txt_len].bool(), **kwargs)
+            
+            #x = block(x, mask=mask, **kwargs)
             
             i += 1
 
@@ -609,13 +676,13 @@ class ReWanModel(torch.nn.Module):
             
             
             out_x = self.forward_orig(
-                                        x[i][None,...], 
-                                        timestep[i][None,...], 
+                                        x          [i][None,...], 
+                                        timestep   [i][None,...], 
                                         context_tmp,
-                                        clip_fea=clip_fea,
-                                        freqs=freqs[i][None,...],
-                                        transformer_options=transformer_options,
-                                        UNCOND=UNCOND,
+                                        clip_fea            = clip_fea,
+                                        freqs               = freqs[i][None,...],
+                                        transformer_options = transformer_options,
+                                        UNCOND              = UNCOND,
                                         )[:, :, :t, :h, :w]
         
             out_list.append(out_x)
