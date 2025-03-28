@@ -408,7 +408,6 @@ class FrameWeightsManager:
         interpolate
         """
         if self.custom_string is not None:
-            # Check if interpolation across frames is requested
             interpolate_frames = "interpolate" in self.custom_string
             
             lines = self.custom_string.strip().split('\n')
@@ -475,7 +474,8 @@ class FrameWeightsManager:
                     if len(weights_tensor) > num_frames:
                         weights_tensor = weights_tensor[:num_frames]
                 
-                RESplain(f"Custom frame weights for step {step}: {weights_tensor.tolist()}")
+                formatted_weights = [f"{w:.2f}" for w in weights_tensor.tolist()]
+                RESplain(f"Custom frame weights for step {step}: {formatted_weights}")
                 return weights_tensor
                     
             except (ValueError, IndexError) as e:
