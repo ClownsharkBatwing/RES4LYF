@@ -155,6 +155,8 @@ NODE_CLASS_MAPPINGS = {
 
 
     "TorchCompileModelFluxAdv"            : models.TorchCompileModelFluxAdvanced,
+    "ClownpileModelWanVideo"              : models.ClownpileModelWanVideo,
+
 
     "ModelTimestepPatcher"                : models.ModelSamplingAdvanced,
     "ModelSamplingAdvanced"               : models.ModelSamplingAdvanced,

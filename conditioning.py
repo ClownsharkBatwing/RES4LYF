@@ -762,7 +762,7 @@ class RegionalGenerateConditioningsAndMasks:
             cross_attn_mask    = torch.zeros((t*img_len, text_len), dtype=dtype)
 
             self_attn_mask     = torch.zeros((        t * img_len,        t * img_len), dtype=dtype)
-            self_attn_mask_bkg = torch.zeros((        t * img_len,        t * img_len), dtype=dtype)
+            #self_attn_mask_bkg = torch.zeros((        t * img_len,        t * img_len), dtype=dtype)
             
             prev_len = 0
             for cond_reg_dict in conditioning_regional:
@@ -780,7 +780,7 @@ class RegionalGenerateConditioningsAndMasks:
                     img2txt_mask = img2txt_mask.repeat(1, cond_reg.shape[1])
                 
                 #img2txt_mask    = torch.nn.functional.interpolate(region_mask[None, None, :, :], (h, w), mode='nearest-exact').flatten().unsqueeze(1).repeat(1, cond_reg.shape[1])  #cond_reg.shape(1) = 256   4096/256 = 16
-                txt2img_mask    = img2txt_mask.transpose(-1, -2)
+                #txt2img_mask    = img2txt_mask.transpose(-1, -2)
                 
                 #img2txt_mask_sq = torch.nn.functional.interpolate(region_mask[None, None, :, :], (h, w), mode='nearest-exact').flatten().unsqueeze(1).repeat(1, img_len)
                 #txt2img_mask_sq = img2txt_mask_sq.transpose(-1, -2)
@@ -810,7 +810,7 @@ class RegionalGenerateConditioningsAndMasks:
             all_attn_mask      = torch.zeros((text_off+t*img_len, text_len+t*img_len), dtype=dtype)
             
             self_attn_mask     = torch.zeros((       t * img_len,        t * img_len), dtype=dtype)
-            self_attn_mask_bkg = torch.zeros((       t * img_len,        t * img_len), dtype=dtype)
+            #self_attn_mask_bkg = torch.zeros((       t * img_len,        t * img_len), dtype=dtype)
             
             prev_len = 0
             for cond_reg_dict in conditioning_regional:
@@ -833,7 +833,8 @@ class RegionalGenerateConditioningsAndMasks:
                 
                 prev_len = curr_len
 
-            all_attn_mask[text_off:, text_len:] = fp_or(self_attn_mask, self_attn_mask_bkg) #combine foreground/background self-attn
+            all_attn_mask[text_off:, text_len:] = self_attn_mask
+            #all_attn_mask[text_off:, text_len:] = fp_or(self_attn_mask, self_attn_mask_bkg) #combine foreground/background self-attn
 
         all_attn_mask         = RegionalMask(all_attn_mask, self.conditioning, self.conditioning_regional, latent, self.start_percent, self.end_percent, self.mask_type, img_len, text_len)
         regional_conditioning = RegionalConditioning(self.conditioning, cond_r, cond_pooled, self.start_percent, self.end_percent)

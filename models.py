@@ -29,7 +29,7 @@ from comfy.ldm.aura.mmdit import MMDiT, DiTBlock, MMDiTBlock, SingleAttention, D
 from .aura.mmdit import ReMMDiT, ReDiTBlock, ReMMDiTBlock, ReSingleAttention, ReDoubleAttention
 
 from comfy.ldm.wan.model import WanAttentionBlock, WanI2VCrossAttention, WanModel, WanSelfAttention, WanT2VCrossAttention
-from .wan.model import ReWanAttentionBlock, ReWanI2VCrossAttention, ReWanModel, ReWanSelfAttention, ReWanT2VCrossAttention
+from .wan.model import ReWanAttentionBlock, ReWanI2VCrossAttention, ReWanModel, ReWanRawSelfAttention, ReWanSelfAttention, ReWanT2VCrossAttention
 
 from .latents import get_orthogonal, get_cosine_similarity
 from .res4lyf import RESplain
@@ -44,7 +44,15 @@ def time_snr_shift_linear(alpha, t):
         return t
     return alpha * t / (1 + (alpha - 1) * t)
 
-
+def parse_range_string(s):
+    result = []
+    for part in s.split(','):
+        if '-' in part:
+            start, end = part.split('-')
+            result.extend(range(int(start), int(end) + 1))
+        elif part.strip() != '':
+            result.append(int(part))
+    return result
 
 class ReWanPatcher:
     @classmethod
@@ -52,6 +60,7 @@ class ReWanPatcher:
         return {
             "required": { 
                 "model":  ("MODEL",),
+                "self_attn_blocks": ("STRING", {"default": "0,1,2,3,4,5,6,7,8,9,", "multiline": True}),
                 "enable": ("BOOLEAN", {"default": True}),
             }
         }
@@ -60,7 +69,9 @@ class ReWanPatcher:
     CATEGORY     = "RES4LYF/model_patches"
     FUNCTION     = "main"
 
-    def main(self, model, enable=True, force=False):
+    def main(self, model, self_attn_blocks, enable=True, force=False):
+        
+        self_attn_blocks = parse_range_string(self_attn_blocks)
         
         if (enable or force) and model.model.diffusion_model.__class__ == WanModel:
             m = model.clone()
@@ -69,7 +80,10 @@ class ReWanPatcher:
             
             for i, block in enumerate(m.model.diffusion_model.blocks):
                 block.__class__            = ReWanAttentionBlock
-                block.self_attn.__class__  = ReWanSelfAttention
+                if i in self_attn_blocks:
+                    block.self_attn.__class__  = ReWanSelfAttention
+                else:
+                    block.self_attn.__class__  = ReWanRawSelfAttention
                 block.cross_attn.__class__ = ReWanT2VCrossAttention
                 block.idx       = i
         
@@ -778,3 +792,70 @@ class TorchCompileModelFluxAdvanced:
         # diffusion_model.vector_in = torch.compile(diffusion_model.vector_in, mode=mode, fullgraph=fullgraph, backend=backend)
         
         #   @torch.compile(mode="default", dynamic=False, fullgraph=False, backend="inductor")
+        
+        
+
+class ClownpileModelWanVideo:
+    def __init__(self):
+        self._compiled = False
+
+    @classmethod
+    def INPUT_TYPES(s):
+        return {
+            "required": {
+                "model": ("MODEL",),
+                "backend": (["inductor","cudagraphs"], {"default": "inductor"}),
+                "fullgraph": ("BOOLEAN", {"default": False, "tooltip": "Enable full graph mode"}),
+                "mode": (["default", "max-autotune", "max-autotune-no-cudagraphs", "reduce-overhead"], {"default": "default"}),
+                "dynamic": ("BOOLEAN", {"default": False, "tooltip": "Enable dynamic mode"}),
+                "dynamo_cache_size_limit": ("INT", {"default": 64, "min": 0, "max": 1024, "step": 1, "tooltip": "torch._dynamo.config.cache_size_limit"}),
+                #"compile_self_attn_blocks": ("INT", {"default": 0, "min": 0, "max": 100, "step": 1, "tooltip": "Maximum blocks to compile. These use huge amounts of VRAM with large attention masks."}),
+                "skip_self_attn_blocks": ("STRING", {"default": "0,1,2,3,4,5,6,7,8,9,", "multiline": True}),
+                "compile_transformer_blocks": ("BOOLEAN", {"default": True, "tooltip": "Compile all transformer blocks"}),
+                "force_recompile": ("BOOLEAN", {"default": False, "tooltip": "Force recompile."}),
+
+            },
+        }
+    RETURN_TYPES = ("MODEL",)
+    FUNCTION = "patch"
+
+    CATEGORY = "RES4LYF/model"
+    EXPERIMENTAL = True
+
+    def patch(self, model, backend, fullgraph, mode, dynamic, dynamo_cache_size_limit, skip_self_attn_blocks, compile_transformer_blocks, force_recompile):
+        m = model.clone()
+        diffusion_model = m.get_model_object("diffusion_model")
+        torch._dynamo.config.cache_size_limit = dynamo_cache_size_limit
+        
+        skip_self_attn_blocks = parse_range_string(skip_self_attn_blocks)
+        
+        if force_recompile:
+            self._compiled = False
+        
+        if not self._compiled:
+            try:
+                if compile_transformer_blocks:
+                    for i, block in enumerate(diffusion_model.blocks):
+                        #if i % 2 == 1:
+                        if i not in skip_self_attn_blocks:
+                            compiled_block = torch.compile(block, fullgraph=fullgraph, dynamic=dynamic, backend=backend, mode=mode)
+                            m.add_object_patch(f"diffusion_model.blocks.{i}", compiled_block)
+                        #block.self_attn = torch.compile(block.self_attn, fullgraph=fullgraph, dynamic=dynamic, backend=backend, mode=mode)
+                        #block.cross_attn = torch.compile(block.cross_attn, fullgraph=fullgraph, dynamic=dynamic, backend=backend, mode=mode)
+                        #if i < compile_self_attn_blocks:
+                        #    block.self_attn = torch.compile(block.self_attn, fullgraph=fullgraph, dynamic=dynamic, backend=backend, mode=mode)
+                        #    #compiled_block = torch.compile(block, fullgraph=fullgraph, dynamic=dynamic, backend=backend, mode=mode)
+                        #    #m.add_object_patch(f"diffusion_model.blocks.{i}", compiled_block)
+                        #block.cross_attn = torch.compile(block.cross_attn, fullgraph=fullgraph, dynamic=dynamic, backend=backend, mode=mode)
+                self._compiled = True
+                compile_settings = {
+                    "backend": backend,
+                    "mode": mode,
+                    "fullgraph": fullgraph,
+                    "dynamic": dynamic,
+                }
+                setattr(m.model, "compile_settings", compile_settings)
+            except:
+                raise RuntimeError("Failed to compile model")
+        return (m, )
+
