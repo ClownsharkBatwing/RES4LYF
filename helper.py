@@ -400,11 +400,12 @@ class FrameWeightsManager:
         - Each line represents weights for one step
         - Add *[multiplier] at the end of a line to scale those weights (e.g., "1.0, 0.8, 0.6*1.5")
         - Include "interpolate" on its own line to interpolate each line to match num_frames
+        - Prefix line with the steps to apply it to (e.g. "0-5: 1.0, 0.8, 0.6")
         
         Example:
-        1.0, 0.8, 0.6, 0.4, 0.2, 0.0
-        0.0, 0.2, 0.4, 0.6, 0.8, 1.0*1.5
-        0.0, 0.5, 1.0, 0.5, 0.0, 0.0*0.8
+        0-5:1.0, 0.8, 0.6, 0.4, 0.2, 0.0
+        6-10:0.0, 0.2, 0.4, 0.6, 0.8, 1.0*1.5
+        11-30:0.0, 0.5, 1.0, 0.5, 0.0, 0.0*0.8
         interpolate
         """
         if self.custom_string is not None:
@@ -416,17 +417,40 @@ class FrameWeightsManager:
             if not lines:
                 return None
             
-            # If step is None, use the last line
-            line_index = len(lines) - 1 if step is None else step
-            
-            if line_index < 0:
-                raise ValueError(f"Step {step} is out of range. Must be >= 0.")
-            
-            # If step is out of range, use the last line
-            if line_index >= len(lines):
-                line_index = len(lines) - 1
+            if step is not None:
+                matching_line = None
+                for line in lines:
+                    # Check if line has a step range prefix
+                    step_range_match = re.match(r'^(\d+)-(\d+):(.*)', line.strip())
+                    if step_range_match:
+                        start_step = int(step_range_match.group(1))
+                        end_step = int(step_range_match.group(2))
+                        if start_step <= step <= end_step:
+                            matching_line = step_range_match.group(3).strip()
                     
-            weights_str = lines[line_index].strip()
+                if matching_line is not None:
+                    weights_str = matching_line
+                else:
+                    # if no matching line, try to use the step number line or the last line
+                    if step < len(lines):
+                        line_index = step
+                    else:
+                        line_index = len(lines) - 1
+                    
+                    if line_index < 0:
+                        return None
+                    
+                    weights_str = lines[line_index].strip()
+
+                    if ":" in weights_str:
+                        weights_str = weights_str.split(":", 1)[1].strip()
+            else:
+                # When no specific step is provided, use the last line
+                line_index = len(lines) - 1
+                weights_str = lines[line_index].strip()
+                if ":" in weights_str:
+                    weights_str = weights_str.split(":", 1)[1].strip()
+            
             if not weights_str:
                 return None
             
