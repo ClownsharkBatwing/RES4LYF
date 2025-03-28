@@ -14,7 +14,7 @@ from .rk_coefficients_beta   import RK_SAMPLER_NAMES_BETA_FOLDERS, get_default_s
 
 from .noise_classes          import NOISE_GENERATOR_NAMES_SIMPLE
 from .rk_noise_sampler_beta  import NOISE_MODE_NAMES
-from .constants              import IMPLICIT_TYPE_NAMES, GUIDE_MODE_NAMES_BETA_MISC, GUIDE_MODE_NAMES_BETA_SIMPLE, MAX_STEPS, FRAME_WEIGHTS_DYNAMICS_NAMES, FRAME_WEIGHTS_SCHEDULE_NAMES
+from .constants              import IMPLICIT_TYPE_NAMES, GUIDE_MODE_NAMES_BETA_MISC, GUIDE_MODE_NAMES_BETA_SIMPLE, MAX_STEPS, FRAME_WEIGHTS_CONFIG_NAMES, FRAME_WEIGHTS_DYNAMICS_NAMES, FRAME_WEIGHTS_SCHEDULE_NAMES
 
 
 class ClownSamplerSelector_Beta:
@@ -1321,7 +1321,7 @@ class ClownOptions_Frameweights:
     def INPUT_TYPES(s):
         return {
             "required": {
-                "apply_to": (["frame_weights", "frame_weights_inv"], {"default": "frame_weights", "tooltip": "Apply the frame weights to the foreground mask or the inverse mask of the guides"}),
+                "config_name": (FRAME_WEIGHTS_CONFIG_NAMES, {"default": "frame_weights", "tooltip": "Apply to specific type of per-frame weights."}),
                 "dynamics": (FRAME_WEIGHTS_DYNAMICS_NAMES, {"default": "ease_out", "tooltip": "The function type used for the dynamic period. constant: no change, linear: steady change, ease_out: starts fast, ease_in: starts slow"}),
                 "schedule": (FRAME_WEIGHTS_SCHEDULE_NAMES, {"default": "moderate_early", "tooltip": "fast_early: fast change starts immediately, slow_late: slow change starts later"}),
                 "scale": ("FLOAT", {"default": 0.5, "min": 0.0, "max": 1.0, "step": 0.01, "tooltip": "The amount of change over the course of the frame weights. 1.0 means that the guides have no influence by the end."}),
@@ -1329,7 +1329,7 @@ class ClownOptions_Frameweights:
             },
             "optional": {
                 "frame_weights": ("SIGMAS", {"tooltip": "Overrides all other settings EXCEPT reverse."}),
-                "custom_string": ("STRING", {"tooltip": "Overrides all other settings EXCEPT reverse."}),
+                "custom_string": ("STRING", {"tooltip": "Overrides all other settings EXCEPT reverse.", "multiline": True}),
                 "options": ("OPTIONS",),
             },
         }
@@ -1340,7 +1340,7 @@ class ClownOptions_Frameweights:
     CATEGORY = "RES4LYF/sampler_options"
 
     def main(self,
-            apply_to,
+            config_name,
             dynamics,
             schedule,
             scale,
@@ -1350,28 +1350,23 @@ class ClownOptions_Frameweights:
             options       = None,
             ):
         
-        options_mgr = OptionsManager(options)
+        # Use an empty dict if options is None
+        options_mgr = OptionsManager(options if options is not None else {})
 
         frame_weights_mgr = options_mgr.get("frame_weights_mgr")
         if frame_weights_mgr is None:
             frame_weights_mgr = FrameWeightsManager()
         
-        if apply_to == "frame_weights":
-            frame_weights_mgr.dynamics        = dynamics
-            frame_weights_mgr.schedule        = schedule
-            frame_weights_mgr.scale           = scale
-            frame_weights_mgr.is_reversed     = reverse
-        elif apply_to == "frame_weights_inv":
-            frame_weights_mgr.dynamics_inv    = dynamics
-            frame_weights_mgr.schedule_inv    = schedule
-            frame_weights_mgr.scale_inv       = scale
-            frame_weights_mgr.is_reversed_inv = reverse
-
-        if frame_weights is not None:
-            frame_weights_mgr.frame_weights   = frame_weights
-
-        if custom_string is not None:
-            frame_weights_mgr.custom_string   = custom_string
+        # Add or update the named weight configuration
+        frame_weights_mgr.add_weight_config(
+            config_name,
+            dynamics=dynamics,
+            schedule=schedule,
+            scale=scale,
+            is_reversed=reverse,
+            frame_weights=frame_weights,
+            custom_string=custom_string
+        )
         
         # Store the manager in options
         options_mgr.update("frame_weights_mgr", frame_weights_mgr)

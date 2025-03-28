@@ -33,6 +33,11 @@ GUIDE_MODE_NAMES_BETA_SIMPLE = [
     "none",
 ]
 
+FRAME_WEIGHTS_CONFIG_NAMES = [
+    "frame_weights",
+    "frame_weights_inv",
+    "frame_targets"
+]
 
 FRAME_WEIGHTS_DYNAMICS_NAMES = [
     "constant",

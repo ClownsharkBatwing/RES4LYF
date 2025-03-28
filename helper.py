@@ -160,7 +160,7 @@ class OptionsManager:
 
         return self._merged_dict
 
-    def update(self, key_or_dict, value=None):
+    def update(self, key_or_dict, value=None, append=False):
         """Update options with a single key-value pair or a dictionary"""
         if value is not None or isinstance(key_or_dict, (str, list)):
             # single key-value update
@@ -366,20 +366,19 @@ precision_tool = PrecisionTool(cast_type='fp64')
 
 class FrameWeightsManager:
     def __init__(self):
-        self.frame_weights = None
-        self.frame_weights_inv = None
-        self.dynamics = "linear"
-        self.dynamics_inv = "linear"
-        self.schedule = "moderate_early"
-        self.schedule_inv = "moderate_early"
-        self.scale = 0.5
-        self.scale_inv = 0.5
-        self.is_reversed = False
-        self.is_reversed_inv = False
+        self._weight_configs = {}
+        
+        self._default_config = {
+            "frame_weights": None,  # Tensor of weights if directly specified
+            "dynamics": "linear",   # Function type for dynamic period
+            "schedule": "moderate_early",  # Schedule type
+            "scale": 0.5,           # Amount of change
+            "is_reversed": False,   # Whether to reverse weights
+            "custom_string": None,  # Per-configuration custom string
+        }
         self.dtype = torch.float64
         self.device = torch.device('cpu')
-        self.custom_string = None
-        
+    
     def set_device_and_dtype(self, device=None, dtype=None):
         """Set the device and dtype for generated weights"""
         if device is not None:
@@ -388,12 +387,55 @@ class FrameWeightsManager:
             self.dtype = dtype
         return self
     
-    def _generate_custom_weights(self, num_frames, step=None):
+    def add_weight_config(self, name, **kwargs):
+        if name not in self._weight_configs:
+            self._weight_configs[name] = self._default_config.copy()
+        
+        for key, value in kwargs.items():
+            if key in self._default_config:
+                self._weight_configs[name][key] = value
+            # ignore unknown parameters
+        
+        return self
+    
+    def get_weight_config(self, name):
+        if name not in self._weight_configs:
+            return None
+        return self._weight_configs[name].copy()
+    
+    def get_frame_weights_by_name(self, name, num_frames, step=None):
+        config = self.get_weight_config(name)
+        if config is None:
+            RESplain(f"Configuration '{name}' not found.", debug=True)
+            return None
+            # self.add_weight_config(name)
+            # config = self.get_weight_config(name)
+        
+        weights_tensor =  self._generate_frame_weights(
+            num_frames,
+            config["dynamics"],
+            config["schedule"],
+            config["scale"],
+            config["is_reversed"],
+            config["frame_weights"],
+            step=step,
+            custom_string=config["custom_string"]
+        )
+
+        formatted_weights = [f"{w:.2f}" for w in weights_tensor.tolist()]
+        if config["custom_string"] is not None and config["custom_string"] != "" and weights_tensor is not None:
+            RESplain(f"Custom '{name}' for step {step}: {formatted_weights}", debug=True)
+
+        return weights_tensor
+    
+
+    def _generate_custom_weights(self, num_frames, custom_string, step=None):
         """
         Generate custom weights based on the provided frame weights from a string with one line per step.
         
         Args:
             num_frames: Number of frames to generate weights for
+            custom_string: The custom weights string to parse
             step: Specific step to use (0-indexed). If None, uses the last line.
         
         Features:
@@ -408,10 +450,10 @@ class FrameWeightsManager:
         11-30:0.0, 0.5, 1.0, 0.5, 0.0, 0.0*0.8
         interpolate
         """
-        if self.custom_string is not None:
-            interpolate_frames = "interpolate" in self.custom_string
+        if custom_string is not None:
+            interpolate_frames = "interpolate" in custom_string
             
-            lines = self.custom_string.strip().split('\n')
+            lines = custom_string.strip().split('\n')
             lines = [line for line in lines if line.strip() and not line.strip().startswith("interp")]
             
             if not lines:
@@ -497,9 +539,7 @@ class FrameWeightsManager:
                     # Trim if too many weights
                     if len(weights_tensor) > num_frames:
                         weights_tensor = weights_tensor[:num_frames]
-                
-                formatted_weights = [f"{w:.2f}" for w in weights_tensor.tolist()]
-                RESplain(f"Custom frame weights for step {step}: {formatted_weights}")
+
                 return weights_tensor
                     
             except (ValueError, IndexError) as e:
@@ -507,11 +547,10 @@ class FrameWeightsManager:
                 return None
         
         return None
-        
     
-    def _generate_frame_weights(self, num_frames, dynamics, schedule, scale, is_reversed, frame_weights, step=None):
-        if self.custom_string is not None and step is not None:
-            custom_weights = self._generate_custom_weights(num_frames, step)
+    def _generate_frame_weights(self, num_frames, dynamics, schedule, scale, is_reversed, frame_weights, step=None, custom_string=None):
+        if custom_string is not None and step is not None:
+            custom_weights = self._generate_custom_weights(num_frames, custom_string, step)
             if custom_weights is not None:
                 weights = custom_weights
                 weights = torch.flip(weights, [0]) if is_reversed else weights
@@ -563,28 +602,6 @@ class FrameWeightsManager:
         weights = weights.to(dtype=self.dtype, device=self.device)
 
         return weights
-
-    def get_frame_weights_inv(self, num_frames, step=None):
-        return self._generate_frame_weights(
-            num_frames,
-            self.dynamics_inv,
-            self.schedule_inv,
-            self.scale_inv,
-            self.is_reversed_inv,
-            self.frame_weights_inv,
-            step=step
-        )
-    
-    def get_frame_weights(self, num_frames, step=None):
-        return self._generate_frame_weights(
-            num_frames,
-            self.dynamics,
-            self.schedule,
-            self.scale,
-            self.is_reversed,
-            self.frame_weights,
-            step=step
-        )
 
     def _generate_constant_schedule(self, timepoints, low_value):
         """constant schedule with the scale as the low weight"""
@@ -644,5 +661,3 @@ class FrameWeightsManager:
         t = torch.linspace(0, 1, timepoints, dtype=self.dtype, device=self.device)
         weights = 1 - (1 - low_value) * torch.pow(t, 2)
         return weights
-    
-    
