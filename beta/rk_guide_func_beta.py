@@ -254,13 +254,6 @@ class LatentGuide:
         else:
             self.y0_mean = torch.zeros_like(x, dtype=self.dtype, device=self.device)
 
-        if self.frame_weights is not None:
-            self.frame_weights     = initialize_or_scale(self.frame_weights,     1.0, self.max_steps).to(dtype=self.dtype, device=self.device)
-            self.frame_weights     = F.pad              (self.frame_weights,     (0,  self.max_steps), value=0.0)
-        if self.frame_weights_inv is not None:
-            self.frame_weights_inv = initialize_or_scale(self.frame_weights_inv, 1.0, self.max_steps).to(dtype=self.dtype, device=self.device)
-            self.frame_weights_inv = F.pad              (self.frame_weights_inv, (0,  self.max_steps), value=0.0)
-
         if self.UNSAMPLE and not self.SAMPLE: #sigma_next > sigma:
             self.y0     = noise_sampler(sigma=self.sigma_max, sigma_next=self.sigma_min).to(dtype=self.dtype, device=self.device)
             self.y0     = normalize_zscore(self.y0,     channelwise=True, inplace=True)
@@ -308,7 +301,12 @@ class LatentGuide:
         lgw_mask, lgw_mask_inv = self.prepare_weighted_masks(step)
         if self.VIDEO and self.frame_weights_mgr is not None:
             num_frames = lgw_mask.shape[2]
+            if self.frame_weights_mgr.custom_string is not None:
+                frame_weights = self.frame_weights_mgr.get_frame_weights(num_frames, step)
+            else:
+                frame_weights = self.frame_weights.clone()
             apply_frame_weights(lgw_mask, self.frame_weights)
+            
             apply_frame_weights(lgw_mask_inv, self.frame_weights_inv)
 
         return lgw_mask.to(self.device), lgw_mask_inv.to(self.device)

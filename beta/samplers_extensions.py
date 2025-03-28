@@ -1328,8 +1328,8 @@ class ClownOptions_Frameweights:
                 "reverse": ("BOOLEAN", {"default": False, "tooltip": "Reverse the frame weights"}),
             },
             "optional": {
-                # Keep these for optional manual override
                 "frame_weights": ("SIGMAS", {"tooltip": "Overrides all other settings EXCEPT reverse."}),
+                "custom_string": ("STRING", {"tooltip": "Overrides all other settings EXCEPT reverse."}),
                 "options": ("OPTIONS",),
             },
         }
@@ -1346,6 +1346,7 @@ class ClownOptions_Frameweights:
             scale,
             reverse,
             frame_weights = None,
+            custom_string = None,
             options       = None,
             ):
         
@@ -1368,6 +1369,9 @@ class ClownOptions_Frameweights:
 
         if frame_weights is not None:
             frame_weights_mgr.frame_weights   = frame_weights
+
+        if custom_string is not None:
+            frame_weights_mgr.custom_string   = custom_string
         
         # Store the manager in options
         options_mgr.update("frame_weights_mgr", frame_weights_mgr)
