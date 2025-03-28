@@ -486,9 +486,7 @@ class FrameWeightsManager:
         
     
     def _generate_frame_weights(self, num_frames, dynamics, schedule, scale, is_reversed, frame_weights, step=None):
-        if self.custom_string is not None:
-            if step is None:
-                raise ValueError("Step must be provided when using custom frame weights.")
+        if self.custom_string is not None and step is not None:
             custom_weights = self._generate_custom_weights(num_frames, step)
             if custom_weights is not None:
                 weights = custom_weights
@@ -514,9 +512,6 @@ class FrameWeightsManager:
         change_frames = max(round(num_frames * rate_factor), 2)
         change_start = round(num_frames * start_change_factor)
         low_value = 1.0 - scale
-
-        if step_percent is not None:
-            low_value = 1.0 - scale * step_percent
 
         if frame_weights is not None:
             weights = torch.cat([frame_weights, torch.full((num_frames,), frame_weights[-1])])
