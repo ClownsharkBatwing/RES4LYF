@@ -422,11 +422,8 @@ class FrameWeightsManager:
     def get_frame_weights_by_name(self, name, num_frames, step=None):
         config = self.get_weight_config(name)
         if config is None:
-            RESplain(f"Configuration '{name}' not found.", debug=True)
             return None
-            # self.add_weight_config(name)
-            # config = self.get_weight_config(name)
-        
+
         weights_tensor =  self._generate_frame_weights(
             num_frames,
             config["dynamics"],
