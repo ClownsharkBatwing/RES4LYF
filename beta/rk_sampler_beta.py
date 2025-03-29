@@ -362,10 +362,12 @@ def sample_rk_beta(
         denoised_prev = LG.y0
     elif LG.y0_inv.sum() != 0:
         denoised_prev = LG.y0_inv
+    data_cached = None
         
     if EO("pseudo_mix_strength"):
         orig_y0     = LG.y0.clone()
         orig_y0_inv = LG.y0_inv.clone()
+        
 
     gc.collect()
 
@@ -666,13 +668,13 @@ def sample_rk_beta(
                                     s_tmp = lying_sd
 
                             if LG.guide_mode == "flow" and LG.lgw[step] > 0:
-                                s_in = x.new_ones([x.shape[0]])
+                                data_cached = torch.zeros_like(x) if data_cached is None else data_cached
                                 if   LG.HAS_LATENT_GUIDE     and not LG.HAS_LATENT_GUIDE_INV:
-                                    y_mix = LG.mask * LG.y0
+                                    y_mix = LG.lgw[step] * LG.mask * LG.y0   +   (1-LG.lgw[step]) * LG.mask * data_cached
                                 elif LG.HAS_LATENT_GUIDE_INV and not LG.HAS_LATENT_GUIDE:
-                                    y_mix = LG.mask_inv * LG.y0_inv
+                                    y_mix = LG.lgw[step] * LG.mask_inv * LG.y0_inv   +   (1-LG.lgw[step]) * LG.mask_inv * data_cached
                                 elif LG.HAS_LATENT_GUIDE     and     LG.HAS_LATENT_GUIDE_INV:
-                                    y_mix = LG.mask * LG.y0 + LG.mask_inv * LG.y0_inv
+                                    y_mix = LG.lgw[step] * LG.mask * LG.y0 + LG.lgw[step] * LG.mask_inv * LG.y0_inv   +   (1-LG.lgw[step]) * LG.mask * data_cached   +   (1-LG.lgw[step]) * LG.mask_inv * data_cached
                                     
                                 if eta > 0:
                                     y_mix_noised, x_0_noised, x_tmp = NS.linear_noise_step   (y_mix, s_tmp, x_0_orig, x_tmp)
@@ -696,11 +698,14 @@ def sample_rk_beta(
                                 eps_[row], data_[row] = RK(x_tmp, s_tmp, x_0_noised, sigma)
 
                                 if LG.lgw[step+1] == 0:
-                                    x_next_override      = x_tmp + NS.h * eps_[row]
-                                    x_[row]              = x_tmp
+                                    x_next_override = x_tmp + NS.h * eps_[row]
+                                    x_[row]         = x_tmp
+                                    data_cached = None
                                 else:
+                                    data_cached = data_[row].clone()
                                     eps_[row] -= eps_unsample
                                     data_[row] = x_[row] - s_tmp * eps_[row]
+                                    
                             
                             if LG.guide_mode == "lure":
                                 x_tmp = LG.process_guides_data_substep(x_tmp, data_[row], step, s_tmp)
@@ -967,7 +972,7 @@ def sample_rk_beta(
 
             
             callback_step = len(sigmas)-1 - step if sampler_mode == "unsample" else step
-            preview_callback(x, eps, denoised, x_, eps_, data_, callback_step, sigma, sigma_next, callback, EO)
+            preview_callback(x, eps, denoised, x_, eps_, data_, callback_step, sigma, sigma_next, callback, EO, preview_override=data_cached)
             
             h_prev = NS.h
             x_prev = x_0
@@ -1119,10 +1124,14 @@ def preview_callback(
                     sigma_next : Tensor,
                     callback   : Callable,
                     EO         : ExtraOptions,
+                    preview_override : Optional[Tensor] = None,
                     FINAL_STEP : bool = False):
     
     if FINAL_STEP:
         denoised_callback = denoised
+        
+    elif preview_override is not None:
+        denoised_callback = preview_override
         
     elif EO("eps_substep_preview"):
         row_callback = EO("eps_substep_preview", 0)
