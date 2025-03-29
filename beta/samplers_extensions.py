@@ -1350,14 +1350,15 @@ class ClownOptions_Frameweights:
             options       = None,
             ):
         
-        # Use an empty dict if options is None
         options_mgr = OptionsManager(options if options is not None else {})
 
         frame_weights_mgr = options_mgr.get("frame_weights_mgr")
         if frame_weights_mgr is None:
             frame_weights_mgr = FrameWeightsManager()
+
+        if custom_string is not None and custom_string.strip() == "":
+            custom_string = None
         
-        # Add or update the named weight configuration
         frame_weights_mgr.add_weight_config(
             config_name,
             dynamics=dynamics,
@@ -1368,7 +1369,6 @@ class ClownOptions_Frameweights:
             custom_string=custom_string
         )
         
-        # Store the manager in options
         options_mgr.update("frame_weights_mgr", frame_weights_mgr)
         
         return (options_mgr.as_dict(),)
