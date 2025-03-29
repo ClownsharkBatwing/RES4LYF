@@ -707,7 +707,7 @@ def sample_rk_beta(
                                     data_[row] = x_[row] - s_tmp * eps_[row]
                                     
                             
-                            if LG.guide_mode == "lure":
+                            if LG.guide_mode.startswith("lure"):
                                 x_tmp = LG.process_guides_data_substep(x_tmp, data_[row], step, s_tmp)
                                 eps_[row], data_[row] = RK(x_tmp, s_tmp, x_0, sigma)
 
@@ -901,7 +901,7 @@ def sample_rk_beta(
 
 
 
-                    if not LG.guide_mode == "lure":
+                    if not LG.guide_mode.startswith("lure"):
                         x_[row+RK.row_offset] = LG.process_guides_data_substep(x_[row+RK.row_offset], data_[row], step, NS.s_[row])
 
                     if BONGMATH and NS.s_[row] > RK.sigma_min and NS.h < RK.sigma_max/2   and   (diag_iter == implicit_steps_diag or EO("enable_diag_explicit_bongmath_all"))   and not EO("disable_terminal_bongmath"):
