@@ -150,6 +150,24 @@ class OptionsManager:
                                 self._deep_update(self._merged_dict[key], value)
                             else:
                                 self._merged_dict[key] = value.copy()
+                        # Special case just for FrameWeightsManager
+                        elif key == "frame_weights_mgr" and hasattr(value, "_weight_configs"):
+                            if key not in self._merged_dict:
+                                self._merged_dict[key] = value
+                            else:
+                                existing_mgr = self._merged_dict[key]
+                                
+                                if hasattr(value, "device") and value.device != torch.device('cpu'):
+                                    existing_mgr.device = value.device
+                                
+                                if hasattr(value, "dtype") and value.dtype != torch.float64:
+                                    existing_mgr.dtype = value.dtype
+                                
+                                # Merge all weight_configs
+                                if hasattr(value, "_weight_configs"):
+                                    for name, config in value._weight_configs.items():
+                                        config_kwargs = config.copy()
+                                        existing_mgr.add_weight_config(name, **config_kwargs)
                         else:
                             self._merged_dict[key] = value
 
@@ -201,7 +219,6 @@ class OptionsManager:
         return self.merged.get(key, default)
 
     def _deep_update(self, target_dict, source_dict):
-
         for key, value in source_dict.items():
             if isinstance(value, dict) and key in target_dict and isinstance(target_dict[key], dict):
                 # recursive dict update
@@ -233,7 +250,6 @@ class OptionsManager:
                     RESplain(f"  {key}: {value}", debug=True)
             else:
                 RESplain("  None", "\n", debug=True)
-
 
 
 
