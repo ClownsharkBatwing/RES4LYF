@@ -13,6 +13,7 @@ import comfy.model_sampling
 import comfy.latent_formats
 import comfy.sd
 import comfy.supported_models
+from comfy.samplers import CFGGuider, sampling_function
 
 import latent_preview
 
@@ -26,6 +27,28 @@ from .constants             import MAX_STEPS, IMPLICIT_TYPE_NAMES
 from .noise_classes         import NOISE_GENERATOR_CLASSES_SIMPLE, NOISE_GENERATOR_NAMES_SIMPLE, NOISE_GENERATOR_NAMES
 from .rk_noise_sampler_beta import NOISE_MODE_NAMES
 from .rk_coefficients_beta  import get_default_sampler_name, get_sampler_name_list, process_sampler_name
+
+
+
+
+class SharkGuider(CFGGuider):
+    def __init__(self, model_patcher):
+        super().__init__(model_patcher)
+        self.cfgs = {}
+
+    def set_conds(self, **kwargs):
+        self.inner_set_conds(kwargs)
+
+    def set_cfgs(self, **kwargs):
+        self.cfgs = {**kwargs}
+
+    def predict_noise(self, x, timestep, model_options={}, seed=None):
+        model_call_type = model_options['transformer_options'].get('model_call_type', 'base')
+        positive    = self.conds.get(f'{model_call_type}_positive', self.conds.get('base_positive'))
+        negative    = self.conds.get(f'{model_call_type}_negative', self.conds.get('base_negative'))
+        cfg         = self.cfgs.get(model_call_type, self.cfg)
+        return sampling_function(self.inner_model, x, timestep, negative, positive, cfg, model_options=model_options, seed=seed)
+
 
 
 
@@ -171,6 +194,11 @@ class SharkSampler:
 
             sigma_min    = work_model.get_model_object('model_sampling').sigma_min
             sigma_max    = work_model.get_model_object('model_sampling').sigma_max
+            
+            """flow_cond = options_mgr.get('flow_cond', None)
+            if flow_cond is not None:
+                work_model.inner_model.set_conds(source_positive=flow_cond['positive'], source_negative=flow_cond['negative']) #, target_positive=target_pos, target_negative=target_neg)
+                work_model.inner_model.set_cfgs(source=flow_cond['cfg']) #, target=target_cfg)"""
         
             if sampler is None:
                 raise ValueError("sampler is required")
@@ -548,11 +576,25 @@ class SharkSampler:
                     #    blah_model = latent_image['model'].clone()
                     #    sampler.extra_options['blah_model'] = blah_model
                     
-                    if batch_num < len(pos_cond):
-                        samples = comfy.sample.sample_custom(work_model, noise, cfg, sampler, sigmas, [pos_cond[batch_num]], neg_cond, x.clone(), noise_mask=noise_mask, callback=callback, disable_pbar=disable_pbar, seed=noise_seed)
+                    guider = SharkGuider(work_model)
+                    flow_cond = options_mgr.get('flow_cond', {})
+                    if flow_cond != {}:
+                        guider.set_conds(flow_positive=flow_cond.get('positive'), flow_negative=flow_cond.get('negative'))
+                        guider.set_cfgs(flow=flow_cond.get('cfg'), base=cfg)
                     else:
-                        samples = comfy.sample.sample_custom(work_model, noise, cfg, sampler, sigmas, pos_cond, neg_cond, x.clone(), noise_mask=noise_mask, callback=callback, disable_pbar=disable_pbar, seed=noise_seed)
+                        guider.set_cfgs(base=cfg)
+                    
+                    if batch_num < len(pos_cond):
+                        guider.set_conds(base_positive=[pos_cond[batch_num]], base_negative=neg_cond)
+                        samples = guider.sample(noise, x.clone(), sampler, sigmas, denoise_mask=noise_mask, callback=callback, disable_pbar=disable_pbar, seed=noise_seed)
+                        #samples = comfy.sample.sample_custom(work_model, noise, cfg, sampler, sigmas, [pos_cond[batch_num]], neg_cond, x.clone(), noise_mask=noise_mask, callback=callback, disable_pbar=disable_pbar, seed=noise_seed)
+                    else:
+                        guider.set_conds(base_positive=pos_cond, base_negative=neg_cond)
+                        samples = guider.sample(noise, x.clone(), sampler, sigmas, denoise_mask=noise_mask, callback=callback, disable_pbar=disable_pbar, seed=noise_seed)
+                        #samples = comfy.sample.sample_custom(work_model, noise, cfg, sampler, sigmas, pos_cond, neg_cond, x.clone(), noise_mask=noise_mask, callback=callback, disable_pbar=disable_pbar, seed=noise_seed)
 
+
+                    
 
 
                     out = latent_unbatch.copy()
