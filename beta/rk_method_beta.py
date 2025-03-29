@@ -680,8 +680,11 @@ class RK_Method_Exponential(RK_Method_Beta):
     def __call__(self,
                 x         : Tensor,
                 sub_sigma : Tensor,
-                x_0       : Tensor,
-                sigma     : Tensor) -> Tuple[Tensor, Tensor]:
+                x_0       : Optional[Tensor] = None,
+                sigma     : Optional[Tensor] = None) -> Tuple[Tensor, Tensor]:
+        
+        x_0   = x         if x_0   is None else x_0
+        sigma = sub_sigma if sigma is None else sigma
         
         denoised = self.model_denoised(x.to(self.model_device), sub_sigma.to(self.model_device), **self.extra_args).to(sigma.device)
         
@@ -794,8 +797,11 @@ class RK_Method_Linear(RK_Method_Beta):
     def __call__(self,
                 x         : Tensor,
                 sub_sigma : Tensor,
-                x_0       : Tensor,
-                sigma     : Tensor) -> Tuple[Tensor, Tensor]:
+                x_0       : Optional[Tensor] = None,
+                sigma     : Optional[Tensor] = None) -> Tuple[Tensor, Tensor]:
+        
+        x_0   = x         if x_0   is None else x_0
+        sigma = sub_sigma if sigma is None else sigma
         
         denoised = self.model_denoised(x.to(self.model_device), sub_sigma.to(self.model_device), **self.extra_args).to(sigma.device)
 

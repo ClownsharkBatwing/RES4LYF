@@ -94,6 +94,8 @@ class RK_NoiseSampler:
         
         self.DOWN_SUBSTEP           = self.EO("down_substep")
         self.DOWN_STEP              = self.EO("down_step")
+        
+        self.init_noise             = None
 
 
 
@@ -416,6 +418,81 @@ class RK_NoiseSampler:
         sigma_down  = sigma_next - (eta/4)*sigma*(1-sigma)*(sigma - sigma_next)
         return sigma_up, sigma_down, alpha_ratio
         
+    def linear_noise_init(self, y:Tensor, sigma_curr:Tensor, x_base:Optional[Tensor]=None, x_curr:Optional[Tensor]=None, mask:Optional[Tensor]=None) -> Tensor: 
+
+        y_noised = (self.sigma_max - sigma_curr) * y + sigma_curr * self.init_noise
+
+        if x_curr is not None:
+            x_curr = x_curr + sigma_curr * (self.init_noise - y)
+            x_base = x_base + self.sigma * (self.init_noise - y)
+            return y_noised, x_base, x_curr
+
+        if mask is not None:
+            y_noised = mask * y_noised + (1-mask) * y
+        
+        return y_noised
+
+    def linear_noise_step(self, y:Tensor, sigma_curr:Optional[Tensor]=None, x_base:Optional[Tensor]=None, x_curr:Optional[Tensor]=None, brownian_sigma:Optional[Tensor]=None, brownian_sigma_next:Optional[Tensor]=None, mask:Optional[Tensor]=None) -> Tensor:
+        if self.sigma_up_eta == 0   or   self.sigma_next == 0:
+            return y, x_base, x_curr
+        
+        sigma_curr = self.sub_sigma if sigma_curr is None else sigma_curr
+
+        brownian_sigma      = sigma_curr              if brownian_sigma      is None else brownian_sigma
+        brownian_sigma_next = self.sigma_next.clone() if brownian_sigma_next is None else brownian_sigma_next
+        
+        if brownian_sigma == brownian_sigma_next:
+            brownian_sigma_next *= 0.999
+            
+        if brownian_sigma_next > brownian_sigma and not self.EO("disable_brownian_swap"): # should this really be done?
+            brownian_sigma, brownian_sigma_next = brownian_sigma_next, brownian_sigma
+        
+        noise = self.noise_sampler(sigma=brownian_sigma, sigma_next=brownian_sigma_next)
+        noise = normalize_zscore(noise, channelwise=True, inplace=True)
+
+        y_noised = (self.sigma_max - sigma_curr) * y + sigma_curr * noise
+        
+        if x_curr is not None:
+            x_curr = x_curr + sigma_curr * (noise - y)
+            x_base = x_base + self.sigma * (noise - y)
+            return y_noised, x_base, x_curr
+        
+        if mask is not None:
+            y_noised = mask * y_noised + (1-mask) * y
+        
+        return y_noised
+
+
+    def linear_noise_substep(self, y:Tensor, sigma_curr:Optional[Tensor]=None, x_base:Optional[Tensor]=None, x_curr:Optional[Tensor]=None, brownian_sigma:Optional[Tensor]=None, brownian_sigma_next:Optional[Tensor]=None, mask:Optional[Tensor]=None) -> Tensor:
+        if self.sub_sigma_up_eta == 0   or   self.sub_sigma_next == 0:
+            return y, x_base, x_curr
+        
+        sigma_curr = self.sub_sigma if sigma_curr is None else sigma_curr
+
+        brownian_sigma      = sigma_curr                  if brownian_sigma      is None else brownian_sigma
+        brownian_sigma_next = self.sub_sigma_next.clone() if brownian_sigma_next is None else brownian_sigma_next
+
+        if brownian_sigma == brownian_sigma_next:
+            brownian_sigma_next *= 0.999
+
+        if brownian_sigma_next > brownian_sigma and not self.EO("disable_brownian_swap"): # should this really be done?
+            brownian_sigma, brownian_sigma_next = brownian_sigma_next, brownian_sigma
+        
+        noise = self.noise_sampler2(sigma=brownian_sigma, sigma_next=brownian_sigma_next)
+        noise = normalize_zscore(noise, channelwise=True, inplace=True)
+
+        y_noised = (self.sigma_max - sigma_curr) * y + sigma_curr * noise
+        
+        if x_curr is not None:
+            x_curr = x_curr + sigma_curr * (noise - y)
+            x_base = x_base + self.sigma * (noise - y)
+            return y_noised, x_base, x_curr
+        
+        if mask is not None:
+            y_noised = mask * y_noised + (1-mask) * y
+        
+        return y_noised
+
 
     def swap_noise_step(self, x_0:Tensor, x_next:Tensor, brownian_sigma:Optional[Tensor]=None, brownian_sigma_next:Optional[Tensor]=None, mask:Optional[Tensor]=None) -> Tensor:
         if self.sigma_up_eta == 0   or   self.sigma_next == 0:

@@ -647,7 +647,7 @@ class LatentGuide:
         if data_row.ndim == 5 and frame_targets is None:
             frame_targets = self.EO("frame_targets", [1.0])
 
-        if self.guide_mode in {"data", "data_projection"}:
+        if self.guide_mode in {"data", "data_projection", "lure", "lure_projection"}:
             if frame_targets is None:
                 x_row = self.get_data_substep(x_row, data_row, y0, y0_inv, lgw_mask, lgw_mask_inv, step, sigma_row)
             else:
@@ -683,14 +683,14 @@ class LatentGuide:
                         frame_target  : float = 1.0,
                         ):
 
-        if self.guide_mode in {"data", "data_projection"}:
+        if self.guide_mode in {"data", "data_projection", "lure", "lure_projection"}:
             data_targets = self.EO("data_targets", [1.0])
             step_target = step if len(data_targets) > step else len(data_targets)-1
             
             cossim_target = frame_target * data_targets[step_target]
             
             if self.HAS_LATENT_GUIDE:
-                if self.guide_mode == "data_projection":
+                if self.guide_mode.endswith("projection"):
                     d_collinear_d_lerp = get_collinear(data_row, y0)  
                     d_lerp_ortho_d     = get_orthogonal(y0, data_row)  
                     y0                 = d_collinear_d_lerp + d_lerp_ortho_d
@@ -713,7 +713,7 @@ class LatentGuide:
 
                 
             if self.HAS_LATENT_GUIDE_INV:
-                if self.guide_mode == "data_projection":
+                if self.guide_mode.endswith("projection"):
                     d_collinear_d_lerp = get_collinear(data_row, y0_inv)  
                     d_lerp_ortho_d     = get_orthogonal(y0_inv, data_row)  
                     y0_inv             = d_collinear_d_lerp + d_lerp_ortho_d
@@ -856,116 +856,6 @@ class LatentGuide:
 
         return eps_row
 
-
-
-
-    @torch.no_grad
-    def get_eps_substep_bagel(self,
-                                x_0           : Tensor,
-                                x_            : Tensor,
-                                eps_          : Tensor,
-                                data_         : Tensor,
-                                row           :  int,
-                                step          :  int,
-                                sigma         : Tensor,
-                                sigma_next    : Tensor,
-                                sigma_down    : Tensor,
-                                s_            : Tensor,
-                                epsilon_scale :  float,
-                                RK,
-                                ):
-
-        y0, y0_inv, lgw_mask, lgw_mask_inv = self.get_cossim_adjusted_lgw_masks(data_[row], step)
-        
-        if not (lgw_mask.any() != 0 or lgw_mask_inv.any() != 0):  # cossim score too similar! deactivate guide for this step
-            return eps_, x_ 
-
-        elif (self.UNSAMPLE or self.guide_mode in {"epsilon", "epsilon_cw", "epsilon_projection", "epsilon_projection_cw"}) and (self.lgw[step] > 0 or self.lgw_inv[step] > 0):
-            if sigma_down < sigma   or   s_[row] < RK.sigma_max:
-                                
-                eps_substep_guide     = torch.zeros_like(x_0)
-                eps_substep_guide_inv = torch.zeros_like(x_0)
-                
-                if self.HAS_LATENT_GUIDE:
-                    eps_substep_guide     = RK.get_guide_epsilon(x_0, x_[row], y0,     sigma, s_[row], sigma_down, epsilon_scale)  
-                    
-                if self.HAS_LATENT_GUIDE_INV:
-                    eps_substep_guide_inv = RK.get_guide_epsilon(x_0, x_[row], y0_inv, sigma, s_[row], sigma_down, epsilon_scale)  
-
-                tol_value = self.EO("tol", -1.0)
-                if tol_value >= 0:
-                    for b, c in itertools.product(range(x_0.shape[0]), range(x_0.shape[1])):
-                        current_diff       = torch.norm(data_[row][b][c] - y0    [b][c]) 
-                        current_diff_inv   = torch.norm(data_[row][b][c] - y0_inv[b][c]) 
-                        
-                        lgw_scaled         = torch.nan_to_num(1-(tol_value/current_diff),     0)
-                        lgw_scaled_inv     = torch.nan_to_num(1-(tol_value/current_diff_inv), 0)
-                        
-                        lgw_tmp            = min(self.lgw[step]    , lgw_scaled)
-                        lgw_tmp_inv        = min(self.lgw_inv[step], lgw_scaled_inv)
-
-                        lgw_mask_clamp     = torch.clamp(lgw_mask,     max=lgw_tmp)
-                        lgw_mask_clamp_inv = torch.clamp(lgw_mask_inv, max=lgw_tmp_inv)
-
-                        eps_[row][b][c]    = eps_[row][b][c] + lgw_mask_clamp[b][c] * (eps_substep_guide[b][c] - eps_[row][b][c]) + lgw_mask_clamp_inv[b][c] * (eps_substep_guide_inv[b][c] - eps_[row][b][c])
-                
-                elif self.guide_mode in {"epsilon"}: 
-                    #eps_[row] = slerp(lgw_mask.mean().item(), eps_[row], eps_substep_guide)
-                    if self.EO("slerp_epsilon_guide"):
-                        if eps_substep_guide.sum() != 0:
-                            eps_[row] = slerp_tensor(lgw_mask, eps_[row], eps_substep_guide)
-                        if eps_substep_guide_inv.sum() != 0:
-                            eps_[row] = slerp_tensor(lgw_mask_inv, eps_[row], eps_substep_guide_inv)
-                    else:
-                        eps_[row] = eps_[row] + lgw_mask * (eps_substep_guide - eps_[row]) + lgw_mask_inv * (eps_substep_guide_inv - eps_[row])
-                    
-                    #eps_[row] = slerp_barycentric(eps_[row].norm(), eps_substep_guide.norm(), eps_substep_guide_inv.norm(), 1-lgw_mask-lgw_mask_inv, lgw_mask, lgw_mask_inv)
-                    
-                elif self.guide_mode in {"epsilon_projection"}:
-                    if self.EO("slerp_epsilon_guide"):
-                        if eps_substep_guide.sum() != 0:
-                            eps_row_slerp = slerp_tensor(self.mask, eps_[row], eps_substep_guide)
-                        if eps_substep_guide_inv.sum() != 0:
-                            eps_row_slerp = slerp_tensor((1-self.mask), eps_row_slerp, eps_substep_guide_inv)
-
-                        eps_collinear_eps_slerp = get_collinear(eps_[row], eps_row_slerp)
-                        eps_slerp_ortho_eps     = get_orthogonal(eps_row_slerp, eps_[row])
-
-                        eps_sum                = eps_collinear_eps_slerp + eps_slerp_ortho_eps
-
-                        eps_[row] = slerp_tensor(lgw_mask, eps_[row] , eps_sum)
-                        eps_[row] = slerp_tensor(lgw_mask_inv, eps_[row], eps_sum)
-                    else:
-                        eps_row_lerp           = eps_[row]   +   self.mask * (eps_substep_guide-eps_[row])   +   (1-self.mask) * (eps_substep_guide_inv-eps_[row])
-
-                        eps_collinear_eps_lerp = get_collinear(eps_[row], eps_row_lerp)
-                        eps_lerp_ortho_eps     = get_orthogonal(eps_row_lerp, eps_[row])
-
-                        eps_sum                = eps_collinear_eps_lerp + eps_lerp_ortho_eps
-
-                        eps_[row]              = eps_[row] + lgw_mask * (eps_sum - eps_[row]) + lgw_mask_inv * (eps_sum - eps_[row])
-
-                    
-                elif self.guide_mode in {"epsilon_cw", "epsilon_projection_cw"}:
-                    eps_ = self.process_channelwise(x_0,
-                                                    eps_,
-                                                    data_,
-                                                    row,
-                                                    eps_substep_guide,
-                                                    eps_substep_guide_inv,
-                                                    y0,
-                                                    y0_inv,
-                                                    lgw_mask,
-                                                    lgw_mask_inv,
-                                                    use_projection = self.guide_mode == "epsilon_projection_cw",
-                                                    channelwise    = True
-                                                    )
-
-        temporal_smoothing = self.EO("temporal_smoothing", 0.0)
-        if temporal_smoothing > 0:
-            eps_[row] = apply_temporal_smoothing(eps_[row], temporal_smoothing)
-        
-        return eps_, x_
 
 
 

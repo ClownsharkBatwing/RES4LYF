@@ -26,10 +26,12 @@ GUIDE_MODE_NAMES_BETA_MISC = [
 
 
 GUIDE_MODE_NAMES_BETA_SIMPLE = [
+    "flow",
+    "lure",
+    "data",
     "epsilon",
     "pseudoimplicit",
     "fully_pseudoimplicit",
-    "data",
     "none",
 ]
 

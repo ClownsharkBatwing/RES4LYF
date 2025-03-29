@@ -215,10 +215,6 @@ def sample_rk_beta(
         sde_mask                      : Optional[Tensor]   = None,
         
         batch_num                     : int                = 0,
-        
-        DATA_LURE                     : bool               = False,
-        EPS_LURE                      : bool               = False,
-
 
         extra_options                 : str                = "",
         
@@ -289,8 +285,6 @@ def sample_rk_beta(
     noise_boost_step     = EO("noise_boost_step",     0.0)
     noise_boost_substep  = EO("noise_boost_substep",  0.0)
     
-    eps_lure_, x_lure_ = None, None
-
     # SETUP SAMPLER
     if implicit_sampler_name not in ("use_explicit", "none"):
         rk_type = implicit_sampler_name
@@ -375,14 +369,13 @@ def sample_rk_beta(
 
     gc.collect()
 
-    if EO("fedit") or EO("zedit"):
-        #fedit_noise = torch.randn_like(LG.y0)
-        fedit_noise = x.clone()
-        
-    if EO("DATA_LURE"):
-        DATA_LURE = True
-    if EO("EPS_LURE"):
-        EPS_LURE = True
+    if LG.guide_mode == "flow":
+        NS.init_noise = x.clone() # will this go haywire with chained samplers? yes... pass via state_info!
+        init_noise = x.clone()
+        if LG.HAS_LATENT_GUIDE:
+            x = (1 - LG.mask)     * x + LG.mask     * LG.y0
+        if LG.HAS_LATENT_GUIDE_INV:
+            x = (1 - LG.mask_inv) * x + LG.mask_inv * LG.y0_inv
 
     # BEGIN SAMPLING LOOP    
     num_steps = len(sigmas[start_step:])-2 if sigmas[-1] == 0 else len(sigmas[start_step:])-1
@@ -405,6 +398,7 @@ def sample_rk_beta(
 
     while step < num_steps:
         sigma, sigma_next = sigmas[step], sigmas[step+1]
+        transition_count = 0
         
         if regional_conditioning_weights is not None:
             RK.extra_args['model_options']['transformer_options']['regional_conditioning_weight'] = regional_conditioning_weights[step]
@@ -647,7 +641,8 @@ def sample_rk_beta(
                                     x_[row+RK.row_offset] = x_0 + NS.h_new * RK.zum(row+RK.row_offset, eps_, eps_prev_)
                                     x_[row+RK.row_offset] = NS.rebound_overshoot_substep(x_0, x_[row+RK.row_offset])
                                     if row > 0:
-                                        x_[row+RK.row_offset] = NS.swap_noise_substep(x_0, x_[row+RK.row_offset])
+                                        if LG.guide_mode != "flow" or LG.lgw[step] == 0:
+                                            x_[row+RK.row_offset] = NS.swap_noise_substep(x_0, x_[row+RK.row_offset])
                                         if BONGMATH and step < sigmas.shape[0]-1 and not EO("disable_implicit_prebong"):
                                             x_0, x_, eps_ = RK.bong_iter(x_0, x_, eps_, eps_prev_, data_, sigma, NS.s_, row, RK.row_offset, NS.h, step)     # TRY WITH h_new ??
                                     x_tmp = x_[row+RK.row_offset]
@@ -670,32 +665,24 @@ def sample_rk_beta(
                                 if RK.multistep_stages > 0:
                                     s_tmp = lying_sd
 
-                            fedit_end_step = EO("zedit_end_step", -1)
-                            if step < fedit_end_step:
-                                if EO("zedit"):
-                                    if EO("zedit_renoise"):
-                                        fedit_noise = torch.randn_like(LG.y0)
-                                    x_tmp         = LG.y0 + s_tmp * (fedit_noise - LG.y0)
-                                    x_[row]       = x_tmp
-                                
-                            fedit_end_step = EO("fedit_end_step", -1)
-                            if step < fedit_end_step:
-                                if EO("fedit"):
-                                    if EO("fedit_renoise"):
-                                        fedit_noise = torch.randn_like(LG.y0)
-                                    y0_noised     = (1-s_tmp) * LG.y0 + s_tmp * fedit_noise
-                                    y_0           = (1-sigma) * LG.y0 + sigma * fedit_noise
-                                    eps_y, data_y = RK(y0_noised, s_tmp, y_0, sigma)
-                                    x_tmp_orig    = x_tmp.clone()
-                                    if step==0:
-                                        zbot = LG.y0.clone()
-                                    x_tmp         = zbot + s_tmp * (fedit_noise - LG.y0)
-                                    #x_tmp[:,:,1:] = x_tmp_new[:,:,1:]
-                                    #if step == fedit_end_step-1:
-                                    #if LG.y0.ndim == 5:
-                                    #    x_tmp[:,:,0:1] = x_tmp_orig[:,:,0:1] 
-                                    x_[row]       = x_tmp
-                            
+                            if LG.guide_mode == "flow" and LG.lgw[step] > 0:
+                                s_in = x.new_ones([x.shape[0]])
+                                if   LG.HAS_LATENT_GUIDE     and not LG.HAS_LATENT_GUIDE_INV:
+                                    y_mix = LG.mask * LG.y0
+                                elif LG.HAS_LATENT_GUIDE_INV and not LG.HAS_LATENT_GUIDE:
+                                    y_mix = LG.mask_inv * LG.y0_inv
+                                elif LG.HAS_LATENT_GUIDE     and     LG.HAS_LATENT_GUIDE_INV:
+                                    y_mix = LG.mask * LG.y0 + LG.mask_inv * LG.y0_inv
+                                    
+                                if eta > 0:
+                                    y_mix_noised, x_0_noised, x_tmp = NS.linear_noise_step   (y_mix, s_tmp, x_0_orig, x_tmp)
+                                elif eta_substep > 0:
+                                    y_mix_noised, x_0_noised, x_tmp = NS.linear_noise_substep(y_mix, s_tmp, x_0_orig, x_tmp)
+                                else:
+                                    y_mix_noised, x_0_noised, x_tmp = NS.linear_noise_init   (y_mix, s_tmp, x_0_orig, x_tmp)
+
+                                eps_unsample, data_unsample = RK(y_mix_noised, s_tmp)
+
                             if step < EO("direct_pre_pseudo_guide", 0) and step > 0:
                                 for i_pseudo in range(EO("direct_pre_pseudo_guide_iter", 1)):
                                     x_tmp += LG.lgw[step] * LG.mask * (NS.sigma_max - s_tmp) * (LG.y0 - denoised)     +     LG.lgw_inv[step] * LG.mask_inv * (NS.sigma_max - s_tmp) * (LG.y0_inv - denoised)
@@ -703,22 +690,25 @@ def sample_rk_beta(
                             
                             # MODEL CALL MODEL CALL MODEL CALL MODEL CALL MODEL CALL MODEL CALL MODEL CALL MODEL CALL MODEL CALL MODEL CALL MODEL CALL MODEL CALL MODEL CALL MODEL CALL MODEL CALL MODEL CALL MODEL CALL
                             
-                            eps_[row], data_[row] = RK(x_tmp, s_tmp, x_0, sigma)
+                            if (LG.guide_mode != "flow")   or   (LG.guide_mode == "flow" and LG.lgw[step] == 0):
+                                eps_[row], data_[row] = RK(x_tmp, s_tmp, x_0, sigma)
+                            else:
+                                eps_[row], data_[row] = RK(x_tmp, s_tmp, x_0_noised, sigma)
+
+                                if LG.lgw[step+1] == 0:
+                                    x_next_override      = x_tmp + NS.h * eps_[row]
+                                    x_[row]              = x_tmp
+                                else:
+                                    eps_[row] -= eps_unsample
+                                    data_[row] = x_[row] - s_tmp * eps_[row]
                             
-                            if DATA_LURE:
+                            if LG.guide_mode == "lure":
                                 x_tmp = LG.process_guides_data_substep(x_tmp, data_[row], step, s_tmp)
                                 eps_[row], data_[row] = RK(x_tmp, s_tmp, x_0, sigma)
-                            
-                            if step < fedit_end_step:
-                                if EO("fedit"):
-                                    #eps_[row] -= eps_y
-                                    zbot = zbot + NS.h * (eps_[row] - eps_y)
-                                    #zbot = zbot + NS.h * RK.zum(row+RK.row_offset, (eps_[row] - eps_y), eps_prev_)
 
-                            
-                            data_[row] = data_[row] - momentum * (data_prev_[0] - data_[row])  #negative!
-
-                            eps_[row]  = RK.get_epsilon(x_0, x_tmp, data_[row], sigma, s_tmp)
+                            if momentum != 0.0:
+                                data_[row] = data_[row] - momentum * (data_prev_[0] - data_[row])  #negative!
+                                eps_[row]  = RK.get_epsilon(x_0, x_tmp, data_[row], sigma, s_tmp)    # ... why was this here??? for momentum maybe?
 
                             if row < RK.rows and noise_scaling_weight != 0 and noise_scaling_type in {"sampler", "sampler_substep"}:
                                 if noise_scaling_type == "sampler_substep":
@@ -896,7 +886,8 @@ def sample_rk_beta(
                             sde_mask_ceiling = EO("sde_mask_ceiling", 1.0)
                             sde_mask = ((sde_mask - sde_mask.min()) * (sde_mask_floor - sde_mask_ceiling)) / (sde_mask.max() - sde_mask.min()) + sde_mask_ceiling     
                             
-                        x_[row+RK.row_offset] = NS.swap_noise_substep(x_0, x_[row+RK.row_offset], mask=sde_mask, guide=LG.y0)
+                        if LG.guide_mode != "flow" or LG.lgw[step] == 0:
+                            x_[row+RK.row_offset] = NS.swap_noise_substep(x_0, x_[row+RK.row_offset], mask=sde_mask, guide=LG.y0)
                         if EO("swap_noise_substep_update_eps"):
                             eps_[row+RK.row_offset] = RK.get_epsilon(x_0, x_[row+RK.row_offset], data_[row+RK.row_offset], sigma, NS.s_[row+RK.row_offset])
                         
@@ -905,7 +896,7 @@ def sample_rk_beta(
 
 
 
-                    if not DATA_LURE:
+                    if not LG.guide_mode == "lure":
                         x_[row+RK.row_offset] = LG.process_guides_data_substep(x_[row+RK.row_offset], data_[row], step, NS.s_[row])
 
                     if BONGMATH and NS.s_[row] > RK.sigma_min and NS.h < RK.sigma_max/2   and   (diag_iter == implicit_steps_diag or EO("enable_diag_explicit_bongmath_all"))   and not EO("disable_terminal_bongmath"):
@@ -922,6 +913,9 @@ def sample_rk_beta(
 
             x_next = x_[RK.rows - RK.multistep_stages - RK.row_offset + 1]
             x_next = NS.rebound_overshoot_step(x_0, x_next)
+            
+            if LG.guide_mode.startswith("flow") and LG.lgw[step] > 0 and LG.lgw[step+1] == 0: 
+                x_next = x_next_override
             
             eps = (x_0 - x_next) / (sigma - sigma_next)
             denoised = x_0 - sigma * eps
@@ -955,14 +949,19 @@ def sample_rk_beta(
                 sde_mask = 1-sde_mask
                 dyn_scale = EO("dynamic_step_scaled_mean_inv_eps_mask", 2.0)
                 sde_mask = ((dyn_scale-1) + sde_mask) / dyn_scale
-                
-                
+            
+            
             x_means_per_step = x_next.mean(dim=(-2,-1), keepdim=True)
             if EO("sde_mask_floor"):
                 sde_mask_floor = EO("sde_mask_floor", 0.0)
                 sde_mask_ceiling = EO("sde_mask_ceiling", 1.0)
                 sde_mask = ((sde_mask - sde_mask.min()) * (sde_mask_floor - sde_mask_ceiling)) / (sde_mask.max() - sde_mask.min()) + sde_mask_ceiling    
-            x      = NS.swap_noise_step(x_0, x_next, mask=sde_mask)
+            
+            if LG.guide_mode != "flow" or LG.lgw[step] == 0:
+                x = NS.swap_noise_step(x_0, x_next, mask=sde_mask)
+            else:
+                x = x_next
+            
             if EO("keep_step_means"):
                 x = x - x.mean(dim=(-2,-1), keepdim=True) + x_means_per_step
 
