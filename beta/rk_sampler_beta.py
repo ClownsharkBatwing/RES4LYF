@@ -706,7 +706,8 @@ def sample_rk_beta(
                                     eps_[row] -= eps_unsample
                                     data_[row] = x_[row] - s_tmp * eps_[row]
                                     
-                            if LG.guide_mode.startswith("lure"): 
+                            
+                            if LG.guide_mode.startswith("lure"):
                                 x_tmp = LG.process_guides_data_substep(x_tmp, data_[row], step, s_tmp)
                                 eps_[row], data_[row] = RK(x_tmp, s_tmp, x_0, sigma)
 
