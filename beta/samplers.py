@@ -13,6 +13,7 @@ import comfy.model_sampling
 import comfy.latent_formats
 import comfy.sd
 import comfy.supported_models
+from comfy.samplers import CFGGuider, sampling_function
 
 import latent_preview
 
@@ -26,6 +27,30 @@ from .constants             import MAX_STEPS, IMPLICIT_TYPE_NAMES
 from .noise_classes         import NOISE_GENERATOR_CLASSES_SIMPLE, NOISE_GENERATOR_NAMES_SIMPLE, NOISE_GENERATOR_NAMES
 from .rk_noise_sampler_beta import NOISE_MODE_NAMES
 from .rk_coefficients_beta  import get_default_sampler_name, get_sampler_name_list, process_sampler_name
+
+
+
+
+class SharkGuider(CFGGuider):
+    def __init__(self, model_patcher):
+        super().__init__(model_patcher)
+        self.cfgs = {}
+
+    def set_conds(self, **kwargs):
+        self.inner_set_conds(kwargs)
+
+    def set_cfgs(self, **kwargs):
+        self.cfgs = {**kwargs}
+
+    def predict_noise(self, x, timestep, model_options={}, seed=None):
+        model_call_type = model_options['transformer_options'].get('model_call_type', 'base')
+        positive = self.conds.get(f'{model_call_type}_positive', self.conds.get('base_positive'))
+        negative = self.conds.get(f'{model_call_type}_negative', self.conds.get('base_negative'))
+        positive = self.conds.get('base_positive') if positive is None else positive
+        negative = self.conds.get('base_negative') if negative is None else negative
+        cfg      = self.cfgs.get(model_call_type, self.cfg)
+        return sampling_function(self.inner_model, x, timestep, negative, positive, cfg, model_options=model_options, seed=seed)
+
 
 
 
@@ -146,11 +171,7 @@ class SharkSampler:
                 sampler = copy.deepcopy(latent_image['sampler'])  #.clone()
             if 'steps_to_run' in sampler.extra_options:
                 sampler.extra_options['steps_to_run'] = steps_to_run
-                
-            #if 'model' in latent_image and model is None:
-            #    model = latent_image['model'].clone()
-            
-                
+
             #sampler.extra_options.update(options_mgr.as_dict())
                 
             if cfg < 0:
@@ -171,7 +192,7 @@ class SharkSampler:
 
             sigma_min    = work_model.get_model_object('model_sampling').sigma_min
             sigma_max    = work_model.get_model_object('model_sampling').sigma_max
-        
+            
             if sampler is None:
                 raise ValueError("sampler is required")
             else:
@@ -185,13 +206,6 @@ class SharkSampler:
             else: 
                 sigmas = get_sigmas(work_model, scheduler, steps, abs(denoise)).to(default_dtype)
             sigmas *= denoise_alt
-            
-            #if 'd_noise' in sampler.extra_options:
-            #    if EO("lying_curve"):
-            #        sigmas_curve = ((sigmas.to(sigma_max.device).to(sigma_max.dtype) - sigma_max / 2).abs() - sigma_max/2).abs()
-            #        sigmas_override = sigmas.to(sigma_max.device).to(sigma_max.dtype)   +   sigmas_curve * (sampler.extra_options['d_noise'] * sigmas.to(sigma_max.device).to(sigma_max.dtype) - sigmas.to(sigma_max.device).to(sigma_max.dtype))
-            #        sampler.extra_options['sigmas_override'] = sigmas_override
-
 
             # USE NULL FLOATS AS "FLAGS" TO PREVENT COMFY NOISE ADDITION
             if sampler_mode.startswith("unsample"): 
@@ -532,7 +546,6 @@ class SharkSampler:
                     else:
                         steps_len = sigmas.shape[-1]-1
                     callback     = latent_preview.prepare_callback(work_model, steps_len, x0_output)
-                    #callback     = latent_preview.prepare_callback(work_model, sigmas.shape[-1] - 1, x0_output)
 
                     if 'BONGMATH' in sampler.extra_options:
                         sampler.extra_options['state_info']     = state_info
@@ -543,16 +556,24 @@ class SharkSampler:
                         [pos_cond[batch_num]][0][1]['control'] = positive[0][1]['control']
                         neg_cond[0][1]['control'].base = negative[0][1]['control'].base
                         [pos_cond[batch_num]][0][1]['control'].base = positive[0][1]['control'].base
-                        
-                    #if 'model' in latent_image:
-                    #    blah_model = latent_image['model'].clone()
-                    #    sampler.extra_options['blah_model'] = blah_model
+
+                    guider = SharkGuider(work_model)
+                    flow_cond = options_mgr.get('flow_cond', {})
+                    if flow_cond != {}:
+                        guider.set_conds(flow_positive=flow_cond.get('positive'), flow_negative=flow_cond.get('negative'))
+                        guider.set_cfgs(flow=flow_cond.get('cfg'), base=cfg)
+                    else:
+                        guider.set_cfgs(base=cfg)
                     
                     if batch_num < len(pos_cond):
-                        samples = comfy.sample.sample_custom(work_model, noise, cfg, sampler, sigmas, [pos_cond[batch_num]], neg_cond, x.clone(), noise_mask=noise_mask, callback=callback, disable_pbar=disable_pbar, seed=noise_seed)
+                        guider.set_conds(base_positive=[pos_cond[batch_num]], base_negative=neg_cond)
+                        samples = guider.sample(noise, x.clone(), sampler, sigmas, denoise_mask=noise_mask, callback=callback, disable_pbar=disable_pbar, seed=noise_seed)
                     else:
-                        samples = comfy.sample.sample_custom(work_model, noise, cfg, sampler, sigmas, pos_cond, neg_cond, x.clone(), noise_mask=noise_mask, callback=callback, disable_pbar=disable_pbar, seed=noise_seed)
+                        guider.set_conds(base_positive=pos_cond, base_negative=neg_cond)
+                        samples = guider.sample(noise, x.clone(), sampler, sigmas, denoise_mask=noise_mask, callback=callback, disable_pbar=disable_pbar, seed=noise_seed)
 
+
+                    
 
 
                     out = latent_unbatch.copy()

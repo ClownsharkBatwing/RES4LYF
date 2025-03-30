@@ -552,6 +552,43 @@ class RK_NoiseSampler:
         return x
 
 
+
+
+    def swap_noise_inv_substep(self, x_0:Tensor, x_next:Tensor, eta_substep:float, row:int, row_offset_multistep_stages:int, brownian_sigma:Optional[Tensor]=None, brownian_sigma_next:Optional[Tensor]=None, mask:Optional[Tensor]=None, guide:Optional[Tensor]=None) -> Tensor:
+        if self.sub_sigma_up_eta == 0   or   self.sub_sigma_next == 0:
+            return x_next
+        
+        brownian_sigma      = self.sub_sigma.clone()      if brownian_sigma      is None else brownian_sigma
+        brownian_sigma_next = self.sub_sigma_next.clone() if brownian_sigma_next is None else brownian_sigma_next
+
+        if brownian_sigma == brownian_sigma_next:
+            brownian_sigma_next *= 0.999
+            
+        eps_next      = (x_0 - x_next) / ((1-self.sigma) - (1-self.sub_sigma_next))
+        denoised_next = x_0 - (1-self.sigma) * eps_next
+        
+        if brownian_sigma_next > brownian_sigma and not self.EO("disable_brownian_swap"): # should this really be done?
+            brownian_sigma, brownian_sigma_next = brownian_sigma_next, brownian_sigma
+        
+        noise = self.noise_sampler2(sigma=brownian_sigma, sigma_next=brownian_sigma_next)
+        noise = normalize_zscore(noise, channelwise=True, inplace=True)
+        
+        sub_sigma_up,     sub_sigma,     sub_sigma_down,     sub_alpha_ratio     = self.get_sde_substep(sigma               = 1-self.s_[row],
+                                                                                                                            sigma_next          = 1-self.s_[row_offset_multistep_stages],
+                                                                                                                            eta                 = eta_substep,
+                                                                                                                            noise_mode_override = self.noise_mode_sde_substep,
+                                                                                                                            DOWN                = self.DOWN_SUBSTEP)
+
+        x_noised = sub_alpha_ratio * (denoised_next + sub_sigma_down * eps_next) + sub_sigma_up * noise * self.s_noise_substep
+
+        if mask is not None:
+            x = mask * x_noised + (1-mask) * x_next
+        else:
+            x = x_noised
+        
+        return x
+
+
     def swap_noise(self,
                     x_0                 :Tensor,
                     x_next              :Tensor,

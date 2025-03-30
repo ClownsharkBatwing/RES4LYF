@@ -133,6 +133,12 @@ class RK_Method_Beta:
         denoised = self.calc_cfg_channelwise(denoised)
         return denoised
 
+    def update_transformer_options(self,
+                transformer_options : Optional[dict] = None,
+                ):
+
+        self.extra_args.setdefault("model_options", {}).setdefault("transformer_options", {}).update(transformer_options)
+        return
 
     def set_coeff(self,
                 rk_type    : str,
@@ -681,11 +687,16 @@ class RK_Method_Exponential(RK_Method_Beta):
                 x         : Tensor,
                 sub_sigma : Tensor,
                 x_0       : Optional[Tensor] = None,
-                sigma     : Optional[Tensor] = None) -> Tuple[Tensor, Tensor]:
+                sigma     : Optional[Tensor] = None,
+                transformer_options : Optional[dict] = None,
+                ) -> Tuple[Tensor, Tensor]:
         
         x_0   = x         if x_0   is None else x_0
         sigma = sub_sigma if sigma is None else sigma
         
+        if transformer_options is not None:
+            self.extra_args.setdefault("model_options", {}).setdefault("transformer_options", {}).update(transformer_options)
+
         denoised = self.model_denoised(x.to(self.model_device), sub_sigma.to(self.model_device), **self.extra_args).to(sigma.device)
         
         eps_anchored = (x_0 - denoised) / sigma
@@ -798,10 +809,15 @@ class RK_Method_Linear(RK_Method_Beta):
                 x         : Tensor,
                 sub_sigma : Tensor,
                 x_0       : Optional[Tensor] = None,
-                sigma     : Optional[Tensor] = None) -> Tuple[Tensor, Tensor]:
+                sigma     : Optional[Tensor] = None,
+                transformer_options : Optional[dict] = None,
+                ) -> Tuple[Tensor, Tensor]:
         
         x_0   = x         if x_0   is None else x_0
         sigma = sub_sigma if sigma is None else sigma
+        
+        if transformer_options is not None:
+            self.extra_args.setdefault("model_options", {}).setdefault("transformer_options", {}).update(transformer_options)     
         
         denoised = self.model_denoised(x.to(self.model_device), sub_sigma.to(self.model_device), **self.extra_args).to(sigma.device)
 

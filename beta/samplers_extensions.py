@@ -439,6 +439,48 @@ class ClownOptions_Automation_Beta:
 
 
 
+
+
+class SharkOptions_GuideCond_Beta:
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {"required": {},
+                "optional": {
+                    "positive": ("CONDITIONING", ),
+                    "negative": ("CONDITIONING", ),
+                    "cfg":("FLOAT",   {"default": 1.0, "min": -10000, "max": 10000, "step":0.01}),
+                    "options":  ("OPTIONS",),  
+                    }  
+                }
+    RETURN_TYPES = ("OPTIONS",)
+    RETURN_NAMES = ("options",)
+    FUNCTION     = "main"
+    CATEGORY     = "RES4LYF/sampler_options"
+
+    def main(self,
+            positive = None,
+            negative = None,
+            cfg      = 1.0,
+            options  = None,
+            ):
+                
+        options = options if options is not None else {}
+
+        flow_cond = {
+            "positive" : positive,
+            "negative" : negative,
+            "cfg"      : cfg,
+        }
+        
+        options["flow_cond"] = flow_cond
+
+        return (options, )
+
+
+
+
+
+
 class SharkOptions_Beta:
     @classmethod
     def INPUT_TYPES(cls):
