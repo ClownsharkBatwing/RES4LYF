@@ -644,7 +644,7 @@ class LatentGuide:
         if not (lgw_mask.any() != 0 or lgw_mask_inv.any() != 0):  # cossim score too similar! deactivate guide for this step
             return x_row
 
-        if self.VIDEO and data_row.ndim == 5 and frame_targets is None:
+        if self.VIDEO and self.frame_weights_mgr is not None and frame_targets is None:
             num_frames = data_row.shape[2]
             frame_targets = self.frame_weights_mgr.get_frame_weights_by_name('frame_targets', num_frames, step)
             if frame_targets is None:
