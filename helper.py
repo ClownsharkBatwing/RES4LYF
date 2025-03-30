@@ -3,6 +3,7 @@ import torch.nn.functional as F
 
 import re
 import functools
+import copy
 
 from comfy.samplers import SCHEDULER_NAMES
 
@@ -153,7 +154,7 @@ class OptionsManager:
                         # Special case just for FrameWeightsManager
                         elif key == "frame_weights_mgr" and hasattr(value, "_weight_configs"):
                             if key not in self._merged_dict:
-                                self._merged_dict[key] = value
+                                self._merged_dict[key] = copy.deepcopy(value)
                             else:
                                 existing_mgr = self._merged_dict[key]
                                 
@@ -435,12 +436,13 @@ class FrameWeightsManager:
             custom_string=config["custom_string"]
         )
 
-        formatted_weights = [f"{w:.2f}" for w in weights_tensor.tolist()]
         if config["custom_string"] is not None and config["custom_string"] != "" and weights_tensor is not None:
+            formatted_weights = [f"{w:.2f}" for w in weights_tensor.tolist()]
             RESplain(f"Custom '{name}' for step {step}: {formatted_weights}", debug=True)
+        elif weights_tensor is None:
+            weights_tensor = torch.ones(num_frames, dtype=self.dtype, device=self.device)
 
         return weights_tensor
-    
 
     def _generate_custom_weights(self, num_frames, custom_string, step=None):
         """

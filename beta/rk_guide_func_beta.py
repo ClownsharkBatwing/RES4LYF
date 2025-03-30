@@ -648,8 +648,8 @@ class LatentGuide:
             num_frames = data_row.shape[2]
             frame_targets = self.frame_weights_mgr.get_frame_weights_by_name('frame_targets', num_frames, step)
             if frame_targets is None:
-                frame_targets = self.EO("frame_targets", [1.0])
-            frame_targets = torch.clamp(frame_targets, 0.0, 1.0)
+                frame_targets = torch.tensor(self.EO("frame_targets", [1.0]))
+            frame_targets = torch.clamp(frame_targets, 0.0, 1.0).to(self.device)
 
         if self.guide_mode in {"data", "data_projection", "lure", "lure_projection"}:
             if frame_targets is None:
