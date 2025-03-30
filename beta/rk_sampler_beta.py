@@ -301,10 +301,7 @@ def sample_rk_beta(
         regional_conditioning_mask_orig = None
     if EO("inv_reg_cond_mask"):
         regional_conditioning_mask_orig = 1-regional_conditioning_mask_orig
-        
-        
-    #RK.extra_args['model_options']['transformer_options']['regional_conditioning_mask_orig'] = regional_conditioning_mask_orig
-    
+
     # SETUP SIGMAS
     NS               = RK_NoiseSampler(RK, model, device=work_device, dtype=default_dtype, extra_options=extra_options)
     sigmas, UNSAMPLE = NS.prepare_sigmas(sigmas, sigmas_override, d_noise, d_noise_start_step, sampler_mode)
@@ -375,12 +372,7 @@ def sample_rk_beta(
     if LG.guide_mode == "flow":
         NS.init_noise = x.clone() # will this go haywire with chained samplers? yes... pass via state_info!
         init_noise = x.clone()
-        
         FLOW_STARTED = False
-        """if LG.HAS_LATENT_GUIDE:
-            x = (1 - LG.mask)     * x + LG.mask     * LG.y0
-        if LG.HAS_LATENT_GUIDE_INV:
-            x = (1 - LG.mask_inv) * x + LG.mask_inv * LG.y0_inv"""
         
 
     # BEGIN SAMPLING LOOP    
@@ -675,24 +667,17 @@ def sample_rk_beta(
 
                             if LG.guide_mode == "flow" and (LG.lgw[step] > 0 or LG.lgw_inv[step] > 0):
                                 if not FLOW_STARTED:
-                                    FLOW_STARTED = True
-                                if step == 0:
-                                    if LG.HAS_LATENT_GUIDE     and not LG.HAS_LATENT_GUIDE_INV:
-                                        y_guide = LG.mask * LG.y0
-                                    elif LG.HAS_LATENT_GUIDE_INV and not LG.HAS_LATENT_GUIDE:
-                                        y_guide = LG.mask_inv * LG.y0_inv 
-                                    elif LG.HAS_LATENT_GUIDE     and     LG.HAS_LATENT_GUIDE_INV:
-                                        y_guide = LG.mask * LG.y0 + LG.mask_inv * LG.y0_inv 
+                                    if step == 0:
+                                        y_guide = LG.HAS_LATENT_GUIDE * LG.mask * LG.y0   +   LG.HAS_LATENT_GUIDE_INV * LG.mask_inv * LG.y0_inv 
+
+                                    else:
+                                        data_cached = data_prev_[0] if data_cached is None else data_cached
+                                        y_guide = (1 - (LG.HAS_LATENT_GUIDE * LG.lgw[step] * LG.mask + LG.HAS_LATENT_GUIDE_INV * LG.lgw_inv[step] * LG.mask_inv)) * data_cached   +   LG.HAS_LATENT_GUIDE * LG.lgw[step] * LG.mask * LG.y0   +   LG.HAS_LATENT_GUIDE_INV * LG.lgw_inv[step] * LG.mask_inv * LG.y0_inv
+                                    x_[row] = x_0 = x_tmp = y_guide.clone()
+
                                 else:
-                                    data_cached = data_prev_[0] if data_cached is None else data_cached
-                                    if LG.HAS_LATENT_GUIDE     and not LG.HAS_LATENT_GUIDE_INV:
-                                        y_guide = (1 - LG.lgw[step] * LG.mask) * data_cached   +   LG.lgw[step] * LG.mask * LG.y0
-                                    elif LG.HAS_LATENT_GUIDE_INV and not LG.HAS_LATENT_GUIDE:
-                                        y_guide = (1 - LG.lgw_inv[step] * LG.mask_inv) * data_cached   +   LG.lgw_inv[step] * LG.mask_inv * LG.y0_inv 
-                                    elif LG.HAS_LATENT_GUIDE     and     LG.HAS_LATENT_GUIDE_INV:
-                                        y_guide = (1 - (LG.lgw[step] * LG.mask + LG.lgw_inv[step] * LG.mask_inv)) * data_cached   +   LG.lgw[step] * LG.mask * LG.y0   +   LG.lgw_inv[step] * LG.mask_inv * LG.y0_inv
-                                x_tmp = y_guide.clone()
-                                x_[row] = x_0 = x_tmp
+                                    y_guide = (1 - (LG.HAS_LATENT_GUIDE * LG.lgw[step] * LG.mask + LG.HAS_LATENT_GUIDE_INV * LG.lgw_inv[step] * LG.mask_inv)) * data_cached   +   LG.HAS_LATENT_GUIDE * LG.lgw[step] * LG.mask * LG.y0   +   LG.HAS_LATENT_GUIDE_INV * LG.lgw_inv[step] * LG.mask_inv * LG.y0_inv
+                                    x_tmp = y_guide.clone()
 
                                 data_cached = torch.zeros_like(x) if data_cached is None else data_cached
 
@@ -719,26 +704,18 @@ def sample_rk_beta(
                             else:
                                 RK.update_transformer_options({'model_call_type': 'base'})
                                 eps_[row], data_[row] = RK(x_tmp, s_tmp, x_0_noised, sigma)
-                                #eps_[row], data_[row] = RK(x_tmp, s_tmp)
 
                                 if LG.lgw[step+1] == 0 and LG.lgw_inv[step+1] == 0:
                                     x_next_override = x_tmp + NS.h * eps_[row]
-                                    x_0_override = NS.sigma_from_to(x_tmp, x_next_override, s_tmp, sigma_next, sigma)
+                                    x_0_override    = NS.sigma_from_to(x_tmp, x_next_override, s_tmp, sigma_next, sigma)
                                     x_[row]         = x_tmp
-                                    #x_next_tmp = x_[row] + NS.h * eps_[row]
-                                    #data_[row] = NS.sigma_from_to(x_[row], x_next_tmp, s_tmp, NS.sub_sigma_next, 0)
-                                    #eps_[row] = RK.get_epsilon(x_0, x_[row], data_[row], sigma, NS.sub_sigma)
-                                    
                                     data_cached     = None
                                 else:
                                     data_cached     = data_[row].clone()
                                     eps_ [row]     -= eps_unsample
-                                    
-                                    x_next_tmp = x_[row] + NS.h * eps_[row]
-                                    data_[row] = NS.sigma_from_to(x_[row], x_next_tmp, s_tmp, NS.sub_sigma_next, 0)     # potential issues with incongruities between x_[row] sigma level and s_tmp
-                                    
-                                    #data_[row]      = x_[row] - s_tmp * eps_[row]
-                                    
+                                    x_next_tmp      = x_[row] + NS.h * eps_[row]
+                                    data_[row]      = NS.sigma_from_to(x_[row], x_next_tmp, s_tmp, NS.sub_sigma_next, 0)     # potential issues with incongruities between x_[row] sigma level and s_tmp
+                                FLOW_STARTED = True
                             
                             if LG.guide_mode.startswith("lure"):
                                 x_tmp = LG.process_guides_data_substep(x_tmp, data_[row], step, s_tmp)
@@ -824,7 +801,6 @@ def sample_rk_beta(
                         
 
                         if LG.y0_mean is not None and LG.y0_mean.sum() != 0.0:
-                            #mean_eps_guide = EO("mean_eps_guide_x_0", 0.5)
                             eps_row_mean = eps_[row] - eps_[row].mean(dim=(-2,-1), keepdim=True) + (LG.y0_mean - x_0).mean(dim=(-2,-1), keepdim=True)
                             
                             if LG.mask_mean is not None:
