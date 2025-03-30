@@ -677,7 +677,8 @@ def sample_rk_beta(
 
                                 else:
                                     y_guide = (1 - (LG.HAS_LATENT_GUIDE * LG.lgw[step] * LG.mask + LG.HAS_LATENT_GUIDE_INV * LG.lgw_inv[step] * LG.mask_inv)) * data_cached   +   LG.HAS_LATENT_GUIDE * LG.lgw[step] * LG.mask * LG.y0   +   LG.HAS_LATENT_GUIDE_INV * LG.lgw_inv[step] * LG.mask_inv * LG.y0_inv
-                                    x_tmp = y_guide.clone()
+                                    x_[row] = x_tmp  = (1 - (LG.HAS_LATENT_GUIDE * LG.lgw[step] * LG.mask + LG.HAS_LATENT_GUIDE_INV * LG.lgw_inv[step] * LG.mask_inv)) * data_cached   +   LG.HAS_LATENT_GUIDE * LG.lgw[step] * LG.mask * x_tmp   +   LG.HAS_LATENT_GUIDE_INV * LG.lgw_inv[step] * LG.mask_inv * x_tmp
+
 
                                 data_cached = torch.zeros_like(x) if data_cached is None else data_cached
 
