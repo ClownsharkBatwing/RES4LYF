@@ -564,6 +564,16 @@ class FrameWeightsManager:
         return None
     
     def _generate_frame_weights(self, num_frames, dynamics, schedule, scale, is_reversed, frame_weights, step=None, custom_string=None):
+        # Look for the multiplier= parameter in the custom string and store it as a float value
+        multiplier = 1.0
+        if custom_string is not None and "multiplier" in custom_string:
+            multiplier_match = re.search(r"multiplier\s*=\s*([0-9.]+)", custom_string)
+            if multiplier_match:
+                multiplier = float(multiplier_match.group(1))
+                # Remove the multiplier= from the custom string
+                custom_string = re.sub(r"multiplier\s*=\s*[0-9.]+", "", custom_string).strip()
+                RESplain(f"Custom multiplier detected: {multiplier}", debug=True)
+
         if custom_string is not None and step is not None:
             custom_weights = self._generate_custom_weights(num_frames, custom_string, step)
             if custom_weights is not None:
@@ -571,7 +581,7 @@ class FrameWeightsManager:
                 weights = torch.flip(weights, [0]) if is_reversed else weights
                 return weights
             else:
-                RESplain("custom frame weights failed to parse, doing the normal thing...")
+                RESplain("custom frame weights failed to parse, doing the normal thing...", debug=True)
 
         if "fast" in schedule:
             rate_factor = 0.25
@@ -596,83 +606,123 @@ class FrameWeightsManager:
             weights = weights[:num_frames]
         else:
             if dynamics == "constant":
-                weights = self._generate_constant_schedule(change_frames, low_value)
+                weights = self._generate_constant_schedule(change_start, change_frames, low_value, num_frames)
             elif dynamics == "linear":
-                weights = self._generate_linear_schedule(change_frames, low_value)
+                weights = self._generate_linear_schedule(change_start, change_frames, low_value, num_frames)
             elif dynamics == "ease_out":
-                weights = self._generate_easeout_schedule(change_frames, low_value)
+                weights = self._generate_easeout_schedule(change_start, change_frames, low_value, num_frames)
             elif dynamics == "ease_in":
-                weights = self._generate_easein_schedule(change_frames, low_value)
+                weights = self._generate_easein_schedule(change_start, change_frames, low_value, num_frames)
+            elif dynamics == "middle":
+                weights = self._generate_middle_schedule(change_start, change_frames, low_value, num_frames)
+            elif dynamics == "trough":
+                weights = self._generate_trough_schedule(change_start, change_frames, low_value, num_frames)
             else:
                 raise ValueError(f"Invalid schedule: {dynamics}")
-
-        # Prepend with change_start frames of 1.0 (unless constant)
-        if dynamics != "constant":
-            weights = torch.cat([torch.full((change_start,), 1.0), weights])
-        # Fill remaining with final value
-        weights = torch.cat([weights, torch.full((num_frames,), weights[-1])])
-        weights = weights[:num_frames]
-
+            
         weights = torch.flip(weights, [0]) if is_reversed else weights
+        weights = weights * multiplier
+        weights = torch.clamp(weights, min=0.0, max=(max(1.0, multiplier)))
         weights = weights.to(dtype=self.dtype, device=self.device)
 
         return weights
 
-    def _generate_constant_schedule(self, timepoints, low_value):
+    def _generate_constant_schedule(self, change_start, change_frames, low_value, num_frames):
         """constant schedule with the scale as the low weight"""
-        return torch.ones(timepoints) * low_value
+        return torch.ones(num_frames) * low_value
     
-    def _generate_linear_schedule(self, timepoints, low_value):
-        """linear schedule from 1 to the low weight
-        1.0 |^
-            | \
-            |  \
-            |   \
-            |    \
-            |     \
-            |      \
-            |       \
-        low |        \
-        0.0 +----------
-             0        1
-                time
-        """
-        return torch.linspace(1, low_value, timepoints)
+    def _generate_linear_schedule(self, change_start, change_frames, low_value, num_frames):
+        """linear schedule from 1 to the low weight"""
+        weights = torch.linspace(1, low_value, change_frames)
+
+        ## Prepend with change_start frames of 1.0
+        weights = torch.cat([torch.full((change_start,), 1.0), weights])
+        # Fill remaining with final value
+        weights = torch.cat([weights, torch.full((num_frames,), weights[-1])])
+        weights = weights[:num_frames]
     
-    def _generate_easeout_schedule(self, timepoints, low_value):
-        """exponential schedule from 1 to the low weight
-        1.0 |^\_
-            |   \\_
-            |     \\__
-            |        \\_
-            |          \\__
-            |             \\____
-            |                   \\________
-        low |                             \______
-        0.0 +----------------------------------------
-             0                                     1
-                              time
-        """
-        timepoints = max(timepoints, 4)
-        t = torch.linspace(0, 1, timepoints, dtype=self.dtype, device=self.device)
+    def _generate_easeout_schedule(self, change_start, change_frames, low_value, num_frames):
+        """exponential schedule from 1 to the low weight"""
+        change_frames = max(change_frames, 4)
+        t = torch.linspace(0, 1, change_frames, dtype=self.dtype, device=self.device)
         weights = torch.pow(low_value, t)
+        ## Prepend with change_start frames of 1.0
+        weights = torch.cat([torch.full((change_start,), 1.0), weights])
+        # Fill remaining with final value
+        weights = torch.cat([weights, torch.full((num_frames,), weights[-1])])
+        weights = weights[:num_frames]
         return weights
 
-    def _generate_easein_schedule(self, timepoints, low_value):
-        """a monomial power schedule from 1 to the low weight
-        1.0 |^--_____
-            |         \_____
-            |                \____
-            |                      \___
-            |                          \__
-            |                             \_
-            |                               \
-        low |                                 \
-        0.0 +----------------------------------
-             0                                1
-                            time
-        """
-        timepoints = max(timepoints, 4)
-        t = torch.linspace(0, 1, timepoints, dtype=self.dtype, device=self.device)
+    def _generate_easein_schedule(self, change_start, change_frames, low_value, num_frames):
+        """a monomial power schedule from 1 to the low weight"""
+        change_frames = max(change_frames, 4)
+        t = torch.linspace(0, 1, change_frames, dtype=self.dtype, device=self.device)
         weights = 1 - (1 - low_value) * torch.pow(t, 2)
+        ## Prepend with change_start frames of 1.0
+        weights = torch.cat([torch.full((change_start,), 1.0), weights])
+        # Fill remaining with final value
+        weights = torch.cat([weights, torch.full((num_frames,), weights[-1])])
+        weights = weights[:num_frames]
+        return weights
+
+    def _generate_middle_schedule(self, change_start, change_frames, low_value, num_frames):
+        """gaussian middle peaking schedule from 1 to the low weight"""
+
+        change_frames = max(change_frames, 4)
+        t = torch.linspace(0, 1, change_frames, dtype=self.dtype, device=self.device)
+        weights = torch.exp(-0.5 * ((t - 0.5) / 0.2) ** 2)
+        weights = weights / torch.max(weights)
+        weights = low_value + (1 - low_value) * weights
+        total_frames_to_pad = num_frames - len(weights)
+        pad_left = total_frames_to_pad // 2
+        pad_right = total_frames_to_pad - pad_left
+        weights = torch.cat([torch.full((pad_left,), low_value), weights, torch.full((pad_right,), low_value)])
+        if change_start > 0:
+            # Pad the beginning with the first value, and truncate to num_frames
+            weights = torch.cat([torch.full((change_start,), low_value), weights])
+            weights = weights[:num_frames]     
+
+        return weights
+    
+    def _generate_trough_schedule(self, change_start, change_frames, low_value, num_frames):
+        """
+        Trough schedule with both ends at 1 and the middle at the low weight.
+        When change_start > 0, creates asymmetry with shorter decay at beginning and longer at end.
+        """
+        change_frames = max(change_frames, 4)
+        
+        # Calculate sigma based on change_frames - controls overall decay rate
+        sigma = max(0.2, change_frames / num_frames)
+        
+        # Create base points for trough
+        if change_start == 0:
+            # Symmetric trough when change_start is 0
+            t = torch.linspace(-1, 1, num_frames, dtype=self.dtype, device=self.device)
+        else:
+            # Create asymmetry when change_start > 0
+            # Map first portion of frames to a shorter range (quicker decay)
+            # Map remaining portion to a longer range (slower decay)
+            asymmetry_factor = min(0.5, change_start / num_frames)
+            
+            # Split point (as a fraction of total frames)
+            split_point = 0.5 - asymmetry_factor
+            
+            # Create first half (beginning of trough) - maps to [-1, 0] range
+            first_size = int(split_point * num_frames)
+            first_size = max(1, first_size)  # Ensure at least one frame
+            t1 = torch.linspace(-1, 0, first_size, dtype=self.dtype, device=self.device)
+            
+            # Create second half (end of trough) - maps to [0, 1] range
+            second_size = num_frames - first_size
+            t2 = torch.linspace(0, 1, second_size, dtype=self.dtype, device=self.device)
+            
+            # Combine the two ranges
+            t = torch.cat([t1, t2])
+        
+        # Create the trough shape using Gaussian function
+        trough = 1.0 - torch.exp(-0.5 * (t / sigma) ** 2)
+        
+        # Scale to the desired range
+        weights = low_value + (1.0 - low_value) * trough
+        
         return weights

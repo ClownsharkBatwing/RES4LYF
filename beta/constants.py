@@ -45,7 +45,9 @@ FRAME_WEIGHTS_DYNAMICS_NAMES = [
     "constant",
     "linear",
     "ease_out",
-    "ease_in"
+    "ease_in",
+    "middle",
+    "trough",
 ]
 
 
