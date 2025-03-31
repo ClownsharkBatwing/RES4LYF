@@ -448,11 +448,12 @@ def sample_rk_beta(
         
 
         rk_swap_stages = 3 if rk_swap_type != "" else 0
-        recycled_stages = max(rk_swap_stages, RK.multistep_stages, RK.hybrid_stages)
+        data_prev_len = len(data_prev_)-1 if data_prev_ is not None else 3
+        recycled_stages = max(rk_swap_stages, RK.multistep_stages, RK.hybrid_stages, data_prev_len)
         
         if INIT_SAMPLE_LOOP:
             INIT_SAMPLE_LOOP = False
-            x_, data_, eps_, eps_prev_  = (torch.zeros(    RK.rows+2,     *x.shape, dtype=default_dtype, device=work_device) for _ in range(4))
+            x_, data_, eps_, eps_prev_ = (torch.zeros(RK.rows+2, *x.shape, dtype=default_dtype, device=work_device) for _ in range(4))
             
             data_prev_ = state_info.get('data_prev_')
             if data_prev_ is not None:
@@ -464,7 +465,7 @@ def sample_rk_beta(
             
         if RK.rows+2 > x_.shape[0]:
             row_gap = RK.rows+2 - x_.shape[0]
-            x_gap_, data_gap_, eps_gap_, eps_prev_gap_  = (torch.zeros(row_gap,     *x.shape, dtype=default_dtype, device=work_device) for _ in range(4))
+            x_gap_, data_gap_, eps_gap_, eps_prev_gap_ = (torch.zeros(row_gap, *x.shape, dtype=default_dtype, device=work_device) for _ in range(4))
             x_        = torch.cat((x_       ,x_gap_)       , dim=0)
             data_     = torch.cat((data_    ,data_gap_)    , dim=0)
             eps_      = torch.cat((eps_     ,eps_gap_)     , dim=0)
@@ -1079,14 +1080,12 @@ def sample_rk_beta(
                 data_cached  = None
                 FLOW_STOPPED = True
 
-                    
-                
-
 
 
         data_prev_[0] = data_[0] if data_cached is None else data_cached # data_cached is data_x from flow mode. this allows multistep to resume seamlessly.
         for ms in range(recycled_stages):
             data_prev_[recycled_stages - ms] = data_prev_[recycled_stages - ms - 1]            # will this really behave correctly? seems to run on every substep...
+
         
         rk_type = RK.swap_rk_type_at_step_or_threshold(x_0, data_prev_, NS, sigmas, step, rk_swap_step, rk_swap_threshold, rk_swap_type, rk_swap_print)
         if step > rk_swap_step:
