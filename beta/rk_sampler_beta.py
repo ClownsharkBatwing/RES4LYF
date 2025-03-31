@@ -977,12 +977,7 @@ def sample_rk_beta(
                             x_0, x_, eps_ = RK.bong_iter(x_0, x_, eps_, eps_prev_, data_, sigma, NS.s_, row, RK.row_offset, NS.h, step)
                             
                     diag_iter += 1
-                    """if x_next_override is not None:
-                        x_0 = x_[0] = x_0_override
-                        x_next_override = None
-                        diag_iter -= 1
-                        LG.lgw[step] = 0
-                        LG.lgw_inv[step] = 0"""
+
 
                     
                     #progress_bar.update( round(1 / implicit_steps_total, 2) )
@@ -1075,7 +1070,7 @@ def sample_rk_beta(
                         LG.lgw *= EO("guide_min_factor", 1.1)
                     full_iter -= 1
                     
-            if (LG.lgw[step] > 0 or LG.lgw_inv[step] > 0) and LG.lgw[step+1] == 0 and LG.lgw_inv[step+1] == 0 and full_iter == implicit_steps_full+1 and LG.guide_mode.startswith("flow"):
+            if ((LG.lgw[step] > 0 or LG.lgw_inv[step] > 0) and LG.lgw[step+1] == 0 and LG.lgw_inv[step+1] == 0 and full_iter == implicit_steps_full+1 and LG.guide_mode.startswith("flow"))   or   (LG.guide_mode.startswith("flow") and step == num_steps-1):
                 noise = normalize_zscore(NS.noise_sampler(sigma=sigma, sigma_next=sigma_next), channelwise=True, inplace=True)
                 yt = (1 - sigma_next) * y0 + sigma_next * noise
                 x_next = x = x_next + yt - y0
