@@ -7,7 +7,7 @@ import math
 
 from ..res4lyf              import RESplain
 from ..helper               import ExtraOptions, FrameWeightsManager
-from ..latents              import lagrange_interpolation, get_collinear, get_orthogonal, get_cosine_similarity, get_slerp_weight_for_cossim, get_slerp_ratio, slerp_tensor
+from ..latents              import lagrange_interpolation, get_collinear, get_orthogonal, get_cosine_similarity, get_slerp_weight_for_cossim, get_slerp_ratio, slerp_tensor, normalize_zscore
 
 from .rk_method_beta        import RK_Method_Beta
 from .rk_noise_sampler_beta import RK_NoiseSampler
@@ -368,12 +368,14 @@ def sample_rk_beta(
 
     gc.collect()
 
-    x_next_override = None
     if LG.guide_mode == "flow":
         NS.init_noise = x.clone() # will this go haywire with chained samplers? yes... pass via state_info!
         init_noise = x.clone()
         FLOW_STARTED = False
-        
+    BASE_STARTED = False
+    INV_STARTED = False
+    FLOW_STOPPED = False
+
 
     # BEGIN SAMPLING LOOP    
     num_steps = len(sigmas[start_step:])-2 if sigmas[-1] == 0 else len(sigmas[start_step:])-1
@@ -665,33 +667,58 @@ def sample_rk_beta(
                                 if RK.multistep_stages > 0:
                                     s_tmp = lying_sd
 
-                            if LG.guide_mode == "flow" and (LG.lgw[step] > 0 or LG.lgw_inv[step] > 0):
+                            if LG.guide_mode == "flow" and not FLOW_STOPPED and (LG.lgw[step] > 0 or LG.lgw_inv[step] > 0):
                                 if not FLOW_STARTED:
+                                    BASE_STARTED = True if BASE_STARTED or LG.lgw    [step] > 0 else False
+                                    INV_STARTED  = True if  INV_STARTED or LG.lgw_inv[step] > 0 else False
                                     if step == 0:
                                         y_guide = LG.HAS_LATENT_GUIDE * LG.mask * LG.y0   +   LG.HAS_LATENT_GUIDE_INV * LG.mask_inv * LG.y0_inv 
-
                                     else:
                                         data_cached = data_prev_[0] if data_cached is None else data_cached
                                         y_guide = (1 - (LG.HAS_LATENT_GUIDE * LG.lgw[step] * LG.mask + LG.HAS_LATENT_GUIDE_INV * LG.lgw_inv[step] * LG.mask_inv)) * data_cached   +   LG.HAS_LATENT_GUIDE * LG.lgw[step] * LG.mask * LG.y0   +   LG.HAS_LATENT_GUIDE_INV * LG.lgw_inv[step] * LG.mask_inv * LG.y0_inv
-                                    x_[row] = x_0 = x_tmp = y_guide.clone()
-
+                                    yx0 = y0 = x_[row] = x_0 = x_0_orig = x_tmp = y_guide.clone()
+                                elif LG.lgw[step-1] == 0 and LG.lgw[step] > 0 and not BASE_STARTED:
+                                    y_guide = (1 - LG.HAS_LATENT_GUIDE * LG.lgw[step] * LG.mask) * LG.y0     +    (1- LG.HAS_LATENT_GUIDE_INV * LG.lgw_inv[step] * LG.mask_inv) * x_tmp        +    LG.HAS_LATENT_GUIDE * LG.lgw[step] * LG.mask * x_tmp    +    LG.HAS_LATENT_GUIDE_INV * LG.lgw_inv[step] * LG.mask_inv * x_tmp
+                                    yx0 = y0 = x_[row] = x_0 = x_0_orig = x_tmp = y_guide.clone()
+                                    BASE_STARTED = True
+                                elif LG.lgw_inv[step-1] == 0 and LG.lgw_inv[step] > 0 and not INV_STARTED:
+                                    y_guide = (1 - LG.HAS_LATENT_GUIDE * LG.lgw[step] * LG.mask) * x_tmp     +    (1- LG.HAS_LATENT_GUIDE_INV * LG.lgw_inv[step] * LG.mask_inv) * LG.y0_inv    +    LG.HAS_LATENT_GUIDE * LG.lgw[step] * LG.mask * x_tmp    +    LG.HAS_LATENT_GUIDE_INV * LG.lgw_inv[step] * LG.mask_inv * x_tmp
+                                    yx0 = y0 = x_[row] = x_0 = x_0_orig = x_tmp = y_guide.clone()
+                                    INV_STARTED = True
                                 else:
-                                    y_guide = (1 - (LG.HAS_LATENT_GUIDE * LG.lgw[step] * LG.mask + LG.HAS_LATENT_GUIDE_INV * LG.lgw_inv[step] * LG.mask_inv)) * data_cached   +   LG.HAS_LATENT_GUIDE * LG.lgw[step] * LG.mask * LG.y0   +   LG.HAS_LATENT_GUIDE_INV * LG.lgw_inv[step] * LG.mask_inv * LG.y0_inv
-                                    x_[row] = x_tmp  = (1 - (LG.HAS_LATENT_GUIDE * LG.lgw[step] * LG.mask + LG.HAS_LATENT_GUIDE_INV * LG.lgw_inv[step] * LG.mask_inv)) * data_cached   +   LG.HAS_LATENT_GUIDE * LG.lgw[step] * LG.mask * x_tmp   +   LG.HAS_LATENT_GUIDE_INV * LG.lgw_inv[step] * LG.mask_inv * x_tmp
+                                    yx0 = x_tmp
 
-
-                                data_cached = torch.zeros_like(x) if data_cached is None else data_cached
-
-                                if eta > 0:
-                                    y_mix_noised, x_0_noised, x_tmp = NS.linear_noise_step   (y_guide, s_tmp, x_0_orig, x_tmp)
-                                elif eta_substep > 0:
-                                    y_mix_noised, x_0_noised, x_tmp = NS.linear_noise_substep(y_guide, s_tmp, x_0_orig, x_tmp)
-                                else:
-                                    y_mix_noised, x_0_noised, x_tmp = NS.linear_noise_init   (y_guide, s_tmp, x_0_orig, x_tmp)
-
-                                RK.update_transformer_options({'model_call_type': 'flow'})
-                                eps_unsample, data_unsample = RK(y_mix_noised, s_tmp)
+                                noise = normalize_zscore(NS.noise_sampler(sigma=sigma, sigma_next=sigma_next), channelwise=True, inplace=True)
                                 
+                                yt = (1 - s_tmp) * y0 + s_tmp * noise
+                                
+                                if EO("noise1"):
+                                    noise1 = normalize_zscore(NS.noise_sampler(sigma=sigma, sigma_next=sigma_next), channelwise=True, inplace=True)
+                                    xt = yx0 + ((1 - s_tmp) * y0 + s_tmp * noise1) - y0
+                                else:
+                                    xt = yx0 + yt - y0
+                                
+                                if EO("noise2"):
+                                    noise2 = normalize_zscore(NS.noise_sampler(sigma=sigma, sigma_next=sigma_next), channelwise=True, inplace=True)
+                                    x_0_noised = x_0_orig + sigma * (noise2 - y0)
+                                else:
+                                    x_0_noised = x_0_orig + sigma * (noise - y0)
+                                
+                                eps_y, data_y = RK(yt, s_tmp,                    transformer_options={'latent_type': 'yt'})
+                                eps_x, data_x = RK(xt, s_tmp, x_0_noised, sigma, transformer_options={'latent_type': 'xt'})
+
+                                yx0 += NS.h * (eps_x - eps_y)
+                                
+                                x_[row]   = x_tmp = yx0
+                                eps_[row] = (eps_x - eps_y)
+                                
+                                data_[row] = yx0.clone()
+                                
+                                yx0 += LG.mask * LG.lgw[step] * (data_x - yx0)  +   LG.mask_inv * LG.lgw_inv[step] * (data_x - yx0)
+                                y0  += LG.mask * LG.lgw[step] * (data_x - y0)   +   LG.mask_inv * LG.lgw_inv[step] * (data_x - y0)
+
+                                data_cached = data_x
+                            
 
                             if step < EO("direct_pre_pseudo_guide", 0) and step > 0:
                                 for i_pseudo in range(EO("direct_pre_pseudo_guide_iter", 1)):
@@ -700,24 +727,9 @@ def sample_rk_beta(
                             
                             # MODEL CALL MODEL CALL MODEL CALL MODEL CALL MODEL CALL MODEL CALL MODEL CALL MODEL CALL MODEL CALL MODEL CALL MODEL CALL MODEL CALL MODEL CALL MODEL CALL MODEL CALL MODEL CALL MODEL CALL
                             
-                            if (LG.guide_mode != "flow")   or   (LG.guide_mode == "flow" and LG.lgw[step] == 0 and LG.lgw_inv[step] == 0):
+                            if (LG.guide_mode != "flow")   or   FLOW_STOPPED   or    (LG.guide_mode == "flow" and LG.lgw[step] == 0 and LG.lgw_inv[step] == 0):
                                 eps_[row], data_[row] = RK(x_tmp, s_tmp, x_0, sigma)
-                            else:
-                                RK.update_transformer_options({'model_call_type': 'base'})
-                                eps_[row], data_[row] = RK(x_tmp, s_tmp, x_0_noised, sigma)
 
-                                if LG.lgw[step+1] == 0 and LG.lgw_inv[step+1] == 0:
-                                    x_next_override = x_tmp + NS.h * eps_[row]
-                                    x_0_override    = NS.sigma_from_to(x_tmp, x_next_override, s_tmp, sigma_next, sigma)
-                                    x_[row]         = x_tmp
-                                    data_cached     = None
-                                else:
-                                    data_cached     = data_[row].clone()
-                                    eps_ [row]     -= eps_unsample
-                                    x_next_tmp      = x_[row] + NS.h * eps_[row]
-                                    data_[row]      = NS.sigma_from_to(x_[row], x_next_tmp, s_tmp, NS.sub_sigma_next, 0)     # potential issues with incongruities between x_[row] sigma level and s_tmp
-                                FLOW_STARTED = True
-                            
                             if LG.guide_mode.startswith("lure"):
                                 x_tmp = LG.process_guides_data_substep(x_tmp, data_[row], step, s_tmp)
                                 eps_[row], data_[row] = RK(x_tmp, s_tmp, x_0, sigma)
@@ -924,13 +936,6 @@ def sample_rk_beta(
                             x_0, x_, eps_ = RK.bong_iter(x_0, x_, eps_, eps_prev_, data_, sigma, NS.s_, row, RK.row_offset, NS.h, step)
                             
                     diag_iter += 1
-                    if x_next_override is not None:
-                        x_0 = x_[0] = x_0_override
-                        x_next_override = None
-                        diag_iter -= 1
-                        LG.lgw[step] = 0
-                        LG.lgw_inv[step] = 0
-
                     
                     #progress_bar.update( round(1 / implicit_steps_total, 2) )
                     
@@ -939,9 +944,6 @@ def sample_rk_beta(
 
             x_next = x_[RK.rows - RK.multistep_stages - RK.row_offset + 1]
             x_next = NS.rebound_overshoot_step(x_0, x_next)
-            
-            if LG.guide_mode.startswith("flow") and LG.lgw[step] > 0 and LG.lgw[step+1] == 0 and LG.lgw_inv[step] > 0 and LG.lgw_inv[step+1] == 0 and x_next_override is not None: 
-                x_next = x_next_override
             
             eps = (x_0 - x_next) / (sigma - sigma_next)
             denoised = x_0 - sigma * eps
@@ -1022,13 +1024,23 @@ def sample_rk_beta(
                         LG.lgw *= EO("guide_min_factor", 1.1)
                     full_iter -= 1
                     
+            if (LG.lgw[step] > 0 or LG.lgw_inv[step] > 0) and LG.lgw[step+1] == 0 and LG.lgw_inv[step+1] == 0 and full_iter == implicit_steps_full+1:
+                noise = normalize_zscore(NS.noise_sampler(sigma=sigma, sigma_next=sigma_next), channelwise=True, inplace=True)
+                yt = (1 - sigma_next) * y0 + sigma_next * noise
+                x_next = x = x_next + yt - y0
+
+                data_[0] = data_cached
+                data_cached = None
+                FLOW_STOPPED = True
+
+                    
                 
 
 
 
         data_prev_[0] = data_[0]
         for ms in range(recycled_stages):
-            data_prev_[recycled_stages - ms] = data_prev_[recycled_stages - ms - 1]
+            data_prev_[recycled_stages - ms] = data_prev_[recycled_stages - ms - 1]            # will this really behave correctly? seems to run on every substep...
         
         rk_type = RK.swap_rk_type_at_step_or_threshold(x_0, data_prev_, NS, sigmas, step, rk_swap_step, rk_swap_threshold, rk_swap_type, rk_swap_print)
         if step > rk_swap_step:

@@ -43,12 +43,12 @@ class SharkGuider(CFGGuider):
         self.cfgs = {**kwargs}
 
     def predict_noise(self, x, timestep, model_options={}, seed=None):
-        model_call_type = model_options['transformer_options'].get('model_call_type', 'base')
-        positive = self.conds.get(f'{model_call_type}_positive', self.conds.get('base_positive'))
-        negative = self.conds.get(f'{model_call_type}_negative', self.conds.get('base_negative'))
-        positive = self.conds.get('base_positive') if positive is None else positive
-        negative = self.conds.get('base_negative') if negative is None else negative
-        cfg      = self.cfgs.get(model_call_type, self.cfg)
+        latent_type = model_options['transformer_options'].get('latent_type', 'xt')
+        positive = self.conds.get(f'{latent_type}_positive', self.conds.get('xt_positive'))
+        negative = self.conds.get(f'{latent_type}_negative', self.conds.get('xt_negative'))
+        positive = self.conds.get('xt_positive') if positive is None else positive
+        negative = self.conds.get('xt_negative') if negative is None else negative
+        cfg      = self.cfgs.get(latent_type, self.cfg)
         return sampling_function(self.inner_model, x, timestep, negative, positive, cfg, model_options=model_options, seed=seed)
 
 
@@ -560,16 +560,16 @@ class SharkSampler:
                     guider = SharkGuider(work_model)
                     flow_cond = options_mgr.get('flow_cond', {})
                     if flow_cond != {}:
-                        guider.set_conds(flow_positive=flow_cond.get('positive'), flow_negative=flow_cond.get('negative'))
-                        guider.set_cfgs(flow=flow_cond.get('cfg'), base=cfg)
+                        guider.set_conds(yt_positive=flow_cond.get('positive'), yt_negative=flow_cond.get('negative'))
+                        guider.set_cfgs(yt=flow_cond.get('cfg'), xt=cfg)
                     else:
-                        guider.set_cfgs(base=cfg)
+                        guider.set_cfgs(xt=cfg)
                     
                     if batch_num < len(pos_cond):
-                        guider.set_conds(base_positive=[pos_cond[batch_num]], base_negative=neg_cond)
+                        guider.set_conds(xt_positive=[pos_cond[batch_num]], xt_negative=neg_cond)
                         samples = guider.sample(noise, x.clone(), sampler, sigmas, denoise_mask=noise_mask, callback=callback, disable_pbar=disable_pbar, seed=noise_seed)
                     else:
-                        guider.set_conds(base_positive=pos_cond, base_negative=neg_cond)
+                        guider.set_conds(xt_positive=pos_cond, xt_negative=neg_cond)
                         samples = guider.sample(noise, x.clone(), sampler, sigmas, denoise_mask=noise_mask, callback=callback, disable_pbar=disable_pbar, seed=noise_seed)
 
 

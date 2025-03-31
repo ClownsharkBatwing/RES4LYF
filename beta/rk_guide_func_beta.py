@@ -160,10 +160,13 @@ class LatentGuide:
                 latent_guide_weights_mean = get_sigmas(self.model, scheduler_mean_, total_steps, 1.0, shift=guide_sigma_shift).to(dtype=self.dtype, device=self.device) / self.sigma_max
                 prepend                   = torch.zeros(start_steps_mean_,                                                        dtype=self.dtype, device=self.device) 
                 latent_guide_weights_mean = torch.cat((prepend, latent_guide_weights_mean.to(self.device)), dim=0)
-                
-            latent_guide_weights      = initialize_or_scale(latent_guide_weights,      latent_guide_weight,      self.max_steps)
-            latent_guide_weights_inv  = initialize_or_scale(latent_guide_weights_inv,  latent_guide_weight_inv,  self.max_steps)
-            latent_guide_weights_mean = initialize_or_scale(latent_guide_weights_mean, latent_guide_weight_mean, self.max_steps)
+            
+            if scheduler_ != "constant":
+                latent_guide_weights      = initialize_or_scale(latent_guide_weights,      latent_guide_weight,      self.max_steps)
+            if scheduler_inv_ != "constant":
+                latent_guide_weights_inv  = initialize_or_scale(latent_guide_weights_inv,  latent_guide_weight_inv,  self.max_steps)
+            if scheduler_mean_ != "constant":
+                latent_guide_weights_mean = initialize_or_scale(latent_guide_weights_mean, latent_guide_weight_mean, self.max_steps)
 
             latent_guide_weights     [steps_     :] = 0
             latent_guide_weights_inv [steps_inv_ :] = 0
