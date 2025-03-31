@@ -1070,7 +1070,7 @@ def sample_rk_beta(
                         LG.lgw *= EO("guide_min_factor", 1.1)
                     full_iter -= 1
                     
-            if ((LG.lgw[step] > 0 or LG.lgw_inv[step] > 0) and LG.lgw[step+1] == 0 and LG.lgw_inv[step+1] == 0 and full_iter == implicit_steps_full+1 and LG.guide_mode.startswith("flow"))   or   (LG.guide_mode.startswith("flow") and step == num_steps-1):
+            if ((LG.lgw[step] > 0 or LG.lgw_inv[step] > 0) and LG.lgw[step+1] == 0 and LG.lgw_inv[step+1] == 0 and full_iter == implicit_steps_full+1 and LG.guide_mode.startswith("flow"))   or   (not FLOW_STOPPED and LG.guide_mode.startswith("flow") and step == num_steps-1):
                 noise = normalize_zscore(NS.noise_sampler(sigma=sigma, sigma_next=sigma_next), channelwise=True, inplace=True)
                 yt = (1 - sigma_next) * y0 + sigma_next * noise
                 x_next = x = x_next + yt - y0
