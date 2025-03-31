@@ -1081,7 +1081,7 @@ def sample_rk_beta(
                 x_next = x = x_next + yt - y0
 
                 data_[0] = data_cached
-                data_cached = None
+                data_cached  = None
                 FLOW_STOPPED = True
 
                     
@@ -1089,7 +1089,7 @@ def sample_rk_beta(
 
 
 
-        data_prev_[0] = data_[0]
+        data_prev_[0] = data_[0] if data_cached is None else data_cached # data_cached is data_x from flow mode. this allows multistep to resume seamlessly.
         for ms in range(recycled_stages):
             data_prev_[recycled_stages - ms] = data_prev_[recycled_stages - ms - 1]            # will this really behave correctly? seems to run on every substep...
         
