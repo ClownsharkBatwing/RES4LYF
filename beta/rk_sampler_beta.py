@@ -732,13 +732,13 @@ def sample_rk_beta(
                                 eps_x, data_x = RK(xt, s_tmp, x_0_noised, sigma, transformer_options={'latent_type': 'xt'})
 
                                 if EO("flow_slerp"):
-                                    eps_y_inv, data_y_inv = RK(yt_inv, s_tmp, y0_noised_inv, sigma, transformer_options={'latent_type': 'yt'})
+                                    eps_y_inv, data_y_inv = RK(yt_inv, s_tmp, y0_noised_inv, sigma, transformer_options={'latent_type': 'yt_inv'})
                                 
                                 if LG.lgw[step+1] == 0 and LG.lgw_inv[step+1] == 0:
                                     eps_ [row]       = eps_x
                                     data_[row]       = data_x
                                     x_   [row] = x_0 = xt 
-                                    
+                                
                                     FLOW_STOPPED = True
                                 else:
                                     if not EO("flow_slerp"):
