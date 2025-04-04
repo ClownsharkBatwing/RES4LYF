@@ -669,6 +669,8 @@ def sample_rk_beta(
                                 
                                 if not FLOW_STARTED:
                                     FLOW_STARTED = True
+                                    data_x_prev_ = torch.zeros_like(data_prev_)
+
                                     y0 = LG.HAS_LATENT_GUIDE * LG.mask * LG.y0   +   LG.HAS_LATENT_GUIDE_INV * LG.mask_inv * LG.y0_inv 
                                     yx0 = y0.clone()
                                     
@@ -1151,9 +1153,14 @@ def sample_rk_beta(
                         LG.lgw *= EO("guide_min_factor", 1.1)
                     full_iter -= 1
                     
+        if FLOW_STARTED and FLOW_STOPPED:
+            data_prev_ = data_x_prev_
+        if FLOW_STARTED and not FLOW_STOPPED:
+            data_x_prev_[0] = data_cached #data_[0] if data_cached is None else data_cached # data_cached is data_x from flow mode. this allows multistep to resume seamlessly.
+            for ms in range(recycled_stages):
+                data_x_prev_[recycled_stages - ms] = data_x_prev_[recycled_stages - ms - 1]            # will this really behave correctly? seems to run on every substep...
 
-
-        data_prev_[0] = data_[0] if data_cached is None else data_cached # data_cached is data_x from flow mode. this allows multistep to resume seamlessly.
+        data_prev_[0] = data_[0] #if data_cached is None else data_cached # data_cached is data_x from flow mode. this allows multistep to resume seamlessly.
         for ms in range(recycled_stages):
             data_prev_[recycled_stages - ms] = data_prev_[recycled_stages - ms - 1]            # will this really behave correctly? seems to run on every substep...
 
