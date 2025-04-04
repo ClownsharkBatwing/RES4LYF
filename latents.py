@@ -149,6 +149,62 @@ def get_slerp_ratio(cos_sim_A, cos_sim_B, target_cos):
     t = max(0.0, min(1.0, t))
     return t
 
+def find_slerp_ratio_grid(A: torch.Tensor, B: torch.Tensor, D: torch.Tensor, E: torch.Tensor,
+                            target_ratio: float = 1.0, num_samples: int = 100) -> float:
+    """
+    Finds the interpolation parameter t (in [0,1]) for which:
+       f(t) = cos(slerp(t, A, B), D) - target_ratio * cos(slerp(t, A, B), E)
+    is minimized in absolute value.
+    
+    Instead of requiring a sign change for bisection, we sample t values uniformly and pick the one that minimizes |f(t)|.
+    """
+    ts = torch.linspace(0.0, 1.0, steps=num_samples, device=A.device, dtype=A.dtype)
+    best_t   = 0.0
+    best_val = float('inf')
+    for t_val in ts:
+        t_tensor = torch.tensor(t_val, dtype=A.dtype, device=A.device)
+        C        = slerp_tensor(t_tensor, A, B)
+        diff     = get_pearson_similarity(C, D) - target_ratio * get_pearson_similarity(C, E)
+        if abs(diff) < best_val:
+            best_val = abs(diff)
+            best_t   = t_val
+    return best_t
+
+
+
+def compute_slerp_ratio_for_target(A: torch.Tensor, B: torch.Tensor, D: torch.Tensor, target: float) -> float:
+    """
+    Given three unit vectors A, B, and D (all assumed to be coplanar)
+    and a target cosine similarity (target) for the slerp result C with D,
+    compute the interpolation parameter t such that:
+        C = slerp(t, A, B)
+        and cos(C, D) ≈ target.
+
+    Args:
+        A: Tensor of shape (D,), starting vector.
+        B: Tensor of shape (D,), ending vector.
+        D: Tensor of shape (D,), the reference vector.
+        target: Desired cosine similarity between C and D.
+
+    Returns:
+        t: A float between 0 and 1.
+    """
+    A = A / (A.norm() + 1e-8)
+    B = B / (B.norm() + 1e-8)
+    D = D / (D.norm() + 1e-8)
+    
+    alpha = math.acos(max(-1.0, min(1.0, float(torch.dot(D, A))))) # angel between D and A
+    beta  = math.acos(max(-1.0, min(1.0, float(torch.dot(D, B))))) # angle between D and B
+    
+    delta = math.acos(max(-1.0, min(1.0, target))) # target cosine similarity... angle etc...
+    
+    if abs(beta - alpha) < 1e-6:
+        return 0.5
+    
+    t = (delta - alpha) / (beta - alpha)
+    t = max(0.0, min(1.0, t))
+    return t
+
 
 
 # TENSOR NORMALIZATION OPS
@@ -221,8 +277,67 @@ def lagrange_interpolation(x_values, y_values, x_new):
 
     return result
 
+def line_intersection(a: torch.Tensor, d1: torch.Tensor, b: torch.Tensor, d2: torch.Tensor, eps=1e-8) -> torch.Tensor:
+    """
+    Computes the intersection (or closest point average) of two lines in R^D.
+    
+    The first line is defined by:  L1: x = a + t * d1
+    The second line is defined by: L2: x = b + s * d2
+    
+    If the lines do not exactly intersect, this function returns the average of the closest points.
+    
+    a, d1, b, d2: Tensors of shape (D,) or with an extra batch dimension (B, D).
+    Returns: Tensor of shape (D,) or (B, D) representing the intersection (or midpoint of closest approach).
+    """
+    # Compute dot products
+    d1d1 = (d1 * d1).sum(dim=-1, keepdim=True)  # shape (B,1) or (1,)
+    d2d2 = (d2 * d2).sum(dim=-1, keepdim=True)
+    d1d2 = (d1 * d2).sum(dim=-1, keepdim=True)
+    
+    r = b - a  # shape (B, D) or (D,)
+    r_d1 = (r * d1).sum(dim=-1, keepdim=True)
+    r_d2 = (r * d2).sum(dim=-1, keepdim=True)
+    
+    # Solve for t and s:
+    # t * d1d1 - s * d1d2 = r_d1
+    # t * d1d2 - s * d2d2 = r_d2
+    # Solve using determinants:
+    denom = d1d1 * d2d2 - d1d2 * d1d2
+    # Avoid division by zero
+    denom = torch.where(denom.abs() < eps, torch.full_like(denom, eps), denom)
+    t = (r_d1 * d2d2 - r_d2 * d1d2) / denom
+    s = (r_d1 * d1d2 - r_d2 * d1d1) / denom
+    
+    point1 = a + t * d1
+    point2 = b + s * d2
+    # If they intersect exactly, point1 and point2 are identical.
+    # Otherwise, return the midpoint of the closest points.
+    return (point1 + point2) / 2
 
+def slerp_direction(t: float, u0: torch.Tensor, u1: torch.Tensor, DOT_THRESHOLD=0.9995) -> torch.Tensor:
+    dot = (u0 * u1).sum(-1).clamp(-1.0, 1.0) #u0, u1 are unit vectors... should not be affected by clamp
+    if dot.item() > DOT_THRESHOLD: # u0, u1 nearly aligned, fallback to lerp
+        return torch.lerp(u0, u1, t)
+    theta_0     = torch.acos(dot)
+    sin_theta_0 = torch.sin(theta_0)
+    theta_t     = theta_0 * t
+    sin_theta_t = torch.sin(theta_t)
+    s0          = torch.sin(theta_0 - theta_t) / sin_theta_0
+    s1          = sin_theta_t / sin_theta_0
+    return s0 * u0 + s1 * u1
 
+def magnitude_aware_interpolation(t: float, v0: torch.Tensor, v1: torch.Tensor) -> torch.Tensor:
+
+    m0 = v0.norm(dim=-1, keepdim=True)
+    m1 = v1.norm(dim=-1, keepdim=True)
+
+    u0 = v0 / (m0 + 1e-8)
+    u1 = v1 / (m1 + 1e-8)
+    
+    u = slerp_direction(t, u0, u1)
+    
+    m = (1 - t) * m0 + t * m1 # tinerpolate magnitudes linearly
+    return m * u
 
 
 def slerp_tensor(val: torch.Tensor, low: torch.Tensor, high: torch.Tensor, dim=-3) -> torch.Tensor:
