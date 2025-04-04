@@ -7,7 +7,7 @@ import math
 
 from ..res4lyf              import RESplain
 from ..helper               import ExtraOptions, FrameWeightsManager
-from ..latents              import lagrange_interpolation, get_collinear, get_orthogonal, get_cosine_similarity, get_slerp_weight_for_cossim, get_slerp_ratio, slerp_tensor, normalize_zscore
+from ..latents              import lagrange_interpolation, get_collinear, get_orthogonal, get_cosine_similarity, get_pearson_similarity, get_slerp_weight_for_cossim, get_slerp_ratio, slerp_tensor, normalize_zscore, compute_slerp_ratio_for_target, find_slerp_ratio_grid
 
 from .rk_method_beta        import RK_Method_Beta
 from .rk_noise_sampler_beta import RK_NoiseSampler
@@ -305,6 +305,7 @@ def sample_rk_beta(
     # SETUP SIGMAS
     NS               = RK_NoiseSampler(RK, model, device=work_device, dtype=default_dtype, extra_options=extra_options)
     sigmas, UNSAMPLE = NS.prepare_sigmas(sigmas, sigmas_override, d_noise, d_noise_start_step, sampler_mode)
+    
 
     
     SDE_NOISE_EXTERNAL = False
@@ -365,18 +366,13 @@ def sample_rk_beta(
         orig_y0     = LG.y0.clone()
         orig_y0_inv = LG.y0_inv.clone()
         
-
     gc.collect()
 
-    x_next_override = None
-    if LG.guide_mode == "flow":
-        NS.init_noise = x.clone() # will this go haywire with chained samplers? yes... pass via state_info!
-        init_noise = x.clone()
-        FLOW_STARTED = False
     BASE_STARTED = False
-    INV_STARTED = False
+    INV_STARTED  = False
+    FLOW_STARTED = False
     FLOW_STOPPED = False
-
+    x_init = x.clone()
 
     # BEGIN SAMPLING LOOP    
     num_steps = len(sigmas[start_step:])-2 if sigmas[-1] == 0 else len(sigmas[start_step:])-1
@@ -669,98 +665,156 @@ def sample_rk_beta(
                                 if RK.multistep_stages > 0:
                                     s_tmp = lying_sd
 
-                            if LG.guide_mode == "flow" and not FLOW_STOPPED and (LG.lgw[step] > 0 or LG.lgw_inv[step] > 0):
-                                if step == 0:
-                                    y_guide = LG.HAS_LATENT_GUIDE * LG.mask * LG.y0   +   LG.HAS_LATENT_GUIDE_INV * LG.mask_inv * LG.y0_inv 
-                                else:
-                                    data_cached = data_prev_[0] if data_cached is None else data_cached
-                                    y_guide = (1 - (LG.HAS_LATENT_GUIDE * LG.lgw[step] * LG.mask + LG.HAS_LATENT_GUIDE_INV * LG.lgw_inv[step] * LG.mask_inv)) * data_cached   +   LG.HAS_LATENT_GUIDE * LG.lgw[step] * LG.mask * LG.y0   +   LG.HAS_LATENT_GUIDE_INV * LG.lgw_inv[step] * LG.mask_inv * LG.y0_inv
-                                yx0, y0, x_[row], x_0, x_0_orig, x_tmp  =  y_guide.clone(), y_guide.clone(), y_guide.clone(), y_guide.clone(), y_guide.clone(), y_guide.clone()
-
-                                noise = normalize_zscore(NS.noise_sampler(sigma=sigma, sigma_next=sigma_next), channelwise=True, inplace=True)
+                            if LG.guide_mode == "flow" and (LG.lgw[step] > 0 or LG.lgw_inv[step] > 0) and not FLOW_STOPPED and not EO("flow_sync") :
                                 
-                                yt = (1 - s_tmp) * y0 + s_tmp * noise
-                                
-                                if EO("noise1"):
-                                    noise1 = normalize_zscore(NS.noise_sampler(sigma=sigma, sigma_next=sigma_next), channelwise=True, inplace=True)
-                                    xt = yx0 + ((1 - s_tmp) * y0 + s_tmp * noise1) - y0
-                                else:
-                                    xt = yx0 + yt - y0
-                                
-                                if EO("noise2"):
-                                    noise2 = normalize_zscore(NS.noise_sampler(sigma=sigma, sigma_next=sigma_next), channelwise=True, inplace=True)
-                                    x_0_noised = x_0_orig + sigma * (noise2 - y0)
-                                else:
-                                    x_0_noised = x_0_orig + sigma * (noise - y0)
-                                
-                                eps_y, data_y = RK(yt, s_tmp,                    transformer_options={'latent_type': 'yt'})
-                                eps_x, data_x = RK(xt, s_tmp, x_0_noised, sigma, transformer_options={'latent_type': 'xt'})
-
-                                eps_[row]  = (eps_x - eps_y)
-                                
-                                eps_y_lin  = (yt - data_y) / s_tmp
-                                eps_x_lin  = (xt - data_x) / s_tmp
-                                eps_yx_lin = (eps_x - eps_y)
-                                data_[row] = yx0 - s_tmp * eps_yx_lin
-
-                                data_cached = data_x
-                            
-
-                            if LG.guide_mode == "flow" and not FLOW_STOPPED and (LG.lgw[step] > 0 or LG.lgw_inv[step] > 0) and EO("full_flow"):
                                 if not FLOW_STARTED:
-                                    BASE_STARTED = True if BASE_STARTED or LG.lgw    [step] > 0 else False
-                                    INV_STARTED  = True if  INV_STARTED or LG.lgw_inv[step] > 0 else False
-                                    if step == 0:
-                                        y_guide = LG.HAS_LATENT_GUIDE * LG.mask * LG.y0   +   LG.HAS_LATENT_GUIDE_INV * LG.mask_inv * LG.y0_inv 
-                                    else:
-                                        data_cached = data_prev_[0] if data_cached is None else data_cached
-                                        y_guide = (1 - (LG.HAS_LATENT_GUIDE * LG.lgw[step] * LG.mask + LG.HAS_LATENT_GUIDE_INV * LG.lgw_inv[step] * LG.mask_inv)) * data_cached   +   LG.HAS_LATENT_GUIDE * LG.lgw[step] * LG.mask * LG.y0   +   LG.HAS_LATENT_GUIDE_INV * LG.lgw_inv[step] * LG.mask_inv * LG.y0_inv
-                                    #yx0 = y0 = x_[row] = x_0 = x_0_orig = x_tmp = y_guide.clone()
-                                    yx0, y0, x_[row], x_0, x_0_orig, x_tmp  =  y_guide.clone(), y_guide.clone(), y_guide.clone(), y_guide.clone(), y_guide.clone(), y_guide.clone()
                                     FLOW_STARTED = True
-                                elif LG.lgw[step-1] == 0 and LG.lgw[step] > 0 and not BASE_STARTED:
-                                    y_guide = (1 - LG.HAS_LATENT_GUIDE * LG.lgw[step] * LG.mask) * LG.y0     +    (1- LG.HAS_LATENT_GUIDE_INV * LG.lgw_inv[step] * LG.mask_inv) * x_tmp        +    LG.HAS_LATENT_GUIDE * LG.lgw[step] * LG.mask * x_tmp    +    LG.HAS_LATENT_GUIDE_INV * LG.lgw_inv[step] * LG.mask_inv * x_tmp
-                                    yx0 = y0 = x_[row] = x_0 = x_0_orig = x_tmp = y_guide.clone()
-                                    BASE_STARTED = True
-                                elif LG.lgw_inv[step-1] == 0 and LG.lgw_inv[step] > 0 and not INV_STARTED:
-                                    y_guide = (1 - LG.HAS_LATENT_GUIDE * LG.lgw[step] * LG.mask) * x_tmp     +    (1- LG.HAS_LATENT_GUIDE_INV * LG.lgw_inv[step] * LG.mask_inv) * LG.y0_inv    +    LG.HAS_LATENT_GUIDE * LG.lgw[step] * LG.mask * x_tmp    +    LG.HAS_LATENT_GUIDE_INV * LG.lgw_inv[step] * LG.mask_inv * x_tmp
-                                    yx0 = y0 = x_[row] = x_0 = x_0_orig = x_tmp = y_guide.clone()
-                                    INV_STARTED = True
+                                    y0 = LG.HAS_LATENT_GUIDE * LG.mask * LG.y0   +   LG.HAS_LATENT_GUIDE_INV * LG.mask_inv * LG.y0_inv 
+                                    yx0 = y0.clone()
+                                    
+                                    if EO("flow_slerp"):
+                                        y0_inv                 = LG.HAS_LATENT_GUIDE * LG.mask * LG.y0_inv   +   LG.HAS_LATENT_GUIDE_INV * LG.mask_inv * LG.y0 
+                                        y0 = LG.y0.clone()
+                                        y0_inv = LG.y0_inv.clone()
+                                        flow_slerp_guide_ratio = EO("flow_slerp_guide_ratio", 0.5)
+                                        y_slerp                = slerp_tensor(flow_slerp_guide_ratio, y0, y0_inv)
+                                        yx0                    = y_slerp.clone()
+                                    
+                                    x_[row], x_0, x_0_orig     =  yx0.clone(), yx0.clone(), yx0.clone()
+                                    
+                                    if step > 0:
+                                        y0  = (1 - (LG.HAS_LATENT_GUIDE * LG.lgw[step] * LG.mask + LG.HAS_LATENT_GUIDE_INV * LG.lgw_inv[step] * LG.mask_inv)) * denoised   +   LG.HAS_LATENT_GUIDE * LG.lgw[step] * LG.mask * LG.y0   +   LG.HAS_LATENT_GUIDE_INV * LG.lgw_inv[step] * LG.mask_inv * LG.y0_inv
+                                        yx0 = y0.clone()
+                                        
+                                        if EO("flow_slerp"):
+                                            y0_inv                 = (1 - (LG.HAS_LATENT_GUIDE * LG.lgw[step] * LG.mask + LG.HAS_LATENT_GUIDE_INV * LG.lgw_inv[step] * LG.mask_inv)) * denoised   +   LG.HAS_LATENT_GUIDE * LG.lgw[step] * LG.mask * LG.y0_inv   +   LG.HAS_LATENT_GUIDE_INV * LG.lgw_inv[step] * LG.mask_inv * LG.y0
+                                            flow_slerp_guide_ratio = EO("flow_slerp_guide_ratio", 0.5)
+                                            y_slerp                = slerp_tensor(flow_slerp_guide_ratio, y0_inv)
+                                            yx0                    = y_slerp.clone()
+                                
+                                else:
+                                    yx0_prev = data_cached
+                                    yx0      = (1 - (LG.HAS_LATENT_GUIDE * LG.lgw[step] * LG.mask + LG.HAS_LATENT_GUIDE_INV * LG.lgw_inv[step] * LG.mask_inv)) * yx0_prev   +   LG.HAS_LATENT_GUIDE * LG.lgw[step] * LG.mask * x_tmp   +   LG.HAS_LATENT_GUIDE_INV * LG.lgw_inv[step] * LG.mask_inv * x_tmp
+                                    y0       = (1 - (LG.HAS_LATENT_GUIDE * LG.lgw[step] * LG.mask + LG.HAS_LATENT_GUIDE_INV * LG.lgw_inv[step] * LG.mask_inv)) * yx0_prev   +   LG.HAS_LATENT_GUIDE * LG.lgw[step] * LG.mask * LG.y0   +   LG.HAS_LATENT_GUIDE_INV * LG.lgw_inv[step] * LG.mask_inv * LG.y0_inv
+                                    if EO("flow_slerp"):
+                                        y0_inv  = (1 - (LG.HAS_LATENT_GUIDE * LG.lgw[step] * LG.mask + LG.HAS_LATENT_GUIDE_INV * LG.lgw_inv[step] * LG.mask_inv)) * yx0_prev   +   LG.HAS_LATENT_GUIDE * LG.lgw[step] * LG.mask * LG.y0_inv   +   LG.HAS_LATENT_GUIDE_INV * LG.lgw_inv[step] * LG.mask_inv * LG.y0
 
-                                noise = normalize_zscore(NS.noise_sampler(sigma=sigma, sigma_next=sigma_next), channelwise=True, inplace=True)
-                                
-                                if FLOW_STARTED:
-                                    yx0 = x_tmp
-                                
-                                yt = (1 - s_tmp) * y0 + s_tmp * noise
-                                
-                                if EO("noise1"):
-                                    noise1 = normalize_zscore(NS.noise_sampler(sigma=sigma, sigma_next=sigma_next), channelwise=True, inplace=True)
-                                    xt = yx0 + ((1 - s_tmp) * y0 + s_tmp * noise1) - y0
+                                if EO("flow_use_init_noise"):
+                                    noise = x_init.clone()
                                 else:
-                                    xt = yx0 + yt - y0
+                                    noise = normalize_zscore(NS.noise_sampler(sigma=sigma, sigma_next=sigma_next), channelwise=True, inplace=True)
+                                yt        = (1-s_tmp) * y0 + s_tmp * noise
+                                if not EO("flow_disable_doublenoise_y0"):
+                                    noise = normalize_zscore(NS.noise_sampler(sigma=sigma, sigma_next=sigma_next), channelwise=True, inplace=True)
+                                y0_noised = (1-sigma) * y0 + sigma * noise
                                 
-                                if EO("noise2"):
-                                    noise2 = normalize_zscore(NS.noise_sampler(sigma=sigma, sigma_next=sigma_next), channelwise=True, inplace=True)
-                                    x_0_noised = x_0_orig + sigma * (noise2 - y0)
+                                if EO("flow_slerp"):
+                                    noise = normalize_zscore(NS.noise_sampler(sigma=sigma, sigma_next=sigma_next), channelwise=True, inplace=True)
+                                    yt_inv        = (1-s_tmp) * y0_inv + s_tmp * noise
+                                    if not EO("flow_disable_doublenoise_y0_inv"):
+                                        noise = normalize_zscore(NS.noise_sampler(sigma=sigma, sigma_next=sigma_next), channelwise=True, inplace=True)
+                                    y0_noised_inv = (1-sigma) * y0_inv + sigma * noise
+                                
+                                if not EO("flow_disable_separatenoise_x_0"):
+                                    noise = normalize_zscore(NS.noise_sampler(sigma=sigma, sigma_next=sigma_next), channelwise=True, inplace=True)
+                                if EO("flow_slerp"):
+                                    xt         = yx0 + s_tmp * (noise - y_slerp)
+                                    if not EO("flow_disable_doublenoise_x_0"):
+                                        noise = normalize_zscore(NS.noise_sampler(sigma=sigma, sigma_next=sigma_next), channelwise=True, inplace=True)
+                                    x_0_noised = x_0 + sigma * (noise - y_slerp)
                                 else:
-                                    x_0_noised = x_0_orig + sigma * (noise - y0)
+                                    xt         = yx0 + s_tmp * (noise - y0)
+                                    if not EO("flow_disable_doublenoise_x_0"):
+                                        noise = normalize_zscore(NS.noise_sampler(sigma=sigma, sigma_next=sigma_next), channelwise=True, inplace=True)
+                                    x_0_noised = x_0 + sigma * (noise - y0)
                                 
-                                eps_y, data_y = RK(yt, s_tmp,                    transformer_options={'latent_type': 'yt'})
+                                eps_y, data_y = RK(yt, s_tmp, y0_noised,  sigma, transformer_options={'latent_type': 'yt'})
                                 eps_x, data_x = RK(xt, s_tmp, x_0_noised, sigma, transformer_options={'latent_type': 'xt'})
 
-                                #yx0 += NS.h * (eps_x - eps_y)
+                                if EO("flow_slerp"):
+                                    eps_y_inv, data_y_inv = RK(yt_inv, s_tmp, y0_noised_inv, sigma, transformer_options={'latent_type': 'yt'})
                                 
-                                #x_[row]   = x_tmp = yx0
-                                eps_[row] = (eps_x - eps_y)
-                                
-                                data_[row] = yx0.clone()
-                                
-                                #yx0 += LG.mask * LG.lgw[step] * (data_x - yx0)  +   LG.mask_inv * LG.lgw_inv[step] * (data_x - yx0)
-                                #y0  += LG.mask * LG.lgw[step] * (data_x - y0)   +   LG.mask_inv * LG.lgw_inv[step] * (data_x - y0)
+                                if LG.lgw[step+1] == 0 and LG.lgw_inv[step+1] == 0:
+                                    eps_ [row]       = eps_x
+                                    data_[row]       = data_x
+                                    x_   [row] = x_0 = xt 
+                                    
+                                    FLOW_STOPPED = True
+                                else:
+                                    if not EO("flow_slerp"):
+                                        if RK.EXPONENTIAL:
+                                            eps_y_alt = data_y - x_0
+                                            eps_x_alt = data_x - x_0
+                                        else:
+                                            eps_y_alt = (x_0 - data_y) / sigma
+                                            eps_x_alt = (x_0 - data_x) / sigma
+                                        
+                                        eps_[row]  = eps_yx = (eps_y_alt - eps_x_alt)
+                                        eps_y_lin           = (x_0 - data_y) / sigma
+                                        eps_x_lin           = (x_0 - data_x) / sigma
+                                        eps_yx_lin          = (eps_y_lin - eps_x_lin)
+                                        
+                                        data_[row] = x_0 - sigma * eps_yx_lin
+                                    
+                                    if EO("flow_slerp"):
+                                        if RK.EXPONENTIAL:
+                                            eps_y_alt     = data_y     - x_0
+                                            eps_y_alt_inv = data_y_inv - x_0
+                                            eps_x_alt     = data_x     - x_0
+                                        else:
+                                            eps_y_alt     = (x_0 - data_y)     / sigma
+                                            eps_y_alt_inv = (x_0 - data_y_inv) / sigma
+                                            eps_x_alt     = (x_0 - data_x)     / sigma
+                                        
+                                        flow_slerp_ratio2 = EO("flow_slerp_ratio2", 0.5)
+                                        eps_y_slerp       = slerp_tensor(flow_slerp_ratio2, eps_y_alt, eps_y_alt_inv)
+                                        data_y_slerp      = slerp_tensor(flow_slerp_ratio2, data_y,    data_y_inv)
+                                        
+                                        eps_yx     = (eps_y_alt - eps_x_alt)
+                                        eps_y_lin  = (x_0 - data_y) / sigma
+                                        eps_x_lin  = (x_0 - data_x) / sigma
+                                        eps_yx_lin = (eps_y_lin - eps_x_lin)
+                                        
+                                        eps_yx_inv     = (eps_y_alt_inv - eps_x_alt)
+                                        eps_y_lin_inv  = (x_0 - data_y_inv) / sigma
+                                        eps_x_lin      = (x_0 - data_x)     / sigma
+                                        eps_yx_lin_inv = (eps_y_lin_inv - eps_x_lin)
+                                        
+                                        data_row     = x_0 - sigma * eps_yx_lin
+                                        data_row_inv = x_0 - sigma * eps_yx_lin_inv
+                                        
+                                        if EO("flow_slerp_similarity_ratio"):
+                                            flow_slerp_similarity_ratio = EO("flow_slerp_similarity_ratio", 1.0)
+                                            flow_slerp_ratio2           = find_slerp_ratio_grid(data_row, data_row_inv, LG.y0.clone(), LG.y0_inv.clone(), flow_slerp_similarity_ratio)
+                                        
+                                        eps_ [row] = slerp_tensor(flow_slerp_ratio2, eps_yx,   eps_yx_inv)
+                                        data_[row] = slerp_tensor(flow_slerp_ratio2, data_row, data_row_inv)
+                                        
+                                        if EO("flow_slerp_autoalter"):
+                                            data_row_slerp = slerp_tensor(0.5, data_row, data_row_inv)
+                                            y0_pearsim     = get_pearson_similarity(data_row_slerp, y0)
+                                            y0_pearsim_inv = get_pearson_similarity(data_row_slerp, y0_inv)
+                                            
+                                            if y0_pearsim > y0_pearsim_inv:
+                                                data_[row] = data_row_inv 
+                                                eps_ [row] = (eps_y_alt_inv - eps_x_alt)
+                                            else:
+                                                data_[row] = data_row
+                                                eps_ [row] = (eps_y_alt     - eps_x_alt)
+                                            
+                                        if EO("flow_slerp_recalc_eps_row"):
+                                            if RK.EXPONENTIAL:
+                                                eps_[row]  = data_[row] - x_0
+                                            else:
+                                                eps_[row]  = (x_0 - data_[row]) / sigma
+                                        
+                                        if EO("flow_slerp_recalc_data_row"):
+                                            if RK.EXPONENTIAL:
+                                                data_[row] = x_0 + eps_[row]
+                                            else:
+                                                data_[row] = x_0 - sigma * eps_[row]
 
-                                data_cached = data_x
-                            
+                                    data_cached = data_x
 
                             if step < EO("direct_pre_pseudo_guide", 0) and step > 0:
                                 for i_pseudo in range(EO("direct_pre_pseudo_guide_iter", 1)):
@@ -976,11 +1030,9 @@ def sample_rk_beta(
                             pass
                         elif full_iter == implicit_steps_full or not EO("disable_fully_explicit_bongmath_except_final"):
                             x_0, x_, eps_ = RK.bong_iter(x_0, x_, eps_, eps_prev_, data_, sigma, NS.s_, row, RK.row_offset, NS.h, step)
-                            
+
                     diag_iter += 1
 
-
-                    
                     #progress_bar.update( round(1 / implicit_steps_total, 2) )
                     
                     #step_update = round(1 / implicit_steps_total, 2)
@@ -988,9 +1040,6 @@ def sample_rk_beta(
 
             x_next = x_[RK.rows - RK.multistep_stages - RK.row_offset + 1]
             x_next = NS.rebound_overshoot_step(x_0, x_next)
-            
-            if LG.guide_mode.startswith("flow") and LG.lgw[step] > 0 and LG.lgw[step+1] == 0 and LG.lgw_inv[step] > 0 and LG.lgw_inv[step+1] == 0 and x_next_override is not None: 
-                x_next = x_next_override
             
             eps = (x_0 - x_next) / (sigma - sigma_next)
             denoised = x_0 - sigma * eps
@@ -1042,7 +1091,7 @@ def sample_rk_beta(
 
             
             callback_step = len(sigmas)-1 - step if sampler_mode == "unsample" else step
-            preview_callback(x, eps, denoised, x_, eps_, data_, callback_step, sigma, sigma_next, callback, EO, preview_override=data_cached)
+            preview_callback(x, eps, denoised, x_, eps_, data_, callback_step, sigma, sigma_next, callback, EO, preview_override=data_cached, FLOW_STOPPED=FLOW_STOPPED)
             
             h_prev = NS.h
             x_prev = x_0
@@ -1071,15 +1120,6 @@ def sample_rk_beta(
                         LG.lgw *= EO("guide_min_factor", 1.1)
                     full_iter -= 1
                     
-            if ((LG.lgw[step] > 0 or LG.lgw_inv[step] > 0) and LG.lgw[step+1] == 0 and LG.lgw_inv[step+1] == 0 and full_iter == implicit_steps_full+1 and LG.guide_mode.startswith("flow"))   or   (not FLOW_STOPPED and LG.guide_mode.startswith("flow") and step == num_steps-1):
-                noise = normalize_zscore(NS.noise_sampler(sigma=sigma, sigma_next=sigma_next), channelwise=True, inplace=True)
-                yt = (1 - sigma_next) * y0 + sigma_next * noise
-                x_next = x = x_next + yt - y0
-
-                data_[0] = data_cached
-                data_cached  = None
-                FLOW_STOPPED = True
-
 
 
         data_prev_[0] = data_[0] if data_cached is None else data_cached # data_cached is data_x from flow mode. this allows multistep to resume seamlessly.
@@ -1169,7 +1209,7 @@ def sample_rk_beta(
     #if not (UNSAMPLE and sigmas[1] > sigmas[0]) and not EO("preview_last_step_always"):
     if not (UNSAMPLE and sigmas[1] > sigmas[0]) and not EO("preview_last_step_always") and sigma is not None:
         callback_step = len(sigmas)-1 - step if sampler_mode == "unsample" else step
-        preview_callback(x, eps, denoised, x_, eps_, data_, callback_step, sigma, sigma_next, callback, EO, FINAL_STEP=True)
+        preview_callback(x, eps, denoised, x_, eps_, data_, callback_step, sigma, sigma_next, callback, EO)
 
     if INIT_SAMPLE_LOOP:
         state_info_out = state_info
@@ -1203,12 +1243,9 @@ def preview_callback(
                     callback   : Callable,
                     EO         : ExtraOptions,
                     preview_override : Optional[Tensor] = None,
-                    FINAL_STEP : bool = False):
-    
-    if FINAL_STEP:
-        denoised_callback = denoised
-        
-    elif EO("eps_substep_preview"):
+                    FLOW_STOPPED : bool = False):
+
+    if EO("eps_substep_preview"):
         row_callback = EO("eps_substep_preview", 0)
         denoised_callback = eps_[row_callback]
         
@@ -1229,7 +1266,7 @@ def preview_callback(
     elif EO("x_preview"):
         denoised_callback = x
         
-    elif preview_override is not None:
+    elif preview_override is not None and FLOW_STOPPED == False:
         denoised_callback = preview_override
         
     else:

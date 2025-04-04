@@ -467,15 +467,61 @@ class SharkOptions_GuideCond_Beta:
         options = options if options is not None else {}
 
         flow_cond = {
-            "positive" : positive,
-            "negative" : negative,
-            "cfg"      : cfg,
+            "yt_positive" : positive,
+            "yt_negative" : negative,
+            "yt_cfg"      : cfg,
         }
         
         options["flow_cond"] = flow_cond
 
         return (options, )
 
+
+
+
+class SharkOptions_GuideConds_Beta:
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {"required": {},
+                "optional": {
+                    "positive_masked": ("CONDITIONING", ),
+                    "positive_unmasked": ("CONDITIONING", ),
+                    "negative_masked": ("CONDITIONING", ),
+                    "negative_unmasked": ("CONDITIONING", ),
+                    "cfg_masked":("FLOAT",   {"default": 1.0, "min": -10000, "max": 10000, "step":0.01}),
+                    "cfg_unmasked":("FLOAT",   {"default": 1.0, "min": -10000, "max": 10000, "step":0.01}),
+                    "options":  ("OPTIONS",),  
+                    }  
+                }
+    RETURN_TYPES = ("OPTIONS",)
+    RETURN_NAMES = ("options",)
+    FUNCTION     = "main"
+    CATEGORY     = "RES4LYF/sampler_options"
+
+    def main(self,
+            positive_masked   = None,
+            negative_masked   = None,
+            cfg_masked        = 1.0,
+            positive_unmasked = None,
+            negative_unmasked = None,
+            cfg_unmasked      = 1.0,
+            options  = None,
+            ):
+                
+        options = options if options is not None else {}
+
+        flow_cond = {
+            "yt_positive"     : positive_masked,
+            "yt_negative"     : negative_masked,
+            "yt_cfg"          : cfg_masked,
+            "yt_inv_positive" : positive_unmasked,
+            "yt_inv_negative" : negative_unmasked,
+            "yt_inv_cfg"      : cfg_unmasked,
+        }
+        
+        options["flow_cond"] = flow_cond
+
+        return (options, )
 
 
 

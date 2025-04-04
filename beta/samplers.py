@@ -559,9 +559,12 @@ class SharkSampler:
 
                     guider = SharkGuider(work_model)
                     flow_cond = options_mgr.get('flow_cond', {})
-                    if flow_cond != {}:
-                        guider.set_conds(yt_positive=flow_cond.get('positive'), yt_negative=flow_cond.get('negative'))
-                        guider.set_cfgs(yt=flow_cond.get('cfg'), xt=cfg)
+                    if flow_cond != {} and 'yt_positive' in flow_cond and not 'yt_inv_positive' in flow_cond:
+                        guider.set_conds(yt_positive=flow_cond.get('yt_positive'), yt_negative=flow_cond.get('yt_negative'),)
+                        guider.set_cfgs(yt=flow_cond.get('yt_cfg'), xt=cfg)
+                    elif flow_cond != {} and 'yt_positive' in flow_cond and 'yt_inv_positive' in flow_cond:
+                        guider.set_conds(yt_positive=flow_cond.get('yt_positive'), yt_negative=flow_cond.get('yt_negative'), yt_inv_positive=flow_cond.get('yt_inv_positive'), yt_inv_negative=flow_cond.get('yt_inv_negative'),)
+                        guider.set_cfgs(yt=flow_cond.get('yt_cfg'), yt_inv=flow_cond.get('yt_inv_cfg'), xt=cfg)
                     else:
                         guider.set_cfgs(xt=cfg)
                     
@@ -738,8 +741,8 @@ class SharkSampler_Beta:
             negative = latent_image['negative']
         if 'sampler'  in latent_image and sampler  is None:
             sampler  = latent_image['sampler']
-        if 'model' in latent_image and model is None:
-            model = latent_image['model']
+        if 'model'    in latent_image and model    is None:
+            model    = latent_image['model']
             
         #if model.model.model_config.unet_config.get('stable_cascade_stage') == 'b':
         #    if 'noise_type_sde' in sampler.extra_options:

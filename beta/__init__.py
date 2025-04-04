@@ -52,6 +52,7 @@ def add_beta(NODE_CLASS_MAPPINGS, extra_samplers):
         "ClownOptions_Combine"            : samplers_extensions.ClownOptions_Combine,
         "ClownOptions_Frameweights"       : samplers_extensions.ClownOptions_Frameweights,
         "SharkOptions_GuideCond_Beta"     : samplers_extensions.SharkOptions_GuideCond_Beta,
+        "SharkOptions_GuideConds_Beta"    : samplers_extensions.SharkOptions_GuideConds_Beta,
 
 
         "SharkOptions_Beta"               : samplers_extensions.SharkOptions_Beta,
