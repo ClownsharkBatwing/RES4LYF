@@ -682,6 +682,9 @@ def sample_rk_beta(
                                     
                                     x_[row], x_0, x_0_orig     =  yx0.clone(), yx0.clone(), yx0.clone()
                                     
+                                    if EO("flow_yx0_init_y0_inv"):
+                                        yx0 = LG.HAS_LATENT_GUIDE * LG.mask * LG.y0_inv   +   LG.HAS_LATENT_GUIDE_INV * LG.mask_inv * LG.y0
+                                    
                                     if step > 0:
                                         y0  = (1 - (LG.HAS_LATENT_GUIDE * LG.lgw[step] * LG.mask + LG.HAS_LATENT_GUIDE_INV * LG.lgw_inv[step] * LG.mask_inv)) * denoised   +   LG.HAS_LATENT_GUIDE * LG.lgw[step] * LG.mask * LG.y0   +   LG.HAS_LATENT_GUIDE_INV * LG.lgw_inv[step] * LG.mask_inv * LG.y0_inv
                                         yx0 = y0.clone()
@@ -689,7 +692,7 @@ def sample_rk_beta(
                                         if EO("flow_slerp"):
                                             y0_inv                 = (1 - (LG.HAS_LATENT_GUIDE * LG.lgw[step] * LG.mask + LG.HAS_LATENT_GUIDE_INV * LG.lgw_inv[step] * LG.mask_inv)) * denoised   +   LG.HAS_LATENT_GUIDE * LG.lgw[step] * LG.mask * LG.y0_inv   +   LG.HAS_LATENT_GUIDE_INV * LG.lgw_inv[step] * LG.mask_inv * LG.y0
                                             flow_slerp_guide_ratio = EO("flow_slerp_guide_ratio", 0.5)
-                                            y_slerp                = slerp_tensor(flow_slerp_guide_ratio, y0_inv)
+                                            y_slerp                = slerp_tensor(flow_slerp_guide_ratio, y0, y0_inv)
                                             yx0                    = y_slerp.clone()
                                 
                                 else:
@@ -699,33 +702,61 @@ def sample_rk_beta(
                                     if EO("flow_slerp"):
                                         y0_inv  = (1 - (LG.HAS_LATENT_GUIDE * LG.lgw[step] * LG.mask + LG.HAS_LATENT_GUIDE_INV * LG.lgw_inv[step] * LG.mask_inv)) * yx0_prev   +   LG.HAS_LATENT_GUIDE * LG.lgw[step] * LG.mask * LG.y0_inv   +   LG.HAS_LATENT_GUIDE_INV * LG.lgw_inv[step] * LG.mask_inv * LG.y0
 
+                                y0_orig = y0.clone()
+                                #yx0_orig = yx0.clone()
+                                if EO("flow_proj_xy"):
+                                    d_collinear_d_lerp = get_collinear(yx0, y0_orig)  
+                                    d_lerp_ortho_d     = get_orthogonal(y0_orig, yx0)  
+                                    y0                 = d_collinear_d_lerp + d_lerp_ortho_d
+                                
+                                if EO("flow_proj_yx"):
+                                    d_collinear_d_lerp = get_collinear(y0_orig, yx0)  
+                                    d_lerp_ortho_d     = get_orthogonal(yx0, y0_orig)  
+                                    yx0                = d_collinear_d_lerp + d_lerp_ortho_d
+                                
+                                y0_inv_orig = None
+                                if EO("flow_proj_xy_inv"):
+                                    y0_inv_orig = y0_inv.clone()
+                                    d_collinear_d_lerp = get_collinear(yx0, y0_inv)  
+                                    d_lerp_ortho_d     = get_orthogonal(y0_inv, yx0)  
+                                    y0_inv             = d_collinear_d_lerp + d_lerp_ortho_d
+                                    
+                                if EO("flow_proj_yx_inv"):
+                                    y0_inv_orig = y0_inv if y0_inv_orig is None else y0_inv_orig
+                                    d_collinear_d_lerp = get_collinear(y0_inv_orig, yx0)  
+                                    d_lerp_ortho_d     = get_orthogonal(yx0, y0_inv_orig)  
+                                    yx0                = d_collinear_d_lerp + d_lerp_ortho_d
+                                del y0_orig
+
+                                flow_cossim_iter = EO("flow_cossim_iter", 1)
+                                
                                 if EO("flow_use_init_noise"):
                                     noise = x_init.clone()
                                 else:
-                                    noise = normalize_zscore(NS.noise_sampler(sigma=sigma, sigma_next=sigma_next), channelwise=True, inplace=True)
+                                    noise = noise_fn(y0, sigma, sigma_next, NS.noise_sampler, flow_cossim_iter) # normalize_zscore(NS.noise_sampler(sigma=sigma, sigma_next=sigma_next), channelwise=True, inplace=True)
                                 yt        = (1-s_tmp) * y0 + s_tmp * noise
                                 if not EO("flow_disable_doublenoise_y0"):
-                                    noise = normalize_zscore(NS.noise_sampler(sigma=sigma, sigma_next=sigma_next), channelwise=True, inplace=True)
+                                    noise = noise_fn(y0, sigma, sigma_next, NS.noise_sampler, flow_cossim_iter) # normalize_zscore(NS.noise_sampler(sigma=sigma, sigma_next=sigma_next), channelwise=True, inplace=True)
                                 y0_noised = (1-sigma) * y0 + sigma * noise
                                 
                                 if EO("flow_slerp"):
-                                    noise = normalize_zscore(NS.noise_sampler(sigma=sigma, sigma_next=sigma_next), channelwise=True, inplace=True)
+                                    noise = noise_fn(y0_inv, sigma, sigma_next, NS.noise_sampler, flow_cossim_iter) # normalize_zscore(NS.noise_sampler(sigma=sigma, sigma_next=sigma_next), channelwise=True, inplace=True)
                                     yt_inv        = (1-s_tmp) * y0_inv + s_tmp * noise
                                     if not EO("flow_disable_doublenoise_y0_inv"):
-                                        noise = normalize_zscore(NS.noise_sampler(sigma=sigma, sigma_next=sigma_next), channelwise=True, inplace=True)
+                                        noise = noise_fn(y0_inv, sigma, sigma_next, NS.noise_sampler, flow_cossim_iter) # normalize_zscore(NS.noise_sampler(sigma=sigma, sigma_next=sigma_next), channelwise=True, inplace=True)
                                     y0_noised_inv = (1-sigma) * y0_inv + sigma * noise
                                 
                                 if not EO("flow_disable_separatenoise_x_0"):
-                                    noise = normalize_zscore(NS.noise_sampler(sigma=sigma, sigma_next=sigma_next), channelwise=True, inplace=True)
+                                    noise = noise_fn(yx0, sigma, sigma_next, NS.noise_sampler, flow_cossim_iter) # normalize_zscore(NS.noise_sampler(sigma=sigma, sigma_next=sigma_next), channelwise=True, inplace=True)
                                 if EO("flow_slerp"):
                                     xt         = yx0 + s_tmp * (noise - y_slerp)
                                     if not EO("flow_disable_doublenoise_x_0"):
-                                        noise = normalize_zscore(NS.noise_sampler(sigma=sigma, sigma_next=sigma_next), channelwise=True, inplace=True)
+                                        noise = noise_fn(x_0, sigma, sigma_next, NS.noise_sampler, flow_cossim_iter) # normalize_zscore(NS.noise_sampler(sigma=sigma, sigma_next=sigma_next), channelwise=True, inplace=True)
                                     x_0_noised = x_0 + sigma * (noise - y_slerp)
                                 else:
                                     xt         = yx0 + s_tmp * (noise - y0)
                                     if not EO("flow_disable_doublenoise_x_0"):
-                                        noise = normalize_zscore(NS.noise_sampler(sigma=sigma, sigma_next=sigma_next), channelwise=True, inplace=True)
+                                        noise = noise_fn(x_0, sigma, sigma_next, NS.noise_sampler, flow_cossim_iter) # normalize_zscore(NS.noise_sampler(sigma=sigma, sigma_next=sigma_next), channelwise=True, inplace=True)
                                     x_0_noised = x_0 + sigma * (noise - y0)
                                 
                                 eps_y, data_y = RK(yt, s_tmp, y0_noised,  sigma, transformer_options={'latent_type': 'yt'})
@@ -767,8 +798,8 @@ def sample_rk_beta(
                                             eps_x_alt     = (x_0 - data_x)     / sigma
                                         
                                         flow_slerp_ratio2 = EO("flow_slerp_ratio2", 0.5)
-                                        eps_y_slerp       = slerp_tensor(flow_slerp_ratio2, eps_y_alt, eps_y_alt_inv)
-                                        data_y_slerp      = slerp_tensor(flow_slerp_ratio2, data_y,    data_y_inv)
+                                        #eps_y_slerp       = slerp_tensor(flow_slerp_ratio2, eps_y_alt, eps_y_alt_inv)
+                                        #data_y_slerp      = slerp_tensor(flow_slerp_ratio2, data_y,    data_y_inv)
                                         
                                         eps_yx     = (eps_y_alt - eps_x_alt)
                                         eps_y_lin  = (x_0 - data_y) / sigma
@@ -1228,6 +1259,20 @@ def sample_rk_beta(
 
     return x
 
+def noise_fn(x, sigma, sigma_next, noise_sampler, cossim_iter=1):
+    
+    noise  = normalize_zscore(noise_sampler(sigma=sigma, sigma_next=sigma_next), channelwise=True, inplace=True)
+    cossim = get_pearson_similarity(x, noise)
+    
+    for i in range(cossim_iter):
+        noise_new  = normalize_zscore(noise_sampler(sigma=sigma, sigma_next=sigma_next), channelwise=True, inplace=True)
+        cossim_new = get_pearson_similarity(x, noise_new)
+        
+        if cossim_new > cossim:
+            noise  = noise_new
+            cossim = cossim_new
+    
+    return noise
 
 
 def preview_callback(
