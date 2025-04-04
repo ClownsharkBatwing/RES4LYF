@@ -700,9 +700,10 @@ def sample_rk_beta(
                                 else:
                                     yx0_prev = data_cached
                                     yx0      = (1 - (LG.HAS_LATENT_GUIDE * LG.lgw[step] * LG.mask + LG.HAS_LATENT_GUIDE_INV * LG.lgw_inv[step] * LG.mask_inv)) * yx0_prev   +   LG.HAS_LATENT_GUIDE * LG.lgw[step] * LG.mask * x_tmp   +   LG.HAS_LATENT_GUIDE_INV * LG.lgw_inv[step] * LG.mask_inv * x_tmp
-                                    y0       = (1 - (LG.HAS_LATENT_GUIDE * LG.lgw[step] * LG.mask + LG.HAS_LATENT_GUIDE_INV * LG.lgw_inv[step] * LG.mask_inv)) * yx0_prev   +   LG.HAS_LATENT_GUIDE * LG.lgw[step] * LG.mask * LG.y0   +   LG.HAS_LATENT_GUIDE_INV * LG.lgw_inv[step] * LG.mask_inv * LG.y0_inv
-                                    if EO("flow_slerp"):
-                                        y0_inv  = (1 - (LG.HAS_LATENT_GUIDE * LG.lgw[step] * LG.mask + LG.HAS_LATENT_GUIDE_INV * LG.lgw_inv[step] * LG.mask_inv)) * yx0_prev   +   LG.HAS_LATENT_GUIDE * LG.lgw[step] * LG.mask * LG.y0_inv   +   LG.HAS_LATENT_GUIDE_INV * LG.lgw_inv[step] * LG.mask_inv * LG.y0
+                                    if not EO("flow_static_guides"):
+                                        y0       = (1 - (LG.HAS_LATENT_GUIDE * LG.lgw[step] * LG.mask + LG.HAS_LATENT_GUIDE_INV * LG.lgw_inv[step] * LG.mask_inv)) * yx0_prev   +   LG.HAS_LATENT_GUIDE * LG.lgw[step] * LG.mask * LG.y0   +   LG.HAS_LATENT_GUIDE_INV * LG.lgw_inv[step] * LG.mask_inv * LG.y0_inv
+                                        if EO("flow_slerp"):
+                                            y0_inv  = (1 - (LG.HAS_LATENT_GUIDE * LG.lgw[step] * LG.mask + LG.HAS_LATENT_GUIDE_INV * LG.lgw_inv[step] * LG.mask_inv)) * yx0_prev   +   LG.HAS_LATENT_GUIDE * LG.lgw[step] * LG.mask * LG.y0_inv   +   LG.HAS_LATENT_GUIDE_INV * LG.lgw_inv[step] * LG.mask_inv * LG.y0
 
                                 y0_orig = y0.clone()
                                 #yx0_orig = yx0.clone()
@@ -857,11 +858,14 @@ def sample_rk_beta(
                             # MODEL CALL MODEL CALL MODEL CALL MODEL CALL MODEL CALL MODEL CALL MODEL CALL MODEL CALL MODEL CALL MODEL CALL MODEL CALL MODEL CALL MODEL CALL MODEL CALL MODEL CALL MODEL CALL MODEL CALL
                             
                             if (LG.guide_mode != "flow")   or   FLOW_STOPPED   or    (LG.guide_mode == "flow" and LG.lgw[step] == 0 and LG.lgw_inv[step] == 0):
-                                eps_[row], data_[row] = RK(x_tmp, s_tmp, x_0, sigma)
+                                if LG.guide_mode == "lure":
+                                    eps_[row], data_[row] = RK(x_tmp, s_tmp, x_0, sigma, transformer_options={'latent_type': 'yt'})
+                                else:
+                                    eps_[row], data_[row] = RK(x_tmp, s_tmp, x_0, sigma)
 
                             if LG.guide_mode.startswith("lure"):
                                 x_tmp = LG.process_guides_data_substep(x_tmp, data_[row], step, s_tmp)
-                                eps_[row], data_[row] = RK(x_tmp, s_tmp, x_0, sigma)
+                                eps_[row], data_[row] = RK(x_tmp, s_tmp, x_0, sigma, transformer_options={'latent_type': 'xt'})
 
                             if momentum != 0.0:
                                 data_[row] = data_[row] - momentum * (data_prev_[0] - data_[row])  #negative!
@@ -1170,9 +1174,9 @@ def sample_rk_beta(
             implicit_steps_full = 0
             implicit_steps_diag = 0
 
-        
-        denoised_data_prev2 = denoised_data_prev
-        denoised_data_prev = data_[0]
+        if EO("bong2m") or EO("bong3m"):
+            denoised_data_prev2 = denoised_data_prev
+            denoised_data_prev = data_[0]
         
         if SKIP_PSEUDO and not LG.guide_mode.startswith("flow"):
             if SKIP_PSEUDO_Y == "y0":
