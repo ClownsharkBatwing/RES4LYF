@@ -5,6 +5,8 @@ import gc
 from typing import Optional, Callable, Tuple, Dict, Any, Union
 import math
 
+from comfy.model_sampling import EPS
+
 from ..res4lyf              import RESplain
 from ..helper               import ExtraOptions, FrameWeightsManager
 from ..latents              import lagrange_interpolation, get_collinear, get_orthogonal, get_cosine_similarity, get_pearson_similarity, get_slerp_weight_for_cossim, get_slerp_ratio, slerp_tensor, normalize_zscore, compute_slerp_ratio_for_target, find_slerp_ratio_grid
@@ -368,6 +370,7 @@ def sample_rk_beta(
         
     gc.collect()
 
+    VE_MODEL = isinstance(model.inner_model.inner_model.model_sampling, EPS)
     BASE_STARTED = False
     INV_STARTED  = False
     FLOW_STARTED = False
@@ -761,30 +764,51 @@ def sample_rk_beta(
                                     noise = x_init.clone()
                                 else:
                                     noise = noise_fn(y0, sigma, sigma_next, NS.noise_sampler, flow_cossim_iter) # normalize_zscore(NS.noise_sampler(sigma=sigma, sigma_next=sigma_next), channelwise=True, inplace=True)
-                                yt        = (1-s_tmp) * y0 + s_tmp * noise
+                                if VE_MODEL:
+                                    yt        = y0 + s_tmp * noise
+                                else:
+                                    yt        = (NS.sigma_max-s_tmp) * y0 + (s_tmp/NS.sigma_max) * noise
                                 if not EO("flow_disable_doublenoise_y0"):
                                     noise = noise_fn(y0, sigma, sigma_next, NS.noise_sampler, flow_cossim_iter) # normalize_zscore(NS.noise_sampler(sigma=sigma, sigma_next=sigma_next), channelwise=True, inplace=True)
-                                y0_noised = (1-sigma) * y0 + sigma * noise
+                                    
+                                if VE_MODEL:
+                                    y0_noised = y0 + sigma * noise
+                                else:
+                                    y0_noised = (NS.sigma_max-sigma) * y0 + sigma * noise
                                 
                                 if EO("flow_slerp"):
                                     noise = noise_fn(y0_inv, sigma, sigma_next, NS.noise_sampler, flow_cossim_iter) # normalize_zscore(NS.noise_sampler(sigma=sigma, sigma_next=sigma_next), channelwise=True, inplace=True)
-                                    yt_inv        = (1-s_tmp) * y0_inv + s_tmp * noise
+                                    yt_inv        = (NS.sigma_max-s_tmp) * y0_inv + (s_tmp/NS.sigma_max) * noise
                                     if not EO("flow_disable_doublenoise_y0_inv"):
                                         noise = noise_fn(y0_inv, sigma, sigma_next, NS.noise_sampler, flow_cossim_iter) # normalize_zscore(NS.noise_sampler(sigma=sigma, sigma_next=sigma_next), channelwise=True, inplace=True)
-                                    y0_noised_inv = (1-sigma) * y0_inv + sigma * noise
+                                    y0_noised_inv = (NS.sigma_max-sigma) * y0_inv + sigma * noise
                                 
                                 if not EO("flow_disable_separatenoise_x_0"):
                                     noise = noise_fn(yx0, sigma, sigma_next, NS.noise_sampler, flow_cossim_iter) # normalize_zscore(NS.noise_sampler(sigma=sigma, sigma_next=sigma_next), channelwise=True, inplace=True)
                                 if EO("flow_slerp"):
-                                    xt         = yx0 + s_tmp * (noise - y_slerp)
+                                    xt         = yx0 + (s_tmp/NS.sigma_max) * (noise - y_slerp)
                                     if not EO("flow_disable_doublenoise_x_0"):
                                         noise = noise_fn(x_0, sigma, sigma_next, NS.noise_sampler, flow_cossim_iter) # normalize_zscore(NS.noise_sampler(sigma=sigma, sigma_next=sigma_next), channelwise=True, inplace=True)
                                     x_0_noised = x_0 + sigma * (noise - y_slerp)
                                 else:
-                                    xt         = yx0 + s_tmp * (noise - y0)
+                                    if EO("flowsplode"):
+                                        xt = yx0 + s_tmp * noise
+                                    elif EO("flowsplode2"):
+                                        xt         = yx0 + (s_tmp/NS.sigma_max) * yx0 + (s_tmp/NS.sigma_max) * (noise - y0)
+                                    elif not EO("disable_flowsplode3"):
+                                        xt         = yx0 + (s_tmp) * yx0 + (s_tmp) * (noise - y0)
+                                    else:
+                                        xt         = yx0 + (s_tmp/NS.sigma_max) * (noise - y0)
                                     if not EO("flow_disable_doublenoise_x_0"):
                                         noise = noise_fn(x_0, sigma, sigma_next, NS.noise_sampler, flow_cossim_iter) # normalize_zscore(NS.noise_sampler(sigma=sigma, sigma_next=sigma_next), channelwise=True, inplace=True)
-                                    x_0_noised = x_0 + sigma * (noise - y0)
+                                    if EO("flowsplode"):
+                                        x_0_noised = x_0 + sigma * noise
+                                    elif EO("flowsplode2"):
+                                        x_0_noised = x_0 + (sigma/NS.sigma_max) * x_0 + (sigma/NS.sigma_max) * (noise - y0)
+                                    elif not EO("disable_flowsplode3"):
+                                        x_0_noised = x_0 + (sigma) * x_0 + (sigma) * (noise - y0)
+                                    else:
+                                        x_0_noised = x_0 + (sigma/NS.sigma_max) * (noise - y0)
                                 
                                 eps_y, data_y = RK(yt, s_tmp, y0_noised,  sigma, transformer_options={'latent_type': 'yt'})
                                 eps_x, data_x = RK(xt, s_tmp, x_0_noised, sigma, transformer_options={'latent_type': 'xt'})
