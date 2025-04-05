@@ -551,15 +551,16 @@ class SharkSampler:
                         sampler.extra_options['state_info']     = state_info
                         sampler.extra_options['state_info_out'] = state_info_out
                     
-                    if 'control' in neg_cond[0][1]:
-                        neg_cond[0][1]['control'] = negative[0][1]['control']
-                        [pos_cond[batch_num]][0][1]['control'] = positive[0][1]['control']
-                        neg_cond[0][1]['control'].base = negative[0][1]['control'].base
-                        [pos_cond[batch_num]][0][1]['control'].base = positive[0][1]['control'].base
+                    for i in range(len(neg_cond)):
+                        if 'control' in neg_cond[i][1]:
+                            neg_cond[i][1]['control'] = negative[i][1]['control']
+                            [pos_cond[batch_num]][i][1]['control'] = positive[i][1]['control']
+                            neg_cond[i][1]['control'].base = negative[i][1]['control'].base
+                            [pos_cond[batch_num]][i][1]['control'].base = positive[i][1]['control'].base
 
                     guider = SharkGuider(work_model)
                     flow_cond = options_mgr.get('flow_cond', {})
-                    if flow_cond != {} and 'yt_positive' in flow_cond and not 'yt_inv_positive' in flow_cond:
+                    if flow_cond != {} and 'yt_positive' in flow_cond and not 'yt_inv;_positive' in flow_cond:
                         guider.set_conds(yt_positive=flow_cond.get('yt_positive'), yt_negative=flow_cond.get('yt_negative'),)
                         guider.set_cfgs(yt=flow_cond.get('yt_cfg'), xt=cfg)
                     elif flow_cond != {} and 'yt_positive' in flow_cond and 'yt_inv_positive' in flow_cond:
@@ -569,7 +570,13 @@ class SharkSampler:
                         guider.set_cfgs(xt=cfg)
                     
                     if batch_num < len(pos_cond):
-                        guider.set_conds(xt_positive=[pos_cond[batch_num]], xt_negative=neg_cond)
+                        if type(pos_cond[0][0]) == list:
+                            pos_cond_tmp = pos_cond[batch_num]
+                        else:
+                            pos_cond_tmp = pos_cond
+                            
+                        guider.set_conds(xt_positive=pos_cond_tmp, xt_negative=neg_cond)
+                        #guider.set_conds(xt_positive=[pos_cond[batch_num]], xt_negative=neg_cond)
                         samples = guider.sample(noise, x.clone(), sampler, sigmas, denoise_mask=noise_mask, callback=callback, disable_pbar=disable_pbar, seed=noise_seed)
                     else:
                         guider.set_conds(xt_positive=pos_cond, xt_negative=neg_cond)
