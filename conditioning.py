@@ -503,7 +503,18 @@ class ConditioningBatch4:
 
     def main(self, conditioning_0, conditioning_1=None, conditioning_2=None, conditioning_3=None, ):
         c = []
-        c.append(conditioning_0[0])
+        c.append(conditioning_0)
+        
+        if conditioning_1 is not None:
+            c.append(conditioning_1)
+            
+        if conditioning_2 is not None:
+            c.append(conditioning_2)
+            
+        if conditioning_3 is not None:
+            c.append(conditioning_3)
+            
+        """c.append(conditioning_0[0])
         
         if conditioning_1 is not None:
             c.append(conditioning_1[0])
@@ -512,7 +523,7 @@ class ConditioningBatch4:
             c.append(conditioning_2[0])
             
         if conditioning_3 is not None:
-            c.append(conditioning_3[0])
+            c.append(conditioning_3[0])"""
             
         return (c, )
 
@@ -544,7 +555,30 @@ class ConditioningBatch8:
 
     def main(self, conditioning_0, conditioning_1=None, conditioning_2=None, conditioning_3=None, conditioning_4=None, conditioning_5=None, conditioning_6=None, conditioning_7=None, ):
         c = []
-        c.append(conditioning_0[0])
+        c.append(conditioning_0)
+        
+        if conditioning_1 is not None:
+            c.append(conditioning_1)
+            
+        if conditioning_2 is not None:
+            c.append(conditioning_2)
+            
+        if conditioning_3 is not None:
+            c.append(conditioning_3)
+            
+        if conditioning_4 is not None:
+            c.append(conditioning_4)
+            
+        if conditioning_5 is not None:
+            c.append(conditioning_5)
+            
+        if conditioning_6 is not None:
+            c.append(conditioning_6)
+            
+        if conditioning_7 is not None:
+            c.append(conditioning_7)
+            
+        """c.append(conditioning_0[0])
         
         if conditioning_1 is not None:
             c.append(conditioning_1[0])
@@ -565,7 +599,7 @@ class ConditioningBatch8:
             c.append(conditioning_6[0])
             
         if conditioning_7 is not None:
-            c.append(conditioning_7[0])
+            c.append(conditioning_7[0])"""
             
         return (c, )
 
