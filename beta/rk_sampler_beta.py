@@ -791,21 +791,13 @@ def sample_rk_beta(
                                         noise = noise_fn(x_0, sigma, sigma_next, NS.noise_sampler, flow_cossim_iter) # normalize_zscore(NS.noise_sampler(sigma=sigma, sigma_next=sigma_next), channelwise=True, inplace=True)
                                     x_0_noised = x_0 + sigma * (noise - y_slerp)
                                 else:
-                                    if EO("flowsplode"):
-                                        xt = yx0 + s_tmp * noise
-                                    elif EO("flowsplode2"):
-                                        xt         = yx0 + (s_tmp/NS.sigma_max) * yx0 + (s_tmp/NS.sigma_max) * (noise - y0)
-                                    elif not EO("disable_flowsplode3"):
+                                    if VE_MODEL:
                                         xt         = yx0 + (s_tmp) * yx0 + (s_tmp) * (noise - y0)
                                     else:
                                         xt         = yx0 + (s_tmp/NS.sigma_max) * (noise - y0)
                                     if not EO("flow_disable_doublenoise_x_0"):
                                         noise = noise_fn(x_0, sigma, sigma_next, NS.noise_sampler, flow_cossim_iter) # normalize_zscore(NS.noise_sampler(sigma=sigma, sigma_next=sigma_next), channelwise=True, inplace=True)
-                                    if EO("flowsplode"):
-                                        x_0_noised = x_0 + sigma * noise
-                                    elif EO("flowsplode2"):
-                                        x_0_noised = x_0 + (sigma/NS.sigma_max) * x_0 + (sigma/NS.sigma_max) * (noise - y0)
-                                    elif not EO("disable_flowsplode3"):
+                                    if VE_MODEL:
                                         x_0_noised = x_0 + (sigma) * x_0 + (sigma) * (noise - y0)
                                     else:
                                         x_0_noised = x_0 + (sigma/NS.sigma_max) * (noise - y0)
