@@ -138,50 +138,36 @@ class ReFlux(Flux):
         
         weight    = transformer_options['reg_cond_weight'] if 'reg_cond_weight' in transformer_options else 0.0
         floor     = transformer_options['reg_cond_floor']  if 'reg_cond_floor'  in transformer_options else 0.0
+        floor     = min(floor, weight)
         reg_cond_mask_expanded = transformer_options.get('reg_cond_mask_expanded')
         reg_cond_mask_expanded = reg_cond_mask_expanded.to(img.dtype).to(img.device) if reg_cond_mask_expanded is not None else None
         reg_cond_mask = None
-        
-        if floor < 0:
-            floor = abs(floor)
-            floor_bkg = False
-        else:
-            floor_bkg = True
-        
-        mask_orig = None
-        mask_self = None
-        mask_obj  = transformer_options.get('patches', {}).get('regional_conditioning_mask', None)
-        
-        if mask_obj is not None and weight > 0:                 #THIS WAS WEIGHT >= 0 2-28-25
-            mask_orig = mask_obj[0](transformer_options, weight.item())
-            mask_self = mask_orig.clone()
-            mask_self[mask_obj[0].text_len:,   mask_obj[0].text_len:] = mask_self.max()
 
+        
+        AttnMask = transformer_options.get('AttnMask')
         mask     = None
-        mask_obj = transformer_options.get('patches', {}).get('regional_conditioning_mask', None)
-        if mask_obj is not None and weight > 0:
-            mask                      = mask_obj[0](transformer_options, weight.item())
+        if AttnMask is not None and weight > 0:
+            mask                      = AttnMask.get(weight=weight) #mask_obj[0](transformer_options, weight.item())
             
             mask_type_bool = type(mask[0][0].item()) == bool if mask is not None else False
             if not mask_type_bool:
                 mask = mask.to(img.dtype)
             
-            
-            text_len                  = mask_obj[0].text_len
+            text_len                  = txt.shape[1] # mask_obj[0].text_len
             
             mask[text_len:,text_len:] = torch.clamp(mask[text_len:,text_len:], min=floor.to(mask.device))   #ORIGINAL SELF-ATTN REGION BLEED
             reg_cond_mask = reg_cond_mask_expanded.unsqueeze(0).clone() if reg_cond_mask_expanded is not None else None
+
         #heatmaps_a, heatmaps_b = [], []
         #cdicts = []
+        
         total_layers = len(self.double_blocks) + len(self.single_blocks)
         img_a, img_b = img.clone(), img.clone()
-        attn_mask = None
+        
         for i, block in enumerate(self.double_blocks):
             if mask is not None and mask_type_bool and weight < (i / (total_layers-1)):
                 mask = mask.to(img.dtype)
-            
-            if attn_mask is not None and timesteps < 0.9:
-                mask = attn_mask & mask
+
             img, txt, attn_mask = block(img=img, txt=txt, vec=vec, pe=pe, mask=mask, reg_cond_mask=reg_cond_mask, idx=i) #, weight=weight) #, mask=mask)
             #img_a, txt_a, _, _ = block(img=img.clone(), txt=txt_a, vec=reg_vec_a, pe=pe_a, mask=None, reg_cond_mask=None, reg_vec=None) #, mask=mask)
             #img_b, txt_b, _, _ = block(img=img.clone(), txt=txt_b, vec=reg_vec_b, pe=pe_b, mask=None, reg_cond_mask=None, reg_vec=None) #, mask=mask)
@@ -232,15 +218,6 @@ class ReFlux(Flux):
         img_ids          = repeat(img_ids, "h w c -> b (h w) c", b=bs)
         return img_ids
 
-
-    """def _get_img_ids(self, x, bs, h_len, w_len, h_start, h_end, w_start, w_end):
-        img_ids = torch.zeros((h_len, w_len, 3), device=x.device, dtype=x.dtype)
-        img_ids[..., 1] = img_ids[..., 1] + torch.linspace(h_start, h_end - 1, steps=h_len, device=x.device, dtype=x.dtype)[:, None]
-        img_ids[..., 2] = img_ids[..., 2] + torch.linspace(w_start, w_end - 1, steps=w_len, device=x.device, dtype=x.dtype)[None, :]
-        img_ids = repeat(img_ids, "h w c -> b (h w) c", b=bs)
-        return img_ids"""
-
-
     def forward(self,
                 x,
                 timestep,
@@ -274,34 +251,47 @@ class ReFlux(Flux):
 
             img = rearrange(x, "b c (h ph) (w pw) -> b (h w) (c ph pw)", ph=patch_size, pw=patch_size) # img 1,9216,64     1,16,128,128 -> 1,4096,64
             vec_full=None
-            if UNCOND:
-                transformer_options['reg_cond_weight'] = 0.0 # -1
-                context_tmp = context[i][None,...].clone()
+            #if UNCOND:
+            #    transformer_options['reg_cond_weight'] = 0.0 # -1
+            #    context_tmp = context[i][None,...].clone()
             
-            elif UNCOND == False:
+            if UNCOND:
+                #transformer_options['reg_cond_weight'] = -1
+                #context_tmp = context[i][None,...].clone()
+                
                 transformer_options['reg_cond_weight'] = transformer_options.get("regional_conditioning_weight", 0.0) #transformer_options['regional_conditioning_weight']
                 transformer_options['reg_cond_floor']  = transformer_options.get("regional_conditioning_floor",  0.0) #transformer_options['regional_conditioning_floor'] #if "regional_conditioning_floor" in transformer_options else 0.0
-                
-                mask_orig = transformer_options.get('regional_conditioning_mask_orig')
-                if mask_orig is not None:
-                    mask_resized = F.interpolate(mask_orig.unsqueeze(0), size=(h, w), mode="bilinear", align_corners=False).squeeze()
-                    mask_expand = mask_resized.repeat(repeats=(1,48*c,1,1))
-                    mask_expand = comfy.ldm.common_dit.pad_to_patch_size(mask_expand, (patch_size, patch_size))
-                    mskz = rearrange(mask_expand, "b c (h ph) (w pw) -> b (h w) (c ph pw)", ph=patch_size, pw=patch_size) # img 1,9216,64
-                    transformer_options['reg_cond_mask_expanded'] = mskz.squeeze(0)
-                    #mask_expanded2 = F.interpolate(mskz, size=(3072,), mode='linear', align_corners=True).squeeze(0)
-                    #transformer_options['reg_cond_mask_expanded'] = mask_expanded2
-
                 transformer_options['reg_cond_mask_orig'] = transformer_options.get('regional_conditioning_mask_orig')
                 
-                regional_conditioning_positive         = transformer_options.get('patches', {}).get('regional_conditioning_positive', None)
+                AttnMask   = transformer_options.get('AttnMask',   None)                    
+                RegContext = transformer_options.get('RegContext', None)
                 
-                if regional_conditioning_positive is None or transformer_options['reg_cond_weight'] <= 0.0:
-                    context_tmp = context[i][None,...].clone()
+                if AttnMask is not None and transformer_options['reg_cond_weight'] > 0.0:
+                    AttnMask.attn_mask_recast(x.dtype)
+                    context_tmp = RegContext.get().to(context.dtype)
+                    #context_tmp = 0 * context_tmp.clone()
+                    
+                    A = context[i][None,...].clone()
+                    B = context_tmp
+                    context_tmp = A.repeat(1, (B.shape[1] // A.shape[1]) + 1, 1)[:, :B.shape[1], :]
+
                 else:
-                    context_tmp = regional_conditioning_positive[0].concat_cond(context[i][None,...], transformer_options)
-                    vec_full    = regional_conditioning_positive[0].concat_pooled(y    [i][None,...], transformer_options)
-                    #vec_tmp = vec_full[:,:768]
+                    context_tmp = context[i][None,...].clone()
+            
+            
+            elif UNCOND == False:
+                transformer_options['reg_cond_weight'] = transformer_options.get("regional_conditioning_weight", 0.0) 
+                transformer_options['reg_cond_floor']  = transformer_options.get("regional_conditioning_floor",  0.0) 
+                transformer_options['reg_cond_mask_orig'] = transformer_options.get('regional_conditioning_mask_orig')
+                                
+                AttnMask   = transformer_options.get('AttnMask',   None)                    
+                RegContext = transformer_options.get('RegContext', None)
+                
+                if AttnMask is not None and transformer_options['reg_cond_weight'] > 0.0:
+                    AttnMask.attn_mask_recast(img.dtype)
+                    context_tmp = RegContext.get()
+                else:
+                    context_tmp = context[i][None,...].clone()
             
             if context_tmp is None:
                 context_tmp = context[i][None,...].clone()
@@ -327,3 +317,4 @@ class ReFlux(Flux):
         out = torch.stack(out_list, dim=0).squeeze(dim=1)
         
         return rearrange(out, "b (h w) (c ph pw) -> b c (h ph) (w pw)", h=h_len, w=w_len, ph=2, pw=2)[:,:,:h,:w]
+    
