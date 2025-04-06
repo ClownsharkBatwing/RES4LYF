@@ -155,6 +155,8 @@ NODE_CLASS_MAPPINGS = {
 
 
     "TorchCompileModelFluxAdv"            : models.TorchCompileModelFluxAdvanced,
+    "TorchCompileModelAura"               : models.TorchCompileModelAura,
+    "TorchCompileModelSD35"               : models.TorchCompileModelSD35,
     "ClownpileModelWanVideo"              : models.ClownpileModelWanVideo,
 
 

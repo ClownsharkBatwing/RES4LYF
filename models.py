@@ -793,7 +793,109 @@ class TorchCompileModelFluxAdvanced:
         
         #   @torch.compile(mode="default", dynamic=False, fullgraph=False, backend="inductor")
         
+
+class TorchCompileModelAura:
+    def __init__(self):
+        self._compiled = False
+
+    @classmethod
+    def INPUT_TYPES(s):
+        return {"required": { 
+                    "model":         ("MODEL",),
+                    "backend":       (["inductor", "cudagraphs"],),
+                    "fullgraph":     ("BOOLEAN",                                                                    {"default": False, "tooltip": "Enable full graph mode"}),
+                    "mode":          (["default", "max-autotune", "max-autotune-no-cudagraphs", "reduce-overhead"], {"default": "default"}),
+                    "dynamic":       ("BOOLEAN",                                                                    {"default": False, "tooltip": "Enable dynamic mode"}),
+                    "dynamo_cache_size_limit": ("INT", {"default": 64, "min": 0, "max": 1024, "step": 1, "tooltip": "torch._dynamo.config.cache_size_limit"}),
+                }}
         
+    RETURN_TYPES = ("MODEL",)
+    RETURN_NAMES = ("model",)
+    FUNCTION     = "main"
+    CATEGORY     = "RES4LYF/model_patches"
+
+    def main(self,
+            model,
+            backend       = "inductor",
+            mode          = "default",
+            fullgraph     = False,
+            dynamic       = False,
+            dynamo_cache_size_limit = 64,
+            ):
+
+        m = model.clone()
+        diffusion_model = m.get_model_object("diffusion_model")
+        torch._dynamo.config.cache_size_limit = dynamo_cache_size_limit
+        
+        if not self._compiled:
+            try:
+                for i, block in enumerate(diffusion_model.double_layers):
+                    m.add_object_patch(f"diffusion_model.double_layers.{i}", torch.compile(block, mode=mode, dynamic=dynamic, fullgraph=fullgraph, backend=backend))
+                for i, block in enumerate(diffusion_model.single_layers):
+                    m.add_object_patch(f"diffusion_model.single_layers.{i}", torch.compile(block, mode=mode, dynamic=dynamic, fullgraph=fullgraph, backend=backend))
+                self._compiled = True
+                compile_settings = {
+                    "backend": backend,
+                    "mode": mode,
+                    "fullgraph": fullgraph,
+                    "dynamic": dynamic,
+                }
+                setattr(m.model, "compile_settings", compile_settings)
+            except:
+                raise RuntimeError("Failed to compile model")
+        
+        return (m, )
+
+class TorchCompileModelSD35:
+    def __init__(self):
+        self._compiled = False
+
+    @classmethod
+    def INPUT_TYPES(s):
+        return {"required": { 
+                    "model":         ("MODEL",),
+                    "backend":       (["inductor", "cudagraphs"],),
+                    "fullgraph":     ("BOOLEAN",                                                                    {"default": False, "tooltip": "Enable full graph mode"}),
+                    "mode":          (["default", "max-autotune", "max-autotune-no-cudagraphs", "reduce-overhead"], {"default": "default"}),
+                    "dynamic":       ("BOOLEAN",                                                                    {"default": False, "tooltip": "Enable dynamic mode"}),
+                    "dynamo_cache_size_limit": ("INT", {"default": 64, "min": 0, "max": 1024, "step": 1, "tooltip": "torch._dynamo.config.cache_size_limit"}),
+                }}
+        
+    RETURN_TYPES = ("MODEL",)
+    RETURN_NAMES = ("model",)
+    FUNCTION     = "main"
+    CATEGORY     = "RES4LYF/model_patches"
+
+    def main(self,
+            model,
+            backend       = "inductor",
+            mode          = "default",
+            fullgraph     = False,
+            dynamic       = False,
+            dynamo_cache_size_limit = 64,
+            ):
+
+        m = model.clone()
+        diffusion_model = m.get_model_object("diffusion_model")
+        torch._dynamo.config.cache_size_limit = dynamo_cache_size_limit
+        
+        if not self._compiled:
+            try:
+                for i, block in enumerate(diffusion_model.joint_blocks):
+                    m.add_object_patch(f"diffusion_model.joint_blocks.{i}", torch.compile(block, mode=mode, dynamic=dynamic, fullgraph=fullgraph, backend=backend))
+                self._compiled = True
+                compile_settings = {
+                    "backend"  : backend,
+                    "mode"     : mode,
+                    "fullgraph": fullgraph,
+                    "dynamic"  : dynamic,
+                }
+                setattr(m.model, "compile_settings", compile_settings)
+            except:
+                raise RuntimeError("Failed to compile model")
+        
+        return (m, )
+
 
 class ClownpileModelWanVideo:
     def __init__(self):
@@ -803,16 +905,16 @@ class ClownpileModelWanVideo:
     def INPUT_TYPES(s):
         return {
             "required": {
-                "model": ("MODEL",),
-                "backend": (["inductor","cudagraphs"], {"default": "inductor"}),
-                "fullgraph": ("BOOLEAN", {"default": False, "tooltip": "Enable full graph mode"}),
-                "mode": (["default", "max-autotune", "max-autotune-no-cudagraphs", "reduce-overhead"], {"default": "default"}),
-                "dynamic": ("BOOLEAN", {"default": False, "tooltip": "Enable dynamic mode"}),
-                "dynamo_cache_size_limit": ("INT", {"default": 64, "min": 0, "max": 1024, "step": 1, "tooltip": "torch._dynamo.config.cache_size_limit"}),
-                #"compile_self_attn_blocks": ("INT", {"default": 0, "min": 0, "max": 100, "step": 1, "tooltip": "Maximum blocks to compile. These use huge amounts of VRAM with large attention masks."}),
-                "skip_self_attn_blocks": ("STRING", {"default": "0,1,2,3,4,5,6,7,8,9,", "multiline": True}),
-                "compile_transformer_blocks": ("BOOLEAN", {"default": True, "tooltip": "Compile all transformer blocks"}),
-                "force_recompile": ("BOOLEAN", {"default": False, "tooltip": "Force recompile."}),
+                "model"                     : ("MODEL",),
+                "backend"                   : (["inductor","cudagraphs"],                                                    {"default" : "inductor"}),
+                "fullgraph"                 : ("BOOLEAN",                                                                    {"default"                : False, "tooltip"                   : "Enable full graph mode"}),
+                "mode"                      : (["default", "max-autotune", "max-autotune-no-cudagraphs", "reduce-overhead"], {"default": "default"}),
+                "dynamic"                   : ("BOOLEAN",                                                                    {"default"                : False, "tooltip"                   : "Enable dynamic mode"}),
+                "dynamo_cache_size_limit"   : ("INT",                                                                        {"default"                : 64, "min"                          : 0, "max": 1024, "step": 1, "tooltip": "torch._dynamo.config.cache_size_limit"}),
+                #"compile_self_attn_blocks" : ("INT",                                                                        {"default"                : 0, "min"                           : 0, "max": 100, "step" : 1, "tooltip": "Maximum blocks to compile. These use huge amounts of VRAM with large attention masks."}),
+                "skip_self_attn_blocks"     : ("STRING",                                                                     {"default"                 : "0,1,2,3,4,5,6,7,8,9,", "multiline": True}),
+                "compile_transformer_blocks": ("BOOLEAN",                                                                    {"default"                : True,  "tooltip"                    : "Compile all transformer blocks"}),
+                "force_recompile"           : ("BOOLEAN",                                                                    {"default": False, "tooltip": "Force recompile."}),
 
             },
         }
