@@ -674,10 +674,6 @@ class ReJointBlock(nn.Module):
         self.context_block = DismantledBlock(*args, pre_only=pre_only, qk_norm=qk_norm,                                      **kwargs)
         self.x_block       = DismantledBlock(*args, pre_only=False,    qk_norm=qk_norm, x_block_self_attn=x_block_self_attn, **kwargs)
 
-
-
-
-
     def forward(self, *args, **kwargs):  # context_block, x_block are DismantledBlock
         return block_mixing(                      # args = Tuple[Tensor,Tensor]   2,154,1536   2,4096,1536
             *args, context_block=self.context_block, x_block=self.x_block, **kwargs
@@ -947,6 +943,9 @@ class MMDiT(nn.Module):
         imgs = x.reshape(shape=(x.shape[0], c, h * p, w * p))
         return imgs
 
+
+
+
     def forward_core_with_concat(
         self,
         x       : torch.Tensor,
@@ -967,38 +966,29 @@ class MMDiT(nn.Module):
                 1,
             )
 
-
-
-
         weight    = transformer_options['reg_cond_weight'] if 'reg_cond_weight' in transformer_options else 0.0
         floor     = transformer_options['reg_cond_floor']  if 'reg_cond_floor'  in transformer_options else 0.0
-        
         floor     = min(floor, weight)
-        
-        mask_orig = None
-        mask_self = None
-        mask_obj  = transformer_options.get('patches', {}).get('regional_conditioning_mask', None)
-        
+                
         if type(weight) == float or type(weight) == int:
             pass
         else:
             weight = weight.item()
-        
-        if mask_obj is not None and weight >= 0:                 #THIS WAS WEIGHT >= 0 2-28-25
 
-            mask_orig = mask_obj[0](transformer_options, weight)
-            mask_self = mask_orig.clone()
-            mask_self[mask_obj[0].text_len:,   mask_obj[0].text_len:] = mask_self.max()
-
+        AttnMask = transformer_options.get('AttnMask')
         mask     = None
-        mask_obj = transformer_options.get('patches', {}).get('regional_conditioning_mask', None)
-        if mask_obj is not None and weight >= 0:
-            mask                      = mask_obj[0](transformer_options, weight)
-            text_len                  = mask_obj[0].text_len
-            mask[text_len:,text_len:] = torch.clamp(mask[text_len:,text_len:], min=floor.to(mask.device))
+        if AttnMask is not None and weight > 0:
+            mask                      = AttnMask.get(weight=weight) #mask_obj[0](transformer_options, weight.item())
+            
+            mask_type_bool = type(mask[0][0].item()) == bool if mask is not None else False
+            if not mask_type_bool:
+                mask = mask.to(x.dtype)
+            
+            text_len                  = context.shape[1] # mask_obj[0].text_len
+            
+            mask[text_len:,text_len:] = torch.clamp(mask[text_len:,text_len:], min=floor.to(mask.device))   #ORIGINAL SELF-ATTN REGION BLEED
+            #reg_cond_mask = reg_cond_mask_expanded.unsqueeze(0).clone() if reg_cond_mask_expanded is not None else None
         mask_type_bool = type(mask[0][0].item()) == bool if mask is not None else False
-        #if weight == 0.0:
-        #    mask = torch.randint(0, 2, mask.shape, dtype=mask.dtype, device=mask.device)
         if weight <= 0.0:
             mask = None
             context = context_base
@@ -1011,8 +1001,6 @@ class MMDiT(nn.Module):
         for i in range(blocks):
             if mask_type_bool and weight < (i / (blocks-1)) and mask is not None:
                 mask = mask.to(x.dtype) # torch.ones((*mask.shape,), dtype=mask.dtype, device=mask.device) #(mask == mask) #set all to false
-                #context = context_base
-                #c_mod = c_mod_base
                 
             if ("double_block", i) in blocks_replace:
                 def block_wrap(args):
@@ -1047,7 +1035,7 @@ class MMDiT(nn.Module):
         t      : torch.Tensor,
         y      : Optional[torch.Tensor] = None,
         context: Optional[torch.Tensor] = None,
-        control                         = None,
+        control                         =   None,
         transformer_options             = {},
     ) -> torch.Tensor:
         """
@@ -1070,18 +1058,42 @@ class MMDiT(nn.Module):
             context_base = context[i][None,...].clone()
 
             if UNCOND:
-                transformer_options['reg_cond_weight'] = -1
-                context_tmp = context[i][None,...].clone()
+                #transformer_options['reg_cond_weight'] = -1
+                #context_tmp = context[i][None,...].clone()
+                
+                transformer_options['reg_cond_weight'] = transformer_options.get("regional_conditioning_weight", 0.0) #transformer_options['regional_conditioning_weight']
+                transformer_options['reg_cond_floor']  = transformer_options.get("regional_conditioning_floor",  0.0) #transformer_options['regional_conditioning_floor'] #if "regional_conditioning_floor" in transformer_options else 0.0
+                transformer_options['reg_cond_mask_orig'] = transformer_options.get('regional_conditioning_mask_orig')
+                
+                AttnMask   = transformer_options.get('AttnMask',   None)                    
+                RegContext = transformer_options.get('RegContext', None)
+                
+                if AttnMask is not None and transformer_options['reg_cond_weight'] > 0.0:
+                    AttnMask.attn_mask_recast(x.dtype)
+                    context_tmp = RegContext.get().to(context.dtype)
+                    #context_tmp = 0 * context_tmp.clone()
+                    
+                    A = context[i][None,...].clone()
+                    B = context_tmp
+                    context_tmp = A.repeat(1, (B.shape[1] // A.shape[1]) + 1, 1)[:, :B.shape[1], :]
+
+                else:
+                    context_tmp = context[i][None,...].clone()
             
             elif UNCOND == False:
                 transformer_options['reg_cond_weight'] = transformer_options.get("regional_conditioning_weight", 0.0) #transformer_options['regional_conditioning_weight']
                 transformer_options['reg_cond_floor']  = transformer_options.get("regional_conditioning_floor",  0.0) #transformer_options['regional_conditioning_floor'] #if "regional_conditioning_floor" in transformer_options else 0.0
-                regional_conditioning_positive         = transformer_options.get('patches', {}).get('regional_conditioning_positive', None)
+                transformer_options['reg_cond_mask_orig'] = transformer_options.get('regional_conditioning_mask_orig')
                 
-                if regional_conditioning_positive is None or transformer_options['reg_cond_weight'] <= 0.0:
-                    context_tmp = context[i][None,...].clone()
+                AttnMask   = transformer_options.get('AttnMask',   None)                    
+                RegContext = transformer_options.get('RegContext', None)
+                
+                if AttnMask is not None and transformer_options['reg_cond_weight'] > 0.0:
+                    AttnMask.attn_mask_recast(x.dtype)
+                    context_tmp = RegContext.get().to(context.dtype)
                 else:
-                    context_tmp = regional_conditioning_positive[0].concat_cond(context[i][None,...], transformer_options)
+                    context_tmp = context[i][None,...].clone()
+
             
             if context_tmp is None:
                 context_tmp = context[i][None,...].clone()
@@ -1124,7 +1136,9 @@ class MMDiT(nn.Module):
                                                 c_base[i][None,...],
                                                 context_tmp,
                                                 context_base, #context[i][None,...].clone(),
-                                                control, transformer_options)
+                                                control, 
+                                                transformer_options,
+                                                )
 
             x = self.unpatchify(x, hw=hw)  # (N, out_channels, H, W)
             
@@ -1135,6 +1149,9 @@ class MMDiT(nn.Module):
         
         
         return x[:,:,:hw[-2],:hw[-1]]
+
+
+
 
 
 class ReOpenAISignatureMMDITWrapper(MMDiT):
