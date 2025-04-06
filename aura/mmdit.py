@@ -7,7 +7,9 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from comfy.ldm.modules.attention import optimized_attention
+#from comfy.ldm.modules.attention import optimized_attention
+from comfy.ldm.modules.attention import attention_pytorch
+
 import comfy.ops
 import comfy.ldm.common_dit
 
@@ -21,7 +23,7 @@ def find_multiple(n: int, k: int) -> int:
     return n + k - (n % k)
 
 
-class MLP(nn.Module):
+class MLP(nn.Module): # not executed directly with ReAura?
     def __init__(self, dim, hidden_dim=None, dtype=None, device=None, operations=None) -> None:
         super().__init__()
         if hidden_dim is None:
@@ -85,7 +87,7 @@ class ReSingleAttention(nn.Module):
             else operations.LayerNorm(self.head_dim, elementwise_affine=False, dtype=dtype, device=device)
         )
 
-    #@torch.compile(mode="default", dynamic=False, fullgraph=False, backend="inductor")              # c = 1,4552,3072
+    #@torch.compile(mode="default", dynamic=False, fullgraph=False, backend="inductor")              # c = 1,4552,3072      #operations.Linear = torch.nn.Linear with recast
     def forward(self, c, mask=None):
 
         bsz, seqlen1, _ = c.shape
@@ -96,7 +98,7 @@ class ReSingleAttention(nn.Module):
         v = v.view(bsz, seqlen1, self.n_heads, self.head_dim)
         q, k = self.q_norm1(q), self.k_norm1(k)
 
-        output = optimized_attention(q.permute(0, 2, 1, 3), k.permute(0, 2, 1, 3), v.permute(0, 2, 1, 3), self.n_heads, skip_reshape=True, mask=mask)
+        output = attention_pytorch(q.permute(0, 2, 1, 3), k.permute(0, 2, 1, 3), v.permute(0, 2, 1, 3), self.n_heads, skip_reshape=True, mask=mask)
         c = self.w1o(output)
         return c
 
@@ -109,7 +111,7 @@ class ReDoubleAttention(nn.Module):
         self.n_heads  = n_heads
         self.head_dim = dim // n_heads
 
-        # this is for cond
+        # this is for cond   1 (one) not l (L)
         self.w1q = operations.Linear(dim, dim, bias=False, dtype=dtype, device=device)
         self.w1k = operations.Linear(dim, dim, bias=False, dtype=dtype, device=device)
         self.w1v = operations.Linear(dim, dim, bias=False, dtype=dtype, device=device)
@@ -151,16 +153,16 @@ class ReDoubleAttention(nn.Module):
         bsz, seqlen2, _ = x.shape
 
         cq, ck, cv = self.w1q(c), self.w1k(c), self.w1v(c)
-        cq = cq.view(bsz, seqlen1, self.n_heads, self.head_dim)
-        ck = ck.view(bsz, seqlen1, self.n_heads, self.head_dim)
-        cv = cv.view(bsz, seqlen1, self.n_heads, self.head_dim)
-        cq, ck = self.q_norm1(cq), self.k_norm1(ck)
+        cq         = cq.view(bsz, seqlen1, self.n_heads, self.head_dim)
+        ck         = ck.view(bsz, seqlen1, self.n_heads, self.head_dim)
+        cv         = cv.view(bsz, seqlen1, self.n_heads, self.head_dim)
+        cq, ck     = self.q_norm1(cq), self.k_norm1(ck)
 
         xq, xk, xv = self.w2q(x), self.w2k(x), self.w2v(x)
-        xq = xq.view(bsz, seqlen2, self.n_heads, self.head_dim)
-        xk = xk.view(bsz, seqlen2, self.n_heads, self.head_dim)
-        xv = xv.view(bsz, seqlen2, self.n_heads, self.head_dim)
-        xq, xk = self.q_norm2(xq), self.k_norm2(xk)
+        xq         = xq.view(bsz, seqlen2, self.n_heads, self.head_dim)
+        xk         = xk.view(bsz, seqlen2, self.n_heads, self.head_dim)
+        xv         = xv.view(bsz, seqlen2, self.n_heads, self.head_dim)
+        xq, xk     = self.q_norm2(xq), self.k_norm2(xk)
 
         # concat all     q,k,v.shape 1,4299,12,256           cq 1,267,12,256   xq 1,4032,12,256      self.n_heads 12      
         q, k, v = (
@@ -172,11 +174,11 @@ class ReDoubleAttention(nn.Module):
         if mask is not None:
             pass
         
-        output = optimized_attention(q.permute(0, 2, 1, 3), k.permute(0, 2, 1, 3), v.permute(0, 2, 1, 3), self.n_heads, skip_reshape=True, mask=mask)
+        output = attention_pytorch(q.permute(0, 2, 1, 3), k.permute(0, 2, 1, 3), v.permute(0, 2, 1, 3), self.n_heads, skip_reshape=True, mask=mask)
 
         c, x = output.split([seqlen1, seqlen2], dim=1)
-        c = self.w1o(c)
-        x = self.w2o(x)
+        c    = self.w1o(c)
+        x    = self.w2o(x)
 
         return c, x
 
@@ -228,9 +230,8 @@ class ReMMDiTBlock(nn.Module):
 
         x = modulate(self.normX1(x), xshift_msa, xscale_msa)
 
-        # attention
+        # attention    c.shape 1,520,3072   x.shape 1,6144,3072
         c, x = self.attn(c, x, mask=mask)
-
 
         c = self.normC2(cres + cgate_msa.unsqueeze(1) * c)
         c = cgate_mlp.unsqueeze(1) * self.mlpC(modulate(c, cshift_mlp, cscale_mlp))
@@ -258,9 +259,9 @@ class ReDiTBlock(nn.Module):
         self.attn = ReSingleAttention(dim, heads, dtype=dtype, device=device, operations=operations)
         self.mlp = MLP(dim, hidden_dim=dim * 4, dtype=dtype, device=device, operations=operations)
 
-    #@torch.compile(mode="default", dynamic=False, fullgraph=False, backend="inductor")
+    #@torch.compile(mode="default", dynamic=False, fullgraph=False, backend="inductor")         # cx.shape 1,6664,3072   global_cond.shape 1,3072   mlpout.shape 1,6664,3072       float16
     def forward(self, cx, global_cond, mask=None, **kwargs):
-        cxres = cx
+        cxres = cx   
         shift_msa, scale_msa, gate_msa, shift_mlp, scale_mlp, gate_mlp = self.modCX(
             global_cond
         ).chunk(6, dim=1)
@@ -270,7 +271,7 @@ class ReDiTBlock(nn.Module):
         mlpout = self.mlp(modulate(cx, shift_mlp, scale_mlp))
         cx = gate_mlp.unsqueeze(1) * mlpout
 
-        cx = cxres + cx
+        cx = cxres + cx    # residual connection
 
         return cx
 
@@ -469,19 +470,46 @@ class ReMMDiT(nn.Module):
 
 
 
-            if UNCOND:
+            """if UNCOND:
                 transformer_options['reg_cond_weight'] = 0.0 # -1
-                context_tmp = context[i][None,...].clone()
-            
+                context_tmp = context[i][None,...].clone()"""
+            if UNCOND:
+                #transformer_options['reg_cond_weight'] = -1
+                #context_tmp = context[i][None,...].clone()
+                
+                transformer_options['reg_cond_weight'] = transformer_options.get("regional_conditioning_weight", 0.0) #transformer_options['regional_conditioning_weight']
+                transformer_options['reg_cond_floor']  = transformer_options.get("regional_conditioning_floor",  0.0) #transformer_options['regional_conditioning_floor'] #if "regional_conditioning_floor" in transformer_options else 0.0
+                transformer_options['reg_cond_mask_orig'] = transformer_options.get('regional_conditioning_mask_orig')
+                
+                AttnMask   = transformer_options.get('AttnMask',   None)                    
+                RegContext = transformer_options.get('RegContext', None)
+                
+                if AttnMask is not None and transformer_options['reg_cond_weight'] > 0.0:
+                    AttnMask.attn_mask_recast(x.dtype)
+                    context_tmp = RegContext.get().to(context.dtype)
+                    #context_tmp = 0 * context_tmp.clone()
+                    
+                    # If it's not a perfect factor, repeat and slice:
+                    A = context[i][None,...].clone()
+                    B = context_tmp
+                    context_tmp = A.repeat(1, (B.shape[1] // A.shape[1]) + 1, 1)[:, :B.shape[1], :]
+
+                else:
+                    context_tmp = context[i][None,...].clone()
+                    
             elif UNCOND == False:
                 transformer_options['reg_cond_weight'] = transformer_options.get("regional_conditioning_weight", 0.0) #transformer_options['regional_conditioning_weight']
                 transformer_options['reg_cond_floor']  = transformer_options.get("regional_conditioning_floor", 0.0) #transformer_options['regional_conditioning_floor'] #if "regional_conditioning_floor" in transformer_options else 0.0
-                regional_conditioning_positive         = transformer_options.get('patches', {}).get('regional_conditioning_positive', None)
+                transformer_options['reg_cond_mask_orig'] = transformer_options.get('regional_conditioning_mask_orig')
                 
-                if regional_conditioning_positive is None or transformer_options['reg_cond_weight'] <= 0.0:
-                    context_tmp = context[i][None,...].clone()
+                AttnMask   = transformer_options.get('AttnMask',   None)                    
+                RegContext = transformer_options.get('RegContext', None)
+                
+                if AttnMask is not None and transformer_options['reg_cond_weight'] > 0.0:
+                    AttnMask.attn_mask_recast(x.dtype)
+                    context_tmp = RegContext.get().to(context.dtype)
                 else:
-                    context_tmp = regional_conditioning_positive[0].concat_cond(context[i][None,...], transformer_options)
+                    context_tmp = context[i][None,...].clone()
             
             if context_tmp is None:
                 context_tmp = context[i][None,...].clone()
@@ -515,31 +543,31 @@ class ReMMDiT(nn.Module):
             
             floor     = min(floor, weight)
             
-            mask_orig = None
-            mask_self = None
-            mask_obj  = transformer_options.get('patches', {}).get('regional_conditioning_mask', None)
-            
-            if mask_obj is not None and weight > 0:                 #THIS WAS WEIGHT >= 0 2-28-25
-                mask_orig = mask_obj[0](transformer_options, weight.item())
-                mask_self = mask_orig.clone()
-                mask_self[mask_obj[0].text_len:,   mask_obj[0].text_len:] = mask_self.max()
+            reg_cond_mask_expanded = transformer_options.get('reg_cond_mask_expanded')
+            reg_cond_mask_expanded = reg_cond_mask_expanded.to(img.dtype).to(img.device) if reg_cond_mask_expanded is not None else None
+            reg_cond_mask = None
 
+
+
+            AttnMask = transformer_options.get('AttnMask')
             mask     = None
-            mask_obj = transformer_options.get('patches', {}).get('regional_conditioning_mask', None)
-            if mask_obj is not None and weight > 0:
-                mask                      = mask_obj[0](transformer_options, weight.item())
+            if AttnMask is not None and weight > 0:
+                mask                      = AttnMask.get(weight=weight) #mask_obj[0](transformer_options, weight.item())
+                
                 mask_type_bool = type(mask[0][0].item()) == bool if mask is not None else False
+                if not mask_type_bool:
+                    mask = mask.to(img.dtype)
+                    
                 if mask_type_bool:
                     mask = F.pad(mask, (8, 0, 8, 0), value=True)
                     #mask = F.pad(mask, (0, 8, 0, 8), value=True)
                 else:
                     mask = F.pad(mask, (8, 0, 8, 0), value=1.0)
-                    #mask = F.pad(mask, (0, 8, 0, 8), value=1.0)
-
-                #    mask = torch.cat([comfy.ops.cast_to_input(self.register_tokens, c).repeat(c.size(0), 1, 1), c], dim=1)
                 
-                text_len                  = mask_obj[0].text_len
-                mask[text_len:,text_len:] = torch.clamp(mask[text_len:,text_len:], min=floor.to(mask.device))
+                text_len                  = context.shape[1] # mask_obj[0].text_len
+                
+                mask[text_len:,text_len:] = torch.clamp(mask[text_len:,text_len:], min=floor.to(mask.device))   #ORIGINAL SELF-ATTN REGION BLEED
+                reg_cond_mask = reg_cond_mask_expanded.unsqueeze(0).clone() if reg_cond_mask_expanded is not None else None
 
             mask_type_bool = type(mask[0][0].item()) == bool if mask is not None else False
 
