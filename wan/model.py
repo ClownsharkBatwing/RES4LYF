@@ -153,6 +153,25 @@ class ReWanSelfAttention(nn.Module):
         return x
 
 
+class ReWanT2VRawCrossAttention(ReWanSelfAttention):
+
+    def forward(self, x, context, mask=None):
+        r"""
+        Args:
+            x(Tensor): Shape [B, L1, C]
+            context(Tensor): Shape [B, L2, C]
+        """
+        # compute query, key, value
+        q = self.norm_q(self.q(x))
+        k = self.norm_k(self.k(context))
+        v =             self.v(context)
+
+        x = optimized_attention(q, k, v, heads=self.num_heads, mask=None)
+
+        x = self.o(x)
+        return x
+
+
 class ReWanT2VCrossAttention(ReWanSelfAttention):
 
     def forward(self, x, context, mask=None):
@@ -169,7 +188,7 @@ class ReWanT2VCrossAttention(ReWanSelfAttention):
         #    num_repeats = q.shape[1] // mask.shape[0]
         #    mask = mask.repeat(num_repeats, 1)
         # compute attention    # x.shape 2,14040,1536     q.shape 2,14040,1536     k,v.shape = 2,512,1536       mask = 14040,512   num_heads=12
-        if mask is not None and (mask.shape[-1] - mask.shape[-2]) == k.shape[-2]:  # need mask shape 11664,5120
+        if mask is not None: # and (mask.shape[-1] - mask.shape[-2]) == k.shape[-2]:  # need mask shape 11664,5120
             #dtype = mask.dtype if mask.dtype == torch.bool else q.dtype
             dtype = torch.bool
             x = attention_pytorch(q, k, v, heads=self.num_heads, mask=mask.to(q.device).bool())
@@ -539,31 +558,25 @@ class ReWanModel(torch.nn.Module):
         
         floor     = min(floor, weight)
         
-        mask_orig = None
-        mask_self = None
-        mask_obj  = transformer_options.get('patches', {}).get('regional_conditioning_mask', None)
-        
         if type(weight) == float or type(weight) == int:
             pass
         else:
             weight = weight.item()
         
-        if mask_obj is not None and weight >= 0:                 #THIS WAS WEIGHT >= 0 2-28-25
-
-            mask_self = mask_obj[0](transformer_options, weight)
-            #mask_orig = mask_obj[0](transformer_options, weight)
-            #mask_self = mask_orig.clone()
-            #mask_self[mask_obj[0].text_len:,   mask_obj[0].text_len:] = mask_self.max()
-
+        AttnMask = transformer_options.get('AttnMask')
         mask     = None
-        mask_obj = transformer_options.get('patches', {}).get('regional_conditioning_mask', None)
-        if mask_obj is not None and weight >= 0:
-            mask                      = mask_obj[0](transformer_options, weight)
-            text_len                  = mask_obj[0].text_len
-            if type(floor) == torch.Tensor:
-                floor = floor.to(mask.device)
-            #mask[:,text_len:] = torch.clamp(mask[:,text_len:], min=floor)
-            #mask[:,text_len:].clamp_(min=floor)    # ?????????????????????????????????
+        if AttnMask is not None and weight > 0:
+            mask                      = AttnMask.get(weight=weight) #mask_obj[0](transformer_options, weight.item())
+            
+            mask_type_bool = type(mask[0][0].item()) == bool if mask is not None else False
+            if not mask_type_bool:
+                mask = mask.to(img.dtype)
+            
+            text_len                  = context.shape[1] # mask_obj[0].text_len
+            
+            #mask[text_len:,text_len:] = torch.clamp(mask[text_len:,text_len:], min=floor.to(mask.device))   #ORIGINAL SELF-ATTN REGION BLEED
+            #reg_cond_mask = reg_cond_mask_expanded.unsqueeze(0).clone() if reg_cond_mask_expanded is not None else None
+        
         mask_type_bool = type(mask[0][0].item()) == bool if mask is not None else False
 
 
@@ -577,8 +590,10 @@ class ReWanModel(torch.nn.Module):
             if mask_type_bool and weight < (i / (len(self.blocks)-1)) and mask is not None:
                 mask = mask.to(x.dtype)
             
-            x = block(x, self_mask=mask[:,txt_len:], cross_mask=mask[:,:txt_len].bool(), **kwargs)
-            
+            if mask is not None:
+                x = block(x, self_mask=mask[:,txt_len:], cross_mask=mask[:,:txt_len].bool(), **kwargs)
+            else:
+                x = block(x, **kwargs)
             #x = block(x, mask=mask, **kwargs)
             
             i += 1
@@ -638,19 +653,48 @@ class ReWanModel(torch.nn.Module):
             transformer_options['patch_size']     = patch_size
             
 
-            if UNCOND:
+            """if UNCOND:
                 transformer_options['reg_cond_weight'] = 0.0 # -1
-                context_tmp = context[i][None,...].clone()
+                context_tmp = context[i][None,...].clone()"""
+                
+            if UNCOND:
+                #transformer_options['reg_cond_weight'] = -1
+                #context_tmp = context[i][None,...].clone()
+                
+                transformer_options['reg_cond_weight'] = transformer_options.get("regional_conditioning_weight", 0.0) #transformer_options['regional_conditioning_weight']
+                transformer_options['reg_cond_floor']  = transformer_options.get("regional_conditioning_floor",  0.0) #transformer_options['regional_conditioning_floor'] #if "regional_conditioning_floor" in transformer_options else 0.0
+                transformer_options['reg_cond_mask_orig'] = transformer_options.get('regional_conditioning_mask_orig')
+                
+                AttnMask   = transformer_options.get('AttnMask',   None)                    
+                RegContext = transformer_options.get('RegContext', None)
+                
+                if AttnMask is not None and transformer_options['reg_cond_weight'] > 0.0:
+                    AttnMask.attn_mask_recast(x.dtype)
+                    context_tmp = RegContext.get().to(context.dtype)
+                    #context_tmp = 0 * context_tmp.clone()
+                    
+                    A = context[i][None,...].clone()
+                    B = context_tmp
+                    context_tmp = A.repeat(1, (B.shape[1] // A.shape[1]) + 1, 1)[:, :B.shape[1], :]
+
+                else:
+                    context_tmp = context[i][None,...].clone()
             
             elif UNCOND == False:
                 transformer_options['reg_cond_weight'] = transformer_options.get("regional_conditioning_weight", 0.0) #transformer_options['regional_conditioning_weight']
                 transformer_options['reg_cond_floor']  = transformer_options.get("regional_conditioning_floor", 0.0) #transformer_options['regional_conditioning_floor'] #if "regional_conditioning_floor" in transformer_options else 0.0
-                regional_conditioning_positive         = transformer_options.get('patches', {}).get('regional_conditioning_positive', None)
+                transformer_options['reg_cond_mask_orig'] = transformer_options.get('regional_conditioning_mask_orig')
                 
-                if regional_conditioning_positive is None or transformer_options['reg_cond_weight'] <= 0.0:
-                    context_tmp = context[i][None,...].clone()
+                AttnMask   = transformer_options.get('AttnMask',   None)
+                RegContext = transformer_options.get('RegContext', None)
+                
+                if AttnMask is not None and transformer_options['reg_cond_weight'] > 0.0:
+                    AttnMask.attn_mask_recast(x.dtype)
+                    context_tmp = RegContext.get()
+                    
                 else:
-                    context_tmp = regional_conditioning_positive[0].concat_cond(context[i][None,...], transformer_options)
+                    context_tmp = context[i][None,...].clone()
+
             
             if context_tmp is None:
                 context_tmp = context[i][None,...].clone()
