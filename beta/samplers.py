@@ -387,74 +387,67 @@ class SharkSampler:
                     
                     pos_cond = pos_cond[0][1]['callback_regional'](work_model)
                 
-                if "regional_conditioning_weights" in pos_cond[0][1]:
+                if 'AttnMask' in pos_cond[0][1]:
+                    sampler.extra_options['AttnMask']   = pos_cond[0][1]['AttnMask']
+                    sampler.extra_options['RegContext'] = pos_cond[0][1]['RegContext']
+                    sampler.extra_options['RegParam']   = pos_cond[0][1]['RegParam']
+                    
+                    sampler.extra_options['AttnMask'].set_latent(latent_image['samples'])
+                    sampler.extra_options['AttnMask'].generate()
+                
+                elif "regional_conditioning_weights" in pos_cond[0][1]:
                     sampler.extra_options['regional_conditioning_weights']   = pos_cond[0][1]['regional_conditioning_weights']
                     sampler.extra_options['regional_conditioning_floors']    = pos_cond[0][1]['regional_conditioning_floors']
                     sampler.extra_options['regional_conditioning_mask_orig'] = pos_cond[0][1]['regional_conditioning_mask_orig']
                     sampler.extra_options['narcissism_start_step']           = pos_cond[0][1].get('narcissism_start_step', 0)
                     sampler.extra_options['narcissism_end_step']             = pos_cond[0][1].get('narcissism_end_step',   5)
                     
-                    regional_generate_conditionings_and_masks_fn             = pos_cond[0][1]['regional_generate_conditionings_and_masks_fn']
-                    regional_conditioning, regional_mask                     = regional_generate_conditionings_and_masks_fn(latent_x['samples'])
+                    if 'regional_generate_conditionings_and_masks_fn' in pos_cond[0][1]:
+                        regional_generate_conditionings_and_masks_fn             = pos_cond[0][1]['regional_generate_conditionings_and_masks_fn']
+                        regional_conditioning, regional_mask                     = regional_generate_conditionings_and_masks_fn(latent_x['samples'])
                     
-                    if EO("edge_mask"):
-                        dilation = EO("edge_mask", 50)
-                        edge_mask = get_edge_mask(regional_generate_conditionings_and_masks_fn.conditioning_regional[0]['mask'].squeeze(0).squeeze(0).to('cuda'), dilation=dilation)
-                        blahmask = torch.nn.functional.interpolate(edge_mask[None, None, :, :], (regional_generate_conditionings_and_masks_fn.h, regional_generate_conditionings_and_masks_fn.w), mode='nearest-exact').flatten().to(torch.bool).to('cuda')
-                        
-                        
-                        
-                        if latent_image['samples'].ndim == 4:
-                            regional_mask.mask[regional_generate_conditionings_and_masks_fn.text_off:,regional_generate_conditionings_and_masks_fn.text_len:] = torch.logical_or(regional_mask.mask[regional_generate_conditionings_and_masks_fn.text_off:,regional_generate_conditionings_and_masks_fn.text_len:], torch.logical_and(blahmask.unsqueeze(1).repeat(1,regional_generate_conditionings_and_masks_fn.img_len), blahmask.unsqueeze(1).repeat(1,regional_generate_conditionings_and_masks_fn.img_len).transpose(-2,-1)))
-                        elif latent_image['samples'].ndim == 5:
-                            selfattn_offset = regional_mask.mask.shape[-1] - regional_mask.mask.shape[-2]
-                            selfattn_len    = regional_mask.mask.shape[-2]
-                            t_dim = latent_image['samples'].shape[-3]
+                        if EO("edge_mask"):
+                            dilation = EO("edge_mask", 50)
+                            edge_mask = get_edge_mask(regional_generate_conditionings_and_masks_fn.conditioning_regional[0]['mask'].squeeze(0).squeeze(0).to('cuda'), dilation=dilation)
+                            blahmask = torch.nn.functional.interpolate(edge_mask[None, None, :, :], (regional_generate_conditionings_and_masks_fn.h, regional_generate_conditionings_and_masks_fn.w), mode='nearest-exact').flatten().to(torch.bool).to('cuda')
                             
-                            regional_mask.mask[:,selfattn_offset:] = torch.logical_or(regional_mask.mask[:,selfattn_offset:],   blahmask.repeat(t_dim).unsqueeze(0) * blahmask.repeat(t_dim).unsqueeze(1))
                             
+                            
+                            if latent_image['samples'].ndim == 4:
+                                regional_mask.mask[regional_generate_conditionings_and_masks_fn.text_off:,regional_generate_conditionings_and_masks_fn.text_len:] = torch.logical_or(regional_mask.mask[regional_generate_conditionings_and_masks_fn.text_off:,regional_generate_conditionings_and_masks_fn.text_len:], torch.logical_and(blahmask.unsqueeze(1).repeat(1,regional_generate_conditionings_and_masks_fn.img_len), blahmask.unsqueeze(1).repeat(1,regional_generate_conditionings_and_masks_fn.img_len).transpose(-2,-1)))
+                            elif latent_image['samples'].ndim == 5:
+                                selfattn_offset = regional_mask.mask.shape[-1] - regional_mask.mask.shape[-2]
+                                selfattn_len    = regional_mask.mask.shape[-2]
+                                t_dim = latent_image['samples'].shape[-3]
+                                
+                                regional_mask.mask[:,selfattn_offset:] = torch.logical_or(regional_mask.mask[:,selfattn_offset:],   blahmask.repeat(t_dim).unsqueeze(0) * blahmask.repeat(t_dim).unsqueeze(1))
+                        
+                        if EO("edge_mask_b"):
+                            dilation = EO("edge_mask_b", 5)
+                            orig_mask = regional_generate_conditionings_and_masks_fn.conditioning_regional[0]['mask'].clone()
+                            orig_mask1 = regional_generate_conditionings_and_masks_fn.conditioning_regional[1]['mask'].clone()
+                            edge_mask = get_edge_mask(orig_mask.squeeze(0).squeeze(0), dilation=dilation)
+                            
+                            edge_mask = torch.nn.functional.interpolate(edge_mask[None,None,...], size=orig_mask.shape[-2:])
+                            regional_generate_conditionings_and_masks_fn.conditioning_regional[0]['mask'] = edge_mask.squeeze(0)
+                            regional_generate_conditionings_and_masks_fn.conditioning_regional[1]['mask'] = edge_mask.squeeze(0)
+                            
+                            regional_conditioning1, regional_mask1 = regional_generate_conditionings_and_masks_fn(latent_x['samples'])
+                            regional_generate_conditionings_and_masks_fn.conditioning_regional[0]['mask'] = orig_mask
+                            regional_generate_conditionings_and_masks_fn.conditioning_regional[1]['mask'] = orig_mask1
+                            
+                            if EO("edge_mask_selfattn_only"):
+                                regional_mask.mask[512:,512:] = torch.logical_or(regional_mask.mask[512:,512:], regional_mask1.mask[512:,512:])
+                            else:
+                                regional_mask.mask = torch.logical_or(regional_mask.mask, regional_mask1.mask)
+
+                        regional_conditioning                                    = copy.deepcopy(regional_conditioning)
+                        regional_mask                                            = copy.deepcopy(regional_mask)
+
+                        work_model.set_model_patch(regional_conditioning, 'regional_conditioning_positive')
+                        work_model.set_model_patch(regional_mask,         'regional_conditioning_mask')
 
 
-                    
-                    if EO("edge_mask_b"):
-                        dilation = EO("edge_mask_b", 5)
-                        orig_mask = regional_generate_conditionings_and_masks_fn.conditioning_regional[0]['mask'].clone()
-                        orig_mask1 = regional_generate_conditionings_and_masks_fn.conditioning_regional[1]['mask'].clone()
-                        edge_mask = get_edge_mask(orig_mask.squeeze(0).squeeze(0), dilation=dilation)
-                        
-                        edge_mask = torch.nn.functional.interpolate(edge_mask[None,None,...], size=orig_mask.shape[-2:])
-                        regional_generate_conditionings_and_masks_fn.conditioning_regional[0]['mask'] = edge_mask.squeeze(0)
-                        regional_generate_conditionings_and_masks_fn.conditioning_regional[1]['mask'] = edge_mask.squeeze(0)
-                        
-                        regional_conditioning1, regional_mask1 = regional_generate_conditionings_and_masks_fn(latent_x['samples'])
-                        regional_generate_conditionings_and_masks_fn.conditioning_regional[0]['mask'] = orig_mask
-                        regional_generate_conditionings_and_masks_fn.conditioning_regional[1]['mask'] = orig_mask1
-                        
-                        if EO("edge_mask_selfattn_only"):
-                            regional_mask.mask[512:,512:] = torch.logical_or(regional_mask.mask[512:,512:], regional_mask1.mask[512:,512:])
-                        else:
-                            regional_mask.mask = torch.logical_or(regional_mask.mask, regional_mask1.mask)
-                        
-                    
-                    
-                    
-                    regional_conditioning                                    = copy.deepcopy(regional_conditioning)
-                    regional_mask                                            = copy.deepcopy(regional_mask)
-                    
-                    #if EO("enable_auto_enable_reflux"):
-                    #    work_model, = RES4LYF.models.ReFluxPatcher().main(work_model, enable=True) #, force=True)
-                    #    if EO("compile_reflux_model"):
-                    #        work_model, = RES4LYF.models.TorchCompileModelFluxAdvanced().main(work_model)
-
-                    work_model.set_model_patch(regional_conditioning, 'regional_conditioning_positive')
-                    work_model.set_model_patch(regional_mask,         'regional_conditioning_mask')
-                else:
-                    #if EO("enable_auto_disable_reflux"):
-                    #    work_model, = RES4LYF.models.ReFluxPatcher().main(work_model, enable=False)
-                    #    if EO("compile_reflux_model"):
-                    #        work_model, = RES4LYF.models.TorchCompileModelFluxAdvanced().main(work_model)
-                    pass
-            
             
             if "noise_seed" in sampler.extra_options:
                 if sampler.extra_options['noise_seed'] == -1 and noise_seed != -1:

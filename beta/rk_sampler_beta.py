@@ -220,7 +220,9 @@ def sample_rk_beta(
 
         extra_options                 : str                = "",
         
-        blah_model = None,
+        AttnMask   = None,
+        RegContext = None,
+        RegParam   = None,
         ):
     
     if sampler_mode == "NULL":
@@ -401,12 +403,23 @@ def sample_rk_beta(
         progress_bar = trange(current_steps+1, disable=disable)
     else:
         progress_bar = trange(current_steps, disable=disable)
+        
+    if AttnMask is not None:
+        RK.update_transformer_options({'AttnMask': AttnMask})
+        RK.update_transformer_options({'RegContext': RegContext})
 
     while step < num_steps:
         sigma, sigma_next = sigmas[step], sigmas[step+1]
         transition_count = 0
         
-        if regional_conditioning_weights is not None:
+        if AttnMask is not None:
+            RK.update_transformer_options({'regional_conditioning_weight': RegParam.weights[step]})
+            RK.update_transformer_options({'regional_conditioning_floor':  RegParam.floors[step]})
+            if   step >= RegParam.narc_start and step < RegParam.narc_stop and regional_conditioning_mask_orig is not None:
+                RK.update_transformer_options({'regional_conditioning_mask_orig':  regional_conditioning_mask_orig})
+            #if   step >= RegParam.narc_start and step < RegParam.narc_stop and RegParam.narc_idx >= 0:
+            #    RK.update_transformer_options({'regional_conditioning_mask_orig':  AttnMask.masks[RegParam.narc_idx]})
+        elif regional_conditioning_weights is not None:
             RK.extra_args['model_options']['transformer_options']['regional_conditioning_weight'] = regional_conditioning_weights[step]
             RK.extra_args['model_options']['transformer_options']['regional_conditioning_floor']  = regional_conditioning_floors [step]
             
