@@ -11,7 +11,12 @@ import torch.optim as optim
 from comfy.k_diffusion.sampling import get_sigmas_polyexponential, get_sigmas_karras
 import comfy.samplers
 
+from torch import Tensor, nn
+from typing import Optional, Callable, Tuple, Dict, Any, Union, TYPE_CHECKING, TypeVar
+
 from .res4lyf import RESplain
+from .helper  import get_res4lyf_scheduler_list
+
 
 def rescale_linear(input, input_min, input_max, output_min, output_max):
     output = ((input - input_min) / (input_max - input_min)) * (output_max - output_min) + output_min;
@@ -1221,6 +1226,121 @@ class constant_scheduler:
         sigmas = torch.concat((sigmas[:cutoff_step], torch.ones(steps + 1 - cutoff_step) * value_end), dim=0)
 
         return (sigmas,)
+    
+    
+    
+
+
+
+class ClownScheduler:
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": { 
+                "pad_start_value":      ("FLOAT",                                     {"default": 0.0, "min":  -10000.0, "max": 10000.0, "step": 0.01}),
+                "start_value":          ("FLOAT",                                     {"default": 1.0, "min":  -10000.0, "max": 10000.0, "step": 0.01}),
+                "end_value":            ("FLOAT",                                     {"default": 1.0, "min":  -10000.0, "max": 10000.0, "step": 0.01}),
+                "pad_end_value":        ("FLOAT",                                     {"default": 0.0, "min":  -10000.0, "max": 10000.0, "step": 0.01}),
+                "scheduler":            (["constant"] + get_res4lyf_scheduler_list(), {"default": "beta57"},),
+                "scheduler_start_step": ("INT",                                       {"default": 0,   "min":  0,        "max": 10000}),
+                "scheduler_end_step":   ("INT",                                       {"default": 30,  "min": -1,        "max": 10000}),
+                "total_steps":          ("INT",                                       {"default": 100, "min": -1,        "max": 10000}),
+                "flip_schedule":        ("BOOLEAN",                                   {"default": False}),
+            }, 
+            "optional": {
+                "model":                ("MODEL", ),
+            }
+        }
+
+    RETURN_TYPES = ("SIGMAS",)
+    RETURN_NAMES = ("sigmas",)
+    FUNCTION     = "main"
+    CATEGORY     = "RES4LYF/schedulers"
+
+    def create_callback(self, **kwargs):
+        def callback(model):
+            kwargs["model"] = model  
+            schedule, = self.prepare_schedule(**kwargs)
+            return schedule
+        return callback
+
+    def main(self,
+            model                        = None,
+            pad_start_value      : float = 1.0,
+            start_value          : float = 0.0,
+            end_value            : float = 1.0,
+            pad_end_value                = None,
+            denoise              : int   = 1.0,
+            scheduler                    = None,
+            scheduler_start_step : int   = 0,
+            scheduler_end_step   : int   = 30,
+            total_steps          : int   = 60,
+            flip_schedule                = False,
+            ) -> Tuple[Tensor]:
+        
+        if model is None:
+            callback = self.create_callback(pad_start_value = pad_start_value,
+                                            start_value     = start_value,
+                                            end_value       = end_value,
+                                            pad_end_value   = pad_end_value,
+                                            
+                                            scheduler       = scheduler,
+                                            start_step      = scheduler_start_step,
+                                            end_step        = scheduler_end_step,
+                                            flip_schedule   = flip_schedule,
+                                            )
+        else:
+            default_dtype  = torch.float64
+            default_device = torch.device("cuda") 
+            
+            if scheduler_end_step == -1:
+                scheduler_total_steps = total_steps - scheduler_start_step
+            else:
+                scheduler_total_steps = scheduler_end_step - scheduler_start_step
+            
+            if total_steps == -1:
+                total_steps = scheduler_start_step + scheduler_end_step
+            
+            end_pad_steps = total_steps - scheduler_end_step
+            
+            if scheduler != "constant":
+                values     = get_sigmas(model, scheduler, scheduler_total_steps, denoise).to(dtype=default_dtype, device=default_device) 
+                values     = ((values - values.min()) * (start_value - end_value))   /   (values.max() - values.min())   +   end_value
+            else:
+                values = torch.linspace(start_value, end_value, scheduler_total_steps, dtype=default_dtype, device=default_device)
+            
+            if flip_schedule:
+                values = torch.flip(values, dims=[0])
+            
+            prepend    = torch.full((scheduler_start_step,),  pad_start_value, dtype=default_dtype, device=default_device)
+            postpend   = torch.full((end_pad_steps,),         pad_end_value,   dtype=default_dtype, device=default_device)
+            
+            values     = torch.cat((prepend, values, postpend), dim=0)
+
+        #ositive[0][1]['callback_regional'] = callback
+        
+        return (values,)
+
+
+
+    def prepare_schedule(self,
+                                model                    = None,
+                                pad_start_value  : float = 1.0,
+                                start_value      : float = 0.0,
+                                end_value        : float = 1.0,
+                                pad_end_value            = None,
+                                weight_scheduler         = None,
+                                start_step       : int   = 0,
+                                end_step         : int   = 30,
+                                flip_schedule            = False,
+                                ) -> Tuple[Tensor]:
+
+        default_dtype  = torch.float64
+        default_device = torch.device("cuda") 
+        
+        return (None,)
+
+
 
 
 def get_sigmas_simple_exponential(model, steps):

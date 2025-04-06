@@ -70,8 +70,6 @@ NODE_CLASS_MAPPINGS = {
     "ClownRegionalConditioning"           : conditioning.ClownRegionalConditioning,
     "ClownRegionalConditioning3"          : conditioning.ClownRegionalConditioning3,
 
-    "ClownRegionalConditioningAdvanced"   : conditioning.ClownRegionalConditioningAdvanced,
-
     "CLIPTextEncodeFluxUnguided"          : conditioning.CLIPTextEncodeFluxUnguided,
     "ConditioningOrthoCollin"             : conditioning.ConditioningOrthoCollin,
 
@@ -83,13 +81,9 @@ NODE_CLASS_MAPPINGS = {
     "ConditioningZeroAndTruncate"         : conditioning.ConditioningZeroAndTruncate,
     "ConditioningTruncate"                : conditioning.ConditioningTruncate,
     "StyleModelApplyAdvanced"             : conditioning.StyleModelApplyAdvanced,
-    
-    "RectifiedFlow_RegionalPrompt"        : conditioning.RectifiedFlow_RegionalPrompt,
-    "RectifiedFlow_RegionalConditioning"  : conditioning.RectifiedFlow_RegionalConditioning,
 
     "ConditioningToBase64"                : conditioning.ConditioningToBase64,
     "Base64ToConditioning"                : conditioning.Base64ToConditioning,
-    "ClownScheduler"                      : conditioning.ClownScheduler,
 
     "ConditioningBatch4"                  : conditioning.ConditioningBatch4,
     "ConditioningBatch8"                  : conditioning.ConditioningBatch8,
@@ -167,9 +161,15 @@ NODE_CLASS_MAPPINGS = {
 
     "ReWanPatcher"                        : models.ReWanPatcher,
     "ReFluxPatcher"                       : models.ReFluxPatcher,
-    "FluxOrthoCFGPatcher"                 : models.FluxOrthoCFGPatcher,
     "ReSD35Patcher"                       : models.ReSD35Patcher,
     "ReAuraPatcher"                       : models.ReAuraPatcher,
+    
+    "ReWanPatcherAdvanced"                : models.ReWanPatcherAdvanced,
+    "ReFluxPatcherAdvanced"               : models.ReFluxPatcherAdvanced,
+    "ReSD35PatcherAdvanced"               : models.ReSD35PatcherAdvanced,
+    "ReAuraPatcherAdvanced"               : models.ReAuraPatcherAdvanced,
+    
+    "FluxOrthoCFGPatcher"                 : models.FluxOrthoCFGPatcher,
 
     
     "UNetSave"                            : models.UNetSave,
@@ -211,6 +211,7 @@ NODE_CLASS_MAPPINGS = {
     "Sigmas Iteration Karras"             : sigmas.sigmas_iteration_karras,
     "Sigmas Iteration Polyexp"            : sigmas.sigmas_iteration_polyexp,
 
+    "ClownScheduler"                      : sigmas.ClownScheduler, # for modulating parameters
     "Tan Scheduler"                       : sigmas.tan_scheduler,
     "Tan Scheduler 2"                     : sigmas.tan_scheduler_2stage,
     "Tan Scheduler 2 Simple"              : sigmas.tan_scheduler_2stage_simple,

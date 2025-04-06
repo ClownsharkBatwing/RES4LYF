@@ -29,7 +29,7 @@ from comfy.ldm.aura.mmdit import MMDiT, DiTBlock, MMDiTBlock, SingleAttention, D
 from .aura.mmdit import ReMMDiT, ReDiTBlock, ReMMDiTBlock, ReSingleAttention, ReDoubleAttention
 
 from comfy.ldm.wan.model import WanAttentionBlock, WanI2VCrossAttention, WanModel, WanSelfAttention, WanT2VCrossAttention
-from .wan.model import ReWanAttentionBlock, ReWanI2VCrossAttention, ReWanModel, ReWanRawSelfAttention, ReWanSelfAttention, ReWanT2VCrossAttention
+from .wan.model import ReWanAttentionBlock, ReWanI2VCrossAttention, ReWanModel, ReWanRawSelfAttention, ReWanSelfAttention, ReWanT2VCrossAttention, ReWanT2VRawCrossAttention
 
 from .latents import get_orthogonal, get_cosine_similarity
 from .res4lyf import RESplain
@@ -44,7 +44,14 @@ def time_snr_shift_linear(alpha, t):
         return t
     return alpha * t / (1 + (alpha - 1) * t)
 
+class AlwaysTrueList:
+    def __contains__(self, item):
+        return True
+
 def parse_range_string(s):
+    if "all" in s:
+        return AlwaysTrueList()
+    
     result = []
     for part in s.split(','):
         if '-' in part:
@@ -54,14 +61,19 @@ def parse_range_string(s):
             result.append(int(part))
     return result
 
-class ReWanPatcher:
+COMPILE_MODES = ["default", "max-autotune", "max-autotune-no-cudagraphs", "reduce-overhead"]
+
+
+
+class ReWanPatcherAdvanced:
     @classmethod
     def INPUT_TYPES(s):
         return {
             "required": { 
-                "model":  ("MODEL",),
-                "self_attn_blocks": ("STRING", {"default": "0,1,2,3,4,5,6,7,8,9,", "multiline": True}),
-                "enable": ("BOOLEAN", {"default": True}),
+                "model"            : ("MODEL",),
+                "self_attn_blocks" : ("STRING",  {"default": "0,1,2,3,4,5,6,7,8,9,", "multiline": True}),
+                "cross_attn_blocks": ("STRING",  {"default": "all",                  "multiline": True}),
+                "enable"           : ("BOOLEAN", {"default": True}),
             }
         }
     RETURN_TYPES = ("MODEL",)
@@ -69,9 +81,10 @@ class ReWanPatcher:
     CATEGORY     = "RES4LYF/model_patches"
     FUNCTION     = "main"
 
-    def main(self, model, self_attn_blocks, enable=True, force=False):
+    def main(self, model, self_attn_blocks, cross_attn_blocks, enable=True, force=False):
         
-        self_attn_blocks = parse_range_string(self_attn_blocks)
+        self_attn_blocks  = parse_range_string(self_attn_blocks)
+        cross_attn_blocks = parse_range_string(cross_attn_blocks)
         
         if (enable or force) and model.model.diffusion_model.__class__ == WanModel:
             m = model.clone()
@@ -84,7 +97,8 @@ class ReWanPatcher:
                     block.self_attn.__class__  = ReWanSelfAttention
                 else:
                     block.self_attn.__class__  = ReWanRawSelfAttention
-                block.cross_attn.__class__ = ReWanT2VCrossAttention
+                if i in cross_attn_blocks:
+                    block.cross_attn.__class__ = ReWanT2VCrossAttention
                 block.idx       = i
         
         elif not enable and model.model.diffusion_model.__class__ == ReWanModel:
@@ -101,16 +115,43 @@ class ReWanPatcher:
             m = model
         
         return (m,)
+    
+class ReWanPatcher(ReWanPatcherAdvanced):
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "model"  : ("MODEL",),
+                "enable" : ("BOOLEAN", {"default": True}),
+            }
+        }
 
+    def main(self, model, enable=True, force=False):
+        return super().main(
+            model=model,
+            doublestream_blocks="all",
+            singlestream_blocks="all",
+            enable=enable,
+            force=force
+        )    
 
+class ReDoubleStreamBlockNoMask(ReDoubleStreamBlock):
+    def forward(self, c, mask=None):
+        return super().forward(c, mask=None)
+    
+class ReSingleStreamBlockNoMask(ReSingleStreamBlock):
+    def forward(self, c, mask=None):
+        return super().forward(c, mask=None)
 
-class ReFluxPatcher:
+class ReFluxPatcherAdvanced:
     @classmethod
     def INPUT_TYPES(s):
         return {
             "required": { 
-                "model":  ("MODEL",),
-                "enable": ("BOOLEAN", {"default": True}),
+                "model"               : ("MODEL",),
+                "doublestream_blocks" : ("STRING",  {"default": "all", "multiline": True}),
+                "singlestream_blocks" : ("STRING",  {"default": "all", "multiline": True}),
+                "enable"              : ("BOOLEAN", {"default": True}),
             }
         }
     RETURN_TYPES = ("MODEL",)
@@ -118,7 +159,10 @@ class ReFluxPatcher:
     CATEGORY     = "RES4LYF/model_patches"
     FUNCTION     = "main"
 
-    def main(self, model, enable=True, force=False):
+    def main(self, model, doublestream_blocks, singlestream_blocks, enable=True, force=False):
+        
+        doublestream_blocks = parse_range_string(doublestream_blocks)
+        singlestream_blocks = parse_range_string(singlestream_blocks)
         
         if (enable or force) and model.model.diffusion_model.__class__ == Flux:
             m = model.clone()
@@ -126,11 +170,17 @@ class ReFluxPatcher:
             m.model.diffusion_model.threshold_inv = False
             
             for i, block in enumerate(m.model.diffusion_model.double_blocks):
-                block.__class__ = ReDoubleStreamBlock
+                if i in doublestream_blocks:
+                    block.__class__ = ReDoubleStreamBlock
+                else:
+                    block.__class__ = ReDoubleStreamBlockNoMask
                 block.idx       = i
 
             for i, block in enumerate(m.model.diffusion_model.single_blocks):
-                block.__class__ = ReSingleStreamBlock
+                if i in singlestream_blocks:
+                    block.__class__ = ReSingleStreamBlock
+                else:
+                    block.__class__ = ReSingleStreamBlockNoMask
                 block.idx       = i
                 
         
@@ -150,14 +200,37 @@ class ReFluxPatcher:
             m = model
         
         return (m,)
+    
+class ReFluxPatcher(ReFluxPatcherAdvanced):
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "model"  : ("MODEL",),
+                "enable" : ("BOOLEAN", {"default": True}),
+            }
+        }
 
+    def main(self, model, enable=True, force=False):
+        return super().main(
+            model=model,
+            doublestream_blocks="all",
+            singlestream_blocks="all",
+            enable=enable,
+            force=force
+        )    
 
-class ReSD35Patcher:
+class ReJointBlockNoMask(ReJointBlock):
+    def forward(self, c, mask=None):
+        return super().forward(c, mask=None)
+
+class ReSD35PatcherAdvanced:
     @classmethod
     def INPUT_TYPES(s):
         return {
             "required": { 
                 "model":  ("MODEL",),
+                "joint_blocks" : ("STRING",  {"default": "all", "multiline": True}),
                 "enable": ("BOOLEAN", {"default": True}),
             }
         }
@@ -166,7 +239,9 @@ class ReSD35Patcher:
     CATEGORY     = "RES4LYF/model_patches"
     FUNCTION     = "main"
 
-    def main(self, model, enable=True, force=False):
+    def main(self, model, joint_blocks, enable=True, force=False):
+        
+        joint_blocks = parse_range_string(joint_blocks)
         
         if (enable or force) and model.model.diffusion_model.__class__ == OpenAISignatureMMDITWrapper:
             m = model.clone()
@@ -174,7 +249,10 @@ class ReSD35Patcher:
             m.model.diffusion_model.threshold_inv = False
             
             for i, block in enumerate(m.model.diffusion_model.joint_blocks):
-                block.__class__ = ReJointBlock
+                if i in joint_blocks:
+                    block.__class__ = ReJointBlock
+                else:
+                    ReJointBlockNoMask
                 block.idx       = i
 
         elif not enable and model.model.diffusion_model.__class__ == ReOpenAISignatureMMDITWrapper:
@@ -189,15 +267,41 @@ class ReSD35Patcher:
             m = model
         
         return (m,)
+    
+class ReSD35Patcher(ReSD35PatcherAdvanced):
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "model"  : ("MODEL",),
+                "enable" : ("BOOLEAN", {"default": True}),
+            }
+        }
 
+    def main(self, model, enable=True, force=False):
+        return super().main(
+            model=model,
+            joint_blocks="all",
+            enable=enable,
+            force=force
+        )    
 
+class ReDoubleAttentionNoMask(ReDoubleAttention):
+    def forward(self, c, mask=None):
+        return super().forward(c, mask=None)
+    
+class ReSingleAttentionNoMask(ReSingleAttention):
+    def forward(self, c, mask=None):
+        return super().forward(c, mask=None)
 
-class ReAuraPatcher:
+class ReAuraPatcherAdvanced:
     @classmethod
     def INPUT_TYPES(s):
         return {
             "required": { 
                 "model":  ("MODEL",),
+                "doublelayer_blocks" : ("STRING",  {"default": "all", "multiline": True}),
+                "singlelayer_blocks" : ("STRING",  {"default": "all", "multiline": True}),
                 "enable": ("BOOLEAN", {"default": True}),
             }
         }
@@ -206,7 +310,10 @@ class ReAuraPatcher:
     CATEGORY     = "RES4LYF/model_patches"
     FUNCTION     = "main"
 
-    def main(self, model, enable=True, force=False):
+    def main(self, model, doublelayer_blocks, singlelayer_blocks, enable=True, force=False):
+        
+        doublelayer_blocks = parse_range_string(doublelayer_blocks)
+        singlelayer_blocks = parse_range_string(singlelayer_blocks)
         
         if (enable or force) and model.model.diffusion_model.__class__ == MMDiT:
             m = model.clone()
@@ -215,12 +322,18 @@ class ReAuraPatcher:
             
             for i, block in enumerate(m.model.diffusion_model.double_layers):
                 block.__class__ = ReMMDiTBlock
-                block.attn.__class__ = ReDoubleAttention
+                if i in doublelayer_blocks:
+                    block.attn.__class__ = ReDoubleAttention
+                else:
+                    block.attn.__class__ = ReDoubleAttentionNoMask
                 block.idx       = i
                 
             for i, block in enumerate(m.model.diffusion_model.single_layers):
                 block.__class__ = ReDiTBlock
-                block.attn.__class__ = ReSingleAttention
+                if i in singlelayer_blocks:
+                    block.attn.__class__ = ReSingleAttention
+                else:
+                    block.attn.__class__ = ReSingleAttentionNoMask
                 block.idx       = i
 
         elif not enable and model.model.diffusion_model.__class__ == ReMMDiT:
@@ -242,58 +355,24 @@ class ReAuraPatcher:
         
         return (m,)
 
-
-
-class Cascade_StageC_AttentionPatcher:
+class ReAuraPatcher(ReAuraPatcherAdvanced):
     @classmethod
-    def INPUT_TYPES(s):
+    def INPUT_TYPES(cls):
         return {
-            "required": { 
-                "model":  ("MODEL",),
-                "enable": ("BOOLEAN", {"default": True}),
+            "required": {
+                "model"  : ("MODEL",),
+                "enable" : ("BOOLEAN", {"default": True}),
             }
         }
-    RETURN_TYPES = ("MODEL",)
-    RETURN_NAMES = ("model",)
-    CATEGORY     = "RES4LYF/model_patches"
-    FUNCTION     = "main"
 
     def main(self, model, enable=True, force=False):
-        
-        if (enable or force) and model.model.diffusion_model.__class__ == MMDiT:
-            m = model.clone()
-            m.model.diffusion_model.__class__     = ReMMDiT
-            m.model.diffusion_model.threshold_inv = False
-            
-            for i, block in enumerate(m.model.diffusion_model.double_layers):
-                block.__class__ = ReMMDiTBlock
-                block.attn.__class__ = ReDoubleAttention
-                block.idx       = i
-                
-            for i, block in enumerate(m.model.diffusion_model.single_layers):
-                block.__class__ = ReDiTBlock
-                block.attn.__class__ = ReSingleAttention
-                block.idx       = i
-
-        elif not enable and model.model.diffusion_model.__class__ == ReMMDiT:
-            m = model.clone()
-            m.model.diffusion_model.__class__ = MMDiT
-            
-            for i, block in enumerate(m.model.diffusion_model.double_layers):
-                block.__class__ = MMDiTBlock
-                block.attn.__class__ = DoubleAttention
-                block.idx       = i
-                
-            for i, block in enumerate(m.model.diffusion_model.single_layers):
-                block.__class__ = DiTBlock
-                block.attn.__class__ = SingleAttention
-                block.idx       = i
-
-        else:
-            m = model
-        
-        return (m,)
-
+        return super().main(
+            model=model,
+            doublelayer_blocks="all",
+            singlelayer_blocks="all",
+            enable=enable,
+            force=force
+        )    
 
 
 class FluxOrthoCFGPatcher:
@@ -305,13 +384,14 @@ class FluxOrthoCFGPatcher:
             "ortho_T5":     ("BOOLEAN", {"default": True}),
             "ortho_clip_L": ("BOOLEAN", {"default": True}),
             "zero_clip_L":  ("BOOLEAN", {"default": True}),
-           }
+            }
         }
         
     RETURN_TYPES = ("MODEL",)
     RETURN_NAMES = ("model",)
     CATEGORY     = "RES4LYF/model_patches"
     FUNCTION     = "main"
+    EXPERIMENTAL = True
     
     original_forward = Flux.forward
 
@@ -801,12 +881,12 @@ class TorchCompileModelAura:
     @classmethod
     def INPUT_TYPES(s):
         return {"required": { 
-                    "model":         ("MODEL",),
-                    "backend":       (["inductor", "cudagraphs"],),
-                    "fullgraph":     ("BOOLEAN",                                                                    {"default": False, "tooltip": "Enable full graph mode"}),
-                    "mode":          (["default", "max-autotune", "max-autotune-no-cudagraphs", "reduce-overhead"], {"default": "default"}),
-                    "dynamic":       ("BOOLEAN",                                                                    {"default": False, "tooltip": "Enable dynamic mode"}),
-                    "dynamo_cache_size_limit": ("INT", {"default": 64, "min": 0, "max": 1024, "step": 1, "tooltip": "torch._dynamo.config.cache_size_limit"}),
+                    "model":                   ("MODEL",),
+                    "backend":                 (["inductor", "cudagraphs"],),
+                    "fullgraph":               ("BOOLEAN",                    {"default": False,                                "tooltip": "Enable full graph mode"}),
+                    "mode":                    (COMPILE_MODES               , {"default": "default"}),
+                    "dynamic":                 ("BOOLEAN",                    {"default": False,                                "tooltip": "Enable dynamic mode"}),
+                    "dynamo_cache_size_limit": ("INT",                        {"default": 64, "min": 0, "max": 1024, "step": 1, "tooltip": "torch._dynamo.config.cache_size_limit"}),
                 }}
         
     RETURN_TYPES = ("MODEL",)
@@ -853,12 +933,12 @@ class TorchCompileModelSD35:
     @classmethod
     def INPUT_TYPES(s):
         return {"required": { 
-                    "model":         ("MODEL",),
-                    "backend":       (["inductor", "cudagraphs"],),
-                    "fullgraph":     ("BOOLEAN",                                                                    {"default": False, "tooltip": "Enable full graph mode"}),
-                    "mode":          (["default", "max-autotune", "max-autotune-no-cudagraphs", "reduce-overhead"], {"default": "default"}),
-                    "dynamic":       ("BOOLEAN",                                                                    {"default": False, "tooltip": "Enable dynamic mode"}),
-                    "dynamo_cache_size_limit": ("INT", {"default": 64, "min": 0, "max": 1024, "step": 1, "tooltip": "torch._dynamo.config.cache_size_limit"}),
+                    "model":                   ("MODEL",),
+                    "backend":                 (["inductor", "cudagraphs"],),
+                    "fullgraph":               ("BOOLEAN",                    {"default": False,                                "tooltip": "Enable full graph mode"}),
+                    "mode":                    (COMPILE_MODES               , {"default": "default"}),
+                    "dynamic":                 ("BOOLEAN",                    {"default": False,                                "tooltip": "Enable dynamic mode"}),
+                    "dynamo_cache_size_limit": ("INT",                        {"default": 64, "min": 0, "max": 1024, "step": 1, "tooltip": "torch._dynamo.config.cache_size_limit"}),
                 }}
         
     RETURN_TYPES = ("MODEL",)
@@ -906,15 +986,15 @@ class ClownpileModelWanVideo:
         return {
             "required": {
                 "model"                     : ("MODEL",),
-                "backend"                   : (["inductor","cudagraphs"],                                                    {"default" : "inductor"}),
-                "fullgraph"                 : ("BOOLEAN",                                                                    {"default"                : False, "tooltip"                   : "Enable full graph mode"}),
-                "mode"                      : (["default", "max-autotune", "max-autotune-no-cudagraphs", "reduce-overhead"], {"default": "default"}),
-                "dynamic"                   : ("BOOLEAN",                                                                    {"default"                : False, "tooltip"                   : "Enable dynamic mode"}),
-                "dynamo_cache_size_limit"   : ("INT",                                                                        {"default"                : 64, "min"                          : 0, "max": 1024, "step": 1, "tooltip": "torch._dynamo.config.cache_size_limit"}),
-                #"compile_self_attn_blocks" : ("INT",                                                                        {"default"                : 0, "min"                           : 0, "max": 100, "step" : 1, "tooltip": "Maximum blocks to compile. These use huge amounts of VRAM with large attention masks."}),
-                "skip_self_attn_blocks"     : ("STRING",                                                                     {"default"                 : "0,1,2,3,4,5,6,7,8,9,", "multiline": True}),
-                "compile_transformer_blocks": ("BOOLEAN",                                                                    {"default"                : True,  "tooltip"                    : "Compile all transformer blocks"}),
-                "force_recompile"           : ("BOOLEAN",                                                                    {"default": False, "tooltip": "Force recompile."}),
+                "backend"                   : (["inductor","cudagraphs"], {"default" : "inductor"}),
+                "fullgraph"                 : ("BOOLEAN",                 {"default"                : False, "tooltip"                   : "Enable full graph mode"}),
+                "mode"                      : (COMPILE_MODES,             {"default": "default"}),
+                "dynamic"                   : ("BOOLEAN",                 {"default"                : False, "tooltip"                   : "Enable dynamic mode"}),
+                "dynamo_cache_size_limit"   : ("INT",                     {"default"                : 64, "min"                          : 0, "max": 1024, "step": 1, "tooltip": "torch._dynamo.config.cache_size_limit"}),
+                #"compile_self_attn_blocks" : ("INT",                     {"default"                : 0, "min"                           : 0, "max": 100, "step" : 1, "tooltip": "Maximum blocks to compile. These use huge amounts of VRAM with large attention masks."}),
+                "skip_self_attn_blocks"     : ("STRING",                  {"default"                 : "0,1,2,3,4,5,6,7,8,9,", "multiline": True, "tooltip": "For WAN only: select self-attn blocks to disable. Due to the size of the self-attn masks, VRAM required to compile blocks using regional WAN is excessive. List any blocks selected in the ReWanPatcher node."}),
+                "compile_transformer_blocks": ("BOOLEAN",                 {"default"                : True,  "tooltip"                    : "Compile all transformer blocks"}),
+                "force_recompile"           : ("BOOLEAN",                 {"default": False, "tooltip": "Force recompile."}),
 
             },
         }
