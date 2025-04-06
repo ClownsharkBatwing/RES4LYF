@@ -492,23 +492,16 @@ class LatentGuide:
         else:
             self.y0_style_neg = torch.zeros_like(x, dtype=self.dtype, device=self.device)
 
-        if self.frame_weights is not None:
-            self.frame_weights     = initialize_or_scale(self.frame_weights,     1.0, self.max_steps).to(dtype=self.dtype, device=self.device)
-            self.frame_weights     = F.pad              (self.frame_weights,     (0,  self.max_steps), value=0.0)
-        if self.frame_weights_inv is not None:
-            self.frame_weights_inv = initialize_or_scale(self.frame_weights_inv, 1.0, self.max_steps).to(dtype=self.dtype, device=self.device)
-            self.frame_weights_inv = F.pad              (self.frame_weights_inv, (0,  self.max_steps), value=0.0)
-
         if self.UNSAMPLE and not self.SAMPLE: #sigma_next > sigma:
             self.y0     = noise_sampler(sigma=self.sigma_max, sigma_next=self.sigma_min).to(dtype=self.dtype, device=self.device)
             self.y0     = normalize_zscore(self.y0,     channelwise=True, inplace=True)
             self.y0_inv = noise_sampler(sigma=self.sigma_max, sigma_next=self.sigma_min).to(dtype=self.dtype, device=self.device)
             self.y0_inv = normalize_zscore(self.y0_inv, channelwise=True, inplace=True)
             
-        if self.VIDEO and self.frame_weights_mgr is not None and x.shape[2] > 1:
+        if self.VIDEO and self.frame_weights_mgr is not None:
             num_frames = x.shape[2]
-            self.frame_weights     = self.frame_weights_mgr.get_frame_weights(num_frames)
-            self.frame_weights_inv = self.frame_weights_mgr.get_frame_weights_inv(num_frames)
+            self.frame_weights     = self.frame_weights_mgr.get_frame_weights_by_name('frame_weights', num_frames)
+            self.frame_weights_inv = self.frame_weights_mgr.get_frame_weights_by_name('frame_weights_inv', num_frames)
             
         x, self.y0, self.y0_inv = self.normalize_inputs(x, self.y0, self.y0_inv)       # ???
 
@@ -544,10 +537,17 @@ class LatentGuide:
 
     def get_masks_for_step(self, step:int) -> Tuple[Tensor, Tensor]:
         lgw_mask, lgw_mask_inv = self.prepare_weighted_masks(step)
-        if self.VIDEO and self.frame_weights_mgr is not None:
+        normalize_frame_weights_per_step = self.EO("normalize_frame_weights_per_step")
+        normalize_frame_weights_per_step_inv = self.EO("normalize_frame_weights_per_step_inv")
+
+        if self.VIDEO and self.frame_weights_mgr:
             num_frames = lgw_mask.shape[2]
-            apply_frame_weights(lgw_mask, self.frame_weights)
-            apply_frame_weights(lgw_mask_inv, self.frame_weights_inv)
+            if self.HAS_LATENT_GUIDE:
+                frame_weights = self.frame_weights_mgr.get_frame_weights_by_name('frame_weights', num_frames, step)
+                apply_frame_weights(lgw_mask, frame_weights, normalize_frame_weights_per_step)
+            if self.HAS_LATENT_GUIDE_INV:
+                frame_weights_inv = self.frame_weights_mgr.get_frame_weights_by_name('frame_weights_inv', num_frames, step)
+                apply_frame_weights(lgw_mask_inv, frame_weights_inv, normalize_frame_weights_per_step_inv)
 
         return lgw_mask.to(self.device), lgw_mask_inv.to(self.device)
 
@@ -884,8 +884,12 @@ class LatentGuide:
         if not (lgw_mask.any() != 0 or lgw_mask_inv.any() != 0):  # cossim score too similar! deactivate guide for this step
             return x_row
 
-        if data_row.ndim == 5 and frame_targets is None:
-            frame_targets = self.EO("frame_targets", [1.0])
+        if self.VIDEO and self.frame_weights_mgr is not None and frame_targets is None:
+            num_frames = data_row.shape[2]
+            frame_targets = self.frame_weights_mgr.get_frame_weights_by_name('frame_targets', num_frames, step)
+            if frame_targets is None:
+                frame_targets = torch.tensor(self.EO("frame_targets", [1.0]))
+            frame_targets = torch.clamp(frame_targets, 0.0, 1.0).to(self.device)
 
         if self.guide_mode in {"data", "data_projection", "lure", "lure_projection"}:
             if frame_targets is None:
@@ -893,7 +897,7 @@ class LatentGuide:
             else:
                 t_dim = x_row.shape[-3]
                 for t in range(t_dim): #temporal dimension
-                    frame_target = frame_targets[t] if len(frame_targets) > t else frame_targets[-1]
+                    frame_target = float(frame_targets[t] if len(frame_targets) > t else frame_targets[-1])
                     x_row[...,t:t+1,:,:] = self.get_data_substep(
                                                                 x_row       [...,t:t+1,:,:], 
                                                                 data_row    [...,t:t+1,:,:],
@@ -1004,8 +1008,12 @@ class LatentGuide:
         if not (lgw_mask.any() != 0 or lgw_mask_inv.any() != 0):  # cossim score too similar! deactivate guide for this step
             return eps_row
 
-        if data_row.ndim == 5 and frame_targets is None:
-            frame_targets = self.EO("frame_targets", [1.0])
+        if self.VIDEO and data_row.ndim == 5 and frame_targets is None:
+            num_frames = data_row.shape[2]
+            frame_targets = self.frame_weights_mgr.get_frame_weights_by_name('frame_targets', num_frames, step)
+            if frame_targets is None:
+                frame_targets = self.EO("frame_targets", [1.0])
+            frame_targets = torch.clamp(frame_targets, 0.0, 1.0)
             
         eps_y0     = torch.zeros_like(x_0)
         eps_y0_inv = torch.zeros_like(x_0)
@@ -1022,7 +1030,7 @@ class LatentGuide:
             else:
                 t_dim = x_row.shape[-3]
                 for t in range(t_dim): #temporal dimension
-                    frame_target = frame_targets[t] if len(frame_targets) > t else frame_targets[-1]
+                    frame_target = float(frame_targets[t] if len(frame_targets) > t else frame_targets[-1])
                     eps_row[...,t:t+1,:,:] = self.get_eps_substep(
                                                                 eps_row     [...,t:t+1,:,:],
                                                                 eps_y0      [...,t:t+1,:,:], 
@@ -1378,11 +1386,16 @@ class LatentGuide:
 
 
 
-def apply_frame_weights(mask, frame_weights):
+def apply_frame_weights(mask, frame_weights, normalize=False):
+    original_mask_mean = mask.mean()
     if frame_weights is not None:
         for f in range(mask.shape[2]):
             frame_weight = frame_weights[f]
             mask[..., f:f+1, :, :] *= frame_weight
+        if normalize:
+            mask_mean = mask.mean()
+            mask *= (original_mask_mean / mask_mean)
+           
 
 
 def prepare_mask(x, mask, LGW_MASK_RESCALE_MIN) -> tuple[torch.Tensor, bool]:
