@@ -140,12 +140,11 @@ class SharkSampler:
 
             # INIT EXTENDABLE OPTIONS INPUTS
             
-            options_mgr    = OptionsManager(options, **kwargs)
+            options_mgr     = OptionsManager(options, **kwargs)
                         
-            extra_options += "\n" + options_mgr.get('extra_options', "")
-            EO = ExtraOptions(extra_options)
-            default_dtype = EO("default_dtype", torch.float64)
-
+            extra_options  += "\n" + options_mgr.get('extra_options', "")
+            EO              = ExtraOptions(extra_options)
+            default_dtype   = EO("default_dtype", torch.float64)
             
             noise_stdev     = options_mgr.get('noise_init_stdev', noise_stdev)
             noise_mean      = options_mgr.get('noise_init_mean',  noise_mean)
@@ -161,19 +160,25 @@ class SharkSampler:
             ultracascade_latent_width  = options_mgr.get('ultracascade_latent_width',  ultracascade_latent_width)
             ultracascade_latent_height = options_mgr.get('ultracascade_latent_height', ultracascade_latent_height)
 
-        
-
             if 'positive' in latent_image and positive is None:
                 positive = copy.deepcopy(latent_image['positive'])
+                if positive is not None and 'control' in positive[0][1]:
+                    for i in range(len(positive)):
+                        positive[i][1]['control']      = latent_image['positive'][i][1]['control']
+                        positive[i][1]['control'].base = latent_image['positive'][i][1]['control'].base
             if 'negative' in latent_image and negative is None:
                 negative = copy.deepcopy(latent_image['negative'])
+                if negative is not None and 'control' in negative[0][1]:
+                    for i in range(len(negative)):
+                        negative[i][1]['control']      = latent_image['negative'][i][1]['control']
+                        negative[i][1]['control'].base = latent_image['negative'][i][1]['control'].base
             if 'sampler' in latent_image and sampler is None:
                 sampler = copy.deepcopy(latent_image['sampler'])  #.clone()
             if 'steps_to_run' in sampler.extra_options:
                 sampler.extra_options['steps_to_run'] = steps_to_run
 
-            #sampler.extra_options.update(options_mgr.as_dict())
-                
+
+            
             if cfg < 0:
                 sampler.extra_options['cfg_cw'] = -cfg
                 cfg = 1.0
@@ -190,8 +195,8 @@ class SharkSampler:
                 x_null = torch.zeros_like(latent_image['samples'])
                 _ = comfy.sample.sample_custom(work_model, x_null, cfg, sampler_null, torch.linspace(1, 0, 10).to(x_null.dtype).to(x_null.device), positive, positive, x_null, noise_mask=None, callback=None, disable_pbar=disable_pbar, seed=noise_seed)
 
-            sigma_min    = work_model.get_model_object('model_sampling').sigma_min
-            sigma_max    = work_model.get_model_object('model_sampling').sigma_max
+            sigma_min = work_model.get_model_object('model_sampling').sigma_min
+            sigma_max = work_model.get_model_object('model_sampling').sigma_max
             
             if sampler is None:
                 raise ValueError("sampler is required")
@@ -219,6 +224,7 @@ class SharkSampler:
                 sigmas = torch.cat([sigmas, null])
 
 
+
             latent_x = {}
             # INIT STATE INFO FOR CONTINUING GENERATION ACROSS MULTIPLE SAMPLER NODES
             if latent_image is not None:
@@ -231,7 +237,7 @@ class SharkSampler:
             
             
             # SETUP CONDITIONING EMBEDS
-                        
+            
             pos_cond    = copy.deepcopy(positive)
             neg_cond    = copy.deepcopy(negative)
             
@@ -321,16 +327,14 @@ class SharkSampler:
                 latent_x['samples'] = torch.zeros([1, 16, ultracascade_latent_height, ultracascade_latent_width], dtype=default_dtype, device=sigmas.device)
             
             
+            
             # NOISE, ORTHOGONALIZE, OR ZERO EMBEDS
             
-            if   isinstance(work_model.model.model_config, comfy.supported_models.Flux) or isinstance(work_model.model.model_config, comfy.supported_models.FluxSchnell):
-                pos_cond = [[torch.zeros((1, 256, 4096)), {'pooled_output': torch.zeros((1,  768))}]] if pos_cond is None else pos_cond
-                neg_cond = [[torch.zeros((1, 256, 4096)), {'pooled_output': torch.zeros((1,  768))}]] if neg_cond is None else neg_cond
-                
-            elif isinstance(work_model.model.model_config, comfy.supported_models.SD3):
-                pos_cond = [[torch.zeros((1, 154, 4096)), {'pooled_output': torch.zeros((1, 2048))}]] if pos_cond is None else pos_cond
-                neg_cond = [[torch.zeros((1, 154, 4096)), {'pooled_output': torch.zeros((1, 2048))}]] if neg_cond is None else neg_cond
-            
+            if pos_cond is None or neg_cond is None:
+                from ..conditioning import EmptyConditioningGenerator
+                EmptyCondGen       = EmptyConditioningGenerator(model)
+                pos_cond, neg_cond = EmptyCondGen.zero_none_conditionings_([pos_cond, neg_cond])
+
 
 
             if EO(("cond_noise", "uncond_noise")):
@@ -378,13 +382,6 @@ class SharkSampler:
 
             if pos_cond[0][1] is not None: 
                 if 'callback_regional' in pos_cond[0][1]:
-                    if   isinstance(work_model.model.model_config, comfy.supported_models.SD3):
-                        text_len_base = 154
-                        pooled_len    = 2048
-                    elif isinstance(work_model.model.model_config, comfy.supported_models.Flux) or isinstance(work_model.model.model_config, comfy.supported_models.FluxSchnell):
-                        text_len_base = 256
-                        pooled_len    = 768
-                    
                     pos_cond = pos_cond[0][1]['callback_regional'](work_model)
                 
                 if 'AttnMask' in pos_cond[0][1]:
@@ -394,60 +391,10 @@ class SharkSampler:
                     
                     sampler.extra_options['AttnMask'].set_latent(latent_image['samples'])
                     sampler.extra_options['AttnMask'].generate()
-                
-                elif "regional_conditioning_weights" in pos_cond[0][1]:
-                    sampler.extra_options['regional_conditioning_weights']   = pos_cond[0][1]['regional_conditioning_weights']
-                    sampler.extra_options['regional_conditioning_floors']    = pos_cond[0][1]['regional_conditioning_floors']
-                    sampler.extra_options['regional_conditioning_mask_orig'] = pos_cond[0][1]['regional_conditioning_mask_orig']
-                    sampler.extra_options['narcissism_start_step']           = pos_cond[0][1].get('narcissism_start_step', 0)
-                    sampler.extra_options['narcissism_end_step']             = pos_cond[0][1].get('narcissism_end_step',   5)
                     
-                    if 'regional_generate_conditionings_and_masks_fn' in pos_cond[0][1]:
-                        regional_generate_conditionings_and_masks_fn             = pos_cond[0][1]['regional_generate_conditionings_and_masks_fn']
-                        regional_conditioning, regional_mask                     = regional_generate_conditionings_and_masks_fn(latent_x['samples'])
                     
-                        if EO("edge_mask"):
-                            dilation = EO("edge_mask", 50)
-                            edge_mask = get_edge_mask(regional_generate_conditionings_and_masks_fn.conditioning_regional[0]['mask'].squeeze(0).squeeze(0).to('cuda'), dilation=dilation)
-                            blahmask = torch.nn.functional.interpolate(edge_mask[None, None, :, :], (regional_generate_conditionings_and_masks_fn.h, regional_generate_conditionings_and_masks_fn.w), mode='nearest-exact').flatten().to(torch.bool).to('cuda')
-                            
-                            
-                            
-                            if latent_image['samples'].ndim == 4:
-                                regional_mask.mask[regional_generate_conditionings_and_masks_fn.text_off:,regional_generate_conditionings_and_masks_fn.text_len:] = torch.logical_or(regional_mask.mask[regional_generate_conditionings_and_masks_fn.text_off:,regional_generate_conditionings_and_masks_fn.text_len:], torch.logical_and(blahmask.unsqueeze(1).repeat(1,regional_generate_conditionings_and_masks_fn.img_len), blahmask.unsqueeze(1).repeat(1,regional_generate_conditionings_and_masks_fn.img_len).transpose(-2,-1)))
-                            elif latent_image['samples'].ndim == 5:
-                                selfattn_offset = regional_mask.mask.shape[-1] - regional_mask.mask.shape[-2]
-                                selfattn_len    = regional_mask.mask.shape[-2]
-                                t_dim = latent_image['samples'].shape[-3]
-                                
-                                regional_mask.mask[:,selfattn_offset:] = torch.logical_or(regional_mask.mask[:,selfattn_offset:],   blahmask.repeat(t_dim).unsqueeze(0) * blahmask.repeat(t_dim).unsqueeze(1))
-                        
-                        if EO("edge_mask_b"):
-                            dilation = EO("edge_mask_b", 5)
-                            orig_mask = regional_generate_conditionings_and_masks_fn.conditioning_regional[0]['mask'].clone()
-                            orig_mask1 = regional_generate_conditionings_and_masks_fn.conditioning_regional[1]['mask'].clone()
-                            edge_mask = get_edge_mask(orig_mask.squeeze(0).squeeze(0), dilation=dilation)
-                            
-                            edge_mask = torch.nn.functional.interpolate(edge_mask[None,None,...], size=orig_mask.shape[-2:])
-                            regional_generate_conditionings_and_masks_fn.conditioning_regional[0]['mask'] = edge_mask.squeeze(0)
-                            regional_generate_conditionings_and_masks_fn.conditioning_regional[1]['mask'] = edge_mask.squeeze(0)
-                            
-                            regional_conditioning1, regional_mask1 = regional_generate_conditionings_and_masks_fn(latent_x['samples'])
-                            regional_generate_conditionings_and_masks_fn.conditioning_regional[0]['mask'] = orig_mask
-                            regional_generate_conditionings_and_masks_fn.conditioning_regional[1]['mask'] = orig_mask1
-                            
-                            if EO("edge_mask_selfattn_only"):
-                                regional_mask.mask[512:,512:] = torch.logical_or(regional_mask.mask[512:,512:], regional_mask1.mask[512:,512:])
-                            else:
-                                regional_mask.mask = torch.logical_or(regional_mask.mask, regional_mask1.mask)
-
-                        regional_conditioning                                    = copy.deepcopy(regional_conditioning)
-                        regional_mask                                            = copy.deepcopy(regional_mask)
-
-                        work_model.set_model_patch(regional_conditioning, 'regional_conditioning_positive')
-                        work_model.set_model_patch(regional_mask,         'regional_conditioning_mask')
-
-
+            
+            
             
             if "noise_seed" in sampler.extra_options:
                 if sampler.extra_options['noise_seed'] == -1 and noise_seed != -1:
@@ -461,8 +408,6 @@ class SharkSampler:
                 extra_options += "\n"
                 extra_options += sampler.extra_options['extra_options']
                 sampler.extra_options['extra_options'] = extra_options
-
-
 
             batch_size = EO("batch_size", 1)
             if batch_size > 1:
@@ -540,7 +485,7 @@ class SharkSampler:
                         steps_len = sigmas.shape[-1]-1
                     callback     = latent_preview.prepare_callback(work_model, steps_len, x0_output)
 
-                    if 'BONGMATH' in sampler.extra_options:
+                    if 'BONGMATH' in sampler.extra_options: # verify the sampler is rk_sampler_beta()
                         sampler.extra_options['state_info']     = state_info
                         sampler.extra_options['state_info_out'] = state_info_out
                     
@@ -549,13 +494,12 @@ class SharkSampler:
                     else:
                         pos_cond_tmp = pos_cond
                     
-                    for i in range(len(neg_cond)):
+                    for i in range(len(neg_cond)): # crude fix for copy.deepcopy converting superclass into real object
                         if 'control' in neg_cond[i][1]:
-                            neg_cond[i][1]['control'] = negative[i][1]['control']
-                            #[pos_cond[batch_num]][i][1]['control'] = positive[i][1]['control']
-                            pos_cond_tmp[i][1]['control'] = positive[i][1]['control']
-                            neg_cond[i][1]['control'].base = negative[i][1]['control'].base
-                            #[pos_cond[batch_num]][i][1]['control'].base = positive[i][1]['control'].base
+                            neg_cond[i][1]['control']          = negative[i][1]['control']
+                            neg_cond[i][1]['control'].base     = negative[i][1]['control'].base
+                        if 'control' in pos_cond[i][1]:
+                            pos_cond_tmp[i][1]['control']      = positive[i][1]['control']
                             pos_cond_tmp[i][1]['control'].base = positive[i][1]['control'].base
 
                     guider = SharkGuider(work_model)
@@ -569,21 +513,9 @@ class SharkSampler:
                     else:
                         guider.set_cfgs(xt=cfg)
                     
-                    if batch_num < len(pos_cond):
-                        if type(pos_cond[0][0]) == list:
-                            pos_cond_tmp = pos_cond[batch_num]
-                        else:
-                            pos_cond_tmp = pos_cond
-                            
-                        guider.set_conds(xt_positive=pos_cond_tmp, xt_negative=neg_cond)
-                        #guider.set_conds(xt_positive=[pos_cond[batch_num]], xt_negative=neg_cond)
-                        samples = guider.sample(noise, x.clone(), sampler, sigmas, denoise_mask=noise_mask, callback=callback, disable_pbar=disable_pbar, seed=noise_seed)
-                    else:
-                        guider.set_conds(xt_positive=pos_cond, xt_negative=neg_cond)
-                        samples = guider.sample(noise, x.clone(), sampler, sigmas, denoise_mask=noise_mask, callback=callback, disable_pbar=disable_pbar, seed=noise_seed)
+                    guider.set_conds(xt_positive=pos_cond_tmp, xt_negative=neg_cond)
+                    samples = guider.sample(noise, x.clone(), sampler, sigmas, denoise_mask=noise_mask, callback=callback, disable_pbar=disable_pbar, seed=noise_seed)
 
-
-                    
 
 
                     out = latent_unbatch.copy()
@@ -1014,7 +946,7 @@ class ClownSamplerAdvanced_Beta:
             
             
             
-            noise_scaling_weight  = options_mgr.get('noise_scaling_weight' , noise_scaling_weight)
+            noise_scaling_weight   = options_mgr.get('noise_scaling_weight'  , noise_scaling_weight)
             noise_scaling_type     = options_mgr.get('noise_scaling_type'    , noise_scaling_type)
             noise_scaling_mode     = options_mgr.get('noise_scaling_mode'    , noise_scaling_mode)
             noise_scaling_eta      = options_mgr.get('noise_scaling_eta'     , noise_scaling_eta)
@@ -1034,6 +966,7 @@ class ClownSamplerAdvanced_Beta:
             d_noise_start_step     = options_mgr.get('d_noise_start_step'    , d_noise_start_step)
             d_noise_inv            = options_mgr.get('d_noise_inv'           , d_noise_inv)
             d_noise_inv_start_step = options_mgr.get('d_noise_inv_start_step', d_noise_inv_start_step)
+            
             
             
             alpha_sde         = options_mgr.get('alpha_sde'        , alpha_sde)
@@ -1967,28 +1900,19 @@ class BongSampler:
     def INPUT_TYPES(cls):
         inputs = {"required":
                     {
-                        
                     "model":        ("MODEL",),
                     "seed":         ("INT",                        {"default": 0,   "min": -1,     "max": 0xffffffffffffffff}),
                     "steps":        ("INT",                        {"default": 30,  "min":  1,     "max": MAX_STEPS}),
                     "cfg":          ("FLOAT",                      {"default": 5.5, "min": -100.0, "max": 100.0,     "step":0.01, "round": False, }),
-
-                    #"eta":          ("FLOAT",                      {"default": 0.5, "min": -100.0, "max": 100.0,     "step":0.01, "round": False, "tooltip": "Calculated noise amount to be added, then removed, after each step."}),
                     "sampler_name": (["res_2m", "res_3m", "res_2s", "res_3s","res_2m_sde", "res_3m_sde", "res_2s_sde", "res_3s_sde"], {"default": "res_2s_sde"}), 
                     "scheduler":    (get_res4lyf_scheduler_list(), {"default": "beta57"},),
-                    #"steps_to_run": ("INT",                        {"default": -1,  "min": -1,     "max": MAX_STEPS}),
                     "denoise":      ("FLOAT",                      {"default": 1.0, "min": -10000, "max": MAX_STEPS, "step":0.01}),
-                    #"sampler_mode": (['unsample', 'standard', 'resample'], {"default": "standard"}),
-                    #"bongmath":     ("BOOLEAN",                    {"default": True}),
                     },
                 "optional": 
                     {
                     "positive":     ("CONDITIONING",),
                     "negative":     ("CONDITIONING",),
                     "latent_image": ("LATENT",),
-                    #"sigmas":       ("SIGMAS",), 
-                    #"guides":       ("GUIDES",), 
-                    #"options":      ("OPTIONS", {}),   
                     }
                 }
         

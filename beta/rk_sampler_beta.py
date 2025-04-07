@@ -1220,13 +1220,13 @@ def sample_rk_beta(
         if FLOW_STARTED and FLOW_STOPPED:
             data_prev_ = data_x_prev_
         if FLOW_STARTED and not FLOW_STOPPED:
-            data_x_prev_[0] = data_cached #data_[0] if data_cached is None else data_cached # data_cached is data_x from flow mode. this allows multistep to resume seamlessly.
+            data_x_prev_[0] = data_cached       # data_cached is data_x from flow mode. this allows multistep to resume seamlessly.
             for ms in range(recycled_stages):
-                data_x_prev_[recycled_stages - ms] = data_x_prev_[recycled_stages - ms - 1]            # will this really behave correctly? seems to run on every substep...
+                data_x_prev_[recycled_stages - ms] = data_x_prev_[recycled_stages - ms - 1]
 
-        data_prev_[0] = data_[0] #if data_cached is None else data_cached # data_cached is data_x from flow mode. this allows multistep to resume seamlessly.
+        data_prev_[0] = data_[0]                # with flow mode, this will be the differentiated guide/"denoised"
         for ms in range(recycled_stages):
-            data_prev_[recycled_stages - ms] = data_prev_[recycled_stages - ms - 1]            # will this really behave correctly? seems to run on every substep...
+            data_prev_[recycled_stages - ms] = data_prev_[recycled_stages - ms - 1]            # TODO: verify that this does not run on every substep...
 
         
         rk_type = RK.swap_rk_type_at_step_or_threshold(x_0, data_prev_, NS, sigmas, step, rk_swap_step, rk_swap_threshold, rk_swap_type, rk_swap_print)
@@ -1270,7 +1270,7 @@ def sample_rk_beta(
             sigmas = sigmas.clone() / d_noise_inv
             if sigmas.max() > NS.sigma_max:
                 sigmas = sigmas / NS.sigma_max
-                
+        
         if LG.lgw[step] > 0 and step >= EO("guide_step_cutoff_start_step", 0) and cossim_counter < EO("guide_step_cutoff_max_iter", 10) and (EO("guide_step_cutoff") or EO("guide_step_min")):
             guide_cutoff = EO("guide_step_cutoff", 1.0)
             #denoised_norm = denoised - denoised.mean(dim=(-2,-1), keepdim=True)

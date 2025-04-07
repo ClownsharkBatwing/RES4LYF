@@ -534,12 +534,10 @@ class SharkOptions_Beta:
             "required": {
                 "noise_type_init": (NOISE_GENERATOR_NAMES_SIMPLE, {"default": "gaussian"}),
                 "noise_stdev":     ("FLOAT",                      {"default": 1.0, "min": -10000.0, "max": 10000.0, "step":0.01, "round": False, }),
-                #"sampler_mode":    (['standard', 'unsample', 'resample'],),
                 "denoise_alt":     ("FLOAT",                      {"default": 1.0, "min": -10000,   "max": 10000,   "step":0.01}),
                 "channelwise_cfg": ("BOOLEAN",                    {"default": False}),
                 },
             "optional": {
-                #"sigmas":          ("SIGMAS", ),
                 "options":         ("OPTIONS", ),   
                 }
             }
@@ -552,10 +550,8 @@ class SharkOptions_Beta:
     def main(self,
             noise_type_init = "gaussian",
             noise_stdev     = 1.0,
-            #sampler_mode    = "standard",
             denoise_alt     = 1.0,
             channelwise_cfg = False,
-            #sigmas          = None,
             options         = None
             ): 
         
@@ -563,10 +559,8 @@ class SharkOptions_Beta:
             
         options['noise_type_init'] = noise_type_init
         options['noise_stdev']     = noise_stdev
-        #options['sampler_mode']    = sampler_mode
         options['denoise_alt']     = denoise_alt
         options['channelwise_cfg'] = channelwise_cfg
-        #options['sigmas']          = sigmas
 
         return (options,)
     
@@ -782,6 +776,7 @@ class ClownGuide_Misc_Beta:
     RETURN_NAMES = ("guides",)
     FUNCTION     = "main"
     CATEGORY     = "RES4LYF/sampler_extensions"
+    EXPERIMENTAL = True
 
     def main(self,
             weight_scheduler          = "constant",
@@ -866,7 +861,6 @@ class ClownGuide_Mean_Beta:
     def INPUT_TYPES(cls):
         return {"required":
                     {
-                    #"guide_mode":           (GUIDE_MODE_NAMES_BETA_SIMPLE+['mean'],                {"default": 'epsilon',                                                      "tooltip": "Recommended: epsilon or mean/mean_std with sampler_mode = standard, and unsample/resample with sampler_mode = unsample/resample. Epsilon_dynamic_mean, etc. are only used with two latent inputs and a mask. Blend/hard_light/mean/mean_std etc. require low strengths, start with 0.01-0.02."}),
                     "channelwise_mode":     ("BOOLEAN",                                   {"default": True}),
                     "projection_mode":      ("BOOLEAN",                                   {"default": True}),
                     "weight":               ("FLOAT",                                     {"default": 0.75, "min":  -100.0, "max": 100.0, "step":0.01, "round": False, "tooltip": "Set the strength of the guide."}),
@@ -898,7 +892,6 @@ class ClownGuide_Mean_Beta:
             guide                     = None,
             weight                    = 0.0,
 
-            guide_mode                = "epsilon",
             channelwise_mode          = False,
             projection_mode           = False,
             weights                   = None,
@@ -1409,16 +1402,16 @@ class ClownOptions_Frameweights:
     def INPUT_TYPES(s):
         return {
             "required": {
-                "apply_to": (["frame_weights", "frame_weights_inv"], {"default": "frame_weights", "tooltip": "Apply the frame weights to the foreground mask or the inverse mask of the guides"}),
-                "dynamics": (FRAME_WEIGHTS_DYNAMICS_NAMES, {"default": "ease_out", "tooltip": "The function type used for the dynamic period. constant: no change, linear: steady change, ease_out: starts fast, ease_in: starts slow"}),
-                "schedule": (FRAME_WEIGHTS_SCHEDULE_NAMES, {"default": "moderate_early", "tooltip": "fast_early: fast change starts immediately, slow_late: slow change starts later"}),
-                "scale": ("FLOAT", {"default": 0.5, "min": 0.0, "max": 1.0, "step": 0.01, "tooltip": "The amount of change over the course of the frame weights. 1.0 means that the guides have no influence by the end."}),
-                "reverse": ("BOOLEAN", {"default": False, "tooltip": "Reverse the frame weights"}),
+                "apply_to": (["frame_weights", "frame_weights_inv"], {"default": "frame_weights",                           "tooltip": "Apply the frame weights to the foreground mask or the inverse mask of the guides"}),
+                "dynamics": (FRAME_WEIGHTS_DYNAMICS_NAMES,           {"default": "ease_out",                                "tooltip": "The function type used for the dynamic period. constant: no change, linear: steady change, ease_out: starts fast, ease_in: starts slow"}),
+                "schedule": (FRAME_WEIGHTS_SCHEDULE_NAMES,           {"default": "moderate_early",                          "tooltip": "fast_early: fast change starts immediately, slow_late: slow change starts later"}),
+                "scale"   : ("FLOAT",                                {"default": 0.5, "min": 0.0, "max": 1.0, "step": 0.01, "tooltip": "The amount of change over the course of the frame weights. 1.0 means that the guides have no influence by the end."}),
+                "reverse" : ("BOOLEAN",                              {"default": False,                                     "tooltip": "Reverse the frame weights"}),
             },
             "optional": {
                 # Keep these for optional manual override
                 "frame_weights": ("SIGMAS", {"tooltip": "Overrides all other settings EXCEPT reverse."}),
-                "options": ("OPTIONS",),
+                "options"      : ("OPTIONS",),
             },
         }
 
@@ -1457,7 +1450,7 @@ class ClownOptions_Frameweights:
         if frame_weights is not None:
             frame_weights_mgr.frame_weights   = frame_weights
         
-        # Store the manager in options
+        # store the manager in options
         options_mgr.update("frame_weights_mgr", frame_weights_mgr)
         
         return (options_mgr.as_dict(),)
