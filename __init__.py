@@ -87,6 +87,8 @@ NODE_CLASS_MAPPINGS = {
 
     "ConditioningBatch4"                  : conditioning.ConditioningBatch4,
     "ConditioningBatch8"                  : conditioning.ConditioningBatch8,
+    
+    "TemporalMaskGenerator"               : conditioning.TemporalMaskGenerator,
 
 
 

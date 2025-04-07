@@ -219,21 +219,28 @@ class SplitAttentionMask(BaseAttentionMask):
         h         = self.h
         w         = self.w
         
-        cross_attn_mask    = torch.zeros((t*img_len, text_len), dtype=dtype)
-        self_attn_mask     = torch.zeros((        t * img_len,        t * img_len), dtype=dtype)
+        cross_attn_mask = torch.zeros((t * img_len,    text_len), dtype=dtype)
+        self_attn_mask  = torch.zeros((t * img_len, t * img_len), dtype=dtype)
     
         prev_len = 0
         for context_len, mask in zip(self.context_lens, self.masks):
 
+            if mask.ndim == 6:
+                mask.squeeze_(0)
             if mask.ndim == 3:
                 t_mask = mask.shape[0]
+            elif mask.ndim == 4:
+                t_mask = mask.shape[-3]
+                mask.squeeze_(0)
+            elif mask.ndim == 5:
+                t_mask = mask.shape[-3]
             else:
                 t_mask = 1
                 mask.unsqueeze_(0)
             img2txt_mask    = torch.nn.functional.interpolate(mask.unsqueeze(0).unsqueeze(0).to(torch.float16), (t_mask, h, w), mode='nearest-exact').to(dtype).flatten().unsqueeze(1)
             
-            if t_mask == 1:
-                img2txt_mask = img2txt_mask.repeat(1, context_len)
+            if t_mask == 1: # ...why only if == 1?
+                img2txt_mask = img2txt_mask.repeat(1, context_len)   
 
             curr_len = prev_len + context_len
             
@@ -242,26 +249,34 @@ class SplitAttentionMask(BaseAttentionMask):
             else:
                 cross_attn_mask[:, prev_len:curr_len] = img2txt_mask
             
-            mask_flat    = torch.nn.functional.interpolate(mask.unsqueeze(0).unsqueeze(0).to(torch.float16), (t_mask, h, w), mode='nearest-exact').to(dtype).flatten()
+            """mask_flat    = torch.nn.functional.interpolate(mask.unsqueeze(0).unsqueeze(0).to(torch.float16), (t_mask, h, w), mode='nearest-exact').to(dtype).flatten()
             
             if t_mask > 1:
                 self_attn_mask = fp_or(self_attn_mask, mask_flat.unsqueeze(0) * mask_flat.unsqueeze(1))
             else:
-                self_attn_mask = fp_or(self_attn_mask, mask_flat.repeat(t).unsqueeze(0) * mask_flat.repeat(t).unsqueeze(1))
+                self_attn_mask = fp_or(self_attn_mask, mask_flat.repeat(t).unsqueeze(0) * mask_flat.repeat(t).unsqueeze(1))"""
+            
+            img2txt_mask_sq = torch.nn.functional.interpolate(mask.unsqueeze(0).to(torch.float16), (h, w), mode='nearest-exact').to(dtype).flatten().unsqueeze(1).repeat(1, t_mask * img_len)
+            
+            if t_mask > 1:
+                self_attn_mask = fp_or(self_attn_mask, fp_and(img2txt_mask_sq, img2txt_mask_sq.transpose(-1,-2)))
+            else:
+                self_attn_mask = fp_or(self_attn_mask, fp_and(img2txt_mask_sq.repeat(t,t), img2txt_mask_sq.transpose(-1,-2)).repeat(t,t))
+            
             
             prev_len = curr_len
-            
-        attn_mask = torch.cat((cross_attn_mask,self_attn_mask), dim=1)
-            
+                    
         if self.mask_type.endswith("_masked"):
-            trimask = torch.tril(torch.ones(img_len, img_len)).to(attn_mask.dtype).to(attn_mask.device)
+            trimask = torch.tril(torch.ones_like(self_attn_mask)).to(self_attn_mask.dtype).to(self_attn_mask.device)
             trimask.diagonal().fill_(0.0)
-            attn_mask[text_off:,text_len:] = fp_or(trimask, attn_mask[text_off:,text_len:])
+            self_attn_mask = fp_or(trimask, self_attn_mask)
             
         if self.mask_type.endswith("_unmasked"):
-            trimask = (1-torch.tril(torch.ones(img_len, img_len))).to(attn_mask.dtype).to(attn_mask.device)
+            trimask = (1-torch.tril(torch.ones_like(self_attn_mask, dtype=torch.float16))).to(self_attn_mask.dtype).to(self_attn_mask.device)
             trimask.diagonal().fill_(0.0)
-            attn_mask[text_off:,text_len:] = fp_or(trimask, attn_mask[text_off:,text_len:])
+            self_attn_mask = fp_or(trimask, self_attn_mask)
+        
+        attn_mask = torch.cat([cross_attn_mask, self_attn_mask], dim=1)
         
         self.attn_mask = CoreAttnMask(attn_mask, mask_type=mask_type)
 
