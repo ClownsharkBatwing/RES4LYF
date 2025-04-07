@@ -86,6 +86,8 @@ class ReWanPatcherAdvanced:
         self_attn_blocks  = parse_range_string(self_attn_blocks)
         cross_attn_blocks = parse_range_string(cross_attn_blocks)
         
+        T2V = type(model.model.model_config) is comfy.supported_models.WAN21_T2V
+        
         if (enable or force) and model.model.diffusion_model.__class__ == WanModel:
             m = model.clone()
             m.model.diffusion_model.__class__     = ReWanModel
@@ -98,7 +100,10 @@ class ReWanPatcherAdvanced:
                 else:
                     block.self_attn.__class__  = ReWanRawSelfAttention
                 if i in cross_attn_blocks:
-                    block.cross_attn.__class__ = ReWanT2VCrossAttention
+                    if T2V:
+                        block.cross_attn.__class__ = ReWanT2VCrossAttention
+                    else:
+                        block.cross_attn.__class__ = ReWanI2VCrossAttention
                 block.idx       = i
         
         elif not enable and model.model.diffusion_model.__class__ == ReWanModel:
