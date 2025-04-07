@@ -556,7 +556,7 @@ class ReMMDiT(nn.Module):
                 
                 mask_type_bool = type(mask[0][0].item()) == bool if mask is not None else False
                 if not mask_type_bool:
-                    mask = mask.to(img.dtype)
+                    mask = mask.to(x.dtype)
                     
                 if mask_type_bool:
                     mask = F.pad(mask, (8, 0, 8, 0), value=True)
