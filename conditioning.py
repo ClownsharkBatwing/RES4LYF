@@ -635,7 +635,6 @@ class ClownRegionalConditioning:
     RETURN_NAMES = ("positive",)
     FUNCTION     = "main"
     CATEGORY     = "RES4LYF/conditioning"
-    EXPERIMENTAL = True
 
     def create_callback(self, **kwargs):
         def callback(model):
