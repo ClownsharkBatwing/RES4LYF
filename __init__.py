@@ -68,6 +68,8 @@ NODE_CLASS_MAPPINGS = {
     
     
     "ClownRegionalConditioning"           : conditioning.ClownRegionalConditioning,
+    "ClownRegionalConditioning_AB"        : conditioning.ClownRegionalConditioning_AB,
+
     "ClownRegionalConditioning3"          : conditioning.ClownRegionalConditioning3,
 
     "CLIPTextEncodeFluxUnguided"          : conditioning.CLIPTextEncodeFluxUnguided,
@@ -89,6 +91,7 @@ NODE_CLASS_MAPPINGS = {
     "ConditioningBatch8"                  : conditioning.ConditioningBatch8,
     
     "TemporalMaskGenerator"               : conditioning.TemporalMaskGenerator,
+    "TemporalSplitAttnMask"               : conditioning.TemporalSplitAttnMask,
 
 
 

@@ -117,6 +117,7 @@ class ReWanPatcherAdvanced:
                 block.idx       = i
 
         else:
+            raise ValueError("This node is for enabling regional conditioning for WAN only!")
             m = model
         
         return (m,)
@@ -202,6 +203,7 @@ class ReFluxPatcherAdvanced:
                 block.idx       = i
                 
         else:
+            raise ValueError("This node is for enabling regional conditioning for Flux only!")
             m = model
         
         return (m,)
@@ -269,6 +271,7 @@ class ReSD35PatcherAdvanced:
                 block.idx       = i
 
         else:
+            raise ValueError("This node is for enabling regional conditioning for SD3.5 only!")
             m = model
         
         return (m,)
@@ -356,6 +359,7 @@ class ReAuraPatcherAdvanced:
                 block.idx       = i
 
         else:
+            raise ValueError("This node is for enabling regional conditioning for AuraFlow only!")
             m = model
         
         return (m,)
@@ -482,7 +486,7 @@ class ModelSamplingAdvanced:
                     "scaling": (["exponential", "linear"], {"default": 'exponential'}), 
                     "shift":   ("FLOAT",                   {"default": 3.0, "min": -100.0, "max": 100.0, "step":0.01, "round": False}),
                     }
-               }
+                }
     
     RETURN_TYPES = ("MODEL",)
     RETURN_NAMES = ("model",)
@@ -841,6 +845,9 @@ class TorchCompileModelFluxAdvanced:
             dynamic       = False,
             ):
         
+        if model.model.diffusion_model.__class__ != MMDiT and model.model.diffusion_model.__class__ != ReMMDiT:
+            raise ValueError("Model type is not AuraFlow!")
+        
         single_block_list = self.parse_blocks(single_blocks)
         double_block_list = self.parse_blocks(double_blocks)
         m = model.clone()
@@ -850,11 +857,9 @@ class TorchCompileModelFluxAdvanced:
             try:
                 for i, block in enumerate(diffusion_model.double_blocks):
                     if i in double_block_list:
-                        #print("Compiling double_block", i)
                         m.add_object_patch(f"diffusion_model.double_blocks.{i}", torch.compile(block, mode=mode, dynamic=dynamic, fullgraph=fullgraph, backend=backend))
                 for i, block in enumerate(diffusion_model.single_blocks):
                     if i in single_block_list:
-                        #print("Compiling single block", i)
                         m.add_object_patch(f"diffusion_model.single_blocks.{i}", torch.compile(block, mode=mode, dynamic=dynamic, fullgraph=fullgraph, backend=backend))
                 self._compiled = True
                 compile_settings = {
@@ -865,7 +870,7 @@ class TorchCompileModelFluxAdvanced:
                 }
                 setattr(m.model, "compile_settings", compile_settings)
             except:
-                raise RuntimeError("Failed to compile model")
+                raise RuntimeError("Failed to compile model. Verify that this is a Flux model!")
         
         return (m, )
         # rest of the layers that are not patched
@@ -927,7 +932,7 @@ class TorchCompileModelAura:
                 }
                 setattr(m.model, "compile_settings", compile_settings)
             except:
-                raise RuntimeError("Failed to compile model")
+                raise RuntimeError("Failed to compile model. Verify that this is an AuraFlow model!")
         
         return (m, )
 
@@ -959,7 +964,7 @@ class TorchCompileModelSD35:
             dynamic       = False,
             dynamo_cache_size_limit = 64,
             ):
-
+        
         m = model.clone()
         diffusion_model = m.get_model_object("diffusion_model")
         torch._dynamo.config.cache_size_limit = dynamo_cache_size_limit
@@ -977,7 +982,7 @@ class TorchCompileModelSD35:
                 }
                 setattr(m.model, "compile_settings", compile_settings)
             except:
-                raise RuntimeError("Failed to compile model")
+                raise RuntimeError("Failed to compile model. Verify that this is a SD3.5 model!")
         
         return (m, )
 

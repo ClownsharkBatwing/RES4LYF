@@ -605,7 +605,7 @@ class EmptyConditioningGenerator:
                 self.pooled_len    = 1280
             elif isinstance(self.model_config, comfy.supported_models.WAN21_T2V) or isinstance(self.model_config, comfy.supported_models.WAN21_I2V):
                 self.text_len_base = 512
-                self.text_channels = 5120
+                self.text_channels = 5120 # sometimes needs to be 4096, like when initializing in samplers_py in shark?
                 self.pooled_len    = 1
             else:
                 raise ValueError(f"Unknown model config: {type(config)}")
@@ -684,6 +684,62 @@ class TemporalMaskGenerator:
             temporal_mask = 1 - temporal_mask
         
         return (temporal_mask,)
+
+
+
+
+class TemporalSplitAttnMask:
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {"required":
+                    {
+                    "self_attn_midframe":  ("INT", {"default": 33, "min": 1, "step": 4, "max": 0xffffffffffffffff}),
+                    "cross_attn_midframe": ("INT", {"default": 33, "min": 1, "step": 4, "max": 0xffffffffffffffff}),
+                    "self_attn_invert":    ("BOOLEAN",                                  {"default": False}),
+                    "cross_attn_invert":   ("BOOLEAN",                                  {"default": False}),
+                    "frames":             ("INT", {"default": 65, "min": 1, "step": 4, "max": 0xffffffffffffffff}),
+
+                    },
+                "optional": 
+                    {
+                    }
+                }
+
+    RETURN_TYPES = ("MASK",)
+    RETURN_NAMES = ("temporal_mask",) 
+    FUNCTION     = "main"
+    CATEGORY     = "RES4LYF/masks"
+    
+    def main(self,
+            self_attn_midframe = 33,
+            cross_attn_midframe = 33,
+            self_attn_invert = False,
+            cross_attn_invert = False,
+            frames = 65,
+            ):
+
+        frames = frames // 4 + 1
+        
+        temporal_self_mask  = torch.ones((frames, 2, 2))
+        temporal_cross_mask = torch.ones((frames, 2, 2))
+
+        
+        self_attn_midframe  = self_attn_midframe  // 4
+        cross_attn_midframe = cross_attn_midframe // 4
+        
+        temporal_self_mask[self_attn_midframe  :,...] = 0.0
+        temporal_cross_mask[cross_attn_midframe:,...] = 0.0
+        
+        
+        if self_attn_invert:
+            temporal_self_mask  = 1 - temporal_self_mask
+            
+        if cross_attn_invert:
+            temporal_cross_mask = 1 - temporal_cross_mask
+        
+        temporal_attn_masks = torch.stack([temporal_cross_mask, temporal_self_mask])
+        
+        return (temporal_attn_masks,)
 
 
 
@@ -914,6 +970,224 @@ class ClownRegionalConditioning:
 
 
 
+
+
+class ClownRegionalConditioning_AB:
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": { 
+                "weight":                  ("FLOAT",                                     {"default": 1.0, "min":  -10000.0, "max": 10000.0, "step": 0.01}),
+                "region_bleed":            ("FLOAT",                                     {"default": 0.0, "min":  -10000.0, "max": 10000.0, "step": 0.01}),
+                "region_bleed_start_step": ("INT",                                       {"default": 0,   "min":  0,        "max": 10000}),
+                "weight_scheduler":        (["constant"] + get_res4lyf_scheduler_list(), {"default": "constant"},),
+                "start_step":              ("INT",                                       {"default": 0,   "min":  0,        "max": 10000}),
+                "end_step":                ("INT",                                       {"default": -1,  "min": -1,        "max": 10000}),
+                "mask_type":               (["gradient", "gradient_masked", "gradient_unmasked", "boolean", "boolean_masked", "boolean_unmasked"],                     {"default": "boolean"}),
+                "narcissism_area":         (["masked", "unmasked", "off"],               {"default": "off"}),
+                "narcissism_start_step":   ("INT",                                       {"default": 0,   "min": -1,        "max": 10000}),
+                "narcissism_end_step":     ("INT",                                       {"default": 5,   "min": -1,        "max": 10000}),
+                "invert_mask":             ("BOOLEAN",                                   {"default": False}),
+            }, 
+            "optional": {
+                "positive_masked":         ("CONDITIONING", ),
+                "positive_unmasked":       ("CONDITIONING", ),
+                "mask":                    ("MASK", ),
+                "unmask":                  ("MASK", ),
+                "weights":                 ("SIGMAS", ),
+                "region_bleeds":           ("SIGMAS", ),
+            }
+        }
+
+    RETURN_TYPES = ("CONDITIONING",)
+    RETURN_NAMES = ("positive",)
+    FUNCTION     = "main"
+    CATEGORY     = "RES4LYF/conditioning"
+
+    def create_callback(self, **kwargs):
+        def callback(model):
+            kwargs["model"] = model  
+            pos_cond, = self.prepare_regional_cond(**kwargs)
+            return pos_cond
+        return callback
+
+    def main(self,
+            weight                   : float  = 1.0,
+            start_sigma              : float  = 0.0,
+            end_sigma                : float  = 1.0,
+            weight_scheduler                  = None,
+            start_step               : int    = 0,
+            end_step                 : int    = -1,
+            positive_masked                   = None,
+            positive_unmasked                 = None,
+            weights                  : Tensor = None,
+            region_bleeds            : Tensor = None,
+            region_bleed             : float  = 0.0,
+            region_bleed_start_step  : int    = 0,
+            mask_type                : str    = "boolean",
+            mask                              = None,
+            unmask                            = None,
+            narcissism_area          : str    = "masked",
+            narcissism_start_step    : int    = 0,
+            narcissism_end_step      : int    = 5,
+            invert_mask              : bool   = False
+            ) -> Tuple[Tensor]:
+        
+        if end_step == -1:
+            end_step = MAX_STEPS
+        
+        if narcissism_end_step == -1:
+            narcissism_end_step = MAX_STEPS
+        
+        callback = self.create_callback(weight                   = weight,
+                                        start_sigma              = start_sigma,
+                                        end_sigma                = end_sigma,
+                                        weight_scheduler         = weight_scheduler,
+                                        start_step               = start_step,
+                                        end_step                 = end_step,
+                                        weights                  = weights,
+                                        region_bleeds            = region_bleeds,
+                                        region_bleed             = region_bleed,
+                                        region_bleed_start_step  = region_bleed_start_step,
+                                        mask_type                = mask_type,
+                                        mask                     = mask,
+                                        unmask                   = unmask,
+                                        invert_mask              = invert_mask,
+                                        positive_masked          = positive_masked,
+                                        positive_unmasked        = positive_unmasked,
+                                        narcissism_area          = narcissism_area,
+                                        narcissism_start_step    = narcissism_start_step,
+                                        narcissism_end_step      = narcissism_end_step,
+                                        )
+
+        positive = zero_conditioning_from_list([positive_masked, positive_unmasked])
+        
+        positive[0][1]['callback_regional'] = callback
+        
+        return (positive,)
+
+
+
+    def prepare_regional_cond(self,
+                                model,
+                                weight                   : float  = 1.0,
+                                start_sigma              : float  = 0.0,
+                                end_sigma                : float  = 1.0,
+                                weight_scheduler                  = None,
+                                start_step               : int    = 0,
+                                end_step                 : int    = -1,
+                                positive_masked                   = None,
+                                positive_unmasked                 = None,
+                                weights                  : Tensor = None,
+                                region_bleeds            : Tensor = None,
+                                region_bleed             : float  = 0.0,
+                                region_bleed_start_step  : int    = 0,
+                                mask_type                : str    = "gradient",
+                                mask                              = None,
+                                unmask                            = None,
+                                invert_mask              : bool   = False,
+                                narcissism_area       : str       = "on",
+                                narcissism_start_step : int       = 0,
+                                narcissism_end_step   : int       = 5,
+                                ) -> Tuple[Tensor]:
+
+        default_dtype  = torch.float64
+        default_device = torch.device("cuda") 
+        
+        if end_step == -1:
+            end_step = MAX_STEPS
+        
+        if weights is None and weight_scheduler != "constant":
+            total_steps = end_step - start_step
+            weights     = get_sigmas(model, weight_scheduler, total_steps, 1.0).to(dtype=default_dtype, device=default_device) #/ model.inner_model.inner_model.model_sampling.sigma_max  #scaling doesn't matter as this is a flux-only node
+            prepend     = torch.zeros(start_step,                                  dtype=default_dtype, device=default_device)
+            weights     = torch.cat((prepend, weights), dim=0)
+        
+        if invert_mask and mask is not None:
+            mask   = 1-mask
+            unmask = 1-unmask
+
+        #weight, weights = mask_weight, mask_weights
+        floor, floors = region_bleed, region_bleeds
+        
+        weights = initialize_or_scale(weights, weight, end_step).to(default_dtype).to(default_device)
+        weights = F.pad(weights, (0, MAX_STEPS), value=0.0)
+        
+        prepend = torch.full((region_bleed_start_step,),  0.0, dtype=default_dtype, device=default_device)
+        floors  = initialize_or_scale(floors,  floor,  end_step).to(default_dtype).to(default_device)
+        floors  = F.pad(floors,  (0, MAX_STEPS), value=0.0)
+        floors  = torch.cat((prepend, floors), dim=0)
+
+        if (positive_masked is None) and (positive_unmasked is None):
+            positive = None
+
+        elif mask is not None:
+            EmptyCondGen = EmptyConditioningGenerator(model)
+            positive_masked, positive_unmasked = EmptyCondGen.zero_none_conditionings_([positive_masked, positive_unmasked])
+            
+            positive_masked_tokens   = positive_masked[0][0]  .shape[1]
+            positive_unmasked_tokens = positive_unmasked[0][0].shape[1]
+            
+            positive_min_tokens = min(positive_masked_tokens, positive_unmasked_tokens)
+            
+            positive = copy.deepcopy(positive_masked)
+            positive[0][0] = (positive_masked[0][0][:,:positive_min_tokens,:] + positive_unmasked[0][0][:,:positive_min_tokens,:]) / 2
+            
+            from .attention_masks import FullAttentionMask, SplitAttentionMask, RegionalContext
+            if isinstance(model.model.model_config, comfy.supported_models.WAN21_T2V) or isinstance(model.model.model_config, comfy.supported_models.WAN21_I2V):
+                AttnMask = SplitAttentionMask(mask_type)
+            else:
+                AttnMask = FullAttentionMask(mask_type)
+            AttnMask.add_region(positive_masked  [0][0],   mask)
+            AttnMask.add_region(positive_unmasked[0][0], unmask)
+            
+            RegContext = RegionalContext()
+            RegContext.add_region(positive_masked  [0][0])
+            RegContext.add_region(positive_unmasked[0][0])
+            
+            positive[0][1]['AttnMask'] = AttnMask
+            positive[0][1]['RegContext'] = RegContext
+            
+            if   positive_masked_tokens < positive_unmasked_tokens:
+                positive[0][0] = torch.cat((positive[0][0], positive_unmasked[0][0][:,positive_min_tokens:,:]), dim=1)
+            elif positive_masked_tokens > positive_unmasked_tokens:
+                positive[0][0] = torch.cat((positive[0][0], positive_masked  [0][0][:,positive_min_tokens:,:]), dim=1)
+                
+            if 'pooled_output' in positive[0][1] and positive_masked[0][1]['pooled_output'] is not None:
+                positive_masked_pooled_tokens   = positive_masked[0][1]['pooled_output'].shape[1]
+                positive_unmasked_pooled_tokens = positive_unmasked[0][1]['pooled_output'].shape[1]
+                
+                positive_min_pooled_tokens = min(positive_masked_pooled_tokens, positive_unmasked_pooled_tokens)
+                
+                positive[0][1]['pooled_output'] = (positive_masked[0][1]['pooled_output'][:,:positive_min_pooled_tokens] + positive_unmasked[0][1]['pooled_output'][:,:positive_min_pooled_tokens]) / 2
+                
+                if   positive_masked_pooled_tokens < positive_unmasked_pooled_tokens:
+                    positive[0][1]['pooled_output'] = torch.cat((positive[0][1]['pooled_output'], positive_unmasked[0][1]['pooled_output'][:,positive_min_pooled_tokens:]), dim=1)
+                elif positive_masked_pooled_tokens > positive_unmasked_pooled_tokens:
+                    positive[0][1]['pooled_output'] = torch.cat((positive[0][1]['pooled_output'], positive_masked  [0][1]['pooled_output'][:,positive_min_pooled_tokens:]), dim=1)
+        
+        else:
+            positive = positive_masked
+            
+        if   mask is not None and narcissism_area == "masked":
+            narc_idx = 0
+            positive[0][1]['regional_conditioning_mask_orig'] = unmask.clone()
+            if 'pooled_output' in positive[0][1]:
+                positive[0][1]['pooled_output'] = positive_unmasked[0][1]['pooled_output']
+        
+        elif mask is not None and narcissism_area == "unmasked":
+            narc_idx = 1
+            positive[0][1]['regional_conditioning_mask_orig'] = mask.clone()
+            if 'pooled_output' in positive[0][1]:
+                positive[0][1]['pooled_output'] = positive_masked[0][1]['pooled_output']
+            
+        else:
+            narc_idx = -1
+            positive[0][1]['regional_conditioning_mask_orig'] = None
+        
+        positive[0][1]['RegParam'] = RegionalParameters(weights, floors, narc_idx, narcissism_start_step, narcissism_end_step)
+        
+        return (positive,)
 
 
 

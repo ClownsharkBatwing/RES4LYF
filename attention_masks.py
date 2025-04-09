@@ -225,19 +225,29 @@ class SplitAttentionMask(BaseAttentionMask):
         prev_len = 0
         for context_len, mask in zip(self.context_lens, self.masks):
 
+            cross_mask, self_mask = None, None
             if mask.ndim == 6:
                 mask.squeeze_(0)
             if mask.ndim == 3:
                 t_mask = mask.shape[0]
             elif mask.ndim == 4:
-                t_mask = mask.shape[-3]
-                mask.squeeze_(0)
+                if mask.shape[0] > 1:
+                    cross_mask = mask[0]
+                    self_mask  = mask[1]
+                    t_mask = mask.shape[-3]
+                else:
+                    t_mask = mask.shape[-3]
+                    mask.squeeze_(0)
             elif mask.ndim == 5:
                 t_mask = mask.shape[-3]
             else:
                 t_mask = 1
                 mask.unsqueeze_(0)
-            img2txt_mask    = torch.nn.functional.interpolate(mask.unsqueeze(0).unsqueeze(0).to(torch.float16), (t_mask, h, w), mode='nearest-exact').to(dtype).flatten().unsqueeze(1)
+                
+            if cross_mask is not None:
+                img2txt_mask    = torch.nn.functional.interpolate(cross_mask.unsqueeze(0).unsqueeze(0).to(torch.float16), (t_mask, h, w), mode='nearest-exact').to(dtype).flatten().unsqueeze(1)
+            else:
+                img2txt_mask    = torch.nn.functional.interpolate(      mask.unsqueeze(0).unsqueeze(0).to(torch.float16), (t_mask, h, w), mode='nearest-exact').to(dtype).flatten().unsqueeze(1)
             
             if t_mask == 1: # ...why only if == 1?
                 img2txt_mask = img2txt_mask.repeat(1, context_len)   
@@ -256,7 +266,10 @@ class SplitAttentionMask(BaseAttentionMask):
             else:
                 self_attn_mask = fp_or(self_attn_mask, mask_flat.repeat(t).unsqueeze(0) * mask_flat.repeat(t).unsqueeze(1))"""
             
-            img2txt_mask_sq = torch.nn.functional.interpolate(mask.unsqueeze(0).to(torch.float16), (h, w), mode='nearest-exact').to(dtype).flatten().unsqueeze(1).repeat(1, t_mask * img_len)
+            if self_mask is not None:
+                img2txt_mask_sq = torch.nn.functional.interpolate(self_mask.unsqueeze(0).to(torch.float16), (h, w), mode='nearest-exact').to(dtype).flatten().unsqueeze(1).repeat(1, t_mask * img_len)
+            else:
+                img2txt_mask_sq = torch.nn.functional.interpolate(     mask.unsqueeze(0).to(torch.float16), (h, w), mode='nearest-exact').to(dtype).flatten().unsqueeze(1).repeat(1, t_mask * img_len)
             
             if t_mask > 1:
                 self_attn_mask = fp_or(self_attn_mask, fp_and(img2txt_mask_sq, img2txt_mask_sq.transpose(-1,-2)))
