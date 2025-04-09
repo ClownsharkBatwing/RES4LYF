@@ -177,7 +177,10 @@ class SharkSampler:
             if 'steps_to_run' in sampler.extra_options:
                 sampler.extra_options['steps_to_run'] = steps_to_run
 
-
+            if positive is None or negative is None:
+                from ..conditioning import EmptyConditioningGenerator
+                EmptyCondGen       = EmptyConditioningGenerator(model)
+                positive, negative = EmptyCondGen.zero_none_conditionings_([positive, negative])
             
             if cfg < 0:
                 sampler.extra_options['cfg_cw'] = -cfg
