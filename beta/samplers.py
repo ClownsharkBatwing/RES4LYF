@@ -425,7 +425,7 @@ class SharkSampler:
             
             out_samples          = []
             out_denoised_samples = []
-
+            out_state_info       = []
             
             for batch_num in range(latent_image_batch['samples'].shape[0]):
                 latent_unbatch            = copy.deepcopy(latent_x)
@@ -435,7 +435,7 @@ class SharkSampler:
                     sampler.extra_options['batch_num'] = batch_num
 
 
-                if noise_seed == -1:
+                if noise_seed == -1 and sampler_mode in {"unsample", "resample"}:
                     if latent_image.get('state_info', {}).get('last_rng', None) is not None:
                         seed = torch.initial_seed() + batch_num
                     else:
@@ -490,9 +490,16 @@ class SharkSampler:
                     callback     = latent_preview.prepare_callback(work_model, steps_len, x0_output)
 
                     if 'BONGMATH' in sampler.extra_options: # verify the sampler is rk_sampler_beta()
-                        sampler.extra_options['state_info']     = state_info
+                        sampler.extra_options['state_info']     = copy.deepcopy(state_info)         ##############################
+                        if state_info != {}:
+                            sampler.extra_options['state_info']['raw_x'] = state_info['raw_x'][batch_num]
+                            sampler.extra_options['state_info']['data_prev_'] = state_info['data_prev_'][batch_num]
+                            sampler.extra_options['state_info']['last_rng'] = state_info['last_rng'][batch_num]
+                            sampler.extra_options['state_info']['last_rng_substep'] = state_info['last_rng_substep'][batch_num]
+                        #state_info     = copy.deepcopy(latent_image['state_info']) if 'state_info' in latent_image else {}
+                        state_info_out = {}
                         sampler.extra_options['state_info_out'] = state_info_out
-                    
+
                     if type(pos_cond[0][0]) == list:
                         pos_cond_tmp = pos_cond[batch_num]
                     else:
@@ -545,7 +552,7 @@ class SharkSampler:
                             sde_noise_out = out["samples"]  
                         sde_noise.append(normalize_zscore(sde_noise_out, channelwise=True, inplace=True))    
                     
-                    
+                    out_state_info.append(state_info_out)
                     
                     # INCREMENT BATCH LOOP
                     seed += 1
@@ -555,6 +562,11 @@ class SharkSampler:
 
 
             # STACK SDE NOISES, SAVE STATE INFO
+            state_info_out = out_state_info[0]
+            state_info_out['raw_x']            = torch.stack([out_state_info[_]['raw_x']            for _ in range(len(out_state_info))])
+            state_info_out['data_prev_']       = torch.stack([out_state_info[_]['data_prev_']       for _ in range(len(out_state_info))])
+            state_info_out['last_rng']         = torch.stack([out_state_info[_]['last_rng']         for _ in range(len(out_state_info))])
+            state_info_out['last_rng_substep'] = torch.stack([out_state_info[_]['last_rng_substep'] for _ in range(len(out_state_info))])
 
             out_samples             = [tensor.squeeze(0) for tensor in out_samples]
             out_denoised_samples    = [tensor.squeeze(0) for tensor in out_denoised_samples]
@@ -1006,6 +1018,12 @@ class ClownSamplerAdvanced_Beta:
                 s_noises_substep  = automation['s_noises_substep']  if 's_noises_substep'  in automation else None
                 epsilon_scales    = automation['epsilon_scales']    if 'epsilon_scales'    in automation else None
                 frame_weights_mgr = automation['frame_weights_mgr'] if 'frame_weights_mgr' in automation else None
+                
+            etas             = options_mgr.get('etas',         etas)
+            etas_substep     = options_mgr.get('etas_substep', etas_substep)
+            
+            s_noises         = options_mgr.get('s_noises',         s_noises)
+            s_noises_substep = options_mgr.get('s_noises_substep', s_noises_substep)
 
             etas             = initialize_or_scale(etas,             eta,             MAX_STEPS).to(default_dtype)
             etas_substep     = initialize_or_scale(etas_substep,     eta_substep,     MAX_STEPS).to(default_dtype)

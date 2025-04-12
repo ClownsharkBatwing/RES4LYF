@@ -61,6 +61,8 @@ class ClownOptions_SDE_Beta:
                     },
                 "optional": 
                     {
+                    "etas":                   ("SIGMAS", ),
+                    "etas_substep":           ("SIGMAS", ),
                     "options":                ("OPTIONS", ),   
                     }
                 }
@@ -78,6 +80,8 @@ class ClownOptions_SDE_Beta:
             eta                    = 0.5,
             eta_substep            = 0.5,
             seed             : int = -1,
+            etas             : Optional[Tensor] = None,
+            etas_substep     : Optional[Tensor] = None,
             options                = None,
             ): 
         
@@ -90,6 +94,9 @@ class ClownOptions_SDE_Beta:
         options['eta']                    = eta
         options['eta_substep']            = eta_substep
         options['noise_seed_sde']         = seed
+        
+        options['etas']                   = etas
+        options['etas_substep']           = etas_substep
 
         return (options,)
 
@@ -138,49 +145,45 @@ class ClownOptions_StepSize_Beta:
 @dataclass
 class DetailBoostOptions:
     noise_scaling_weight : float = 0.0
-    noise_boost_step      : float = 0.0
-    noise_boost_substep   : float = 0.0
-    noise_anchor          : float = 1.0
-    s_noise               : float = 1.0
-    s_noise_substep       : float = 1.0
-    d_noise               : float = 1.0
+    noise_boost_step     : float = 0.0
+    noise_boost_substep  : float = 0.0
+    noise_anchor         : float = 1.0
+    s_noise              : float = 1.0
+    s_noise_substep      : float = 1.0
+    d_noise              : float = 1.0
 
+DETAIL_BOOST_METHODS = [
+    'sampler',
+    'sampler_normal',
+    'sampler_substep',
+    'sampler_substep_normal',
+    'model',
+    'model_alpha',
+    ]
 
 class ClownOptions_DetailBoost_Beta:
     @classmethod
     def INPUT_TYPES(cls):
         return {"required":
                     {
-                    "noise_scaling_weight": ("FLOAT",            {"default": 1.0, "min": -100.0, "max": 100.0, "step":0.01, "round": False, "tooltip": "Set to positive values to create a sharper, grittier, more detailed image. Set to negative values to soften and deepen the colors."}),
-                    "noise_scaling_type":    (['sampler','sampler_substep','model','model_alpha'],{"default": "model_alpha",                  "tooltip": "Determines whether the sampler or the model underestimates the noise level."}),
+                    "weight":     ("FLOAT",              {"default": 1.0, "min": -100.0, "max": 100.0, "step":0.01, "round": False, "tooltip": "Set to positive values to create a sharper, grittier, more detailed image. Set to negative values to soften and deepen the colors."}),
+                    "method":     (DETAIL_BOOST_METHODS, {"default": "model",                                                       "tooltip": "Determines whether the sampler or the model underestimates the noise level."}),
                     #"noise_scaling_mode":    (['linear'] + NOISE_MODE_NAMES,  {"default": 'hard',                                          "tooltip": "Changes the steps where the effect is greatest. Most affect early steps, sinusoidal affects middle steps."}),
-                    "noise_scaling_mode":    (NOISE_MODE_NAMES,   {"default": 'sinusoidal',                                                   "tooltip": "Changes the steps where the effect is greatest. Most affect early steps, sinusoidal affects middle steps."}),
-                    "noise_scaling_eta":     ("FLOAT",            {"default": 0.5, "min": -100.0, "max": 100.0, "step":0.01, "round": False, "tooltip": "The strength of the effect of the noise_scaling_mode. Linear ignores this parameter."}),
-                    "noise_scaling_start_step": ("INT",              {"default": 0, "min": 0, "max": MAX_STEPS}),
-                    "noise_scaling_end_step":   ("INT",              {"default": -1, "min": -1, "max": MAX_STEPS}),
+                    "mode":       (NOISE_MODE_NAMES,     {"default": 'hard',                                                        "tooltip": "Changes the steps where the effect is greatest. Most affect early steps, sinusoidal affects middle steps."}),
+                    "eta":        ("FLOAT",              {"default": 0.5, "min": -100.0, "max": 100.0, "step":0.01, "round": False, "tooltip": "The strength of the effect of the noise_scaling_mode. Linear ignores this parameter."}),
+                    "start_step": ("INT",                {"default": 3,   "min": 0,      "max": MAX_STEPS}),
+                    "end_step":   ("INT",                {"default": 10,  "min": -1,     "max": MAX_STEPS}),
 
                     #"noise_scaling_cycles":  ("INT",              {"default": 1, "min": 1, "max": MAX_STEPS}),
 
                     #"noise_boost_step":      ("FLOAT",            {"default": 0.0, "min": -100.0, "max": 100.0, "step":0.01, "round": False, "tooltip": "Set to positive values to create a sharper, grittier, more detailed image. Set to negative values to soften and deepen the colors."}),
                     #"noise_boost_substep":   ("FLOAT",            {"default": 0.0, "min": -100.0, "max": 100.0, "step":0.01, "round": False, "tooltip": "Set to positive values to create a sharper, grittier, more detailed image. Set to negative values to soften and deepen the colors."}),
-                    "sampler_scaling_normalize":("BOOLEAN",          {"default": False,                                                          "tooltip": "Limit saturation and luminosity drift."}),
-                    "noise_anchor":          ("FLOAT",            {"default": 1.0, "min": -100.0, "max": 100.0, "step":0.01, "round": False, "tooltip": "Typically set to between 1.0 and 0.0. Lower values cerate a grittier, more detailed image."}),
-                    
-                    "s_noise":               ("FLOAT",            {"default": 1.0, "min": -10000, "max": 10000, "step":0.01,                 "tooltip": "Adds extra SDE noise. Values around 1.03-1.07 can lead to a moderate boost in detail and paint textures."}),
-                    "s_noise_substep":       ("FLOAT",            {"default": 1.0, "min": -10000, "max": 10000, "step":0.01,                 "tooltip": "Adds extra SDE noise. Values around 1.03-1.07 can lead to a moderate boost in detail and paint textures."}),
-                    
-                    "d_noise":               ("FLOAT",            {"default": 1.0, "min": -10000, "max": 10000, "step":0.01,                 "tooltip": "Downscales the sigma schedule. Values around 0.98-0.95 can lead to a large boost in detail and paint textures."}),
-                    "d_noise_start_step":    ("INT",              {"default": 0, "min": 0, "max": MAX_STEPS}),
-
-                    "d_noise_inv":           ("FLOAT",            {"default": 1.0, "min": -10000, "max": 10000, "step":0.01,                 "tooltip": "Upscales the sigma schedule. Will soften the image and deepen colors. Use after d_noise to counteract desaturation."}),
-                    "d_noise_inv_start_step":("INT",              {"default": 1, "min": 0, "max": MAX_STEPS}),
-
-                    #"d_noise_mode":          (['early','middle'], {"default": "middle",                                                      "tooltip": "Determines area of emphasis for downscaling the sigma schedule."}),
+                    #"sampler_scaling_normalize":("BOOLEAN",          {"default": False,                                                          "tooltip": "Limit saturation and luminosity drift."}),
                     },
                 "optional": 
                     {
-                    "noise_scaling_weights": ("SIGMAS", ),
-                    "noise_scaling_etas":    ("SIGMAS", ),
+                    "weights": ("SIGMAS", ),
+                    "etas":    ("SIGMAS", ),
                     "options":               ("OPTIONS", ),   
                     }
                 }
@@ -191,39 +194,45 @@ class ClownOptions_DetailBoost_Beta:
     CATEGORY     = "RES4LYF/sampler_options"
     
     def main(self,
-            noise_scaling_weight      : float            = 0.0,
-            noise_scaling_type        : str              = "sampler",
-            noise_scaling_mode        : str              = "linear",
-            noise_scaling_eta         : float            = 0.5,
-            noise_scaling_start_step  : int              = 0,
-            noise_scaling_end_step    : int              = -1,
+            weight      : float = 0.0,
+            method      : str   = "sampler",
+            mode        : str   = "linear",
+            eta         : float = 0.5,
+            start_step  : int   = 0,
+            end_step    : int   = -1,
 
 
-            noise_scaling_cycles      : int              = 1,
+            noise_scaling_cycles      : int   = 1,
 
-            noise_boost_step          : float            = 0.0,
-            noise_boost_substep       : float            = 0.0,
-            sampler_scaling_normalize : bool             = False,
-            noise_anchor              : float            = 1.0,
+            noise_boost_step          : float = 0.0,
+            noise_boost_substep       : float = 0.0,
+            sampler_scaling_normalize : bool  = False,
+
+            weights     : Optional[Tensor] = None,
+            etas        : Optional[Tensor] = None,
             
-            s_noise                   : float            = 1.0,
-            s_noise_substep           : float            = 1.0,
-            d_noise                   : float            = 1.0,
-            d_noise_start_step        : int              = 0,
-            
-            d_noise_inv               : float            = 1.0,
-            d_noise_inv_start_step    : int              = 1,
-            
-            noise_scaling_weights     : Optional[Tensor] = None,
-            noise_scaling_etas        : Optional[Tensor] = None,
-            
-            options                                      = None
+            options                        = None
             ):
+        
+        noise_scaling_weight     = weight
+        noise_scaling_type       = method
+        noise_scaling_mode       = mode
+        noise_scaling_eta        = eta
+        noise_scaling_start_step = start_step
+        noise_scaling_end_step   = end_step
+        
+        noise_scaling_weights = weights
+        noise_scaling_etas    = etas
+        
         
         options = options if options is not None else {}
         
         default_dtype = torch.float64
         default_device = torch.device('cuda')
+        
+        if noise_scaling_type.endswith("_normal"):
+            sampler_scaling_normalize = True
+            noise_scaling_type = noise_scaling_type[:-7]
         
         if noise_scaling_end_step == -1:
             noise_scaling_end_step = MAX_STEPS
@@ -249,26 +258,18 @@ class ClownOptions_DetailBoost_Beta:
         noise_scaling_etas = F.pad(noise_scaling_etas, (0, MAX_STEPS), value=0.0)
         
         options['noise_scaling_weight']  = noise_scaling_weight
-        options['noise_scaling_type']     = noise_scaling_type
-        options['noise_scaling_mode']     = noise_scaling_mode
-        options['noise_scaling_eta']      = noise_scaling_eta
-        options['noise_scaling_cycles']   = noise_scaling_cycles
+        options['noise_scaling_type']    = noise_scaling_type
+        options['noise_scaling_mode']    = noise_scaling_mode
+        options['noise_scaling_eta']     = noise_scaling_eta
+        options['noise_scaling_cycles']  = noise_scaling_cycles
         
-        options['noise_scaling_weights']  = noise_scaling_weights
-        options['noise_scaling_etas']     = noise_scaling_etas
+        options['noise_scaling_weights'] = noise_scaling_weights
+        options['noise_scaling_etas']    = noise_scaling_etas
         
-        options['noise_boost_step']       = noise_boost_step
-        options['noise_boost_substep']    = noise_boost_substep
-        options['noise_boost_normalize']  = sampler_scaling_normalize
-        options['noise_anchor']           = noise_anchor
-        
-        options['s_noise']                = s_noise
-        options['s_noise_substep']        = s_noise_substep
-        options['d_noise']                = d_noise
-        options['d_noise_start_step']     = d_noise_start_step
-        options['d_noise_inv']            = d_noise_inv
-        options['d_noise_inv_start_step'] = d_noise_inv_start_step
-        
+        options['noise_boost_step']      = noise_boost_step
+        options['noise_boost_substep']   = noise_boost_substep
+        options['noise_boost_normalize'] = sampler_scaling_normalize
+
         """options['DetailBoostOptions'] = DetailBoostOptions(
             noise_scaling_weight = noise_scaling_weight,
             noise_scaling_type    = noise_scaling_type,
@@ -287,6 +288,75 @@ class ClownOptions_DetailBoost_Beta:
         )"""
 
         return (options,)
+
+
+
+
+class ClownOptions_SigmaScaling_Beta:
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {"required":
+                    {
+                    "s_noise":              ("FLOAT", {"default": 1.0, "min": -10000, "max": 10000, "step":0.01,                 "tooltip": "Adds extra SDE noise. Values around 1.03-1.07 can lead to a moderate boost in detail and paint textures."}),
+                    "s_noise_substep":      ("FLOAT", {"default": 1.0, "min": -10000, "max": 10000, "step":0.01,                 "tooltip": "Adds extra SDE noise. Values around 1.03-1.07 can lead to a moderate boost in detail and paint textures."}),
+                    "noise_anchor_sde":     ("FLOAT", {"default": 1.0, "min": -100.0, "max": 100.0, "step":0.01, "round": False, "tooltip": "Typically set to between 1.0 and 0.0. Lower values cerate a grittier, more detailed image."}),
+                    
+                    "lying":                ("FLOAT", {"default": 1.0, "min": -10000, "max": 10000, "step":0.01,                 "tooltip": "Downscales the sigma schedule. Values around 0.98-0.95 can lead to a large boost in detail and paint textures."}),
+                    "lying_inv":            ("FLOAT", {"default": 1.0, "min": -10000, "max": 10000, "step":0.01,                 "tooltip": "Upscales the sigma schedule. Will soften the image and deepen colors. Use after d_noise to counteract desaturation."}),
+                    "lying_start_step":     ("INT",   {"default": 0, "min": 0, "max": MAX_STEPS}),
+                    "lying_inv_start_step": ("INT",   {"default": 1, "min": 0, "max": MAX_STEPS}),
+
+                    },
+                "optional": 
+                    {
+                    "s_noises":             ("SIGMAS", ),
+                    "s_noises_substep":     ("SIGMAS", ),
+                    "options":              ("OPTIONS", ),
+                    }
+                }
+
+    RETURN_TYPES = ("OPTIONS",)
+    RETURN_NAMES = ("options",)
+    FUNCTION     = "main"
+    CATEGORY     = "RES4LYF/sampler_options"
+    
+    def main(self,
+            noise_anchor_sde        : float = 1.0,
+            
+            s_noise                 : float = 1.0,
+            s_noise_substep         : float = 1.0,
+            lying                   : float = 1.0,
+            lying_start_step        : int   = 0,
+            
+            lying_inv               : float = 1.0,
+            lying_inv_start_step    : int   = 1,
+            
+            s_noises                : Optional[Tensor] = None,
+            s_noises_substep        : Optional[Tensor] = None,
+            options                         = None
+            ):
+        
+        options = options if options is not None else {}
+        
+        default_dtype = torch.float64
+        default_device = torch.device('cuda')
+        
+        
+        
+        options['noise_anchor']           = noise_anchor_sde
+        options['s_noise']                = s_noise
+        options['s_noise_substep']        = s_noise_substep
+        options['d_noise']                = lying
+        options['d_noise_start_step']     = lying_start_step
+        options['d_noise_inv']            = lying_inv
+        options['d_noise_inv_start_step'] = lying_inv_start_step
+
+        options['s_noises']                = s_noises
+        options['s_noises_substep']        = s_noises_substep
+
+        return (options,)
+
+
 
 
 class ClownOptions_Momentum_Beta:
@@ -533,7 +603,7 @@ class SharkOptions_Beta:
         return {
             "required": {
                 "noise_type_init": (NOISE_GENERATOR_NAMES_SIMPLE, {"default": "gaussian"}),
-                "noise_stdev":     ("FLOAT",                      {"default": 1.0, "min": -10000.0, "max": 10000.0, "step":0.01, "round": False, }),
+                "s_noise_init":    ("FLOAT",                      {"default": 1.0, "min": -10000.0, "max": 10000.0, "step":0.01, "round": False, }),
                 "denoise_alt":     ("FLOAT",                      {"default": 1.0, "min": -10000,   "max": 10000,   "step":0.01}),
                 "channelwise_cfg": ("BOOLEAN",                    {"default": False}),
                 },
@@ -549,7 +619,7 @@ class SharkOptions_Beta:
     
     def main(self,
             noise_type_init = "gaussian",
-            noise_stdev     = 1.0,
+            s_noise_init    = 1.0,
             denoise_alt     = 1.0,
             channelwise_cfg = False,
             options         = None
@@ -558,7 +628,7 @@ class SharkOptions_Beta:
         options = options if options is not None else {}
             
         options['noise_type_init'] = noise_type_init
-        options['noise_stdev']     = noise_stdev
+        options['noise_stdev']     = s_noise_init
         options['denoise_alt']     = denoise_alt
         options['channelwise_cfg'] = channelwise_cfg
 
