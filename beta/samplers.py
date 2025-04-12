@@ -159,6 +159,9 @@ class SharkSampler:
             ultracascade_latent_image  = options_mgr.get('ultracascade_latent_image',  ultracascade_latent_image)
             ultracascade_latent_width  = options_mgr.get('ultracascade_latent_width',  ultracascade_latent_width)
             ultracascade_latent_height = options_mgr.get('ultracascade_latent_height', ultracascade_latent_height)
+            
+            
+            latent_image['samples'] = comfy.sample.fix_empty_latent_channels(model, latent_image['samples'])
 
             if 'positive' in latent_image and positive is None:
                 positive = copy.deepcopy(latent_image['positive'])
