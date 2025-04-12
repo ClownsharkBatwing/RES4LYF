@@ -232,6 +232,9 @@ class SplitAttentionMask(BaseAttentionMask):
                 t_mask = mask.shape[0]
             elif mask.ndim == 4:
                 if mask.shape[0] > 1:
+                    #cross_mask = 
+                    #F.pad(a.permute(1,2,0), [0,2], value=0).permute(2,0,1)
+
                     cross_mask = mask[0]
                     self_mask  = mask[1]
                     t_mask = mask.shape[-3]

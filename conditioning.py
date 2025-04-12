@@ -709,6 +709,7 @@ class TemporalSplitAttnMask:
     RETURN_NAMES = ("temporal_mask",) 
     FUNCTION     = "main"
     CATEGORY     = "RES4LYF/masks"
+    EXPERIMENTAL = True
     
     def main(self,
             self_attn_midframe = 33,
@@ -730,7 +731,6 @@ class TemporalSplitAttnMask:
         temporal_self_mask[self_attn_midframe  :,...] = 0.0
         temporal_cross_mask[cross_attn_midframe:,...] = 0.0
         
-        
         if self_attn_invert:
             temporal_self_mask  = 1 - temporal_self_mask
             
@@ -740,6 +740,58 @@ class TemporalSplitAttnMask:
         temporal_attn_masks = torch.stack([temporal_cross_mask, temporal_self_mask])
         
         return (temporal_attn_masks,)
+
+
+
+
+class TemporalSplitAttnMask2:
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {"required":
+                    {
+                    "self_attn_start":  ("INT", {"default": 1,  "min": 1, "step": 4, "max": 0xffffffffffffffff}),
+                    "self_attn_stop":   ("INT", {"default": 33, "min": 1, "step": 4, "max": 0xffffffffffffffff}),
+                    "cross_attn_start": ("INT", {"default": 1,  "min": 1, "step": 4, "max": 0xffffffffffffffff}),
+                    "cross_attn_stop":  ("INT", {"default": 33, "min": 1, "step": 4, "max": 0xffffffffffffffff}),
+
+                    "frames":           ("INT", {"default": 65, "min": 1, "step": 4, "max": 0xffffffffffffffff}),
+                    },
+                "optional": 
+                    {
+                    }
+                }
+
+    RETURN_TYPES = ("MASK",)
+    RETURN_NAMES = ("temporal_mask",) 
+    FUNCTION     = "main"
+    CATEGORY     = "RES4LYF/masks"
+    
+    def main(self,
+            self_attn_start  = 0,
+            self_attn_stop   = 33,
+            cross_attn_start = 0,
+            cross_attn_stop  = 33,
+            frames           = 65,
+            ):
+
+        frames = frames // 4 + 1
+        
+        self_attn_start  = self_attn_start  // 4 #+ 1
+        self_attn_stop   = self_attn_stop   // 4 + 1
+        cross_attn_start = cross_attn_start // 4 #+ 1
+        cross_attn_stop  = cross_attn_stop  // 4 + 1
+        
+        temporal_self_mask  = torch.zeros((frames, 1, 1))
+        temporal_cross_mask = torch.zeros((frames, 1, 1))
+
+
+        temporal_self_mask [ self_attn_start: self_attn_stop,...] = 1.0
+        temporal_cross_mask[cross_attn_start:cross_attn_stop,...] = 1.0
+        
+        temporal_attn_masks = torch.stack([temporal_cross_mask, temporal_self_mask])
+        
+        return (temporal_attn_masks,)
+
 
 
 

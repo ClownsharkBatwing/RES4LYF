@@ -29,7 +29,7 @@ from comfy.ldm.aura.mmdit import MMDiT, DiTBlock, MMDiTBlock, SingleAttention, D
 from .aura.mmdit import ReMMDiT, ReDiTBlock, ReMMDiTBlock, ReSingleAttention, ReDoubleAttention
 
 from comfy.ldm.wan.model import WanAttentionBlock, WanI2VCrossAttention, WanModel, WanSelfAttention, WanT2VCrossAttention
-from .wan.model import ReWanAttentionBlock, ReWanI2VCrossAttention, ReWanModel, ReWanRawSelfAttention, ReWanSelfAttention, ReWanT2VCrossAttention, ReWanT2VRawCrossAttention
+from .wan.model import ReWanAttentionBlock, ReWanI2VCrossAttention, ReWanModel, ReWanRawSelfAttention, ReWanSelfAttention, ReWanSlidingSelfAttention, ReWanT2VCrossAttention, ReWanT2VRawCrossAttention
 
 from .latents import get_orthogonal, get_cosine_similarity
 from .res4lyf import RESplain
@@ -74,6 +74,8 @@ class ReWanPatcherAdvanced:
                 "self_attn_blocks" : ("STRING",  {"default": "0,1,2,3,4,5,6,7,8,9,", "multiline": True}),
                 "cross_attn_blocks": ("STRING",  {"default": "all",                  "multiline": True}),
                 "enable"           : ("BOOLEAN", {"default": True}),
+                "sliding_window_self_attn" :  (['false', 'standard', 'circular'], {"default": "false"}),
+                "sliding_window_size": ("INT",   {"default": 15,   "min": 1,    "max": 0xffffffffffffffff}),
             }
         }
     RETURN_TYPES = ("MODEL",)
@@ -81,7 +83,7 @@ class ReWanPatcherAdvanced:
     CATEGORY     = "RES4LYF/model_patches"
     FUNCTION     = "main"
 
-    def main(self, model, self_attn_blocks, cross_attn_blocks, enable=True, force=False):
+    def main(self, model, self_attn_blocks, cross_attn_blocks, sliding_window_self_attn, sliding_window_size, enable=True, force=False):
         
         self_attn_blocks  = parse_range_string(self_attn_blocks)
         cross_attn_blocks = parse_range_string(cross_attn_blocks)
@@ -96,7 +98,12 @@ class ReWanPatcherAdvanced:
             for i, block in enumerate(m.model.diffusion_model.blocks):
                 block.__class__            = ReWanAttentionBlock
                 if i in self_attn_blocks:
-                    block.self_attn.__class__  = ReWanSelfAttention
+                    if sliding_window_self_attn != "false":
+                        block.self_attn.__class__ = ReWanSlidingSelfAttention
+                        block.self_attn.winderz = sliding_window_size
+                        block.self_attn.winderz_type = sliding_window_self_attn
+                    else:
+                        block.self_attn.__class__  = ReWanSelfAttention
                 else:
                     block.self_attn.__class__  = ReWanRawSelfAttention
                 if i in cross_attn_blocks:
@@ -104,7 +111,10 @@ class ReWanPatcherAdvanced:
                         block.cross_attn.__class__ = ReWanT2VCrossAttention
                     else:
                         block.cross_attn.__class__ = ReWanI2VCrossAttention
-                block.idx       = i
+                block.idx            = i
+                block.self_attn.idx  = i
+                block.cross_attn.idx = i # 40 total blocks (i == 39)
+                
         
         elif not enable and model.model.diffusion_model.__class__ == ReWanModel:
             m = model.clone()
@@ -134,11 +144,11 @@ class ReWanPatcher(ReWanPatcherAdvanced):
 
     def main(self, model, enable=True, force=False):
         return super().main(
-            model=model,
-            doublestream_blocks="all",
-            singlestream_blocks="all",
-            enable=enable,
-            force=force
+            model             = model,
+            self_attn_blocks  = "all",
+            cross_attn_blocks = "all",
+            enable            = enable,
+            force             = force
         )    
 
 class ReDoubleStreamBlockNoMask(ReDoubleStreamBlock):
@@ -220,11 +230,11 @@ class ReFluxPatcher(ReFluxPatcherAdvanced):
 
     def main(self, model, enable=True, force=False):
         return super().main(
-            model=model,
-            doublestream_blocks="all",
-            singlestream_blocks="all",
-            enable=enable,
-            force=force
+            model               = model,
+            doublestream_blocks = "all",
+            singlestream_blocks = "all",
+            enable              = enable,
+            force               = force
         )    
 
 class ReJointBlockNoMask(ReJointBlock):
@@ -288,10 +298,10 @@ class ReSD35Patcher(ReSD35PatcherAdvanced):
 
     def main(self, model, enable=True, force=False):
         return super().main(
-            model=model,
-            joint_blocks="all",
-            enable=enable,
-            force=force
+            model        = model,
+            joint_blocks = "all",
+            enable       = enable,
+            force        = force
         )    
 
 class ReDoubleAttentionNoMask(ReDoubleAttention):
@@ -376,11 +386,11 @@ class ReAuraPatcher(ReAuraPatcherAdvanced):
 
     def main(self, model, enable=True, force=False):
         return super().main(
-            model=model,
-            doublelayer_blocks="all",
-            singlelayer_blocks="all",
-            enable=enable,
-            force=force
+            model              = model,
+            doublelayer_blocks = "all",
+            singlelayer_blocks = "all",
+            enable             = enable,
+            force              = force
         )    
 
 
@@ -557,7 +567,7 @@ class ModelSamplingAdvanced:
 
         m.object_patches['model_sampling'] = m.model.model_sampling = ModelSamplingAdvanced(m.model.model_config)
 
-        m.model.model_sampling.__dict__['shift'] = self.timestep_shift
+        m.model.model_sampling.__dict__['shift']      = self.timestep_shift
         m.model.model_sampling.__dict__['multiplier'] = self.multiplier
 
         s_range = torch.arange(1, timesteps + 1, 1).to(torch.float64)
@@ -845,9 +855,6 @@ class TorchCompileModelFluxAdvanced:
             dynamic       = False,
             ):
         
-        if model.model.diffusion_model.__class__ != MMDiT and model.model.diffusion_model.__class__ != ReMMDiT:
-            raise ValueError("Model type is not AuraFlow!")
-        
         single_block_list = self.parse_blocks(single_blocks)
         double_block_list = self.parse_blocks(double_blocks)
         m = model.clone()
@@ -1005,7 +1012,6 @@ class ClownpileModelWanVideo:
                 "skip_self_attn_blocks"     : ("STRING",                  {"default"                 : "0,1,2,3,4,5,6,7,8,9,", "multiline": True, "tooltip": "For WAN only: select self-attn blocks to disable. Due to the size of the self-attn masks, VRAM required to compile blocks using regional WAN is excessive. List any blocks selected in the ReWanPatcher node."}),
                 "compile_transformer_blocks": ("BOOLEAN",                 {"default"                : True,  "tooltip"                    : "Compile all transformer blocks"}),
                 "force_recompile"           : ("BOOLEAN",                 {"default": False, "tooltip": "Force recompile."}),
-
             },
         }
     RETURN_TYPES = ("MODEL",)
@@ -1048,6 +1054,6 @@ class ClownpileModelWanVideo:
                 }
                 setattr(m.model, "compile_settings", compile_settings)
             except:
-                raise RuntimeError("Failed to compile model")
+                raise RuntimeError("Failed to compile model. Verify that this is a WAN model!")
         return (m, )
 
