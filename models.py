@@ -66,6 +66,10 @@ COMPILE_MODES = ["default", "max-autotune", "max-autotune-no-cudagraphs", "reduc
 
 
 class ReWanPatcherAdvanced:
+    def __init__(self):
+        self.sliding_window_size = 0
+        self.sliding_window_self_attn = "false"
+
     @classmethod
     def INPUT_TYPES(s):
         return {
@@ -115,6 +119,11 @@ class ReWanPatcherAdvanced:
                 block.self_attn.idx  = i
                 block.cross_attn.idx = i # 40 total blocks (i == 39)
                 
+        elif enable and (sliding_window_self_attn != self.sliding_window_self_attn or sliding_window_size != self.sliding_window_size) and model.model.diffusion_model.__class__ == ReWanModel:
+            for i, block in enumerate(m.model.diffusion_model.blocks):
+                if i in self_attn_blocks:
+                    block.self_attn.winderz = sliding_window_size
+                    block.self_attn.winderz_type = sliding_window_self_attn
         
         elif not enable and model.model.diffusion_model.__class__ == ReWanModel:
             m = model.clone()
