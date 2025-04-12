@@ -71,6 +71,7 @@ NODE_CLASS_MAPPINGS = {
     "ClownRegionalConditioning_AB"        : conditioning.ClownRegionalConditioning_AB,
 
     "ClownRegionalConditioning3"          : conditioning.ClownRegionalConditioning3,
+    "ClownRegionalConditioning_ABC"       : conditioning.ClownRegionalConditioning_ABC,
 
     "CLIPTextEncodeFluxUnguided"          : conditioning.CLIPTextEncodeFluxUnguided,
     "ConditioningOrthoCollin"             : conditioning.ConditioningOrthoCollin,
