@@ -232,6 +232,8 @@ class SharkSampler:
             # INIT STATE INFO FOR CONTINUING GENERATION ACROSS MULTIPLE SAMPLER NODES
             if latent_image is not None:
                 latent_x['samples'] = latent_image['samples'].clone()
+                if 'noise_mask' in latent_image:
+                    latent_x['noise_mask'] = latent_image['noise_mask'].clone()
                 state_info     = copy.deepcopy(latent_image['state_info']) if 'state_info' in latent_image else {}
             else:
                 state_info = {}
@@ -412,13 +414,9 @@ class SharkSampler:
                 extra_options += sampler.extra_options['extra_options']
                 sampler.extra_options['extra_options'] = extra_options
 
-            batch_size = EO("batch_size", 1)
-            if batch_size > 1:
-                latent_x['samples'] = latent_x['samples'].repeat(batch_size, 1, 1, 1) 
-            
             latent_image_batch = {"samples": latent_x['samples'].clone()}
-            
-            
+            if 'noise_mask' in latent_x and latent_x['noise_mask'] is not None:
+                latent_image_batch['noise_mask'] = latent_x['noise_mask'].clone()
             
             # UNROLL BATCHES
             
