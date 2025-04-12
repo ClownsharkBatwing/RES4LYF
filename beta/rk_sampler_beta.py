@@ -473,9 +473,12 @@ def sample_rk_beta(
             INIT_SAMPLE_LOOP = False
             x_, data_, eps_, eps_prev_ = (torch.zeros(RK.rows+2, *x.shape, dtype=default_dtype, device=work_device) for _ in range(4))
             
-            data_prev_ = state_info.get('data_prev_')
-            if data_prev_ is not None:
-                data_prev_ = state_info['data_prev_'].clone().to(dtype=default_dtype, device=work_device)
+            if sampler_mode in {"unsample", "resample"}:
+                data_prev_ = state_info.get('data_prev_')
+                if data_prev_ is not None:
+                    data_prev_ = state_info['data_prev_'].clone().to(dtype=default_dtype, device=work_device)
+                else:
+                    data_prev_ =  torch.zeros(4, *x.shape, dtype=default_dtype, device=work_device) # multistep max is 4m... so 4 needed
             else:
                 data_prev_ =  torch.zeros(4, *x.shape, dtype=default_dtype, device=work_device) # multistep max is 4m... so 4 needed
             
@@ -921,7 +924,189 @@ def sample_rk_beta(
                                 if LG.guide_mode == "lure" and LG.lgw[step] > 0 and LG.lgw_inv[step] > 0:
                                     eps_[row], data_[row] = RK(x_tmp, s_tmp, x_0, sigma, transformer_options={'latent_type': 'yt'})
                                 else:
-                                    eps_[row], data_[row] = RK(x_tmp, s_tmp, x_0, sigma)
+                                    if EO("t_pad"):
+                                        x_tmp_pad = torch.cat([x_tmp, x_tmp[...,0:1,:,:]], dim=-3)
+                                        x_0_pad   = torch.cat([x_0,   x_0  [...,0:1,:,:]], dim=-3)
+                                        if EO("t_pad_flip"):
+                                            x_tmp_pad    = torch.flip(x_tmp_pad, dims=[-3])
+                                        eps_row_pad, data_row_pad = RK(x_tmp_pad, s_tmp, x_0_pad, sigma)
+                                        if EO("t_pad_flip"):
+                                            eps_row_pad  = torch.flip(eps_row_pad,  dims=[-3])    
+                                            data_row_pad = torch.flip(data_row_pad, dims=[-3])    
+                                        eps_ [row] = eps_row_pad [...,:-1,:,:]
+                                        data_[row] = data_row_pad[...,:-1,:,:]
+                                    if EO("t_prepad"):
+                                        x_tmp_pad = torch.cat([x_tmp[...,-1:,:,:], x_tmp], dim=-3)
+                                        x_0_pad   = torch.cat([x_0  [...,-1:,:,:], x_0  ], dim=-3)
+                                        if EO("t_pad_flip"):
+                                            x_tmp_pad    = torch.flip(x_tmp_pad, dims=[-3])
+                                        eps_row_pad, data_row_pad = RK(x_tmp_pad, s_tmp, x_0_pad, sigma)
+                                        if EO("t_pad_flip"):
+                                            eps_row_pad  = torch.flip(eps_row_pad,  dims=[-3])    
+                                            data_row_pad = torch.flip(data_row_pad, dims=[-3])    
+                                        eps_ [row] = eps_row_pad [...,1:,:,:]
+                                        data_[row] = data_row_pad[...,1:,:,:]
+                                        
+                                    if EO("t_prepostpad"):
+                                        
+                                        x_tmp_pad = torch.cat([x_tmp[...,-1:,:,:], x_tmp], dim=-3)
+                                        x_0_pad   = torch.cat([x_0  [...,-1:,:,:], x_0  ], dim=-3)
+                                        
+                                        x_tmp_pad = torch.cat([x_tmp_pad, x_tmp[...,0:1,:,:]], dim=-3)
+                                        x_0_pad   = torch.cat([x_0_pad,   x_0  [...,0:1,:,:]], dim=-3)
+                                        
+                                        if EO("t_pad_flip"):
+                                            x_tmp_pad    = torch.flip(x_tmp_pad, dims=[-3])
+                                        eps_row_pad, data_row_pad = RK(x_tmp_pad, s_tmp, x_0_pad, sigma)
+                                        if EO("t_pad_flip"):
+                                            eps_row_pad  = torch.flip(eps_row_pad,  dims=[-3])    
+                                            data_row_pad = torch.flip(data_row_pad, dims=[-3])    
+                                        eps_ [row] = eps_row_pad [...,1:-1,:,:]
+                                        data_[row] = data_row_pad[...,1:-1,:,:]
+                                        
+                                    elif EO("t_pad2"):
+                                        x_tmp_pad = torch.cat([x_tmp, x_tmp[...,1:2,:,:]], dim=-3)
+                                        x_0_pad   = torch.cat([x_0,   x_0  [...,1:2,:,:]], dim=-3)
+                                        if EO("t_pad2_flip"):
+                                            x_tmp_pad    = torch.flip(x_tmp_pad, dims=[-3])
+                                        eps_row_pad, data_row_pad = RK(x_tmp_pad, s_tmp, x_0_pad, sigma)
+                                        if EO("t_pad2_flip"):
+                                            eps_row_pad  = torch.flip(eps_row_pad,  dims=[-3])    
+                                            data_row_pad = torch.flip(data_row_pad, dims=[-3])    
+                                        eps_ [row] = eps_row_pad [...,:-1,:,:]
+                                        data_[row] = data_row_pad[...,:-1,:,:]
+                                    elif EO("t_pad3"):
+                                        x_tmp_pad = torch.cat([x_tmp, x_tmp], dim=-3)
+                                        x_0_pad   = torch.cat([x_0,   x_0  ], dim=-3)
+                                        if EO("t_pad3_flip"):
+                                            x_tmp_pad    = torch.flip(x_tmp_pad, dims=[-3])
+                                        eps_row_pad, data_row_pad = RK(x_tmp_pad, s_tmp, x_0_pad, sigma)
+                                        if EO("t_pad3_flip"):
+                                            eps_row_pad  = torch.flip(eps_row_pad,  dims=[-3])    
+                                            data_row_pad = torch.flip(data_row_pad, dims=[-3])    
+                                        eps_ [row] = eps_row_pad [...,:eps_[row].shape[-3],:,:]
+                                        data_[row] = data_row_pad[...,:data_[row].shape[-3],:,:]
+                                    elif EO("t_replace"):
+                                        x_tmp[...,-1:,:,:] = x_tmp[...,0:1,:,:]
+                                        x_0[...,-1:,:,:]   = x_0[...,0:1,:,:]
+                                        eps_[row], data_[row] = RK(x_tmp, s_tmp, x_0, sigma)
+                                    elif EO("t_replace_first_with_last"):
+                                        x_tmp[...,0:1,:,:] = x_tmp[...,-1:,:,:]
+                                        x_0[...,0:1,:,:] = x_0[...,-1:,:,:] 
+                                        eps_[row], data_[row] = RK(x_tmp, s_tmp, x_0, sigma)
+                            
+                                    elif EO("t_rotato"):
+                                        if diag_iter % 2 == 0:
+                                            eps_[row], data_[row] = RK(x_tmp, s_tmp, x_0, sigma)
+                                        else:
+                                            x_tmp_roll = torch.roll(x_tmp, dims=-3, shifts=-1)
+                                            x_0_roll = torch.roll(x_0, dims=-3, shifts=-1)
+                                            eps_row_roll, data_row_roll = RK(x_tmp_roll, s_tmp, x_0_roll, sigma)
+                                            eps_row_roll = torch.roll(eps_row_roll, dims=-3, shifts=1)
+                                            data_row_roll = torch.roll(data_row_roll, dims=-3, shifts=1)
+                                            eps_[row] = eps_row_roll
+                                            data_[row] = data_row_roll
+                                            
+                                    elif EO("t_rotato_pos"):
+                                        if diag_iter % 2 == 0:
+                                            eps_[row], data_[row] = RK(x_tmp, s_tmp, x_0, sigma)
+                                        else:
+                                            x_tmp_roll = torch.roll(x_tmp, dims=-3, shifts=1)
+                                            x_0_roll = torch.roll(x_0, dims=-3, shifts=1)
+                                            eps_row_roll, data_row_roll = RK(x_tmp_roll, s_tmp, x_0_roll, sigma)
+                                            eps_row_roll = torch.roll(eps_row_roll, dims=-3, shifts=-1)
+                                            data_row_roll = torch.roll(data_row_roll, dims=-3, shifts=-1)
+                                            eps_[row] = eps_row_roll
+                                            data_[row] = data_row_roll
+                                    
+                                    elif EO("t_stitch"):
+                                        t_blk0_end = EO("t_blk0_end", 11)
+                                        t_blk1_start = EO("t_blk1_start", 10)
+                                        
+                                        eps_row_blk0, data_row_blk0 = RK(x_tmp[...,:t_blk0_end   ,:,:], s_tmp, x_0[...,:t_blk0_end   ,:,:], sigma)
+                                        eps_row_blk1, data_row_blk1 = RK(x_tmp[..., t_blk1_start:,:,:], s_tmp, x_0[... ,t_blk1_start:,:,:], sigma)
+                                        
+                                        eps_ [row] = torch.cat([ eps_row_blk0[...,:t_blk0_end,:,:] ,  eps_row_blk1[...,t_blk0_end-t_blk1_start:,:,:]], dim=-3)
+                                        data_[row] = torch.cat([data_row_blk0[...,:t_blk0_end,:,:] , data_row_blk1[...,t_blk0_end-t_blk1_start:,:,:]], dim=-3)
+                                        
+                                    elif EO("t_stitch_end"):
+                                        t_blk0_end = EO("t_blk0_end", 11)
+                                        t_blk1_start = EO("t_blk1_start", 10)
+                                        
+                                        eps_row_blk0, data_row_blk0 = RK(x_tmp[...,:t_blk0_end   ,:,:], s_tmp, x_0[...,:t_blk0_end   ,:,:], sigma)
+                                        eps_row_blk1, data_row_blk1 = RK(x_tmp[..., t_blk1_start:,:,:], s_tmp, x_0[... ,t_blk1_start:,:,:], sigma)
+                                        
+                                        eps_ [row] = torch.cat([ eps_row_blk0[...,:t_blk1_start,:,:] ,  eps_row_blk1], dim=-3)
+                                        data_[row] = torch.cat([data_row_blk0[...,:t_blk1_start,:,:] , data_row_blk1], dim=-3)
+                                        
+                                        
+                                    elif EO("t_stitch_avg"):
+                                        t_blk0_end = EO("t_blk0_end", 11)
+                                        t_blk1_start = EO("t_blk1_start", 10)
+                                        
+                                        eps_row_blk0, data_row_blk0 = RK(x_tmp[...,:t_blk0_end   ,:,:], s_tmp, x_0[...,:t_blk0_end   ,:,:], sigma)
+                                        eps_row_blk1, data_row_blk1 = RK(x_tmp[..., t_blk1_start:,:,:], s_tmp, x_0[... ,t_blk1_start:,:,:], sigma)
+                                        
+                                        eps_ [row] = torch.cat([
+                                            eps_row_blk0[...,:t_blk1_start,:,:] ,  
+                                            
+                                            (eps_row_blk0[...,t_blk1_start:,:,:]  +  eps_row_blk1[...,:t_blk0_end-t_blk1_start,:,:]) / 2,
+                                            
+                                            eps_row_blk1[...,t_blk0_end-t_blk1_start:,:,:]
+                                            ], dim=-3)
+                                        
+                                        data_[row] = torch.cat([
+                                            data_row_blk0[...,:t_blk1_start,:,:] , 
+                                            
+                                            (data_row_blk0[...,t_blk1_start:,:,:] + data_row_blk1[...,:t_blk0_end-t_blk1_start,:,:]) / 2,
+
+                                            data_row_blk1[...,t_blk0_end-t_blk1_start:,:,:]
+                                            ], dim=-3)
+                                        
+                                    elif EO("t_stitch_slerp"):
+                                        t_blk0_end = EO("t_blk0_end", 11)
+                                        t_blk1_start = EO("t_blk1_start", 10)
+                                        
+                                        eps_row_blk0, data_row_blk0 = RK(x_tmp[...,:t_blk0_end   ,:,:], s_tmp, x_0[...,:t_blk0_end   ,:,:], sigma)
+                                        eps_row_blk1, data_row_blk1 = RK(x_tmp[..., t_blk1_start:,:,:], s_tmp, x_0[... ,t_blk1_start:,:,:], sigma)
+                                        
+                                        eps_ [row] = torch.cat([
+                                            eps_row_blk0[...,:t_blk1_start,:,:] ,  
+                                            
+                                            slerp_tensor(0.5, eps_row_blk0[...,t_blk1_start:,:,:], eps_row_blk1[...,:t_blk0_end-t_blk1_start,:,:]),
+                                            
+                                            eps_row_blk1[...,t_blk0_end-t_blk1_start:,:,:]
+                                            ], dim=-3)
+                                        
+                                        data_[row] = torch.cat([
+                                            data_row_blk0[...,:t_blk1_start,:,:] , 
+                                            
+                                            slerp_tensor(0.5, data_row_blk0[...,t_blk1_start:,:,:], data_row_blk1[...,:t_blk0_end-t_blk1_start,:,:]),
+
+                                            data_row_blk1[...,t_blk0_end-t_blk1_start:,:,:]
+                                            ], dim=-3)
+                                        
+                                    
+                                    elif not EO("t_roll"):
+                                        eps_[row], data_[row] = RK(x_tmp, s_tmp, x_0, sigma)
+                                    elif step % 2 == 0:
+                                        eps_[row], data_[row] = RK(x_tmp, s_tmp, x_0, sigma)
+                                    else:
+                                        #import einops
+                                        #b, c, t, h, w = x.shape
+                                        #patches = einops.rearrange(x, "b c (t h w) c -> b t (h w) c", h=30, w=30)
+                                        x_tmp_roll = torch.roll(x_tmp, dims=-3, shifts=-1)
+                                        x_0_roll = torch.roll(x_0, dims=-3, shifts=-1)
+                                        eps_row_roll, data_row_roll = RK(x_tmp_roll, s_tmp, x_0_roll, sigma)
+                                        eps_row_roll = torch.roll(eps_row_roll, dims=-3, shifts=1)
+                                        data_row_roll = torch.roll(data_row_roll, dims=-3, shifts=1)
+                                        eps_[row] = eps_row_roll
+                                        data_[row] = data_row_roll
+                                        #eps_[row] = (eps_[row] + eps_row_roll) / 2
+                                        #data_[row] = (data_[row] + data_row_roll) / 2
+                                        
+                                        
+
 
                             if LG.guide_mode.startswith("lure") and LG.lgw[step] > 0 and LG.lgw_inv[step] > 0:
                                 x_tmp = LG.process_guides_data_substep(x_tmp, data_[row], step, s_tmp)
