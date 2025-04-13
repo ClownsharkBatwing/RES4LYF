@@ -235,8 +235,13 @@ class CrossAttentionMask(BaseAttentionMask):
                     #F.pad(a.permute(1,2,0), [0,2], value=0).permute(2,0,1)
 
                     cross_mask = mask[0]
-                    self_mask  = mask[1]
-                    t_mask = mask.shape[-3]
+                    if cross_mask.shape[-3] > self.t:
+                        cross_mask = cross_mask[:self.t,...]
+                    elif cross_mask.shape[-3] < self.t:
+                        cross_mask = F.pad(cross_mask.permute(1,2,0), [0,self.t-cross_mask.shape[-3]], value=0).permute(2,0,1)
+                    #self_mask  = mask[1]
+                    #t_mask = mask.shape[-3]
+                    t_mask = self.t
                 else:
                     t_mask = mask.shape[-3]
                     mask.squeeze_(0)

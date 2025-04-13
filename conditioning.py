@@ -795,6 +795,43 @@ class TemporalSplitAttnMask2:
 
 
 
+class TemporalCrossAttnMask:
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {"required":
+                    {
+                    "cross_attn_start": ("INT", {"default": 1,  "min": 1, "step": 4, "max": 0xffffffffffffffff}),
+                    "cross_attn_stop":  ("INT", {"default": 33, "min": 1, "step": 4, "max": 0xffffffffffffffff}),
+                    },
+                "optional": 
+                    {
+                    }
+                }
+
+    RETURN_TYPES = ("MASK",)
+    RETURN_NAMES = ("temporal_mask",) 
+    FUNCTION     = "main"
+    CATEGORY     = "RES4LYF/masks"
+    
+    def main(self,
+            cross_attn_start = 0,
+            cross_attn_stop  = 33,
+            ):
+        
+        cross_attn_start = cross_attn_start // 4 #+ 1
+        cross_attn_stop  = cross_attn_stop  // 4 + 1
+        
+        temporal_self_mask  = torch.zeros((cross_attn_stop, 1, 1))  # dummy to satisfy stack
+        temporal_cross_mask = torch.zeros((cross_attn_stop, 1, 1))
+
+        temporal_cross_mask[cross_attn_start:cross_attn_stop,...] = 1.0
+        
+        temporal_attn_masks = torch.stack([temporal_cross_mask, temporal_self_mask])
+        
+        return (temporal_attn_masks,)
+
+
+
 
 @dataclass
 class RegionalParameters:

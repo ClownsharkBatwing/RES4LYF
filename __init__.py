@@ -94,6 +94,7 @@ NODE_CLASS_MAPPINGS = {
     "TemporalMaskGenerator"               : conditioning.TemporalMaskGenerator,
     "TemporalSplitAttnMask"               : conditioning.TemporalSplitAttnMask,
     "TemporalSplitAttnMask2"              : conditioning.TemporalSplitAttnMask2,
+    "TemporalCrossAttnMask"               : conditioning.TemporalCrossAttnMask,
 
 
 
