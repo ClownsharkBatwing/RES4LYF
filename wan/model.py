@@ -185,7 +185,7 @@ class ReWanSlidingSelfAttention(nn.Module):
 
             token_indices = torch.tensor(token_indices, device=q.device)
 
-            x = attention_pytorch(
+            x = optimized_attention(
                 q_[:, q_start:q_end, :],           # [B, img_len, C]
                 k_.index_select(1, token_indices), # [B, window_size * img_len, C]
                 v .index_select(1, token_indices),
