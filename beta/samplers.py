@@ -168,13 +168,15 @@ class SharkSampler:
                 if positive is not None and 'control' in positive[0][1]:
                     for i in range(len(positive)):
                         positive[i][1]['control']      = latent_image['positive'][i][1]['control']
-                        positive[i][1]['control'].base = latent_image['positive'][i][1]['control'].base
+                        if hasattr(latent_image['positive'][i][1]['control'], 'base'):
+                            positive[i][1]['control'].base = latent_image['positive'][i][1]['control'].base
             if 'negative' in latent_image and negative is None:
                 negative = copy.deepcopy(latent_image['negative'])
                 if negative is not None and 'control' in negative[0][1]:
                     for i in range(len(negative)):
                         negative[i][1]['control']      = latent_image['negative'][i][1]['control']
-                        negative[i][1]['control'].base = latent_image['negative'][i][1]['control'].base
+                        if hasattr(latent_image['negative'][i][1]['control'], 'base'):
+                            negative[i][1]['control'].base = latent_image['negative'][i][1]['control'].base
             if 'sampler' in latent_image and sampler is None:
                 sampler = copy.deepcopy(latent_image['sampler'])  #.clone()
             if 'steps_to_run' in sampler.extra_options:
