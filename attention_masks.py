@@ -208,6 +208,66 @@ class FullAttentionMask(BaseAttentionMask):
 
 
 
+class CrossAttentionMask(BaseAttentionMask):
+    def generate(self, mask_type=None, dtype=None):
+        mask_type = self.mask_type if mask_type is None else mask_type
+        dtype     = self.dtype     if dtype     is None else dtype
+        text_off  = self.text_off
+        text_len  = self.text_len
+        img_len   = self.img_len
+        t         = self.t
+        h         = self.h
+        w         = self.w
+        
+        cross_attn_mask = torch.zeros((t * img_len,    text_len), dtype=dtype)
+    
+        prev_len = 0
+        for context_len, mask in zip(self.context_lens, self.masks):
+
+            cross_mask, self_mask = None, None
+            if mask.ndim == 6:
+                mask.squeeze_(0)
+            if mask.ndim == 3:
+                t_mask = mask.shape[0]
+            elif mask.ndim == 4:
+                if mask.shape[0] > 1:
+                    #cross_mask = 
+                    #F.pad(a.permute(1,2,0), [0,2], value=0).permute(2,0,1)
+
+                    cross_mask = mask[0]
+                    self_mask  = mask[1]
+                    t_mask = mask.shape[-3]
+                else:
+                    t_mask = mask.shape[-3]
+                    mask.squeeze_(0)
+            elif mask.ndim == 5:
+                t_mask = mask.shape[-3]
+            else:
+                t_mask = 1
+                mask.unsqueeze_(0)
+                
+            if cross_mask is not None:
+                img2txt_mask    = torch.nn.functional.interpolate(cross_mask.unsqueeze(0).unsqueeze(0).to(torch.float16), (t_mask, h, w), mode='nearest-exact').to(dtype).flatten().unsqueeze(1)
+            else:
+                img2txt_mask    = torch.nn.functional.interpolate(      mask.unsqueeze(0).unsqueeze(0).to(torch.float16), (t_mask, h, w), mode='nearest-exact').to(dtype).flatten().unsqueeze(1)
+            
+            if t_mask == 1: # ...why only if == 1?
+                img2txt_mask = img2txt_mask.repeat(1, context_len)   
+
+            curr_len = prev_len + context_len
+            
+            if t_mask == 1:
+                cross_attn_mask[:, prev_len:curr_len] = img2txt_mask.repeat(t,1)
+            else:
+                cross_attn_mask[:, prev_len:curr_len] = img2txt_mask
+            
+            prev_len = curr_len
+                            
+        self.attn_mask = CoreAttnMask(cross_attn_mask, mask_type=mask_type)
+
+
+
+
 class SplitAttentionMask(BaseAttentionMask):
     def generate(self, mask_type=None, dtype=None):
         mask_type = self.mask_type if mask_type is None else mask_type

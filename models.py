@@ -75,8 +75,9 @@ class ReWanPatcherAdvanced:
         return {
             "required": { 
                 "model"            : ("MODEL",),
-                "self_attn_blocks" : ("STRING",  {"default": "0,1,2,3,4,5,6,7,8,9,", "multiline": True}),
-                "cross_attn_blocks": ("STRING",  {"default": "all",                  "multiline": True}),
+                #"self_attn_blocks" : ("STRING",  {"default": "0,1,2,3,4,5,6,7,8,9,", "multiline": True}),
+                "self_attn_blocks" : ("STRING",  {"default": "all", "multiline": True}),
+                "cross_attn_blocks": ("STRING",  {"default": "all", "multiline": True}),
                 "enable"           : ("BOOLEAN", {"default": True}),
                 "sliding_window_self_attn" :  (['false', 'standard', 'circular'], {"default": "false"}),
                 "sliding_window_size": ("INT",   {"default": 15,   "min": 1,    "max": 0xffffffffffffffff}),

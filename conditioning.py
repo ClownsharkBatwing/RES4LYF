@@ -961,9 +961,12 @@ class ClownRegionalConditioning:
             positive = copy.deepcopy(positive_masked)
             positive[0][0] = (positive_masked[0][0][:,:positive_min_tokens,:] + positive_unmasked[0][0][:,:positive_min_tokens,:]) / 2
             
-            from .attention_masks import FullAttentionMask, SplitAttentionMask, RegionalContext
+            from .attention_masks import FullAttentionMask, CrossAttentionMask, SplitAttentionMask, RegionalContext
             if isinstance(model.model.model_config, comfy.supported_models.WAN21_T2V) or isinstance(model.model.model_config, comfy.supported_models.WAN21_I2V):
-                AttnMask = SplitAttentionMask(mask_type)
+                if model.model.diffusion_model.blocks[0].self_attn.winderz_type != "false":
+                    AttnMask = CrossAttentionMask(mask_type)
+                else:
+                    AttnMask = SplitAttentionMask(mask_type)
             else:
                 AttnMask = FullAttentionMask(mask_type)
             AttnMask.add_region(positive_masked  [0][0],   mask)
@@ -1185,9 +1188,12 @@ class ClownRegionalConditioning_AB:
             positive = copy.deepcopy(positive_masked)
             positive[0][0] = (positive_masked[0][0][:,:positive_min_tokens,:] + positive_unmasked[0][0][:,:positive_min_tokens,:]) / 2
             
-            from .attention_masks import FullAttentionMask, SplitAttentionMask, RegionalContext
+            from .attention_masks import FullAttentionMask, CrossAttentionMask, SplitAttentionMask, RegionalContext
             if isinstance(model.model.model_config, comfy.supported_models.WAN21_T2V) or isinstance(model.model.model_config, comfy.supported_models.WAN21_I2V):
-                AttnMask = SplitAttentionMask(mask_type)
+                if model.model.diffusion_model.blocks[0].self_attn.winderz_type != "false":
+                    AttnMask = CrossAttentionMask(mask_type)
+                else:
+                    AttnMask = SplitAttentionMask(mask_type)
             else:
                 AttnMask = FullAttentionMask(mask_type)
             AttnMask.add_region(positive_masked  [0][0],   mask)
@@ -1423,9 +1429,12 @@ class ClownRegionalConditioning3:
             positive = copy.deepcopy(positive_A)
             positive[0][0] = (positive_A[0][0][:,:positive_min_tokens,:] + positive_B[0][0][:,:positive_min_tokens,:] + positive_unmasked[0][0][:,:positive_min_tokens,:]) / 3
             
-            from .attention_masks import FullAttentionMask, SplitAttentionMask, RegionalContext
+            from .attention_masks import FullAttentionMask, CrossAttentionMask, SplitAttentionMask, RegionalContext
             if isinstance(model.model.model_config, comfy.supported_models.WAN21_T2V) or isinstance(model.model.model_config, comfy.supported_models.WAN21_I2V):
-                AttnMask = SplitAttentionMask(mask_type)
+                if model.model.diffusion_model.blocks[0].self_attn.winderz_type != "false":
+                    AttnMask = CrossAttentionMask(mask_type)
+                else:
+                    AttnMask = SplitAttentionMask(mask_type)
             else:
                 AttnMask = FullAttentionMask(mask_type)
             AttnMask.add_region(positive_A       [0][0], mask_A)
@@ -1732,9 +1741,12 @@ class ClownRegionalConditioning_ABC:
             positive = copy.deepcopy(positive_A)
             positive[0][0] = (positive_A[0][0][:,:positive_min_tokens,:] + positive_B[0][0][:,:positive_min_tokens,:] + positive_unmasked[0][0][:,:positive_min_tokens,:]) / 3
             
-            from .attention_masks import FullAttentionMask, SplitAttentionMask, RegionalContext
+            from .attention_masks import FullAttentionMask, CrossAttentionMask, SplitAttentionMask, RegionalContext
             if isinstance(model.model.model_config, comfy.supported_models.WAN21_T2V) or isinstance(model.model.model_config, comfy.supported_models.WAN21_I2V):
-                AttnMask = SplitAttentionMask(mask_type)
+                if model.model.diffusion_model.blocks[0].self_attn.winderz_type != "false":
+                    AttnMask = CrossAttentionMask(mask_type)
+                else:
+                    AttnMask = SplitAttentionMask(mask_type)
             else:
                 AttnMask = FullAttentionMask(mask_type)
             AttnMask.add_region(positive_A       [0][0], mask_A)
