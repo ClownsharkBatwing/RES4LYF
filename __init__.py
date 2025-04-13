@@ -276,70 +276,75 @@ flags = {
 
 
 try:
-    zampler_module = importlib.import_module("RES4LYF.zampler")
     from .zampler import add_zamplers
     NODE_CLASS_MAPPINGS, extra_samplers = add_zamplers(NODE_CLASS_MAPPINGS, extra_samplers)
     flags["zampler"] = True
     RESplain("Importing zampler.")
-except ImportError as e:
-    #RESplain("Failed to import zampler.", debug=True)
+except ImportError:
     try:
-        zampler_module = importlib.import_module("res4lyf.zampler")
-        from .zampler import add_zamplers
-        NODE_CLASS_MAPPINGS, extra_samplers = add_zamplers(NODE_CLASS_MAPPINGS, extra_samplers)
-        flags["zampler"] = True
-        RESplain("Importing zampler.")
-    except ImportError as e:
-        #RESplain("Failed to import zampler.", debug=True)
-        print(f"Failed to import zamplers: {e}")
-        pass
-
-    #print(f"Failed to import zamplers: {e}")
-    pass
-
+        import importlib
+        for module_name in ["RES4LYF.zampler", "res4lyf.zampler"]:
+            try:
+                zampler_module = importlib.import_module(module_name)
+                add_zamplers = zampler_module.add_zamplers
+                NODE_CLASS_MAPPINGS, extra_samplers = add_zamplers(NODE_CLASS_MAPPINGS, extra_samplers)
+                flags["zampler"] = True
+                RESplain(f"Importing zampler via {module_name}.")
+                break
+            except ImportError:
+                continue
+        else:
+            raise ImportError("Zampler module not found in any path")
+    except Exception as e:
+        print(f"(RES4LYF) Failed to import zamplers: {e}")
 
 
 try:
-    legacy_module = importlib.import_module("RES4LYF.legacy")
     from .legacy import add_legacy
     NODE_CLASS_MAPPINGS, extra_samplers = add_legacy(NODE_CLASS_MAPPINGS, extra_samplers)
     flags["legacy_samplers"] = True
     RESplain("Importing legacy samplers.")
-except Exception as e:
+except ImportError:
     try:
-        legacy_module = importlib.import_module("res4lyf.legacy")
-        from .legacy import add_legacy
-        NODE_CLASS_MAPPINGS, extra_samplers = add_legacy(NODE_CLASS_MAPPINGS, extra_samplers)
-        flags["legacy_samplers"] = True
-        RESplain("Importing legacy samplers.")
+        import importlib
+        for module_name in ["RES4LYF.legacy", "res4lyf.legacy"]:
+            try:
+                legacy_module = importlib.import_module(module_name)
+                add_legacy = legacy_module.add_legacy
+                NODE_CLASS_MAPPINGS, extra_samplers = add_legacy(NODE_CLASS_MAPPINGS, extra_samplers)
+                flags["legacy_samplers"] = True
+                RESplain(f"Importing legacy samplers via {module_name}.")
+                break
+            except ImportError:
+                continue
+        else:
+            raise ImportError("Legacy module not found in any path")
     except Exception as e:
-        #RESplain("Failed to import legacy samplers", debug=False)
         print(f"(RES4LYF) Failed to import legacy samplers: {e}")
-
-    #RESplain("Failed to import legacy samplers", debug=False)
-    #print(f"(RES4LYF) Failed to import legacy samplers: {e}")
-
 
 
 try:
-    beta_module = importlib.import_module("RES4LYF.beta")
     from .beta import add_beta
     NODE_CLASS_MAPPINGS, extra_samplers = add_beta(NODE_CLASS_MAPPINGS, extra_samplers)
     flags["beta_samplers"] = True
     RESplain("Importing beta samplers.")
-except Exception as e:
+except ImportError:
     try:
-        beta_module = importlib.import_module("res4lyf.beta")
-        from .beta import add_beta
-        NODE_CLASS_MAPPINGS, extra_samplers = add_beta(NODE_CLASS_MAPPINGS, extra_samplers)
-        flags["beta_samplers"] = True
-        RESplain("Importing beta samplers.")
+        import importlib
+        for module_name in ["RES4LYF.beta", "res4lyf.beta"]:
+            try:
+                beta_module = importlib.import_module(module_name)
+                add_beta = beta_module.add_beta
+                NODE_CLASS_MAPPINGS, extra_samplers = add_beta(NODE_CLASS_MAPPINGS, extra_samplers)
+                flags["beta_samplers"] = True
+                RESplain(f"Importing beta samplers via {module_name}.")
+                break
+            except ImportError:
+                continue
+        else:
+            raise ImportError("Beta module not found in any path")
     except Exception as e:
-        #RESplain("Failed to import legacy samplers", debug=False)
         print(f"(RES4LYF) Failed to import beta samplers: {e}")
-
-    #RESplain("Failed to import legacy samplers", debug=False)
-    #print(f"(RES4LYF) Failed to import beta samplers: {e}")
 
 
 
