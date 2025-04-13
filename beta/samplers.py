@@ -510,11 +510,13 @@ class SharkSampler:
                     for i in range(len(neg_cond)): # crude fix for copy.deepcopy converting superclass into real object
                         if 'control' in neg_cond[i][1]:
                             neg_cond[i][1]['control']          = negative[i][1]['control']
-                            neg_cond[i][1]['control'].base     = negative[i][1]['control'].base
+                            if hasattr(negative[i][1]['control'], 'base'):
+                                neg_cond[i][1]['control'].base     = negative[i][1]['control'].base
                     for i in range(len(pos_cond)): # crude fix for copy.deepcopy converting superclass into real object
                         if 'control' in pos_cond[i][1]:
                             pos_cond_tmp[i][1]['control']      = positive[i][1]['control']
-                            pos_cond_tmp[i][1]['control'].base = positive[i][1]['control'].base
+                            if hasattr(positive[i][1]['control'], 'base'):
+                                pos_cond_tmp[i][1]['control'].base = positive[i][1]['control'].base
 
                     guider = SharkGuider(work_model)
                     flow_cond = options_mgr.get('flow_cond', {})
