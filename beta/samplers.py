@@ -589,7 +589,7 @@ class SharkSampler:
             out['model']    = work_model.clone()
             out['sampler']  = sampler
             
-            gc.collect()
+            #gc.collect()
 
             return (out, out_denoised, sde_noise,)
 
@@ -657,35 +657,35 @@ class SharkSampler_Beta:
     CATEGORY     = "RES4LYF/samplers"
     
     def main(self, 
-            model                                       = None,
-            cfg                : float                  = 5.5, 
-            scheduler          : str                    = "beta57", 
-            steps              : int                    = 30, 
-            steps_to_run       : int                    = -1,
-            sampler_mode       : str                    = "standard",
-            denoise            : float                  = 1.0, 
-            denoise_alt        : float                  = 1.0,
-            noise_type_init    : str                    = "gaussian",
-            latent_image       : Optional[dict[Tensor]] = None,
+            model                                    = None,
+            cfg             : float                  =  5.5, 
+            scheduler       : str                    = "beta57", 
+            steps           : int                    = 30, 
+            steps_to_run    : int                    = -1,
+            sampler_mode    : str                    = "standard",
+            denoise         : float                  =  1.0, 
+            denoise_alt     : float                  =  1.0,
+            noise_type_init : str                    = "gaussian",
+            latent_image    : Optional[dict[Tensor]] = None,
             
-            positive                                    = None,
-            negative                                    = None,
-            sampler                                     = None,
-            sigmas             : Optional[Tensor]       = None,
-            noise_stdev        : float                  = 1.0,
-            noise_mean         : float                  = 0.0,
-            noise_normalize    : bool                   = True,
+            positive                                 = None,
+            negative                                 = None,
+            sampler                                  = None,
+            sigmas          : Optional[Tensor]       = None,
+            noise_stdev     : float                  =  1.0,
+            noise_mean      : float                  =  0.0,
+            noise_normalize : bool                   = True,
             
-            d_noise            : float                  =  1.0,
-            alpha_init         : float                  = -1.0,
-            k_init             : float                  = 1.0,
-            cfgpp              : float                  = 0.0,
-            seed               : int                    = -1,
-            options                                     = None,
-            sde_noise                                   = None,
-            sde_noise_steps    : int                    = 1,
+            d_noise         : float                  =  1.0,
+            alpha_init      : float                  = -1.0,
+            k_init          : float                  =  1.0,
+            cfgpp           : float                  =  0.0,
+            seed            : int                    = -1,
+            options                                  = None,
+            sde_noise                                = None,
+            sde_noise_steps : int                    =  1,
         
-            extra_options      : str                    = "", 
+            extra_options   : str                    = "", 
             **kwargs,
             ): 
         
@@ -782,16 +782,15 @@ class SharkUnsampler_Beta(SharkSampler_Beta):
     def INPUT_TYPES(cls):
         return {
             "required": {
-                "steps_to_run":    ("INT",                        {"default": -1,  "min": -1,       "max": MAX_STEPS}),
+                "steps_to_run": ("INT", {"default": -1,  "min": -1, "max": MAX_STEPS}),
                 },
             "optional": {
-                "model":           ("MODEL",),
-                "positive":        ("CONDITIONING", ),
-                #"negative":        ("CONDITIONING", ),
-                "sampler":         ("SAMPLER", ),
-                "sigmas":          ("SIGMAS", ),
-                "latent_image":    ("LATENT", ),     
-                "options":         ("OPTIONS", ),   
+                "model":        ("MODEL",),
+                "positive":     ("CONDITIONING", ),
+                "sampler":      ("SAMPLER", ),
+                "sigmas":       ("SIGMAS", ),
+                "latent_image": ("LATENT", ),     
+                "options":      ("OPTIONS", ),   
                 }
             }
 
@@ -826,7 +825,7 @@ class ClownSamplerAdvanced_Beta:
                     "eta_substep":            ("FLOAT",                      {"default": 0.5, "min": -100.0, "max": 100.0, "step":0.01, "round": False, "tooltip": "Calculated noise amount to be added, then removed, after each step."}),
                     "overshoot":              ("FLOAT",                      {"default": 0.0, "min": -100.0, "max": 100.0, "step":0.01, "round": False, "tooltip": "Boost the size of each denoising step, then rescale to match the original. Has a softening effect."}),
                     "overshoot_substep":      ("FLOAT",                      {"default": 0.0, "min": -100.0, "max": 100.0, "step":0.01, "round": False, "tooltip": "Boost the size of each denoising substep, then rescale to match the original. Has a softening effect."}),
-                    "noise_scaling_weight":  ("FLOAT",                      {"default": 0.0, "min": -100.0, "max": 100.0, "step":0.01, "round": False, "tooltip": "Set to positive values to create a sharper, grittier, more detailed image. Set to negative values to soften and deepen the colors."}),
+                    "noise_scaling_weight":   ("FLOAT",                      {"default": 0.0, "min": -100.0, "max": 100.0, "step":0.01, "round": False, "tooltip": "Set to positive values to create a sharper, grittier, more detailed image. Set to negative values to soften and deepen the colors."}),
                     "noise_boost_step":       ("FLOAT",                      {"default": 0.0, "min": -100.0, "max": 100.0, "step":0.01, "round": False, "tooltip": "Set to positive values to create a sharper, grittier, more detailed image. Set to negative values to soften and deepen the colors."}),
                     "noise_boost_substep":    ("FLOAT",                      {"default": 0.0, "min": -100.0, "max": 100.0, "step":0.01, "round": False, "tooltip": "Set to positive values to create a sharper, grittier, more detailed image. Set to negative values to soften and deepen the colors."}),
                     "noise_anchor":           ("FLOAT",                      {"default": 1.0, "min": -100.0, "max": 100.0, "step":0.01, "round": False, "tooltip": "Typically set to between 1.0 and 0.0. Lower values cerate a grittier, more detailed image."}),
@@ -870,7 +869,7 @@ class ClownSamplerAdvanced_Beta:
 
 
 
-            noise_scaling_weight         : float = 0.0,
+            noise_scaling_weight          : float = 0.0,
             noise_scaling_type            : str   = "sampler",
             noise_scaling_mode            : str   = "linear",
             noise_scaling_eta             : float = 0.0,
@@ -1095,7 +1094,7 @@ class ClownSamplerAdvanced_Beta:
                     
                     
                     
-                    "noise_scaling_weight"         : noise_scaling_weight,
+                    "noise_scaling_weight"          : noise_scaling_weight,
                     "noise_scaling_type"            : noise_scaling_type,
                     "noise_scaling_mode"            : noise_scaling_mode,
                     "noise_scaling_eta"             : noise_scaling_eta,
@@ -1350,7 +1349,7 @@ class ClownsharKSampler_Beta:
         
         
     
-        noise_scaling_weight  = options_mgr.get('noise_scaling_weight' , noise_scaling_weight)
+        noise_scaling_weight   = options_mgr.get('noise_scaling_weight' , noise_scaling_weight)
         noise_scaling_type     = options_mgr.get('noise_scaling_type'    , noise_scaling_type)
         noise_scaling_mode     = options_mgr.get('noise_scaling_mode'    , noise_scaling_mode)
         noise_scaling_eta      = options_mgr.get('noise_scaling_eta'     , noise_scaling_eta)
@@ -1367,7 +1366,7 @@ class ClownsharKSampler_Beta:
         s_noise                = options_mgr.get('s_noise'               , s_noise)
         s_noise_substep        = options_mgr.get('s_noise_substep'       , s_noise_substep)
         d_noise                = options_mgr.get('d_noise'               , d_noise)
-        d_noise_start_step           = options_mgr.get('d_noise_start_step'          , d_noise_start_step)
+        d_noise_start_step     = options_mgr.get('d_noise_start_step'          , d_noise_start_step)
         d_noise_inv            = options_mgr.get('d_noise_inv'           , d_noise_inv)
         d_noise_inv_start_step = options_mgr.get('d_noise_inv_start_step', d_noise_inv_start_step)
         
@@ -1474,7 +1473,7 @@ class ClownsharKSampler_Beta:
 
 
 
-            noise_scaling_weight         = noise_scaling_weight,
+            noise_scaling_weight          = noise_scaling_weight,
             noise_scaling_type            = noise_scaling_type,
             noise_scaling_mode            = noise_scaling_mode,
             noise_scaling_eta             = noise_scaling_eta,
@@ -1557,33 +1556,33 @@ class ClownsharkChainsampler_Beta(ClownsharKSampler_Beta):
     def INPUT_TYPES(cls):
         return {
             "required": {
-                "eta":          ("FLOAT",                      {"default": 0.5, "min": -100.0, "max": 100.0,     "step":0.01, "round": False, "tooltip": "Calculated noise amount to be added, then removed, after each step."}),
-                "sampler_name": (get_sampler_name_list     (), {"default": get_default_sampler_name()}), 
-                "steps_to_run": ("INT",                        {"default": -1,  "min": -1,       "max": MAX_STEPS}),
-                "cfg":          ("FLOAT",                      {"default": 5.5, "min": -10000.0, "max": 10000.0, "step":0.01, "round": False, "tooltip": "Negative values use channelwise CFG." }),
-                "sampler_mode": (['unsample', 'resample'], {"default": "resample"}),
-                "bongmath":     ("BOOLEAN",                    {"default": True}),
+                "eta":          ("FLOAT",                 {"default": 0.5, "min": -100.0, "max": 100.0,     "step":0.01, "round": False, "tooltip": "Calculated noise amount to be added, then removed, after each step."}),
+                "sampler_name": (get_sampler_name_list(), {"default": get_default_sampler_name()}), 
+                "steps_to_run": ("INT",                   {"default": -1,  "min": -1,       "max": MAX_STEPS}),
+                "cfg":          ("FLOAT",                 {"default": 5.5, "min": -10000.0, "max": 10000.0, "step":0.01, "round": False, "tooltip": "Negative values use channelwise CFG." }),
+                "sampler_mode": (['unsample', 'resample'],{"default": "resample"}),
+                "bongmath":     ("BOOLEAN",               {"default": True}),
                 },
             "optional": {
-                "model":           ("MODEL",),
-                "positive":        ("CONDITIONING", ),
-                "negative":        ("CONDITIONING", ),
-                #"sampler":         ("SAMPLER", ),
-                "sigmas":          ("SIGMAS", ),
-                "latent_image":    ("LATENT", ),     
-                "guides":          ("GUIDES", ),   
-                "options":         ("OPTIONS", ),   
+                "model":        ("MODEL",),
+                "positive":     ("CONDITIONING", ),
+                "negative":     ("CONDITIONING", ),
+                #"sampler":      ("SAMPLER", ),
+                "sigmas":       ("SIGMAS", ),
+                "latent_image": ("LATENT", ),     
+                "guides":       ("GUIDES", ),   
+                "options":      ("OPTIONS", ),   
                 }
             }
 
     def main(self, 
-            eta = 0.5,
-            sampler_name = "res_2m",
-            steps_to_run=-1, 
-            cfg=5.5, 
-            bongmath=True,
+            eta                   =  0.5,
+            sampler_name          = "res_2m",
+            steps_to_run          = -1, 
+            cfg                   =  5.5, 
+            bongmath              = True,
             seed            : int = -1, 
-            latent_image=None,
+            latent_image          = None,
              **kwargs):  
         
         steps = latent_image['state_info']['sigmas'].shape[-1] - 3
@@ -1694,7 +1693,7 @@ class ClownSampler_Beta:
             eta                           : float                  = 0.5, 
             eta_substep                   : float                  = 0.5,
             
-            noise_scaling_weight         : float                  = 0.0,
+            noise_scaling_weight          : float                  = 0.0,
             noise_boost_step              : float                  = 0.0, 
             noise_boost_substep           : float                  = 0.0, 
             noise_anchor                  : float                  = 1.0,
@@ -1743,7 +1742,7 @@ class ClownSampler_Beta:
             rk_swap_threshold             : float                  = 0.0,
             rk_swap_type                  : str                    = "",
             
-            sde_mask                      : Optional[Tensor] = None,
+            sde_mask                      : Optional[Tensor]       = None,
 
             
             #start_at_step                 : int                    = 0,
@@ -1783,7 +1782,7 @@ class ClownSampler_Beta:
         overshoot              = options_mgr.get('overshoot'             , overshoot)
         overshoot_substep      = options_mgr.get('overshoot_substep'     , overshoot_substep)
         
-        noise_scaling_weight  = options_mgr.get('noise_scaling_weight' , noise_scaling_weight)
+        noise_scaling_weight   = options_mgr.get('noise_scaling_weight' , noise_scaling_weight)
         noise_boost_step       = options_mgr.get('noise_boost_step'      , noise_boost_step)
         noise_boost_substep    = options_mgr.get('noise_boost_substep'   , noise_boost_substep)
         
@@ -1892,7 +1891,7 @@ class ClownSampler_Beta:
             extra_options                 = extra_options,
             automation                    = automation,
 
-            noise_scaling_weight         = noise_scaling_weight,
+            noise_scaling_weight          = noise_scaling_weight,
             noise_boost_step              = noise_boost_step,
             noise_boost_substep           = noise_boost_substep,
             

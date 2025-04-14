@@ -232,14 +232,14 @@ def sample_rk_beta(
     default_dtype  = EO("default_dtype", torch.float64)
     
     extra_args     = {} if extra_args     is None else extra_args
-    model_device   = x.device
+    model_device   = model.inner_model.inner_model.device #x.device
     work_device    = 'cpu' if EO("work_device_cpu") else model_device
 
     state_info     = {} if state_info     is None else state_info
     state_info_out = {} if state_info_out is None else state_info_out
 
     if 'raw_x' in state_info and sampler_mode in {"resample", "unsample"}:
-        x = state_info['raw_x'].clone()
+        x = state_info['raw_x'].to(model_device) #clone()
         RESplain("Continuing from raw latent from previous sampler.", debug=False)
     
 
@@ -370,7 +370,7 @@ def sample_rk_beta(
         orig_y0     = LG.y0.clone()
         orig_y0_inv = LG.y0_inv.clone()
         
-    gc.collect()
+    #gc.collect()
 
     VE_MODEL = isinstance(model.inner_model.inner_model.model_sampling, EPS)
     BASE_STARTED = False
@@ -380,10 +380,11 @@ def sample_rk_beta(
     FLOW_RESUMED = False
     if state_info.get('FLOW_STARTED', False) and not state_info.get('FLOW_STOPPED', False):
         FLOW_RESUMED = True
-        y0 = state_info['y0']
-        data_cached = state_info['data_cached']
-        data_x_prev_ = state_info['data_x_prev_']
-    x_init = x.clone()
+        y0 = state_info['y0'].to(model_device) 
+        data_cached = state_info['data_cached'].to(model_device) 
+        data_x_prev_ = state_info['data_x_prev_'].to(model_device) 
+    if EO("flow_use_init_noise"):
+        x_init = x.clone()
 
     # BEGIN SAMPLING LOOP    
     num_steps = len(sigmas[start_step:])-2 if sigmas[-1] == 0 else len(sigmas[start_step:])-1
@@ -410,7 +411,7 @@ def sample_rk_beta(
 
     while step < num_steps:
         sigma, sigma_next = sigmas[step], sigmas[step+1]
-        transition_count = 0
+
         
         if AttnMask is not None:
             RK.update_transformer_options({'regional_conditioning_weight': RegParam.weights[step]})
@@ -502,7 +503,8 @@ def sample_rk_beta(
         x_[0] = x.clone()
         # PRENOISE METHOD HERE!
         x_0      = x_[0].clone()
-        x_0_orig = x_0.clone()
+        if EO("guide_step_cutoff") or EO("guide_step_min"):
+            x_0_orig = x_0.clone()
         
         # RECYCLE STAGES FOR MULTISTEP
         if RK.multistep_stages > 0 or RK.hybrid_stages > 0:
@@ -708,7 +710,9 @@ def sample_rk_beta(
                                         y_slerp                = slerp_tensor(flow_slerp_guide_ratio, y0, y0_inv)
                                         yx0                    = y_slerp.clone()
                                     
-                                    x_[row], x_0, x_0_orig     =  yx0.clone(), yx0.clone(), yx0.clone()
+                                    x_[row], x_0 =  yx0.clone(), yx0.clone()
+                                    if EO("guide_step_cutoff") or EO("guide_step_min"):
+                                        x_0_orig = yx0.clone()
                                     
                                     if EO("flow_yx0_init_y0_inv"):
                                         yx0 = LG.HAS_LATENT_GUIDE * LG.mask * LG.y0_inv   +   LG.HAS_LATENT_GUIDE_INV * LG.mask_inv * LG.y0
@@ -1085,7 +1089,7 @@ def sample_rk_beta(
 
                                             data_row_blk1[...,t_blk0_end-t_blk1_start:,:,:]
                                             ], dim=-3)
-                                        
+                                    
                                     
                                     elif not EO("t_roll"):
                                         eps_[row], data_[row] = RK(x_tmp, s_tmp, x_0, sigma)
@@ -1501,8 +1505,8 @@ def sample_rk_beta(
     if INIT_SAMPLE_LOOP:
         state_info_out = state_info
     else:
-        state_info_out['raw_x']             = x.clone()
-        state_info_out['data_prev_']        = data_prev_.clone()
+        state_info_out['raw_x']             = x.to('cpu') #clone()
+        state_info_out['data_prev_']        = data_prev_.to('cpu') #clone()
         state_info_out['end_step']          = step
         state_info_out['sigma_next']        = sigma_next.clone()
         state_info_out['sigmas']            = sigmas.clone()
@@ -1513,11 +1517,12 @@ def sample_rk_beta(
         state_info_out['FLOW_STARTED']      = FLOW_STARTED
         state_info_out['FLOW_STOPPED']      = FLOW_STOPPED
         if FLOW_STARTED and not FLOW_STOPPED:
-            state_info_out['y0']           = y0.clone()
-            state_info_out['data_cached']  = data_cached.clone()
-            state_info_out['data_x_prev_'] = data_x_prev_.clone()
+            state_info_out['y0']           = y0.to('cpu') #clone()
+            state_info_out['data_cached']  = data_cached.to('cpu') #clone()
+            state_info_out['data_x_prev_'] = data_x_prev_.to('cpu') #clone()
     
-    gc.collect()
+    #gc.collect()
+    #torch.cuda.empty_cache()
 
     return x
 
