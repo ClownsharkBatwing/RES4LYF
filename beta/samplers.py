@@ -572,6 +572,8 @@ class SharkSampler:
                 state_info_out['data_prev_']       = torch.stack([out_state_info[_]['data_prev_']       for _ in range(len(out_state_info))])
                 state_info_out['last_rng']         = torch.stack([out_state_info[_]['last_rng']         for _ in range(len(out_state_info))])
                 state_info_out['last_rng_substep'] = torch.stack([out_state_info[_]['last_rng_substep'] for _ in range(len(out_state_info))])
+            elif 'raw_x' in state_info:
+                state_info_out = state_info
 
             out_samples             = [tensor.squeeze(0) for tensor in out_samples]
             out_denoised_samples    = [tensor.squeeze(0) for tensor in out_denoised_samples]
