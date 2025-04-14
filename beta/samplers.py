@@ -444,7 +444,7 @@ class SharkSampler:
                         seed = torch.initial_seed() + 1 + batch_num
                 else:
                     seed = noise_seed + batch_num
-                    torch.manual_seed(seed)
+                    torch     .manual_seed(seed)
                     torch.cuda.manual_seed(seed)
 
 
@@ -567,10 +567,11 @@ class SharkSampler:
 
             # STACK SDE NOISES, SAVE STATE INFO
             state_info_out = out_state_info[0]
-            state_info_out['raw_x']            = torch.stack([out_state_info[_]['raw_x']            for _ in range(len(out_state_info))])
-            state_info_out['data_prev_']       = torch.stack([out_state_info[_]['data_prev_']       for _ in range(len(out_state_info))])
-            state_info_out['last_rng']         = torch.stack([out_state_info[_]['last_rng']         for _ in range(len(out_state_info))])
-            state_info_out['last_rng_substep'] = torch.stack([out_state_info[_]['last_rng_substep'] for _ in range(len(out_state_info))])
+            if 'raw_x' in out_state_info[0]:
+                state_info_out['raw_x']            = torch.stack([out_state_info[_]['raw_x']            for _ in range(len(out_state_info))])
+                state_info_out['data_prev_']       = torch.stack([out_state_info[_]['data_prev_']       for _ in range(len(out_state_info))])
+                state_info_out['last_rng']         = torch.stack([out_state_info[_]['last_rng']         for _ in range(len(out_state_info))])
+                state_info_out['last_rng_substep'] = torch.stack([out_state_info[_]['last_rng_substep'] for _ in range(len(out_state_info))])
 
             out_samples             = [tensor.squeeze(0) for tensor in out_samples]
             out_denoised_samples    = [tensor.squeeze(0) for tensor in out_denoised_samples]
