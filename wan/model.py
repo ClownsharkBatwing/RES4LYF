@@ -195,10 +195,80 @@ class ReWanSlidingSelfAttention(nn.Module):
             x_list.append(x)
 
         x = torch.cat(x_list, dim=1)
+        del x_list, q, k, v, q_, k_
 
         x = self.o(x)
         return x
 
+
+
+
+class ReWanT2VSlidingCrossAttention(ReWanSlidingSelfAttention):
+
+    def forward(self, x, context, mask=None, grid_sizes=None):
+        r"""
+        Args:
+            x(Tensor): Shape [B, L1, C]
+            context(Tensor): Shape [B, L2, C]
+        """
+        # compute query, key, value
+        q = self.norm_q(self.q(x))
+        k = self.norm_k(self.k(context))
+        v =             self.v(context)
+
+        img_len = grid_sizes[1] * grid_sizes[2]
+        total_frames = int(q.shape[1] // img_len)
+
+        window_size = self.winderz
+        half_window = window_size // 2
+
+        q_ = q.view(b, s, n * d)
+        k_ = k.view(b, s, n * d)
+        x_list = []
+
+        for i in range(total_frames):
+            q_start =  i      * img_len
+            q_end   = (i + 1) * img_len
+
+            # circular frame indices for key/value window
+            center = i
+            #window_indices = [(center + offset) % total_frames for offset in range(-half_window, half_window + 1)]
+            if self.winderz_type == "standard":
+                start = max(0, center - half_window)
+                end   = min(total_frames, center + half_window + 1)
+                # Shift window if it would be too short
+                if end - start < window_size:
+                    if start == 0:
+                        end = min(total_frames, start + window_size)
+                    elif end == total_frames:
+                        start = max(0, end - window_size)
+
+                window_indices = list(range(start, end))
+            elif self.winderz_type == "circular":
+                window_indices = [(center + offset) % total_frames for offset in range(-half_window, half_window + 1)]
+            
+            # frame indices to token indices
+            token_indices = []
+            for frame in window_indices:
+                start = frame * img_len
+                token_indices.extend(range(start, start + img_len))
+
+            token_indices = torch.tensor(token_indices, device=q.device)
+
+            x = optimized_attention(
+                q_[:, q_start:q_end, :],           # [B, img_len, C]
+                k_.index_select(1, token_indices), # [B, window_size * img_len, C]
+                v .index_select(1, token_indices),
+                heads=self.num_heads,
+            )
+
+            x_list.append(x)
+
+        x = torch.cat(x_list, dim=1)
+        del x_list, q, k, v, q_, k_
+
+        x = self.o(x)
+        return x
 
 
 
@@ -273,7 +343,7 @@ class ReWanSelfAttention(nn.Module):
 
 class ReWanT2VRawCrossAttention(ReWanSelfAttention):
 
-    def forward(self, x, context, mask=None):
+    def forward(self, x, context, mask=None, grid_sizes=None):
         r"""
         Args:
             x(Tensor): Shape [B, L1, C]
@@ -292,7 +362,7 @@ class ReWanT2VRawCrossAttention(ReWanSelfAttention):
 
 class ReWanT2VCrossAttention(ReWanSelfAttention):
 
-    def forward(self, x, context, mask=None):
+    def forward(self, x, context, mask=None, grid_sizes=None):
         r"""
         Args:
             x(Tensor): Shape [B, L1, C]
@@ -326,7 +396,7 @@ class ReWanI2VCrossAttention(ReWanSelfAttention):   # image2video only
                 num_heads,
                 window_size=(-1, -1),
                 qk_norm=True,
-                eps=1e-6, operation_settings={}):
+                eps=1e-6, operation_settings={}, ):
         super().__init__(dim, num_heads, window_size, qk_norm, eps, operation_settings=operation_settings)
 
         self.k_img = operation_settings.get("operations").Linear(dim, dim, device=operation_settings.get("device"), dtype=operation_settings.get("dtype"))
@@ -334,7 +404,7 @@ class ReWanI2VCrossAttention(ReWanSelfAttention):   # image2video only
         # self.alpha = nn.Parameter(torch.zeros((1, )))
         self.norm_k_img = RMSNorm(dim, eps=eps, elementwise_affine=True, device=operation_settings.get("device"), dtype=operation_settings.get("dtype")) if qk_norm else nn.Identity()
 
-    def forward(self, x, context, mask=None):
+    def forward(self, x, context, mask=None, grid_sizes=None):
         r"""
         Args:
             x(Tensor): Shape [B, L1, C]
@@ -443,8 +513,10 @@ class ReWanAttentionBlock(nn.Module):
         x = x + y * e[2]
 
         # cross-attention & ffn   # x,y.shape 2,14040,1536   
-        x = x + self.cross_attn(self.norm3(x), context, mask=cross_mask) #mask[:,:txt_len])
+        x = x + self.cross_attn(self.norm3(x), context, mask=cross_mask, grid_sizes=grid_sizes,) #mask[:,:txt_len])
+        #print("before norm2 ", torch.cuda.memory_allocated() / 1024**3)
         y = self.ffn(self.norm2(x) * (1 + e[4]) + e[3])
+        #print("after norm2 ", torch.cuda.memory_allocated() / 1024**3)
         x = x + y * e[5]
         return x
 
@@ -579,7 +651,9 @@ class ReWanModel(torch.nn.Module):
 
         # embeddings
         self.patch_embedding = operations.Conv3d(
-            in_dim, dim, kernel_size=patch_size, stride=patch_size, device=operation_settings.get("device"), dtype=torch.float32)
+            in_dim, dim, kernel_size=patch_size, stride=patch_size, device=operation_settings.get("device"), dtype=operation_settings.get("dtype")) #dtype=torch.float32)
+        
+        
         self.text_embedding = nn.Sequential(
             operations.Linear(text_dim, dim, device=operation_settings.get("device"), dtype=operation_settings.get("dtype")), nn.GELU(approximate='tanh'),
             operations.Linear(dim, dim,      device=operation_settings.get("device"), dtype=operation_settings.get("dtype")))
@@ -648,14 +722,15 @@ class ReWanModel(torch.nn.Module):
                 List of denoised video tensors with original input shapes [C_out, F, H / 8, W / 8]
         """
         # embeddings
-        x          = self.patch_embedding(x.float()).to(x.dtype)
+        self.patch_embedding.to(self.time_embedding[0].weight.dtype)
+        x          = self.patch_embedding(x.float()).to(x.dtype)         # vram jumped from ~16-16.5 up to 17.98     gained 300mb with weights at torch.float8_e4m3fn
         grid_sizes = x.shape[2:]
-        x          = x.flatten(2).transpose(1, 2)
+        x          = x.flatten(2).transpose(1, 2)      # x.shape 1,32400,5120  bfloat16   316.4 MB
 
         # time embeddings
         e = self.time_embedding(
             sinusoidal_embedding_1d(self.freq_dim, t).to(dtype=x[0].dtype))
-        e0 = self.time_projection(e).unflatten(1, (6, self.dim))              # e0.shape = 2,6,1536
+        e0 = self.time_projection(e).unflatten(1, (6, self.dim))              # e0.shape = 2,6,1536       tiny ( < 0.1 MB)
 
         # context
         context = self.text_embedding(context)
@@ -667,8 +742,8 @@ class ReWanModel(torch.nn.Module):
         # arguments
         kwargs = dict(
             e       = e0,
-            freqs   = freqs,
-            context = context,
+            freqs   = freqs,              # 1,32400,1,64,2,2 bfloat16 15.8 MB
+            context = context,            # 1,1536,5120      bfloat16 15.0 MB
             grid_sizes = grid_sizes)
 
 
@@ -685,16 +760,16 @@ class ReWanModel(torch.nn.Module):
         else:
             weight = weight.item()
         
-        AttnMask = transformer_options.get('AttnMask')
+        AttnMask = transformer_options.get('AttnMask')    # somewhere around here, jumped to 20.6GB
         mask     = None
         if AttnMask is not None and weight > 0:
-            mask                      = AttnMask.get(weight=weight) #mask_obj[0](transformer_options, weight.item())
+            mask                      = AttnMask.get(weight=weight) #mask_obj[0](transformer_options, weight.item())         # 32400,33936  bool   1048.6 MB
             
             mask_type_bool = type(mask[0][0].item()) == bool if mask is not None else False
             if not mask_type_bool:
                 mask = mask.to(x.dtype)
             
-            text_len                  = context.shape[1] # mask_obj[0].text_len
+            #text_len                  = context.shape[1] # mask_obj[0].text_len
             
             #mask[text_len:,text_len:] = torch.clamp(mask[text_len:,text_len:], min=floor.to(mask.device))   #ORIGINAL SELF-ATTN REGION BLEED
             #reg_cond_mask = reg_cond_mask_expanded.unsqueeze(0).clone() if reg_cond_mask_expanded is not None else None
@@ -704,8 +779,8 @@ class ReWanModel(torch.nn.Module):
 
 
 
-
-        txt_len = mask.shape[-1] - mask.shape[-2] if mask is not None else "Unlogic Condition"
+        txt_len = context.shape[1] # mask_obj[0].text_len
+        #txt_len = mask.shape[-1] - mask.shape[-2] if mask is not None else "Unlogic Condition"          #what's the point of this?
         
         #self_attn_mask  = mask[:, txt_len:]
         #cross_attn_mask = mask[:,:txt_len ].bool()
@@ -731,7 +806,7 @@ class ReWanModel(torch.nn.Module):
                 else:
                     #x = block(x, self_mask=mask[:,txt_len:], cross_mask=mask[:,:txt_len].bool(), **kwargs)
                     x = block(x, self_mask=None, cross_mask=mask[:,:txt_len].bool(), **kwargs)
-                    
+            
             else:
                 x = block(x, **kwargs)
             #x = block(x, mask=mask, **kwargs)
@@ -769,9 +844,9 @@ class ReWanModel(torch.nn.Module):
         
         
         
-        x_orig = x.clone()
-        timestep_orig = timestep.clone()
-        context_orig = context.clone()
+        x_orig = x.clone()      # 1,16,36,60,60   bfloat16
+        timestep_orig = timestep.clone() # 1000    float32
+        context_orig = context.clone() # 1,512,4096 bfloat16
         
         
         out_list = []
