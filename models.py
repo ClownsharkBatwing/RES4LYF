@@ -29,7 +29,7 @@ from comfy.ldm.aura.mmdit import MMDiT, DiTBlock, MMDiTBlock, SingleAttention, D
 from .aura.mmdit import ReMMDiT, ReDiTBlock, ReMMDiTBlock, ReSingleAttention, ReDoubleAttention
 
 from comfy.ldm.wan.model import WanAttentionBlock, WanI2VCrossAttention, WanModel, WanSelfAttention, WanT2VCrossAttention
-from .wan.model import ReWanAttentionBlock, ReWanI2VCrossAttention, ReWanModel, ReWanRawSelfAttention, ReWanSelfAttention, ReWanSlidingSelfAttention, ReWanT2VCrossAttention, ReWanT2VRawCrossAttention
+from .wan.model import ReWanAttentionBlock, ReWanI2VCrossAttention, ReWanModel, ReWanRawSelfAttention, ReWanSelfAttention, ReWanSlidingSelfAttention, ReWanT2VSlidingCrossAttention, ReWanT2VCrossAttention, ReWanT2VRawCrossAttention
 
 from .latents import get_orthogonal, get_cosine_similarity
 from .res4lyf import RESplain
@@ -65,6 +65,95 @@ COMPILE_MODES = ["default", "max-autotune", "max-autotune-no-cudagraphs", "reduc
 
 
 
+
+class TorchCompileModels: 
+    def __init__(self):
+        self._compiled = False
+
+    @classmethod
+    def INPUT_TYPES(s):
+        return {"required": { 
+                    "model":         ("MODEL",),
+                    "backend":       (["inductor", "cudagraphs"],),
+                    "fullgraph":     ("BOOLEAN",                                                                    {"default": False, "tooltip": "Enable full graph mode"}),
+                    "mode":          (["default", "max-autotune", "max-autotune-no-cudagraphs", "reduce-overhead"], {"default": "default"}),
+                    "dynamic":       ("BOOLEAN",                                                                    {"default": False, "tooltip": "Enable dynamic mode"}),
+                    "dynamo_cache_size_limit"   : ("INT",                     {"default"                : 64, "min"                          : 0, "max": 1024, "step": 1, "tooltip": "torch._dynamo.config.cache_size_limit"}),
+                    "triton_max_block_x": ("INT", {"default": 0, "min": 0, "max": 4294967296, "step": 1})
+                }}
+        
+    RETURN_TYPES = ("MODEL",)
+    RETURN_NAMES = ("model",)
+    FUNCTION     = "main"
+    CATEGORY     = "RES4LYF/model_patches"
+
+    def main(self,
+            model,
+            backend       = "inductor",
+            mode          = "default",
+            fullgraph     = False,
+            dynamic       = False,
+            dynamo_cache_size_limit = 64,
+            triton_max_block_x = 0,
+            ):
+        
+        m = model.clone()
+        diffusion_model = m.get_model_object("diffusion_model")
+        torch._dynamo.config.cache_size_limit = dynamo_cache_size_limit
+        
+        if triton_max_block_x > 0:
+            import os
+            os.environ["TRITON_MAX_BLOCK_X"] = "4096"
+        
+        if not self._compiled:
+            try:
+                if hasattr(diffusion_model, "double_blocks"):
+                    for i, block in enumerate(diffusion_model.double_blocks):
+                        m.add_object_patch(f"diffusion_model.double_blocks.{i}", torch.compile(block, mode=mode, dynamic=dynamic, fullgraph=fullgraph, backend=backend))
+                    self._compiled = True
+                    
+                if hasattr(diffusion_model, "single_blocks"):
+                    for i, block in enumerate(diffusion_model.single_blocks):
+                        m.add_object_patch(f"diffusion_model.single_blocks.{i}", torch.compile(block, mode=mode, dynamic=dynamic, fullgraph=fullgraph, backend=backend))
+                    self._compiled = True
+                    
+                if hasattr(diffusion_model, "double_layers"):
+                    for i, block in enumerate(diffusion_model.double_layers):
+                        m.add_object_patch(f"diffusion_model.double_layers.{i}", torch.compile(block, mode=mode, dynamic=dynamic, fullgraph=fullgraph, backend=backend))
+                    self._compiled = True
+                    
+                if hasattr(diffusion_model, "single_layers"):
+                    for i, block in enumerate(diffusion_model.single_layers):
+                        m.add_object_patch(f"diffusion_model.single_layers.{i}", torch.compile(block, mode=mode, dynamic=dynamic, fullgraph=fullgraph, backend=backend))
+                    self._compiled = True
+                    
+                if hasattr(diffusion_model, "joint_blocks"):
+                    for i, block in enumerate(diffusion_model.joint_blocks):
+                        m.add_object_patch(f"diffusion_model.joint_blocks.{i}", torch.compile(block, mode=mode, dynamic=dynamic, fullgraph=fullgraph, backend=backend))
+                    self._compiled = True
+                    
+                if hasattr(diffusion_model, "blocks"):
+                    for i, block in enumerate(diffusion_model.blocks):
+                        m.add_object_patch(f"diffusion_model.blocks.{i}", torch.compile(block, mode=mode, dynamic=dynamic, fullgraph=fullgraph, backend=backend))
+                    self._compiled = True
+                    
+                if self._compiled == False:
+                    raise RuntimeError("Model not compiled. Verify that this is a Flux, SD3.5, Wan, or Aura model!")
+                
+                compile_settings = {
+                    "backend": backend,
+                    "mode": mode,
+                    "fullgraph": fullgraph,
+                    "dynamic": dynamic,
+                }
+                
+                setattr(m.model, "compile_settings", compile_settings)
+            except:
+                raise RuntimeError("Failed to compile model. Verify that this is a Flux, SD3.5, Wan, or Aura model!")
+        
+        return (m, )
+
+
 class ReWanPatcherAdvanced:
     def __init__(self):
         self.sliding_window_size = 0
@@ -80,7 +169,7 @@ class ReWanPatcherAdvanced:
                 "cross_attn_blocks": ("STRING",  {"default": "all", "multiline": True}),
                 "enable"           : ("BOOLEAN", {"default": True}),
                 "sliding_window_self_attn" :  (['false', 'standard', 'circular'], {"default": "false"}),
-                "sliding_window_size": ("INT",   {"default": 15,   "min": 1,    "max": 0xffffffffffffffff}),
+                "sliding_window_size": ("INT",   {"default": 15,   "min": 1,    "max": 0xffffffffffffffff, "tooltip": "How many real frames each frame sees. Divide frames by 4 to get real frames."}),
             }
         }
     RETURN_TYPES = ("MODEL",)
@@ -88,7 +177,7 @@ class ReWanPatcherAdvanced:
     CATEGORY     = "RES4LYF/model_patches"
     FUNCTION     = "main"
 
-    def main(self, model, self_attn_blocks, cross_attn_blocks, sliding_window_self_attn, sliding_window_size, enable=True, force=False):
+    def main(self, model, self_attn_blocks, cross_attn_blocks, sliding_window_self_attn="false", sliding_window_size=15, enable=True, force=False):
         
         self_attn_blocks  = parse_range_string(self_attn_blocks)
         cross_attn_blocks = parse_range_string(cross_attn_blocks)
@@ -109,11 +198,18 @@ class ReWanPatcherAdvanced:
                         block.self_attn.winderz_type = sliding_window_self_attn
                     else:
                         block.self_attn.__class__  = ReWanSelfAttention
+                        block.self_attn.winderz_type = "false"
                 else:
                     block.self_attn.__class__  = ReWanRawSelfAttention
                 if i in cross_attn_blocks:
                     if T2V:
-                        block.cross_attn.__class__ = ReWanT2VCrossAttention
+                        if False: #sliding_window_self_attn != "false":
+                            block.cross_attn.__class__ = ReWanT2VSlidingCrossAttention
+                            block.cross_attn.winderz = sliding_window_size
+                            block.cross_attn.winderz_type = sliding_window_self_attn
+                        else:
+                            block.cross_attn.__class__ = ReWanT2VCrossAttention
+
                     else:
                         block.cross_attn.__class__ = ReWanI2VCrossAttention
                 block.idx            = i

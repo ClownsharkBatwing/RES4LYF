@@ -666,6 +666,7 @@ class TemporalMaskGenerator:
     RETURN_NAMES = ("temporal_mask",) 
     FUNCTION     = "main"
     CATEGORY     = "RES4LYF/masks"
+    EXPERIMENTAL = True
     
     def main(self,
             switch_frame = 33,
@@ -688,7 +689,7 @@ class TemporalMaskGenerator:
 
 
 
-class TemporalSplitAttnMask:
+class TemporalSplitAttnMask_Midframe:
     @classmethod
     def INPUT_TYPES(cls):
         return {"required":
@@ -744,7 +745,7 @@ class TemporalSplitAttnMask:
 
 
 
-class TemporalSplitAttnMask2:
+class TemporalSplitAttnMask:
     @classmethod
     def INPUT_TYPES(cls):
         return {"required":
@@ -754,7 +755,7 @@ class TemporalSplitAttnMask2:
                     "cross_attn_start": ("INT", {"default": 1,  "min": 1, "step": 4, "max": 0xffffffffffffffff}),
                     "cross_attn_stop":  ("INT", {"default": 33, "min": 1, "step": 4, "max": 0xffffffffffffffff}),
 
-                    "frames":           ("INT", {"default": 65, "min": 1, "step": 4, "max": 0xffffffffffffffff}),
+                    #"frames":           ("INT", {"default": 65, "min": 1, "step": 4, "max": 0xffffffffffffffff}),
                     },
                 "optional": 
                     {
@@ -771,19 +772,20 @@ class TemporalSplitAttnMask2:
             self_attn_stop   = 33,
             cross_attn_start = 0,
             cross_attn_stop  = 33,
-            frames           = 65,
+            #frames           = 65,
             ):
 
-        frames = frames // 4 + 1
+        #frames = frames // 4 + 1
         
         self_attn_start  = self_attn_start  // 4 #+ 1
         self_attn_stop   = self_attn_stop   // 4 + 1
         cross_attn_start = cross_attn_start // 4 #+ 1
         cross_attn_stop  = cross_attn_stop  // 4 + 1
         
-        temporal_self_mask  = torch.zeros((frames, 1, 1))
-        temporal_cross_mask = torch.zeros((frames, 1, 1))
-
+        max_stop = max(self_attn_stop, cross_attn_stop)
+        
+        temporal_self_mask  = torch.zeros((max_stop, 1, 1))
+        temporal_cross_mask = torch.zeros((max_stop, 1, 1))
 
         temporal_self_mask [ self_attn_start: self_attn_stop,...] = 1.0
         temporal_cross_mask[cross_attn_start:cross_attn_stop,...] = 1.0
@@ -842,6 +844,64 @@ class RegionalParameters:
     narc_stop  :      int    = -1
 
 
+
+REG_MASK_TYPE_2 = [
+    "gradient",
+    "gradient_masked",
+    "gradient_unmasked",
+    "boolean",
+    "boolean_masked",
+    "boolean_unmasked",
+]
+
+REG_MASK_TYPE_3 = [
+    "gradient",
+    "gradient_A",
+    "gradient_B",
+    "gradient_unmasked",
+    "gradient_AB",
+    "gradient_A,unmasked",
+    "gradient_B,unmasked",
+
+    "boolean",
+    "boolean_A",
+    "boolean_B",
+    "boolean_unmasked",
+    "boolean_AB",
+    "boolean_A,unmasked",
+    "boolean_B,unmasked",
+]
+
+REG_MASK_TYPE_AB = [
+    "gradient",
+    "gradient_A",
+    "gradient_B",
+    "boolean",
+    "boolean_A",
+    "boolean_B",
+]
+
+REG_MASK_TYPE_ABC = [
+    "gradient",
+    "gradient_A",
+    "gradient_B",
+    "gradient_C",
+    "gradient_AB",
+    "gradient_AC",
+    "gradient_BC",
+
+    "boolean",
+    "boolean_A",
+    "boolean_B",
+    "boolean_C",
+    "boolean_AB",
+    "boolean_AC",
+    "boolean_BC",
+
+]
+
+
+
 class ClownRegionalConditioning:
     @classmethod
     def INPUT_TYPES(cls):
@@ -853,10 +913,11 @@ class ClownRegionalConditioning:
                 "weight_scheduler":        (["constant"] + get_res4lyf_scheduler_list(), {"default": "constant"},),
                 "start_step":              ("INT",                                       {"default": 0,   "min":  0,        "max": 10000}),
                 "end_step":                ("INT",                                       {"default": -1,  "min": -1,        "max": 10000}),
-                "mask_type":               (["gradient", "gradient_masked", "gradient_unmasked", "boolean", "boolean_masked", "boolean_unmasked"],                     {"default": "boolean"}),
-                "narcissism_area":         (["masked", "unmasked", "off"],               {"default": "off"}),
-                "narcissism_start_step":   ("INT",                                       {"default": 0,   "min": -1,        "max": 10000}),
-                "narcissism_end_step":     ("INT",                                       {"default": 5,   "min": -1,        "max": 10000}),
+                "mask_type":               (REG_MASK_TYPE_2,                             {"default": "boolean"}),
+                "edge_width":              ("INT",                                       {"default": 0,  "min": 0,          "max": 10000}),
+                #"narcissism_area":         (["masked", "unmasked", "off"],               {"default": "off"}),
+                #"narcissism_start_step":   ("INT",                                       {"default": 0,   "min": -1,        "max": 10000}),
+                #"narcissism_end_step":     ("INT",                                       {"default": 5,   "min": -1,        "max": 10000}),
                 "invert_mask":             ("BOOLEAN",                                   {"default": False}),
             }, 
             "optional": {
@@ -894,6 +955,7 @@ class ClownRegionalConditioning:
             region_bleed             : float  = 0.0,
             region_bleed_start_step  : int    = 0,
             mask_type                : str    = "boolean",
+            edge_width               : int    = 0,
             mask                              = None,
             narcissism_area          : str    = "masked",
             narcissism_start_step    : int    = 0,
@@ -918,6 +980,7 @@ class ClownRegionalConditioning:
                                         region_bleed             = region_bleed,
                                         region_bleed_start_step  = region_bleed_start_step,
                                         mask_type                = mask_type,
+                                        edge_width               = edge_width,
                                         mask                     = mask,
                                         invert_mask              = invert_mask,
                                         positive_masked          = positive_masked,
@@ -950,6 +1013,7 @@ class ClownRegionalConditioning:
                                 region_bleed             : float  = 0.0,
                                 region_bleed_start_step  : int    = 0,
                                 mask_type                : str    = "gradient",
+                                edge_width               : int    = 0,
                                 mask                              = None,
                                 invert_mask              : bool   = False,
                                 narcissism_area       : str       = "on",
@@ -1001,11 +1065,11 @@ class ClownRegionalConditioning:
             from .attention_masks import FullAttentionMask, CrossAttentionMask, SplitAttentionMask, RegionalContext
             if isinstance(model.model.model_config, comfy.supported_models.WAN21_T2V) or isinstance(model.model.model_config, comfy.supported_models.WAN21_I2V):
                 if model.model.diffusion_model.blocks[0].self_attn.winderz_type != "false":
-                    AttnMask = CrossAttentionMask(mask_type)
+                    AttnMask = CrossAttentionMask(mask_type, edge_width)
                 else:
-                    AttnMask = SplitAttentionMask(mask_type)
+                    AttnMask = SplitAttentionMask(mask_type, edge_width)
             else:
-                AttnMask = FullAttentionMask(mask_type)
+                AttnMask = FullAttentionMask(mask_type, edge_width)
             AttnMask.add_region(positive_masked  [0][0],   mask)
             AttnMask.add_region(positive_unmasked[0][0], 1-mask)
             
@@ -1075,17 +1139,18 @@ class ClownRegionalConditioning_AB:
                 "weight_scheduler":        (["constant"] + get_res4lyf_scheduler_list(), {"default": "constant"},),
                 "start_step":              ("INT",                                       {"default": 0,   "min":  0,        "max": 10000}),
                 "end_step":                ("INT",                                       {"default": -1,  "min": -1,        "max": 10000}),
-                "mask_type":               (["gradient", "gradient_masked", "gradient_unmasked", "boolean", "boolean_masked", "boolean_unmasked"],                     {"default": "boolean"}),
-                "narcissism_area":         (["masked", "unmasked", "off"],               {"default": "off"}),
-                "narcissism_start_step":   ("INT",                                       {"default": 0,   "min": -1,        "max": 10000}),
-                "narcissism_end_step":     ("INT",                                       {"default": 5,   "min": -1,        "max": 10000}),
+                "mask_type":               (REG_MASK_TYPE_AB,                            {"default": "boolean"}),
+                "edge_width":              ("INT",                                       {"default": 0,  "min": 0,          "max": 10000}),
+                #"narcissism_area":         (["masked", "unmasked", "off"],               {"default": "off"}),
+                #"narcissism_start_step":   ("INT",                                       {"default": 0,   "min": -1,        "max": 10000}),
+                #"narcissism_end_step":     ("INT",                                       {"default": 5,   "min": -1,        "max": 10000}),
                 "invert_mask":             ("BOOLEAN",                                   {"default": False}),
             }, 
             "optional": {
-                "positive_masked":         ("CONDITIONING", ),
-                "positive_unmasked":       ("CONDITIONING", ),
-                "mask":                    ("MASK", ),
-                "unmask":                  ("MASK", ),
+                "positive_A":              ("CONDITIONING", ),
+                "positive_B":              ("CONDITIONING", ),
+                "mask_A":                  ("MASK", ),
+                "mask_B":                  ("MASK", ),
                 "weights":                 ("SIGMAS", ),
                 "region_bleeds":           ("SIGMAS", ),
             }
@@ -1110,20 +1175,27 @@ class ClownRegionalConditioning_AB:
             weight_scheduler                  = None,
             start_step               : int    = 0,
             end_step                 : int    = -1,
-            positive_masked                   = None,
-            positive_unmasked                 = None,
+            positive_A                        = None,
+            positive_B                        = None,
             weights                  : Tensor = None,
             region_bleeds            : Tensor = None,
             region_bleed             : float  = 0.0,
             region_bleed_start_step  : int    = 0,
             mask_type                : str    = "boolean",
-            mask                              = None,
-            unmask                            = None,
+            edge_width               : int    = 0,
+            mask_A                            = None,
+            mask_B                            = None,
             narcissism_area          : str    = "masked",
             narcissism_start_step    : int    = 0,
             narcissism_end_step      : int    = 5,
             invert_mask              : bool   = False
             ) -> Tuple[Tensor]:
+        
+        positive_masked   = positive_A 
+        positive_unmasked = positive_B
+        
+        mask   = mask_A
+        unmask = mask_B
         
         if end_step == -1:
             end_step = MAX_STEPS
@@ -1142,6 +1214,7 @@ class ClownRegionalConditioning_AB:
                                         region_bleed             = region_bleed,
                                         region_bleed_start_step  = region_bleed_start_step,
                                         mask_type                = mask_type,
+                                        edge_width               = edge_width,
                                         mask                     = mask,
                                         unmask                   = unmask,
                                         invert_mask              = invert_mask,
@@ -1175,6 +1248,7 @@ class ClownRegionalConditioning_AB:
                                 region_bleed             : float  = 0.0,
                                 region_bleed_start_step  : int    = 0,
                                 mask_type                : str    = "gradient",
+                                edge_width               : int    = 0,
                                 mask                              = None,
                                 unmask                            = None,
                                 invert_mask              : bool   = False,
@@ -1228,11 +1302,11 @@ class ClownRegionalConditioning_AB:
             from .attention_masks import FullAttentionMask, CrossAttentionMask, SplitAttentionMask, RegionalContext
             if isinstance(model.model.model_config, comfy.supported_models.WAN21_T2V) or isinstance(model.model.model_config, comfy.supported_models.WAN21_I2V):
                 if model.model.diffusion_model.blocks[0].self_attn.winderz_type != "false":
-                    AttnMask = CrossAttentionMask(mask_type)
+                    AttnMask = CrossAttentionMask(mask_type, edge_width)
                 else:
-                    AttnMask = SplitAttentionMask(mask_type)
+                    AttnMask = SplitAttentionMask(mask_type, edge_width)
             else:
-                AttnMask = FullAttentionMask(mask_type)
+                AttnMask = FullAttentionMask(mask_type, edge_width)
             AttnMask.add_region(positive_masked  [0][0],   mask)
             AttnMask.add_region(positive_unmasked[0][0], unmask)
             
@@ -1286,11 +1360,6 @@ class ClownRegionalConditioning_AB:
 
 
 
-
-
-
-
-
 class ClownRegionalConditioning3:
     @classmethod
     def INPUT_TYPES(cls):
@@ -1302,10 +1371,11 @@ class ClownRegionalConditioning3:
                 "weight_scheduler":        (["constant"] + get_res4lyf_scheduler_list(), {"default": "constant"},),
                 "start_step":              ("INT",                                       {"default": 0,    "min":  0,        "max": 10000}),
                 "end_step":                ("INT",                                       {"default": 100,  "min": -1,        "max": 10000}),
-                "mask_type":               (["gradient", "gradient_masked", "gradient_unmasked", "boolean", "boolean_masked", "boolean_unmasked"],                     {"default": "boolean"}),
-                "narcissism_area":         (["A", "B", "AB", "unmasked", "off"],         {"default": "off"}),
-                "narcissism_start_step":   ("INT",                                 {"default": 0,   "min": -1,        "max": 10000}),
-                "narcissism_end_step":     ("INT",                                 {"default": 5,   "min": -1,        "max": 10000}),
+                "mask_type":               (REG_MASK_TYPE_3,                             {"default": "boolean"}),
+                "edge_width":              ("INT",                                       {"default": 0,  "min": 0,          "max": 10000}),
+                #"narcissism_area":         (["A", "B", "AB", "unmasked", "off"],         {"default": "off"}),
+                #"narcissism_start_step":   ("INT",                                       {"default": 0,   "min": -1,        "max": 10000}),
+                #"narcissism_end_step":     ("INT",                                       {"default": 5,   "min": -1,        "max": 10000}),
                 "invert_mask":             ("BOOLEAN",                                   {"default": False}),
             }, 
             "optional": {
@@ -1347,6 +1417,7 @@ class ClownRegionalConditioning3:
             region_bleed_start_step  : int    = 0,
 
             mask_type                : str    = "boolean",
+            edge_width               : int    = 0,
             mask_A                              = None,
             mask_B                              = None,
             narcissism_area       : str    = "AB",
@@ -1369,6 +1440,7 @@ class ClownRegionalConditioning3:
                                         region_bleed             = region_bleed,
                                         region_bleed_start_step  = region_bleed_start_step,
                                         mask_type                = mask_type,
+                                        edge_width               = edge_width,
                                         mask_A                   = mask_A,
                                         mask_B                   = mask_B,
                                         invert_mask              = invert_mask,
@@ -1406,6 +1478,7 @@ class ClownRegionalConditioning3:
                                 region_bleed_start_step  : int    = 0,
 
                                 mask_type                : str    = "boolean",
+                                edge_width               : int    = 0,
                                 mask_A                            = None,
                                 mask_B                            = None,
                                 invert_mask              : bool   = False,
@@ -1469,11 +1542,11 @@ class ClownRegionalConditioning3:
             from .attention_masks import FullAttentionMask, CrossAttentionMask, SplitAttentionMask, RegionalContext
             if isinstance(model.model.model_config, comfy.supported_models.WAN21_T2V) or isinstance(model.model.model_config, comfy.supported_models.WAN21_I2V):
                 if model.model.diffusion_model.blocks[0].self_attn.winderz_type != "false":
-                    AttnMask = CrossAttentionMask(mask_type)
+                    AttnMask = CrossAttentionMask(mask_type, edge_width)
                 else:
-                    AttnMask = SplitAttentionMask(mask_type)
+                    AttnMask = SplitAttentionMask(mask_type, edge_width)
             else:
-                AttnMask = FullAttentionMask(mask_type)
+                AttnMask = FullAttentionMask(mask_type, edge_width)
             AttnMask.add_region(positive_A       [0][0], mask_A)
             AttnMask.add_region(positive_B       [0][0], mask_B)
             AttnMask.add_region(positive_unmasked[0][0], mask_AB_inv)
@@ -1600,14 +1673,15 @@ class ClownRegionalConditioning_ABC:
             "required": { 
                 "weight":                  ("FLOAT",                                     {"default": 1.0,  "min": -10000.0, "max": 10000.0, "step": 0.01}),
                 "region_bleed":            ("FLOAT",                                     {"default": 0.0,  "min": -10000.0, "max": 10000.0, "step": 0.01}),
-                "region_bleed_start_step": ("INT",                                       {"default": 0,   "min":  0,        "max": 10000}),
+                "region_bleed_start_step": ("INT",                                       {"default": 0,    "min":  0,       "max": 10000}),
                 "weight_scheduler":        (["constant"] + get_res4lyf_scheduler_list(), {"default": "constant"},),
-                "start_step":              ("INT",                                       {"default": 0,    "min":  0,        "max": 10000}),
-                "end_step":                ("INT",                                       {"default": 100,  "min": -1,        "max": 10000}),
-                "mask_type":               (["gradient", "gradient_masked", "gradient_unmasked", "boolean", "boolean_masked", "boolean_unmasked"],                     {"default": "boolean"}),
-                "narcissism_area":         (["A", "B", "AB", "unmasked", "off"],         {"default": "off"}),
-                "narcissism_start_step":   ("INT",                                 {"default": 0,   "min": -1,        "max": 10000}),
-                "narcissism_end_step":     ("INT",                                 {"default": 5,   "min": -1,        "max": 10000}),
+                "start_step":              ("INT",                                       {"default": 0,    "min":  0,       "max": 10000}),
+                "end_step":                ("INT",                                       {"default": 100,  "min": -1,       "max": 10000}),
+                "mask_type":               (REG_MASK_TYPE_ABC,                           {"default": "boolean"}),
+                "edge_width":              ("INT",                                       {"default": 0,    "min": 0,        "max": 10000}),
+                #"narcissism_area":         (["A", "B", "AB", "unmasked", "off"],         {"default": "off"}),
+                #"narcissism_start_step":   ("INT",                                       {"default": 0,   "min": -1,        "max": 10000}),
+                #"narcissism_end_step":     ("INT",                                       {"default": 5,   "min": -1,        "max": 10000}),
                 "invert_mask":             ("BOOLEAN",                                   {"default": False}),
             }, 
             "optional": {
@@ -1650,6 +1724,7 @@ class ClownRegionalConditioning_ABC:
             region_bleed_start_step  : int    = 0,
 
             mask_type                : str    = "boolean",
+            edge_width               : int    = 0,
             mask_A                              = None,
             mask_B                              = None,
             mask_C                              = None,
@@ -1673,6 +1748,7 @@ class ClownRegionalConditioning_ABC:
                                         region_bleed             = region_bleed,
                                         region_bleed_start_step  = region_bleed_start_step,
                                         mask_type                = mask_type,
+                                        edge_width               = edge_width,
                                         mask_A                   = mask_A,
                                         mask_B                   = mask_B,
                                         mask_C                   = mask_C,
@@ -1711,6 +1787,7 @@ class ClownRegionalConditioning_ABC:
                                 region_bleed_start_step  : int    = 0,
 
                                 mask_type                : str    = "boolean",
+                                edge_width               : int    = 0,
                                 mask_A                            = None,
                                 mask_B                            = None,
                                 mask_C                            = None,
@@ -1781,11 +1858,11 @@ class ClownRegionalConditioning_ABC:
             from .attention_masks import FullAttentionMask, CrossAttentionMask, SplitAttentionMask, RegionalContext
             if isinstance(model.model.model_config, comfy.supported_models.WAN21_T2V) or isinstance(model.model.model_config, comfy.supported_models.WAN21_I2V):
                 if model.model.diffusion_model.blocks[0].self_attn.winderz_type != "false":
-                    AttnMask = CrossAttentionMask(mask_type)
+                    AttnMask = CrossAttentionMask(mask_type, edge_width)
                 else:
-                    AttnMask = SplitAttentionMask(mask_type)
+                    AttnMask = SplitAttentionMask(mask_type, edge_width)
             else:
-                AttnMask = FullAttentionMask(mask_type)
+                AttnMask = FullAttentionMask(mask_type, edge_width)
             AttnMask.add_region(positive_A       [0][0], mask_A)
             AttnMask.add_region(positive_B       [0][0], mask_B)
             AttnMask.add_region(positive_unmasked[0][0], mask_AB_inv)

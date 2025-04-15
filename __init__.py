@@ -93,7 +93,7 @@ NODE_CLASS_MAPPINGS = {
     
     "TemporalMaskGenerator"               : conditioning.TemporalMaskGenerator,
     "TemporalSplitAttnMask"               : conditioning.TemporalSplitAttnMask,
-    "TemporalSplitAttnMask2"              : conditioning.TemporalSplitAttnMask2,
+    "TemporalSplitAttnMask (Midframe)"    : conditioning.TemporalSplitAttnMask_Midframe,
     "TemporalCrossAttnMask"               : conditioning.TemporalCrossAttnMask,
 
 
@@ -159,6 +159,7 @@ NODE_CLASS_MAPPINGS = {
     "TorchCompileModelFluxAdv"            : models.TorchCompileModelFluxAdvanced,
     "TorchCompileModelAura"               : models.TorchCompileModelAura,
     "TorchCompileModelSD35"               : models.TorchCompileModelSD35,
+    "TorchCompileModels"                  : models.TorchCompileModels,
     "ClownpileModelWanVideo"              : models.ClownpileModelWanVideo,
 
 
@@ -350,14 +351,8 @@ except ImportError:
 
 
 
-
-
-
-
-
-
-
-
 add_samplers()
+
+
 
 

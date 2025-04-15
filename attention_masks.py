@@ -4,6 +4,8 @@ import torch.nn.functional as F
 from torch  import Tensor
 from typing import Optional, Callable, Tuple, Dict, Any, Union, TYPE_CHECKING, TypeVar
 
+from einops import rearrange
+
 import copy
 import base64
 
@@ -88,7 +90,7 @@ class CoreAttnMask:
 
 
 class BaseAttentionMask:
-    def __init__(self, mask_type="gradient", dtype=torch.float16):
+    def __init__(self, mask_type="gradient", edge_width=0, dtype=torch.float16):
         self.t                    = 1
         self.img_len              = 0
         self.text_len             = 0
@@ -106,6 +108,7 @@ class BaseAttentionMask:
         
         self.attn_mask            = None
         self.mask_type            = mask_type
+        self.edge_width           = edge_width
         
         if mask_type == "gradient":
             self.dtype            = dtype
@@ -193,15 +196,26 @@ class FullAttentionMask(BaseAttentionMask):
             
             prev_len = curr_len
             
-        if self.mask_type.endswith("_masked"):
-            trimask = torch.tril(torch.ones(img_len, img_len)).to(attn_mask.dtype).to(attn_mask.device)
-            trimask.diagonal().fill_(0.0)
-            attn_mask[text_off:,text_len:] = fp_or(trimask, attn_mask[text_off:,text_len:])
+        if self.mask_type.endswith("_masked") or self.mask_type.endswith("_A") or self.mask_type.endswith("_AB") or self.mask_type.endswith("_AC") or self.mask_type.endswith("_A,unmasked"):
+            img2txt_mask_sq = torch.nn.functional.interpolate(self.masks[0].unsqueeze(0).to(torch.float16), (h, w), mode='nearest-exact').to(dtype).flatten().unsqueeze(1).repeat(1, img_len)
+            attn_mask[text_off:, text_len:] = fp_or(attn_mask[text_off:, text_len:], img2txt_mask_sq)
+        
+        if self.mask_type.endswith("_unmasked") or self.mask_type.endswith("_C") or self.mask_type.endswith("_BC") or self.mask_type.endswith("_AC") or self.mask_type.endswith("_B,unmasked") or self.mask_type.endswith("_A,unmasked"):
+            img2txt_mask_sq = torch.nn.functional.interpolate(self.masks[-1].unsqueeze(0).to(torch.float16), (h, w), mode='nearest-exact').to(dtype).flatten().unsqueeze(1).repeat(1, img_len)
+            attn_mask[text_off:, text_len:] = fp_or(attn_mask[text_off:, text_len:], img2txt_mask_sq)
             
-        if self.mask_type.endswith("_unmasked"):
-            trimask = (1-torch.tril(torch.ones(img_len, img_len))).to(attn_mask.dtype).to(attn_mask.device)
-            trimask.diagonal().fill_(0.0)
-            attn_mask[text_off:,text_len:] = fp_or(trimask, attn_mask[text_off:,text_len:])
+        if self.mask_type.endswith("_B") or self.mask_type.endswith("_AB") or self.mask_type.endswith("_BC") or self.mask_type.endswith("_B,unmasked"):
+            img2txt_mask_sq = torch.nn.functional.interpolate(self.masks[1].unsqueeze(0).to(torch.float16), (h, w), mode='nearest-exact').to(dtype).flatten().unsqueeze(1).repeat(1, img_len)
+            attn_mask[text_off:, text_len:] = fp_or(attn_mask[text_off:, text_len:], img2txt_mask_sq)
+            
+        if self.edge_width > 0:
+            #for i in range(len(self.masks)):
+            edge_mask = torch.zeros_like(self.masks[0])
+            for mask in self.masks:
+                edge_mask = fp_or(edge_mask, get_edge_mask(mask, dilation=self.edge_width))
+                
+            img2txt_mask_sq = torch.nn.functional.interpolate(edge_mask.unsqueeze(0).to(torch.float16), (h, w), mode='nearest-exact').to(dtype).flatten().unsqueeze(1).repeat(1, img_len)
+            attn_mask[text_off:, text_len:] = fp_or(attn_mask[text_off:, text_len:], img2txt_mask_sq)
         
         self.attn_mask = CoreAttnMask(attn_mask, mask_type=mask_type)
 
@@ -288,6 +302,7 @@ class SplitAttentionMask(BaseAttentionMask):
         self_attn_mask  = torch.zeros((t * img_len, t * img_len), dtype=dtype)
     
         prev_len = 0
+        self_masks = []
         for context_len, mask in zip(self.context_lens, self.masks):
 
             cross_mask, self_mask = None, None
@@ -296,13 +311,27 @@ class SplitAttentionMask(BaseAttentionMask):
             if mask.ndim == 3:
                 t_mask = mask.shape[0]
             elif mask.ndim == 4:
-                if mask.shape[0] > 1:
+                """if mask.shape[0] > 1:
                     #cross_mask = 
                     #F.pad(a.permute(1,2,0), [0,2], value=0).permute(2,0,1)
 
                     cross_mask = mask[0]
                     self_mask  = mask[1]
-                    t_mask = mask.shape[-3]
+                    t_mask = mask.shape[-3]"""
+                if mask.shape[0] > 1:
+                    cross_mask = mask[0]
+                    if cross_mask.shape[-3] > self.t:
+                        cross_mask = cross_mask[:self.t,...]
+                    elif cross_mask.shape[-3] < self.t:
+                        cross_mask = F.pad(cross_mask.permute(1,2,0), [0,self.t-cross_mask.shape[-3]], value=0).permute(2,0,1)
+
+                    self_mask = mask[1]
+                    if self_mask.shape[-3] > self.t:
+                        self_mask = self_mask[:self.t,...]
+                    elif self_mask.shape[-3] < self.t:
+                        self_mask = F.pad(self_mask.permute(1,2,0), [0,self.t-self_mask.shape[-3]], value=0).permute(2,0,1)
+
+                    t_mask = self.t
                 else:
                     t_mask = mask.shape[-3]
                     mask.squeeze_(0)
@@ -338,24 +367,26 @@ class SplitAttentionMask(BaseAttentionMask):
                 img2txt_mask_sq = torch.nn.functional.interpolate(self_mask.unsqueeze(0).to(torch.float16), (h, w), mode='nearest-exact').to(dtype).flatten().unsqueeze(1).repeat(1, t_mask * img_len)
             else:
                 img2txt_mask_sq = torch.nn.functional.interpolate(     mask.unsqueeze(0).to(torch.float16), (h, w), mode='nearest-exact').to(dtype).flatten().unsqueeze(1).repeat(1, t_mask * img_len)
+            self_masks.append(img2txt_mask_sq)
             
             if t_mask > 1:
                 self_attn_mask = fp_or(self_attn_mask, fp_and(img2txt_mask_sq, img2txt_mask_sq.transpose(-1,-2)))
             else:
                 self_attn_mask = fp_or(self_attn_mask, fp_and(img2txt_mask_sq.repeat(t,t), img2txt_mask_sq.transpose(-1,-2)).repeat(t,t))
             
-            
             prev_len = curr_len
-                    
-        if self.mask_type.endswith("_masked"):
-            trimask = torch.tril(torch.ones_like(self_attn_mask)).to(self_attn_mask.dtype).to(self_attn_mask.device)
-            trimask.diagonal().fill_(0.0)
-            self_attn_mask = fp_or(trimask, self_attn_mask)
+
+        if self.mask_type.endswith("_masked") or self.mask_type.endswith("_A") or self.mask_type.endswith("_AB") or self.mask_type.endswith("_AC") or self.mask_type.endswith("_A,unmasked"):
+            #img2txt_mask_sq = torch.nn.functional.interpolate(self_masks[0].unsqueeze(0).to(torch.float16), (h, w), mode='nearest-exact').to(dtype).flatten().unsqueeze(1).repeat(1, img_len)
+            self_attn_mask = fp_or(self_attn_mask, self_masks[0])
+        
+        if self.mask_type.endswith("_unmasked") or self.mask_type.endswith("_C") or self.mask_type.endswith("_BC") or self.mask_type.endswith("_AC") or self.mask_type.endswith("_B,unmasked") or self.mask_type.endswith("_A,unmasked"):
+            #img2txt_mask_sq = torch.nn.functional.interpolate(self_masks[-1].unsqueeze(0).to(torch.float16), (h, w), mode='nearest-exact').to(dtype).flatten().unsqueeze(1).repeat(1, img_len)
+            self_attn_mask = fp_or(self_attn_mask, self_masks[-1])
             
-        if self.mask_type.endswith("_unmasked"):
-            trimask = (1-torch.tril(torch.ones_like(self_attn_mask, dtype=torch.float16))).to(self_attn_mask.dtype).to(self_attn_mask.device)
-            trimask.diagonal().fill_(0.0)
-            self_attn_mask = fp_or(trimask, self_attn_mask)
+        if self.mask_type.endswith("_B") or self.mask_type.endswith("_AB") or self.mask_type.endswith("_BC") or self.mask_type.endswith("_B,unmasked"):
+            #img2txt_mask_sq = torch.nn.functional.interpolate(self_masks[1].unsqueeze(0).to(torch.float16), (h, w), mode='nearest-exact').to(dtype).flatten().unsqueeze(1).repeat(1, img_len)
+            self_attn_mask = fp_or(self_attn_mask, self_masks[1])
         
         attn_mask = torch.cat([cross_attn_mask, self_attn_mask], dim=1)
         
@@ -385,5 +416,17 @@ class RegionalContext:
 
 
 
-
-
+def get_edge_mask(mask: torch.Tensor, dilation: int = 3) -> torch.Tensor:
+    mask_tmp = mask.squeeze()
+    mask_tmp = mask_tmp.float()
+    
+    eroded = -F.max_pool2d(-mask_tmp.unsqueeze(0).unsqueeze(0), kernel_size=3, stride=1, padding=1)
+    eroded = eroded.squeeze(0).squeeze(0)
+    
+    edge = mask_tmp - eroded
+    edge = (edge > 0).float()
+    
+    dilated_edge = F.max_pool2d(edge.unsqueeze(0).unsqueeze(0), kernel_size=dilation, stride=1, padding=dilation//2)
+    dilated_edge = dilated_edge.squeeze(0).squeeze(0)
+    
+    return dilated_edge[...,:mask.shape[-2], :mask.shape[-1]].view_as(mask)
