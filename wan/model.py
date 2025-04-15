@@ -722,7 +722,7 @@ class ReWanModel(torch.nn.Module):
                 List of denoised video tensors with original input shapes [C_out, F, H / 8, W / 8]
         """
         # embeddings
-        self.patch_embedding.to(self.time_embedding[0].weight.dtype)
+        #self.patch_embedding.to(self.time_embedding[0].weight.dtype)
         x          = self.patch_embedding(x.float()).to(x.dtype)         # vram jumped from ~16-16.5 up to 17.98     gained 300mb with weights at torch.float8_e4m3fn
         grid_sizes = x.shape[2:]
         x          = x.flatten(2).transpose(1, 2)      # x.shape 1,32400,5120  bfloat16   316.4 MB
