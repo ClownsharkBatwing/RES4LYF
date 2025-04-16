@@ -398,8 +398,8 @@ def sample_rk_beta(
     else:
         current_steps =              num_steps
         num_steps     = start_step + num_steps
-    current_steps = current_steps + 1 if sigmas[-1] == 0 and steps_to_run < 0 else current_steps
-        
+    #current_steps = current_steps + 1 if sigmas[-1] == 0 and steps_to_run < 0 and UNSAMPLE else current_steps
+    
     INIT_SAMPLE_LOOP = True
     step = start_step
     sigma, sigma_next, data_prev_ = None, None, None
