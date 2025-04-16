@@ -310,7 +310,7 @@ def sample_rk_beta(
     sigmas_orig = sigmas.clone()
     NS               = RK_NoiseSampler(RK, model, device=work_device, dtype=default_dtype, extra_options=extra_options)
     sigmas, UNSAMPLE = NS.prepare_sigmas(sigmas, sigmas_override, d_noise, d_noise_start_step, sampler_mode)
-    if UNSAMPLE and sigmas_orig[0] == 0.0 and sigmas_orig[0] != sigmas[0]:
+    if UNSAMPLE and sigmas_orig[0] == 0.0 and sigmas_orig[0] != sigmas[0] and sigmas[1] < sigmas[2]:
         sigmas = torch.cat([torch.full_like(sigmas[0], 0.0).unsqueeze(0), sigmas])
         start_step = 1
 
