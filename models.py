@@ -127,6 +127,20 @@ class TorchCompileModels:
                         m.add_object_patch(f"diffusion_model.single_layers.{i}", torch.compile(block, mode=mode, dynamic=dynamic, fullgraph=fullgraph, backend=backend))
                     self._compiled = True
                     
+                    
+                    
+                if hasattr(diffusion_model, "double_stream_blocks"):
+                    for i, block in enumerate(diffusion_model.double_stream_blocks):
+                        m.add_object_patch(f"diffusion_model.double_stream_blocks.{i}", torch.compile(block, mode=mode, dynamic=dynamic, fullgraph=fullgraph, backend=backend))
+                    self._compiled = True
+                    
+                if hasattr(diffusion_model, "single_stream_blocks"):
+                    for i, block in enumerate(diffusion_model.single_stream_blocks):
+                        m.add_object_patch(f"diffusion_model.single_stream_blocks.{i}", torch.compile(block, mode=mode, dynamic=dynamic, fullgraph=fullgraph, backend=backend))
+                    self._compiled = True
+                                        
+                                        
+                                        
                 if hasattr(diffusion_model, "joint_blocks"):
                     for i, block in enumerate(diffusion_model.joint_blocks):
                         m.add_object_patch(f"diffusion_model.joint_blocks.{i}", torch.compile(block, mode=mode, dynamic=dynamic, fullgraph=fullgraph, backend=backend))
@@ -320,8 +334,9 @@ class ReFluxPatcherAdvanced:
                 block.__class__ = SingleStreamBlock
                 block.idx       = i
                 
-        else:
+        elif model.model.diffusion_model.__class__ != Flux and model.model.diffusion_model.__class__ != ReFlux:
             raise ValueError("This node is for enabling regional conditioning for Flux only!")
+        else:
             m = model
         
         return (m,)
