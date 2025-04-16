@@ -763,16 +763,20 @@ class SharkChainsampler_Beta(SharkSampler_Beta):
             }
 
     def main(self, 
-            model=None,
-            steps_to_run=-1, 
-            cfg=5.5, 
-            latent_image=None,
+            model                 = None,
+            steps_to_run          = -1, 
+            cfg                   = 5.5, 
+            latent_image          = None,
+            sigmas                = None,
             seed            : int = -1, 
              **kwargs):  
         
         steps = latent_image['state_info']['sigmas'].shape[-1] - 3
+        sigmas = latent_image['state_info']['sigmas'] if sigmas is None else sigmas
+        if len(sigmas) > 2 and sigmas[1] < sigmas[2]:
+            sigmas = torch.flip(sigmas, dims=[0])
         
-        return super().main(model=model, steps_to_run=steps_to_run, steps=steps, cfg=cfg, seed=seed, latent_image=latent_image, **kwargs)
+        return super().main(model=model, steps_to_run=steps_to_run, sigmas=sigmas, steps=steps, cfg=cfg, seed=seed, latent_image=latent_image, **kwargs)
 
 
 
@@ -1583,11 +1587,15 @@ class ClownsharkChainsampler_Beta(ClownsharKSampler_Beta):
             bongmath              = True,
             seed            : int = -1, 
             latent_image          = None,
+            sigmas                = None,
              **kwargs):  
         
         steps = latent_image['state_info']['sigmas'].shape[-1] - 3
+        sigmas = latent_image['state_info']['sigmas'] if sigmas is None else sigmas
+        if len(sigmas) > 2 and sigmas[1] < sigmas[2]:
+            sigmas = torch.flip(sigmas, dims=[0])
         
-        return super().main(eta=eta, sampler_name=sampler_name, steps_to_run=steps_to_run, steps=steps, cfg=cfg, bongmath=bongmath, seed=seed, latent_image=latent_image, **kwargs)
+        return super().main(eta=eta, sampler_name=sampler_name, sigmas=sigmas, steps_to_run=steps_to_run, steps=steps, cfg=cfg, bongmath=bongmath, seed=seed, latent_image=latent_image, **kwargs)
 
 
 

@@ -305,11 +305,14 @@ def sample_rk_beta(
         regional_conditioning_mask_orig = None
     if EO("inv_reg_cond_mask"):
         regional_conditioning_mask_orig = 1-regional_conditioning_mask_orig
-
+    
     # SETUP SIGMAS
+    sigmas_orig = sigmas.clone()
     NS               = RK_NoiseSampler(RK, model, device=work_device, dtype=default_dtype, extra_options=extra_options)
     sigmas, UNSAMPLE = NS.prepare_sigmas(sigmas, sigmas_override, d_noise, d_noise_start_step, sampler_mode)
-    
+    if UNSAMPLE and sigmas_orig[0] == 0.0 and sigmas_orig[0] != sigmas[0]:
+        sigmas = torch.cat([torch.full_like(sigmas[0], 0.0).unsqueeze(0), sigmas])
+        start_step = 1
 
     
     SDE_NOISE_EXTERNAL = False
@@ -395,6 +398,7 @@ def sample_rk_beta(
     else:
         current_steps =              num_steps
         num_steps     = start_step + num_steps
+    current_steps = current_steps + 1 if sigmas[-1] == 0 and steps_to_run < 0 else current_steps
         
     INIT_SAMPLE_LOOP = True
     step = start_step
@@ -404,6 +408,8 @@ def sample_rk_beta(
         progress_bar = trange(current_steps+1, disable=disable)
     else:
         progress_bar = trange(current_steps, disable=disable)
+    
+    #progress_bar = trange(len(sigmas)-1-start_step, disable=disable)
         
     if AttnMask is not None:
         RK.update_transformer_options({'AttnMask': AttnMask})
@@ -1489,7 +1495,7 @@ def sample_rk_beta(
     if step == len(sigmas)-2 and sigmas[-1] == 0 and sigmas[-2] == NS.sigma_min:
         eps, denoised = RK(x, NS.sigma_min, x, NS.sigma_min)
         x = denoised
-        #progress_bar.update(1)
+        progress_bar.update(1)
 
     eps      = eps     .to(model_device)
     denoised = denoised.to(model_device)
