@@ -412,7 +412,7 @@ def sample_rk_beta(
     #progress_bar = trange(len(sigmas)-1-start_step, disable=disable)
         
     if AttnMask is not None:
-        RK.update_transformer_options({'AttnMask': AttnMask})
+        RK.update_transformer_options({'AttnMask'  : AttnMask})
         RK.update_transformer_options({'RegContext': RegContext})
 
     while step < num_steps:
@@ -1495,7 +1495,7 @@ def sample_rk_beta(
     if step == len(sigmas)-2 and sigmas[-1] == 0 and sigmas[-2] == NS.sigma_min:
         eps, denoised = RK(x, NS.sigma_min, x, NS.sigma_min)
         x = denoised
-        progress_bar.update(1)
+        #progress_bar.update(1)
 
     eps      = eps     .to(model_device)
     denoised = denoised.to(model_device)

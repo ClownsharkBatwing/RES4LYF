@@ -794,9 +794,12 @@ class RK_NoiseSampler:
             
         if d_noise_start_step == 0:
             sigmas = sigmas.clone() * d_noise
-        
+            
+        UNSAMPLE_FROM_ZERO = False
         if sigmas[0] == 0.0:      #remove padding used to prevent comfy from adding noise to the latent (for unsampling, etc.)
             UNSAMPLE = True
+            if sigmas[-1] == 0.0:
+                UNSAMPLE_FROM_ZERO = True
             sigmas   = sigmas[1:-1]
         else:
             UNSAMPLE = False
@@ -815,6 +818,9 @@ class RK_NoiseSampler:
                 sigmas[-2] = self.sigma_min
             elif (sigmas[-2] - self.sigma_min).abs() > 1e-4:
                 sigmas = torch.cat((sigmas[:-1], self.sigma_min.unsqueeze(0), sigmas[-1:]))
+                
+        elif UNSAMPLE_FROM_ZERO and not torch.isclose(sigmas[0], self.sigma_min):
+            sigmas = torch.cat([self.sigma_min.unsqueeze(0), sigmas])
         
         self.sigmas       = sigmas
         self.UNSAMPLE     = UNSAMPLE
