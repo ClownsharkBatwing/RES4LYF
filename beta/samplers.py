@@ -768,15 +768,16 @@ class SharkChainsampler_Beta(SharkSampler_Beta):
             cfg                   = 5.5, 
             latent_image          = None,
             sigmas                = None,
+            sampler_mode          = "",
             seed            : int = -1, 
              **kwargs):  
         
         steps = latent_image['state_info']['sigmas'].shape[-1] - 3
         sigmas = latent_image['state_info']['sigmas'] if sigmas is None else sigmas
-        if len(sigmas) > 2 and sigmas[1] < sigmas[2]:
+        if len(sigmas) > 2 and sigmas[1] < sigmas[2] and latent_image['state_info']['sampler_mode'] == "unsample" and sampler_mode == "resample":
             sigmas = torch.flip(sigmas, dims=[0])
         
-        return super().main(model=model, steps_to_run=steps_to_run, sigmas=sigmas, steps=steps, cfg=cfg, seed=seed, latent_image=latent_image, **kwargs)
+        return super().main(model=model, sampler_mode=sampler_mode, steps_to_run=steps_to_run, sigmas=sigmas, steps=steps, cfg=cfg, seed=seed, latent_image=latent_image, **kwargs)
 
 
 
@@ -1588,14 +1589,16 @@ class ClownsharkChainsampler_Beta(ClownsharKSampler_Beta):
             seed            : int = -1, 
             latent_image          = None,
             sigmas                = None,
+            sampler_mode          = "",
+            
              **kwargs):  
         
         steps = latent_image['state_info']['sigmas'].shape[-1] - 3
         sigmas = latent_image['state_info']['sigmas'] if sigmas is None else sigmas
-        if len(sigmas) > 2 and sigmas[1] < sigmas[2]:
+        if len(sigmas) > 2 and sigmas[1] < sigmas[2] and latent_image['state_info']['sampler_mode'] == "unsample" and sampler_mode == "resample":
             sigmas = torch.flip(sigmas, dims=[0])
         
-        return super().main(eta=eta, sampler_name=sampler_name, sigmas=sigmas, steps_to_run=steps_to_run, steps=steps, cfg=cfg, bongmath=bongmath, seed=seed, latent_image=latent_image, **kwargs)
+        return super().main(eta=eta, sampler_name=sampler_name, sampler_mode=sampler_mode, sigmas=sigmas, steps_to_run=steps_to_run, steps=steps, cfg=cfg, bongmath=bongmath, seed=seed, latent_image=latent_image, **kwargs)
 
 
 
