@@ -276,29 +276,6 @@ flags = {
 
 
 
-try:
-    from .zampler import add_zamplers
-    NODE_CLASS_MAPPINGS, extra_samplers = add_zamplers(NODE_CLASS_MAPPINGS, extra_samplers)
-    flags["zampler"] = True
-    RESplain("Importing zampler.")
-except ImportError:
-    try:
-        import importlib
-        for module_name in ["RES4LYF.zampler", "res4lyf.zampler"]:
-            try:
-                zampler_module = importlib.import_module(module_name)
-                add_zamplers = zampler_module.add_zamplers
-                NODE_CLASS_MAPPINGS, extra_samplers = add_zamplers(NODE_CLASS_MAPPINGS, extra_samplers)
-                flags["zampler"] = True
-                RESplain(f"Importing zampler via {module_name}.")
-                break
-            except ImportError:
-                continue
-        else:
-            raise ImportError("Zampler module not found in any path")
-    except Exception as e:
-        print(f"(RES4LYF) Failed to import zamplers: {e}")
-
 
 try:
     from .legacy import add_legacy
