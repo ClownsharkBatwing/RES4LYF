@@ -1495,7 +1495,7 @@ def sample_rk_beta(
 
     #progress_bar.close()
 
-    if step == len(sigmas)-2 and sigmas[-1] == 0 and sigmas[-2] == NS.sigma_min:
+    if step == len(sigmas)-2 and sigmas[-1] == 0 and sigmas[-2] == NS.sigma_min and not INIT_SAMPLE_LOOP:
         eps, denoised = RK(x, NS.sigma_min, x, NS.sigma_min)
         x = denoised
         #progress_bar.update(1)
