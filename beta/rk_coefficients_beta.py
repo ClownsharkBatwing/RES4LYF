@@ -2878,8 +2878,8 @@ def get_rk_methods_beta(rk_type       : str,
                 #print(i,j,k,l)
 
                 b[0][i-1] = numerator / prod_diff(ci[i-1], ci[j-1], ci[k-1], ci[l-1])
-             
-             
+            
+            
             ijkl = list(permutations([12, 13, 14, 15], 4))
             selected_permutations = {} 
             sign = 1  

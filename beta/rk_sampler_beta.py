@@ -312,7 +312,10 @@ def sample_rk_beta(
     sigmas, UNSAMPLE = NS.prepare_sigmas(sigmas, sigmas_override, d_noise, d_noise_start_step, sampler_mode)
     if UNSAMPLE and sigmas_orig[0] == 0.0 and sigmas_orig[0] != sigmas[0] and sigmas[1] < sigmas[2]:
         sigmas = torch.cat([torch.full_like(sigmas[0], 0.0).unsqueeze(0), sigmas])
-        start_step = 1
+        if start_step == 0:
+            start_step  = 1
+        else:
+            start_step -= 1
 
     
     SDE_NOISE_EXTERNAL = False
