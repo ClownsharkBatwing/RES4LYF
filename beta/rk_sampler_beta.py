@@ -934,7 +934,7 @@ def sample_rk_beta(
                             # MODEL CALL MODEL CALL MODEL CALL MODEL CALL MODEL CALL MODEL CALL MODEL CALL MODEL CALL MODEL CALL MODEL CALL MODEL CALL MODEL CALL MODEL CALL MODEL CALL MODEL CALL MODEL CALL MODEL CALL
                             
                             if (LG.guide_mode != "flow")   or   FLOW_STOPPED   or    (LG.guide_mode == "flow" and LG.lgw[step] == 0 and LG.lgw_inv[step] == 0):
-                                if LG.guide_mode == "lure" and LG.lgw[step] > 0 and LG.lgw_inv[step] > 0:
+                                if LG.guide_mode == "lure" and (LG.lgw[step] > 0 or LG.lgw_inv[step] > 0):
                                     eps_[row], data_[row] = RK(x_tmp, s_tmp, x_0, sigma, transformer_options={'latent_type': 'yt'})
                                 else:
                                     if EO("t_pad"):
@@ -1121,7 +1121,7 @@ def sample_rk_beta(
                                         
 
 
-                            if LG.guide_mode.startswith("lure") and LG.lgw[step] > 0 and LG.lgw_inv[step] > 0:
+                            if LG.guide_mode.startswith("lure") and (LG.lgw[step] > 0 or LG.lgw_inv[step] > 0):
                                 x_tmp = LG.process_guides_data_substep(x_tmp, data_[row], step, s_tmp)
                                 eps_[row], data_[row] = RK(x_tmp, s_tmp, x_0, sigma, transformer_options={'latent_type': 'xt'})
 
