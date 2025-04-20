@@ -1,4 +1,5 @@
 import importlib
+import os
 
 from . import loaders
 from . import sigmas
@@ -85,9 +86,11 @@ NODE_CLASS_MAPPINGS = {
     "ConditioningTruncate"                : conditioning.ConditioningTruncate,
     "StyleModelApplyAdvanced"             : conditioning.StyleModelApplyAdvanced,
 
+    "ConditioningDownsample (T5)"         : conditioning.ConditioningDownsampleT5,
+
     "ConditioningToBase64"                : conditioning.ConditioningToBase64,
     "Base64ToConditioning"                : conditioning.Base64ToConditioning,
-
+    
     "ConditioningBatch4"                  : conditioning.ConditioningBatch4,
     "ConditioningBatch8"                  : conditioning.ConditioningBatch8,
     
@@ -275,6 +278,30 @@ flags = {
 }
 
 
+file_path = os.path.join(os.path.dirname(__file__), "zampler_test_code.txt")
+if os.path.exists(file_path):
+    try:
+        from .zampler import add_zamplers
+        NODE_CLASS_MAPPINGS, extra_samplers = add_zamplers(NODE_CLASS_MAPPINGS, extra_samplers)
+        flags["zampler"] = True
+        RESplain("Importing zampler.")
+    except ImportError:
+        try:
+            import importlib
+            for module_name in ["RES4LYF.zampler", "res4lyf.zampler"]:
+                try:
+                    zampler_module = importlib.import_module(module_name)
+                    add_zamplers = zampler_module.add_zamplers
+                    NODE_CLASS_MAPPINGS, extra_samplers = add_zamplers(NODE_CLASS_MAPPINGS, extra_samplers)
+                    flags["zampler"] = True
+                    RESplain(f"Importing zampler via {module_name}.")
+                    break
+                except ImportError:
+                    continue
+            else:
+                raise ImportError("Zampler module not found in any path")
+        except Exception as e:
+            print(f"(RES4LYF) Failed to import zamplers: {e}")
 
 
 try:

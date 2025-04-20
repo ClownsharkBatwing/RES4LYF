@@ -1,5 +1,6 @@
 import torch
 import torch.nn.functional as F
+import math
 
 from torch  import Tensor
 from typing import Optional, Callable, Tuple, Dict, Any, Union, TYPE_CHECKING, TypeVar, List
@@ -20,6 +21,7 @@ from .helper  import initialize_or_scale, precision_tool, get_res4lyf_scheduler_
 from .latents import get_orthogonal, get_collinear
 from .res4lyf import RESplain
 from .beta.constants import MAX_STEPS
+from .attention_masks import FullAttentionMask, FullAttentionMaskHiDream, CrossAttentionMask, SplitAttentionMask, RegionalContext
 
 
 def multiply_nested_tensors(structure, scalar):
@@ -293,7 +295,7 @@ class ConditioningSetTimestepRange:
     def INPUT_TYPES(cls):
         return {"required": {"conditioning": ("CONDITIONING", ),
                             "start": ("FLOAT", {"default": 0.0, "min": 0.0, "max": 1.0, "step": 0.001}),
-                            "end": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 1.0, "step": 0.001})
+                            "end":   ("FLOAT", {"default": 1.0, "min": 0.0, "max": 1.0, "step": 0.001})
                             }}
     RETURN_TYPES = ("CONDITIONING",)
     RETURN_NAMES = ("conditioning",)
@@ -483,6 +485,64 @@ class Base64ToConditioning:
         return (conditioning,)
 
 
+def best_hw(n): # get factor pair closesst to a true square
+    best = (1, n)
+    min_diff = n
+    for i in range(1, int(n**0.5) + 1):
+        if n % i == 0:
+            j = n // i
+            if abs(i - j) < min_diff:
+                best = (i, j)
+                min_diff = abs(i - j)
+    return best
+
+def downsample_tokens(cond: torch.Tensor, target_tokens: int, mode="bicubic") -> torch.Tensor:
+    B, T, D = cond.shape
+
+    def next_square(n: int):
+        root = math.ceil(n**0.5)
+        return root * root
+
+    padded_len = next_square(T)
+    pad_amount = padded_len - T
+    if pad_amount > 0:
+        pad_tensor = torch.zeros(B, pad_amount, D, dtype=cond.dtype, device=cond.device)
+        cond = torch.cat([cond, pad_tensor], dim=1)
+
+    side_len = int(math.sqrt(padded_len))
+    cond_reshaped = cond.view(B, side_len, side_len, D).permute(0, 3, 1, 2)  # [B, D, H, W]
+
+    H_target, W_target = best_hw(target_tokens)
+    cond_interp = F.interpolate(cond_reshaped, size=(H_target, W_target), mode=mode)
+
+    cond_final = cond_interp.permute(0, 2, 3, 1).reshape(B, -1, D)
+    cond_final = cond_final[:, :target_tokens, :]
+
+    return cond_final
+
+
+class ConditioningDownsampleT5:
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": { 
+                "conditioning": ("CONDITIONING",),
+                "token_limit" : ("INT", {'default': 128, 'min': 1, 'max': 16384}),
+            },
+            "optional": {
+            }
+        }
+        
+    RETURN_TYPES = ("CONDITIONING",)
+    RETURN_NAMES = ("conditioning",)
+    FUNCTION     = "main"
+    CATEGORY     = "RES4LYF/conditioning"
+    EXPERIMENTAL = True
+
+    def main(self, conditioning, token_limit):
+        
+        conditioning[0][0] = downsample_tokens(conditioning[0][0], token_limit)
+        return (conditioning, )
 
 
 
@@ -606,6 +666,10 @@ class EmptyConditioningGenerator:
             elif isinstance(self.model_config, comfy.supported_models.WAN21_T2V) or isinstance(self.model_config, comfy.supported_models.WAN21_I2V):
                 self.text_len_base = 512
                 self.text_channels = 5120 # sometimes needs to be 4096, like when initializing in samplers_py in shark?
+                self.pooled_len    = 1
+            elif isinstance(self.model_config, comfy.supported_models.HiDream):
+                self.text_len_base = 128
+                self.text_channels = 4096 # sometimes needs to be 4096, like when initializing in samplers_py in shark?
                 self.pooled_len    = 1
             else:
                 raise ValueError(f"Unknown model config: {type(config)}")
@@ -1062,24 +1126,46 @@ class ClownRegionalConditioning:
             positive = copy.deepcopy(positive_masked)
             positive[0][0] = (positive_masked[0][0][:,:positive_min_tokens,:] + positive_unmasked[0][0][:,:positive_min_tokens,:]) / 2
             
-            from .attention_masks import FullAttentionMask, CrossAttentionMask, SplitAttentionMask, RegionalContext
             if isinstance(model.model.model_config, comfy.supported_models.WAN21_T2V) or isinstance(model.model.model_config, comfy.supported_models.WAN21_I2V):
                 if model.model.diffusion_model.blocks[0].self_attn.winderz_type != "false":
                     AttnMask = CrossAttentionMask(mask_type, edge_width)
                 else:
                     AttnMask = SplitAttentionMask(mask_type, edge_width)
+            elif isinstance(model.model.model_config, comfy.supported_models.HiDream):
+                AttnMask = FullAttentionMaskHiDream(mask_type, edge_width)
             else:
                 AttnMask = FullAttentionMask(mask_type, edge_width)
-            AttnMask.add_region(positive_masked  [0][0],   mask)
-            AttnMask.add_region(positive_unmasked[0][0], 1-mask)
-            
+                
             RegContext = RegionalContext()
+                
+            if isinstance(model.model.model_config, comfy.supported_models.HiDream):
+                AttnMask.add_region(torch.concat([
+                    positive_masked  [0][0],
+                    positive_masked  [0][1]['conditioning_llama3'][0,0,...].unsqueeze(0),
+                    positive_masked  [0][1]['conditioning_llama3'][0,0,...].unsqueeze(0),
+                    ],
+                    dim=-2),
+                    mask)
+                AttnMask.add_region(torch.concat([
+                    positive_unmasked[0][0],
+                    positive_unmasked[0][1]['conditioning_llama3'][0,0,...].unsqueeze(0),
+                    positive_unmasked[0][1]['conditioning_llama3'][0,0,...].unsqueeze(0),
+                    ],
+                    dim=-2),
+                    1-mask)
+
+                RegContext.add_region_llama3(positive_masked  [0][1]['conditioning_llama3'])
+                RegContext.add_region_llama3(positive_unmasked[0][1]['conditioning_llama3'])
+            else:
+                AttnMask.add_region(positive_masked  [0][0],   mask)
+                AttnMask.add_region(positive_unmasked[0][0], 1-mask)
+                
             RegContext.add_region(positive_masked  [0][0])
             RegContext.add_region(positive_unmasked[0][0])
             
-            positive[0][1]['AttnMask'] = AttnMask
+            positive[0][1]['AttnMask']   = AttnMask
             positive[0][1]['RegContext'] = RegContext
-            
+                
             if   positive_masked_tokens < positive_unmasked_tokens:
                 positive[0][0] = torch.cat((positive[0][0], positive_unmasked[0][0][:,positive_min_tokens:,:]), dim=1)
             elif positive_masked_tokens > positive_unmasked_tokens:
@@ -1299,7 +1385,6 @@ class ClownRegionalConditioning_AB:
             positive = copy.deepcopy(positive_masked)
             positive[0][0] = (positive_masked[0][0][:,:positive_min_tokens,:] + positive_unmasked[0][0][:,:positive_min_tokens,:]) / 2
             
-            from .attention_masks import FullAttentionMask, CrossAttentionMask, SplitAttentionMask, RegionalContext
             if isinstance(model.model.model_config, comfy.supported_models.WAN21_T2V) or isinstance(model.model.model_config, comfy.supported_models.WAN21_I2V):
                 if model.model.diffusion_model.blocks[0].self_attn.winderz_type != "false":
                     AttnMask = CrossAttentionMask(mask_type, edge_width)
@@ -1307,12 +1392,37 @@ class ClownRegionalConditioning_AB:
                     AttnMask = SplitAttentionMask(mask_type, edge_width)
             else:
                 AttnMask = FullAttentionMask(mask_type, edge_width)
-            AttnMask.add_region(positive_masked  [0][0],   mask)
-            AttnMask.add_region(positive_unmasked[0][0], unmask)
-            
+
             RegContext = RegionalContext()
+            
+            if isinstance(model.model.model_config, comfy.supported_models.HiDream):
+                AttnMask.add_region(torch.concat([
+                    positive_masked  [0][0],
+                    positive_masked  [0][1]['conditioning_llama3'][0,0,...].unsqueeze(0),
+                    positive_masked  [0][1]['conditioning_llama3'][0,0,...].unsqueeze(0),
+                    ],
+                    dim=-2),
+                    mask)
+                AttnMask.add_region(torch.concat([
+                    positive_unmasked[0][0],
+                    positive_unmasked[0][1]['conditioning_llama3'][0,0,...].unsqueeze(0),
+                    positive_unmasked[0][1]['conditioning_llama3'][0,0,...].unsqueeze(0),
+                    ],
+                    dim=-2),
+                    unmask)
+
+                RegContext.add_region_llama3(positive_masked  [0][1]['conditioning_llama3'])
+                RegContext.add_region_llama3(positive_unmasked[0][1]['conditioning_llama3'])
+            else:
+                AttnMask.add_region(positive_masked  [0][0],   mask)
+                AttnMask.add_region(positive_unmasked[0][0], unmask)
+            
             RegContext.add_region(positive_masked  [0][0])
             RegContext.add_region(positive_unmasked[0][0])
+            
+            if 'clip_vision_output' in positive_masked[0][1]:
+                RegContext.add_region_clip_fea(positive_masked  [0][1]['clip_vision_output'].penultimate_hidden_states)
+                RegContext.add_region_clip_fea(positive_unmasked[0][1]['clip_vision_output'].penultimate_hidden_states)
             
             positive[0][1]['AttnMask'] = AttnMask
             positive[0][1]['RegContext'] = RegContext
@@ -1539,7 +1649,6 @@ class ClownRegionalConditioning3:
             positive = copy.deepcopy(positive_A)
             positive[0][0] = (positive_A[0][0][:,:positive_min_tokens,:] + positive_B[0][0][:,:positive_min_tokens,:] + positive_unmasked[0][0][:,:positive_min_tokens,:]) / 3
             
-            from .attention_masks import FullAttentionMask, CrossAttentionMask, SplitAttentionMask, RegionalContext
             if isinstance(model.model.model_config, comfy.supported_models.WAN21_T2V) or isinstance(model.model.model_config, comfy.supported_models.WAN21_I2V):
                 if model.model.diffusion_model.blocks[0].self_attn.winderz_type != "false":
                     AttnMask = CrossAttentionMask(mask_type, edge_width)
@@ -1547,16 +1656,44 @@ class ClownRegionalConditioning3:
                     AttnMask = SplitAttentionMask(mask_type, edge_width)
             else:
                 AttnMask = FullAttentionMask(mask_type, edge_width)
-            AttnMask.add_region(positive_A       [0][0], mask_A)
-            AttnMask.add_region(positive_B       [0][0], mask_B)
-            AttnMask.add_region(positive_unmasked[0][0], mask_AB_inv)
-            
+
             RegContext = RegionalContext()
+            
+            if isinstance(model.model.model_config, comfy.supported_models.HiDream):
+                AttnMask.add_region(torch.concat([
+                    positive_A  [0][0],
+                    positive_A  [0][1]['conditioning_llama3'][0,0,...].unsqueeze(0),
+                    positive_A  [0][1]['conditioning_llama3'][0,0,...].unsqueeze(0),
+                    ],
+                    dim=-2),
+                    mask_A)
+                AttnMask.add_region(torch.concat([
+                    positive_B  [0][0],
+                    positive_B  [0][1]['conditioning_llama3'][0,0,...].unsqueeze(0),
+                    positive_B  [0][1]['conditioning_llama3'][0,0,...].unsqueeze(0),
+                    ],
+                    dim=-2),
+                    mask_B)
+                AttnMask.add_region(torch.concat([
+                    positive_unmasked[0][0],
+                    positive_unmasked[0][1]['conditioning_llama3'][0,0,...].unsqueeze(0),
+                    positive_unmasked[0][1]['conditioning_llama3'][0,0,...].unsqueeze(0),
+                    ],
+                    dim=-2),
+                    mask_AB_inv)
+
+                RegContext.add_region_llama3(positive_A       [0][1]['conditioning_llama3'])
+                RegContext.add_region_llama3(positive_B       [0][1]['conditioning_llama3'])
+                RegContext.add_region_llama3(positive_unmasked[0][1]['conditioning_llama3'])
+            else:
+                AttnMask.add_region(positive_A       [0][0], mask_A)
+                AttnMask.add_region(positive_B       [0][0], mask_B)
+                AttnMask.add_region(positive_unmasked[0][0], mask_AB_inv)
+            
             RegContext.add_region(positive_A  [0][0])
             RegContext.add_region(positive_B[0][0])
             RegContext.add_region(positive_unmasked[0][0])
 
-            
             positive[0][1]['AttnMask']   = AttnMask
             positive[0][1]['RegContext'] = RegContext
             
@@ -1855,7 +1992,6 @@ class ClownRegionalConditioning_ABC:
             positive = copy.deepcopy(positive_A)
             positive[0][0] = (positive_A[0][0][:,:positive_min_tokens,:] + positive_B[0][0][:,:positive_min_tokens,:] + positive_unmasked[0][0][:,:positive_min_tokens,:]) / 3
             
-            from .attention_masks import FullAttentionMask, CrossAttentionMask, SplitAttentionMask, RegionalContext
             if isinstance(model.model.model_config, comfy.supported_models.WAN21_T2V) or isinstance(model.model.model_config, comfy.supported_models.WAN21_I2V):
                 if model.model.diffusion_model.blocks[0].self_attn.winderz_type != "false":
                     AttnMask = CrossAttentionMask(mask_type, edge_width)
@@ -1863,15 +1999,43 @@ class ClownRegionalConditioning_ABC:
                     AttnMask = SplitAttentionMask(mask_type, edge_width)
             else:
                 AttnMask = FullAttentionMask(mask_type, edge_width)
-            AttnMask.add_region(positive_A       [0][0], mask_A)
-            AttnMask.add_region(positive_B       [0][0], mask_B)
-            AttnMask.add_region(positive_unmasked[0][0], mask_AB_inv)
-            
+                
             RegContext = RegionalContext()
+            
+            if isinstance(model.model.model_config, comfy.supported_models.HiDream):
+                AttnMask.add_region(torch.concat([
+                    positive_A  [0][0],
+                    positive_A  [0][1]['conditioning_llama3'][0,0,...].unsqueeze(0),
+                    positive_A  [0][1]['conditioning_llama3'][0,0,...].unsqueeze(0),
+                    ],
+                    dim=-2),
+                    mask_A)
+                AttnMask.add_region(torch.concat([
+                    positive_B  [0][0],
+                    positive_B  [0][1]['conditioning_llama3'][0,0,...].unsqueeze(0),
+                    positive_B  [0][1]['conditioning_llama3'][0,0,...].unsqueeze(0),
+                    ],
+                    dim=-2),
+                    mask_B)
+                AttnMask.add_region(torch.concat([
+                    positive_unmasked[0][0],
+                    positive_unmasked[0][1]['conditioning_llama3'][0,0,...].unsqueeze(0),
+                    positive_unmasked[0][1]['conditioning_llama3'][0,0,...].unsqueeze(0),
+                    ],
+                    dim=-2),
+                    mask_AB_inv)
+
+                RegContext.add_region_llama3(positive_A       [0][1]['conditioning_llama3'])
+                RegContext.add_region_llama3(positive_B       [0][1]['conditioning_llama3'])
+                RegContext.add_region_llama3(positive_unmasked[0][1]['conditioning_llama3'])
+            else:
+                AttnMask.add_region(positive_A       [0][0], mask_A)
+                AttnMask.add_region(positive_B       [0][0], mask_B)
+                AttnMask.add_region(positive_unmasked[0][0], mask_AB_inv)
+            
             RegContext.add_region(positive_A  [0][0])
             RegContext.add_region(positive_B[0][0])
             RegContext.add_region(positive_unmasked[0][0])
-
             
             positive[0][1]['AttnMask']   = AttnMask
             positive[0][1]['RegContext'] = RegContext
