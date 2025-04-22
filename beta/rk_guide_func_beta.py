@@ -161,11 +161,11 @@ class LatentGuide:
                 prepend                   = torch.zeros(start_steps_mean_,                                                        dtype=self.dtype, device=self.device) 
                 latent_guide_weights_mean = torch.cat((prepend, latent_guide_weights_mean.to(self.device)), dim=0)
             
-            if scheduler_ != "constant":
+            if scheduler_ != "constant" or latent_guide_weights is not None:
                 latent_guide_weights      = initialize_or_scale(latent_guide_weights,      latent_guide_weight,      self.max_steps)
-            if scheduler_inv_ != "constant":
+            if scheduler_inv_ != "constant" or latent_guide_weights_inv is not None:
                 latent_guide_weights_inv  = initialize_or_scale(latent_guide_weights_inv,  latent_guide_weight_inv,  self.max_steps)
-            if scheduler_mean_ != "constant":
+            if scheduler_mean_ != "constant" or latent_guide_weights_mean is not None:
                 latent_guide_weights_mean = initialize_or_scale(latent_guide_weights_mean, latent_guide_weight_mean, self.max_steps)
 
             latent_guide_weights     [steps_     :] = 0
@@ -641,6 +641,8 @@ class LatentGuide:
                                 sigma_row     : Tensor,
                                 frame_targets : Optional[Tensor] = None,
                                 ):
+        if not self.HAS_LATENT_GUIDE and not self.HAS_LATENT_GUIDE_INV:
+            return x_row
 
         y0, y0_inv, lgw_mask, lgw_mask_inv = self.get_cossim_adjusted_lgw_masks(data_row, step)
         
@@ -685,6 +687,9 @@ class LatentGuide:
                         sigma_row     : Tensor,
                         frame_target  : float = 1.0,
                         ):
+
+        if not self.HAS_LATENT_GUIDE and not self.HAS_LATENT_GUIDE_INV:
+            return x_row
 
         if self.guide_mode in {"data", "data_projection", "lure", "lure_projection"}:
             data_targets = self.EO("data_targets", [1.0])
@@ -755,6 +760,9 @@ class LatentGuide:
                                 frame_targets : Optional[Tensor] = None,
                                 RK=None,
                                 ):
+        
+        if not self.HAS_LATENT_GUIDE and not self.HAS_LATENT_GUIDE_INV:
+            return eps_row
 
         y0, y0_inv, lgw_mask, lgw_mask_inv = self.get_cossim_adjusted_lgw_masks(data_row, step)
         
@@ -805,6 +813,9 @@ class LatentGuide:
                         sigma_row     : Tensor,
                         frame_target  : float = 1.0,
                         ):
+        
+        if not self.HAS_LATENT_GUIDE and not self.HAS_LATENT_GUIDE_INV:
+            return eps_row
 
         if self.guide_mode in {"epsilon", "epsilon_projection"}:
             eps_targets = self.EO("eps_targets", [1.0])
@@ -878,6 +889,9 @@ class LatentGuide:
                                 epsilon_scale :  float,
                                 RK,
                                 ):
+        
+        if not self.HAS_LATENT_GUIDE and not self.HAS_LATENT_GUIDE_INV:
+            return eps_, x_
 
         y0, y0_inv, lgw_mask, lgw_mask_inv = self.get_cossim_adjusted_lgw_masks(data_[row], step)
         
@@ -1022,7 +1036,7 @@ class LatentGuide:
         if self.EO("substep_eps_std"):
             eps_[row] = normalize_latent(eps_[row], eps_orig[row], mean=False, channelwise=False)
         return eps_, x_
-
+    
 
     def process_channelwise(self,
                             x_0                   : Tensor,
@@ -1099,14 +1113,17 @@ class LatentGuide:
 
     @torch.no_grad
     def process_guides_poststep(self, x:Tensor, denoised:Tensor, eps:Tensor, data:Tensor, sigma_curr:Tensor, step:int) -> Tuple[Tensor, Tensor, Tensor]:
-        x_orig = x.clone()
-        mean_weight = self.EO("mean_weight", 0.01)
+        if not self.HAS_LATENT_GUIDE and not self.HAS_LATENT_GUIDE_INV:
+            return x
 
         y0, y0_inv, lgw_mask, lgw_mask_inv = self.get_cossim_adjusted_lgw_masks(denoised, step)
         
         if not (lgw_mask.any() != 0 or lgw_mask_inv.any() != 0):  # cossim score too similar! deactivate guide for this step
             return x
         
+        x_orig = x.clone()
+        mean_weight = self.EO("mean_weight", 0.01)
+
         mask = self.mask #needed for bitwise mask below
         
         if self.guide_mode in {"epsilon_dynamic_mean_std", "epsilon_dynamic_mean", "epsilon_dynamic_std", "epsilon_dynamic_mean_from_bkg"}:
