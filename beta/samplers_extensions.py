@@ -1524,3 +1524,35 @@ class ClownOptions_Frameweights:
         options_mgr.update("frame_weights_mgr", frame_weights_mgr)
         
         return (options_mgr.as_dict(),)
+
+
+class ClownOptions_GuiderInput:
+    @classmethod
+    def INPUT_TYPES(s):
+        return {"required":
+                    {"guider": ("GUIDER", ),
+                    },
+                "optional":
+                    {"options": ("OPTIONS", ),
+                    }
+                }
+    RETURN_TYPES = ("OPTIONS",)
+    RETURN_NAMES = ("options",)
+    FUNCTION     = "main"
+    CATEGORY     = "RES4LYF/sampler_options"
+
+    def main(self, guider, options=None):
+        options_mgr = OptionsManager(options if options is not None else {})
+        
+        if isinstance(guider, dict):
+            guider = guider.get('samples', None)
+            
+        if isinstance(guider, torch.Tensor):
+            guider = guider.detach().cpu()
+        
+        if options_mgr is None:
+            options_mgr = OptionsManager()
+            
+        options_mgr.update("guider", guider)
+        
+        return (options_mgr.as_dict(), )
