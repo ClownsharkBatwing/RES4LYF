@@ -605,8 +605,11 @@ class HDModel(nn.Module):
                         txt_list.append(txt_segment)
                     txt = torch.cat(txt_list + [txt_llama], dim=1)
                     
-                if mask is not None and floor > bid/48:
-                    mask[:img_len,:img_len] = True
+                if mask is not None:
+                    if floor > bid/48:
+                        mask[:img_len,:img_len] = 1.0
+                    elif weight < bid/48:
+                        mask[...] = 1.0
 
                 img, txt_init = block(img, img_masks, txt, clip, rope, mask)
                 txt_init = txt_init[:, :txt_init_len]
@@ -628,8 +631,14 @@ class HDModel(nn.Module):
                 txt_llama = contexts[bid+16]                        # T5 pre-embedded for single stream blocks
                 img = torch.cat([img, txt_llama], dim=1)            # cat img,txt     opposite of flux which is txt,img       4303 + 143 -> 4446
                 
-                if mask is not None and floor > (bid+16)/48:
-                    mask[:img_len,:img_len] = True
+                #if mask is not None and floor > (bid+16)/48:
+                #    mask[:img_len,:img_len] = True
+                    
+                if mask is not None:
+                    if floor > (bid+16)/48:
+                        mask[:img_len,:img_len] = 1.0
+                    elif weight < (bid+16)/48:
+                        mask[...] = 1.0
                 
                 img = block(img, img_masks, None, clip, rope, mask)
                 img = img[:, :joint_len]   # slice off txt_llama
