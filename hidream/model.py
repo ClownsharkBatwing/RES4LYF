@@ -14,7 +14,7 @@ import torch.nn.functional as F
 from comfy.ldm.flux.math import apply_rope, rope
 from comfy.ldm.flux.layers import LastLayer
 
-from comfy.ldm.modules.attention import optimized_attention, attention_pytorch2
+from comfy.ldm.modules.attention import optimized_attention
 import comfy.model_management
 import comfy.ldm.common_dit
 
