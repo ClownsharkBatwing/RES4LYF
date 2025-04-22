@@ -615,7 +615,7 @@ class HDModel(nn.Module):
                     txt = torch.cat(txt_list + [txt_llama], dim=1)
                     
                 if mask is not None:
-                    if floor > bid/48:
+                    if floor > 0 and floor > bid/48:
                         mask[:img_len,:img_len] = 1.0
                     elif weight > 0 and weight < bid/48:
                         mask = None
@@ -653,7 +653,7 @@ class HDModel(nn.Module):
                 #    mask[:img_len,:img_len] = True
                     
                 if mask is not None:
-                    if floor > (bid+16)/48:
+                    if floor > 0 and floor > (bid+16)/48:
                         mask[:img_len,:img_len] = 1.0
                     elif weight > 0 and weight < (bid+16)/48:
                         mask = None
