@@ -219,12 +219,11 @@ class FullAttentionMask(BaseAttentionMask):
         self.attn_mask = CoreAttnMask(attn_mask, mask_type=mask_type)
 
 
-def make_checkerboard(tile_size: int, num_tiles: int, dtype=torch.float32, device="cpu"):
+def make_checkerboard(tile_size: int, num_tiles: int, dtype=torch.float16, device="cpu"):
     pattern = torch.tensor([[0, 1], [1, 0]], dtype=dtype, device=device)
     board = pattern.repeat(num_tiles // 2 + 1, num_tiles // 2 + 1)[:num_tiles, :num_tiles]
     board_expanded = board.repeat_interleave(tile_size, dim=0).repeat_interleave(tile_size, dim=1)
     return board_expanded
-
 
 
 class FullAttentionMaskHiDream(BaseAttentionMask):
@@ -238,38 +237,27 @@ class FullAttentionMaskHiDream(BaseAttentionMask):
         h         = self.h
         w         = self.w
         
-        #text_len -= 128
-        #text_off -= 128
         attn_mask = torch.zeros((text_off+t*img_len, text_len+t*img_len), dtype=dtype)
         
         prev_len = 0
         for context_len, mask in zip(self.context_lens, self.masks):
             mask = torch.flip(mask, dims=[-2,-1])
-            mask = ~mask if mask.dtype == torch.bool else 1-mask
-            
-            #if (prev_len // context_len) % 2 == 1:
-            #    context_len -= 128
+            #mask = ~mask if mask.dtype == torch.bool else 1-mask
             
             img2txt_mask    = ~torch.nn.functional.interpolate(mask.unsqueeze(0).to(torch.float16), (h, w), mode='nearest-exact').to(dtype).flatten().unsqueeze(1).repeat(1, context_len)
             
+            img2txt_mask = ~img2txt_mask
             img2txt_mask[:,128:256] = ~img2txt_mask[:,128:256]
-            """if (prev_len // context_len) % 2 == 0:
-                img2txt_mask[:,:128] = True
-                img2txt_mask[:,256:] = ~img2txt_mask[:,256:]
-            else:
-                img2txt_mask[:,256:] = ~img2txt_mask[:,256:]"""
-            #img2txt_mask[...] = True
 
-            img2txt_mask_sq = torch.nn.functional.interpolate(mask.unsqueeze(0).to(torch.float16), (h, w), mode='nearest-exact').to(dtype).flatten().unsqueeze(1).repeat(1, img_len)
-            #img2txt_mask_sq[...] = True
+            img2txt_mask_sq = ~torch.nn.functional.interpolate(mask.unsqueeze(0).to(torch.float16), (h, w), mode='nearest-exact').to(dtype).flatten().unsqueeze(1).repeat(1, img_len)
 
             curr_len = prev_len + context_len
             
             attn_mask[prev_len:curr_len, prev_len:curr_len] = 1.0                                         # self             TXT 2 TXT
-            attn_mask[prev_len:curr_len, text_len:        ] = img2txt_mask.transpose(-1, -2).repeat(1,t)  # cross            TXT 2 regional IMG    # txt2img_mask
-            attn_mask[text_off:        , prev_len:curr_len] = img2txt_mask.repeat(t,1)                    # cross   regional IMG 2 TXT
+            attn_mask[prev_len:curr_len, text_len:        ] = img2txt_mask.transpose(-1,-2).repeat(1,t)  # cross            TXT 2 regional IMG    # txt2img_mask
+            attn_mask[text_off:        , prev_len:curr_len] = img2txt_mask                  .repeat(t,1)  # cross   regional IMG 2 TXT
 
-            attn_mask[text_off:, text_len:] = fp_or(attn_mask[text_off:, text_len:], fp_and(img2txt_mask_sq.repeat(t,t), img2txt_mask_sq.transpose(-1, -2).repeat(t,t))) # img2txt_mask_sq, txt2img_mask_sq
+            attn_mask[text_off:, text_len:] = fp_or(attn_mask[text_off:, text_len:], fp_and(img2txt_mask_sq.repeat(t,t), img2txt_mask_sq.transpose(-1,-2).repeat(t,t))) # img2txt_mask_sq, txt2img_mask_sq
             
             prev_len = curr_len
             
@@ -284,7 +272,7 @@ class FullAttentionMaskHiDream(BaseAttentionMask):
         if self.mask_type.endswith("_B") or self.mask_type.endswith("_AB") or self.mask_type.endswith("_BC") or self.mask_type.endswith("_B,unmasked"):
             img2txt_mask_sq = torch.nn.functional.interpolate(torch.flip(self.masks[1], dims=[-2,-1]).unsqueeze(0).to(torch.float16), (h, w), mode='nearest-exact').to(dtype).flatten().unsqueeze(1).repeat(1, img_len)
             attn_mask[text_off:, text_len:] = fp_or(attn_mask[text_off:, text_len:], img2txt_mask_sq)
-            
+        
         if self.edge_width > 0:
             edge_mask = torch.zeros_like(self.masks[0])
             for mask in self.masks:
@@ -294,12 +282,9 @@ class FullAttentionMaskHiDream(BaseAttentionMask):
             img2txt_mask_sq = torch.nn.functional.interpolate(edge_mask.unsqueeze(0).to(torch.float16), (h, w), mode='nearest-exact').to(dtype).flatten().unsqueeze(1).repeat(1, img_len)
             attn_mask[text_off:, text_len:] = fp_or(attn_mask[text_off:, text_len:], img2txt_mask_sq)
         
-
         attn_mask = torch.flip(attn_mask, dims=[-2,-1])
-        #attn_mask[...] = True
-        #attn_mask = attn_mask[:4416,:4416]
-        checkerboard = make_checkerboard(tile_size=128, num_tiles=6)
-        attn_mask[:img_len, :img_len] = True
+        num_tiles = (attn_mask.shape[-1] - img_len) // 128
+        checkerboard = make_checkerboard(tile_size=128, num_tiles=num_tiles)
         attn_mask[img_len:,img_len:] = ~(checkerboard.bool())
         
         self.attn_mask = CoreAttnMask(attn_mask, mask_type=mask_type)

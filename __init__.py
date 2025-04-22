@@ -175,11 +175,14 @@ NODE_CLASS_MAPPINGS = {
     "ReFluxPatcher"                       : models.ReFluxPatcher,
     "ReSD35Patcher"                       : models.ReSD35Patcher,
     "ReAuraPatcher"                       : models.ReAuraPatcher,
+    "ReHiDreamPatcher"                    : models.ReHiDreamPatcher,
     
     "ReWanPatcherAdvanced"                : models.ReWanPatcherAdvanced,
     "ReFluxPatcherAdvanced"               : models.ReFluxPatcherAdvanced,
     "ReSD35PatcherAdvanced"               : models.ReSD35PatcherAdvanced,
     "ReAuraPatcherAdvanced"               : models.ReAuraPatcherAdvanced,
+    
+    "ReHiDreamPatcherAdvanced"            : models.ReHiDreamPatcherAdvanced,
     
     "FluxOrthoCFGPatcher"                 : models.FluxOrthoCFGPatcher,
 

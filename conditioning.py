@@ -1390,6 +1390,8 @@ class ClownRegionalConditioning_AB:
                     AttnMask = CrossAttentionMask(mask_type, edge_width)
                 else:
                     AttnMask = SplitAttentionMask(mask_type, edge_width)
+            elif isinstance(model.model.model_config, comfy.supported_models.HiDream):
+                AttnMask = FullAttentionMaskHiDream(mask_type, edge_width)
             else:
                 AttnMask = FullAttentionMask(mask_type, edge_width)
 
@@ -1654,6 +1656,8 @@ class ClownRegionalConditioning3:
                     AttnMask = CrossAttentionMask(mask_type, edge_width)
                 else:
                     AttnMask = SplitAttentionMask(mask_type, edge_width)
+            elif isinstance(model.model.model_config, comfy.supported_models.HiDream):
+                AttnMask = FullAttentionMaskHiDream(mask_type, edge_width)
             else:
                 AttnMask = FullAttentionMask(mask_type, edge_width)
 
@@ -1690,8 +1694,8 @@ class ClownRegionalConditioning3:
                 AttnMask.add_region(positive_B       [0][0], mask_B)
                 AttnMask.add_region(positive_unmasked[0][0], mask_AB_inv)
             
-            RegContext.add_region(positive_A  [0][0])
-            RegContext.add_region(positive_B[0][0])
+            RegContext.add_region(positive_A       [0][0])
+            RegContext.add_region(positive_B       [0][0])
             RegContext.add_region(positive_unmasked[0][0])
 
             positive[0][1]['AttnMask']   = AttnMask
@@ -1997,6 +2001,8 @@ class ClownRegionalConditioning_ABC:
                     AttnMask = CrossAttentionMask(mask_type, edge_width)
                 else:
                     AttnMask = SplitAttentionMask(mask_type, edge_width)
+            elif isinstance(model.model.model_config, comfy.supported_models.HiDream):
+                AttnMask = FullAttentionMaskHiDream(mask_type, edge_width)
             else:
                 AttnMask = FullAttentionMask(mask_type, edge_width)
                 

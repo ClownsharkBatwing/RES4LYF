@@ -22,6 +22,15 @@ from comfy.ldm.flux.layers import SingleStreamBlock, DoubleStreamBlock
 from .flux.model  import ReFlux
 from .flux.layers import SingleStreamBlock as ReSingleStreamBlock, DoubleStreamBlock as ReDoubleStreamBlock
 
+from comfy.ldm.flux.model  import Flux
+from comfy.ldm.flux.layers import SingleStreamBlock, DoubleStreamBlock
+
+from comfy.ldm.hidream.model import HiDreamImageTransformer2DModel
+from comfy.ldm.hidream.model import HiDreamImageBlock, HiDreamImageSingleTransformerBlock, HiDreamImageTransformerBlock, HiDreamAttention
+
+from .hidream.model import HDModel
+from .hidream.model import HDBlock, HDBlockDouble, HDBlockSingle, HDAttention
+
 from comfy.ldm.modules.diffusionmodules.mmdit import OpenAISignatureMMDITWrapper, JointBlock
 from .sd35.mmdit import ReOpenAISignatureMMDITWrapper, ReJointBlock
 
@@ -359,6 +368,119 @@ class ReFluxPatcher(ReFluxPatcherAdvanced):
             enable              = enable,
             force               = force
         )    
+
+
+
+class HDBlockDoubleNoMask(HDBlockDouble):
+    def forward(self, c, mask=None):
+        return super().forward(c, mask=None)
+    
+class HDBlockSingleNoMask(HDBlockSingle):
+    def forward(self, c, mask=None):
+        return super().forward(c, mask=None)
+
+
+class ReHiDreamPatcherAdvanced:
+    @classmethod
+    def INPUT_TYPES(s):
+        return {
+            "required": { 
+                "model"               : ("MODEL",),
+                "double_stream_blocks" : ("STRING",  {"default": "all", "multiline": True}),
+                "single_stream_blocks" : ("STRING",  {"default": "all", "multiline": True}),
+                "enable"              : ("BOOLEAN", {"default": True}),
+            }
+        }
+    RETURN_TYPES = ("MODEL",)
+    RETURN_NAMES = ("model",)
+    CATEGORY     = "RES4LYF/model_patches"
+    FUNCTION     = "main"
+
+    def main(self, model, double_stream_blocks, single_stream_blocks, enable=True, force=False):
+        
+        double_stream_blocks = parse_range_string(double_stream_blocks)
+        single_stream_blocks = parse_range_string(single_stream_blocks)
+        
+        if (enable or force) and model.model.diffusion_model.__class__ == HiDreamImageTransformer2DModel:
+            m = model.clone()
+            m.model.diffusion_model.__class__     = HDModel
+            m.model.diffusion_model.threshold_inv = False
+            m.model.diffusion_model.manual_mask   = None
+            
+            for i, block in enumerate(m.model.diffusion_model.double_stream_blocks):
+                if i in double_stream_blocks:
+                    block.__class__             = HDBlock
+                    block.block.__class__       = HDBlockDouble
+                    block.block.attn1.__class__ = HDAttention
+                else:
+                    block.__class__             = HDBlock
+                    block.block.__class__       = HDBlockDoubleNoMask
+                    block.block.attn1.__class__ = HDAttention
+                block.idx       = i
+
+            for i, block in enumerate(m.model.diffusion_model.single_stream_blocks):
+                if i in single_stream_blocks:
+                    block.__class__             = HDBlock
+                    block.block.__class__       = HDBlockSingle
+                    block.block.attn1.__class__ = HDAttention
+                else:
+                    block.__class__             = HDBlock
+                    block.block.__class__       = HDBlockSingleNoMask
+                    block.block.attn1.__class__ = HDAttention
+                block.idx       = i
+                
+        elif not enable and model.model.diffusion_model.__class__ == HDModel:
+            m = model.clone()
+            m.model.diffusion_model.__class__ = HiDreamImageTransformer2DModel
+            
+            for i, block in enumerate(m.model.diffusion_model.double_stream_blocks):
+                if i in double_stream_blocks:
+                    block.__class__             = HiDreamImageBlock
+                    block.block.__class__       = HiDreamImageTransformerBlock
+                    block.block.attn1.__class__ = HiDreamAttention
+                block.idx       = i
+
+            for i, block in enumerate(m.model.diffusion_model.single_stream_blocks):
+                if i in single_stream_blocks:
+                    block.__class__             = HiDreamImageBlock
+                    block.block.__class__       = HiDreamImageSingleTransformerBlock
+                    block.block.attn1.__class__ = HiDreamAttention
+                block.idx       = i
+                
+        elif model.model.diffusion_model.__class__ != HDModel and model.model.diffusion_model.__class__ != HiDreamImageTransformer2DModel:
+            raise ValueError("This node is for enabling regional conditioning for HiDream only!")
+        else:
+            m = model
+        
+        return (m,)
+    
+class ReHiDreamPatcher(ReHiDreamPatcherAdvanced):
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "model"  : ("MODEL",),
+                "enable" : ("BOOLEAN", {"default": True}),
+            }
+        }
+
+    def main(self, model, enable=True, force=False):
+        return super().main(
+            model                = model,
+            double_stream_blocks = "all",
+            single_stream_blocks = "all",
+            enable               = enable,
+            force                = force
+        )    
+
+
+
+
+
+
+
+
+
 
 class ReJointBlockNoMask(ReJointBlock):
     def forward(self, c, mask=None):
