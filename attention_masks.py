@@ -271,10 +271,20 @@ class FullAttentionMaskHiDream(BaseAttentionMask):
                 
             img2txt_mask_sq = torch.nn.functional.interpolate(edge_mask.unsqueeze(0).to(torch.float16), (h, w), mode='nearest-exact').to(dtype).flatten().unsqueeze(1).repeat(1, img_len)
             attn_mask[text_off:, text_len:] = fp_or(attn_mask[text_off:, text_len:], img2txt_mask_sq)
+            
+        if self.edge_width < 0: #TODO: get edge masks using cross-attn too
+            edge_mask = torch.zeros_like(self.masks[0])
+            for mask in self.masks:
+                edge_mask = fp_or(edge_mask, get_edge_mask(mask, dilation=abs(self.edge_width)))
+                
+            img2txt_mask_sq = torch.nn.functional.interpolate(edge_mask.unsqueeze(0).to(torch.float16), (h, w), mode='nearest-exact').to(dtype).flatten().unsqueeze(1).repeat(1, img_len)
+            attn_mask[text_off:, text_len:] = fp_or(attn_mask[text_off:, text_len:], img2txt_mask_sq)
                     
         reg_num_slice = 0
         img2txt_mask = torch.empty((img_len, 128*len(self.masks))).to(attn_mask)
         for context_len, mask_slice in zip(self.context_lens, self.masks):
+            if self.edge_width < 0: #TODO: get edge masks using cross-attn too
+                mask_slice = fp_or(mask_slice, get_edge_mask(mask_slice, dilation=abs(self.edge_width)))
             
             img2txt_mask_slice = torch.nn.functional.interpolate(mask_slice.unsqueeze(0).to(torch.float16), (h, w), mode='nearest-exact').to(dtype).flatten().unsqueeze(1).repeat(1, slice_len)
             

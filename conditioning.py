@@ -988,7 +988,7 @@ class ClownRegionalConditioning:
                 "start_step":              ("INT",                                       {"default": 0,   "min":  0,        "max": 10000}),
                 "end_step":                ("INT",                                       {"default": -1,  "min": -1,        "max": 10000}),
                 "mask_type":               (REG_MASK_TYPE_2,                             {"default": "boolean"}),
-                "edge_width":              ("INT",                                       {"default": 0,  "min": 0,          "max": 10000}),
+                "edge_width":              ("INT",                                       {"default": 0,  "min": -10000,          "max": 10000}),
                 #"narcissism_area":         (["masked", "unmasked", "off"],               {"default": "off"}),
                 #"narcissism_start_step":   ("INT",                                       {"default": 0,   "min": -1,        "max": 10000}),
                 #"narcissism_end_step":     ("INT",                                       {"default": 5,   "min": -1,        "max": 10000}),
