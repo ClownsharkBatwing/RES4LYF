@@ -531,7 +531,7 @@ class HDModel(nn.Module):
         
         weight    = transformer_options.get("regional_conditioning_weight", 0.0)
         floor     = transformer_options.get("regional_conditioning_floor",  0.0)
-        floor     = min(floor, weight)
+        #floor     = min(floor, weight)
 
         out_list = []
         for cond_iter in range(len(transformer_options['cond_or_uncond'])):
@@ -620,8 +620,14 @@ class HDModel(nn.Module):
                     elif weight < bid/48:
                         mask = None
                         #mask[...] = 1.0
-
-                img, txt_init = block(img, img_masks, txt, clip, rope, mask)
+                
+                if floor < 0 and mask is not None and abs(floor) > (1 - bid/48):
+                    mask_tmp = mask.clone()
+                    mask_tmp[:img_len,:img_len] = 1.0
+                    img, txt_init = block(img, img_masks, txt, clip, rope, mask_tmp)
+                else:
+                    img, txt_init = block(img, img_masks, txt, clip, rope, mask)
+                    
                 txt_init = txt_init[:, :txt_init_len]
                 
                 txt_init_list = list(txt_init.split(256, dim=1))
@@ -651,7 +657,14 @@ class HDModel(nn.Module):
                         mask = None
                         #mask[...] = 1.0
                 
-                img = block(img, img_masks, None, clip, rope, mask)
+                if floor < 0 and mask is not None and abs(floor) > (1 - bid/48):
+                    mask_tmp = mask.clone()
+                    mask_tmp[:img_len,:img_len] = 1.0
+                    img = block(img, img_masks, None, clip, rope, mask_tmp)
+                else:
+                    img = block(img, img_masks, None, clip, rope, mask)
+                
+                #img = block(img, img_masks, None, clip, rope, mask)
                 img = img[:, :joint_len]   # slice off txt_llama
 
             img = img[:, :img_len, ...]
