@@ -617,7 +617,7 @@ class HDModel(nn.Module):
                 if mask is not None:
                     if floor > bid/48:
                         mask[:img_len,:img_len] = 1.0
-                    elif weight < bid/48:
+                    elif weight > 0 and weight < bid/48:
                         mask = None
                         #mask[...] = 1.0
                 
@@ -625,7 +625,7 @@ class HDModel(nn.Module):
                     mask_tmp = mask.clone()
                     mask_tmp[:img_len,:img_len] = 1.0
                     img, txt_init = block(img, img_masks, txt, clip, rope, mask_tmp)
-                elif weight < 0 and mask is not None and abs(weight) > (1 - bid/48):
+                elif weight < 0 and mask is not None and abs(weight) < (1 - bid/48):
                     img, txt_init = block(img, img_masks, txt, clip, rope, None)
                 else:
                     img, txt_init = block(img, img_masks, txt, clip, rope, mask)
@@ -655,7 +655,7 @@ class HDModel(nn.Module):
                 if mask is not None:
                     if floor > (bid+16)/48:
                         mask[:img_len,:img_len] = 1.0
-                    elif weight < (bid+16)/48:
+                    elif weight > 0 and weight < (bid+16)/48:
                         mask = None
                         #mask[...] = 1.0
                 
@@ -663,7 +663,7 @@ class HDModel(nn.Module):
                     mask_tmp = mask.clone()
                     mask_tmp[:img_len,:img_len] = 1.0
                     img = block(img, img_masks, None, clip, rope, mask_tmp)
-                if weight < 0 and mask is not None and abs(weight) > (1 - (bid+16)/48):
+                if weight < 0 and mask is not None and abs(weight) < (1 - (bid+16)/48):
                     img = block(img, img_masks, None, clip, rope, None)
                 else:
                     img = block(img, img_masks, None, clip, rope, mask)
