@@ -663,7 +663,8 @@ class EmptyConditioningGenerator:
                 self.text_len_base = 77
                 self.text_channels = 1280
                 self.pooled_len    = 1280
-            elif isinstance(self.model_config, comfy.supported_models.WAN21_T2V) or isinstance(self.model_config, comfy.supported_models.WAN21_I2V):
+            elif isinstance(self.model_config, comfy.supported_models.WAN21_T2V) or \
+                 isinstance(self.model_config, comfy.supported_models.WAN21_I2V):
                 self.text_len_base = 512
                 self.text_channels = 5120 # sometimes needs to be 4096, like when initializing in samplers_py in shark?
                 self.pooled_len    = 1
@@ -671,6 +672,17 @@ class EmptyConditioningGenerator:
                 self.text_len_base = 128
                 self.text_channels = 4096 # sometimes needs to be 4096, like when initializing in samplers_py in shark?
                 self.pooled_len    = 1
+            elif isinstance(self.model_config, comfy.supported_models.LTXV):
+                self.text_len_base = 128
+                self.text_channels = 4096
+                self.pooled_len    = 1
+            elif isinstance(self.model_config, comfy.supported_models.HunyuanVideo) or \
+                 isinstance(self.model_config, comfy.supported_models.HunyuanVideoI2V) or \
+                 isinstance(self.model_config, comfy.supported_models.HunyuanVideoSkyreelsI2V):
+                self.text_len_base = 128
+                self.text_channels = 4096
+                self.pooled_len    = 1
+
             else:
                 raise ValueError(f"Unknown model config: {type(config)}")
         elif conditioning is not None:
