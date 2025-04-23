@@ -14,7 +14,7 @@ import torch.nn.functional as F
 from comfy.ldm.flux.math import apply_rope, rope
 from comfy.ldm.flux.layers import LastLayer
 
-from comfy.ldm.modules.attention import optimized_attention
+from comfy.ldm.modules.attention import optimized_attention, attention_pytorch
 import comfy.model_management
 import comfy.ldm.common_dit
 
@@ -203,13 +203,22 @@ class MOEFeedForwardSwiGLU(nn.Module):
 
 def attention(q: Tensor, k: Tensor, v: Tensor, rope: Tensor, mask: Optional[Tensor] = None):
     q, k = apply_rope(q, k, rope)
-    return optimized_attention(
-        q.view(q.shape[0], -1, q.shape[-1] * q.shape[-2]), 
-        k.view(k.shape[0], -1, k.shape[-1] * k.shape[-2]), 
-        v.view(v.shape[0], -1, v.shape[-1] * v.shape[-2]), 
-        q.shape[2],
-        mask=mask,
-        )
+    if mask is not None:
+        return attention_pytorch(
+            q.view(q.shape[0], -1, q.shape[-1] * q.shape[-2]), 
+            k.view(k.shape[0], -1, k.shape[-1] * k.shape[-2]), 
+            v.view(v.shape[0], -1, v.shape[-1] * v.shape[-2]), 
+            q.shape[2],
+            mask=mask,
+            )
+    else:
+        return optimized_attention(
+            q.view(q.shape[0], -1, q.shape[-1] * q.shape[-2]), 
+            k.view(k.shape[0], -1, k.shape[-1] * k.shape[-2]), 
+            v.view(v.shape[0], -1, v.shape[-1] * v.shape[-2]), 
+            q.shape[2],
+            mask=mask,
+            )
 
 class HDAttention(nn.Module):
     def __init__(
@@ -522,7 +531,7 @@ class HDModel(nn.Module):
         
         weight    = transformer_options.get("regional_conditioning_weight", 0.0)
         floor     = transformer_options.get("regional_conditioning_floor",  0.0)
-        floor     = min(floor, weight)
+        #floor     = min(floor, weight)
 
         out_list = []
         for cond_iter in range(len(transformer_options['cond_or_uncond'])):
@@ -605,10 +614,22 @@ class HDModel(nn.Module):
                         txt_list.append(txt_segment)
                     txt = torch.cat(txt_list + [txt_llama], dim=1)
                     
-                if mask is not None and floor > bid/48:
-                    mask[:img_len,:img_len] = True
-
-                img, txt_init = block(img, img_masks, txt, clip, rope, mask)
+                if mask is not None:
+                    if floor > 0 and floor > bid/48:
+                        mask[:img_len,:img_len] = 1.0
+                    elif weight > 0 and weight < bid/48:
+                        mask = None
+                        #mask[...] = 1.0
+                
+                if floor < 0 and mask is not None and abs(floor) > (1 - bid/48):
+                    mask_tmp = mask.clone()
+                    mask_tmp[:img_len,:img_len] = 1.0
+                    img, txt_init = block(img, img_masks, txt, clip, rope, mask_tmp)
+                elif weight < 0 and mask is not None and abs(weight) < (1 - bid/48):
+                    img, txt_init = block(img, img_masks, txt, clip, rope, None)
+                else:
+                    img, txt_init = block(img, img_masks, txt, clip, rope, mask)
+                    
                 txt_init = txt_init[:, :txt_init_len]
                 
                 txt_init_list = list(txt_init.split(256, dim=1))
@@ -628,10 +649,26 @@ class HDModel(nn.Module):
                 txt_llama = contexts[bid+16]                        # T5 pre-embedded for single stream blocks
                 img = torch.cat([img, txt_llama], dim=1)            # cat img,txt     opposite of flux which is txt,img       4303 + 143 -> 4446
                 
-                if mask is not None and floor > (bid+16)/48:
-                    mask[:img_len,:img_len] = True
+                #if mask is not None and floor > (bid+16)/48:
+                #    mask[:img_len,:img_len] = True
+                    
+                if mask is not None:
+                    if floor > 0 and floor > (bid+16)/48:
+                        mask[:img_len,:img_len] = 1.0
+                    elif weight > 0 and weight < (bid+16)/48:
+                        mask = None
+                        #mask[...] = 1.0
                 
-                img = block(img, img_masks, None, clip, rope, mask)
+                if floor < 0 and mask is not None and abs(floor) > (1 - (bid+16)/48):
+                    mask_tmp = mask.clone()
+                    mask_tmp[:img_len,:img_len] = 1.0
+                    img = block(img, img_masks, None, clip, rope, mask_tmp)
+                if weight < 0 and mask is not None and abs(weight) < (1 - (bid+16)/48):
+                    img = block(img, img_masks, None, clip, rope, None)
+                else:
+                    img = block(img, img_masks, None, clip, rope, mask)
+                
+                #img = block(img, img_masks, None, clip, rope, mask)
                 img = img[:, :joint_len]   # slice off txt_llama
 
             img = img[:, :img_len, ...]
