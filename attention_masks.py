@@ -293,10 +293,14 @@ class FullAttentionMaskHiDream(BaseAttentionMask):
             reg_num_slice += 1
             
         img2txt_mask = img2txt_mask.repeat(1,3)
-        attn_mask[text_off:,:text_len] = img2txt_mask
-        attn_mask[:text_off,text_len:] = img2txt_mask.transpose(-2,-1)
+        attn_mask[:-text_off, :-text_len] = attn_mask[text_off:, text_len:]
+        attn_mask[:-text_off,-text_len:] = img2txt_mask
+        attn_mask[-text_off:,:-text_len] = img2txt_mask.transpose(-2,-1)
+        
+        #attn_mask[text_off:,:text_len] = img2txt_mask
+        #attn_mask[:text_off,text_len:] = img2txt_mask.transpose(-2,-1)
 
-        attn_mask = torch.flip(attn_mask, dims=[-2,-1])
+        #attn_mask = torch.flip(attn_mask, dims=[-2,-1])
         attn_mask[img_len:,img_len:] = 1.0   # txt -> txt "self-cross" attn is critical with hidream. checkerboard strategies are poo
         
         self.attn_mask = CoreAttnMask(attn_mask, mask_type=mask_type)
