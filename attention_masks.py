@@ -332,10 +332,15 @@ class FullAttentionMaskHiDream(BaseAttentionMask):
 
         attn_mask[img_len:,img_len:] = 1.0   # txt -> txt "self-cross" attn is critical with hidream in most cases. checkerboard strategies are generally poo
         
+        # mask cross attention between text embeds
+        flat = [v for group in zip(*self.context_lens_list) for v in group]
+        checkvar = checkerboard_variable(flat)
+        attn_mask[img_len:, img_len:] = checkvar
+        
         self.attn_mask = CoreAttnMask(attn_mask, mask_type=mask_type)
 
 
-
+        #flat = [v for group in zip(*self.context_lens_list) for v in group]
 
 class RegionalContext:
     def __init__(self, idle_device='cpu', work_device='cuda'):
@@ -573,3 +578,22 @@ def get_edge_mask(mask: torch.Tensor, dilation: int = 3) -> torch.Tensor:
     dilated_edge = dilated_edge.squeeze(0).squeeze(0)
     
     return dilated_edge[...,:mask.shape[-2], :mask.shape[-1]].view_as(mask).to(mask.device)
+
+
+
+def checkerboard_variable(widths, dtype=torch.float16, device='cpu'):
+    total = sum(widths)
+    mask = torch.zeros((total, total), dtype=dtype, device=device)
+
+    x_start = 0
+    for i, w_x in enumerate(widths):
+        y_start = 0
+        for j, w_y in enumerate(widths):
+            if (i + j) % 2 == 0:  # checkerboard logic
+                mask[x_start:x_start+w_x, y_start:y_start+w_y] = 1.0
+            y_start += w_y
+        x_start += w_x
+
+    return mask
+
+
