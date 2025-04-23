@@ -102,6 +102,7 @@ class BaseAttentionMask:
         self.text_register_tokens = 0
         
         self.context_lens         = []
+        self.context_lens_list    = []
         self.masks                = []
         
         self.num_regions          = 0
@@ -130,7 +131,7 @@ class BaseAttentionMask:
         self.img_len = self.h * self.w        
 
     def add_region(self, context, mask):
-        self.context_lens.append(context.shape[1])
+        self.context_lens.append(context.shape[-2])
         self.masks       .append(mask)
         
         self.text_len = sum(self.context_lens)
@@ -142,6 +143,23 @@ class BaseAttentionMask:
             self.text_off = self.text_len"""
             
         self.num_regions += 1
+        
+    def add_region_sizes(self, context_size_list, mask):
+        
+        self.context_lens_list.append(context_size_list)
+        #self.masks            .append(mask)
+        
+        #self.text_len = sum(self.context_lens_list)
+        self.text_len = sum(sum(sublist) for sublist in self.context_lens_list)
+
+        self.text_off = self.text_len
+        
+        """if isinstance(self.model_config, comfy.supported_models.Stable_Cascade_C):
+            self.text_off = 0
+        else:
+            self.text_off = self.text_len"""
+        
+        #self.num_regions += 1
         
     def add_regions(self, contexts, masks):
         for context, mask in zip(contexts, masks):
@@ -233,7 +251,6 @@ class FullAttentionMaskHiDream(BaseAttentionMask):
         text_off  = self.text_off
         text_len  = self.text_len
         img_len   = self.img_len
-        slice_len = 128
         t         = self.t
         h         = self.h
         w         = self.w
@@ -272,36 +289,59 @@ class FullAttentionMaskHiDream(BaseAttentionMask):
             img2txt_mask_sq = torch.nn.functional.interpolate(edge_mask.unsqueeze(0).to(torch.float16), (h, w), mode='nearest-exact').to(dtype).flatten().unsqueeze(1).repeat(1, img_len)
             attn_mask[text_off:, text_len:] = fp_or(attn_mask[text_off:, text_len:], img2txt_mask_sq)
             
-        if self.edge_width < 0: #TODO: get edge masks using cross-attn too
+        if self.edge_width < 0: # edge masks using cross-attn too
             edge_mask = torch.zeros_like(self.masks[0])
             for mask in self.masks:
                 edge_mask = fp_or(edge_mask, get_edge_mask(mask, dilation=abs(self.edge_width)))
                 
             img2txt_mask_sq = torch.nn.functional.interpolate(edge_mask.unsqueeze(0).to(torch.float16), (h, w), mode='nearest-exact').to(dtype).flatten().unsqueeze(1).repeat(1, img_len)
             attn_mask[text_off:, text_len:] = fp_or(attn_mask[text_off:, text_len:], img2txt_mask_sq)
-                    
-        reg_num_slice = 0
-        img2txt_mask = torch.empty((img_len, 128*len(self.masks))).to(attn_mask)
+        
+        
+        
+        text_len_t5     = sum(sublist[0] for sublist in self.context_lens_list)
+        img2txt_mask_t5 = torch.empty((img_len, text_len_t5)).to(attn_mask)
+        offset_t5_start = 0
+        reg_num_slice   = 0
         for context_len, mask_slice in zip(self.context_lens, self.masks):
-            if self.edge_width < 0: #TODO: get edge masks using cross-attn too
+            if self.edge_width < 0: # edge masks using cross-attn too
                 mask_slice = fp_or(mask_slice, get_edge_mask(mask_slice, dilation=abs(self.edge_width)))
+            
+            slice_len     = self.context_lens_list[reg_num_slice][0]
+            offset_t5_end = offset_t5_start + slice_len
             
             img2txt_mask_slice = torch.nn.functional.interpolate(mask_slice.unsqueeze(0).to(torch.float16), (h, w), mode='nearest-exact').to(dtype).flatten().unsqueeze(1).repeat(1, slice_len)
             
-            img2txt_mask[:, reg_num_slice*128:(reg_num_slice+1)*128] = img2txt_mask_slice
+            img2txt_mask_t5[:, offset_t5_start:offset_t5_end] = img2txt_mask_slice
             
+            offset_t5_start = offset_t5_end
             reg_num_slice += 1
-            
-        img2txt_mask = img2txt_mask.repeat(1,3)
-        attn_mask[:-text_off, :-text_len] = attn_mask[text_off:, text_len:]
-        attn_mask[:-text_off,-text_len:] = img2txt_mask
-        attn_mask[-text_off:,:-text_len] = img2txt_mask.transpose(-2,-1)
         
-        #attn_mask[text_off:,:text_len] = img2txt_mask
-        #attn_mask[:text_off,text_len:] = img2txt_mask.transpose(-2,-1)
+        text_len_llama     = sum(sublist[1] for sublist in self.context_lens_list)
+        img2txt_mask_llama = torch.empty((img_len, text_len_llama)).to(attn_mask)
+        offset_llama_start = 0
+        reg_num_slice      = 0
+        for context_len, mask_slice in zip(self.context_lens, self.masks):
+            if self.edge_width < 0: # edge masks using cross-attn too
+                mask_slice = fp_or(mask_slice, get_edge_mask(mask_slice, dilation=abs(self.edge_width)))
+            
+            slice_len        = self.context_lens_list[reg_num_slice][1]
+            offset_llama_end = offset_llama_start + slice_len
+            
+            img2txt_mask_slice = torch.nn.functional.interpolate(mask_slice.unsqueeze(0).to(torch.float16), (h, w), mode='nearest-exact').to(dtype).flatten().unsqueeze(1).repeat(1, slice_len)
+            
+            img2txt_mask_llama[:, offset_llama_start:offset_llama_end] = img2txt_mask_slice
+            
+            offset_llama_start = offset_llama_end
+            reg_num_slice += 1
+        
+        img2txt_mask = torch.cat([img2txt_mask_t5, img2txt_mask_llama.repeat(1,2)], dim=-1)
+        
+        attn_mask[:-text_off , :-text_len ] = attn_mask[text_off:, text_len:]
+        attn_mask[:-text_off ,  -text_len:] = img2txt_mask
+        attn_mask[ -text_off:, :-text_len ] = img2txt_mask.transpose(-2,-1)
 
-        #attn_mask = torch.flip(attn_mask, dims=[-2,-1])
-        attn_mask[img_len:,img_len:] = 1.0   # txt -> txt "self-cross" attn is critical with hidream. checkerboard strategies are poo
+        attn_mask[img_len:,img_len:] = 1.0   # txt -> txt "self-cross" attn is critical with hidream in most cases. checkerboard strategies are generally poo
         
         self.attn_mask = CoreAttnMask(attn_mask, mask_type=mask_type)
 

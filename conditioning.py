@@ -913,9 +913,6 @@ class TemporalCrossAttnMask:
 class RegionalParameters:
     weights    : List[float] = field(default_factory=list)
     floors     : List[float] = field(default_factory=list)
-    narc_idx   :      int    = -1
-    narc_start :      int    =  0
-    narc_stop  :      int    = -1
 
 
 
@@ -989,9 +986,6 @@ class ClownRegionalConditioning:
                 "end_step":                ("INT",                                       {"default": -1,  "min": -1,        "max": 10000}),
                 "mask_type":               (REG_MASK_TYPE_2,                             {"default": "boolean"}),
                 "edge_width":              ("INT",                                       {"default": 0,  "min": -10000,          "max": 10000}),
-                #"narcissism_area":         (["masked", "unmasked", "off"],               {"default": "off"}),
-                #"narcissism_start_step":   ("INT",                                       {"default": 0,   "min": -1,        "max": 10000}),
-                #"narcissism_end_step":     ("INT",                                       {"default": 5,   "min": -1,        "max": 10000}),
                 "invert_mask":             ("BOOLEAN",                                   {"default": False}),
             }, 
             "optional": {
@@ -1031,17 +1025,12 @@ class ClownRegionalConditioning:
             mask_type                : str    = "boolean",
             edge_width               : int    = 0,
             mask                              = None,
-            narcissism_area          : str    = "masked",
-            narcissism_start_step    : int    = 0,
-            narcissism_end_step      : int    = 5,
             invert_mask              : bool   = False
             ) -> Tuple[Tensor]:
         
         if end_step == -1:
             end_step = MAX_STEPS
         
-        if narcissism_end_step == -1:
-            narcissism_end_step = MAX_STEPS
         
         callback = self.create_callback(weight                   = weight,
                                         start_sigma              = start_sigma,
@@ -1059,9 +1048,6 @@ class ClownRegionalConditioning:
                                         invert_mask              = invert_mask,
                                         positive_masked          = positive_masked,
                                         positive_unmasked        = positive_unmasked,
-                                        narcissism_area          = narcissism_area,
-                                        narcissism_start_step    = narcissism_start_step,
-                                        narcissism_end_step      = narcissism_end_step,
                                         )
 
         positive = zero_conditioning_from_list([positive_masked, positive_unmasked])
@@ -1090,9 +1076,6 @@ class ClownRegionalConditioning:
                                 edge_width               : int    = 0,
                                 mask                              = None,
                                 invert_mask              : bool   = False,
-                                narcissism_area       : str       = "on",
-                                narcissism_start_step : int       = 0,
-                                narcissism_end_step   : int       = 5,
                                 ) -> Tuple[Tensor]:
 
         default_dtype  = torch.float64
@@ -1110,7 +1093,6 @@ class ClownRegionalConditioning:
         if invert_mask and mask is not None:
             mask = 1-mask
 
-        #weight, weights = mask_weight, mask_weights
         floor, floors = region_bleed, region_bleeds
         
         weights = initialize_or_scale(weights, weight, end_step).to(default_dtype).to(default_device)
@@ -1156,7 +1138,6 @@ class ClownRegionalConditioning:
                     ],
                     dim=-2),
                     mask)
-                    #torch.flip(mask, dims=[-2,-1]))
                 AttnMask.add_region(torch.concat([
                     positive_unmasked[0][0],
                     positive_unmasked[0][1]['conditioning_llama3'][0,0,...].unsqueeze(0),
@@ -1164,7 +1145,21 @@ class ClownRegionalConditioning:
                     ],
                     dim=-2),
                     1-mask)
-                    #torch.flip(1-mask, dims=[-2,-1]))
+                
+                AttnMask.add_region_sizes(
+                    [
+                        positive_masked  [0][0].shape[-2],
+                        positive_masked  [0][1]['conditioning_llama3'][0,0,...].shape[-2],
+                        positive_masked  [0][1]['conditioning_llama3'][0,0,...].shape[-2],
+                    ],
+                    mask)
+                AttnMask.add_region_sizes(
+                    [
+                        positive_unmasked[0][0].shape[-2],
+                        positive_unmasked[0][1]['conditioning_llama3'][0,0,...].shape[-2],
+                        positive_unmasked[0][1]['conditioning_llama3'][0,0,...].shape[-2],
+                    ],
+                    1-mask)
 
                 RegContext.add_region_llama3(positive_masked  [0][1]['conditioning_llama3'])
                 RegContext.add_region_llama3(positive_unmasked[0][1]['conditioning_llama3'])
@@ -1199,23 +1194,8 @@ class ClownRegionalConditioning:
         else:
             positive = positive_masked
             
-        if   mask is not None and narcissism_area == "masked":
-            narc_idx = 0
-            positive[0][1]['regional_conditioning_mask_orig'] = 1-mask.clone()
-            if 'pooled_output' in positive[0][1]:
-                positive[0][1]['pooled_output'] = positive_unmasked[0][1]['pooled_output']
         
-        elif mask is not None and narcissism_area == "unmasked":
-            narc_idx = 1
-            positive[0][1]['regional_conditioning_mask_orig'] = mask.clone()
-            if 'pooled_output' in positive[0][1]:
-                positive[0][1]['pooled_output'] = positive_masked[0][1]['pooled_output']
-            
-        else:
-            narc_idx = -1
-            positive[0][1]['regional_conditioning_mask_orig'] = None
-        
-        positive[0][1]['RegParam'] = RegionalParameters(weights, floors, narc_idx, narcissism_start_step, narcissism_end_step)
+        positive[0][1]['RegParam'] = RegionalParameters(weights, floors)
         
         return (positive,)
 
@@ -1239,9 +1219,6 @@ class ClownRegionalConditioning_AB:
                 "end_step":                ("INT",                                       {"default": -1,  "min": -1,        "max": 10000}),
                 "mask_type":               (REG_MASK_TYPE_AB,                            {"default": "boolean"}),
                 "edge_width":              ("INT",                                       {"default": 0,  "min": 0,          "max": 10000}),
-                #"narcissism_area":         (["masked", "unmasked", "off"],               {"default": "off"}),
-                #"narcissism_start_step":   ("INT",                                       {"default": 0,   "min": -1,        "max": 10000}),
-                #"narcissism_end_step":     ("INT",                                       {"default": 5,   "min": -1,        "max": 10000}),
                 "invert_mask":             ("BOOLEAN",                                   {"default": False}),
             }, 
             "optional": {
@@ -1283,9 +1260,6 @@ class ClownRegionalConditioning_AB:
             edge_width               : int    = 0,
             mask_A                            = None,
             mask_B                            = None,
-            narcissism_area          : str    = "masked",
-            narcissism_start_step    : int    = 0,
-            narcissism_end_step      : int    = 5,
             invert_mask              : bool   = False
             ) -> Tuple[Tensor]:
         
@@ -1297,10 +1271,7 @@ class ClownRegionalConditioning_AB:
         
         if end_step == -1:
             end_step = MAX_STEPS
-        
-        if narcissism_end_step == -1:
-            narcissism_end_step = MAX_STEPS
-        
+
         callback = self.create_callback(weight                   = weight,
                                         start_sigma              = start_sigma,
                                         end_sigma                = end_sigma,
@@ -1318,9 +1289,6 @@ class ClownRegionalConditioning_AB:
                                         invert_mask              = invert_mask,
                                         positive_masked          = positive_masked,
                                         positive_unmasked        = positive_unmasked,
-                                        narcissism_area          = narcissism_area,
-                                        narcissism_start_step    = narcissism_start_step,
-                                        narcissism_end_step      = narcissism_end_step,
                                         )
 
         positive = zero_conditioning_from_list([positive_masked, positive_unmasked])
@@ -1350,9 +1318,6 @@ class ClownRegionalConditioning_AB:
                                 mask                              = None,
                                 unmask                            = None,
                                 invert_mask              : bool   = False,
-                                narcissism_area       : str       = "on",
-                                narcissism_start_step : int       = 0,
-                                narcissism_end_step   : int       = 5,
                                 ) -> Tuple[Tensor]:
 
         default_dtype  = torch.float64
@@ -1371,7 +1336,6 @@ class ClownRegionalConditioning_AB:
             mask   = 1-mask
             unmask = 1-unmask
 
-        #weight, weights = mask_weight, mask_weights
         floor, floors = region_bleed, region_bleeds
         
         weights = initialize_or_scale(weights, weight, end_step).to(default_dtype).to(default_device)
@@ -1417,7 +1381,6 @@ class ClownRegionalConditioning_AB:
                     ],
                     dim=-2),
                     mask)
-                    #torch.flip(mask, dims=[-2,-1]))
                 AttnMask.add_region(torch.concat([
                     positive_unmasked[0][0],
                     positive_unmasked[0][1]['conditioning_llama3'][0,0,...].unsqueeze(0),
@@ -1425,7 +1388,6 @@ class ClownRegionalConditioning_AB:
                     ],
                     dim=-2),
                     unmask)
-                    #torch.flip(unmask, dims=[-2,-1]))
 
                 RegContext.add_region_llama3(positive_masked  [0][1]['conditioning_llama3'])
                 RegContext.add_region_llama3(positive_unmasked[0][1]['conditioning_llama3'])
@@ -1464,23 +1426,8 @@ class ClownRegionalConditioning_AB:
         else:
             positive = positive_masked
             
-        if   mask is not None and narcissism_area == "masked":
-            narc_idx = 0
-            positive[0][1]['regional_conditioning_mask_orig'] = unmask.clone()
-            if 'pooled_output' in positive[0][1]:
-                positive[0][1]['pooled_output'] = positive_unmasked[0][1]['pooled_output']
         
-        elif mask is not None and narcissism_area == "unmasked":
-            narc_idx = 1
-            positive[0][1]['regional_conditioning_mask_orig'] = mask.clone()
-            if 'pooled_output' in positive[0][1]:
-                positive[0][1]['pooled_output'] = positive_masked[0][1]['pooled_output']
-            
-        else:
-            narc_idx = -1
-            positive[0][1]['regional_conditioning_mask_orig'] = None
-        
-        positive[0][1]['RegParam'] = RegionalParameters(weights, floors, narc_idx, narcissism_start_step, narcissism_end_step)
+        positive[0][1]['RegParam'] = RegionalParameters(weights, floors)
         
         return (positive,)
 
@@ -1499,9 +1446,6 @@ class ClownRegionalConditioning3:
                 "end_step":                ("INT",                                       {"default": 100,  "min": -1,        "max": 10000}),
                 "mask_type":               (REG_MASK_TYPE_3,                             {"default": "boolean"}),
                 "edge_width":              ("INT",                                       {"default": 0,  "min": 0,          "max": 10000}),
-                #"narcissism_area":         (["A", "B", "AB", "unmasked", "off"],         {"default": "off"}),
-                #"narcissism_start_step":   ("INT",                                       {"default": 0,   "min": -1,        "max": 10000}),
-                #"narcissism_end_step":     ("INT",                                       {"default": 5,   "min": -1,        "max": 10000}),
                 "invert_mask":             ("BOOLEAN",                                   {"default": False}),
             }, 
             "optional": {
@@ -1546,9 +1490,6 @@ class ClownRegionalConditioning3:
             edge_width               : int    = 0,
             mask_A                              = None,
             mask_B                              = None,
-            narcissism_area       : str    = "AB",
-            narcissism_start_step : int    = 0,
-            narcissism_end_step   : int    = 5,
             invert_mask              : bool   = False
             ) -> Tuple[Tensor]:
         
@@ -1573,9 +1514,6 @@ class ClownRegionalConditioning3:
                                         positive_A               = positive_A,
                                         positive_B               = positive_B,
                                         positive_unmasked        = positive_unmasked,
-                                        narcissism_area       = narcissism_area,
-                                        narcissism_start_step = narcissism_start_step,
-                                        narcissism_end_step   = narcissism_end_step,
                                         )
 
         positive = zero_conditioning_from_list([positive_A, positive_B, positive_unmasked])
@@ -1608,9 +1546,6 @@ class ClownRegionalConditioning3:
                                 mask_A                            = None,
                                 mask_B                            = None,
                                 invert_mask              : bool   = False,
-                                narcissism_area       : str    = "AB",
-                                narcissism_start_step : int    = 0,
-                                narcissism_end_step   : int    = 5,
                                 ) -> Tuple[Tensor]:
 
         default_dtype  = torch.float64
@@ -1632,14 +1567,14 @@ class ClownRegionalConditioning3:
             mask_B = 1-mask_B
         
         mask_AB_inv = torch.ones_like(mask_A) - mask_A - mask_B
+        mask_AB_inv[mask_AB_inv < 0] = 0
 
-        #weight, weights = mask_weight, mask_weights
         floor, floors = region_bleed, region_bleeds
         
         weights = initialize_or_scale(weights, weight, end_step).to(default_dtype)
         weights = F.pad(weights, (0, MAX_STEPS), value=0.0)
         
-        prepend    = torch.full((region_bleed_start_step,),  0.0, dtype=default_dtype, device=default_device)
+        prepend = torch.full((region_bleed_start_step,),  0.0, dtype=default_dtype, device=default_device)
         floors  = initialize_or_scale(floors,  floor,  end_step).to(default_dtype).to(default_device)
         floors  = F.pad(floors,  (0, MAX_STEPS), value=0.0)
         floors  = torch.cat((prepend, floors), dim=0)
@@ -1685,7 +1620,6 @@ class ClownRegionalConditioning3:
                     ],
                     dim=-2),
                     mask_A)
-                    #torch.flip(mask_A, dims=[-2,-1]))
                 AttnMask.add_region(torch.concat([
                     positive_B  [0][0],
                     positive_B  [0][1]['conditioning_llama3'][0,0,...].unsqueeze(0),
@@ -1693,7 +1627,6 @@ class ClownRegionalConditioning3:
                     ],
                     dim=-2),
                     mask_B)
-                    #torch.flip(mask_B, dims=[-2,-1]))
                 AttnMask.add_region(torch.concat([
                     positive_unmasked[0][0],
                     positive_unmasked[0][1]['conditioning_llama3'][0,0,...].unsqueeze(0),
@@ -1701,7 +1634,6 @@ class ClownRegionalConditioning3:
                     ],
                     dim=-2),
                     mask_AB_inv)
-                    #torch.flip(mask_AB_inv, dims=[-2,-1]))
 
                 RegContext.add_region_llama3(positive_A       [0][1]['conditioning_llama3'])
                 RegContext.add_region_llama3(positive_B       [0][1]['conditioning_llama3'])
@@ -1777,45 +1709,11 @@ class ClownRegionalConditioning3:
         else:
             positive = positive_A
         
-        if   mask_A is not None and narcissism_area == "A":
-            narc_idx = 0
-            positive[0][1]['regional_conditioning_mask_orig'] = 1-mask_A.clone()
-            
-        elif mask_B is not None and narcissism_area == "B":
-            narc_idx = 1
-            positive[0][1]['regional_conditioning_mask_orig'] = 1-mask_B.clone()
-            
-        elif mask_A is not None and mask_B is not None and narcissism_area == "AB":
-            narc_idx = 2
-            positive[0][1]['regional_conditioning_mask_orig'] = torch.clamp(1 - mask_A.clone() - mask_B.clone(), min=0.0)
-            
-        elif mask_A is not None and mask_B is not None and narcissism_area == "unmasked":
-            narc_idx = 25436747  # need to deal with this properly!
-            positive[0][1]['regional_conditioning_mask_orig'] = 1-torch.clamp(1 - mask_A.clone() - mask_B.clone(), min=0.0)
-            
-        else:
-            narc_idx = -1
-            positive[0][1]['regional_conditioning_mask_orig'] = None
         
 
-        positive[0][1]['RegParam'] = RegionalParameters(weights, floors, narc_idx, narcissism_start_step, narcissism_end_step)
+        positive[0][1]['RegParam'] = RegionalParameters(weights, floors)
         
         return (positive,)
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 
 
@@ -1837,9 +1735,6 @@ class ClownRegionalConditioning_ABC:
                 "end_step":                ("INT",                                       {"default": 100,  "min": -1,       "max": 10000}),
                 "mask_type":               (REG_MASK_TYPE_ABC,                           {"default": "boolean"}),
                 "edge_width":              ("INT",                                       {"default": 0,    "min": 0,        "max": 10000}),
-                #"narcissism_area":         (["A", "B", "AB", "unmasked", "off"],         {"default": "off"}),
-                #"narcissism_start_step":   ("INT",                                       {"default": 0,   "min": -1,        "max": 10000}),
-                #"narcissism_end_step":     ("INT",                                       {"default": 5,   "min": -1,        "max": 10000}),
                 "invert_mask":             ("BOOLEAN",                                   {"default": False}),
             }, 
             "optional": {
@@ -1886,9 +1781,6 @@ class ClownRegionalConditioning_ABC:
             mask_A                              = None,
             mask_B                              = None,
             mask_C                              = None,
-            narcissism_area       : str    = "AB",
-            narcissism_start_step : int    = 0,
-            narcissism_end_step   : int    = 5,
             invert_mask              : bool   = False
             ) -> Tuple[Tensor]:
         
@@ -1914,9 +1806,6 @@ class ClownRegionalConditioning_ABC:
                                         positive_A               = positive_A,
                                         positive_B               = positive_B,
                                         positive_C               = positive_C,
-                                        narcissism_area       = narcissism_area,
-                                        narcissism_start_step = narcissism_start_step,
-                                        narcissism_end_step   = narcissism_end_step,
                                         )
 
         positive = zero_conditioning_from_list([positive_A, positive_B, positive_C])
@@ -1950,9 +1839,6 @@ class ClownRegionalConditioning_ABC:
                                 mask_B                            = None,
                                 mask_C                            = None,
                                 invert_mask              : bool   = False,
-                                narcissism_area       : str    = "AB",
-                                narcissism_start_step : int    = 0,
-                                narcissism_end_step   : int    = 5,
                                 ) -> Tuple[Tensor]:
 
         default_dtype  = torch.float64
@@ -1978,10 +1864,7 @@ class ClownRegionalConditioning_ABC:
             mask_AB_inv = 1-mask_AB_inv
             
         positive_unmasked = positive_C
-        
-        #mask_AB_inv = torch.ones_like(mask_A) - mask_A - mask_B
 
-        #weight, weights = mask_weight, mask_weights
         floor, floors = region_bleed, region_bleeds
         
         weights = initialize_or_scale(weights, weight, end_step).to(default_dtype)
@@ -2033,7 +1916,6 @@ class ClownRegionalConditioning_ABC:
                     ],
                     dim=-2),
                     mask_A)
-                    #torch.flip(mask_A, dims=[-2,-1]))
                 AttnMask.add_region(torch.concat([
                     positive_B  [0][0],
                     positive_B  [0][1]['conditioning_llama3'][0,0,...].unsqueeze(0),
@@ -2041,7 +1923,6 @@ class ClownRegionalConditioning_ABC:
                     ],
                     dim=-2),
                     mask_B)
-                    #torch.flip(mask_B, dims=[-2,-1]))
                 AttnMask.add_region(torch.concat([
                     positive_unmasked[0][0],
                     positive_unmasked[0][1]['conditioning_llama3'][0,0,...].unsqueeze(0),
@@ -2049,7 +1930,6 @@ class ClownRegionalConditioning_ABC:
                     ],
                     dim=-2),
                     mask_AB_inv)
-                    #torch.flip(mask_AB_inv, dims=[-2,-1]))
 
                 RegContext.add_region_llama3(positive_A       [0][1]['conditioning_llama3'])
                 RegContext.add_region_llama3(positive_B       [0][1]['conditioning_llama3'])
@@ -2125,28 +2005,10 @@ class ClownRegionalConditioning_ABC:
         else:
             positive = positive_A
         
-        if   mask_A is not None and narcissism_area == "A":
-            narc_idx = 0
-            positive[0][1]['regional_conditioning_mask_orig'] = 1-mask_A.clone()
-            
-        elif mask_B is not None and narcissism_area == "B":
-            narc_idx = 1
-            positive[0][1]['regional_conditioning_mask_orig'] = 1-mask_B.clone()
-            
-        elif mask_A is not None and mask_B is not None and narcissism_area == "AB":
-            narc_idx = 2
-            positive[0][1]['regional_conditioning_mask_orig'] = torch.clamp(1 - mask_A.clone() - mask_B.clone(), min=0.0)
-            
-        elif mask_A is not None and mask_B is not None and narcissism_area == "unmasked":
-            narc_idx = 25436747  # need to deal with this properly!
-            positive[0][1]['regional_conditioning_mask_orig'] = 1-torch.clamp(1 - mask_A.clone() - mask_B.clone(), min=0.0)
-            
-        else:
-            narc_idx = -1
-            positive[0][1]['regional_conditioning_mask_orig'] = None
+
         
 
-        positive[0][1]['RegParam'] = RegionalParameters(weights, floors, narc_idx, narcissism_start_step, narcissism_end_step)
+        positive[0][1]['RegParam'] = RegionalParameters(weights, floors)
         
         return (positive,)
 
