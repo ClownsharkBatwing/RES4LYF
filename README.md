@@ -18,6 +18,7 @@ I have prepared a detailed explanation of many of the concepts of sampling with 
 [workflows/intro_to_clownsampling_beta.json
 ](https://github.com/ClownsharkBatwing/RES4LYF/blob/0096defce83b1e38f9e2b9c7feda240f43797423/workflows/intro_to_clownsampling_beta.json)
 
+![image](https://github.com/user-attachments/assets/35f4657e-1f56-4a47-9702-fbef8f47a70a)
 
 
 
