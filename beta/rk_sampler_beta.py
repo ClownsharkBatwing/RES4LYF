@@ -186,7 +186,6 @@ def sample_rk_beta(
 
         regional_conditioning_weights : Optional[Tensor]   = None,
         regional_conditioning_floors  : Optional[Tensor]   = None,
-        regional_conditioning_mask_orig : Optional[Tensor] = None,
         narcissism_start_step      : int                = 0,
         narcissism_end_step        : int                = 5,
                 
@@ -300,12 +299,7 @@ def sample_rk_beta(
     RK.extra_args = RK.init_cfg_channelwise(x, cfg_cw, **extra_args)
     RK.extra_args['model_options']['transformer_options']['regional_conditioning_weight'] = 0.0
     RK.extra_args['model_options']['transformer_options']['regional_conditioning_floor']  = 0.0
-    
-    if EO("no_reg_cond_mask"):
-        regional_conditioning_mask_orig = None
-    if EO("inv_reg_cond_mask"):
-        regional_conditioning_mask_orig = 1-regional_conditioning_mask_orig
-    
+
     # SETUP SIGMAS
     sigmas_orig = sigmas.clone()
     NS               = RK_NoiseSampler(RK, model, device=work_device, dtype=default_dtype, extra_options=extra_options)
@@ -425,19 +419,10 @@ def sample_rk_beta(
         if AttnMask is not None:
             RK.update_transformer_options({'regional_conditioning_weight': RegParam.weights[step]})
             RK.update_transformer_options({'regional_conditioning_floor':  RegParam.floors[step]})
-            if   step >= RegParam.narc_start and step < RegParam.narc_stop and regional_conditioning_mask_orig is not None:
-                RK.update_transformer_options({'regional_conditioning_mask_orig':  regional_conditioning_mask_orig})
-            #if   step >= RegParam.narc_start and step < RegParam.narc_stop and RegParam.narc_idx >= 0:
-            #    RK.update_transformer_options({'regional_conditioning_mask_orig':  AttnMask.masks[RegParam.narc_idx]})
+
         elif regional_conditioning_weights is not None:
             RK.extra_args['model_options']['transformer_options']['regional_conditioning_weight'] = regional_conditioning_weights[step]
             RK.extra_args['model_options']['transformer_options']['regional_conditioning_floor']  = regional_conditioning_floors [step]
-            
-            if   step >= narcissism_start_step and step < narcissism_end_step and regional_conditioning_mask_orig is not None:
-                RK.extra_args['model_options']['transformer_options']['regional_conditioning_mask_orig'] = regional_conditioning_mask_orig
-                #RK.extra_args['model_options']['transformer_options']['regional_conditioning_floor']    *= 0
-            else:
-                RK.extra_args['model_options']['transformer_options']['regional_conditioning_mask_orig'] = None
         
         epsilon_scale        = float(epsilon_scales [step]) if epsilon_scales        is not None else None
         eta                  = etas                 [step]  if etas                  is not None else eta
@@ -1424,7 +1409,7 @@ def sample_rk_beta(
 
         data_prev_[0] = data_[0]                # with flow mode, this will be the differentiated guide/"denoised"
         for ms in range(recycled_stages):
-            data_prev_[recycled_stages - ms] = data_prev_[recycled_stages - ms - 1]            # TODO: verify that this does not run on every substep...
+            data_prev_[recycled_stages - ms] = data_prev_[recycled_stages - ms - 1]   # TODO: verify that this does not run on every substep...
 
         
         rk_type = RK.swap_rk_type_at_step_or_threshold(x_0, data_prev_, NS, sigmas, step, rk_swap_step, rk_swap_threshold, rk_swap_type, rk_swap_print)
@@ -1514,8 +1499,8 @@ def sample_rk_beta(
     if INIT_SAMPLE_LOOP:
         state_info_out = state_info
     else:
-        state_info_out['raw_x']             = x.to('cpu') #clone()
-        state_info_out['data_prev_']        = data_prev_.to('cpu') #clone()
+        state_info_out['raw_x']             = x.to('cpu')
+        state_info_out['data_prev_']        = data_prev_.to('cpu')
         state_info_out['end_step']          = step
         state_info_out['sigma_next']        = sigma_next.clone()
         state_info_out['sigmas']            = sigmas.clone()
@@ -1526,12 +1511,9 @@ def sample_rk_beta(
         state_info_out['FLOW_STARTED']      = FLOW_STARTED
         state_info_out['FLOW_STOPPED']      = FLOW_STOPPED
         if FLOW_STARTED and not FLOW_STOPPED:
-            state_info_out['y0']           = y0.to('cpu') #clone()
-            state_info_out['data_cached']  = data_cached.to('cpu') #clone()
-            state_info_out['data_x_prev_'] = data_x_prev_.to('cpu') #clone()
-    
-    #gc.collect()
-    #torch.cuda.empty_cache()
+            state_info_out['y0']           = y0.to('cpu') 
+            state_info_out['data_cached']  = data_cached.to('cpu')
+            state_info_out['data_x_prev_'] = data_x_prev_.to('cpu')
 
     return x
 
@@ -1596,7 +1578,6 @@ def preview_callback(
     callback({'x': x, 'i': step, 'sigma': sigma, 'sigma_next': sigma_next, 'denoised': denoised_callback.to(torch.float32)}) if callback is not None else None
     
     return
-
 
 
 

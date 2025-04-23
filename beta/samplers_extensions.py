@@ -1556,3 +1556,4 @@ class ClownOptions_GuiderInput:
         options_mgr.update("guider", guider)
         
         return (options_mgr.as_dict(), )
+    
