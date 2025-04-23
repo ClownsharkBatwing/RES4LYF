@@ -2,7 +2,14 @@
 
 Some of you may be aware that there's been a "beta" version of the nodes in progress for some time now. They are now **vastly superior** to the current "main" versions, and I highly recommend checking them out. Once the various options and parameters are fully settled, they will become the "main" versions of the nodes, and the current versions will remain available but with "Legacy" appended to their names.
 
-![image](https://github.com/user-attachments/assets/9a83e151-c467-462d-ac1d-5e0ad5107b22)
+If you wish to use the sampler menu shown below, you will need to install https://github.com/rgthree/rgthree-comfy (which I highly recommend you have regardless).
+
+![image](https://github.com/user-attachments/assets/b36360bb-a59e-4654-aed7-6b6f53673826)
+
+If these menus do not show up after restarting ComfyUI and refreshing the page (hit F5, not just "r") verify that these menus are enabled in the rgthree settings (click the gear in the bottom left of ComfyUI, select rgthree, and ensure "Auto Nest Subdirectories" is checked):
+
+![image](https://github.com/user-attachments/assets/db46fc90-df1a-4d1c-b6ed-c44d26b8a9b3)
+
 
 ## BETA NODE DOCUMENTATION ##
 
