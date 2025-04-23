@@ -4,12 +4,14 @@ Some of you may be aware that there's been a "beta" version of the nodes in prog
 
 ![image](https://github.com/user-attachments/assets/9a83e151-c467-462d-ac1d-5e0ad5107b22)
 
-## Early Documentation ##
+## BETA NODE DOCUMENTATION ##
 
 I have prepared a detailed explanation of many of the concepts of sampling with exmaples in this workflow. There's also many tips, explanations of parameters, and all of the most important nodes are laid out for you to see. Some new workflow-enhancing tricks like "chainsamplers" are demonstrated, and **regional AND temporal prompting** are explained (supporting Flux, HiDream, SD3.5, AuraFlow, and WAN - you can even change the conditioning on a frame-by-frame basis!).
 
 [workflows/intro_to_clownsampling_beta.json
 ](https://github.com/ClownsharkBatwing/RES4LYF/blob/0096defce83b1e38f9e2b9c7feda240f43797423/workflows/intro_to_clownsampling_beta.json)
+
+
 
 
 
