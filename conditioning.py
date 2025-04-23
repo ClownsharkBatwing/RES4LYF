@@ -1131,21 +1131,7 @@ class ClownRegionalConditioning:
             RegContext = RegionalContext()
                 
             if isinstance(model.model.model_config, comfy.supported_models.HiDream):
-                """AttnMask.add_region(torch.concat([
-                    positive_masked  [0][0],
-                    positive_masked  [0][1]['conditioning_llama3'][0,0,...].unsqueeze(0),
-                    positive_masked  [0][1]['conditioning_llama3'][0,0,...].unsqueeze(0),
-                    ],
-                    dim=-2),
-                    mask)
-                AttnMask.add_region(torch.concat([
-                    positive_unmasked[0][0],
-                    positive_unmasked[0][1]['conditioning_llama3'][0,0,...].unsqueeze(0),
-                    positive_unmasked[0][1]['conditioning_llama3'][0,0,...].unsqueeze(0),
-                    ],
-                    dim=-2),
-                    1-mask)"""
-                
+
                 AttnMask.add_region_sizes(
                     [
                         positive_masked  [0][0].shape[-2],
@@ -1374,19 +1360,20 @@ class ClownRegionalConditioning_AB:
             RegContext = RegionalContext()
             
             if isinstance(model.model.model_config, comfy.supported_models.HiDream):
-                AttnMask.add_region(torch.concat([
-                    positive_masked  [0][0],
-                    positive_masked  [0][1]['conditioning_llama3'][0,0,...].unsqueeze(0),
-                    positive_masked  [0][1]['conditioning_llama3'][0,0,...].unsqueeze(0),
+
+                AttnMask.add_region_sizes(
+                    [
+                        positive_masked  [0][0].shape[-2],
+                        positive_masked  [0][1]['conditioning_llama3'][0,0,...].shape[-2],
+                        positive_masked  [0][1]['conditioning_llama3'][0,0,...].shape[-2],
                     ],
-                    dim=-2),
                     mask)
-                AttnMask.add_region(torch.concat([
-                    positive_unmasked[0][0],
-                    positive_unmasked[0][1]['conditioning_llama3'][0,0,...].unsqueeze(0),
-                    positive_unmasked[0][1]['conditioning_llama3'][0,0,...].unsqueeze(0),
+                AttnMask.add_region_sizes(
+                    [
+                        positive_unmasked[0][0].shape[-2],
+                        positive_unmasked[0][1]['conditioning_llama3'][0,0,...].shape[-2],
+                        positive_unmasked[0][1]['conditioning_llama3'][0,0,...].shape[-2],
                     ],
-                    dim=-2),
                     unmask)
 
                 RegContext.add_region_llama3(positive_masked  [0][1]['conditioning_llama3'])
@@ -1613,26 +1600,26 @@ class ClownRegionalConditioning3:
             RegContext = RegionalContext()
             
             if isinstance(model.model.model_config, comfy.supported_models.HiDream):
-                AttnMask.add_region(torch.concat([
-                    positive_A  [0][0],
-                    positive_A  [0][1]['conditioning_llama3'][0,0,...].unsqueeze(0),
-                    positive_A  [0][1]['conditioning_llama3'][0,0,...].unsqueeze(0),
+                AttnMask.add_region_sizes(
+                    [
+                        positive_A  [0][0].shape[-2],
+                        positive_A  [0][1]['conditioning_llama3'][0,0,...].shape[-2],
+                        positive_A  [0][1]['conditioning_llama3'][0,0,...].shape[-2],
                     ],
-                    dim=-2),
                     mask_A)
-                AttnMask.add_region(torch.concat([
-                    positive_B  [0][0],
-                    positive_B  [0][1]['conditioning_llama3'][0,0,...].unsqueeze(0),
-                    positive_B  [0][1]['conditioning_llama3'][0,0,...].unsqueeze(0),
+                AttnMask.add_region_sizes(
+                    [
+                        positive_B[0][0].shape[-2],
+                        positive_B[0][1]['conditioning_llama3'][0,0,...].shape[-2],
+                        positive_B[0][1]['conditioning_llama3'][0,0,...].shape[-2],
                     ],
-                    dim=-2),
                     mask_B)
-                AttnMask.add_region(torch.concat([
-                    positive_unmasked[0][0],
-                    positive_unmasked[0][1]['conditioning_llama3'][0,0,...].unsqueeze(0),
-                    positive_unmasked[0][1]['conditioning_llama3'][0,0,...].unsqueeze(0),
+                AttnMask.add_region_sizes(
+                    [
+                        positive_unmasked[0][0].shape[-2],
+                        positive_unmasked[0][1]['conditioning_llama3'][0,0,...].shape[-2],
+                        positive_unmasked[0][1]['conditioning_llama3'][0,0,...].shape[-2],
                     ],
-                    dim=-2),
                     mask_AB_inv)
 
                 RegContext.add_region_llama3(positive_A       [0][1]['conditioning_llama3'])
@@ -1909,28 +1896,28 @@ class ClownRegionalConditioning_ABC:
             RegContext = RegionalContext()
             
             if isinstance(model.model.model_config, comfy.supported_models.HiDream):
-                AttnMask.add_region(torch.concat([
-                    positive_A  [0][0],
-                    positive_A  [0][1]['conditioning_llama3'][0,0,...].unsqueeze(0),
-                    positive_A  [0][1]['conditioning_llama3'][0,0,...].unsqueeze(0),
+                AttnMask.add_region_sizes(
+                    [
+                        positive_A  [0][0].shape[-2],
+                        positive_A  [0][1]['conditioning_llama3'][0,0,...].shape[-2],
+                        positive_A  [0][1]['conditioning_llama3'][0,0,...].shape[-2],
                     ],
-                    dim=-2),
                     mask_A)
-                AttnMask.add_region(torch.concat([
-                    positive_B  [0][0],
-                    positive_B  [0][1]['conditioning_llama3'][0,0,...].unsqueeze(0),
-                    positive_B  [0][1]['conditioning_llama3'][0,0,...].unsqueeze(0),
+                AttnMask.add_region_sizes(
+                    [
+                        positive_B[0][0].shape[-2],
+                        positive_B[0][1]['conditioning_llama3'][0,0,...].shape[-2],
+                        positive_B[0][1]['conditioning_llama3'][0,0,...].shape[-2],
                     ],
-                    dim=-2),
                     mask_B)
-                AttnMask.add_region(torch.concat([
-                    positive_unmasked[0][0],
-                    positive_unmasked[0][1]['conditioning_llama3'][0,0,...].unsqueeze(0),
-                    positive_unmasked[0][1]['conditioning_llama3'][0,0,...].unsqueeze(0),
+                AttnMask.add_region_sizes(
+                    [
+                        positive_unmasked[0][0].shape[-2],
+                        positive_unmasked[0][1]['conditioning_llama3'][0,0,...].shape[-2],
+                        positive_unmasked[0][1]['conditioning_llama3'][0,0,...].shape[-2],
                     ],
-                    dim=-2),
                     mask_AB_inv)
-
+                
                 RegContext.add_region_llama3(positive_A       [0][1]['conditioning_llama3'])
                 RegContext.add_region_llama3(positive_B       [0][1]['conditioning_llama3'])
                 RegContext.add_region_llama3(positive_unmasked[0][1]['conditioning_llama3'])
