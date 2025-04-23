@@ -128,7 +128,7 @@ class SharkSampler:
             
             ultracascade_latent_width : int = 0,
             ultracascade_latent_height: int = 0,
-        
+
             extra_options      : str = "", 
             **kwargs,
             ): 
@@ -159,10 +159,10 @@ class SharkSampler:
             ultracascade_latent_image  = options_mgr.get('ultracascade_latent_image',  ultracascade_latent_image)
             ultracascade_latent_width  = options_mgr.get('ultracascade_latent_width',  ultracascade_latent_width)
             ultracascade_latent_height = options_mgr.get('ultracascade_latent_height', ultracascade_latent_height)
-            
-            
+                        
             latent_image['samples'] = comfy.sample.fix_empty_latent_channels(model, latent_image['samples'])
 
+            is_chained = False
             if 'positive' in latent_image and positive is None:
                 positive = copy.deepcopy(latent_image['positive'])
                 if positive is not None and 'control' in positive[0][1]:
@@ -170,6 +170,7 @@ class SharkSampler:
                         positive[i][1]['control']      = latent_image['positive'][i][1]['control']
                         if hasattr(latent_image['positive'][i][1]['control'], 'base'):
                             positive[i][1]['control'].base = latent_image['positive'][i][1]['control'].base
+                is_chained = True
             if 'negative' in latent_image and negative is None:
                 negative = copy.deepcopy(latent_image['negative'])
                 if negative is not None and 'control' in negative[0][1]:
@@ -177,23 +178,48 @@ class SharkSampler:
                         negative[i][1]['control']      = latent_image['negative'][i][1]['control']
                         if hasattr(latent_image['negative'][i][1]['control'], 'base'):
                             negative[i][1]['control'].base = latent_image['negative'][i][1]['control'].base
+                is_chained = True
             if 'sampler' in latent_image and sampler is None:
                 sampler = copy.deepcopy(latent_image['sampler'])  #.clone()
+                is_chained = True
             if 'steps_to_run' in sampler.extra_options:
                 sampler.extra_options['steps_to_run'] = steps_to_run
 
+            guider_input = options_mgr.get('guider', None)
+            if guider_input is not None and is_chained is False:
+                guider = guider_input
+                work_model = guider.model_patcher
+                RESplain("Shark: Using model from ClownOptions_GuiderInput: ", guider.model_patcher.model.diffusion_model.__class__.__name__)
+                RESplain("SharkWarning: \"flow\" guide mode does not work with ClownOptions_GuiderInput")
+                if hasattr(guider, 'cfg') and guider.cfg is not None:
+                    cfg = guider.cfg
+                    RESplain("Shark: Using cfg from ClownOptions_GuiderInput: ", cfg)
+                if hasattr(guider, 'original_conds') and guider.original_conds is not None:
+                    if 'positive' in guider.original_conds:
+                        first_ = guider.original_conds['positive'][0]['cross_attn']
+                        second_ = {k: v for k, v in guider.original_conds['positive'][0].items() if k != 'cross_attn'}
+                        positive = [[first_, second_],]
+                        RESplain("Shark: Using positive cond from ClownOptions_GuiderInput")
+                    if 'negative' in guider.original_conds:
+                        first_ = guider.original_conds['negative'][0]['cross_attn']
+                        second_ = {k: v for k, v in guider.original_conds['negative'][0].items() if k != 'cross_attn'}
+                        negative = [[first_, second_],]
+                        RESplain("Shark: Using negative cond from ClownOptions_GuiderInput")
+            else:
+                guider = None
+                work_model   = model.clone()
+                
             if positive is None or negative is None:
                 from ..conditioning import EmptyConditioningGenerator
-                EmptyCondGen       = EmptyConditioningGenerator(model)
+                EmptyCondGen       = EmptyConditioningGenerator(work_model)
                 positive, negative = EmptyCondGen.zero_none_conditionings_([positive, negative])
-            
+
             if cfg < 0:
                 sampler.extra_options['cfg_cw'] = -cfg
                 cfg = 1.0
             else:
                 sampler.extra_options.pop("cfg_cw", None) 
 
-            work_model   = model.clone()
             
             if not EO("disable_dummy_sampler_init"):
                 sampler_null = comfy.samplers.ksampler("rk_beta", 
@@ -342,7 +368,7 @@ class SharkSampler:
             
             if pos_cond is None or neg_cond is None:
                 from ..conditioning import EmptyConditioningGenerator
-                EmptyCondGen       = EmptyConditioningGenerator(model)
+                EmptyCondGen       = EmptyConditioningGenerator(work_model)
                 pos_cond, neg_cond = EmptyCondGen.zero_none_conditionings_([pos_cond, neg_cond])
 
 
@@ -517,19 +543,23 @@ class SharkSampler:
                             pos_cond_tmp[i][1]['control']      = positive[i][1]['control']
                             if hasattr(positive[i][1]['control'], 'base'):
                                 pos_cond_tmp[i][1]['control'].base = positive[i][1]['control'].base
-
-                    guider = SharkGuider(work_model)
-                    flow_cond = options_mgr.get('flow_cond', {})
-                    if flow_cond != {} and 'yt_positive' in flow_cond and not 'yt_inv;_positive' in flow_cond:
-                        guider.set_conds(yt_positive=flow_cond.get('yt_positive'), yt_negative=flow_cond.get('yt_negative'),)
-                        guider.set_cfgs(yt=flow_cond.get('yt_cfg'), xt=cfg)
-                    elif flow_cond != {} and 'yt_positive' in flow_cond and 'yt_inv_positive' in flow_cond:
-                        guider.set_conds(yt_positive=flow_cond.get('yt_positive'), yt_negative=flow_cond.get('yt_negative'), yt_inv_positive=flow_cond.get('yt_inv_positive'), yt_inv_negative=flow_cond.get('yt_inv_negative'),)
-                        guider.set_cfgs(yt=flow_cond.get('yt_cfg'), yt_inv=flow_cond.get('yt_inv_cfg'), xt=cfg)
-                    else:
-                        guider.set_cfgs(xt=cfg)
                     
-                    guider.set_conds(xt_positive=pos_cond_tmp, xt_negative=neg_cond)
+                    if guider is None:
+                        guider = SharkGuider(work_model)
+                        flow_cond = options_mgr.get('flow_cond', {})
+                        if flow_cond != {} and 'yt_positive' in flow_cond and not 'yt_inv;_positive' in flow_cond:
+                            guider.set_conds(yt_positive=flow_cond.get('yt_positive'), yt_negative=flow_cond.get('yt_negative'),)
+                            guider.set_cfgs(yt=flow_cond.get('yt_cfg'), xt=cfg)
+                        elif flow_cond != {} and 'yt_positive' in flow_cond and 'yt_inv_positive' in flow_cond:
+                            guider.set_conds(yt_positive=flow_cond.get('yt_positive'), yt_negative=flow_cond.get('yt_negative'), yt_inv_positive=flow_cond.get('yt_inv_positive'), yt_inv_negative=flow_cond.get('yt_inv_negative'),)
+                            guider.set_cfgs(yt=flow_cond.get('yt_cfg'), yt_inv=flow_cond.get('yt_inv_cfg'), xt=cfg)
+                        else:
+                            guider.set_cfgs(xt=cfg)
+                        
+                        guider.set_conds(xt_positive=pos_cond_tmp, xt_negative=neg_cond)
+                    else:
+                        guider.set_conds(pos_cond_tmp, neg_cond)
+
                     samples = guider.sample(noise, x.clone(), sampler, sigmas, denoise_mask=noise_mask, callback=callback, disable_pbar=disable_pbar, seed=noise_seed)
 
 
@@ -564,6 +594,7 @@ class SharkSampler:
                         torch.manual_seed(seed)
 
 
+            gc.collect()
 
             # STACK SDE NOISES, SAVE STATE INFO
             state_info_out = out_state_info[0]
@@ -589,7 +620,6 @@ class SharkSampler:
             out['model']    = work_model.clone()
             out['sampler']  = sampler
             
-            #gc.collect()
 
             return (out, out_denoised, sde_noise,)
 
@@ -1305,13 +1335,22 @@ class ClownsharKSampler_Beta:
             denoise_alt = -denoise
             denoised = 1.0
         
+        is_chained = False
+
         if 'positive' in latent_image and positive is None:
             positive = latent_image['positive']
+            is_chained = True
         if 'negative' in latent_image and negative is None:
             negative = latent_image['negative']
+            is_chained = True
         if 'model' in latent_image and model is None:
             model = latent_image['model']
+            is_chained = True
         
+        guider = options_mgr.get('guider', None)
+        if is_chained is False and guider is not None:
+            model = guider.model_patcher
+
         if model.model.model_config.unet_config.get('stable_cascade_stage') == 'b':
             noise_type_sde         = "pyramid-cascade_B"
             noise_type_sde_substep = "pyramid-cascade_B"

@@ -239,7 +239,7 @@ def sample_rk_beta(
     state_info_out = {} if state_info_out is None else state_info_out
 
     if 'raw_x' in state_info and sampler_mode in {"resample", "unsample"}:
-        x = state_info['raw_x'].to(model_device) #clone()
+        x = state_info['raw_x'].to(work_device) #clone()
         RESplain("Continuing from raw latent from previous sampler.", debug=False)
     
 
@@ -386,9 +386,9 @@ def sample_rk_beta(
     FLOW_RESUMED = False
     if state_info.get('FLOW_STARTED', False) and not state_info.get('FLOW_STOPPED', False):
         FLOW_RESUMED = True
-        y0 = state_info['y0'].to(model_device) 
-        data_cached = state_info['data_cached'].to(model_device) 
-        data_x_prev_ = state_info['data_x_prev_'].to(model_device) 
+        y0 = state_info['y0'].to(work_device) 
+        data_cached = state_info['data_cached'].to(work_device) 
+        data_x_prev_ = state_info['data_x_prev_'].to(work_device) 
     if EO("flow_use_init_noise"):
         x_init = x.clone()
 
@@ -1495,7 +1495,7 @@ def sample_rk_beta(
 
     #progress_bar.close()
 
-    if step == len(sigmas)-2 and sigmas[-1] == 0 and sigmas[-2] == NS.sigma_min:
+    if step == len(sigmas)-2 and sigmas[-1] == 0 and sigmas[-2] == NS.sigma_min and not INIT_SAMPLE_LOOP:
         eps, denoised = RK(x, NS.sigma_min, x, NS.sigma_min)
         x = denoised
         #progress_bar.update(1)
