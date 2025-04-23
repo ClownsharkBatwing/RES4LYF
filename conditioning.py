@@ -1155,14 +1155,14 @@ class ClownRegionalConditioning:
                     positive_masked  [0][1]['conditioning_llama3'][0,0,...].unsqueeze(0),
                     ],
                     dim=-2),
-                    torch.flip(mask, dims=[-1]))
+                    torch.flip(mask, dims=[-2,-1]))
                 AttnMask.add_region(torch.concat([
                     positive_unmasked[0][0],
                     positive_unmasked[0][1]['conditioning_llama3'][0,0,...].unsqueeze(0),
                     positive_unmasked[0][1]['conditioning_llama3'][0,0,...].unsqueeze(0),
                     ],
                     dim=-2),
-                    torch.flip(1-mask, dims=[-1]))
+                    torch.flip(1-mask, dims=[-2,-1]))
 
                 RegContext.add_region_llama3(positive_masked  [0][1]['conditioning_llama3'])
                 RegContext.add_region_llama3(positive_unmasked[0][1]['conditioning_llama3'])
@@ -1414,14 +1414,14 @@ class ClownRegionalConditioning_AB:
                     positive_masked  [0][1]['conditioning_llama3'][0,0,...].unsqueeze(0),
                     ],
                     dim=-2),
-                    torch.flip(mask, dims=[-1]))
+                    torch.flip(mask, dims=[-2,-1]))
                 AttnMask.add_region(torch.concat([
                     positive_unmasked[0][0],
                     positive_unmasked[0][1]['conditioning_llama3'][0,0,...].unsqueeze(0),
                     positive_unmasked[0][1]['conditioning_llama3'][0,0,...].unsqueeze(0),
                     ],
                     dim=-2),
-                    torch.flip(unmask, dims=[-1]))
+                    torch.flip(unmask, dims=[-2,-1]))
 
                 RegContext.add_region_llama3(positive_masked  [0][1]['conditioning_llama3'])
                 RegContext.add_region_llama3(positive_unmasked[0][1]['conditioning_llama3'])
@@ -1680,21 +1680,21 @@ class ClownRegionalConditioning3:
                     positive_A  [0][1]['conditioning_llama3'][0,0,...].unsqueeze(0),
                     ],
                     dim=-2),
-                    torch.flip(mask_A, dims=[-1]))
+                    torch.flip(mask_A, dims=[-2,-1]))
                 AttnMask.add_region(torch.concat([
                     positive_B  [0][0],
                     positive_B  [0][1]['conditioning_llama3'][0,0,...].unsqueeze(0),
                     positive_B  [0][1]['conditioning_llama3'][0,0,...].unsqueeze(0),
                     ],
                     dim=-2),
-                    torch.flip(mask_B, dims=[-1]))
+                    torch.flip(mask_B, dims=[-2,-1]))
                 AttnMask.add_region(torch.concat([
                     positive_unmasked[0][0],
                     positive_unmasked[0][1]['conditioning_llama3'][0,0,...].unsqueeze(0),
                     positive_unmasked[0][1]['conditioning_llama3'][0,0,...].unsqueeze(0),
                     ],
                     dim=-2),
-                    torch.flip(mask_AB_inv, dims=[-1]))
+                    torch.flip(mask_AB_inv, dims=[-2,-1]))
 
                 RegContext.add_region_llama3(positive_A       [0][1]['conditioning_llama3'])
                 RegContext.add_region_llama3(positive_B       [0][1]['conditioning_llama3'])
@@ -2025,21 +2025,21 @@ class ClownRegionalConditioning_ABC:
                     positive_A  [0][1]['conditioning_llama3'][0,0,...].unsqueeze(0),
                     ],
                     dim=-2),
-                    torch.flip(mask_A, dims=[-1]))
+                    torch.flip(mask_A, dims=[-2,-1]))
                 AttnMask.add_region(torch.concat([
                     positive_B  [0][0],
                     positive_B  [0][1]['conditioning_llama3'][0,0,...].unsqueeze(0),
                     positive_B  [0][1]['conditioning_llama3'][0,0,...].unsqueeze(0),
                     ],
                     dim=-2),
-                    torch.flip(mask_B, dims=[-1]))
+                    torch.flip(mask_B, dims=[-2,-1]))
                 AttnMask.add_region(torch.concat([
                     positive_unmasked[0][0],
                     positive_unmasked[0][1]['conditioning_llama3'][0,0,...].unsqueeze(0),
                     positive_unmasked[0][1]['conditioning_llama3'][0,0,...].unsqueeze(0),
                     ],
                     dim=-2),
-                    torch.flip(mask_AB_inv, dims=[-1]))
+                    torch.flip(mask_AB_inv, dims=[-2,-1]))
 
                 RegContext.add_region_llama3(positive_A       [0][1]['conditioning_llama3'])
                 RegContext.add_region_llama3(positive_B       [0][1]['conditioning_llama3'])

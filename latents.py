@@ -553,3 +553,12 @@ def hard_light_blend(base_latent, blend_latent):
 
 
 
+
+def make_checkerboard(tile_size: int, num_tiles: int, dtype=torch.float16, device="cpu"):
+    pattern = torch.tensor([[0, 1], [1, 0]], dtype=dtype, device=device)
+    board = pattern.repeat(num_tiles // 2 + 1, num_tiles // 2 + 1)[:num_tiles, :num_tiles]
+    board_expanded = board.repeat_interleave(tile_size, dim=0).repeat_interleave(tile_size, dim=1)
+    return board_expanded
+
+
+
