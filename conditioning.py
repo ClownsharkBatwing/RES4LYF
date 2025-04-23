@@ -1131,7 +1131,7 @@ class ClownRegionalConditioning:
             RegContext = RegionalContext()
                 
             if isinstance(model.model.model_config, comfy.supported_models.HiDream):
-                AttnMask.add_region(torch.concat([
+                """AttnMask.add_region(torch.concat([
                     positive_masked  [0][0],
                     positive_masked  [0][1]['conditioning_llama3'][0,0,...].unsqueeze(0),
                     positive_masked  [0][1]['conditioning_llama3'][0,0,...].unsqueeze(0),
@@ -1144,7 +1144,7 @@ class ClownRegionalConditioning:
                     positive_unmasked[0][1]['conditioning_llama3'][0,0,...].unsqueeze(0),
                     ],
                     dim=-2),
-                    1-mask)
+                    1-mask)"""
                 
                 AttnMask.add_region_sizes(
                     [

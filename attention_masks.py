@@ -137,29 +137,18 @@ class BaseAttentionMask:
         self.text_len = sum(self.context_lens)
         self.text_off = self.text_len
         
-        """if isinstance(self.model_config, comfy.supported_models.Stable_Cascade_C):
-            self.text_off = 0
-        else:
-            self.text_off = self.text_len"""
-            
         self.num_regions += 1
         
     def add_region_sizes(self, context_size_list, mask):
         
-        self.context_lens_list.append(context_size_list)
-        #self.masks            .append(mask)
+        self.context_lens     .append(sum(context_size_list))
+        self.context_lens_list.append(    context_size_list)
+        self.masks            .append(mask)
         
-        #self.text_len = sum(self.context_lens_list)
         self.text_len = sum(sum(sublist) for sublist in self.context_lens_list)
-
         self.text_off = self.text_len
-        
-        """if isinstance(self.model_config, comfy.supported_models.Stable_Cascade_C):
-            self.text_off = 0
-        else:
-            self.text_off = self.text_len"""
-        
-        #self.num_regions += 1
+
+        self.num_regions += 1
         
     def add_regions(self, contexts, masks):
         for context, mask in zip(contexts, masks):
@@ -337,7 +326,7 @@ class FullAttentionMaskHiDream(BaseAttentionMask):
         
         img2txt_mask = torch.cat([img2txt_mask_t5, img2txt_mask_llama.repeat(1,2)], dim=-1)
         
-        attn_mask[:-text_off , :-text_len ] = attn_mask[text_off:, text_len:]
+        attn_mask[:-text_off , :-text_len ] = attn_mask[text_off:, text_len:].clone()
         attn_mask[:-text_off ,  -text_len:] = img2txt_mask
         attn_mask[ -text_off:, :-text_len ] = img2txt_mask.transpose(-2,-1)
 
