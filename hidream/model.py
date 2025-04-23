@@ -320,19 +320,19 @@ class HDBlockDouble(nn.Module):
         super().__init__()
         self.adaLN_modulation = nn.Sequential(
             nn.SiLU(),
-            operations.Linear(dim, 12*dim, bias=True,                                                               dtype=dtype, device=device)
+            operations.Linear(dim, 12*dim, bias=True,                                                 dtype=dtype, device=device)
         )
 
-        self.norm1_i = operations.LayerNorm(dim, eps = 1e-06, elementwise_affine = False,                         dtype=dtype, device=device)
-        self.norm1_t = operations.LayerNorm(dim, eps = 1e-06, elementwise_affine = False,                         dtype=dtype, device=device)
+        self.norm1_i = operations.LayerNorm(dim, eps = 1e-06, elementwise_affine = False,             dtype=dtype, device=device)
+        self.norm1_t = operations.LayerNorm(dim, eps = 1e-06, elementwise_affine = False,             dtype=dtype, device=device)
         
-        self.attn1     = HDAttention         (dim, heads, head_dim, single=False,                                   dtype=dtype, device=device, operations=operations)
+        self.attn1     = HDAttention         (dim, heads, head_dim, single=False,                     dtype=dtype, device=device, operations=operations)
 
-        self.norm3_i = operations.LayerNorm(dim, eps = 1e-06, elementwise_affine = False,                         dtype=dtype, device=device)
-        self.ff_i      = MOEFeedForwardSwiGLU(dim, 4*dim, num_routed_experts, num_activated_experts,                dtype=dtype, device=device, operations=operations)
+        self.norm3_i = operations.LayerNorm(dim, eps = 1e-06, elementwise_affine = False,             dtype=dtype, device=device)
+        self.ff_i      = MOEFeedForwardSwiGLU(dim, 4*dim, num_routed_experts, num_activated_experts,  dtype=dtype, device=device, operations=operations)
                 
-        self.norm3_t = operations.LayerNorm(dim, eps = 1e-06, elementwise_affine = False,                         dtype=dtype, device=device)                                 
-        self.ff_t      =    FeedForwardSwiGLU(dim, 4*dim,                                                           dtype=dtype, device=device, operations=operations)
+        self.norm3_t = operations.LayerNorm(dim, eps = 1e-06, elementwise_affine = False,             dtype=dtype, device=device)                                 
+        self.ff_t      =    FeedForwardSwiGLU(dim, 4*dim,                                             dtype=dtype, device=device, operations=operations)
 
     def forward(
         self,
@@ -377,14 +377,14 @@ class HDBlockSingle(nn.Module):
         super().__init__()
         self.adaLN_modulation = nn.Sequential(
             nn.SiLU(),
-            operations.Linear(dim, 6 * dim, bias=True,                                                             dtype=dtype, device=device)
+            operations.Linear(dim, 6 * dim, bias=True,                                                dtype=dtype, device=device)
         )
 
-        self.norm1_i = operations.LayerNorm(dim, eps = 1e-06, elementwise_affine = False,                        dtype=dtype, device=device)
-        self.attn1     = HDAttention         (dim, heads, head_dim, single=True,                                   dtype=dtype, device=device, operations=operations)
+        self.norm1_i = operations.LayerNorm(dim, eps = 1e-06, elementwise_affine = False,             dtype=dtype, device=device)
+        self.attn1     = HDAttention         (dim, heads, head_dim, single=True,                      dtype=dtype, device=device, operations=operations)
 
-        self.norm3_i = operations.LayerNorm(dim, eps = 1e-06, elementwise_affine = False,                        dtype=dtype, device=device)
-        self.ff_i      = MOEFeedForwardSwiGLU(dim, 4*dim, num_routed_experts, num_activated_experts,               dtype=dtype, device=device, operations=operations)
+        self.norm3_i = operations.LayerNorm(dim, eps = 1e-06, elementwise_affine = False,             dtype=dtype, device=device)
+        self.ff_i      = MOEFeedForwardSwiGLU(dim, 4*dim, num_routed_experts, num_activated_experts,  dtype=dtype, device=device, operations=operations)
 
     def forward(
         self,
