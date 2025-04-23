@@ -591,10 +591,23 @@ class HDModel(nn.Module):
             if mask is not None and self.manual_mask is None:
                 txt_offset = transformer_options['AttnMask'].text_len // 3 // transformer_options['AttnMask'].num_regions
                 txt_init_list = []
+                
+                offset_t5_start    = 0
                 for i in range(transformer_options['AttnMask'].num_regions):
-                    txt_init_segment = torch.cat([contexts[-1][:,128*i:128*(i+1),:], contexts[-2][:,128*i:128*(i+1),:]], dim=1) 
-                    txt_init_list.append(txt_init_segment)
+                    offset_t5_end   = offset_t5_start + transformer_options['AttnMask'].context_lens_list[i][0]
+                    txt_init_list.append(contexts[-1][:,offset_t5_start:offset_t5_end,:])
+                    offset_t5_start = offset_t5_end
+                
+                offset_llama_start = 0
+                for i in range(transformer_options['AttnMask'].num_regions):
+                    offset_llama_end   = offset_llama_start + transformer_options['AttnMask'].context_lens_list[i][1]
+                    txt_init_list.append(contexts[-2][:,offset_llama_start:offset_llama_end,:])
+                    offset_llama_start = offset_llama_end
+                
                 txt_init = torch.cat(txt_init_list, dim=1)  #T5,LLAMA3 (last block)
+                txt_init_len = txt_init.shape[1]     
+                
+                
                 
             img_len = img.shape[1]
             
@@ -602,24 +615,11 @@ class HDModel(nn.Module):
                 txt_llama = contexts[bid]
                 txt       = torch.cat([txt_init, txt_llama], dim=1)        # 1,384,2560       # cur_contexts = T5, LLAMA3 (last block), LLAMA3 (current block)
 
-                if mask is not None and bid == 0 and self.manual_mask is None:
-                    txt_list = []
-                    for i in range(transformer_options['AttnMask'].num_regions):
-                        chunk_list = []
-                        for j in range(len(txt_init_list)):
-                            segment = txt_init_list[j][:, 128*i:128*(i+1), :]
-                            chunk_list.append(segment)
-                        txt_segment = torch.cat(chunk_list, dim=1) 
-                        #txt_segment = torch.cat([txt_init_list[0][:,128*i:128*(i+1),:], txt_init_list[1][:,128*i:128*(i+1),:]], dim=1) 
-                        txt_list.append(txt_segment)
-                    txt = torch.cat(txt_list + [txt_llama], dim=1)
-                    
                 if mask is not None:
                     if floor > 0 and floor > bid/48:
                         mask[:img_len,:img_len] = 1.0
                     elif weight > 0 and weight < bid/48:
                         mask = None
-                        #mask[...] = 1.0
                 
                 if floor < 0 and mask is not None and abs(floor) > (1 - bid/48):
                     mask_tmp = mask.clone()
@@ -632,9 +632,6 @@ class HDModel(nn.Module):
                     
                 txt_init = txt_init[:, :txt_init_len]
                 
-                txt_init_list = list(txt_init.split(256, dim=1))
-
-
 
             img_len = img.shape[1]
             img     = torch.cat([img, txt_init], dim=1)   # 4032 + 271 -> 4303     # txt embed from double stream block
@@ -648,16 +645,12 @@ class HDModel(nn.Module):
             for bid, block in enumerate(self.single_stream_blocks): # len == 32
                 txt_llama = contexts[bid+16]                        # T5 pre-embedded for single stream blocks
                 img = torch.cat([img, txt_llama], dim=1)            # cat img,txt     opposite of flux which is txt,img       4303 + 143 -> 4446
-                
-                #if mask is not None and floor > (bid+16)/48:
-                #    mask[:img_len,:img_len] = True
-                    
+
                 if mask is not None:
                     if floor > 0 and floor > (bid+16)/48:
                         mask[:img_len,:img_len] = 1.0
                     elif weight > 0 and weight < (bid+16)/48:
                         mask = None
-                        #mask[...] = 1.0
                 
                 if floor < 0 and mask is not None and abs(floor) > (1 - (bid+16)/48):
                     mask_tmp = mask.clone()
@@ -668,7 +661,6 @@ class HDModel(nn.Module):
                 else:
                     img = block(img, img_masks, None, clip, rope, mask)
                 
-                #img = block(img, img_masks, None, clip, rope, mask)
                 img = img[:, :joint_len]   # slice off txt_llama
 
             img = img[:, :img_len, ...]
