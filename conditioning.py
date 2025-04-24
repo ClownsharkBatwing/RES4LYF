@@ -990,8 +990,8 @@ class ClownRegionalConditioning_AB:
                 "invert_mask":             ("BOOLEAN",                                   {"default": False}),
             }, 
             "optional": {
-                "positive_A":              ("CONDITIONING", ),
-                "positive_B":              ("CONDITIONING", ),
+                "conditioning_A":          ("CONDITIONING", ),
+                "conditioning_B":          ("CONDITIONING", ),
                 "mask_A":                  ("MASK", ),
                 "mask_B":                  ("MASK", ),
                 "weights":                 ("SIGMAS", ),
@@ -1030,6 +1030,9 @@ class ClownRegionalConditioning_AB:
             mask_B                            = None,
             invert_mask              : bool   = False
             ) -> Tuple[Tensor]:
+        
+        positive_A = conditioning_A
+        positive_B = conditioning_B
         
         positive_masked   = positive_A 
         positive_unmasked = positive_B
@@ -1219,9 +1222,9 @@ class ClownRegionalConditioning_ABC:
                 "invert_mask":             ("BOOLEAN",                                   {"default": False}),
             }, 
             "optional": {
-                "positive_A":              ("CONDITIONING", ),
-                "positive_B":              ("CONDITIONING", ),
-                "positive_C":              ("CONDITIONING", ),
+                "conditioning_A":              ("CONDITIONING", ),
+                "conditioning_B":              ("CONDITIONING", ),
+                "conditioning_C":              ("CONDITIONING", ),
                 "mask_A":                  ("MASK", ),
                 "mask_B":                  ("MASK", ),
                 "mask_C":                  ("MASK", ),
@@ -1249,9 +1252,9 @@ class ClownRegionalConditioning_ABC:
             weight_scheduler                  = None,
             start_step               : int    = 0,
             end_step                 : int    = -1,
-            positive_A                        = None,
-            positive_B                        = None,
-            positive_C                        = None,
+            conditioning_A                    = None,
+            conditioning_B                    = None,
+            conditioning_C                    = None,
             weights                  : Tensor = None,
             region_bleeds            : Tensor = None,
             region_bleed             : float  = 0.0,
@@ -1264,6 +1267,10 @@ class ClownRegionalConditioning_ABC:
             mask_C                              = None,
             invert_mask              : bool   = False
             ) -> Tuple[Tensor]:
+        
+        positive_A = conditioning_A
+        positive_B = conditioning_B
+        positive_C = conditioning_C
         
         if end_step == -1:
             end_step = MAX_STEPS
@@ -1508,20 +1515,20 @@ class ClownRegionalConditioning(ClownRegionalConditioning_AB):
                 "invert_mask":             ("BOOLEAN",                                   {"default": False}),
             }, 
             "optional": {
-                "positive_masked":         ("CONDITIONING", ),
-                "positive_unmasked":       ("CONDITIONING", ),
+                "conditioning_masked":     ("CONDITIONING", ),
+                "conditioning_unmasked":       ("CONDITIONING", ),
                 "mask":                    ("MASK", ),
                 "weights":                 ("SIGMAS", ),
                 "region_bleeds":           ("SIGMAS", ),
             }
         }
 
-    def main(self, positive_masked, positive_unmasked, mask, **kwargs):
+    def main(self, conditioning_masked, conditioning_unmasked, mask, **kwargs):
         return super().main(
-            positive_A = positive_masked,
-            positive_B = positive_unmasked,
-            mask_A     =   mask,
-            mask_B     = 1-mask,
+            conditioning_A = conditioning_masked,
+            conditioning_B = conditioning_unmasked,
+            mask_A         =   mask,
+            mask_B         = 1-mask,
             **kwargs
         )    
 
@@ -1543,9 +1550,9 @@ class ClownRegionalConditioning3(ClownRegionalConditioning_ABC):
                 "invert_mask":             ("BOOLEAN",                                   {"default": False}),
             }, 
             "optional": {
-                "positive_A":              ("CONDITIONING", ),
-                "positive_B":              ("CONDITIONING", ),
-                "positive_unmasked":       ("CONDITIONING", ),
+                "conditioning_A":          ("CONDITIONING", ),
+                "conditioning_B":          ("CONDITIONING", ),
+                "conditioning_unmasked":   ("CONDITIONING", ),
                 "mask_A":                  ("MASK", ),
                 "mask_B":                  ("MASK", ),
                 "weights":                 ("SIGMAS", ),
@@ -1553,16 +1560,16 @@ class ClownRegionalConditioning3(ClownRegionalConditioning_ABC):
             }
         }
 
-    def main(self, positive_unmasked, mask_A, mask_B, **kwargs):
+    def main(self, conditioning_unmasked, mask_A, mask_B, **kwargs):
         
         mask_AB_inv = torch.ones_like(mask_A) - mask_A - mask_B
         mask_AB_inv[mask_AB_inv < 0] = 0
         
         return super().main(
-            positive_C = positive_unmasked,
-            mask_A     = mask_A,
-            mask_B     = mask_B,
-            mask_C     = mask_AB_inv,
+            conditioning_C = conditioning_unmasked,
+            mask_A         = mask_A,
+            mask_B         = mask_B,
+            mask_C         = mask_AB_inv,
             **kwargs
         )    
 
