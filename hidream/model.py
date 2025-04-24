@@ -543,10 +543,24 @@ class HDModel(nn.Module):
             img, t, y, context, llama3 = clone_inputs(img_orig, t_orig, y_orig, context_orig, llama3_orig, index=cond_iter)
             
             mask = None
-            if 'AttnMask' in transformer_options:
+            if 'AttnMask' in transformer_options: # and weight != 0:
                 mask = transformer_options['AttnMask'].attn_mask.mask.to('cuda')
 
-                if not UNCOND:
+                if False: #weight == 0:
+                    mask_zero = torch.ones_like(mask)
+                    img_len = transformer_options['AttnMask'].img_len
+                    mask_zero[img_len:, img_len:] = mask[img_len:, img_len:]
+                    mask = mask_zero
+                if weight == 0 and not UNCOND:
+                    context = transformer_options['RegContext'].context.to(context.dtype).to(context.device)
+                    context = context.view(128, -1, context.shape[-1]).sum(dim=-2)
+                    llama3  = transformer_options['RegContext'].llama3 .to(llama3 .dtype).to(llama3 .device)
+                    mask = None
+                elif weight == 0 and UNCOND:
+                    mask = None
+                    pass
+
+                elif not UNCOND:
                     context = transformer_options['RegContext'].context.to(context.dtype).to(context.device)
                     llama3  = transformer_options['RegContext'].llama3 .to(llama3 .dtype).to(llama3 .device)
                 
@@ -575,6 +589,7 @@ class HDModel(nn.Module):
                 img_ids         = repeat(img_ids, "h w c -> b (h w) c", b=bsz)
             img = self.x_embedder(img)  # hidden_states 1,4032,2560         for 1024x1024: -> 1,4096,2560      ,64 -> ,2560 (x40)
             
+            #contexts_orig = self.prepare_contexts(llama3_orig, context_orig, bsz, img.shape[-1])
             contexts = self.prepare_contexts(llama3, context, bsz, img.shape[-1])
 
             # txt_ids -> 1,414,3
@@ -585,11 +600,14 @@ class HDModel(nn.Module):
 
 
             # 2. Blocks
+            #txt_init_orig     = torch.cat([contexts_orig[-1], contexts_orig[-2]], dim=1)     # shape[1] == 128, 143       then on another step/call it's 128, 128...??? cuz the contexts is now 1,128,2560
+            #txt_init_len_orig = txt_init_orig.shape[1]                                       # 271
+            
             txt_init     = torch.cat([contexts[-1], contexts[-2]], dim=1)     # shape[1] == 128, 143       then on another step/call it's 128, 128...??? cuz the contexts is now 1,128,2560
             txt_init_len = txt_init.shape[1]                                       # 271
 
             if mask is not None and self.manual_mask is None:
-                txt_offset = transformer_options['AttnMask'].text_len // 3 // transformer_options['AttnMask'].num_regions
+                #txt_offset = transformer_options['AttnMask'].text_len // 3 // transformer_options['AttnMask'].num_regions
                 txt_init_list = []
                 
                 offset_t5_start    = 0
@@ -614,6 +632,9 @@ class HDModel(nn.Module):
             for bid, block in enumerate(self.double_stream_blocks):                                                              # len == 16
                 txt_llama = contexts[bid]
                 txt       = torch.cat([txt_init, txt_llama], dim=1)        # 1,384,2560       # cur_contexts = T5, LLAMA3 (last block), LLAMA3 (current block)
+
+                #txt_llama_orig = contexts_orig[bid]
+                #txt_orig       = torch.cat([txt_init_orig, txt_llama_orig], dim=1)        # 1,384,2560       # cur_contexts = T5, LLAMA3 (last block), LLAMA3 (current block)
 
                 if mask is not None:
                     if floor > 0 and floor > bid/48:
