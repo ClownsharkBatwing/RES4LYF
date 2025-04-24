@@ -532,6 +532,7 @@ class HDModel(nn.Module):
         weight    = transformer_options.get("regional_conditioning_weight", 0.0)
         floor     = transformer_options.get("regional_conditioning_floor",  0.0)
         #floor     = min(floor, weight)
+        mask_zero = None
 
         out_list = []
         for cond_iter in range(len(transformer_options['cond_or_uncond'])):
@@ -543,37 +544,54 @@ class HDModel(nn.Module):
             img, t, y, context, llama3 = clone_inputs(img_orig, t_orig, y_orig, context_orig, llama3_orig, index=cond_iter)
             
             mask = None
-            if 'AttnMask' in transformer_options: # and weight != 0:
+            if not UNCOND and 'AttnMask' in transformer_options: # and weight != 0:
                 mask = transformer_options['AttnMask'].attn_mask.mask.to('cuda')
-
-                if False: #weight == 0:
+                if mask_zero is None:
                     mask_zero = torch.ones_like(mask)
                     img_len = transformer_options['AttnMask'].img_len
                     mask_zero[img_len:, img_len:] = mask[img_len:, img_len:]
-                    mask = mask_zero
-                if weight == 0 and not UNCOND:
+
+                if weight == 0:
                     context = transformer_options['RegContext'].context.to(context.dtype).to(context.device)
-                    context = context.view(128, -1, context.shape[-1]).sum(dim=-2)
+                    context = context.view(128, -1, context.shape[-1]).sum(dim=-2)                                    # 128 !!!
                     llama3  = transformer_options['RegContext'].llama3 .to(llama3 .dtype).to(llama3 .device)
                     mask = None
-                elif weight == 0 and UNCOND:
-                    mask = None
-                    pass
-
-                elif not UNCOND:
+                else:
                     context = transformer_options['RegContext'].context.to(context.dtype).to(context.device)
                     llama3  = transformer_options['RegContext'].llama3 .to(llama3 .dtype).to(llama3 .device)
                 
+
+
+            if UNCOND and 'AttnMask_neg' in transformer_options: # and weight != 0:
+                mask = transformer_options['AttnMask_neg'].attn_mask.mask.to('cuda')
+                if mask_zero is None:
+                    mask_zero = torch.ones_like(mask)
+                    img_len = transformer_options['AttnMask_neg'].img_len
+                    mask_zero[img_len:, img_len:] = mask[img_len:, img_len:]
+
+                if weight == 0:
+                    context = transformer_options['RegContext_neg'].context.to(context.dtype).to(context.device)
+                    context = context.view(128, -1, context.shape[-1]).sum(dim=-2)                                    # 128 !!!
+                    llama3  = transformer_options['RegContext_neg'].llama3 .to(llama3 .dtype).to(llama3 .device)
+                    mask = None
+
                 else:
+                    context = transformer_options['RegContext_neg'].context.to(context.dtype).to(context.device)
+                    llama3  = transformer_options['RegContext_neg'].llama3 .to(llama3 .dtype).to(llama3 .device)
+
+            elif UNCOND:
                     A       = context
-                    B       = transformer_options['RegContext'].context
+                    B       = transformer_options['RegContext_neg'].context
                     context = A.repeat(1,    (B.shape[1] // A.shape[1]) + 1, 1)[:,   :B.shape[1], :]
                     
                     A       = llama3
-                    B       = transformer_options['RegContext'].llama3
+                    B       = transformer_options['RegContext_neg'].llama3
                     llama3  = A.repeat(1, 1, (B.shape[2] // A.shape[2]) + 1, 1)[:,:, :B.shape[2], :]
-            elif self.manual_mask is not None:
+
+
+            if self.manual_mask is not None:
                 mask = self.manual_mask
+
 
             # prep embeds
             t    = self.expand_timesteps(t, bsz, img.device)
@@ -639,11 +657,11 @@ class HDModel(nn.Module):
                 if mask is not None:
                     if floor > 0 and floor > bid/48:
                         mask[:img_len,:img_len] = 1.0
-                    elif weight > 0 and weight < bid/48:
-                        mask = None
+                    if weight > 0 and weight < bid/48:
+                        mask = mask_zero
                 
                 if weight < 0 and mask is not None and abs(weight) < (1 - bid/48):
-                    img, txt_init = block(img, img_masks, txt, clip, rope, None)
+                    img, txt_init = block(img, img_masks, txt, clip, rope, mask_zero)
                 elif floor < 0 and mask is not None and abs(floor) > (1 - bid/48):
                     mask_tmp = mask.clone()
                     mask_tmp[:img_len,:img_len] = 1.0
@@ -670,11 +688,11 @@ class HDModel(nn.Module):
                 if mask is not None:
                     if floor > 0 and floor > (bid+16)/48:
                         mask[:img_len,:img_len] = 1.0
-                    elif weight > 0 and weight < (bid+16)/48:
-                        mask = None
+                    if weight > 0 and weight < (bid+16)/48:
+                        mask = mask_zero
                 
                 if weight < 0 and mask is not None and abs(weight) < (1 - (bid+16)/48):
-                    img = block(img, img_masks, None, clip, rope, None)
+                    img = block(img, img_masks, None, clip, rope, mask_zero)
                 elif floor < 0 and mask is not None and abs(floor) > (1 - (bid+16)/48):
                     mask_tmp = mask.clone()
                     mask_tmp[:img_len,:img_len] = 1.0
