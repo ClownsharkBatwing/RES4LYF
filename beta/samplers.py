@@ -207,7 +207,7 @@ class SharkSampler:
                         RESplain("Shark: Using negative cond from ClownOptions_GuiderInput")
             else:
                 guider = None
-                work_model   = model.clone()
+                work_model   = model#.clone()
                 
             if positive is None or negative is None:
                 from ..conditioning import EmptyConditioningGenerator
@@ -435,7 +435,7 @@ class SharkSampler:
             if "noise_seed" in sampler.extra_options:
                 if sampler.extra_options['noise_seed'] == -1 and noise_seed != -1:
                     sampler.extra_options['noise_seed'] = noise_seed + 1
-                    RESplain("Shark: setting clown noise seed to: ", sampler.extra_options['noise_seed'], debug=False)
+                    RESplain("Shark: setting clown noise seed to: ", sampler.extra_options['noise_seed'], debug=True)
 
             if "sampler_mode" in sampler.extra_options:
                 sampler.extra_options['sampler_mode'] = sampler_mode
@@ -488,7 +488,7 @@ class SharkSampler:
                     if noise_type_init == "none" or noise_stdev == 0.0:
                         noise = torch.zeros_like(x)
                     else:
-                        RESplain("Initial latent noise seed: ", seed, debug=False)
+                        RESplain("Initial latent noise seed: ", seed, debug=True)
                         
                         noise_sampler_init = NOISE_GENERATOR_CLASSES_SIMPLE.get(noise_type_init)(x=x, seed=seed, sigma_max=sigma_max, sigma_min=sigma_min)
                     
@@ -617,7 +617,7 @@ class SharkSampler:
             
             out['positive'] = positive
             out['negative'] = negative
-            out['model']    = work_model.clone()
+            out['model']    = work_model#.clone()
             out['sampler']  = sampler
             
 

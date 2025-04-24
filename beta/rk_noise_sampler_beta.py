@@ -134,13 +134,13 @@ class RK_NoiseSampler:
         
         if noise_seed < 0 and last_rng is None:
             seed = torch.initial_seed()+1 
-            RESplain("SDE noise seed: ", seed, " (set via torch.initial_seed()+1)")
+            RESplain("SDE noise seed: ", seed, " (set via torch.initial_seed()+1)", debug=True)
         if noise_seed < 0 and last_rng is not None:
             seed = torch.initial_seed() 
-            RESplain("SDE noise seed: ", seed, " (set via torch.initial_seed())")
+            RESplain("SDE noise seed: ", seed, " (set via torch.initial_seed())", debug=True)
         else:
             seed = noise_seed
-            RESplain("SDE noise seed: ", seed)
+            RESplain("SDE noise seed: ", seed, debug=True)
 
             
         #seed2 = seed + MAX_STEPS #for substep noise generation. offset needed to ensure seeds are not reused

@@ -101,9 +101,9 @@ class LatentGuide:
 
         if guides is not None:
             self.guide_mode               = guides.get("guide_mode", "none")
-            latent_guide_weight           = guides.get("weight_masked", 0.)
+            latent_guide_weight           = guides.get("weight_masked",   0.)
             latent_guide_weight_inv       = guides.get("weight_unmasked", 0.)
-            latent_guide_weight_mean      = guides.get("weight_mean", 0.)
+            latent_guide_weight_mean      = guides.get("weight_mean",     0.)
 
             latent_guide_weights          = guides.get("weights_masked")
             latent_guide_weights_inv      = guides.get("weights_unmasked")
@@ -120,18 +120,18 @@ class LatentGuide:
             scheduler_                    = guides.get("weight_scheduler_masked")
             scheduler_inv_                = guides.get("weight_scheduler_unmasked")
             scheduler_mean_               = guides.get("weight_scheduler_mean")
-                        
-            start_steps_                  = guides.get("start_step_masked", 0)
-            start_steps_inv_              = guides.get("start_step_unmasked", 0)
-            start_steps_mean_             = guides.get("start_step_mean", 0)
             
-            steps_                        = guides.get("end_step_masked", 1)
-            steps_inv_                    = guides.get("end_step_unmasked", 1)
-            steps_mean_                   = guides.get("end_step_mean", 1)
+            start_steps_                  = guides.get("start_step_masked",   0)
+            start_steps_inv_              = guides.get("start_step_unmasked", 0)
+            start_steps_mean_             = guides.get("start_step_mean",     0)
+            
+            steps_                        = guides.get("end_step_masked",     1)
+            steps_inv_                    = guides.get("end_step_unmasked",   1)
+            steps_mean_                   = guides.get("end_step_mean",       1)
 
-            self.guide_cossim_cutoff_     = guides.get("cutoff_masked", 1.)
-            self.guide_bkg_cossim_cutoff_ = guides.get("cutoff_unmasked", 1.)
-            self.guide_mean_cossim_cutoff_= guides.get("cutoff_mean", 1.)
+            self.guide_cossim_cutoff_     = guides.get("cutoff_masked",       1.)
+            self.guide_bkg_cossim_cutoff_ = guides.get("cutoff_unmasked",     1.)
+            self.guide_mean_cossim_cutoff_= guides.get("cutoff_mean",         1.)
 
             if self.mask     is not None and self.mask.shape    [0] > 1 and self.VIDEO is False:
                 self.mask     = self.mask    [batch_num].unsqueeze(0)
@@ -143,17 +143,17 @@ class LatentGuide:
             
             guide_sigma_shift = self.EO("guide_sigma_shift", 0.0)
             
-            if latent_guide_weights is None:# and self.guide_mode != "none":
+            if latent_guide_weights is None and scheduler_ is not None:# and self.guide_mode != "none":
                 total_steps          = steps_ - start_steps_
                 latent_guide_weights = get_sigmas(self.model, scheduler_, total_steps, 1.0, shift=guide_sigma_shift).to(dtype=self.dtype, device=self.device) / self.sigma_max
-            prepend              = torch.zeros(start_steps_,                               dtype=self.dtype, device=self.device)
-            latent_guide_weights = torch.cat((prepend, latent_guide_weights.to(self.device)), dim=0)
+                prepend              = torch.zeros(start_steps_,                               dtype=self.dtype, device=self.device)
+                latent_guide_weights = torch.cat((prepend, latent_guide_weights.to(self.device)), dim=0)
                 
-            if latent_guide_weights_inv is None:# and self.guide_mode != "none":
+            if latent_guide_weights_inv is None and scheduler_inv_ is not None:# and self.guide_mode != "none":
                 total_steps              = steps_inv_ - start_steps_inv_
                 latent_guide_weights_inv = get_sigmas(self.model, scheduler_inv_, total_steps, 1.0, shift=guide_sigma_shift).to(dtype=self.dtype, device=self.device) / self.sigma_max
-            prepend                  = torch.zeros(start_steps_inv_,                               dtype=self.dtype, device=self.device) 
-            latent_guide_weights_inv = torch.cat((prepend, latent_guide_weights_inv.to(self.device)), dim=0)
+                prepend                  = torch.zeros(start_steps_inv_,                               dtype=self.dtype, device=self.device) 
+                latent_guide_weights_inv = torch.cat((prepend, latent_guide_weights_inv.to(self.device)), dim=0)
                 
             if latent_guide_weights_mean is None and scheduler_mean_ is not None:
                 total_steps               = steps_mean_ - start_steps_mean_

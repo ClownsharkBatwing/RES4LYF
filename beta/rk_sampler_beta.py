@@ -310,7 +310,6 @@ def sample_rk_beta(
             start_step  = 1
         else:
             start_step -= 1
-
     
     SDE_NOISE_EXTERNAL = False
     if sde_noise is not None:

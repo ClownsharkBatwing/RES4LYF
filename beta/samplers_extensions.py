@@ -869,8 +869,8 @@ class ClownGuide_Mean_Beta:
     def INPUT_TYPES(cls):
         return {"required":
                     {
-                    "channelwise_mode":     ("BOOLEAN",                                   {"default": True}),
-                    "projection_mode":      ("BOOLEAN",                                   {"default": True}),
+                    #"channelwise_mode":     ("BOOLEAN",                                   {"default": True}),
+                    #"projection_mode":      ("BOOLEAN",                                   {"default": True}),
                     "weight":               ("FLOAT",                                     {"default": 0.75, "min":  -100.0, "max": 100.0, "step":0.01, "round": False, "tooltip": "Set the strength of the guide."}),
                     "cutoff":               ("FLOAT",                                     {"default": 1.0,  "min":  0.0,    "max": 1.0,   "step":0.01, "round": False, "tooltip": "Disables the guide for the next step when the denoised image is similar to the guide. Higher values will strengthen the effect."}),
                     "weight_scheduler":     (["constant"] + get_res4lyf_scheduler_list(), {"default": "beta57"},),
