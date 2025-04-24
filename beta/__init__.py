@@ -13,15 +13,11 @@ def add_beta(NODE_CLASS_MAPPINGS, extra_samplers):
         "SharkSampler_Beta"               : samplers.SharkSampler_Beta,
         
         "SharkChainsampler_Beta"          : samplers.SharkChainsampler_Beta,
-        #"SharkUnsampler_Beta"             : samplers.SharkUnsampler_Beta,
-
 
         "BongSampler"                     : samplers.BongSampler,
 
         "ClownsharKSampler_Beta"          : samplers.ClownsharKSampler_Beta,
         "ClownsharkChainsampler_Beta"      : samplers.ClownsharkChainsampler_Beta,
-        #"ClownsharkUnsampler_Beta"        : samplers.ClownsharkUnsampler_Beta,
-
         
         
         "ClownSampler_Beta"               : samplers.ClownSampler_Beta,
@@ -47,19 +43,17 @@ def add_beta(NODE_CLASS_MAPPINGS, extra_samplers):
         "ClownOptions_Momentum_Beta"      : samplers_extensions.ClownOptions_Momentum_Beta,
         "ClownOptions_ImplicitSteps_Beta" : samplers_extensions.ClownOptions_ImplicitSteps_Beta,
         "ClownOptions_SwapSampler_Beta"   : samplers_extensions.ClownOptions_SwapSampler_Beta,
-        #"ClownOptions_StepsToRun_Beta"    : samplers_extensions.ClownOptions_StepsToRun_Beta,
         
         "ClownOptions_ExtraOptions_Beta"  : samplers_extensions.ClownOptions_ExtraOptions_Beta,
         "ClownOptions_Automation_Beta"    : samplers_extensions.ClownOptions_Automation_Beta,
         "ClownOptions_Combine"            : samplers_extensions.ClownOptions_Combine,
         "ClownOptions_Frameweights"       : samplers_extensions.ClownOptions_Frameweights,
-        "ClownOptions_GuiderInput"        : samplers_extensions.ClownOptions_GuiderInput,
         "SharkOptions_GuideCond_Beta"     : samplers_extensions.SharkOptions_GuideCond_Beta,
         "SharkOptions_GuideConds_Beta"    : samplers_extensions.SharkOptions_GuideConds_Beta,
+        "ClownOptions_GuiderInput"        : samplers_extensions.ClownOptions_GuiderInput,
 
 
         "SharkOptions_Beta"               : samplers_extensions.SharkOptions_Beta,
-        #"SharkOptions_UltraCascade_Beta"  : samplers_extensions.SharkOptions_UltraCascade_Beta,
         "SharkOptions_UltraCascade_Latent_Beta"  : samplers_extensions.SharkOptions_UltraCascade_Latent_Beta,
     })
 

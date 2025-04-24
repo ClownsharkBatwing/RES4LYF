@@ -1793,4 +1793,3 @@ def get_masked_epsilon_projection(x_0, x_, eps_, y0, y0_inv, s_, row, row_offset
     lgw_mask, lgw_mask_inv = LG.get_masks_for_step(step)
     eps_substep_guide = eps_[row] + lgw_mask * (eps_sum - eps_[row]) + lgw_mask_inv * (eps_sum - eps_[row])
     return eps_substep_guide
-

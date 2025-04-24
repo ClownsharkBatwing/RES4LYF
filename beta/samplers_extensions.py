@@ -634,38 +634,6 @@ class SharkOptions_Beta:
 
         return (options,)
     
-    
-    
-class SharkOptions_UltraCascade_Beta:
-    @classmethod
-    def INPUT_TYPES(cls):
-        return {
-            "required": {
-                #"ultracascade_stage": (["stage_UP", "stage_B"], {"default": "stage_UP"}),
-                "latent_image":       ("LATENT",),
-                },
-            "optional": {
-                "options":            ("OPTIONS",),   
-                }
-            }
-
-    RETURN_TYPES = ("OPTIONS",)
-    RETURN_NAMES = ("options",)
-    FUNCTION     = "main"
-    CATEGORY     = "RES4LYF/sampler_options"
-    
-    def main(self,
-            #ultracascade_stage = "stage_UP",
-            latent_image       = None,
-            options            = None
-            ): 
-        
-        options = options if options is not None else {}
-            
-        #options['ultracascade_stage']        = ultracascade_stage
-        options['ultracascade_latent_image'] = latent_image
-
-        return (options,)
 
 
 
@@ -745,36 +713,6 @@ class ClownOptions_SwapSampler_Beta:
         return (options,)
     
     
-    
-class ClownOptions_StepsToRun_Beta:
-    @classmethod
-    def INPUT_TYPES(cls):
-        return {
-            "required": {
-                "steps_to_run":  ("INT", {"default": -1,  "min": -1, "max": 10000}),
-                },
-            "optional": {
-                "options":            ("OPTIONS", ),   
-                }
-            }
-
-    RETURN_TYPES = ("OPTIONS",)
-    RETURN_NAMES = ("options",)
-    FUNCTION     = "main"
-    CATEGORY     = "RES4LYF/sampler_options"
-    
-    def main(self,
-            steps_to_run = -1,
-            options      = None,
-            ): 
-        
-        options = options if options is not None else {}
-            
-        options['steps_to_run'] = steps_to_run
-
-        return (options,)
-
-
 
     
     

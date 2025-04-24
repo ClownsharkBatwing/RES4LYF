@@ -812,38 +812,6 @@ class SharkChainsampler_Beta(SharkSampler_Beta):
 
 
 
-class SharkUnsampler_Beta(SharkSampler_Beta):  
-    @classmethod
-    def INPUT_TYPES(cls):
-        return {
-            "required": {
-                "steps_to_run": ("INT", {"default": -1,  "min": -1, "max": MAX_STEPS}),
-                },
-            "optional": {
-                "model":        ("MODEL",),
-                "positive":     ("CONDITIONING", ),
-                "sampler":      ("SAMPLER", ),
-                "sigmas":       ("SIGMAS", ),
-                "latent_image": ("LATENT", ),     
-                "options":      ("OPTIONS", ),   
-                }
-            }
-
-    def main(self, 
-            model=None,
-            steps_to_run=-1, 
-            cfg=1.0, 
-            sampler_mode="unsample",
-            latent_image=None,
-             **kwargs):  
-        
-        steps = latent_image['state_info']['sigmas'].shape[-1] - 3
-        
-        return super().main(model=model, steps_to_run=steps_to_run, steps=steps, cfg=cfg, sampler_mode="resample", latent_image=latent_image, **kwargs)
-
-
-
-
 
 class ClownSamplerAdvanced_Beta:
     @classmethod
@@ -888,8 +856,9 @@ class ClownSamplerAdvanced_Beta:
 
     RETURN_TYPES = ("SAMPLER",)
     RETURN_NAMES = ("sampler", ) 
-    FUNCTION = "main"
-    CATEGORY = "RES4LYF/samplers"
+    FUNCTION     = "main"
+    CATEGORY     = "RES4LYF/samplers"
+    EXPERIMENTAL = True
     
     def main(self, 
             noise_type_sde                : str = "gaussian",
@@ -1215,13 +1184,11 @@ class ClownsharKSampler_Beta:
     RETURN_TYPES = ("LATENT", 
                     "LATENT",
                     "OPTIONS",
-                    #"MODEL",
                     )
     
     RETURN_NAMES = ("output", 
                     "denoised",
                     "options",
-                    #"model",
                     ) 
     
     FUNCTION = "main"
@@ -1638,51 +1605,6 @@ class ClownsharkChainsampler_Beta(ClownsharKSampler_Beta):
             sigmas = torch.flip(sigmas, dims=[0])
         
         return super().main(eta=eta, sampler_name=sampler_name, sampler_mode=sampler_mode, sigmas=sigmas, steps_to_run=steps_to_run, steps=steps, cfg=cfg, bongmath=bongmath, seed=seed, latent_image=latent_image, **kwargs)
-
-
-
-
-
-
-
-
-
-class ClownsharkUnsampler_Beta(ClownsharKSampler_Beta):  
-    @classmethod
-    def INPUT_TYPES(cls):
-        return {
-            "required": {
-                "eta":          ("FLOAT",                      {"default": 0.5, "min": -100.0, "max": 100.0,     "step":0.01, "round": False, "tooltip": "Calculated noise amount to be added, then removed, after each step."}),
-                "sampler_name": (get_sampler_name_list     (), {"default": get_default_sampler_name()}), 
-                "steps_to_run": ("INT",                        {"default": -1,  "min": -1,       "max": MAX_STEPS}),
-                #"cfg":          ("FLOAT",                      {"default": 5.5, "min": -10000.0, "max": 10000.0, "step":0.01, "round": False, "tooltip": "Negative values use channelwise CFG." }),
-                "bongmath":     ("BOOLEAN",                    {"default": True}),
-                },
-            "optional": {
-                "model":           ("MODEL",),
-                "positive":        ("CONDITIONING", ),
-                #"negative":        ("CONDITIONING", ),
-                "sampler":         ("SAMPLER", ),
-                "sigmas":          ("SIGMAS", ),
-                "latent_image":    ("LATENT", ),     
-                "options":         ("OPTIONS", ),   
-                }
-            }
-
-    def main(self, 
-            eta = 0.5,
-            sampler_name = "res_2m",
-            steps_to_run=-1, 
-            cfg=1.0, 
-            bongmath=True,
-            seed            : int = -1, 
-            latent_image=None,
-             **kwargs):  
-        
-        steps = latent_image['state_info']['sigmas'].shape[-1] - 3
-        
-        return super().main(eta=eta, sampler_name=sampler_name, steps_to_run=steps_to_run, steps=steps, cfg=cfg, bongmath=bongmath, seed=seed, sampler_mode="unsample", latent_image=latent_image, **kwargs)
-
 
 
 
