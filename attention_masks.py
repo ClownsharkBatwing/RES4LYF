@@ -273,7 +273,9 @@ class FullAttentionMaskHiDream(BaseAttentionMask):
         if self.edge_width > 0:
             edge_mask = torch.zeros_like(self.masks[0])
             for mask in self.masks:
-                edge_mask = fp_or(edge_mask, get_edge_mask(mask, dilation=self.edge_width))
+                edge_mask_new = get_edge_mask(mask, dilation=abs(self.edge_width))
+                edge_mask = fp_or(edge_mask, edge_mask_new)
+                #edge_mask = fp_or(edge_mask, get_edge_mask(mask, dilation=self.edge_width))
                 
             img2txt_mask_sq = torch.nn.functional.interpolate(edge_mask.unsqueeze(0).to(torch.float16), (h, w), mode='nearest-exact').to(dtype).flatten().unsqueeze(1).repeat(1, img_len)
             attn_mask[text_off:, text_len:] = fp_or(attn_mask[text_off:, text_len:], img2txt_mask_sq)

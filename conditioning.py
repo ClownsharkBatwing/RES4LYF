@@ -973,224 +973,6 @@ REG_MASK_TYPE_ABC = [
 
 
 
-class ClownRegionalConditioning:
-    @classmethod
-    def INPUT_TYPES(cls):
-        return {
-            "required": { 
-                "weight":                  ("FLOAT",                                     {"default": 1.0, "min":  -10000.0, "max": 10000.0, "step": 0.01}),
-                "region_bleed":            ("FLOAT",                                     {"default": 0.0, "min":  -10000.0, "max": 10000.0, "step": 0.01}),
-                "region_bleed_start_step": ("INT",                                       {"default": 0,   "min":  0,        "max": 10000}),
-                "weight_scheduler":        (["constant"] + get_res4lyf_scheduler_list(), {"default": "constant"},),
-                "start_step":              ("INT",                                       {"default": 0,   "min":  0,        "max": 10000}),
-                "end_step":                ("INT",                                       {"default": -1,  "min": -1,        "max": 10000}),
-                "mask_type":               (REG_MASK_TYPE_2,                             {"default": "boolean"}),
-                "edge_width":              ("INT",                                       {"default": 0,  "min": -10000,          "max": 10000}),
-                "invert_mask":             ("BOOLEAN",                                   {"default": False}),
-            }, 
-            "optional": {
-                "positive_masked":         ("CONDITIONING", ),
-                "positive_unmasked":       ("CONDITIONING", ),
-                "mask":                    ("MASK", ),
-                "weights":                 ("SIGMAS", ),
-                "region_bleeds":           ("SIGMAS", ),
-            }
-        }
-
-    RETURN_TYPES = ("CONDITIONING",)
-    RETURN_NAMES = ("positive",)
-    FUNCTION     = "main"
-    CATEGORY     = "RES4LYF/conditioning"
-
-    def create_callback(self, **kwargs):
-        def callback(model):
-            kwargs["model"] = model  
-            pos_cond, = self.prepare_regional_cond(**kwargs)
-            return pos_cond
-        return callback
-
-    def main(self,
-            weight                   : float  = 1.0,
-            start_sigma              : float  = 0.0,
-            end_sigma                : float  = 1.0,
-            weight_scheduler                  = None,
-            start_step               : int    = 0,
-            end_step                 : int    = -1,
-            positive_masked                   = None,
-            positive_unmasked                 = None,
-            weights                  : Tensor = None,
-            region_bleeds            : Tensor = None,
-            region_bleed             : float  = 0.0,
-            region_bleed_start_step  : int    = 0,
-            mask_type                : str    = "boolean",
-            edge_width               : int    = 0,
-            mask                              = None,
-            invert_mask              : bool   = False
-            ) -> Tuple[Tensor]:
-        
-        if end_step == -1:
-            end_step = MAX_STEPS
-        
-        
-        callback = self.create_callback(weight                   = weight,
-                                        start_sigma              = start_sigma,
-                                        end_sigma                = end_sigma,
-                                        weight_scheduler         = weight_scheduler,
-                                        start_step               = start_step,
-                                        end_step                 = end_step,
-                                        weights                  = weights,
-                                        region_bleeds            = region_bleeds,
-                                        region_bleed             = region_bleed,
-                                        region_bleed_start_step  = region_bleed_start_step,
-                                        mask_type                = mask_type,
-                                        edge_width               = edge_width,
-                                        mask                     = mask,
-                                        invert_mask              = invert_mask,
-                                        positive_masked          = positive_masked,
-                                        positive_unmasked        = positive_unmasked,
-                                        )
-
-        positive = zero_conditioning_from_list([positive_masked, positive_unmasked])
-        
-        positive[0][1]['callback_regional'] = callback
-        
-        return (positive,)
-
-
-
-    def prepare_regional_cond(self,
-                                model,
-                                weight                   : float  = 1.0,
-                                start_sigma              : float  = 0.0,
-                                end_sigma                : float  = 1.0,
-                                weight_scheduler                  = None,
-                                start_step               : int    = 0,
-                                end_step                 : int    = -1,
-                                positive_masked                   = None,
-                                positive_unmasked                 = None,
-                                weights                  : Tensor = None,
-                                region_bleeds            : Tensor = None,
-                                region_bleed             : float  = 0.0,
-                                region_bleed_start_step  : int    = 0,
-                                mask_type                : str    = "gradient",
-                                edge_width               : int    = 0,
-                                mask                              = None,
-                                invert_mask              : bool   = False,
-                                ) -> Tuple[Tensor]:
-
-        default_dtype  = torch.float64
-        default_device = torch.device("cuda") 
-        
-        if end_step == -1:
-            end_step = MAX_STEPS
-        
-        if weights is None and weight_scheduler != "constant":
-            total_steps = end_step - start_step
-            weights     = get_sigmas(model, weight_scheduler, total_steps, 1.0).to(dtype=default_dtype, device=default_device) #/ model.inner_model.inner_model.model_sampling.sigma_max  #scaling doesn't matter as this is a flux-only node
-            prepend     = torch.zeros(start_step,                                  dtype=default_dtype, device=default_device)
-            weights     = torch.cat((prepend, weights), dim=0)
-        
-        if invert_mask and mask is not None:
-            mask = 1-mask
-
-        floor, floors = region_bleed, region_bleeds
-        
-        weights = initialize_or_scale(weights, weight, end_step).to(default_dtype).to(default_device)
-        weights = F.pad(weights, (0, MAX_STEPS), value=0.0)
-        
-        prepend = torch.full((region_bleed_start_step,),  0.0, dtype=default_dtype, device=default_device)
-        floors  = initialize_or_scale(floors,  floor,  end_step).to(default_dtype).to(default_device)
-        floors  = F.pad(floors,  (0, MAX_STEPS), value=0.0)
-        floors  = torch.cat((prepend, floors), dim=0)
-
-        if (positive_masked is None) and (positive_unmasked is None):
-            positive = None
-
-        elif mask is not None:
-            EmptyCondGen = EmptyConditioningGenerator(model)
-            positive_masked, positive_unmasked = EmptyCondGen.zero_none_conditionings_([positive_masked, positive_unmasked])
-            
-            positive_masked_tokens   = positive_masked[0][0]  .shape[1]
-            positive_unmasked_tokens = positive_unmasked[0][0].shape[1]
-            
-            positive_min_tokens = min(positive_masked_tokens, positive_unmasked_tokens)
-            
-            positive = copy.deepcopy(positive_masked)
-            positive[0][0] = (positive_masked[0][0][:,:positive_min_tokens,:] + positive_unmasked[0][0][:,:positive_min_tokens,:]) / 2
-            
-            if isinstance(model.model.model_config, comfy.supported_models.WAN21_T2V) or isinstance(model.model.model_config, comfy.supported_models.WAN21_I2V):
-                if model.model.diffusion_model.blocks[0].self_attn.winderz_type != "false":
-                    AttnMask = CrossAttentionMask(mask_type, edge_width)
-                else:
-                    AttnMask = SplitAttentionMask(mask_type, edge_width)
-            elif isinstance(model.model.model_config, comfy.supported_models.HiDream):
-                AttnMask = FullAttentionMaskHiDream(mask_type, edge_width)
-            else:
-                AttnMask = FullAttentionMask(mask_type, edge_width)
-                
-            RegContext = RegionalContext()
-                
-            if isinstance(model.model.model_config, comfy.supported_models.HiDream):
-
-                AttnMask.add_region_sizes(
-                    [
-                        positive_masked  [0][0].shape[-2],
-                        positive_masked  [0][1]['conditioning_llama3'][0,0,...].shape[-2],
-                        positive_masked  [0][1]['conditioning_llama3'][0,0,...].shape[-2],
-                    ],
-                    mask)
-                AttnMask.add_region_sizes(
-                    [
-                        positive_unmasked[0][0].shape[-2],
-                        positive_unmasked[0][1]['conditioning_llama3'][0,0,...].shape[-2],
-                        positive_unmasked[0][1]['conditioning_llama3'][0,0,...].shape[-2],
-                    ],
-                    1-mask)
-
-                RegContext.add_region_llama3(positive_masked  [0][1]['conditioning_llama3'])
-                RegContext.add_region_llama3(positive_unmasked[0][1]['conditioning_llama3'])
-            else:
-                AttnMask.add_region(positive_masked  [0][0],   mask)
-                AttnMask.add_region(positive_unmasked[0][0], 1-mask)
-                
-            RegContext.add_region(positive_masked  [0][0])
-            RegContext.add_region(positive_unmasked[0][0])
-            
-            positive[0][1]['AttnMask']   = AttnMask
-            positive[0][1]['RegContext'] = RegContext
-                
-            if   positive_masked_tokens < positive_unmasked_tokens:
-                positive[0][0] = torch.cat((positive[0][0], positive_unmasked[0][0][:,positive_min_tokens:,:]), dim=1)
-            elif positive_masked_tokens > positive_unmasked_tokens:
-                positive[0][0] = torch.cat((positive[0][0], positive_masked  [0][0][:,positive_min_tokens:,:]), dim=1)
-                
-            if 'pooled_output' in positive[0][1] and positive_masked[0][1]['pooled_output'] is not None:
-                positive_masked_pooled_tokens   = positive_masked[0][1]['pooled_output'].shape[1]
-                positive_unmasked_pooled_tokens = positive_unmasked[0][1]['pooled_output'].shape[1]
-                
-                positive_min_pooled_tokens = min(positive_masked_pooled_tokens, positive_unmasked_pooled_tokens)
-                
-                positive[0][1]['pooled_output'] = (positive_masked[0][1]['pooled_output'][:,:positive_min_pooled_tokens] + positive_unmasked[0][1]['pooled_output'][:,:positive_min_pooled_tokens]) / 2
-                
-                if   positive_masked_pooled_tokens < positive_unmasked_pooled_tokens:
-                    positive[0][1]['pooled_output'] = torch.cat((positive[0][1]['pooled_output'], positive_unmasked[0][1]['pooled_output'][:,positive_min_pooled_tokens:]), dim=1)
-                elif positive_masked_pooled_tokens > positive_unmasked_pooled_tokens:
-                    positive[0][1]['pooled_output'] = torch.cat((positive[0][1]['pooled_output'], positive_masked  [0][1]['pooled_output'][:,positive_min_pooled_tokens:]), dim=1)
-        
-        else:
-            positive = positive_masked
-            
-        
-        positive[0][1]['RegParam'] = RegionalParameters(weights, floors)
-        
-        return (positive,)
-
-
-
-
-
-
-
 
 class ClownRegionalConditioning_AB:
     @classmethod
@@ -1413,297 +1195,9 @@ class ClownRegionalConditioning_AB:
         else:
             positive = positive_masked
             
-        
         positive[0][1]['RegParam'] = RegionalParameters(weights, floors)
         
         return (positive,)
-
-
-
-class ClownRegionalConditioning3:
-    @classmethod
-    def INPUT_TYPES(cls):
-        return {
-            "required": { 
-                "weight":                  ("FLOAT",                                     {"default": 1.0,  "min": -10000.0, "max": 10000.0, "step": 0.01}),
-                "region_bleed":            ("FLOAT",                                     {"default": 0.0,  "min": -10000.0, "max": 10000.0, "step": 0.01}),
-                "region_bleed_start_step": ("INT",                                       {"default": 0,   "min":  0,        "max": 10000}),
-                "weight_scheduler":        (["constant"] + get_res4lyf_scheduler_list(), {"default": "constant"},),
-                "start_step":              ("INT",                                       {"default": 0,    "min":  0,        "max": 10000}),
-                "end_step":                ("INT",                                       {"default": 100,  "min": -1,        "max": 10000}),
-                "mask_type":               (REG_MASK_TYPE_3,                             {"default": "boolean"}),
-                "edge_width":              ("INT",                                       {"default": 0,  "min": 0,          "max": 10000}),
-                "invert_mask":             ("BOOLEAN",                                   {"default": False}),
-            }, 
-            "optional": {
-                "positive_A":              ("CONDITIONING", ),
-                "positive_B":              ("CONDITIONING", ),
-                "positive_unmasked":       ("CONDITIONING", ),
-                "mask_A":                  ("MASK", ),
-                "mask_B":                  ("MASK", ),
-                "weights":                 ("SIGMAS", ),
-                "region_bleeds":           ("SIGMAS", ),
-            }
-        }
-
-    RETURN_TYPES = ("CONDITIONING",)
-    RETURN_NAMES = ("positive",)
-    FUNCTION     = "main"
-    CATEGORY     = "RES4LYF/conditioning"
-
-    def create_callback(self, **kwargs):
-        def callback(model):
-            kwargs["model"] = model  
-            pos_cond, = self.prepare_regional_cond(**kwargs)
-            return pos_cond
-        return callback
-
-    def main(self,
-            weight                   : float  = 1.0,
-            start_sigma              : float  = 0.0,
-            end_sigma                : float  = 1.0,
-            weight_scheduler                  = None,
-            start_step               : int    = 0,
-            end_step                 : int    = -1,
-            positive_A                   = None,
-            positive_B                        = None,
-            positive_unmasked                 = None,
-            weights                  : Tensor = None,
-            region_bleeds            : Tensor = None,
-            region_bleed             : float  = 0.0,
-            region_bleed_start_step  : int    = 0,
-
-            mask_type                : str    = "boolean",
-            edge_width               : int    = 0,
-            mask_A                              = None,
-            mask_B                              = None,
-            invert_mask              : bool   = False
-            ) -> Tuple[Tensor]:
-        
-        if end_step == -1:
-            end_step = MAX_STEPS
-        
-        callback = self.create_callback(weight                   = weight,
-                                        start_sigma              = start_sigma,
-                                        end_sigma                = end_sigma,
-                                        weight_scheduler         = weight_scheduler,
-                                        start_step               = start_step,
-                                        end_step                 = end_step,
-                                        weights                  = weights,
-                                        region_bleeds            = region_bleeds,
-                                        region_bleed             = region_bleed,
-                                        region_bleed_start_step  = region_bleed_start_step,
-                                        mask_type                = mask_type,
-                                        edge_width               = edge_width,
-                                        mask_A                   = mask_A,
-                                        mask_B                   = mask_B,
-                                        invert_mask              = invert_mask,
-                                        positive_A               = positive_A,
-                                        positive_B               = positive_B,
-                                        positive_unmasked        = positive_unmasked,
-                                        )
-
-        positive = zero_conditioning_from_list([positive_A, positive_B, positive_unmasked])
-        
-        positive[0][1]['callback_regional'] = callback
-        
-        return (positive,)
-
-
-
-    def prepare_regional_cond(self,
-                                model,
-                                weight                   : float  = 1.0,
-                                start_sigma              : float  = 0.0,
-                                end_sigma                : float  = 1.0,
-                                weight_scheduler                  = None,
-                                start_step               : int    =  0,
-                                end_step                 : int    = -1,
-                                positive_A                        = None,
-                                positive_B                        = None,
-
-                                positive_unmasked                 = None,
-                                weights                  : Tensor = None,
-                                region_bleeds            : Tensor = None,
-                                region_bleed             : float  = 0.0,
-                                region_bleed_start_step  : int    = 0,
-
-                                mask_type                : str    = "boolean",
-                                edge_width               : int    = 0,
-                                mask_A                            = None,
-                                mask_B                            = None,
-                                invert_mask              : bool   = False,
-                                ) -> Tuple[Tensor]:
-
-        default_dtype  = torch.float64
-        default_device = torch.device("cuda") 
-        
-        if end_step == -1:
-            end_step = MAX_STEPS
-        
-        if weights is None and weight_scheduler != "constant":
-            total_steps = end_step - start_step
-            weights     = get_sigmas(model, weight_scheduler, total_steps, 1.0).to(dtype=default_dtype, device=default_device) #/ model.inner_model.inner_model.model_sampling.sigma_max  #scaling doesn't matter as this is a flux-only node
-            prepend     = torch.zeros(start_step,                                  dtype=default_dtype, device=default_device)
-            weights     = torch.cat((prepend, weights), dim=0)
-        
-        if invert_mask and mask_A is not None:
-            mask_A = 1-mask_A
-            
-        if invert_mask and mask_B is not None:
-            mask_B = 1-mask_B
-        
-        mask_AB_inv = torch.ones_like(mask_A) - mask_A - mask_B
-        mask_AB_inv[mask_AB_inv < 0] = 0
-
-        floor, floors = region_bleed, region_bleeds
-        
-        weights = initialize_or_scale(weights, weight, end_step).to(default_dtype)
-        weights = F.pad(weights, (0, MAX_STEPS), value=0.0)
-        
-        prepend = torch.full((region_bleed_start_step,),  0.0, dtype=default_dtype, device=default_device)
-        floors  = initialize_or_scale(floors,  floor,  end_step).to(default_dtype).to(default_device)
-        floors  = F.pad(floors,  (0, MAX_STEPS), value=0.0)
-        floors  = torch.cat((prepend, floors), dim=0)
-
-        if (positive_A is None) and (positive_B is None) and (positive_unmasked is None):
-            positive = None
-
-        elif mask_A is not None:
-            
-            EmptyCondGen = EmptyConditioningGenerator(model)
-            positive_A, positive_B, positive_unmasked = EmptyCondGen.zero_none_conditionings_([positive_A, positive_B, positive_unmasked])
-
-            positive_A_tokens        = positive_A[0][0].shape[1]
-            positive_B_tokens        = positive_B[0][0].shape[1]
-            positive_unmasked_tokens = positive_unmasked[0][0].shape[1]
-            
-            values = sorted([positive_A_tokens, positive_B_tokens, positive_unmasked_tokens])
-
-            positive_min_tokens  = values[0]
-            positive_mid_tokens  = values[1]
-            positive_max_tokens  = values[2]
-            
-            positive = copy.deepcopy(positive_A)
-            positive[0][0] = (positive_A[0][0][:,:positive_min_tokens,:] + positive_B[0][0][:,:positive_min_tokens,:] + positive_unmasked[0][0][:,:positive_min_tokens,:]) / 3
-            
-            if isinstance(model.model.model_config, comfy.supported_models.WAN21_T2V) or isinstance(model.model.model_config, comfy.supported_models.WAN21_I2V):
-                if model.model.diffusion_model.blocks[0].self_attn.winderz_type != "false":
-                    AttnMask = CrossAttentionMask(mask_type, edge_width)
-                else:
-                    AttnMask = SplitAttentionMask(mask_type, edge_width)
-            elif isinstance(model.model.model_config, comfy.supported_models.HiDream):
-                AttnMask = FullAttentionMaskHiDream(mask_type, edge_width)
-            else:
-                AttnMask = FullAttentionMask(mask_type, edge_width)
-
-            RegContext = RegionalContext()
-            
-            if isinstance(model.model.model_config, comfy.supported_models.HiDream):
-                AttnMask.add_region_sizes(
-                    [
-                        positive_A  [0][0].shape[-2],
-                        positive_A  [0][1]['conditioning_llama3'][0,0,...].shape[-2],
-                        positive_A  [0][1]['conditioning_llama3'][0,0,...].shape[-2],
-                    ],
-                    mask_A)
-                AttnMask.add_region_sizes(
-                    [
-                        positive_B[0][0].shape[-2],
-                        positive_B[0][1]['conditioning_llama3'][0,0,...].shape[-2],
-                        positive_B[0][1]['conditioning_llama3'][0,0,...].shape[-2],
-                    ],
-                    mask_B)
-                AttnMask.add_region_sizes(
-                    [
-                        positive_unmasked[0][0].shape[-2],
-                        positive_unmasked[0][1]['conditioning_llama3'][0,0,...].shape[-2],
-                        positive_unmasked[0][1]['conditioning_llama3'][0,0,...].shape[-2],
-                    ],
-                    mask_AB_inv)
-
-                RegContext.add_region_llama3(positive_A       [0][1]['conditioning_llama3'])
-                RegContext.add_region_llama3(positive_B       [0][1]['conditioning_llama3'])
-                RegContext.add_region_llama3(positive_unmasked[0][1]['conditioning_llama3'])
-            else:
-                AttnMask.add_region(positive_A       [0][0], mask_A)
-                AttnMask.add_region(positive_B       [0][0], mask_B)
-                AttnMask.add_region(positive_unmasked[0][0], mask_AB_inv)
-            
-            RegContext.add_region(positive_A       [0][0])
-            RegContext.add_region(positive_B       [0][0])
-            RegContext.add_region(positive_unmasked[0][0])
-
-            positive[0][1]['AttnMask']   = AttnMask
-            positive[0][1]['RegContext'] = RegContext
-            
-            
-            if   positive_A_tokens        != positive_min_tokens and positive_A_tokens != positive_max_tokens:
-                positive[0][0] = torch.cat((positive[0][0], positive_A       [0][0][:,positive_min_tokens:,:]), dim=1)
-                
-            elif positive_B_tokens        != positive_min_tokens and positive_B_tokens != positive_max_tokens:
-                positive[0][0] = torch.cat((positive[0][0], positive_B       [0][0][:,positive_min_tokens:,:]), dim=1)
-                
-            elif positive_unmasked_tokens != positive_min_tokens and positive_unmasked_tokens != positive_max_tokens:
-                positive[0][0] = torch.cat((positive[0][0], positive_unmasked[0][0][:,positive_min_tokens:,:]), dim=1)
-                
-                
-                
-            if   positive_A_tokens        == positive_mid_tokens and positive_mid_tokens != positive_max_tokens:
-                positive[0][0] = torch.cat((positive[0][0], positive_A       [0][0][:,positive_mid_tokens:,:]), dim=1)
-                
-            elif positive_B_tokens        == positive_mid_tokens and positive_mid_tokens != positive_max_tokens:
-                positive[0][0] = torch.cat((positive[0][0], positive_B       [0][0][:,positive_mid_tokens:,:]), dim=1)
-                
-            elif positive_unmasked_tokens == positive_mid_tokens and positive_mid_tokens != positive_max_tokens:
-                positive[0][0] = torch.cat((positive[0][0], positive_unmasked[0][0][:,positive_mid_tokens:,:]), dim=1)
-            
-            
-            
-            if 'pooled_output' in positive[0][1] and positive_A[0][1]['pooled_output'] is not None:
-                positive_A_pooled_tokens = positive_A[0][1]['pooled_output'].shape[1]
-                positive_B_pooled_tokens = positive_B[0][1]['pooled_output'].shape[1]
-                positive_unmasked_pooled_tokens = positive_unmasked[0][1]['pooled_output'].shape[1]
-                
-                values = sorted([positive_A_pooled_tokens, positive_B_pooled_tokens, positive_unmasked_pooled_tokens])
-
-                positive_min_pooled_tokens  = values[0]
-                positive_mid_pooled_tokens  = values[1]
-                positive_max_pooled_tokens  = values[2]
-                
-                positive[0][1]['pooled_output'] = (positive_A[0][1]['pooled_output'][:,:positive_min_pooled_tokens] + positive_B[0][1]['pooled_output'][:,:positive_min_pooled_tokens] + positive_unmasked[0][1]['pooled_output'][:,:positive_min_pooled_tokens]) / 3
-                
-                if   positive_A_pooled_tokens        != positive_min_pooled_tokens and positive_A_pooled_tokens != positive_max_pooled_tokens:
-                    positive[0][1]['pooled_output'] = torch.cat((positive[0][1]['pooled_output'], positive_A       [0][1]['pooled_output'][:,positive_min_pooled_tokens:,:]), dim=1)
-                    
-                elif positive_B_pooled_tokens        != positive_min_pooled_tokens and positive_B_pooled_tokens != positive_max_pooled_tokens:
-                    positive[0][1]['pooled_output'] = torch.cat((positive[0][1]['pooled_output'], positive_B       [0][1]['pooled_output'][:,positive_min_pooled_tokens:,:]), dim=1)
-                    
-                elif positive_unmasked_pooled_tokens != positive_min_pooled_tokens and positive_unmasked_pooled_tokens != positive_max_pooled_tokens:
-                    positive[0][1]['pooled_output'] = torch.cat((positive[0][1]['pooled_output'], positive_unmasked[0][1]['pooled_output'][:,positive_min_pooled_tokens:,:]), dim=1)
-                    
-                    
-                    
-                if   positive_A_pooled_tokens        == positive_mid_pooled_tokens and positive_mid_pooled_tokens != positive_max_pooled_tokens:
-                    positive[0][1]['pooled_output'] = torch.cat((positive[0][1]['pooled_output'], positive_A       [0][1]['pooled_output'][:,positive_mid_pooled_tokens:,:]), dim=1)
-                    
-                elif positive_B_pooled_tokens        == positive_mid_pooled_tokens and positive_mid_pooled_tokens != positive_max_pooled_tokens:
-                    positive[0][1]['pooled_output'] = torch.cat((positive[0][1]['pooled_output'], positive_B       [0][1]['pooled_output'][:,positive_mid_pooled_tokens:,:]), dim=1)
-                    
-                elif positive_unmasked_pooled_tokens == positive_mid_pooled_tokens and positive_mid_pooled_tokens != positive_max_pooled_tokens:
-                    positive[0][1]['pooled_output'] = torch.cat((positive[0][1]['pooled_output'], positive_unmasked[0][1]['pooled_output'][:,positive_mid_pooled_tokens:,:]), dim=1)
-                
-        else:
-            positive = positive_A
-        
-        
-
-        positive[0][1]['RegParam'] = RegionalParameters(weights, floors)
-        
-        return (positive,)
-
-
-
 
 
 
@@ -1849,7 +1343,7 @@ class ClownRegionalConditioning_ABC:
         mask_AB_inv = mask_C
         if invert_mask and mask_AB_inv is not None:
             mask_AB_inv = 1-mask_AB_inv
-            
+        
         positive_unmasked = positive_C
 
         floor, floors = region_bleed, region_bleeds
@@ -1991,14 +1485,86 @@ class ClownRegionalConditioning_ABC:
                 
         else:
             positive = positive_A
-        
-
-        
 
         positive[0][1]['RegParam'] = RegionalParameters(weights, floors)
         
         return (positive,)
 
+
+
+class ClownRegionalConditioning(ClownRegionalConditioning_AB):
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": { 
+                "weight":                  ("FLOAT",                                     {"default": 1.0, "min":  -10000.0, "max": 10000.0, "step": 0.01}),
+                "region_bleed":            ("FLOAT",                                     {"default": 0.0, "min":  -10000.0, "max": 10000.0, "step": 0.01}),
+                "region_bleed_start_step": ("INT",                                       {"default": 0,   "min":  0,        "max": 10000}),
+                "weight_scheduler":        (["constant"] + get_res4lyf_scheduler_list(), {"default": "constant"},),
+                "start_step":              ("INT",                                       {"default": 0,   "min":  0,        "max": 10000}),
+                "end_step":                ("INT",                                       {"default": -1,  "min": -1,        "max": 10000}),
+                "mask_type":               (REG_MASK_TYPE_2,                             {"default": "boolean"}),
+                "edge_width":              ("INT",                                       {"default": 0,  "min": -10000,          "max": 10000}),
+                "invert_mask":             ("BOOLEAN",                                   {"default": False}),
+            }, 
+            "optional": {
+                "positive_masked":         ("CONDITIONING", ),
+                "positive_unmasked":       ("CONDITIONING", ),
+                "mask":                    ("MASK", ),
+                "weights":                 ("SIGMAS", ),
+                "region_bleeds":           ("SIGMAS", ),
+            }
+        }
+
+    def main(self, positive_masked, positive_unmasked, mask, **kwargs):
+        return super().main(
+            positive_A = positive_masked,
+            positive_B = positive_unmasked,
+            mask_A     =   mask,
+            mask_B     = 1-mask,
+            **kwargs
+        )    
+
+
+
+class ClownRegionalConditioning3(ClownRegionalConditioning_ABC):
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": { 
+                "weight":                  ("FLOAT",                                     {"default": 1.0,  "min": -10000.0, "max": 10000.0, "step": 0.01}),
+                "region_bleed":            ("FLOAT",                                     {"default": 0.0,  "min": -10000.0, "max": 10000.0, "step": 0.01}),
+                "region_bleed_start_step": ("INT",                                       {"default": 0,   "min":  0,        "max": 10000}),
+                "weight_scheduler":        (["constant"] + get_res4lyf_scheduler_list(), {"default": "constant"},),
+                "start_step":              ("INT",                                       {"default": 0,    "min":  0,        "max": 10000}),
+                "end_step":                ("INT",                                       {"default": 100,  "min": -1,        "max": 10000}),
+                "mask_type":               (REG_MASK_TYPE_3,                             {"default": "boolean"}),
+                "edge_width":              ("INT",                                       {"default": 0,  "min": 0,          "max": 10000}),
+                "invert_mask":             ("BOOLEAN",                                   {"default": False}),
+            }, 
+            "optional": {
+                "positive_A":              ("CONDITIONING", ),
+                "positive_B":              ("CONDITIONING", ),
+                "positive_unmasked":       ("CONDITIONING", ),
+                "mask_A":                  ("MASK", ),
+                "mask_B":                  ("MASK", ),
+                "weights":                 ("SIGMAS", ),
+                "region_bleeds":           ("SIGMAS", ),
+            }
+        }
+
+    def main(self, positive_unmasked, mask_A, mask_B, **kwargs):
+        
+        mask_AB_inv = torch.ones_like(mask_A) - mask_A - mask_B
+        mask_AB_inv[mask_AB_inv < 0] = 0
+        
+        return super().main(
+            positive_C = positive_unmasked,
+            mask_A     = mask_A,
+            mask_B     = mask_B,
+            mask_C     = mask_AB_inv,
+            **kwargs
+        )    
 
 
 

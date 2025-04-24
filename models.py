@@ -428,7 +428,7 @@ class ReHiDreamPatcherAdvanced:
                     block.block.__class__       = HDBlockSingleNoMask
                     block.block.attn1.__class__ = HDAttention
                 block.idx       = i
-                
+
         elif not enable and model.model.diffusion_model.__class__ == HDModel:
             m = model.clone()
             m.model.diffusion_model.__class__ = HiDreamImageTransformer2DModel
@@ -439,7 +439,7 @@ class ReHiDreamPatcherAdvanced:
                     block.block.__class__       = HiDreamImageTransformerBlock
                     block.block.attn1.__class__ = HiDreamAttention
                 block.idx       = i
-
+            
             for i, block in enumerate(m.model.diffusion_model.single_stream_blocks):
                 if i in single_stream_blocks:
                     block.__class__             = HiDreamImageBlock
