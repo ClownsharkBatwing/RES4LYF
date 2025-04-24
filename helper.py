@@ -40,6 +40,7 @@ class ExtraOptions():
             
             if match:
                 value = match.group(1)
+                Resplain("Set extra_option: (option, value)", option, value)
             else:
                 value = default
                 
@@ -58,6 +59,7 @@ class ExtraOptions():
             match = re.search(pattern, self.extra_options, flags=re.MULTILINE)
             if match:
                 value = ret_type(match.group(1))
+                Resplain("Set extra_option: (option, value)", option, value)
             else:
                 value = default
         
