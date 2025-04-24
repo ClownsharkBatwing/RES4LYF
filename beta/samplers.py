@@ -428,6 +428,18 @@ class SharkSampler:
                     sampler.extra_options['AttnMask'].set_latent(latent_image['samples'])
                     sampler.extra_options['AttnMask'].generate()
                     
+            if neg_cond[0][1] is not None: 
+                if 'callback_regional' in neg_cond[0][1]:
+                    neg_cond = neg_cond[0][1]['callback_regional'](work_model)
+                
+                if 'AttnMask' in neg_cond[0][1]:
+                    sampler.extra_options['AttnMask_neg']   = neg_cond[0][1]['AttnMask']
+                    sampler.extra_options['RegContext_neg'] = neg_cond[0][1]['RegContext']
+                    sampler.extra_options['RegParam_neg']   = neg_cond[0][1]['RegParam']
+                    
+                    sampler.extra_options['AttnMask_neg'].set_latent(latent_image['samples'])
+                    sampler.extra_options['AttnMask_neg'].generate()
+                    
                     
             
             

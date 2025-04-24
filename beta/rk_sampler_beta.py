@@ -222,6 +222,10 @@ def sample_rk_beta(
         AttnMask   = None,
         RegContext = None,
         RegParam   = None,
+        
+        AttnMask_neg   = None,
+        RegContext_neg = None,
+        RegParam_neg   = None,
         ):
     
     if sampler_mode == "NULL":
@@ -411,10 +415,17 @@ def sample_rk_beta(
         RK.update_transformer_options({'AttnMask'  : AttnMask})
         RK.update_transformer_options({'RegContext': RegContext})
 
+    if AttnMask_neg is not None:
+        RK.update_transformer_options({'AttnMask_neg'  : AttnMask_neg})
+        RK.update_transformer_options({'RegContext_neg': RegContext_neg})
+
     while step < num_steps:
         sigma, sigma_next = sigmas[step], sigmas[step+1]
 
-        
+        if AttnMask_neg is not None:
+            RK.update_transformer_options({'regional_conditioning_weight_neg': RegParam_neg.weights[step]})
+            RK.update_transformer_options({'regional_conditioning_floor_neg':  RegParam_neg.floors[step]})
+
         if AttnMask is not None:
             RK.update_transformer_options({'regional_conditioning_weight': RegParam.weights[step]})
             RK.update_transformer_options({'regional_conditioning_floor':  RegParam.floors[step]})
