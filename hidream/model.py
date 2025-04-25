@@ -579,13 +579,13 @@ class HDModel(nn.Module):
                     context = transformer_options['RegContext_neg'].context.to(context.dtype).to(context.device)
                     llama3  = transformer_options['RegContext_neg'].llama3 .to(llama3 .dtype).to(llama3 .device)
 
-            elif UNCOND:
+            elif UNCOND and 'AttnMask' in transformer_options:
                     A       = context
-                    B       = transformer_options['RegContext_neg'].context
+                    B       = transformer_options['RegContext'].context
                     context = A.repeat(1,    (B.shape[1] // A.shape[1]) + 1, 1)[:,   :B.shape[1], :]
                     
                     A       = llama3
-                    B       = transformer_options['RegContext_neg'].llama3
+                    B       = transformer_options['RegContext'].llama3
                     llama3  = A.repeat(1, 1, (B.shape[2] // A.shape[2]) + 1, 1)[:,:, :B.shape[2], :]
 
 
