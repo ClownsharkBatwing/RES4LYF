@@ -580,13 +580,14 @@ class HDModel(nn.Module):
                     llama3  = transformer_options['RegContext_neg'].llama3 .to(llama3 .dtype).to(llama3 .device)
 
             elif UNCOND and 'AttnMask' in transformer_options:
-                    A       = context
-                    B       = transformer_options['RegContext'].context
-                    context = A.repeat(1,    (B.shape[1] // A.shape[1]) + 1, 1)[:,   :B.shape[1], :]
-                    
-                    A       = llama3
-                    B       = transformer_options['RegContext'].llama3
-                    llama3  = A.repeat(1, 1, (B.shape[2] // A.shape[2]) + 1, 1)[:,:, :B.shape[2], :]
+                mask = transformer_options['AttnMask'].attn_mask.mask.to('cuda')
+                A       = context
+                B       = transformer_options['RegContext'].context
+                context = A.repeat(1,    (B.shape[1] // A.shape[1]) + 1, 1)[:,   :B.shape[1], :]
+                
+                A       = llama3
+                B       = transformer_options['RegContext'].llama3
+                llama3  = A.repeat(1, 1, (B.shape[2] // A.shape[2]) + 1, 1)[:,:, :B.shape[2], :]
 
 
             if self.manual_mask is not None:
