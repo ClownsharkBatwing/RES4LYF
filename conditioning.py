@@ -4,6 +4,7 @@ import math
 
 from torch  import Tensor
 from typing import Optional, Callable, Tuple, Dict, Any, Union, TYPE_CHECKING, TypeVar, List
+
 from dataclasses import dataclass, field
 
 import copy
@@ -17,7 +18,7 @@ import gc
 
 from .sigmas  import get_sigmas
 
-from .helper  import initialize_or_scale, precision_tool, get_res4lyf_scheduler_list
+from .helper  import initialize_or_scale, precision_tool, get_res4lyf_scheduler_list, pad_tensor_list_to_max_len
 from .latents import get_orthogonal, get_collinear
 from .res4lyf import RESplain
 from .beta.constants import MAX_STEPS
@@ -182,6 +183,7 @@ class ConditioningTruncate:
     FUNCTION     = "zero_out"
     CATEGORY     = "RES4LYF/conditioning"
     DESCRIPTION  = "Use for positive conditioning with SD3.5. Tokens beyond 77 result in degradation of image quality."
+    EXPERIMENTAL = True
 
     def zero_out(self, conditioning):
         c = []
@@ -408,6 +410,7 @@ class Conditioning_Recast64:
     RETURN_NAMES = ("cond_0_recast","cond_1_recast",)
     FUNCTION     = "main"
     CATEGORY     = "RES4LYF/precision"
+    EXPERIMENTAL = True
 
     @precision_tool.cast_tensor
     def main(self, cond_0, cond_1 = None):
@@ -485,40 +488,6 @@ class Base64ToConditioning:
         return (conditioning,)
 
 
-def best_hw(n): # get factor pair closesst to a true square
-    best = (1, n)
-    min_diff = n
-    for i in range(1, int(n**0.5) + 1):
-        if n % i == 0:
-            j = n // i
-            if abs(i - j) < min_diff:
-                best = (i, j)
-                min_diff = abs(i - j)
-    return best
-
-def downsample_tokens(cond: torch.Tensor, target_tokens: int, mode="bicubic") -> torch.Tensor:
-    B, T, D = cond.shape
-
-    def next_square(n: int):
-        root = math.ceil(n**0.5)
-        return root * root
-
-    padded_len = next_square(T)
-    pad_amount = padded_len - T
-    if pad_amount > 0:
-        pad_tensor = torch.zeros(B, pad_amount, D, dtype=cond.dtype, device=cond.device)
-        cond = torch.cat([cond, pad_tensor], dim=1)
-
-    side_len = int(math.sqrt(padded_len))
-    cond_reshaped = cond.view(B, side_len, side_len, D).permute(0, 3, 1, 2)  # [B, D, H, W]
-
-    H_target, W_target = best_hw(target_tokens)
-    cond_interp = F.interpolate(cond_reshaped, size=(H_target, W_target), mode=mode)
-
-    cond_final = cond_interp.permute(0, 2, 3, 1).reshape(B, -1, D)
-    cond_final = cond_final[:, :target_tokens, :]
-
-    return cond_final
 
 
 class ConditioningDownsampleT5:
@@ -706,7 +675,7 @@ class EmptyConditioningGenerator:
             conds[i] = self.get_empty_conditioning() if cond is None else cond
         return conds
 
-def zero_conditioning_from_list(conds):
+"""def zero_conditioning_from_list(conds):
     for cond in conds:
         if cond is not None:
             for i in range(len(cond)):
@@ -718,8 +687,27 @@ def zero_conditioning_from_list(conds):
                     {"pooled_output": torch.zeros((1,pooled_len), dtype=cond[i][0].dtype, device=cond[i][0].device)},
                 ]]
                 
-            return cond_zero
+            return cond_zero"""
 
+def zero_conditioning_from_list(conds):
+    for cond in conds:
+        if cond is not None:
+            for i in range(len(cond)):
+                pooled = cond[i][1].get('pooled_output')
+                llama3 = cond[i][1].get('conditioning_llama3')
+
+                pooled_len = pooled.shape[-1] if pooled is not None else 1
+                llama3_shape = llama3.shape if llama3 is not None else (1, 32, 128, 4096)
+
+                cond_zero = [[
+                    torch.zeros_like(cond[i][0]),
+                    {
+                        "pooled_output": torch.zeros((1, pooled_len), dtype=cond[i][0].dtype, device=cond[i][0].device),
+                        "conditioning_llama3": torch.zeros(llama3_shape, dtype=cond[i][0].dtype, device=cond[i][0].device),
+                    },
+                ]]
+
+            return cond_zero
 
 class TemporalMaskGenerator:
     @classmethod
@@ -1000,7 +988,7 @@ class ClownRegionalConditioning_AB:
         }
 
     RETURN_TYPES = ("CONDITIONING",)
-    RETURN_NAMES = ("positive",)
+    RETURN_NAMES = ("conditioning",)
     FUNCTION     = "main"
     CATEGORY     = "RES4LYF/conditioning"
 
@@ -1031,12 +1019,6 @@ class ClownRegionalConditioning_AB:
             invert_mask              : bool   = False
             ) -> Tuple[Tensor]:
         
-        positive_A = conditioning_A
-        positive_B = conditioning_B
-        
-        positive_masked   = positive_A 
-        positive_unmasked = positive_B
-        
         mask   = mask_A
         unmask = mask_B
         
@@ -1058,15 +1040,15 @@ class ClownRegionalConditioning_AB:
                                         mask                     = mask,
                                         unmask                   = unmask,
                                         invert_mask              = invert_mask,
-                                        positive_masked          = positive_masked,
-                                        positive_unmasked        = positive_unmasked,
+                                        conditioning_A           = conditioning_A,
+                                        conditioning_B           = conditioning_B,
                                         )
 
-        positive = zero_conditioning_from_list([positive_masked, positive_unmasked])
+        cond = zero_conditioning_from_list([conditioning_A, conditioning_B])
         
-        positive[0][1]['callback_regional'] = callback
+        cond[0][1]['callback_regional'] = callback
         
-        return (positive,)
+        return (cond,)
 
 
 
@@ -1078,8 +1060,8 @@ class ClownRegionalConditioning_AB:
                                 weight_scheduler                  = None,
                                 start_step               : int    = 0,
                                 end_step                 : int    = -1,
-                                positive_masked                   = None,
-                                positive_unmasked                 = None,
+                                conditioning_A                    = None,
+                                conditioning_B                    = None,
                                 weights                  : Tensor = None,
                                 region_bleeds            : Tensor = None,
                                 region_bleed             : float  = 0.0,
@@ -1117,20 +1099,14 @@ class ClownRegionalConditioning_AB:
         floors  = F.pad(floors,  (0, MAX_STEPS), value=0.0)
         floors  = torch.cat((prepend, floors), dim=0)
 
-        if (positive_masked is None) and (positive_unmasked is None):
-            positive = None
+        if (conditioning_A is None) and (conditioning_B is None):
+            cond = None
 
         elif mask is not None:
             EmptyCondGen = EmptyConditioningGenerator(model)
-            positive_masked, positive_unmasked = EmptyCondGen.zero_none_conditionings_([positive_masked, positive_unmasked])
+            conditioning_A, conditioning_B = EmptyCondGen.zero_none_conditionings_([conditioning_A, conditioning_B])
             
-            positive_masked_tokens   = positive_masked[0][0]  .shape[1]
-            positive_unmasked_tokens = positive_unmasked[0][0].shape[1]
-            
-            positive_min_tokens = min(positive_masked_tokens, positive_unmasked_tokens)
-            
-            positive = copy.deepcopy(positive_masked)
-            positive[0][0] = (positive_masked[0][0][:,:positive_min_tokens,:] + positive_unmasked[0][0][:,:positive_min_tokens,:]) / 2
+            cond = copy.deepcopy(conditioning_A)
             
             if isinstance(model.model.model_config, comfy.supported_models.WAN21_T2V) or isinstance(model.model.model_config, comfy.supported_models.WAN21_I2V):
                 if model.model.diffusion_model.blocks[0].self_attn.winderz_type != "false":
@@ -1148,59 +1124,44 @@ class ClownRegionalConditioning_AB:
 
                 AttnMask.add_region_sizes(
                     [
-                        positive_masked  [0][0].shape[-2],
-                        positive_masked  [0][1]['conditioning_llama3'][0,0,...].shape[-2],
-                        positive_masked  [0][1]['conditioning_llama3'][0,0,...].shape[-2],
+                        conditioning_A[0][0].shape[-2],
+                        conditioning_A[0][1]['conditioning_llama3'][0,0,...].shape[-2],
+                        conditioning_A[0][1]['conditioning_llama3'][0,0,...].shape[-2],
                     ],
                     mask)
                 AttnMask.add_region_sizes(
                     [
-                        positive_unmasked[0][0].shape[-2],
-                        positive_unmasked[0][1]['conditioning_llama3'][0,0,...].shape[-2],
-                        positive_unmasked[0][1]['conditioning_llama3'][0,0,...].shape[-2],
+                        conditioning_B[0][0].shape[-2],
+                        conditioning_B[0][1]['conditioning_llama3'][0,0,...].shape[-2],
+                        conditioning_B[0][1]['conditioning_llama3'][0,0,...].shape[-2],
                     ],
                     unmask)
 
-                RegContext.add_region_llama3(positive_masked  [0][1]['conditioning_llama3'])
-                RegContext.add_region_llama3(positive_unmasked[0][1]['conditioning_llama3'])
+                RegContext.add_region_llama3(conditioning_A[0][1]['conditioning_llama3'])
+                RegContext.add_region_llama3(conditioning_B[0][1]['conditioning_llama3'])
             else:
-                AttnMask.add_region(positive_masked  [0][0],   mask)
-                AttnMask.add_region(positive_unmasked[0][0], unmask)
+                AttnMask.add_region(conditioning_A[0][0],   mask)
+                AttnMask.add_region(conditioning_B[0][0], unmask)
             
-            RegContext.add_region(positive_masked  [0][0])
-            RegContext.add_region(positive_unmasked[0][0])
+            RegContext.add_region(conditioning_A[0][0])
+            RegContext.add_region(conditioning_B[0][0])
             
-            if 'clip_vision_output' in positive_masked[0][1]:
-                RegContext.add_region_clip_fea(positive_masked  [0][1]['clip_vision_output'].penultimate_hidden_states)
-                RegContext.add_region_clip_fea(positive_unmasked[0][1]['clip_vision_output'].penultimate_hidden_states)
+            if 'clip_vision_output' in conditioning_A[0][1]: # For WAN... dicey results
+                RegContext.add_region_clip_fea(conditioning_A[0][1]['clip_vision_output'].penultimate_hidden_states)
+                RegContext.add_region_clip_fea(conditioning_B[0][1]['clip_vision_output'].penultimate_hidden_states)
             
-            positive[0][1]['AttnMask'] = AttnMask
-            positive[0][1]['RegContext'] = RegContext
+            cond[0][1]['AttnMask'] = AttnMask
+            cond[0][1]['RegContext'] = RegContext
             
-            if   positive_masked_tokens < positive_unmasked_tokens:
-                positive[0][0] = torch.cat((positive[0][0], positive_unmasked[0][0][:,positive_min_tokens:,:]), dim=1)
-            elif positive_masked_tokens > positive_unmasked_tokens:
-                positive[0][0] = torch.cat((positive[0][0], positive_masked  [0][0][:,positive_min_tokens:,:]), dim=1)
-                
-            if 'pooled_output' in positive[0][1] and positive_masked[0][1]['pooled_output'] is not None:
-                positive_masked_pooled_tokens   = positive_masked[0][1]['pooled_output'].shape[1]
-                positive_unmasked_pooled_tokens = positive_unmasked[0][1]['pooled_output'].shape[1]
-                
-                positive_min_pooled_tokens = min(positive_masked_pooled_tokens, positive_unmasked_pooled_tokens)
-                
-                positive[0][1]['pooled_output'] = (positive_masked[0][1]['pooled_output'][:,:positive_min_pooled_tokens] + positive_unmasked[0][1]['pooled_output'][:,:positive_min_pooled_tokens]) / 2
-                
-                if   positive_masked_pooled_tokens < positive_unmasked_pooled_tokens:
-                    positive[0][1]['pooled_output'] = torch.cat((positive[0][1]['pooled_output'], positive_unmasked[0][1]['pooled_output'][:,positive_min_pooled_tokens:]), dim=1)
-                elif positive_masked_pooled_tokens > positive_unmasked_pooled_tokens:
-                    positive[0][1]['pooled_output'] = torch.cat((positive[0][1]['pooled_output'], positive_masked  [0][1]['pooled_output'][:,positive_min_pooled_tokens:]), dim=1)
-        
+            cond = merge_with_base(base=cond, others=[conditioning_A, conditioning_B])
+            
+
         else:
-            positive = positive_masked
+            cond = conditioning_A
             
-        positive[0][1]['RegParam'] = RegionalParameters(weights, floors)
+        cond[0][1]['RegParam'] = RegionalParameters(weights, floors)
         
-        return (positive,)
+        return (cond,)
 
 
 
@@ -1234,7 +1195,7 @@ class ClownRegionalConditioning_ABC:
         }
 
     RETURN_TYPES = ("CONDITIONING",)
-    RETURN_NAMES = ("positive",)
+    RETURN_NAMES = ("conditioning",)
     FUNCTION     = "main"
     CATEGORY     = "RES4LYF/conditioning"
 
@@ -1267,11 +1228,7 @@ class ClownRegionalConditioning_ABC:
             mask_C                              = None,
             invert_mask              : bool   = False
             ) -> Tuple[Tensor]:
-        
-        positive_A = conditioning_A
-        positive_B = conditioning_B
-        positive_C = conditioning_C
-        
+
         if end_step == -1:
             end_step = MAX_STEPS
         
@@ -1291,16 +1248,16 @@ class ClownRegionalConditioning_ABC:
                                         mask_B                   = mask_B,
                                         mask_C                   = mask_C,
                                         invert_mask              = invert_mask,
-                                        positive_A               = positive_A,
-                                        positive_B               = positive_B,
-                                        positive_C               = positive_C,
+                                        conditioning_A           = conditioning_A,
+                                        conditioning_B           = conditioning_B,
+                                        conditioning_C           = conditioning_C,
                                         )
 
-        positive = zero_conditioning_from_list([positive_A, positive_B, positive_C])
+        cond = zero_conditioning_from_list([conditioning_A, conditioning_B, conditioning_C])
         
-        positive[0][1]['callback_regional'] = callback
+        cond[0][1]['callback_regional'] = callback
         
-        return (positive,)
+        return (cond,)
 
 
 
@@ -1312,10 +1269,10 @@ class ClownRegionalConditioning_ABC:
                                 weight_scheduler                  = None,
                                 start_step               : int    =  0,
                                 end_step                 : int    = -1,
-                                positive_A                        = None,
-                                positive_B                        = None,
+                                conditioning_A                    = None,
+                                conditioning_B                    = None,
 
-                                positive_C                        = None,
+                                conditioning_C                    = None,
                                 weights                  : Tensor = None,
                                 region_bleeds            : Tensor = None,
                                 region_bleed             : float  = 0.0,
@@ -1351,8 +1308,6 @@ class ClownRegionalConditioning_ABC:
         if invert_mask and mask_AB_inv is not None:
             mask_AB_inv = 1-mask_AB_inv
         
-        positive_unmasked = positive_C
-
         floor, floors = region_bleed, region_bleeds
         
         weights = initialize_or_scale(weights, weight, end_step).to(default_dtype)
@@ -1363,26 +1318,15 @@ class ClownRegionalConditioning_ABC:
         floors  = F.pad(floors,  (0, MAX_STEPS), value=0.0)
         floors  = torch.cat((prepend, floors), dim=0)
 
-        if (positive_A is None) and (positive_B is None) and (positive_unmasked is None):
-            positive = None
+        if (conditioning_A is None) and (conditioning_B is None) and (conditioning_C is None):
+            conditioning = None
 
         elif mask_A is not None:
             
             EmptyCondGen = EmptyConditioningGenerator(model)
-            positive_A, positive_B, positive_unmasked = EmptyCondGen.zero_none_conditionings_([positive_A, positive_B, positive_unmasked])
+            conditioning_A, conditioning_B, conditioning_C = EmptyCondGen.zero_none_conditionings_([conditioning_A, conditioning_B, conditioning_C])
 
-            positive_A_tokens        = positive_A[0][0].shape[1]
-            positive_B_tokens        = positive_B[0][0].shape[1]
-            positive_unmasked_tokens = positive_unmasked[0][0].shape[1]
-            
-            values = sorted([positive_A_tokens, positive_B_tokens, positive_unmasked_tokens])
-
-            positive_min_tokens  = values[0]
-            positive_mid_tokens  = values[1]
-            positive_max_tokens  = values[2]
-            
-            positive = copy.deepcopy(positive_A)
-            positive[0][0] = (positive_A[0][0][:,:positive_min_tokens,:] + positive_B[0][0][:,:positive_min_tokens,:] + positive_unmasked[0][0][:,:positive_min_tokens,:]) / 3
+            conditioning = copy.deepcopy(conditioning_A)
             
             if isinstance(model.model.model_config, comfy.supported_models.WAN21_T2V) or isinstance(model.model.model_config, comfy.supported_models.WAN21_I2V):
                 if model.model.diffusion_model.blocks[0].self_attn.winderz_type != "false":
@@ -1399,107 +1343,53 @@ class ClownRegionalConditioning_ABC:
             if isinstance(model.model.model_config, comfy.supported_models.HiDream):
                 AttnMask.add_region_sizes(
                     [
-                        positive_A  [0][0].shape[-2],
-                        positive_A  [0][1]['conditioning_llama3'][0,0,...].shape[-2],
-                        positive_A  [0][1]['conditioning_llama3'][0,0,...].shape[-2],
+                        conditioning_A[0][0].shape[-2],
+                        conditioning_A[0][1]['conditioning_llama3'][0,0,...].shape[-2],
+                        conditioning_A[0][1]['conditioning_llama3'][0,0,...].shape[-2],
                     ],
                     mask_A)
                 AttnMask.add_region_sizes(
                     [
-                        positive_B[0][0].shape[-2],
-                        positive_B[0][1]['conditioning_llama3'][0,0,...].shape[-2],
-                        positive_B[0][1]['conditioning_llama3'][0,0,...].shape[-2],
+                        conditioning_B[0][0].shape[-2],
+                        conditioning_B[0][1]['conditioning_llama3'][0,0,...].shape[-2],
+                        conditioning_B[0][1]['conditioning_llama3'][0,0,...].shape[-2],
                     ],
                     mask_B)
                 AttnMask.add_region_sizes(
                     [
-                        positive_unmasked[0][0].shape[-2],
-                        positive_unmasked[0][1]['conditioning_llama3'][0,0,...].shape[-2],
-                        positive_unmasked[0][1]['conditioning_llama3'][0,0,...].shape[-2],
+                        conditioning_C[0][0].shape[-2],
+                        conditioning_C[0][1]['conditioning_llama3'][0,0,...].shape[-2],
+                        conditioning_C[0][1]['conditioning_llama3'][0,0,...].shape[-2],
                     ],
                     mask_AB_inv)
                 
-                RegContext.add_region_llama3(positive_A       [0][1]['conditioning_llama3'])
-                RegContext.add_region_llama3(positive_B       [0][1]['conditioning_llama3'])
-                RegContext.add_region_llama3(positive_unmasked[0][1]['conditioning_llama3'])
+                RegContext.add_region_llama3(conditioning_A[0][1]['conditioning_llama3'])
+                RegContext.add_region_llama3(conditioning_B[0][1]['conditioning_llama3'])
+                RegContext.add_region_llama3(conditioning_C[0][1]['conditioning_llama3'])
             else:
-                AttnMask.add_region(positive_A       [0][0], mask_A)
-                AttnMask.add_region(positive_B       [0][0], mask_B)
-                AttnMask.add_region(positive_unmasked[0][0], mask_AB_inv)
+                AttnMask.add_region(conditioning_A[0][0], mask_A)
+                AttnMask.add_region(conditioning_B[0][0], mask_B)
+                AttnMask.add_region(conditioning_C[0][0], mask_AB_inv)
             
-            RegContext.add_region(positive_A  [0][0])
-            RegContext.add_region(positive_B[0][0])
-            RegContext.add_region(positive_unmasked[0][0])
+            RegContext.add_region(conditioning_A[0][0])
+            RegContext.add_region(conditioning_B[0][0])
+            RegContext.add_region(conditioning_C[0][0])
             
-            positive[0][1]['AttnMask']   = AttnMask
-            positive[0][1]['RegContext'] = RegContext
+            conditioning[0][1]['AttnMask']   = AttnMask
+            conditioning[0][1]['RegContext'] = RegContext
             
+            conditioning = merge_with_base(base=conditioning, others=[conditioning_A, conditioning_B, conditioning_C])
             
-            if   positive_A_tokens        != positive_min_tokens and positive_A_tokens != positive_max_tokens:
-                positive[0][0] = torch.cat((positive[0][0], positive_A       [0][0][:,positive_min_tokens:,:]), dim=1)
-                
-            elif positive_B_tokens        != positive_min_tokens and positive_B_tokens != positive_max_tokens:
-                positive[0][0] = torch.cat((positive[0][0], positive_B       [0][0][:,positive_min_tokens:,:]), dim=1)
-                
-            elif positive_unmasked_tokens != positive_min_tokens and positive_unmasked_tokens != positive_max_tokens:
-                positive[0][0] = torch.cat((positive[0][0], positive_unmasked[0][0][:,positive_min_tokens:,:]), dim=1)
-                
-                
-                
-            if   positive_A_tokens        == positive_mid_tokens and positive_mid_tokens != positive_max_tokens:
-                positive[0][0] = torch.cat((positive[0][0], positive_A       [0][0][:,positive_mid_tokens:,:]), dim=1)
-                
-            elif positive_B_tokens        == positive_mid_tokens and positive_mid_tokens != positive_max_tokens:
-                positive[0][0] = torch.cat((positive[0][0], positive_B       [0][0][:,positive_mid_tokens:,:]), dim=1)
-                
-            elif positive_unmasked_tokens == positive_mid_tokens and positive_mid_tokens != positive_max_tokens:
-                positive[0][0] = torch.cat((positive[0][0], positive_unmasked[0][0][:,positive_mid_tokens:,:]), dim=1)
-            
-            
-            
-            if 'pooled_output' in positive[0][1] and positive_A[0][1]['pooled_output'] is not None:
-                positive_A_pooled_tokens = positive_A[0][1]['pooled_output'].shape[1]
-                positive_B_pooled_tokens = positive_B[0][1]['pooled_output'].shape[1]
-                positive_unmasked_pooled_tokens = positive_unmasked[0][1]['pooled_output'].shape[1]
-                
-                values = sorted([positive_A_pooled_tokens, positive_B_pooled_tokens, positive_unmasked_pooled_tokens])
-
-                positive_min_pooled_tokens  = values[0]
-                positive_mid_pooled_tokens  = values[1]
-                positive_max_pooled_tokens  = values[2]
-                
-                positive[0][1]['pooled_output'] = (positive_A[0][1]['pooled_output'][:,:positive_min_pooled_tokens] + positive_B[0][1]['pooled_output'][:,:positive_min_pooled_tokens] + positive_unmasked[0][1]['pooled_output'][:,:positive_min_pooled_tokens]) / 3
-                
-                if   positive_A_pooled_tokens        != positive_min_pooled_tokens and positive_A_pooled_tokens != positive_max_pooled_tokens:
-                    positive[0][1]['pooled_output'] = torch.cat((positive[0][1]['pooled_output'], positive_A       [0][1]['pooled_output'][:,positive_min_pooled_tokens:,:]), dim=1)
-                    
-                elif positive_B_pooled_tokens        != positive_min_pooled_tokens and positive_B_pooled_tokens != positive_max_pooled_tokens:
-                    positive[0][1]['pooled_output'] = torch.cat((positive[0][1]['pooled_output'], positive_B       [0][1]['pooled_output'][:,positive_min_pooled_tokens:,:]), dim=1)
-                    
-                elif positive_unmasked_pooled_tokens != positive_min_pooled_tokens and positive_unmasked_pooled_tokens != positive_max_pooled_tokens:
-                    positive[0][1]['pooled_output'] = torch.cat((positive[0][1]['pooled_output'], positive_unmasked[0][1]['pooled_output'][:,positive_min_pooled_tokens:,:]), dim=1)
-                    
-                    
-                    
-                if   positive_A_pooled_tokens        == positive_mid_pooled_tokens and positive_mid_pooled_tokens != positive_max_pooled_tokens:
-                    positive[0][1]['pooled_output'] = torch.cat((positive[0][1]['pooled_output'], positive_A       [0][1]['pooled_output'][:,positive_mid_pooled_tokens:,:]), dim=1)
-                    
-                elif positive_B_pooled_tokens        == positive_mid_pooled_tokens and positive_mid_pooled_tokens != positive_max_pooled_tokens:
-                    positive[0][1]['pooled_output'] = torch.cat((positive[0][1]['pooled_output'], positive_B       [0][1]['pooled_output'][:,positive_mid_pooled_tokens:,:]), dim=1)
-                    
-                elif positive_unmasked_pooled_tokens == positive_mid_pooled_tokens and positive_mid_pooled_tokens != positive_max_pooled_tokens:
-                    positive[0][1]['pooled_output'] = torch.cat((positive[0][1]['pooled_output'], positive_unmasked[0][1]['pooled_output'][:,positive_mid_pooled_tokens:,:]), dim=1)
-                
         else:
-            positive = positive_A
+            conditioning = conditioning_A
 
-        positive[0][1]['RegParam'] = RegionalParameters(weights, floors)
+        conditioning[0][1]['RegParam'] = RegionalParameters(weights, floors)
         
-        return (positive,)
+        return (conditioning,)
 
 
 
-class ClownRegionalConditioning(ClownRegionalConditioning_AB):
+class ClownRegionalConditioning2(ClownRegionalConditioning_AB):
     @classmethod
     def INPUT_TYPES(cls):
         return {
@@ -1541,14 +1431,14 @@ class ClownRegionalConditioning3(ClownRegionalConditioning_ABC):
             "required": { 
                 "weight":                  ("FLOAT",                                     {"default": 1.0,  "min": -10000.0, "max": 10000.0, "step": 0.01}),
                 "region_bleed":            ("FLOAT",                                     {"default": 0.0,  "min": -10000.0, "max": 10000.0, "step": 0.01}),
-                "region_bleed_start_step": ("INT",                                       {"default": 0,   "min":  0,        "max": 10000}),
+                "region_bleed_start_step": ("INT",                                       {"default": 0,    "min":  0,       "max": 10000}),
                 "weight_scheduler":        (["constant"] + get_res4lyf_scheduler_list(), {"default": "constant"},),
-                "start_step":              ("INT",                                       {"default": 0,    "min":  0,        "max": 10000}),
-                "end_step":                ("INT",                                       {"default": 100,  "min": -1,        "max": 10000}),
+                "start_step":              ("INT",                                       {"default": 0,    "min":  0,       "max": 10000}),
+                "end_step":                ("INT",                                       {"default": 100,  "min": -1,       "max": 10000}),
                 "mask_type":               (REG_MASK_TYPE_3,                             {"default": "boolean"}),
-                "edge_width":              ("INT",                                       {"default": 0,  "min": 0,          "max": 10000}),
+                "edge_width":              ("INT",                                       {"default": 0,    "min": 0,        "max": 10000}),
                 "invert_mask":             ("BOOLEAN",                                   {"default": False}),
-            }, 
+            },
             "optional": {
                 "conditioning_A":          ("CONDITIONING", ),
                 "conditioning_B":          ("CONDITIONING", ),
@@ -1572,6 +1462,340 @@ class ClownRegionalConditioning3(ClownRegionalConditioning_ABC):
             mask_C         = mask_AB_inv,
             **kwargs
         )    
+
+
+
+
+class ClownRegionalConditioning:
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {"required":
+                    {
+                    "spineless":    ("BOOLEAN", {"default": False}),
+                    "edge_width":   ("INT",     {"default": 0,  "min": -10000,  "max": 10000}),
+                    },
+                "optional": 
+                    {
+                    "cond_regions": ("COND_REGIONS", ),
+                    "conditioning": ("CONDITIONING", ),
+                    "mask":         ("MASK", ),
+                    }
+                }
+
+    RETURN_TYPES = ("COND_REGIONS",)
+    RETURN_NAMES = ("cond_regions",) 
+    FUNCTION     = "main"
+    CATEGORY     = "RES4LYF/conditioning"
+    
+    def main(self,
+            spineless    = False,
+            edge_width   = 0,
+            cond_regions = None,
+            conditioning = None,
+            mask         = None,
+            ):
+        
+        cond_reg = [] if cond_regions is None else copy.deepcopy(cond_regions)
+        
+        if mask is None:
+            mask = torch.ones_like(cond_reg[0]['mask'])
+            for i in range(len(cond_reg)):
+                if mask.dtype == torch.bool:
+                    mask &= cond_reg[i]['mask'].to(cond_reg[0]['mask'].dtype)
+                else:
+                    mask = mask - cond_reg[i]['mask'].to(cond_reg[0]['mask'].dtype)
+                    mask[mask < 0] = 0.0
+                    
+        
+        cond_reg.append(
+            {
+                'use_self_attn_mask': not spineless,
+                'edge_width'        : edge_width,
+                'conditioning'      : conditioning,
+                'mask'              : mask,
+            }
+        )
+
+        return (cond_reg,)
+
+
+
+
+
+class ClownRegionalConditionings:
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": { 
+                "weight":                  ("FLOAT",                                     {"default": 1.0, "min":  -10000.0, "max": 10000.0, "step": 0.01}),
+                "region_bleed":            ("FLOAT",                                     {"default": 0.0, "min":  -10000.0, "max": 10000.0, "step": 0.01}),
+                "region_bleed_start_step": ("INT",                                       {"default": 0,   "min":  0,        "max": 10000}),
+                "weight_scheduler":        (["constant"] + get_res4lyf_scheduler_list(), {"default": "constant"},),
+                "start_step":              ("INT",                                       {"default": 0,   "min":  0,        "max": 10000}),
+                "end_step":                ("INT",                                       {"default": -1,  "min": -1,        "max": 10000}),
+                "mask_type":               (["gradient", "boolean"],                     {"default": "boolean"}),
+                "invert_masks":            ("BOOLEAN",                                   {"default": False}),
+            },
+            "optional": {
+                "cond_regions":            ("COND_REGIONS", ),
+                "weights":                 ("SIGMAS", ),
+                "region_bleeds":           ("SIGMAS", ),
+            }
+        }
+
+    RETURN_TYPES = ("CONDITIONING",)
+    RETURN_NAMES = ("conditioning",)
+    FUNCTION     = "main"
+    CATEGORY     = "RES4LYF/conditioning"
+
+    def create_callback(self, **kwargs):
+        def callback(model):
+            kwargs["model"] = model  
+            pos_cond, = self.prepare_regional_cond(**kwargs)
+            return pos_cond
+        return callback
+
+    def main(self,
+            weight                   : float  = 1.0,
+            start_sigma              : float  = 0.0,
+            end_sigma                : float  = 1.0,
+            weight_scheduler                  = None,
+            start_step               : int    = 0,
+            end_step                 : int    = -1,
+            cond_regions                      = None,
+            weights                  : Tensor = None,
+            region_bleeds            : Tensor = None,
+            region_bleed             : float  = 0.0,
+            region_bleed_start_step  : int    = 0,
+            mask_type                : str    = "boolean",
+            invert_masks             : bool   = False
+            ) -> Tuple[Tensor]:
+                
+        if end_step == -1:
+            end_step = MAX_STEPS
+
+        callback = self.create_callback(weight                   = weight,
+                                        start_sigma              = start_sigma,
+                                        end_sigma                = end_sigma,
+                                        weight_scheduler         = weight_scheduler,
+                                        start_step               = start_step,
+                                        end_step                 = end_step,
+                                        weights                  = weights,
+                                        region_bleeds            = region_bleeds,
+                                        region_bleed             = region_bleed,
+                                        region_bleed_start_step  = region_bleed_start_step,
+                                        mask_type                = mask_type,
+                                        invert_masks             = invert_masks,
+                                        cond_regions             = cond_regions,
+                                        )
+
+        cond_list = [region['conditioning'] for region in cond_regions]
+        conditioning = zero_conditioning_from_list(cond_list)
+        
+        conditioning[0][1]['callback_regional'] = callback
+        
+        return (conditioning,)
+
+
+
+    def prepare_regional_cond(self,
+                                model,
+                                weight                   : float  = 1.0,
+                                start_sigma              : float  = 0.0,
+                                end_sigma                : float  = 1.0,
+                                weight_scheduler                  = None,
+                                start_step               : int    = 0,
+                                end_step                 : int    = -1,
+                                weights                  : Tensor = None,
+                                region_bleeds            : Tensor = None,
+                                region_bleed             : float  = 0.0,
+                                region_bleed_start_step  : int    = 0,
+                                mask_type                : str    = "gradient",
+                                cond_regions                      = None,
+                                invert_masks             : bool   = False,
+                                ) -> Tuple[Tensor]:
+
+        default_dtype  = torch.float64
+        default_device = torch.device("cuda") 
+        
+        cond_list               = [region['conditioning']       for region in cond_regions]
+        mask_list               = [region['mask']               for region in cond_regions]
+        edge_width_list         = [region['edge_width']         for region in cond_regions]
+        use_self_attn_mask_list = [region['use_self_attn_mask'] for region in cond_regions]
+        if end_step == -1:
+            end_step = MAX_STEPS
+        if weights is None and weight_scheduler != "constant":
+            total_steps = end_step - start_step
+            weights     = get_sigmas(model, weight_scheduler, total_steps, 1.0).to(dtype=default_dtype, device=default_device) #/ model.inner_model.inner_model.model_sampling.sigma_max  #scaling doesn't matter as this is a flux-only node
+            prepend     = torch.zeros(start_step,                                  dtype=default_dtype, device=default_device)
+            weights     = torch.cat((prepend, weights), dim=0)
+        
+        if invert_masks:
+            for i in range(len(mask_list)):
+                if mask_list[i].dtype == torch.bool:
+                    mask_list[i] = ~mask_list[i]
+                else:
+                    mask_list[i] = 1 - mask_list[i]
+                    
+        floor, floors = region_bleed, region_bleeds
+        
+        weights = initialize_or_scale(weights, weight, end_step).to(default_dtype).to(default_device)
+        weights = F.pad(weights, (0, MAX_STEPS), value=0.0)
+        
+        prepend = torch.full((region_bleed_start_step,),  0.0, dtype=default_dtype, device=default_device)
+        floors  = initialize_or_scale(floors,  floor,  end_step).to(default_dtype).to(default_device)
+        floors  = F.pad(floors,  (0, MAX_STEPS), value=0.0)
+        floors  = torch.cat((prepend, floors), dim=0)
+
+        EmptyCondGen = EmptyConditioningGenerator(model)
+        cond_list = EmptyCondGen.zero_none_conditionings_(cond_list)
+        
+        conditioning = copy.deepcopy(cond_list[0])
+        
+        if isinstance(model.model.model_config, comfy.supported_models.WAN21_T2V) or isinstance(model.model.model_config, comfy.supported_models.WAN21_I2V):
+            if model.model.diffusion_model.blocks[0].self_attn.winderz_type != "false":
+                AttnMask = CrossAttentionMask  (mask_type, edge_width_list=edge_width_list, use_self_attn_mask_list=use_self_attn_mask_list)
+            else:
+                AttnMask = SplitAttentionMask  (mask_type, edge_width_list=edge_width_list, use_self_attn_mask_list=use_self_attn_mask_list)
+        elif isinstance(model.model.model_config, comfy.supported_models.HiDream):
+            AttnMask = FullAttentionMaskHiDream(mask_type, edge_width_list=edge_width_list, use_self_attn_mask_list=use_self_attn_mask_list)
+        else:
+            AttnMask = FullAttentionMask       (mask_type, edge_width_list=edge_width_list, use_self_attn_mask_list=use_self_attn_mask_list)
+
+        RegContext = RegionalContext()
+        
+        for cond, mask in zip(cond_list, mask_list):
+            if isinstance(model.model.model_config, comfy.supported_models.HiDream):
+                
+                AttnMask.add_region_sizes(
+                    [
+                        cond[0][0].shape[-2],
+                        cond[0][1]['conditioning_llama3'][0,0,...].shape[-2],
+                        cond[0][1]['conditioning_llama3'][0,0,...].shape[-2],
+                    ],
+                    mask)
+
+                RegContext.add_region_llama3(cond[0][1]['conditioning_llama3'])
+            else:
+                AttnMask.add_region(cond[0][0],   mask)
+            
+            RegContext.add_region(cond[0][0])
+            
+            if 'clip_vision_output' in cond[0][1]: # For WAN... dicey results
+                RegContext.add_region_clip_fea(cond[0][1]['clip_vision_output'].penultimate_hidden_states)
+            
+        conditioning[0][1]['AttnMask']   = AttnMask
+        conditioning[0][1]['RegContext'] = RegContext
+        conditioning[0][1]['RegParam']   = RegionalParameters(weights, floors)
+        
+        conditioning = merge_with_base(base=conditioning, others=cond_list)
+
+        return (conditioning,)
+
+
+
+
+
+
+
+def merge_with_base(
+    base   : List[     Tuple[torch.Tensor, Dict[str, Any]]],
+    others : List[List[Tuple[torch.Tensor, Dict[str, Any]]]],
+    dim    : int = -2
+) ->         List[     Tuple[torch.Tensor, Dict[str, Any]]]:
+    """
+    Merge `base` plus an arbitrary list of other conditioning objects:
+        - base: zero out its tensors, for use as an accumulator
+        - For each level ℓ:
+            • Collect the base’s zeroed tensor + all others’ ℓ-tensors.
+            • Pad them along `dim` to the same length and sum.
+            • Replace merged[ℓ][0] with that sum.
+        - For each tensor-valued key in the base’s info-dict at level ℓ:
+            • Gather a zeroed tensor + that key from all others.
+            • Pad & sum, and store back under that key.
+        - Any non-tensor entries in the base’s info are preserved untouched.
+    """
+    max_levels = max(len(base), *(len(p) for p in others))
+
+    for lvl in range(max_levels):
+        if lvl >= len(base): # if base lacks this level, skip entirely
+            continue
+
+        # --- tokens merge ---
+        base_tokens, base_info = base[lvl]
+        zero_tokens = torch.zeros_like(base_tokens)
+        toks = [zero_tokens]
+
+        # zero-out any tensor fields in base_info
+        for key, val in base_info.items():
+            if isinstance(val, torch.Tensor):
+                base_info[key] = torch.zeros_like(val)
+
+        # collect same-level tokens from each other
+        for pos in others:
+            if lvl < len(pos):
+                toks.append(pos[lvl][0])
+
+        toks = pad_tensor_list_to_max_len(toks, dim=dim)
+        base_tokens = sum(toks)
+        base[lvl] = (base_tokens, base_info)
+
+        # --- info-dict tensor merge ---
+        for key, val in list(base_info.items()):
+            if not isinstance(val, torch.Tensor):
+                continue
+            pieces = [val]  # zeroed base tensor
+            for pos in others:
+                if lvl < len(pos):
+                    info_i = pos[lvl][1]
+                    if key in info_i and isinstance(info_i[key], torch.Tensor):
+                        pieces.append(info_i[key])
+            pieces = pad_tensor_list_to_max_len(pieces, dim=dim)
+            base[lvl][1][key] = sum(pieces)
+
+    return base
+
+
+
+
+
+def best_hw(n): # get factor pair closesst to a true square
+    best = (1, n)
+    min_diff = n
+    for i in range(1, int(n**0.5) + 1):
+        if n % i == 0:
+            j = n // i
+            if abs(i - j) < min_diff:
+                best = (i, j)
+                min_diff = abs(i - j)
+    return best
+
+def downsample_tokens(cond: torch.Tensor, target_tokens: int, mode="bicubic") -> torch.Tensor:
+    B, T, D = cond.shape
+
+    def next_square(n: int):
+        root = math.ceil(n**0.5)
+        return root * root
+
+    padded_len = next_square(T)
+    pad_amount = padded_len - T
+    if pad_amount > 0:
+        pad_tensor = torch.zeros(B, pad_amount, D, dtype=cond.dtype, device=cond.device)
+        cond = torch.cat([cond, pad_tensor], dim=1)
+
+    side_len = int(math.sqrt(padded_len))
+    cond_reshaped = cond.view(B, side_len, side_len, D).permute(0, 3, 1, 2)  # [B, D, H, W]
+
+    H_target, W_target = best_hw(target_tokens)
+    cond_interp = F.interpolate(cond_reshaped, size=(H_target, W_target), mode=mode)
+
+    cond_final = cond_interp.permute(0, 2, 3, 1).reshape(B, -1, D)
+    cond_final = cond_final[:, :target_tokens, :]
+
+    return cond_final
+
+
+
 
 
 

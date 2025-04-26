@@ -3,6 +3,9 @@ import torch.nn.functional as F
 
 from torchvision import transforms
 
+from torch  import Tensor
+from typing import Optional, Callable, Tuple, Dict, Any, Union, TYPE_CHECKING, TypeVar, List
+
 import numpy as np
 import kornia
 import cv2
@@ -38,7 +41,7 @@ def freq_sep_fft(img, cutoff=5, sigma=10):
     high_pass_fft = fft_shifted * (1 - low_pass_filter)
 
     # inverse FFT -> return to spatial domain
-    low_pass_img = torch.fft.ifft2(torch.fft.ifftshift(low_pass_fft), dim=(-2, -1)).real
+    low_pass_img  = torch.fft.ifft2(torch.fft.ifftshift( low_pass_fft), dim=(-2, -1)).real
     high_pass_img = torch.fft.ifft2(torch.fft.ifftshift(high_pass_fft), dim=(-2, -1)).real
 
     return low_pass_img, high_pass_img
@@ -750,3 +753,346 @@ class Image_Crop_Location_Exact:
 
         return cropped_image, crop_data
     
+
+
+
+class Masks_Unpack4:
+    @classmethod
+    def INPUT_TYPES(s):
+        return {
+            "required": { 
+                "masks": ("MASK",),
+                }
+            }
+    RETURN_TYPES = ("MASK","MASK","MASK","MASK",)
+    RETURN_NAMES = ("masks","masks","masks","masks",)
+    FUNCTION     = "main"
+    CATEGORY     = "RES4LYF/masks"
+    DESCRIPTION  = "Unpack a list of masks into separate outputs."
+
+    def main(self, masks,):
+        return (*masks,)
+
+class Masks_Unpack8:
+    @classmethod
+    def INPUT_TYPES(s):
+        return {
+            "required": { 
+                "masks": ("MASK",),
+                }
+            }
+    RETURN_TYPES = ("MASK","MASK","MASK","MASK","MASK","MASK","MASK","MASK",)
+    RETURN_NAMES = ("masks","masks","masks","masks","masks","masks","masks","masks",)
+    FUNCTION     = "main"
+    CATEGORY     = "RES4LYF/masks"
+    DESCRIPTION  = "Unpack a list of masks into separate outputs."
+
+    def main(self, masks,):
+        return (*masks,)
+
+class Masks_Unpack16:
+    @classmethod
+    def INPUT_TYPES(s):
+        return {
+            "required": { 
+                "masks": ("MASK",),
+                }
+            }
+    RETURN_TYPES = ("MASK","MASK","MASK","MASK","MASK","MASK","MASK","MASK","MASK","MASK","MASK","MASK","MASK","MASK","MASK","MASK",)
+    RETURN_NAMES = ("masks","masks","masks","masks","masks","masks","masks","masks","masks","masks","masks","masks","masks","masks","masks","masks",)
+    FUNCTION     = "main"
+    CATEGORY     = "RES4LYF/masks"
+    DESCRIPTION  = "Unpack a list of masks into separate outputs."
+
+    def main(self, masks,):
+        return (*masks,)
+
+
+
+
+
+
+class Image_Get_Color_Swatches:
+    @classmethod
+    def INPUT_TYPES(s):
+        return {
+            "required": { 
+                "image_color_swatches": ("IMAGE",),
+                }
+            }
+    RETURN_TYPES = ("COLOR_SWATCHES",)
+    RETURN_NAMES = ("color_swatches",)
+    FUNCTION     = "main"
+    CATEGORY     = "RES4LYF/images"
+    DESCRIPTION  = "Get color swatches, in the order they appear, from top to bottom, in an input image. For use with color masks."
+
+    def main(self, image_color_swatches):
+        rgb = (image_color_swatches * 255).round().clamp(0, 255).to(torch.uint8)
+        color_swatches = read_swatch_colors(rgb.squeeze().numpy(), min_fraction=0.01)
+        #color_swatches = read_swatch_colors(rgb.squeeze().numpy(), ignore=(255,255,255), min_fraction=0.01)
+
+        return (color_swatches,)
+
+class Masks_From_Color_Swatches:
+    @classmethod
+    def INPUT_TYPES(s):
+        return {
+            "required": { 
+                "image_color_mask": ("IMAGE",),
+                "color_swatches":   ("COLOR_SWATCHES",),
+                }
+            }
+    RETURN_TYPES = ("MASK",)
+    RETURN_NAMES = ("masks",)
+    FUNCTION     = "main"
+    CATEGORY     = "RES4LYF/images"
+    DESCRIPTION  = "Create masks from a multicolor image using color swatches to identify regions. Returns them as a list."
+
+    def main(self, image_color_mask, color_swatches):
+        rgb = (image_color_mask * 255).round().clamp(0, 255).to(torch.uint8)
+        masks = build_masks_from_swatch(rgb.squeeze().numpy(), color_swatches, tol=8)
+        masks = cleanup_and_fill_masks(masks)
+        masks = torch.stack(masks, dim=0).unsqueeze(1)
+        return (masks,)
+
+
+
+class Masks_From_Colors:
+    @classmethod
+    def INPUT_TYPES(s):
+        return {
+            "required": { 
+                "image_color_swatches": ("IMAGE",),
+                "image_color_mask":     ("IMAGE",),
+                }
+            }
+    RETURN_TYPES = ("MASK",)
+    RETURN_NAMES = ("masks",)
+    FUNCTION     = "main"
+    CATEGORY     = "RES4LYF/images"
+    DESCRIPTION  = "Create masks from a multicolor image using color swatches to identify regions. Returns them as a list."
+
+    def main(self, image_color_swatches, image_color_mask, ):
+        rgb = (image_color_swatches * 255).round().clamp(0, 255).to(torch.uint8)
+        color_swatches = read_swatch_colors(rgb.squeeze().numpy(), min_fraction=0.01)
+        #color_swatches = read_swatch_colors(rgb.squeeze().numpy(), ignore=(255,255,255), min_fraction=0.01)
+        
+        rgb = (image_color_mask * 255).round().clamp(0, 255).to(torch.uint8)
+        masks = build_masks_from_swatch(rgb.squeeze().numpy(), color_swatches, tol=8)
+        masks = cleanup_and_fill_masks(masks)
+        
+        original_len = len(masks)
+        masks = [m for m in masks if m.sum() != 0]
+        
+        removed = original_len - len(masks)
+        print(f"Removed {removed} empty masks.")
+        masks = torch.stack(masks, dim=0).unsqueeze(1)
+        return (masks,)
+
+
+
+
+
+
+
+from PIL import Image
+import numpy as np
+
+def read_swatch_colors(
+    img,
+    ignore: Tuple[int,int,int] = (-1,-1,-1),
+    min_fraction: float = 0.2
+) -> List[Tuple[int,int,int]]:
+    """
+    1. Load swatch, RGB.
+    2. Count every unique color (except `ignore`).
+    3. Discard any color whose count < (min_fraction * largest_count).
+    4. Sort the remaining by their first y-position (top→bottom).
+    """
+    H, W, _ = img.shape
+    flat = img.reshape(-1,3)
+    
+    # count all colors
+    colors, counts = np.unique(flat, axis=0, return_counts=True)
+    # build list of (color, count), skipping white
+    cc = [
+        (tuple(c.tolist()), cnt)
+        for c, cnt in zip(colors, counts)
+        if tuple(c.tolist()) != ignore
+    ]
+    if not cc:
+        return []
+    
+    # find largest band size
+    max_cnt = max(cnt for _,cnt in cc)
+    # filter by relative size
+    kept = [c for c,cnt in cc if cnt >= max_cnt * min_fraction]
+    
+    # find first‐y for each kept color
+    first_y = {}
+    for color in kept:
+        # mask of where that color lives
+        mask = np.all(img == color, axis=-1)
+        ys, xs = np.nonzero(mask)
+        first_y[color] = int(np.min(ys))
+    
+    # sort top→bottom
+    kept.sort(key=lambda c: first_y[c])
+    return kept
+
+
+
+import numpy as np
+import torch
+from typing import List, Tuple
+from PIL import Image
+
+def build_masks_from_swatch(
+    mask_img: np.ndarray,
+    swatch_colors: List[Tuple[int,int,int]],
+    tol: int = 8
+) -> List[torch.Tensor]:
+    """
+    1. Snap every pixel in mask_img into bins of size tol
+    2. Snap each swatch color into the same bins
+    3. In swatch order, claim pixels exactly matching each swatch bin (first-wins)
+    4. For any unclaimed pixel, compute its nearest swatch‐bin by RGB distance
+       and assign it to that mask.
+    Returns: list of H×W bool‐tensors, one per swatch color.
+    """
+    H, W, _ = mask_img.shape
+
+    # 1) Bin the mask
+    binned = (mask_img // tol) * tol  # H×W×3
+
+    # 2) Bin the swatch colors
+    snapped_swatches = np.array([(np.array(c)//tol)*tol for c in swatch_colors])  # C×3
+
+    claimed = np.zeros((H, W), dtype=bool)
+    masks   = []
+
+    # 3) First‐pass exact matches
+    for c in snapped_swatches:
+        match = (
+            (binned[:,:,0] == c[0]) &
+            (binned[:,:,1] == c[1]) &
+            (binned[:,:,2] == c[2])
+        )
+        match &= ~claimed
+        masks.append(torch.from_numpy(match))
+        claimed |= match
+
+    # 4) Fill‐in pass for any unclaimed pixels
+    miss = ~claimed
+    if miss.any():
+        # flatten for vectorized nearest‐neighbor
+        flat = binned.reshape(-1,3)           # (H*W)×3
+        flat_miss = miss.reshape(-1)          # (H*W,)
+        # compute squared‐distance to each swatch color
+        # (H*W)×1×3  minus 1×C×3 → (H*W)×C×3 → sum over rgb → (H*W)×C
+        dists = np.sum((flat[:,None,:] - snapped_swatches[None,:,:])**2, axis=2)
+        nearest = np.argmin(dists, axis=1)    # (H*W,)
+
+        # assign each missed pixel to its nearest swatch mask
+        for i in range(len(masks)):
+            assign = (flat_miss & (nearest == i)).reshape(H, W)
+            # OR into the existing mask
+            masks[i] = masks[i] | torch.from_numpy(assign)
+
+    return masks
+
+
+
+
+import numpy as np
+import torch
+from typing import List
+from collections import deque
+
+def _remove_small_components(
+    mask: np.ndarray,
+    rel_thresh: float = 0.01
+) -> np.ndarray:
+    """
+    Remove connected components smaller than rel_thresh * max_component_size.
+    4-connectivity.
+    """
+    H, W = mask.shape
+    visited = np.zeros_like(mask, bool)
+    comps = []  # list of (size, pixels_list)
+
+    # 1) find all components
+    for y in range(H):
+        for x in range(W):
+            if mask[y,x] and not visited[y,x]:
+                q = deque([(y,x)])
+                visited[y,x] = True
+                pix = [(y,x)]
+                while q:
+                    cy,cx = q.popleft()
+                    for dy,dx in ((1,0),(-1,0),(0,1),(0,-1)):
+                        ny,nx = cy+dy, cx+dx
+                        if 0<=ny<H and 0<=nx<W and mask[ny,nx] and not visited[ny,nx]:
+                            visited[ny,nx] = True
+                            q.append((ny,nx))
+                            pix.append((ny,nx))
+                comps.append(pix)
+
+    if not comps:
+        return np.zeros_like(mask)
+
+    # 2) compute threshold
+    sizes = [len(c) for c in comps]
+    max_size = max(sizes)
+    min_size = max_size * rel_thresh
+
+    # 3) build a new mask keeping only large comps
+    out = np.zeros_like(mask)
+    for pix in comps:
+        if len(pix) >= min_size:
+            for (y,x) in pix:
+                out[y,x] = True
+
+    return out
+
+def cleanup_and_fill_masks(
+    masks: List[torch.Tensor],
+    rel_thresh: float = 0.01
+) -> List[torch.Tensor]:
+    """
+    1) Remove any component < rel_thresh * (largest component) per mask
+    2) Then re-assign any freed pixels to nearest-swatches by neighbor-count
+    """
+    # stack into C×H×W
+    np_masks = np.stack([m.cpu().numpy() for m in masks], axis=0)
+    C, H, W = np_masks.shape
+
+    # 1) component pruning
+    for c in range(C):
+        np_masks[c] = _remove_small_components(np_masks[c], rel_thresh)
+
+    # 2) figure out what’s still unclaimed
+    claimed = np_masks.any(axis=0)  # H×W
+
+    # 3) build neighbor‐counts to know who's closest
+    #    (reuse the same 8-neighbor idea to bias to the largest local region)
+    shifts = [(1,0),(-1,0),(0,1),(0,-1),(1,1),(1,-1),(-1,1),(-1,-1)]
+    neighbor_counts = np.zeros_like(np_masks, int)
+    for dy,dx in shifts:
+        neighbor_counts += np.roll(np.roll(np_masks, dy, axis=1), dx, axis=2)
+
+    # 4) for every pixel still unclaimed, pick the mask with the highest neighbor count
+    miss = ~claimed
+    if miss.any():
+        # which mask “wins” that pixel?
+        winner = np.argmax(neighbor_counts, axis=0)  # H×W
+        for c in range(C):
+            assign = (miss & (winner == c))
+            np_masks[c][assign] = True
+
+    # back to torch
+    cleaned = [torch.from_numpy(np_masks[c]) for c in range(C)]
+    return cleaned
+
+
+

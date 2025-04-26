@@ -66,12 +66,13 @@ NODE_CLASS_MAPPINGS = {
 
     "SeedGenerator"                       : nodes_misc.SeedGenerator,
     
-    
-    
     "ClownRegionalConditioning"           : conditioning.ClownRegionalConditioning,
-    "ClownRegionalConditioning_AB"        : conditioning.ClownRegionalConditioning_AB,
-
+    "ClownRegionalConditionings"          : conditioning.ClownRegionalConditionings,
+    
+    "ClownRegionalConditioning2"          : conditioning.ClownRegionalConditioning2,
     "ClownRegionalConditioning3"          : conditioning.ClownRegionalConditioning3,
+    
+    "ClownRegionalConditioning_AB"        : conditioning.ClownRegionalConditioning_AB,
     "ClownRegionalConditioning_ABC"       : conditioning.ClownRegionalConditioning_ABC,
 
     "CLIPTextEncodeFluxUnguided"          : conditioning.CLIPTextEncodeFluxUnguided,
@@ -233,7 +234,14 @@ NODE_CLASS_MAPPINGS = {
     "Constant Scheduler"                  : sigmas.constant_scheduler,
     "Linear Quadratic Advanced"           : sigmas.linear_quadratic_advanced,
     
+    "Image Get Color Swatches"            : images.Image_Get_Color_Swatches,
+    "Masks From Color Swatches"           : images.Masks_From_Color_Swatches,
+    "Masks From Colors"                   : images.Masks_From_Colors,
     
+    "Masks Unpack 4"                      : images.Masks_Unpack4,
+    "Masks Unpack 8"                      : images.Masks_Unpack8,
+    "Masks Unpack 16"                     : images.Masks_Unpack16,
+
     
     "Image Sharpen FS"                    : images.ImageSharpenFS,
     "Image Channels LAB"                  : images.Image_Channels_LAB,

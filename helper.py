@@ -1,5 +1,6 @@
 import torch
 import torch.nn.functional as F
+from typing import Optional, Callable, Tuple, Dict, Any, Union, TYPE_CHECKING, TypeVar, List
 
 import re
 import functools
@@ -312,6 +313,21 @@ def initialize_or_scale(tensor, value, steps):
         return torch.full((steps,), value)
     else:
         return value * tensor
+
+
+def pad_tensor_list_to_max_len(tensors: List[torch.Tensor], dim: int = -2) -> List[torch.Tensor]:
+    """Zero-pad each tensor in `tensors` along `dim` up to their common maximum length."""
+    max_len = max(t.shape[dim] for t in tensors)
+    padded = []
+    for t in tensors:
+        cur = t.shape[dim]
+        if cur < max_len:
+            pad_shape = list(t.shape)
+            pad_shape[dim] = max_len - cur
+            zeros = torch.zeros(*pad_shape, dtype=t.dtype, device=t.device)
+            t = torch.cat((t, zeros), dim=dim)
+        padded.append(t)
+    return padded
 
 
 
