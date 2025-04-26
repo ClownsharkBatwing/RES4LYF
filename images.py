@@ -947,56 +947,73 @@ import torch
 from typing import List, Tuple
 from PIL import Image
 
+
 def build_masks_from_swatch(
     mask_img: np.ndarray,
     swatch_colors: List[Tuple[int,int,int]],
     tol: int = 8
 ) -> List[torch.Tensor]:
     """
-    1. Snap every pixel in mask_img into bins of size tol
-    2. Snap each swatch color into the same bins
-    3. In swatch order, claim pixels exactly matching each swatch bin (first-wins)
-    4. For any unclaimed pixel, compute its nearest swatch‐bin by RGB distance
-       and assign it to that mask.
-    Returns: list of H×W bool‐tensors, one per swatch color.
+    1. Normalize mask_img → uint8 H×W×3 (handles float [0,1] or [0,255], channel-first too).
+    2. Bin every pixel into buckets of size `tol`.
+    3. Detect user-painted region (non-black).
+    4. In swatch order, claim all exact matches (first-wins).
+    5. Fill in any *painted but unclaimed* pixel by nearest‐swatch in RGB distance.
+    Returns a list of BoolTensors [H,W], one per swatch color.
     """
-    H, W, _ = mask_img.shape
+    # --- 1) ensure H×W×3 uint8 ---
+    img = mask_img
+    # channel-first → channel-last
+    if img.ndim == 3 and img.shape[0] == 3:
+        img = np.transpose(img, (1,2,0))
+    # float → uint8
+    if np.issubdtype(img.dtype, np.floating):
+        m = img.max()
+        if m <= 1.01:
+            img = (img * 255.0).round()
+        else:
+            img = img.round()
+    img = img.clip(0,255).astype(np.uint8)
 
-    # 1) Bin the mask
-    binned = (mask_img // tol) * tol  # H×W×3
+    H, W, _ = img.shape
 
-    # 2) Bin the swatch colors
-    snapped_swatches = np.array([(np.array(c)//tol)*tol for c in swatch_colors])  # C×3
+    # --- 2) bin into tol-sized buckets ---
+    binned = (img // tol) * tol  # still uint8
+
+    # --- 3) painted region mask (non-black) ---
+    painted = np.any(img != 0, axis=2)  # H×W bool
+
+    # --- snap swatch colors into same buckets ---
+    snapped = np.array([
+        ((np.array(c)//tol)*tol).astype(np.uint8)
+        for c in swatch_colors
+    ])  # C×3
 
     claimed = np.zeros((H, W), dtype=bool)
     masks   = []
 
-    # 3) First‐pass exact matches
-    for c in snapped_swatches:
-        match = (
-            (binned[:,:,0] == c[0]) &
-            (binned[:,:,1] == c[1]) &
-            (binned[:,:,2] == c[2])
+    # --- 4) first-pass exact matches ---
+    for s in snapped:
+        m = (
+            (binned[:,:,0] == s[0]) &
+            (binned[:,:,1] == s[1]) &
+            (binned[:,:,2] == s[2])
         )
-        match &= ~claimed
-        masks.append(torch.from_numpy(match))
-        claimed |= match
+        m &= ~claimed
+        masks.append(torch.from_numpy(m))
+        claimed |= m
 
-    # 4) Fill‐in pass for any unclaimed pixels
-    miss = ~claimed
+    # --- 5) fill-in only within painted & unclaimed pixels ---
+    miss = painted & (~claimed)
     if miss.any():
-        # flatten for vectorized nearest‐neighbor
-        flat = binned.reshape(-1,3)           # (H*W)×3
-        flat_miss = miss.reshape(-1)          # (H*W,)
-        # compute squared‐distance to each swatch color
-        # (H*W)×1×3  minus 1×C×3 → (H*W)×C×3 → sum over rgb → (H*W)×C
-        dists = np.sum((flat[:,None,:] - snapped_swatches[None,:,:])**2, axis=2)
-        nearest = np.argmin(dists, axis=1)    # (H*W,)
+        flat       = binned.reshape(-1,3).astype(int)  # (H*W)×3
+        flat_miss  = miss.reshape(-1)                 # (H*W,)
+        # squared RGB distances to each swatch: → (H*W)×C
+        d2         = np.sum((flat[:,None,:] - snapped[None,:,:])**2, axis=2)
+        nearest    = np.argmin(d2, axis=1)            # (H*W,)
 
-        # assign each missed pixel to its nearest swatch mask
         for i in range(len(masks)):
             assign = (flat_miss & (nearest == i)).reshape(H, W)
-            # OR into the existing mask
             masks[i] = masks[i] | torch.from_numpy(assign)
 
     return masks
