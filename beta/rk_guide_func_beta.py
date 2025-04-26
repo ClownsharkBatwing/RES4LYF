@@ -171,7 +171,7 @@ class LatentGuide:
             latent_guide_weights     [steps_     :] = 0
             latent_guide_weights_inv [steps_inv_ :] = 0
             latent_guide_weights_mean[steps_mean_:] = 0
-                
+        
         self.lgw      = F.pad(latent_guide_weights,      (0, self.max_steps), value=0.0)
         self.lgw_inv  = F.pad(latent_guide_weights_inv,  (0, self.max_steps), value=0.0)
         self.lgw_mean = F.pad(latent_guide_weights_mean, (0, self.max_steps), value=0.0)
