@@ -529,8 +529,8 @@ class HDModel(nn.Module):
 
         img_orig, t_orig, y_orig, context_orig, llama3_orig = clone_inputs(img, t, y, context, encoder_hidden_states_llama3)
         
-        weight    = transformer_options.get("regional_conditioning_weight", 0.0)
-        floor     = transformer_options.get("regional_conditioning_floor",  0.0)
+        weight    = -1 * transformer_options.get("regional_conditioning_weight", 0.0)
+        floor     = -1 * transformer_options.get("regional_conditioning_floor",  0.0)
         #floor     = min(floor, weight)
         mask_zero = None
 
@@ -545,6 +545,7 @@ class HDModel(nn.Module):
             
             mask = None
             if not UNCOND and 'AttnMask' in transformer_options: # and weight != 0:
+                AttnMask = transformer_options['AttnMask']
                 mask = transformer_options['AttnMask'].attn_mask.mask.to('cuda')
                 if mask_zero is None:
                     mask_zero = torch.ones_like(mask)
@@ -563,6 +564,7 @@ class HDModel(nn.Module):
 
 
             if UNCOND and 'AttnMask_neg' in transformer_options: # and weight != 0:
+                AttnMask = transformer_options['AttnMask_neg']
                 mask = transformer_options['AttnMask_neg'].attn_mask.mask.to('cuda')
                 if mask_zero is None:
                     mask_zero = torch.ones_like(mask)
@@ -580,6 +582,7 @@ class HDModel(nn.Module):
                     llama3  = transformer_options['RegContext_neg'].llama3 .to(llama3 .dtype).to(llama3 .device)
 
             elif UNCOND and 'AttnMask' in transformer_options:
+                AttnMask = transformer_options['AttnMask']
                 mask = transformer_options['AttnMask'].attn_mask.mask.to('cuda')
                 A       = context
                 B       = transformer_options['RegContext'].context
@@ -655,18 +658,36 @@ class HDModel(nn.Module):
                 #txt_llama_orig = contexts_orig[bid]
                 #txt_orig       = torch.cat([txt_init_orig, txt_llama_orig], dim=1)        # 1,384,2560       # cur_contexts = T5, LLAMA3 (last block), LLAMA3 (current block)
 
-                if mask is not None:
-                    if floor > 0 and floor > bid/48:
-                        mask[:img_len,:img_len] = 1.0
+                """if mask is not None:
+                    #if floor > 0 and floor > bid/48:                 # neg weight hits early blocks             neg reg bleed hits late blocks
+                    #    mask[:img_len,:img_len] = 1.0
                     if weight > 0 and weight < bid/48:
-                        mask = mask_zero
-                
-                if weight < 0 and mask is not None and abs(weight) < (1 - bid/48):
+                        mask = mask_zero"""
+                if False:# weight != 0:
+                    mask = AttnMask.gen_edge_mask(bid)
+                        
+                if   weight > 0 and mask is not None and     weight  <      bid/48:
                     img, txt_init = block(img, img_masks, txt, clip, rope, mask_zero)
+                    
+                elif (weight < 0 and mask is not None and abs(weight) < (1 - bid/48)):
+                    img_tmpZ = img.clone()
+                    txt_tmpZ = txt.clone()
+                    #img_trash, txt_init = block(img, img_masks, txt, clip, rope, mask_zero)
+                    #img, txt_init_trash = block(img_tmpZ, img_masks, txt_tmpZ, clip, rope, mask)
+                    
+                    img, txt_init_trash = block(img, img_masks, txt, clip, rope, mask_zero)
+                    img_trash, txt_init = block(img_tmpZ, img_masks, txt_tmpZ, clip, rope, mask)
+                    
+                elif floor > 0 and mask is not None and     floor  >      bid/48:
+                    mask_tmp = mask.clone()
+                    mask_tmp[:img_len,:img_len] = 1.0
+                    img, txt_init = block(img, img_masks, txt, clip, rope, mask_tmp)
+                    
                 elif floor < 0 and mask is not None and abs(floor) > (1 - bid/48):
                     mask_tmp = mask.clone()
                     mask_tmp[:img_len,:img_len] = 1.0
                     img, txt_init = block(img, img_masks, txt, clip, rope, mask_tmp)
+                    
                 else:
                     img, txt_init = block(img, img_masks, txt, clip, rope, mask)
                     
@@ -686,18 +707,37 @@ class HDModel(nn.Module):
                 txt_llama = contexts[bid+16]                        # T5 pre-embedded for single stream blocks
                 img = torch.cat([img, txt_llama], dim=1)            # cat img,txt     opposite of flux which is txt,img       4303 + 143 -> 4446
 
-                if mask is not None:
-                    if floor > 0 and floor > (bid+16)/48:
-                        mask[:img_len,:img_len] = 1.0
+                """if mask is not None:
+                    #if floor > 0 and floor > (bid+16)/48:
+                    #    mask[:img_len,:img_len] = 1.0
                     if weight > 0 and weight < (bid+16)/48:
-                        mask = mask_zero
-                
-                if weight < 0 and mask is not None and abs(weight) < (1 - (bid+16)/48):
+                        mask = mask_zero"""
+                if False: #eight != 0:
+                    mask = AttnMask.gen_edge_mask(bid+16)
+                        
+                if   weight > 0 and mask is not None and     weight  <      (bid+16)/48:
                     img = block(img, img_masks, None, clip, rope, mask_zero)
+                    
+                elif weight < 0 and mask is not None and abs(weight) < (1 - (bid+16)/48):
+                    img = block(img, img_masks, None, clip, rope, mask_zero)
+                    
+                    """img_tmpZ = img.clone()
+                    img = block(img, img_masks, None, clip, rope, mask_zero)
+                    
+                    img_part_trash = block(img_tmpZ, img_masks, None, clip, rope, mask)
+                    
+                    img = torch.cat([img[..., :joint_len], img_part_trash[..., joint_len:]], dim=-1)"""
+                    
+                elif floor > 0 and mask is not None and     floor  >      (bid+16)/48:
+                    mask_tmp = mask.clone()
+                    mask_tmp[:img_len,:img_len] = 1.0
+                    img = block(img, img_masks, None, clip, rope, mask_tmp)
+                    
                 elif floor < 0 and mask is not None and abs(floor) > (1 - (bid+16)/48):
                     mask_tmp = mask.clone()
                     mask_tmp[:img_len,:img_len] = 1.0
                     img = block(img, img_masks, None, clip, rope, mask_tmp)
+                    
                 else:
                     img = block(img, img_masks, None, clip, rope, mask)
                 
