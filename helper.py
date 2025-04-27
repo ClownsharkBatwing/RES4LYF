@@ -41,11 +41,11 @@ class ExtraOptions():
             
             if match:
                 value = match.group(1)
-                Resplain("Set extra_option: (option, value)", option, value)
+                RESplain("Set extra_option: ", option, "=", value)
             else:
                 value = default
                 
-            if type(value) == str:
+            if type(value) == str: 
                 value = value.split(',')
             
                 if type(default[0]) == type:
@@ -60,7 +60,7 @@ class ExtraOptions():
             match = re.search(pattern, self.extra_options, flags=re.MULTILINE)
             if match:
                 value = ret_type(match.group(1))
-                Resplain("Set extra_option: (option, value)", option, value)
+                RESplain("Set extra_option: ", option, "=", value)
             else:
                 value = default
         
