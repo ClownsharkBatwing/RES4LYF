@@ -188,6 +188,9 @@ class FullAttentionMask(BaseAttentionMask):
         h         = self.h
         w         = self.w
         
+        if self.edge_width_list is None:
+            self.edge_width_list = [self.edge_width] * self.num_regions
+        
         attn_mask = torch.zeros((text_off+t*img_len, text_len+t*img_len), dtype=dtype)
         
         prev_len = 0
@@ -265,6 +268,9 @@ class FullAttentionMaskHiDream(BaseAttentionMask):
         t         = self.t
         h         = self.h
         w         = self.w
+        
+        if self.edge_width_list is None:
+            self.edge_width_list = [self.edge_width] * self.num_regions
         
         attn_mask = torch.zeros((text_off+t*img_len, text_len+t*img_len), dtype=dtype)
         reg_num  = 0
@@ -624,6 +630,9 @@ class SplitAttentionMask(BaseAttentionMask):
         t         = self.t
         h         = self.h
         w         = self.w
+        
+        if self.edge_width_list is None:
+            self.edge_width_list = [self.edge_width] * self.num_regions
         
         cross_attn_mask = torch.zeros((t * img_len,    text_len), dtype=dtype)
         self_attn_mask  = torch.zeros((t * img_len, t * img_len), dtype=dtype)
