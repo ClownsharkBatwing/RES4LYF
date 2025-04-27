@@ -526,6 +526,18 @@ class HDModel(nn.Module):
     ) -> Tensor:
         b, c, h, w  = x.shape
         img          = comfy.ldm.common_dit.pad_to_patch_size(x, (self.patch_size, self.patch_size))
+        
+        if 'y0' in transformer_options:
+            self.y0 = transformer_options['y0'].clone().to(x)
+            y0 = self.y0.clone()
+            sigma_curr = t[0].item() / 1000
+            #y0 = (1 - sigma_curr) * y0 + sigma_curr * torch.randn_like(y0)
+            
+            y0 = (1 - 0.01) * y0 + 0.01 * torch.randn_like(y0)
+            
+            img_y0 = comfy.ldm.common_dit.pad_to_patch_size(y0, (self.patch_size, self.patch_size))
+        else:
+            y0 = None
 
         img_orig, t_orig, y_orig, context_orig, llama3_orig = clone_inputs(img, t, y, context, encoder_hidden_states_llama3)
         
@@ -538,7 +550,6 @@ class HDModel(nn.Module):
         for cond_iter in range(len(transformer_options['cond_or_uncond'])):
             UNCOND = transformer_options['cond_or_uncond'][cond_iter] == 1
 
-            img_sizes = None
             bsz = 1
 
             img, t, y, context, llama3 = clone_inputs(img_orig, t_orig, y_orig, context_orig, llama3_orig, index=cond_iter)
@@ -601,7 +612,15 @@ class HDModel(nn.Module):
             t    = self.expand_timesteps(t, bsz, img.device)
             t    = self.t_embedder      (t,      img.dtype)
             clip = t + self.p_embedder(y)
+            
+            if y0 is not None:
+                t_y0 = torch.full_like(t_orig, 10.0)[0].unsqueeze(0)
+                t_y0    = self.expand_timesteps(t_y0, bsz, img.device)
+                t_y0    = self.t_embedder      (t_y0,      img.dtype)
+                y = y_orig.clone()[0].unsqueeze(0)
+                clip_y0 = t_y0 + self.p_embedder(y)    
 
+            img_sizes = None
             img, img_masks, img_sizes = self.patchify(img, self.max_seq, img_sizes)   # for 1024x1024: output is   1,4096,64   None   [[64,64]]     hidden_states rearranged not shrunk, patch_size 1x1???
             if img_masks is None:
                 pH, pW          = img_sizes[0]
@@ -610,6 +629,20 @@ class HDModel(nn.Module):
                 img_ids[..., 2] = img_ids[..., 2] + torch.arange(pW, device=img.device)[None, :]
                 img_ids         = repeat(img_ids, "h w c -> b (h w) c", b=bsz)
             img = self.x_embedder(img)  # hidden_states 1,4032,2560         for 1024x1024: -> 1,4096,2560      ,64 -> ,2560 (x40)
+            
+            if not UNCOND and y0 is not None:
+                img_sizes_y0 = None
+                img_y0, img_masks_y0, img_sizes_y0 = self.patchify(img_y0, self.max_seq, img_sizes_y0)   # for 1024x1024: output is   1,4096,64   None   [[64,64]]     hidden_states rearranged not shrunk, patch_size 1x1???
+                if img_masks_y0 is None:
+                    pH, pW          = img_sizes_y0[0]
+                    img_ids_y0         = torch.zeros(pH, pW, 3, device=img_y0.device)
+                    img_ids_y0[..., 1] = img_ids_y0[..., 1] + torch.arange(pH, device=img_y0.device)[:, None]
+                    img_ids_y0[..., 2] = img_ids_y0[..., 2] + torch.arange(pW, device=img_y0.device)[None, :]
+                    img_ids_y0         = repeat(img_ids_y0, "h w c -> b (h w) c", b=bsz)
+                img_y0 = self.x_embedder(img_y0)  # hidden_states 1,4032,2560         for 1024x1024: -> 1,4096,2560      ,64 -> ,2560 (x40)
+
+                ids_y0     = torch.cat((img_ids_y0, txt_ids), dim=1) 
+                rope_y0    = self.pe_embedder(ids_y0) 
             
             #contexts_orig = self.prepare_contexts(llama3_orig, context_orig, bsz, img.shape[-1])
             contexts = self.prepare_contexts(llama3, context, bsz, img.shape[-1])
@@ -658,25 +691,15 @@ class HDModel(nn.Module):
                 #txt_llama_orig = contexts_orig[bid]
                 #txt_orig       = torch.cat([txt_init_orig, txt_llama_orig], dim=1)        # 1,384,2560       # cur_contexts = T5, LLAMA3 (last block), LLAMA3 (current block)
 
-                """if mask is not None:
-                    #if floor > 0 and floor > bid/48:                 # neg weight hits early blocks             neg reg bleed hits late blocks
-                    #    mask[:img_len,:img_len] = 1.0
-                    if weight > 0 and weight < bid/48:
-                        mask = mask_zero"""
-                if False:# weight != 0:
-                    mask = AttnMask.gen_edge_mask(bid)
-                        
                 if   weight > 0 and mask is not None and     weight  <      bid/48:
                     img, txt_init = block(img, img_masks, txt, clip, rope, mask_zero)
                     
                 elif (weight < 0 and mask is not None and abs(weight) < (1 - bid/48)):
-                    img_tmpZ = img.clone()
-                    txt_tmpZ = txt.clone()
-                    #img_trash, txt_init = block(img, img_masks, txt, clip, rope, mask_zero)
-                    #img, txt_init_trash = block(img_tmpZ, img_masks, txt_tmpZ, clip, rope, mask)
-                    
-                    img, txt_init_trash = block(img, img_masks, txt, clip, rope, mask_zero)
-                    img_trash, txt_init = block(img_tmpZ, img_masks, txt_tmpZ, clip, rope, mask)
+                    img_tmpZ, txt_tmpZ = img.clone(), txt.clone()
+
+                    # more efficient than the commented lines below being used instead in the loop?
+                    img_tmpZ, txt_init = block(img_tmpZ, img_masks, txt_tmpZ, clip, rope, mask)
+                    img     , txt_tmpZ = block(img     , img_masks, txt     , clip, rope, mask_zero)
                     
                 elif floor > 0 and mask is not None and     floor  >      bid/48:
                     mask_tmp = mask.clone()
@@ -689,7 +712,11 @@ class HDModel(nn.Module):
                     img, txt_init = block(img, img_masks, txt, clip, rope, mask_tmp)
                     
                 else:
+                    if not UNCOND and y0 is not None:
+                        txtZ = txt.clone()
                     img, txt_init = block(img, img_masks, txt, clip, rope, mask)
+                    if not UNCOND and y0 is not None:
+                        img_y0, txt_init = block(img_y0, img_masks, txtZ, clip_y0, rope_y0, mask)
                     
                 txt_init = txt_init[:, :txt_init_len]
                 
@@ -707,11 +734,7 @@ class HDModel(nn.Module):
                 txt_llama = contexts[bid+16]                        # T5 pre-embedded for single stream blocks
                 img = torch.cat([img, txt_llama], dim=1)            # cat img,txt     opposite of flux which is txt,img       4303 + 143 -> 4446
 
-                """if mask is not None:
-                    #if floor > 0 and floor > (bid+16)/48:
-                    #    mask[:img_len,:img_len] = 1.0
-                    if weight > 0 and weight < (bid+16)/48:
-                        mask = mask_zero"""
+
                 if False: #eight != 0:
                     mask = AttnMask.gen_edge_mask(bid+16)
                         
