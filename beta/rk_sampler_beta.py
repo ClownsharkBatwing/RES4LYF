@@ -418,6 +418,9 @@ def sample_rk_beta(
     if AttnMask_neg is not None:
         RK.update_transformer_options({'AttnMask_neg'  : AttnMask_neg})
         RK.update_transformer_options({'RegContext_neg': RegContext_neg})
+        
+    if EO("y0_to_transformer_options"):
+        RK.update_transformer_options({'y0':  LG.y0.clone()})
 
     while step < num_steps:
         sigma, sigma_next = sigmas[step], sigmas[step+1]
