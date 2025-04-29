@@ -1,0 +1,15 @@
+[project]
+name = "res4lyf"
+description = "Advanced samplers with new noise scaling math to enable SDE sampling with all publicly available rectified flow models; new unsampling/noise inversion methods and other advanced techniques for inpainting and/or guiding the sampling process with latent images. 40 sampler types, 20 noise types, 7 noise scaling modes, in a single node. Also includes a wide variety of QoF and other utility nodes for manipulating sigmas, latents, images, and more."
+version = "1.0.0"
+license = {file = "LICENSE"}
+dependencies = ["matplotlib", "pywavelets", "numpy"]
+
+[project.urls]
+Repository = "https://github.com/ClownsharkBatwing/RES4LYF"
+#  Used by Comfy Registry https://comfyregistry.org
+
+[tool.comfy]
+PublisherId = ""
+DisplayName = "RES4LYF"
+Icon = ""
