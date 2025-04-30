@@ -1,9 +1,8 @@
-from typing import Optional, Tuple, List
-from dataclasses import dataclass
-
 import torch
 import torch.nn as nn
 from torch import Tensor, FloatTensor
+from typing import Optional, Callable, Tuple, List, Dict, Any, Union, TYPE_CHECKING, TypeVar
+from dataclasses import dataclass
 
 import einops
 from einops import repeat
@@ -18,6 +17,8 @@ from comfy.ldm.modules.attention import optimized_attention, attention_pytorch
 import comfy.model_management
 import comfy.ldm.common_dit
 
+from ..helper  import ExtraOptions
+from ..latents import slerp_tensor
 
 @dataclass
 class ModulationOut:
@@ -55,13 +56,16 @@ class HDBlock(nn.Module):
     def forward(
         self,
         img       :          FloatTensor,
-        img_masks : Optional[FloatTensor] = None,
-        txt       : Optional[FloatTensor] = None,
-        clip      :          FloatTensor  = None,
-        rope      :          FloatTensor  = None,
-        mask      : Optional[FloatTensor] = None,
+        img_masks : Optional[FloatTensor]  = None,
+        txt       : Optional[FloatTensor]  = None,
+        clip      :          FloatTensor   = None,
+        rope      :          FloatTensor   = None,
+        mask      : Optional[FloatTensor]  = None,
+        update_cross_attn : Optional[Dict] = None,
+        cache_v   :                  bool  = False,
+        attninj_opts :      Optional[Dict] = {},
     ) -> FloatTensor:
-        return self.block(img, img_masks, txt, clip, rope, mask)
+        return self.block(img, img_masks, txt, clip, rope, mask, update_cross_attn, cache_v, attninj_opts)
 
 
 
@@ -263,13 +267,53 @@ class HDAttention(nn.Module):
         txt       : Optional[FloatTensor] = None,
         rope      :          FloatTensor  = None,
         mask      : Optional[FloatTensor] = None,
+        update_cross_attn : Optional[Dict]= None,
+        cache_v : bool = False,
+        attninj_opts : Optional[Dict] = {},
     ) -> Tensor:
-        
+
         bsz = img.shape[0]
 
         img_q = self.q_rms_norm(self.to_q(img))
         img_k = self.k_rms_norm(self.to_k(img))
         img_v =                 self.to_v(img)
+
+        weight_img_q = attninj_opts.get("img_q", 0.0)
+        weight_img_k = attninj_opts.get("img_k", 0.0)
+        weight_img_v = attninj_opts.get("img_v", 0.0)
+        
+        weight_img_q_norm = attninj_opts.get("img_q_norm", 0.0)
+        weight_img_k_norm = attninj_opts.get("img_k_norm", 0.0)
+        weight_img_v_norm = attninj_opts.get("img_v_norm", 0.0)
+
+        if cache_v:
+            if weight_img_q != 0 or weight_img_q_norm != 0:
+                self.img_q_cache = img_q
+            if weight_img_k != 0 or weight_img_k_norm != 0:
+                self.img_k_cache = img_k
+            if weight_img_v != 0 or weight_img_v_norm != 0:
+                self.img_v_cache = img_v
+        else: 
+            if self.EO("slerp"):
+                interp_fn = slerp_tensor
+            else:
+                interp_fn = lambda weight, A, B: (1-weight) * A + weight * B
+
+            if weight_img_q != 0 and hasattr(self, "img_q_cache"):
+                img_q = interp_fn(weight_img_q, img_q, self.img_q_cache)
+            if weight_img_k != 0 and hasattr(self, "img_k_cache"):
+                img_k = interp_fn(weight_img_k, img_k, self.img_k_cache)
+            if weight_img_v != 0 and hasattr(self, "img_v_cache"):
+                img_v = interp_fn(weight_img_v, img_v, self.img_v_cache)
+                
+            if weight_img_q_norm != 0 and hasattr(self, "img_q_cache"):
+                img_q = interp_fn(weight_img_q_norm, img_q, adain_seq(img_q, self.img_q_cache))
+            if weight_img_k_norm != 0 and hasattr(self, "img_k_cache"):
+                img_k = interp_fn(weight_img_k_norm, img_k, adain_seq(img_k, self.img_k_cache))
+            if weight_img_v_norm != 0 and hasattr(self, "img_v_cache"):
+                img_v = interp_fn(weight_img_v_norm, img_v, adain_seq(img_v, self.img_v_cache))
+                
+
 
         inner_dim = img_k.shape[-1]
         head_dim  = inner_dim // self.heads
@@ -281,26 +325,125 @@ class HDAttention(nn.Module):
         if img_masks is not None:
             img_k = img_k * img_masks.view(bsz, -1, 1, 1)
 
+
         if self.single:
             attn = attention(img_q, img_k, img_v, rope=rope, mask=mask)
             return self.to_out(attn)
         else:
+            
             txt_q   = self.q_rms_norm_t(self.to_q_t(txt))
             txt_k   = self.k_rms_norm_t(self.to_k_t(txt))
             txt_v   =                   self.to_v_t(txt)
 
+            weight_txt_q = attninj_opts.get("txt_q", 0.0)
+            weight_txt_k = attninj_opts.get("txt_k", 0.0)
+            weight_txt_v = attninj_opts.get("txt_v", 0.0)
+            
+            weight_txt_q_norm = attninj_opts.get("txt_q_norm", 0.0)
+            weight_txt_k_norm = attninj_opts.get("txt_k_norm", 0.0)
+            weight_txt_v_norm = attninj_opts.get("txt_v_norm", 0.0)
+
+            if cache_v:
+                if weight_txt_q != 0 or weight_txt_q_norm != 0:
+                    self.txt_q_cache = txt_q
+                if weight_txt_k != 0 or weight_txt_k_norm != 0:
+                    self.txt_k_cache = txt_k
+                if weight_txt_v != 0 or weight_txt_v_norm != 0:
+                    self.txt_v_cache = txt_v
+            else: 
+                if self.EO("slerp"):
+                    interp_fn = slerp_tensor
+                else:
+                    interp_fn = lambda weight, A, B: (1-weight) * A + weight * B
+
+                if weight_txt_q != 0 and hasattr(self, "txt_q_cache"):
+                    txt_q = interp_fn(weight_txt_q, txt_q, self.txt_q_cache)
+                if weight_txt_k != 0 and hasattr(self, "txt_k_cache"):
+                    txt_k = interp_fn(weight_txt_k, txt_k, self.txt_k_cache)
+                if weight_txt_v != 0 and hasattr(self, "txt_v_cache"):
+                    txt_v = interp_fn(weight_txt_v, txt_v, self.txt_v_cache)
+                    
+                if weight_txt_q_norm != 0 and hasattr(self, "txt_q_cache"):
+                    txt_q = interp_fn(weight_txt_q_norm, txt_q, adain_seq(txt_q, self.txt_q_cache))
+                if weight_txt_k_norm != 0 and hasattr(self, "txt_k_cache"):
+                    txt_k = interp_fn(weight_txt_k_norm, txt_k, adain_seq(txt_k, self.txt_k_cache))
+                if weight_txt_v_norm != 0 and hasattr(self, "txt_v_cache"):
+                    txt_v = interp_fn(weight_txt_v_norm, txt_v, adain_seq(txt_v, self.txt_v_cache))
+
             txt_q   = txt_q.view(bsz, -1, self.heads, head_dim)
             txt_k   = txt_k.view(bsz, -1, self.heads, head_dim)
             txt_v   = txt_v.view(bsz, -1, self.heads, head_dim)
-
+            
             img_len = img_q.shape[1]
             txt_len = txt_q.shape[1]
             
             attn    = attention(torch.cat([img_q, txt_q], dim=1), 
                                 torch.cat([img_k, txt_k], dim=1), 
                                 torch.cat([img_v, txt_v], dim=1), rope=rope, mask=mask)
+            
+            img_attn, txt_attn = torch.split(attn, [img_len, txt_len], dim=1)   #1, 4480, 2560
+            
+            if cache_v == True and self.EO("img_attn_adain"):
+                self.img_attn_cache = img_attn.clone()
+            elif hasattr(self, "img_attn_cache") and self.EO("img_attn_adain"):
+                attn_adain_weight = self.EO("img_attn_adain_weight", 0.99)
+                img_attn = attn_adain_weight * img_attn + (1 - attn_adain_weight) * adain_seq(img_attn, self.img_attn_cache)
+                del self.img_attn_cache
+            
+            #if anticond == "uncond":
+            #    txt_src    = torch.cat([txt[:,1:3,:], txt[:,129:131,:], txt[:,257:259],], dim=-2).float()
+            #    self.c_src = txt_src.transpose(-2,-1).squeeze(0)    # shape [C,1]
 
-            img_attn, txt_attn = torch.split(attn, [img_len, txt_len], dim=1)
+            if update_cross_attn is not None:
+                if not update_cross_attn['skip_cross_attn']:
+                    UNCOND      = update_cross_attn['UNCOND']
+                    
+                    if UNCOND:
+                        llama_start = update_cross_attn['src_llama_start']
+                        llama_end   = update_cross_attn['src_llama_end']
+                        t5_start    = update_cross_attn['src_t5_start']
+                        t5_end      = update_cross_attn['src_t5_end']
+                    
+                        txt_src    = torch.cat([txt[:,t5_start:t5_end,:], txt[:,128+llama_start:128+llama_end,:], txt[:,256+llama_start:256+llama_end],], dim=-2).float()
+                        self.c_src = txt_src.transpose(-2,-1).squeeze(0)    # shape [C,1]
+                    else:
+                        llama_start = update_cross_attn['tgt_llama_start']
+                        llama_end   = update_cross_attn['tgt_llama_end']
+                        t5_start    = update_cross_attn['tgt_t5_start']
+                        t5_end      = update_cross_attn['tgt_t5_end']
+                        
+                        lamb  = update_cross_attn['lamb']
+                        erase = update_cross_attn['erase']
+                        
+                        txt_guide = torch.cat([txt[:,t5_start:t5_end,:], txt[:,128+llama_start:128+llama_end,:], txt[:,256+llama_start:256+llama_end],], dim=-2).float()
+                        c_guide   = txt_guide.transpose(-2,-1).squeeze(0)  # [C,1]
+                        
+                        Wv_old       = self.to_v_t.weight.data.float()              # [C,C]
+                        Wk_old       = self.to_k_t.weight.data.float()              # [C,C]
+
+                        v_star       = Wv_old @ c_guide                             # [C,1]
+                        k_star       = Wk_old @ c_guide                             # [C,1]
+
+                        c_src        = self.c_src                                   # [C,1]
+
+                        lamb         = lamb
+                        erase_scale  = erase
+                        d            = c_src.shape[0]
+
+                        C            = c_src @ c_src.T                              # [C,C]
+                        I            = torch.eye(d, device=C.device, dtype=C.dtype)
+
+                        mat1_v       = lamb*Wv_old + erase_scale*(v_star @ c_src.T)     # [C,C]
+                        mat2_v       = lamb*I      + erase_scale*(C)                    # [C,C]
+                        Wv_new       = mat1_v @ torch.inverse(mat2_v)                   # [C,C]
+
+                        mat1_k       = lamb*Wk_old + erase_scale*(k_star @ c_src.T)     # [C,C]
+                        mat2_k       = lamb*I      + erase_scale*(C)                    # [C,C]
+                        Wk_new       = mat1_k @ torch.inverse(mat2_k)                   # [C,C]
+
+                        self.to_v_t.weight.data.copy_(Wv_new.to(self.to_v_t.weight.data.dtype))
+                        self.to_k_t.weight.data.copy_(Wk_new.to(self.to_k_t.weight.data.dtype))
+                
             return self.to_out(img_attn), self.to_out_t(txt_attn)
 
     
@@ -320,19 +463,19 @@ class HDBlockDouble(nn.Module):
         super().__init__()
         self.adaLN_modulation = nn.Sequential(
             nn.SiLU(),
-            operations.Linear(dim, 12*dim, bias=True,                                                 dtype=dtype, device=device)
+            operations.Linear(dim, 12*dim, bias=True,                                               dtype=dtype, device=device)
         )
 
-        self.norm1_i = operations.LayerNorm(dim, eps = 1e-06, elementwise_affine = False,             dtype=dtype, device=device)
-        self.norm1_t = operations.LayerNorm(dim, eps = 1e-06, elementwise_affine = False,             dtype=dtype, device=device)
+        self.norm1_i = operations.LayerNorm(dim, eps = 1e-06, elementwise_affine = False,           dtype=dtype, device=device)
+        self.norm1_t = operations.LayerNorm(dim, eps = 1e-06, elementwise_affine = False,           dtype=dtype, device=device)
         
-        self.attn1     = HDAttention         (dim, heads, head_dim, single=False,                     dtype=dtype, device=device, operations=operations)
+        self.attn1   = HDAttention         (dim, heads, head_dim, single=False,                     dtype=dtype, device=device, operations=operations)
 
-        self.norm3_i = operations.LayerNorm(dim, eps = 1e-06, elementwise_affine = False,             dtype=dtype, device=device)
-        self.ff_i      = MOEFeedForwardSwiGLU(dim, 4*dim, num_routed_experts, num_activated_experts,  dtype=dtype, device=device, operations=operations)
+        self.norm3_i = operations.LayerNorm(dim, eps = 1e-06, elementwise_affine = False,           dtype=dtype, device=device)
+        self.ff_i    = MOEFeedForwardSwiGLU(dim, 4*dim, num_routed_experts, num_activated_experts,  dtype=dtype, device=device, operations=operations)
                 
-        self.norm3_t = operations.LayerNorm(dim, eps = 1e-06, elementwise_affine = False,             dtype=dtype, device=device)                                 
-        self.ff_t      =    FeedForwardSwiGLU(dim, 4*dim,                                             dtype=dtype, device=device, operations=operations)
+        self.norm3_t = operations.LayerNorm(dim, eps = 1e-06, elementwise_affine = False,           dtype=dtype, device=device)                                 
+        self.ff_t    =    FeedForwardSwiGLU(dim, 4*dim,                                             dtype=dtype, device=device, operations=operations)
 
     def forward(
         self,
@@ -342,6 +485,9 @@ class HDBlockDouble(nn.Module):
         clip      : Optional[FloatTensor] = None,    # clip = t + p_embedder (from pooled)
         rope      :          FloatTensor  = None,
         mask      : Optional[FloatTensor] = None,
+        update_cross_attn : Optional[Dict]= None,
+        cache_v   :                  bool = True,
+        attninj_opts :     Optional[Dict] = {},
     ) -> FloatTensor:
         
         img_msa_shift, img_msa_scale, img_msa_gate, img_mlp_shift, img_mlp_scale, img_mlp_gate, \
@@ -350,7 +496,7 @@ class HDBlockDouble(nn.Module):
         img_norm = self.norm1_i(img) * (1+img_msa_scale) + img_msa_shift
         txt_norm = self.norm1_t(txt) * (1+txt_msa_scale) + txt_msa_shift
 
-        img_attn, txt_attn = self.attn1(img_norm, img_masks, txt_norm, rope=rope, mask=mask)
+        img_attn, txt_attn = self.attn1(img_norm, img_masks, txt_norm, rope=rope, mask=mask, update_cross_attn=update_cross_attn, cache_v=cache_v, attninj_opts=attninj_opts)
         
         img     += img_attn            *    img_msa_gate
         img_norm = self.norm3_i(img) * (1+img_mlp_scale) + img_mlp_shift
@@ -377,23 +523,26 @@ class HDBlockSingle(nn.Module):
         super().__init__()
         self.adaLN_modulation = nn.Sequential(
             nn.SiLU(),
-            operations.Linear(dim, 6 * dim, bias=True,                                                dtype=dtype, device=device)
+            operations.Linear(dim, 6 * dim, bias=True,                                              dtype=dtype, device=device)
         )
 
-        self.norm1_i = operations.LayerNorm(dim, eps = 1e-06, elementwise_affine = False,             dtype=dtype, device=device)
-        self.attn1     = HDAttention         (dim, heads, head_dim, single=True,                      dtype=dtype, device=device, operations=operations)
+        self.norm1_i = operations.LayerNorm(dim, eps = 1e-06, elementwise_affine = False,           dtype=dtype, device=device)
+        self.attn1   = HDAttention         (dim, heads, head_dim, single=True,                      dtype=dtype, device=device, operations=operations)
 
-        self.norm3_i = operations.LayerNorm(dim, eps = 1e-06, elementwise_affine = False,             dtype=dtype, device=device)
-        self.ff_i      = MOEFeedForwardSwiGLU(dim, 4*dim, num_routed_experts, num_activated_experts,  dtype=dtype, device=device, operations=operations)
+        self.norm3_i = operations.LayerNorm(dim, eps = 1e-06, elementwise_affine = False,           dtype=dtype, device=device)
+        self.ff_i    = MOEFeedForwardSwiGLU(dim, 4*dim, num_routed_experts, num_activated_experts,  dtype=dtype, device=device, operations=operations)
 
     def forward(
         self,
-        img       :          FloatTensor,
-        img_masks : Optional[FloatTensor] = None,
-        txt       : Optional[FloatTensor] = None,
-        clip      : Optional[FloatTensor] = None,
-        rope      :          FloatTensor  = None,
-        mask      : Optional[FloatTensor] = None,
+        img        :          FloatTensor,
+        img_masks  : Optional[FloatTensor]  = None,
+        txt        : Optional[FloatTensor]  = None,
+        clip       : Optional[FloatTensor]  = None,
+        rope       :          FloatTensor   = None,
+        mask       : Optional[FloatTensor]  = None,
+        update_cross_attn : Optional[Dict] = None,
+        cache_v   :                  bool  = True,
+        attninj_opts :      Optional[Dict]  = None,
 
     ) -> FloatTensor:
         
@@ -401,7 +550,7 @@ class HDBlockSingle(nn.Module):
 
         img_norm = self.norm1_i(img) * (1+img_msa_scale) + img_msa_shift
         
-        img_attn = self.attn1(img_norm, img_masks, rope=rope, mask=mask)
+        img_attn = self.attn1(img_norm, img_masks, rope=rope, mask=mask, cache_v=cache_v, attninj_opts=attninj_opts)
         
         img     += img_attn            *    img_msa_gate
         img_norm = self.norm3_i(img) * (1+img_mlp_scale) + img_mlp_shift
@@ -508,6 +657,7 @@ class HDModel(nn.Module):
             contexts = contexts_list
             context  = self.caption_projection[-1](context)
             context  = context.view(bsz, -1, img_num_fea)
+            
             contexts.append(context)                      # len == 49...... of tensors that are 1,143,2560.   last chunk is T5
 
         return contexts
@@ -526,19 +676,48 @@ class HDModel(nn.Module):
     ) -> Tensor:
         b, c, h, w  = x.shape
         img          = comfy.ldm.common_dit.pad_to_patch_size(x, (self.patch_size, self.patch_size))
+        update_cross_attn = transformer_options.get("update_cross_attn")
         
-        if 'y0' in transformer_options:
-            self.y0 = transformer_options['y0'].clone().to(x)
-            y0 = self.y0.clone()
-            sigma_curr = t[0].item() / 1000
-            #y0 = (1 - sigma_curr) * y0 + sigma_curr * torch.randn_like(y0)
+        EO = transformer_options.get("ExtraOptions", ExtraOptions(""))
+        if EO is not None:
+            EO.mute = True
             
-            y0 = (1 - 0.01) * y0 + 0.01 * torch.randn_like(y0)
+        for block in self.double_stream_blocks:
+            block.block.attn1.EO = EO
+        for block in self.single_stream_blocks:
+            block.block.attn1.EO = EO
             
-            img_y0 = comfy.ldm.common_dit.pad_to_patch_size(y0, (self.patch_size, self.patch_size))
+        ADAIN_SINGLE_BLOCKS,   ADAIN_DOUBLE_BLOCKS   = [-1], [-1]
+        ATTNINJ_SINGLE_BLOCKS, ATTNINJ_DOUBLE_BLOCKS = [-1], [-1]
+        
+        y0_adain,   img_y0_adain,   img_sizes_y0_adain   = None, None, None
+        y0_attninj, img_y0_attninj, img_sizes_y0_attninj = None, None, None
+        blocks_attninj_qkv_scaled = {}
+        
+        y0_adain = transformer_options.get("y0_adain")
+        if y0_adain is not None:
+            y0_adain            = y0_adain.to(x)
+            img_y0_adain        = comfy.ldm.common_dit.pad_to_patch_size(y0_adain, (self.patch_size, self.patch_size))
+            t_y0_adain          = torch.full_like(t, 0.0)[0].unsqueeze(0)
+            blocks_adain        = transformer_options.get("blocks_adain")
+            ADAIN_SINGLE_BLOCKS = blocks_adain['single_blocks']
+            ADAIN_DOUBLE_BLOCKS = blocks_adain['double_blocks']
+        
+        y0_attninj = transformer_options.get("y0_attninj")
+        if y0_attninj is not None:
+            y0_attninj            = y0_attninj.to(x)
+            img_y0_attninj        = comfy.ldm.common_dit.pad_to_patch_size(y0_attninj, (self.patch_size, self.patch_size))
+            t_y0_attninj          = torch.full_like(t, 0.0)[0].unsqueeze(0)
+            blocks_attninj        = transformer_options.get("blocks_attninj")
+            blocks_attninj_qkv    = transformer_options.get("blocks_attninj_qkv")
+            ATTNINJ_SINGLE_BLOCKS = blocks_attninj['single_blocks']
+            ATTNINJ_DOUBLE_BLOCKS = blocks_attninj['double_blocks']
+        
+        if y0_adain is not None and y0_attninj is not None and torch.norm(y0_adain - y0_attninj) == 0.0:
+            IDENTICAL_ADAIN_ATTNINJ = True
         else:
-            y0 = None
-
+            IDENTICAL_ADAIN_ATTNINJ = False
+            
         img_orig, t_orig, y_orig, context_orig, llama3_orig = clone_inputs(img, t, y, context, encoder_hidden_states_llama3)
         
         weight    = -1 * transformer_options.get("regional_conditioning_weight", 0.0)
@@ -549,7 +728,10 @@ class HDModel(nn.Module):
         out_list = []
         for cond_iter in range(len(transformer_options['cond_or_uncond'])):
             UNCOND = transformer_options['cond_or_uncond'][cond_iter] == 1
-
+            
+            if update_cross_attn is not None:
+                update_cross_attn['UNCOND'] = UNCOND
+            
             bsz = 1
 
             img, t, y, context, llama3 = clone_inputs(img_orig, t_orig, y_orig, context_orig, llama3_orig, index=cond_iter)
@@ -603,22 +785,29 @@ class HDModel(nn.Module):
                 B       = transformer_options['RegContext'].llama3
                 llama3  = A.repeat(1, 1, (B.shape[2] // A.shape[2]) + 1, 1)[:,:, :B.shape[2], :]
 
-
             if self.manual_mask is not None:
                 mask = self.manual_mask
-
 
             # prep embeds
             t    = self.expand_timesteps(t, bsz, img.device)
             t    = self.t_embedder      (t,      img.dtype)
             clip = t + self.p_embedder(y)
             
-            if y0 is not None:
-                t_y0 = torch.full_like(t_orig, 10.0)[0].unsqueeze(0)
-                t_y0    = self.expand_timesteps(t_y0, bsz, img.device)
-                t_y0    = self.t_embedder      (t_y0,      img.dtype)
+            if y0_adain is not None and img_sizes_y0_adain is None:
+                #t_y0_adain = t_orig[0].unsqueeze(0).clone() # torch.full_like(t_orig, 10.0)[0].unsqueeze(0)
+                
+                t_y0_adain    = self.expand_timesteps(t_y0_adain, bsz, img.device)
+                t_y0_adain    = self.t_embedder      (t_y0_adain,      img.dtype)
                 y = y_orig.clone()[0].unsqueeze(0)
-                clip_y0 = t_y0 + self.p_embedder(y)    
+                clip_y0_adain = t_y0_adain + self.p_embedder(y)   
+
+            if y0_attninj is not None and img_sizes_y0_attninj is None:
+                #t_y0_attninj = t_orig[0].unsqueeze(0).clone() # torch.full_like(t_orig, 10.0)[0].unsqueeze(0)
+                
+                t_y0_attninj    = self.expand_timesteps(t_y0_attninj, bsz, img.device)
+                t_y0_attninj    = self.t_embedder      (t_y0_attninj,      img.dtype)
+                y = y_orig.clone()[0].unsqueeze(0)
+                clip_y0_attninj = t_y0_attninj + self.p_embedder(y)   
 
             img_sizes = None
             img, img_masks, img_sizes = self.patchify(img, self.max_seq, img_sizes)   # for 1024x1024: output is   1,4096,64   None   [[64,64]]     hidden_states rearranged not shrunk, patch_size 1x1???
@@ -629,20 +818,29 @@ class HDModel(nn.Module):
                 img_ids[..., 2] = img_ids[..., 2] + torch.arange(pW, device=img.device)[None, :]
                 img_ids         = repeat(img_ids, "h w c -> b (h w) c", b=bsz)
             img = self.x_embedder(img)  # hidden_states 1,4032,2560         for 1024x1024: -> 1,4096,2560      ,64 -> ,2560 (x40)
-            
-            if not UNCOND and y0 is not None:
-                img_sizes_y0 = None
-                img_y0, img_masks_y0, img_sizes_y0 = self.patchify(img_y0, self.max_seq, img_sizes_y0)   # for 1024x1024: output is   1,4096,64   None   [[64,64]]     hidden_states rearranged not shrunk, patch_size 1x1???
-                if img_masks_y0 is None:
-                    pH, pW          = img_sizes_y0[0]
-                    img_ids_y0         = torch.zeros(pH, pW, 3, device=img_y0.device)
-                    img_ids_y0[..., 1] = img_ids_y0[..., 1] + torch.arange(pH, device=img_y0.device)[:, None]
-                    img_ids_y0[..., 2] = img_ids_y0[..., 2] + torch.arange(pW, device=img_y0.device)[None, :]
-                    img_ids_y0         = repeat(img_ids_y0, "h w c -> b (h w) c", b=bsz)
-                img_y0 = self.x_embedder(img_y0)  # hidden_states 1,4032,2560         for 1024x1024: -> 1,4096,2560      ,64 -> ,2560 (x40)
 
-                ids_y0     = torch.cat((img_ids_y0, txt_ids), dim=1) 
-                rope_y0    = self.pe_embedder(ids_y0) 
+            if y0_adain is not None and img_sizes_y0_adain is None: #and not UNCOND 
+                img_sizes_y0_adain = None
+                img_y0_adain, img_masks_y0_adain, img_sizes_y0_adain = self.patchify(img_y0_adain, self.max_seq, img_sizes_y0_adain)   # for 1024x1024: output is   1,4096,64   None   [[64,64]]     hidden_states rearranged not shrunk, patch_size 1x1???
+                if img_masks_y0_adain is None:
+                    pH, pW          = img_sizes_y0_adain[0]
+                    img_ids_y0_adain         = torch.zeros(pH, pW, 3, device=img_y0_adain.device)
+                    img_ids_y0_adain[..., 1] = img_ids_y0_adain[..., 1] + torch.arange(pH, device=img_y0_adain.device)[:, None]
+                    img_ids_y0_adain[..., 2] = img_ids_y0_adain[..., 2] + torch.arange(pW, device=img_y0_adain.device)[None, :]
+                    img_ids_y0_adain         = repeat(img_ids_y0_adain, "h w c -> b (h w) c", b=bsz)
+                img_y0_adain = self.x_embedder(img_y0_adain)  # hidden_states 1,4032,2560         for 1024x1024: -> 1,4096,2560      ,64 -> ,2560 (x40)
+            
+            if y0_attninj is not None and img_sizes_y0_attninj is None: #and not UNCOND 
+                img_sizes_y0_attninj = None
+                img_y0_attninj, img_masks_y0_attninj, img_sizes_y0_attninj = self.patchify(img_y0_attninj, self.max_seq, img_sizes_y0_attninj)   # for 1024x1024: output is   1,4096,64   None   [[64,64]]     hidden_states rearranged not shrunk, patch_size 1x1???
+                if img_masks_y0_attninj is None:
+                    pH, pW          = img_sizes_y0_attninj[0]
+                    img_ids_y0_attninj         = torch.zeros(pH, pW, 3, device=img_y0_attninj.device)
+                    img_ids_y0_attninj[..., 1] = img_ids_y0_attninj[..., 1] + torch.arange(pH, device=img_y0_attninj.device)[:, None]
+                    img_ids_y0_attninj[..., 2] = img_ids_y0_attninj[..., 2] + torch.arange(pW, device=img_y0_attninj.device)[None, :]
+                    img_ids_y0_attninj         = repeat(img_ids_y0_attninj, "h w c -> b (h w) c", b=bsz)
+                img_y0_attninj = self.x_embedder(img_y0_attninj)  # hidden_states 1,4032,2560         for 1024x1024: -> 1,4096,2560      ,64 -> ,2560 (x40)
+            
             
             #contexts_orig = self.prepare_contexts(llama3_orig, context_orig, bsz, img.shape[-1])
             contexts = self.prepare_contexts(llama3, context, bsz, img.shape[-1])
@@ -651,8 +849,6 @@ class HDModel(nn.Module):
             txt_ids = torch.zeros(bsz,   contexts[-1].shape[1] + contexts[-2].shape[1] + contexts[0].shape[1],     3,    device=img_ids.device, dtype=img_ids.dtype)
             ids     = torch.cat((img_ids, txt_ids), dim=1)   # ids -> 1,4446,3
             rope    = self.pe_embedder(ids)                  # rope -> 1, 4446, 1, 64, 2, 2
-
-
 
             # 2. Blocks
             #txt_init_orig     = torch.cat([contexts_orig[-1], contexts_orig[-2]], dim=1)     # shape[1] == 128, 143       then on another step/call it's 128, 128...??? cuz the contexts is now 1,128,2560
@@ -679,10 +875,13 @@ class HDModel(nn.Module):
                 
                 txt_init = torch.cat(txt_init_list, dim=1)  #T5,LLAMA3 (last block)
                 txt_init_len = txt_init.shape[1]     
-                
-                
-                
+
             img_len = img.shape[1]
+            
+            if not UNCOND and img_y0_adain is not None:
+                txt_init_y0_adain = txt_init.clone()
+            if not UNCOND and img_y0_attninj is not None:
+                txt_init_y0_attninj = txt_init.clone()
             
             for bid, block in enumerate(self.double_stream_blocks):                                                              # len == 16
                 txt_llama = contexts[bid]
@@ -711,18 +910,46 @@ class HDModel(nn.Module):
                     mask_tmp[:img_len,:img_len] = 1.0
                     img, txt_init = block(img, img_masks, txt, clip, rope, mask_tmp)
                     
-                else:
-                    if not UNCOND and y0 is not None:
-                        txtZ = txt.clone()
-                    img, txt_init = block(img, img_masks, txt, clip, rope, mask)
-                    if not UNCOND and y0 is not None:
-                        img_y0, txt_init = block(img_y0, img_masks, txtZ, clip_y0, rope_y0, mask)
+                elif update_cross_attn is not None and update_cross_attn['skip_cross_attn']:
+                    img, txt_init = block(img, img_masks, txt, clip, rope, mask, update_cross_attn=update_cross_attn)
                     
+                else:
+                    if not UNCOND and img_y0_attninj is not None:
+                        cache_v = False
+                        if bid in ATTNINJ_DOUBLE_BLOCKS:
+                            cache_v = True
+                        
+                        scale = blocks_attninj['double_weights'][bid]
+                        blocks_attninj_qkv_scaled = {k: v * scale for k, v in blocks_attninj_qkv.items()}
+                        txt_y0_attninj                      = torch.cat([txt_init_y0_attninj, txt_llama], dim=1)
+                        img_y0_attninj, txt_init_y0_attninj = block(img_y0_attninj, img_masks, txt_y0_attninj, clip_y0_attninj, rope, mask, cache_v=cache_v, attninj_opts=blocks_attninj_qkv_scaled)
+                        txt_init_y0_attninj                 = txt_init_y0_attninj[:, :txt_init_len]
+                        
+                    img, txt_init = block(img, img_masks, txt, clip, rope, mask, update_cross_attn=update_cross_attn, attninj_opts=blocks_attninj_qkv_scaled)
+
+                    if not UNCOND and img_y0_adain is not None:
+                        if IDENTICAL_ADAIN_ATTNINJ:
+                            img_y0_adain      = img_y0_attninj
+                            txt_init_y0_adain = txt_init_y0_attninj
+                        else:
+                            txt_y0_adain                    = torch.cat([txt_init_y0_adain, txt_llama], dim=1)
+                            img_y0_adain, txt_init_y0_adain = block(img_y0_adain, img_masks, txt_y0_adain, clip_y0_adain, rope, mask)
+                            txt_init_y0_adain               = txt_init_y0_adain[:, :txt_init_len]
+                        
+                        if bid in ADAIN_DOUBLE_BLOCKS:
+                            adaweight = blocks_adain['double_weights'][bid]
+                            img = (1-adaweight) * img + adaweight * adain_seq(img, img_y0_adain)
+
                 txt_init = txt_init[:, :txt_init_len]
-                
 
             img_len = img.shape[1]
             img     = torch.cat([img, txt_init], dim=1)   # 4032 + 271 -> 4303     # txt embed from double stream block
+            
+            if not UNCOND and y0_adain is not None:
+                img_y0_adain = torch.cat([img_y0_adain, txt_init_y0_adain], dim=1)
+            if not UNCOND and y0_attninj is not None:
+                img_y0_attninj = torch.cat([img_y0_attninj, txt_init_y0_attninj], dim=1)
+                
             joint_len = img.shape[1]
             
             if img_masks is not None:
@@ -733,8 +960,7 @@ class HDModel(nn.Module):
             for bid, block in enumerate(self.single_stream_blocks): # len == 32
                 txt_llama = contexts[bid+16]                        # T5 pre-embedded for single stream blocks
                 img = torch.cat([img, txt_llama], dim=1)            # cat img,txt     opposite of flux which is txt,img       4303 + 143 -> 4446
-
-
+                
                 if False: #eight != 0:
                     mask = AttnMask.gen_edge_mask(bid+16)
                         
@@ -743,13 +969,6 @@ class HDModel(nn.Module):
                     
                 elif weight < 0 and mask is not None and abs(weight) < (1 - (bid+16)/48):
                     img = block(img, img_masks, None, clip, rope, mask_zero)
-                    
-                    """img_tmpZ = img.clone()
-                    img = block(img, img_masks, None, clip, rope, mask_zero)
-                    
-                    img_part_trash = block(img_tmpZ, img_masks, None, clip, rope, mask)
-                    
-                    img = torch.cat([img[..., :joint_len], img_part_trash[..., joint_len:]], dim=-1)"""
                     
                 elif floor > 0 and mask is not None and     floor  >      (bid+16)/48:
                     mask_tmp = mask.clone()
@@ -762,10 +981,33 @@ class HDModel(nn.Module):
                     img = block(img, img_masks, None, clip, rope, mask_tmp)
                     
                 else:
-                    img = block(img, img_masks, None, clip, rope, mask)
-                
-                img = img[:, :joint_len]   # slice off txt_llama
+                    if not UNCOND and img_y0_attninj is not None:
+                        cache_v = False
+                        if bid in ATTNINJ_SINGLE_BLOCKS:
+                            cache_v = True
+                        
+                        scale = blocks_attninj['single_weights'][bid]
+                        blocks_attninj_qkv_scaled = {k: v * scale for k, v in blocks_attninj_qkv.items()}
+                        img_y0_attninj = torch.cat([img_y0_attninj, txt_llama], dim=1)   
+                        img_y0_attninj = block(img_y0_attninj, img_masks, None, clip_y0_attninj, rope, mask, cache_v=cache_v, attninj_opts=blocks_attninj_qkv_scaled)
+                        img_y0_attninj = img_y0_attninj[:, :joint_len]
 
+                    img = block(img, img_masks, None, clip, rope, mask, attninj_opts=blocks_attninj_qkv_scaled)
+
+                img = img[:, :joint_len]   # slice off txt_llama
+                
+                if not UNCOND and img_y0_adain is not None:
+                    if IDENTICAL_ADAIN_ATTNINJ:
+                        img_y0_adain = img_y0_attninj
+                    else:
+                        img_y0_adain = torch.cat([img_y0_adain, txt_llama], dim=1)   
+                        img_y0_adain = block(img_y0_adain, img_masks, None, clip_y0_adain, rope, mask)
+                        img_y0_adain = img_y0_adain[:, :joint_len]
+                    
+                    if bid in ADAIN_SINGLE_BLOCKS:
+                        adaweight = blocks_adain['single_weights'][bid]
+                        img = (1-adaweight) * img + adaweight * adain_seq(img, img_y0_adain)
+                
             img = img[:, :img_len, ...]
             img = self.final_layer(img, clip)
             img = self.unpatchify (img, img_sizes)
@@ -838,5 +1080,162 @@ def clone_inputs(*args, index: int=None):
         return tuple(x.clone() for x in args)
     else:
         return tuple(x[index].unsqueeze(0).clone() for x in args)
+
+
+
+
+
+
+
+
+def adain_seq(content: torch.Tensor, style: torch.Tensor, eps: float = 1e-7) -> torch.Tensor: # [B,L,C]
+    mean_c = content.mean(dim=1, keepdim=True)       # [B,1,C]
+    std_c  = content.std (dim=1, keepdim=True) + eps # [B,1,C]
+    mean_s = style.  mean(dim=1, keepdim=True)       # [B,1,C]
+    std_s  = style.  std (dim=1, keepdim=True) + eps # [B,1,C]
+
+    normalized = (content - mean_c) / std_c
+    return normalized * std_s + mean_s               # [B,L,C]
+
+
+def wct_transform(Fc, Fs, eps=1e-5):
+    """
+    Fc:  [B, C, N] content features
+    Fs:  [B, C, N] style features
+    returns: [B, C, N] content whitened & recolored
+    """
+    dtype = Fc.dtype
+    Fc = Fc.to(torch.float32)
+    Fs = Fs.to(torch.float32)
+    B, C, N = Fc.shape
+    # 1) compute content covariance
+    mu_c = Fc.mean(-1, keepdim=True)           # [B,C,1]
+    Fc0  = Fc - mu_c
+    cov_c = (Fc0 @ Fc0.transpose(1,2)) / (N - 1)  # [B,C,C]
+    
+    # 2) whiten via SVD
+    Uc, Sc, _ = torch.linalg.svd(cov_c + eps*torch.eye(C, device=Fc.device)[None], full_matrices=False)
+    Dc = torch.diag_embed(1.0 / torch.sqrt(Sc))
+    Fw = Uc @ (Dc @ (Uc.transpose(1,2) @ Fc0))   # [B,C,N]
+    
+    # 3) color to style covariance
+    mu_s = Fs.mean(-1, keepdim=True)
+    Fs0  = Fs - mu_s
+    cov_s = (Fs0 @ Fs0.transpose(1,2)) / (N - 1)
+    Us, Ss, _ = torch.linalg.svd(cov_s + eps*torch.eye(C, device=Fc.device)[None], full_matrices=False)
+    Ds = torch.diag_embed(torch.sqrt(Ss))
+    Fcs = Us @ (Ds @ (Us.transpose(1,2) @ Fw))   # [B,C,N]
+    return (Fcs + mu_s).to(dtype)
+
+
+
+def wct_cholesky(Fc, Fs, eps=1e-5):
+    # Fc, Fs: [B, C, N]
+    dtype = Fc.dtype
+    Fc = Fc.to(torch.float32)
+    Fs = Fs.to(torch.float32)
+    
+    B, C, N = Fc.shape
+    mu_c = Fc.mean(-1, keepdim=True)         # [B,C,1]
+    Fc0  = Fc - mu_c
+    cov_c = (Fc0 @ Fc0.transpose(1,2))/(N-1) + eps*torch.eye(C, device=Fc.device)[None]
+    Lc    = torch.linalg.cholesky(cov_c)     # [B,C,C]
+    # whiten: Lc Lc^T = cov_c  → inv(Lc) Fc0
+    Fc_w  = torch.linalg.solve_triangular(Lc, Fc0, upper=False)
+    Fc_w  = torch.linalg.solve_triangular(Lc.transpose(1,2), Fc_w, upper=True)
+
+    mu_s = Fs.mean(-1, keepdim=True)
+    Fs0  = Fs - mu_s
+    cov_s = (Fs0 @ Fs0.transpose(1,2))/(N-1) + eps*torch.eye(C, device=Fs.device)[None]
+    Ls    = torch.linalg.cholesky(cov_s)
+    # color: Ls Fc_w
+    Fcs   = Ls @ Fc_w
+
+    return (Fcs + mu_s).to(dtype)
+
+
+def adaptive_adain(x, y, eps=1e-7):
+    # x: [B, N, C] content feats,  y: [B, N, C] style feats
+    μc = x.mean(-2, keepdim=True)
+    σc = x.var( -2, keepdim=True).add(eps).sqrt()
+    μs = y.mean(-2, keepdim=True)
+    σs = y.var( -2, keepdim=True).add(eps).sqrt()
+
+    x_norm = (x - μc) / σc
+    adain  = x_norm * σs + μs      # [B, N, C]
+
+    # build per-channel stats
+    stats = torch.cat([
+        μc .squeeze(-2)[...,None],
+        σc .squeeze(-2)[...,None],
+        μs .squeeze(-2)[...,None],
+        σs .squeeze(-2)[...,None],
+    ], dim=-1)  # [B, C, 4]
+
+    α = torch.softmax(gate_net(stats), dim=-1).unsqueeze(-2)  # [B,1,C]
+
+    return α * adain + (1-α) * x
+
+
+
+def adain_onehot(x: Tensor, y: Tensor, eps=1e-5) -> Tensor:
+    """
+    One-shot AdaIN with per-channel strength α based on channelwise difference.
+    x: content feats [B, N, C]
+    y:   style feats [B, N, C]
+    returns: mixed feats [B, N, C]
+    """
+    # 1) compute stats
+    μc = x.mean(dim=-2, keepdim=True)                # [B,1,C]
+    σc = x.var( dim=-2, keepdim=True, unbiased=False).add(eps).sqrt()
+    μs = y.mean(dim=-2, keepdim=True)
+    σs = y.var( dim=-2, keepdim=True, unbiased=False).add(eps).sqrt()
+
+    # 2) standard AdaIN result
+    x_norm = (x - μc) / σc
+    adain  = x_norm * σs + μs                        # [B,N,C]
+
+    # 3) per-channel “difference magnitude”
+    #    (sum of abs mean‐shift + abs std‐shift)
+    diff = (μs - μc).abs() + (σs - σc).abs()          # [B,1,C]
+
+    # 4) normalize to [0,1] per batch (so largest diff → 1.0)
+    max_diff = diff.max(dim=-1, keepdim=True).values # [B,1,1]
+    α = diff / (max_diff + eps)                      # [B,1,C]
+
+    # 5) mix
+    return α * adain + (1 - α) * x
+
+
+
+def adain_softmax(x: Tensor, y: Tensor, temperature: float = 1.0, eps: float = 1e-5) -> Tensor:
+    """
+    Adaptive Instance Norm with a per-channel gating α computed via softmax.
+    x: content feats [B, N, C]
+    y:   style feats [B, N, C]
+    temperature: higher → softer (more uniform) gating
+    returns: mixed feats [B, N, C]
+    """
+    # 1) content / style stats
+    μc = x.mean (dim=-2, keepdim=True)                              # [B,1,C]
+    σc = x.var  (dim=-2, keepdim=True, unbiased=False).add(eps).sqrt()  
+    μs = y.mean (dim=-2, keepdim=True)
+    σs = y.var  (dim=-2, keepdim=True, unbiased=False).add(eps).sqrt()
+
+    # 2) standard AdaIN
+    x_norm = (x - μc) / σc
+    adain  = x_norm * σs + μs                                      # [B,N,C]
+
+    # 3) per-channel diff magnitude
+    diff = (μs - μc).abs() + (σs - σc).abs()                       # [B,1,C]
+
+    # 4) softmax gating across channels
+    #    flatten out the spatial dim so we can softmax over C
+    scores = diff.squeeze(1) / temperature                         # [B,C]
+    α      = F.softmax(scores, dim=-1).unsqueeze(1)                # [B,1,C]
+
+    # 5) channelwise blend
+    return α * adain + (1 - α) * x
+
 
 
