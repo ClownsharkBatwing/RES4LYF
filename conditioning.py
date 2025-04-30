@@ -1183,9 +1183,9 @@ class ClownRegionalConditioning_ABC:
                 "invert_mask":             ("BOOLEAN",                                   {"default": False}),
             }, 
             "optional": {
-                "conditioning_A":              ("CONDITIONING", ),
-                "conditioning_B":              ("CONDITIONING", ),
-                "conditioning_C":              ("CONDITIONING", ),
+                "conditioning_A":          ("CONDITIONING", ),
+                "conditioning_B":          ("CONDITIONING", ),
+                "conditioning_C":          ("CONDITIONING", ),
                 "mask_A":                  ("MASK", ),
                 "mask_B":                  ("MASK", ),
                 "mask_C":                  ("MASK", ),
@@ -1406,7 +1406,7 @@ class ClownRegionalConditioning2(ClownRegionalConditioning_AB):
             }, 
             "optional": {
                 "conditioning_masked":     ("CONDITIONING", ),
-                "conditioning_unmasked":       ("CONDITIONING", ),
+                "conditioning_unmasked":   ("CONDITIONING", ),
                 "mask":                    ("MASK", ),
                 "weights":                 ("SIGMAS", ),
                 "region_bleeds":           ("SIGMAS", ),

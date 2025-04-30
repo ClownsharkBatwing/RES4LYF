@@ -17,6 +17,7 @@ from .res4lyf import RESplain
 class ExtraOptions():
     def __init__(self, extra_options):
         self.extra_options = extra_options
+        self.mute          = False
         
     def __call__(self, option, default=None, ret_type=None, match_all_flags=False):
         if isinstance(option, (tuple, list)):
@@ -41,7 +42,8 @@ class ExtraOptions():
             
             if match:
                 value = match.group(1)
-                RESplain("Set extra_option: ", option, "=", value)
+                if not self.mute:
+                    RESplain("Set extra_option: ", option, "=", value)
             else:
                 value = default
                 
@@ -59,8 +61,13 @@ class ExtraOptions():
             pattern = rf"^{re.escape(option)}\s*=\s*([a-zA-Z0-9_.+-]+)\s*$"
             match = re.search(pattern, self.extra_options, flags=re.MULTILINE)
             if match:
-                value = ret_type(match.group(1))
-                RESplain("Set extra_option: ", option, "=", value)
+                if ret_type == bool:
+                    value_str = match.group(1).lower()
+                    value = value_str in ("true", "1", "yes", "on")
+                else:
+                    value = ret_type(match.group(1))
+                if not self.mute:
+                    RESplain("Set extra_option: ", option, "=", value)
             else:
                 value = default
         
@@ -259,6 +266,35 @@ def safe_get_nested(d, keys, default=None):
             return default
     return d
 
+class AlwaysTrueList:
+    def __contains__(self, item):
+        return True
+
+def parse_range_string(s):
+    if "all" in s:
+        return AlwaysTrueList()
+
+    result = []
+    for part in s.split(','):
+        part = part.strip()
+        if not part:
+            continue
+        val = float(part) if '.' in part else int(part)
+        result.append(val)
+    return result
+
+def parse_range_string_int(s):
+    if "all" in s:
+        return AlwaysTrueList()
+    
+    result = []
+    for part in s.split(','):
+        if '-' in part:
+            start, end = part.split('-')
+            result.extend(range(int(start), int(end) + 1))
+        elif part.strip() != '':
+            result.append(int(part))
+    return result
 
 
 

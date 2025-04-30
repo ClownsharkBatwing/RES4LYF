@@ -43,7 +43,7 @@ from .wan.model import ReWanAttentionBlock, ReWanI2VCrossAttention, ReWanModel, 
 from .latents import get_orthogonal, get_cosine_similarity
 from .res4lyf import RESplain
 
-
+from .helper import parse_range_string
 
 def time_snr_shift_exponential(alpha, t):
     return math.exp(alpha) / (math.exp(alpha) + (1 / t - 1) ** 1.0)
@@ -53,22 +53,8 @@ def time_snr_shift_linear(alpha, t):
         return t
     return alpha * t / (1 + (alpha - 1) * t)
 
-class AlwaysTrueList:
-    def __contains__(self, item):
-        return True
 
-def parse_range_string(s):
-    if "all" in s:
-        return AlwaysTrueList()
-    
-    result = []
-    for part in s.split(','):
-        if '-' in part:
-            start, end = part.split('-')
-            result.extend(range(int(start), int(end) + 1))
-        elif part.strip() != '':
-            result.append(int(part))
-    return result
+
 
 COMPILE_MODES = ["default", "max-autotune", "max-autotune-no-cudagraphs", "reduce-overhead"]
 
@@ -385,10 +371,10 @@ class ReHiDreamPatcherAdvanced:
     def INPUT_TYPES(s):
         return {
             "required": { 
-                "model"               : ("MODEL",),
+                "model"                : ("MODEL",),
                 "double_stream_blocks" : ("STRING",  {"default": "all", "multiline": True}),
                 "single_stream_blocks" : ("STRING",  {"default": "all", "multiline": True}),
-                "enable"              : ("BOOLEAN", {"default": True}),
+                "enable"               : ("BOOLEAN", {"default": True}),
             }
         }
     RETURN_TYPES = ("MODEL",)
@@ -416,7 +402,13 @@ class ReHiDreamPatcherAdvanced:
                     block.__class__             = HDBlock
                     block.block.__class__       = HDBlockDoubleNoMask
                     block.block.attn1.__class__ = HDAttention
-                block.idx       = i
+                    
+                block.block.attn1.single_stream = False
+                block.block.attn1.double_stream = True
+                
+                block.idx             = i
+                block.block.idx       = i
+                block.block.attn1.idx = i
 
             for i, block in enumerate(m.model.diffusion_model.single_stream_blocks):
                 if i in single_stream_blocks:
@@ -427,7 +419,13 @@ class ReHiDreamPatcherAdvanced:
                     block.__class__             = HDBlock
                     block.block.__class__       = HDBlockSingleNoMask
                     block.block.attn1.__class__ = HDAttention
-                block.idx       = i
+                    
+                block.block.attn1.single_stream = True
+                block.block.attn1.double_stream = False
+                
+                block.idx             = i
+                block.block.idx       = i
+                block.block.attn1.idx = i
 
         elif not enable and model.model.diffusion_model.__class__ == HDModel:
             m = model.clone()
