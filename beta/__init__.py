@@ -24,6 +24,9 @@ def add_beta(NODE_CLASS_MAPPINGS, extra_samplers):
         "ClownSamplerAdvanced_Beta"       : samplers.ClownSamplerAdvanced_Beta,
 
         "ClownGuide_Mean_Beta"            : samplers_extensions.ClownGuide_Mean_Beta,
+        "ClownGuide_AdaIN_MMDiT_Beta"     : samplers_extensions.ClownGuide_AdaIN_MMDiT_Beta,
+        "ClownGuide_AttnInj_MMDiT_Beta"   : samplers_extensions.ClownGuide_AttnInj_MMDiT_Beta,
+
 
         "ClownGuide_Beta"                 : samplers_extensions.ClownGuide_Beta,
         "ClownGuides_Beta"                : samplers_extensions.ClownGuides_Beta,
@@ -58,9 +61,63 @@ def add_beta(NODE_CLASS_MAPPINGS, extra_samplers):
     })
 
     extra_samplers.update({
+        "res_2m"     : sample_res_2m,
+        "res_3m"     : sample_res_3m,
+        "res_2s"     : sample_res_2s,
+        "res_3s"     : sample_res_3s,
+        "res_5s"     : sample_res_5s,
+        "res_6s"     : sample_res_6s,
+        "res_2m_ode" : sample_res_2m_ode,
+        "res_3m_ode" : sample_res_3m_ode,
+        "res_2s_ode" : sample_res_2s_ode,
+        "res_3s_ode" : sample_res_3s_ode,
+        "res_5s_ode" : sample_res_5s_ode,
+        "res_6s_ode" : sample_res_6s_ode,
+
+        "deis_2m"    : sample_deis_2m,
+        "deis_3m"    : sample_deis_3m,
+        "deis_2m_ode": sample_deis_2m_ode,
+        "deis_3m_ode": sample_deis_3m_ode,
         "rk_beta": rk_sampler_beta.sample_rk_beta,
     })
     
     return NODE_CLASS_MAPPINGS, extra_samplers
 
+
+
+def sample_res_2m(model, x, sigmas, extra_args=None, callback=None, disable=None):
+    return sample_rk_beta(model, x, sigmas, extra_args, callback, disable, noise_sampler_type="gaussian", noise_mode="hard", noise_seed=-1, rk_type="res_2m",)
+def sample_res_3m(model, x, sigmas, extra_args=None, callback=None, disable=None):
+    return sample_rk_beta(model, x, sigmas, extra_args, callback, disable, noise_sampler_type="gaussian", noise_mode="hard", noise_seed=-1, rk_type="res_3m",)
+def sample_res_2s(model, x, sigmas, extra_args=None, callback=None, disable=None):
+    return sample_rk_beta(model, x, sigmas, extra_args, callback, disable, noise_sampler_type="gaussian", noise_mode="hard", noise_seed=-1, rk_type="res_2s",)
+def sample_res_3s(model, x, sigmas, extra_args=None, callback=None, disable=None):
+    return sample_rk_beta(model, x, sigmas, extra_args, callback, disable, noise_sampler_type="gaussian", noise_mode="hard", noise_seed=-1, rk_type="res_3s",)
+def sample_res_5s(model, x, sigmas, extra_args=None, callback=None, disable=None):
+    return sample_rk_beta(model, x, sigmas, extra_args, callback, disable, noise_sampler_type="gaussian", noise_mode="hard", noise_seed=-1, rk_type="res_5s",)
+def sample_res_6s(model, x, sigmas, extra_args=None, callback=None, disable=None):
+    return sample_rk_beta(model, x, sigmas, extra_args, callback, disable, noise_sampler_type="gaussian", noise_mode="hard", noise_seed=-1, rk_type="res_6s",)
+
+def sample_res_2m_ode(model, x, sigmas, extra_args=None, callback=None, disable=None):
+    return sample_rk_beta(model, x, sigmas, extra_args, callback, disable, noise_sampler_type="gaussian", noise_mode="hard", noise_seed=-1, rk_type="res_2m", eta=0.0, eta_substep=0.0, )
+def sample_res_3m_ode(model, x, sigmas, extra_args=None, callback=None, disable=None):
+    return sample_rk_beta(model, x, sigmas, extra_args, callback, disable, noise_sampler_type="gaussian", noise_mode="hard", noise_seed=-1, rk_type="res_3m", eta=0.0, eta_substep=0.0, )
+def sample_res_2s_ode(model, x, sigmas, extra_args=None, callback=None, disable=None):
+    return sample_rk_beta(model, x, sigmas, extra_args, callback, disable, noise_sampler_type="gaussian", noise_mode="hard", noise_seed=-1, rk_type="res_2s", eta=0.0, eta_substep=0.0, )
+def sample_res_3s_ode(model, x, sigmas, extra_args=None, callback=None, disable=None):
+    return sample_rk_beta(model, x, sigmas, extra_args, callback, disable, noise_sampler_type="gaussian", noise_mode="hard", noise_seed=-1, rk_type="res_3s", eta=0.0, eta_substep=0.0, )
+def sample_res_5s_ode(model, x, sigmas, extra_args=None, callback=None, disable=None):
+    return sample_rk_beta(model, x, sigmas, extra_args, callback, disable, noise_sampler_type="gaussian", noise_mode="hard", noise_seed=-1, rk_type="res_5s", eta=0.0, eta_substep=0.0, )
+def sample_res_6s_ode(model, x, sigmas, extra_args=None, callback=None, disable=None):
+    return sample_rk_beta(model, x, sigmas, extra_args, callback, disable, noise_sampler_type="gaussian", noise_mode="hard", noise_seed=-1, rk_type="res_6s", eta=0.0, eta_substep=0.0, )
+
+def sample_deis_2m(model, x, sigmas, extra_args=None, callback=None, disable=None):
+    return sample_rk_beta(model, x, sigmas, extra_args, callback, disable, noise_sampler_type="gaussian", noise_mode="hard", noise_seed=-1, rk_type="deis_2m",)
+def sample_deis_3m(model, x, sigmas, extra_args=None, callback=None, disable=None):
+    return sample_rk_beta(model, x, sigmas, extra_args, callback, disable, noise_sampler_type="gaussian", noise_mode="hard", noise_seed=-1, rk_type="deis_3m",)
+
+def sample_deis_2m_ode(model, x, sigmas, extra_args=None, callback=None, disable=None):
+    return sample_rk_beta(model, x, sigmas, extra_args, callback, disable, noise_sampler_type="gaussian", noise_mode="hard", noise_seed=-1, rk_type="deis_2m", eta=0.0, eta_substep=0.0, )
+def sample_deis_3m_ode(model, x, sigmas, extra_args=None, callback=None, disable=None):
+    return sample_rk_beta(model, x, sigmas, extra_args, callback, disable, noise_sampler_type="gaussian", noise_mode="hard", noise_seed=-1, rk_type="deis_3m", eta=0.0, eta_substep=0.0, )
 

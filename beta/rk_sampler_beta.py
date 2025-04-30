@@ -4,6 +4,7 @@ from tqdm.auto import trange
 import gc
 from typing import Optional, Callable, Tuple, Dict, Any, Union
 import math
+import copy
 
 from comfy.model_sampling import EPS
 
@@ -129,8 +130,8 @@ def sample_rk_beta(
         noise_mode_sde                : str                = "hard",
         noise_mode_sde_substep        : str                = "hard",
 
-        eta                           : float              =  0.0,
-        eta_substep                   : float              =  0.0,
+        eta                           : float              =  0.5,
+        eta_substep                   : float              =  0.5,
 
 
 
@@ -186,12 +187,12 @@ def sample_rk_beta(
 
         regional_conditioning_weights : Optional[Tensor]   = None,
         regional_conditioning_floors  : Optional[Tensor]   = None,
-        narcissism_start_step      : int                = 0,
-        narcissism_end_step        : int                = 5,
+        narcissism_start_step         : int                = 0,
+        narcissism_end_step           : int                = 5,
                 
-        LGW_MASK_RESCALE_MIN          : bool               = True,
-        guides                        : Optional[Tuple[Any, ...]]    = None,
-        epsilon_scales                : Optional[Tensor]   = None,
+        LGW_MASK_RESCALE_MIN          : bool                          = True,
+        guides                        : Optional[Tuple[Any, ...]]     = None,
+        epsilon_scales                : Optional[Tensor]              = None,
         frame_weights_mgr             : Optional[FrameWeightsManager] = None,
 
         sde_noise                     : list    [Tensor]   = [],
@@ -421,9 +422,79 @@ def sample_rk_beta(
         
     if EO("y0_to_transformer_options"):
         RK.update_transformer_options({'y0':  LG.y0.clone()})
+    
+    if EO("y0_inv_to_transformer_options"):
+        RK.update_transformer_options({'y0_inv':  LG.y0_inv.clone()})
+        for block in model.inner_model.inner_model.diffusion_model.double_stream_blocks:
+            for attr in ["txt_q_cache", "txt_k_cache", "txt_v_cache", "img_q_cache", "img_k_cache", "img_v_cache"]:
+                if hasattr(block.block.attn1, attr):
+                    delattr(block.block.attn1, attr)
+
+        for block in model.inner_model.inner_model.diffusion_model.single_stream_blocks:
+            block.block.attn1.EO = EO 
+            for attr in ["txt_q_cache", "txt_k_cache", "txt_v_cache", "img_q_cache", "img_k_cache", "img_v_cache"]:
+                if hasattr(block.block.attn1, attr):
+                    delattr(block.block.attn1, attr)
+
+    RK.update_transformer_options({'ExtraOptions': copy.deepcopy(EO)})
+    if EO("update_cross_attn"):
+        update_cross_attn = {
+            'src_llama_start': EO('src_llama_start', 0),
+            'src_llama_end':   EO('src_llama_end', 0),
+            'src_t5_start':    EO('src_t5_start', 0),
+            'src_t5_end':      EO('src_t5_end', 0),
+
+            'tgt_llama_start': EO('tgt_llama_start', 0),
+            'tgt_llama_end':   EO('tgt_llama_end', 0),
+            'tgt_t5_start':    EO('tgt_t5_start', 0),
+            'tgt_t5_end':      EO('tgt_t5_end', 0),
+            'skip_cross_attn': EO('skip_cross_attn', False),
+            'lamb':  EO('lamb', 0.01),
+            'erase': EO('erase', 10.0),
+        }
+        RK.update_transformer_options({'update_cross_attn':  update_cross_attn})
+    else:
+        RK.update_transformer_options({'update_cross_attn':  None})
+
+    if LG.HAS_LATENT_GUIDE_ADAIN:
+        RK.update_transformer_options({'blocks_adain_cache': []})
+    if LG.HAS_LATENT_GUIDE_ATTNINJ:
+        RK.update_transformer_options({'blocks_attninj_cache': []})
 
     while step < num_steps:
         sigma, sigma_next = sigmas[step], sigmas[step+1]
+        
+        if LG.HAS_LATENT_GUIDE_ADAIN:
+            if LG.lgw_adain[step] == 0.0:
+                RK.update_transformer_options({'y0_adain': None})
+                RK.update_transformer_options({'blocks_adain': {}})
+            else:
+                RK.update_transformer_options({'y0_adain': LG.y0_adain.clone()})
+                if 'blocks_adain_mmdit' in guides:
+                    blocks_adain = {
+                        "double_weights": [val * LG.lgw_adain[step] for val in guides['blocks_adain_mmdit']['double_weights']],
+                        "single_weights": [val * LG.lgw_adain[step] for val in guides['blocks_adain_mmdit']['single_weights']],
+                        "double_blocks" : guides['blocks_adain_mmdit']['double_blocks'],
+                        "single_blocks" : guides['blocks_adain_mmdit']['single_blocks'],
+                    }
+                RK.update_transformer_options({'blocks_adain': blocks_adain})
+        
+        if LG.HAS_LATENT_GUIDE_ATTNINJ:
+            if LG.lgw_attninj[step] == 0.0:
+                RK.update_transformer_options({'y0_attninj': None})
+                RK.update_transformer_options({'blocks_attninj'    : {}})
+                RK.update_transformer_options({'blocks_attninj_qkv': {}})
+            else:
+                RK.update_transformer_options({'y0_attninj': LG.y0_attninj.clone()})
+                if 'blocks_attninj_mmdit' in guides:
+                    blocks_attninj = {
+                        "double_weights": [val * LG.lgw_attninj[step] for val in guides['blocks_attninj_mmdit']['double_weights']],
+                        "single_weights": [val * LG.lgw_attninj[step] for val in guides['blocks_attninj_mmdit']['single_weights']],
+                        "double_blocks" : guides['blocks_attninj_mmdit']['double_blocks'],
+                        "single_blocks" : guides['blocks_attninj_mmdit']['single_blocks'],
+                    }
+                RK.update_transformer_options({'blocks_attninj'    : blocks_attninj})
+                RK.update_transformer_options({'blocks_attninj_qkv': guides['blocks_attninj_qkv']})
 
         if AttnMask_neg is not None:
             RK.update_transformer_options({'regional_conditioning_weight_neg': RegParam_neg.weights[step]})
@@ -1492,7 +1563,7 @@ def sample_rk_beta(
         # end sampling loop
 
     #progress_bar.close()
-
+    RK.update_transformer_options({'update_cross_attn':  None})
     if step == len(sigmas)-2 and sigmas[-1] == 0 and sigmas[-2] == NS.sigma_min and not INIT_SAMPLE_LOOP:
         eps, denoised = RK(x, NS.sigma_min, x, NS.sigma_min)
         x = denoised

@@ -8,7 +8,7 @@ import copy
 
 from nodes import MAX_RESOLUTION
 
-from ..helper                import OptionsManager, FrameWeightsManager, initialize_or_scale, get_res4lyf_scheduler_list
+from ..helper                import OptionsManager, FrameWeightsManager, initialize_or_scale, get_res4lyf_scheduler_list, parse_range_string
 
 from .rk_coefficients_beta   import RK_SAMPLER_NAMES_BETA_FOLDERS, get_default_sampler_name, get_sampler_name_list, process_sampler_name
 
@@ -941,6 +941,334 @@ class ClownGuide_Mean_Beta:
         guides['cutoff_mean']           = cutoff
         
         return (guides, )
+
+
+
+
+
+
+class ClownGuide_AdaIN_MMDiT_Beta:
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {"required":
+                    {
+                    "weight":           ("FLOAT",                                     {"default": 1.0, "min":  -100.0, "max": 100.0, "step":0.01, "round": False, "tooltip": "Set the strength of the guide by multiplying all other weights by this value."}),
+                    "weight_scheduler": (["constant"] + get_res4lyf_scheduler_list(), {"default": "constant"},),
+                    "double_blocks"   : ("STRING",                                    {"default": "", "multiline": True}),
+                    "double_weights"  : ("STRING",                                    {"default": "", "multiline": True}),
+                    "single_blocks"   : ("STRING",                                    {"default": "20", "multiline": True}),
+                    "single_weights"  : ("STRING",                                    {"default": "0.5", "multiline": True}),
+                    "start_step":       ("INT",                                       {"default": 0,    "min":  0,      "max": 10000}),
+                    "end_step":         ("INT",                                       {"default": 15,   "min": -1,      "max": 10000}),
+                    "invert_mask":      ("BOOLEAN",                                   {"default": False}),
+                    },
+                "optional": 
+                    {
+                    "guide":            ("LATENT", ),
+                    "mask":             ("MASK", ),
+                    "weights":          ("SIGMAS", ),
+                    "guides":           ("GUIDES", ),
+                    }  
+                }
+    
+    RETURN_TYPES = ("GUIDES",)
+    RETURN_NAMES = ("guides",)
+    FUNCTION     = "main"
+    CATEGORY     = "RES4LYF/sampler_extensions"
+
+    def main(self,
+            weight           = 1.0,
+            weight_scheduler = "constant",
+            double_weights   = "0.1",
+            single_weights   = "0.0", 
+            double_blocks    = "all",
+            single_blocks    = "all", 
+            start_step       = 0,
+            end_step         = 15,
+            invert_mask      = False,
+            
+            guide            = None,
+            mask             = None,
+            weights          = None,
+            guides           = None,
+            ):
+        
+        default_dtype = torch.float64
+        
+        mask = 1-mask if mask is not None else None
+        
+        double_weights = parse_range_string(double_weights)
+        single_weights = parse_range_string(single_weights)
+        
+        if len(double_weights) == 0:
+            double_weights.append(0.0)
+        if len(single_weights) == 0:
+            single_weights.append(0.0)
+            
+        if len(double_weights) == 1:
+            double_weights = double_weights * 100
+        if len(single_weights) == 1:
+            single_weights = single_weights * 100
+            
+        if type(double_weights[0]) == int:
+            double_weights = [float(val) for val in double_weights]
+        if type(single_weights[0]) == int:
+            single_weights = [float(val) for val in single_weights]
+        
+        if double_blocks == "all":
+            double_blocks  = [val for val in range(100)]
+            if len(double_weights) == 1:
+                double_weights = [double_weights[0]] * 100
+        else:
+            double_blocks  = parse_range_string(double_blocks)
+            
+            weights_expanded = [0.0] * 100
+            for b, w in zip(double_blocks, double_weights):
+                weights_expanded[b] = w
+            double_weights = weights_expanded
+            
+        
+        if single_blocks == "all":
+            single_blocks = [val for val in range(100)]
+            if len(single_weights) == 1:
+                single_weights = [single_weights[0]] * 100
+        else:
+            single_blocks  = parse_range_string(single_blocks)
+            
+            weights_expanded = [0.0] * 100
+            for b, w in zip(single_blocks, single_weights):
+                weights_expanded[b] = w
+            single_weights = weights_expanded
+        
+        
+        
+        if end_step == -1:
+            end_step = MAX_STEPS
+        
+        if guide is not None:
+            raw_x = guide.get('state_info', {}).get('raw_x', None)
+            if raw_x is not None:
+                guide          = {'samples': guide['state_info']['raw_x'].clone()}
+            else:
+                guide          = {'samples': guide['samples'].clone()}
+        
+        if weight_scheduler == "constant": # and weights == None: 
+            weights = initialize_or_scale(None, weight, end_step).to(default_dtype)
+            prepend = torch.zeros(start_step).to(weights)
+            weights = torch.cat([prepend, weights])
+            weights = F.pad(weights, (0, MAX_STEPS), value=0.0)
+        
+        guides = copy.deepcopy(guides) if guides is not None else {}
+        
+        guides['weight_adain']           = weight
+        guides['weights_adain']          = weights
+        
+        guides['blocks_adain_mmdit'] = {
+            "double_weights": double_weights,
+            "single_weights": single_weights,
+            "double_blocks" : double_blocks,
+            "single_blocks" : single_blocks,
+        }
+        
+        guides['guide_adain']            = guide
+        guides['mask_adain']             = mask
+
+        guides['weight_scheduler_adain'] = weight_scheduler
+        guides['start_step_adain']       = start_step
+        guides['end_step_adain']         = end_step
+        
+        return (guides, )
+
+
+
+
+
+
+
+class ClownGuide_AttnInj_MMDiT_Beta:
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {"required":
+                    {
+                    "weight":           ("FLOAT",                                     {"default": 1.0, "min":  -100.0, "max": 100.0, "step":0.01, "round": False, "tooltip": "Set the strength of the guide by multiplying all other weights by this value."}),
+                    "weight_scheduler": (["constant"] + get_res4lyf_scheduler_list(), {"default": "constant"},),
+                    "double_blocks"   : ("STRING",                                    {"default": "0,1,3", "multiline": True}),
+                    "double_weights"  : ("STRING",                                    {"default": "1.0", "multiline": True}),
+                    "single_blocks"   : ("STRING",                                    {"default": "20", "multiline": True}),
+                    "single_weights"  : ("STRING",                                    {"default": "0.5", "multiline": True}),
+                    
+                    "img_q":            ("FLOAT",                                     {"default": 0.0, "min":  -100.0, "max": 100.0, "step":0.01, "round": False, "tooltip": "Set relative injection strength."}),
+                    "img_k":            ("FLOAT",                                     {"default": 0.0, "min":  -100.0, "max": 100.0, "step":0.01, "round": False, "tooltip": "Set relative injection strength."}),
+                    "img_v":            ("FLOAT",                                     {"default": 1.0, "min":  -100.0, "max": 100.0, "step":0.01, "round": False, "tooltip": "Set relative injection strength."}),
+
+                    "txt_q":            ("FLOAT",                                     {"default": 0.0, "min":  -100.0, "max": 100.0, "step":0.01, "round": False, "tooltip": "Set relative injection strength."}),
+                    "txt_k":            ("FLOAT",                                     {"default": 0.0, "min":  -100.0, "max": 100.0, "step":0.01, "round": False, "tooltip": "Set relative injection strength."}),
+                    "txt_v":            ("FLOAT",                                     {"default": 0.0, "min":  -100.0, "max": 100.0, "step":0.01, "round": False, "tooltip": "Set relative injection strength."}),
+
+                    "img_q_norm":       ("FLOAT",                                     {"default": 0.0, "min":  -100.0, "max": 100.0, "step":0.01, "round": False, "tooltip": "Set relative injection strength."}),
+                    "img_k_norm":       ("FLOAT",                                     {"default": 0.0, "min":  -100.0, "max": 100.0, "step":0.01, "round": False, "tooltip": "Set relative injection strength."}),
+                    "img_v_norm":       ("FLOAT",                                     {"default": 0.0, "min":  -100.0, "max": 100.0, "step":0.01, "round": False, "tooltip": "Set relative injection strength."}),
+
+                    "txt_q_norm":       ("FLOAT",                                     {"default": 0.0, "min":  -100.0, "max": 100.0, "step":0.01, "round": False, "tooltip": "Set relative injection strength."}),
+                    "txt_k_norm":       ("FLOAT",                                     {"default": 0.0, "min":  -100.0, "max": 100.0, "step":0.01, "round": False, "tooltip": "Set relative injection strength."}),
+                    "txt_v_norm":       ("FLOAT",                                     {"default": 0.0, "min":  -100.0, "max": 100.0, "step":0.01, "round": False, "tooltip": "Set relative injection strength."}),
+
+                    "start_step":       ("INT",                                       {"default": 0,    "min":  0,      "max": 10000}),
+                    "end_step":         ("INT",                                       {"default": 15,   "min": -1,      "max": 10000}),
+                    "invert_mask":      ("BOOLEAN",                                   {"default": False}),
+                    },
+                "optional": 
+                    {
+                    "guide":            ("LATENT", ),
+                    "mask":             ("MASK", ),
+                    "weights":          ("SIGMAS", ),
+                    "guides":           ("GUIDES", ),
+                    }  
+                }
+    
+    RETURN_TYPES = ("GUIDES",)
+    RETURN_NAMES = ("guides",)
+    FUNCTION     = "main"
+    CATEGORY     = "RES4LYF/sampler_extensions"
+
+    def main(self,
+            weight           = 1.0,
+            weight_scheduler = "constant",
+            double_weights   = "0.1",
+            single_weights   = "0.0", 
+            double_blocks    = "all",
+            single_blocks    = "all", 
+            
+            img_q            = 0.0,
+            img_k            = 0.0,
+            img_v            = 0.0,
+            
+            txt_q            = 0.0,
+            txt_k            = 0.0,
+            txt_v            = 0.0,
+            
+            img_q_norm       = 0.0,
+            img_k_norm       = 0.0,
+            img_v_norm       = 0.0,
+            
+            txt_q_norm       = 0.0,
+            txt_k_norm       = 0.0,
+            txt_v_norm       = 0.0,
+            
+            start_step       = 0,
+            end_step         = 15,
+            invert_mask      = False,
+            
+            guide            = None,
+            mask             = None,
+            weights          = None,
+            guides           = None,
+            ):
+        
+        default_dtype = torch.float64
+        
+        mask = 1-mask if mask is not None else None
+        
+        double_weights = parse_range_string(double_weights)
+        single_weights = parse_range_string(single_weights)
+        
+        if len(double_weights) == 0:
+            double_weights.append(0.0)
+        if len(single_weights) == 0:
+            single_weights.append(0.0)
+        
+        if len(double_weights) == 1:
+            double_weights = double_weights * 100
+        if len(single_weights) == 1:
+            single_weights = single_weights * 100
+        
+        if type(double_weights[0]) == int:
+            double_weights = [float(val) for val in double_weights]
+        if type(single_weights[0]) == int:
+            single_weights = [float(val) for val in single_weights]
+        
+        if double_blocks == "all":
+            double_blocks  = [val for val in range(100)]
+            if len(double_weights) == 1:
+                double_weights = [double_weights[0]] * 100
+        else:
+            double_blocks  = parse_range_string(double_blocks)
+            
+            weights_expanded = [0.0] * 100
+            for b, w in zip(double_blocks, double_weights):
+                weights_expanded[b] = w
+            double_weights = weights_expanded
+            
+        
+        if single_blocks == "all":
+            single_blocks = [val for val in range(100)]
+            if len(single_weights) == 1:
+                single_weights = [single_weights[0]] * 100
+        else:
+            single_blocks  = parse_range_string(single_blocks)
+            
+            weights_expanded = [0.0] * 100
+            for b, w in zip(single_blocks, single_weights):
+                weights_expanded[b] = w
+            single_weights = weights_expanded
+        
+        
+        
+        if end_step == -1:
+            end_step = MAX_STEPS
+        
+        if guide is not None:
+            raw_x = guide.get('state_info', {}).get('raw_x', None)
+            if raw_x is not None:
+                guide          = {'samples': guide['state_info']['raw_x'].clone()}
+            else:
+                guide          = {'samples': guide['samples'].clone()}
+        
+        if weight_scheduler == "constant": # and weights == None: 
+            weights = initialize_or_scale(None, weight, end_step).to(default_dtype)
+            prepend = torch.zeros(start_step).to(weights)
+            weights = torch.cat([prepend, weights])
+            weights = F.pad(weights, (0, MAX_STEPS), value=0.0)
+        
+        guides = copy.deepcopy(guides) if guides is not None else {}
+        
+        guides['weight_attninj']           = weight
+        guides['weights_attninj']          = weights
+        
+        guides['blocks_attninj_mmdit'] = {
+            "double_weights": double_weights,
+            "single_weights": single_weights,
+            "double_blocks" : double_blocks,
+            "single_blocks" : single_blocks,
+        }
+        
+        guides['blocks_attninj_qkv'] = {
+            "img_q": img_q,
+            "img_k": img_k,
+            "img_v": img_v,
+            "txt_q": txt_q,
+            "txt_k": txt_k,
+            "txt_v": txt_v,
+            
+            "img_q_norm": img_q_norm,
+            "img_k_norm": img_k_norm,
+            "img_v_norm": img_v_norm,
+            "txt_q_norm": txt_q_norm,
+            "txt_k_norm": txt_k_norm,
+            "txt_v_norm": txt_v_norm,
+        }
+        
+        guides['guide_attninj']            = guide
+        guides['mask_attninj']             = mask
+
+        guides['weight_scheduler_attninj'] = weight_scheduler
+        guides['start_step_attninj']       = start_step
+        guides['end_step_attninj']         = end_step
+        
+        return (guides, )
+
+
+
 
 
 
