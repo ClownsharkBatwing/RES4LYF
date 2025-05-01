@@ -1310,9 +1310,19 @@ class ClownsharKSampler_Beta:
         #if model is None:
         #    model = latent_image['model']
         
+        
+        # defaults for ClownSampler
+        eta_substep = eta
+        
+        # defaults for SharkSampler
+        noise_type_init = "gaussian"
+        noise_stdev     = 1.0
+        denoise_alt     = 1.0
+        channelwise_cfg = 1.0
+        
         if denoise < 0:
             denoise_alt = -denoise
-            denoised = 1.0
+            denoise = 1.0
         
         is_chained = False
 
@@ -1333,15 +1343,6 @@ class ClownsharKSampler_Beta:
         if model.model.model_config.unet_config.get('stable_cascade_stage') == 'b':
             noise_type_sde         = "pyramid-cascade_B"
             noise_type_sde_substep = "pyramid-cascade_B"
-        
-        # defaults for ClownSampler
-        eta_substep = eta
-        
-        # defaults for SharkSampler
-        noise_type_init = "gaussian"
-        noise_stdev     = 1.0
-        denoise_alt     = 1.0
-        channelwise_cfg = 1.0
         
         
         #if options is not None:

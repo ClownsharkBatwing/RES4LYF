@@ -26,7 +26,7 @@ def add_beta(NODE_CLASS_MAPPINGS, extra_samplers):
         "ClownGuide_Mean_Beta"            : samplers_extensions.ClownGuide_Mean_Beta,
         "ClownGuide_AdaIN_MMDiT_Beta"     : samplers_extensions.ClownGuide_AdaIN_MMDiT_Beta,
         "ClownGuide_AttnInj_MMDiT_Beta"   : samplers_extensions.ClownGuide_AttnInj_MMDiT_Beta,
-
+        "ClownGuide_Style_Beta"           : samplers_extensions.ClownGuide_Style_Beta,
 
         "ClownGuide_Beta"                 : samplers_extensions.ClownGuide_Beta,
         "ClownGuides_Beta"                : samplers_extensions.ClownGuides_Beta,

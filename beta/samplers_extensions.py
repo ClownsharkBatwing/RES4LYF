@@ -947,6 +947,114 @@ class ClownGuide_Mean_Beta:
 
 
 
+class ClownGuide_Style_Beta:
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {"required":
+                    {
+                    "apply_to":         (["positive", "negative"],                    {"default": "positive"}),
+                    "weight":           ("FLOAT",                                     {"default": 1.0, "min":  -100.0, "max": 100.0, "step":0.01, "round": False, "tooltip": "Set the strength of the guide by multiplying all other weights by this value."}),
+                    "synweight":        ("FLOAT",                                     {"default": 1.0, "min":  -100.0, "max": 100.0, "step":0.01, "round": False, "tooltip": "Set the strength of the guide by multiplying all other weights by this value."}),
+                    "weight_scheduler": (["constant"] + get_res4lyf_scheduler_list(), {"default": "constant"},),
+                    "start_step":       ("INT",                                       {"default": 0,    "min":  0,      "max": 10000}),
+                    "end_step":         ("INT",                                       {"default": 15,   "min": -1,      "max": 10000}),
+                    "invert_mask":      ("BOOLEAN",                                   {"default": False}),
+                    },
+                "optional": 
+                    {
+                    "guide":            ("LATENT", ),
+                    "mask":             ("MASK", ),
+                    "weights":          ("SIGMAS", ),
+                    "guides":           ("GUIDES", ),
+                    }  
+                }
+    
+    RETURN_TYPES = ("GUIDES",)
+    RETURN_NAMES = ("guides",)
+    FUNCTION     = "main"
+    CATEGORY     = "RES4LYF/sampler_extensions"
+
+    def main(self,
+            apply_to         = "all",
+            weight           = 1.0,
+            synweight        = 1.0,
+            weight_scheduler = "constant",
+            start_step       = 0,
+            end_step         = 15,
+            invert_mask      = False,
+            
+            guide            = None,
+            mask             = None,
+            weights          = None,
+            guides           = None,
+            ):
+        
+        default_dtype = torch.float64
+        
+        mask = 1-mask if mask is not None else None
+        
+        if end_step == -1:
+            end_step = MAX_STEPS
+        
+        if guide is not None:
+            raw_x = guide.get('state_info', {}).get('raw_x', None)
+            if raw_x is not None:
+                guide          = {'samples': guide['state_info']['raw_x'].clone()}
+            else:
+                guide          = {'samples': guide['samples'].clone()}
+        
+        if weight_scheduler == "constant": # and weights == None: 
+            weights = initialize_or_scale(None, weight, end_step).to(default_dtype)
+            prepend = torch.zeros(start_step).to(weights)
+            weights = torch.cat([prepend, weights])
+            weights = F.pad(weights, (0, MAX_STEPS), value=0.0)
+            
+        """if weight_scheduler == "constant": # and weights == None: 
+            synweights = initialize_or_scale(None, synweight, end_step).to(default_dtype)
+            prepend = torch.zeros(start_step).to(synweights)
+            synweights = torch.cat([prepend, synweights])
+            synweights = F.pad(synweights, (0, MAX_STEPS), value=0.0)"""
+        
+        guides = copy.deepcopy(guides) if guides is not None else {}
+        
+        if apply_to in {"positive", "all"}:
+        
+            guides['weight_style_pos']           = weight
+            guides['weights_style_pos']          = weights
+
+            guides['synweight_style_pos']        = synweight
+            #guides['synweights_style_pos']       = synweights
+
+            guides['guide_style_pos']            = guide
+            guides['mask_style_pos']             = mask
+
+            guides['weight_scheduler_style_pos'] = weight_scheduler
+            guides['start_step_style_pos']       = start_step
+            guides['end_step_style_pos']         = end_step
+            
+        if apply_to in {"negative", "all"}:
+            guides['weight_style_neg']           = weight
+            guides['weights_style_neg']          = weights
+
+            guides['synweight_style_neg']        = synweight
+            #guides['synweights_style_neg']       = synweights
+
+            guides['guide_style_neg']            = guide
+            guides['mask_style_neg']             = mask
+
+            guides['weight_scheduler_style_neg'] = weight_scheduler
+            guides['start_step_style_neg']       = start_step
+            guides['end_step_style_neg']         = end_step
+        
+        return (guides, )
+
+
+
+
+
+
+
+
 class ClownGuide_AdaIN_MMDiT_Beta:
     @classmethod
     def INPUT_TYPES(cls):

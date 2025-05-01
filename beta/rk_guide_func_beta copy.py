@@ -57,8 +57,6 @@ class LatentGuide:
         self.y0_mean                   = None
         self.y0_adain                  = None
         self.y0_attninj                = None
-        self.y0_style_pos              = None
-        self.y0_style_neg              = None
 
         self.guide_mode                = ""
         self.max_steps                 = MAX_STEPS
@@ -67,8 +65,6 @@ class LatentGuide:
         self.mask_mean                 = None
         self.mask_adain                = None
         self.mask_attninj              = None
-        self.mask_style_pos            = None
-        self.mask_style_neg            = None
         self.x_lying_                  = None
         self.s_lying_                  = None
         
@@ -78,16 +74,12 @@ class LatentGuide:
         self.HAS_LATENT_GUIDE_MEAN     = False
         self.HAS_LATENT_GUIDE_ADAIN    = False
         self.HAS_LATENT_GUIDE_ATTNINJ  = False
-        self.HAS_LATENT_GUIDE_STYLE_POS= False
-        self.HAS_LATENT_GUIDE_STYLE_NEG= False
         
         self.lgw                       = torch.full_like(sigmas, 0., dtype=dtype) 
         self.lgw_inv                   = torch.full_like(sigmas, 0., dtype=dtype)
         self.lgw_mean                  = torch.full_like(sigmas, 0., dtype=dtype)
         self.lgw_adain                 = torch.full_like(sigmas, 0., dtype=dtype)
         self.lgw_attninj               = torch.full_like(sigmas, 0., dtype=dtype)
-        self.lgw_style_pos             = torch.full_like(sigmas, 0., dtype=dtype)
-        self.lgw_style_neg             = torch.full_like(sigmas, 0., dtype=dtype)
         
         self.cossim_tgt                = torch.full_like(sigmas, 0., dtype=dtype) 
         self.cossim_tgt_inv            = torch.full_like(sigmas, 0., dtype=dtype) 
@@ -97,8 +89,6 @@ class LatentGuide:
         self.guide_mean_cossim_cutoff_ = 1.0
         self.guide_adain_cossim_cutoff_= 1.0
         self.guide_attninj_cossim_cutoff_= 1.0
-        self.guide_style_pos_cossim_cutoff_= 1.0
-        self.guide_style_neg_cossim_cutoff_= 1.0
 
         self.frame_weights_mgr        = frame_weights_mgr
         self.frame_weights            = None
@@ -114,24 +104,18 @@ class LatentGuide:
         latent_guide_weight_mean  = 0.0
         latent_guide_weight_adain = 0.0
         latent_guide_weight_attninj = 0.0
-        latent_guide_weight_style_pos = 0.0
-        latent_guide_weight_style_neg = 0.0
 
         latent_guide_weights      = torch.zeros_like(self.sigmas, dtype=self.dtype, device=self.device)
         latent_guide_weights_inv  = torch.zeros_like(self.sigmas, dtype=self.dtype, device=self.device)
         latent_guide_weights_mean = torch.zeros_like(self.sigmas, dtype=self.dtype, device=self.device)
         latent_guide_weights_adain= torch.zeros_like(self.sigmas, dtype=self.dtype, device=self.device)
         latent_guide_weights_attninj = torch.zeros_like(self.sigmas, dtype=self.dtype, device=self.device)
-        latent_guide_weights_style_pos = torch.zeros_like(self.sigmas, dtype=self.dtype, device=self.device)
-        latent_guide_weights_style_neg = torch.zeros_like(self.sigmas, dtype=self.dtype, device=self.device)
 
         latent_guide              = None
         latent_guide_inv          = None
         latent_guide_mean         = None
         latent_guide_adain        = None
         latent_guide_attninj      = None
-        latent_guide_style_pos    = None
-        latent_guide_style_neg    = None
 
         if guides is not None:
             self.guide_mode                = guides.get("guide_mode", "none")
@@ -140,69 +124,48 @@ class LatentGuide:
             latent_guide_weight_mean       = guides.get("weight_mean",     0.)
             latent_guide_weight_adain      = guides.get("weight_adain",    0.)
             latent_guide_weight_attninj    = guides.get("weight_attninj",  0.)
-            latent_guide_weight_style_pos  = guides.get("weight_style_pos", 0.)
-            latent_guide_weight_style_neg  = guides.get("weight_style_neg", 0.)
-            #latent_guide_synweight_style_pos  = guides.get("synweight_style_pos", 0.)
-            #latent_guide_synweight_style_neg  = guides.get("synweight_style_neg", 0.)
 
             latent_guide_weights           = guides.get("weights_masked")
             latent_guide_weights_inv       = guides.get("weights_unmasked")
             latent_guide_weights_mean      = guides.get("weights_mean")
             latent_guide_weights_adain     = guides.get("weights_adain")
             latent_guide_weights_attninj   = guides.get("weights_attninj")
-            latent_guide_weights_style_pos = guides.get("weights_style_pos")
-            latent_guide_weights_style_neg = guides.get("weights_style_neg")
-            #latent_guide_synweights_style_pos = guides.get("synweights_style_pos")
-            #latent_guide_synweights_style_neg = guides.get("synweights_style_neg")
 
             latent_guide                   = guides.get("guide_masked")
             latent_guide_inv               = guides.get("guide_unmasked")
             latent_guide_mean              = guides.get("guide_mean")
             latent_guide_adain             = guides.get("guide_adain")
             latent_guide_attninj           = guides.get("guide_attninj")
-            latent_guide_style_pos         = guides.get("guide_style_pos")
-            latent_guide_style_neg         = guides.get("guide_style_neg")
 
             self.mask                      = guides.get("mask")
             self.mask_inv                  = guides.get("unmask")
             self.mask_mean                 = guides.get("mask_mean")
             self.mask_adain                = guides.get("mask_adain")
             self.mask_attninj              = guides.get("mask_attninj")
-            self.mask_style_pos            = guides.get("mask_style_pos")
-            self.mask_style_neg            = guides.get("mask_style_neg")
 
             scheduler_                     = guides.get("weight_scheduler_masked")
             scheduler_inv_                 = guides.get("weight_scheduler_unmasked")
             scheduler_mean_                = guides.get("weight_scheduler_mean")
             scheduler_adain_               = guides.get("weight_scheduler_adain")
             scheduler_attninj_             = guides.get("weight_scheduler_attninj")
-            scheduler_style_pos_           = guides.get("weight_scheduler_style_pos")
-            scheduler_style_neg_           = guides.get("weight_scheduler_style_neg")
 
             start_steps_                   = guides.get("start_step_masked",   0)
             start_steps_inv_               = guides.get("start_step_unmasked", 0)
             start_steps_mean_              = guides.get("start_step_mean",     0)
             start_steps_adain_             = guides.get("start_step_adain",    0)
             start_steps_attninj_           = guides.get("start_step_attninj",  0)
-            start_steps_style_pos_         = guides.get("start_step_style_pos", 0)
-            start_steps_style_neg_         = guides.get("start_step_style_neg", 0)
 
             steps_                         = guides.get("end_step_masked",     1)
             steps_inv_                     = guides.get("end_step_unmasked",   1)
             steps_mean_                    = guides.get("end_step_mean",       1)
             steps_adain_                   = guides.get("end_step_adain",      1)
             steps_attninj_                 = guides.get("end_step_attninj",    1)
-            steps_style_pos_               = guides.get("end_step_style_pos",  1)
-            steps_style_neg_               = guides.get("end_step_style_neg",  1)
 
-            self.guide_cossim_cutoff_         = guides.get("cutoff_masked",       1.)
-            self.guide_bkg_cossim_cutoff_     = guides.get("cutoff_unmasked",     1.)
-            self.guide_mean_cossim_cutoff_    = guides.get("cutoff_mean",         1.)
-            self.guide_adain_cossim_cutoff_   = guides.get("cutoff_adain",        1.)
-            self.guide_attninj_cossim_cutoff_ = guides.get("cutoff_attninj",      1.)
-            self.guide_style_pos_cossim_cutoff_ = guides.get("cutoff_style_pos",  1.)
-            self.guide_style_neg_cossim_cutoff_ = guides.get("cutoff_style_neg",  1.)
-
+            self.guide_cossim_cutoff_      = guides.get("cutoff_masked",       1.)
+            self.guide_bkg_cossim_cutoff_  = guides.get("cutoff_unmasked",     1.)
+            self.guide_mean_cossim_cutoff_ = guides.get("cutoff_mean",         1.)
+            self.guide_adain_cossim_cutoff_= guides.get("cutoff_adain",        1.)
+            self.guide_attninj_cossim_cutoff_ = guides.get("cutoff_attninj",   1.)
 
 
             if self.mask     is not None and self.mask.shape    [0] > 1 and self.VIDEO is False:
@@ -245,17 +208,6 @@ class LatentGuide:
                 prepend                    = torch.zeros(start_steps_attninj_,                                                         dtype=self.dtype, device=self.device) 
                 latent_guide_weights_attninj = torch.cat((prepend, latent_guide_weights_attninj.to(self.device)), dim=0)
             
-            if latent_guide_weights_style_pos is None and scheduler_style_pos_ is not None:
-                total_steps                = steps_style_pos_ - start_steps_style_pos_
-                latent_guide_weights_style_pos = get_sigmas(self.model, scheduler_style_pos_, total_steps, 1.0, shift=guide_sigma_shift).to(dtype=self.dtype, device=self.device) / self.sigma_max
-                prepend                    = torch.zeros(start_steps_style_pos_,                                                         dtype=self.dtype, device=self.device) 
-                latent_guide_weights_style_pos = torch.cat((prepend, latent_guide_weights_style_pos.to(self.device)), dim=0)
-            
-            if latent_guide_weights_style_neg is None and scheduler_style_neg_ is not None:
-                total_steps                = steps_style_neg_ - start_steps_style_neg_
-                latent_guide_weights_style_neg = get_sigmas(self.model, scheduler_style_neg_, total_steps, 1.0, shift=guide_sigma_shift).to(dtype=self.dtype, device=self.device) / self.sigma_max
-                prepend                    = torch.zeros(start_steps_style_neg_,                                                         dtype=self.dtype, device=self.device) 
-                latent_guide_weights_style_neg = torch.cat((prepend, latent_guide_weights_style_neg.to(self.device)), dim=0)
             
             if scheduler_ != "constant" or latent_guide_weights is not None:
                 latent_guide_weights      = initialize_or_scale(latent_guide_weights,      latent_guide_weight,      self.max_steps)
@@ -267,18 +219,13 @@ class LatentGuide:
                 latent_guide_weights_adain = initialize_or_scale(latent_guide_weights_adain, latent_guide_weight_adain, self.max_steps)
             if scheduler_attninj_ != "constant" or latent_guide_weights_attninj is not None:
                 latent_guide_weights_attninj = initialize_or_scale(latent_guide_weights_attninj, latent_guide_weight_attninj, self.max_steps)
-            if scheduler_style_pos_ != "constant" or latent_guide_weights_style_pos is not None:
-                latent_guide_weights_style_pos = initialize_or_scale(latent_guide_weights_style_pos, latent_guide_weight_style_pos, self.max_steps)
-            if scheduler_style_neg_ != "constant" or latent_guide_weights_style_neg is not None:
-                latent_guide_weights_style_neg = initialize_or_scale(latent_guide_weights_style_neg, latent_guide_weight_style_neg, self.max_steps)
+
 
             latent_guide_weights      [steps_      :] = 0
             latent_guide_weights_inv  [steps_inv_  :] = 0
             latent_guide_weights_mean [steps_mean_ :] = 0
             latent_guide_weights_adain[steps_adain_:] = 0
             latent_guide_weights_attninj[steps_attninj_:] = 0
-            latent_guide_weights_style_pos[steps_style_pos_:] = 0
-            latent_guide_weights_style_neg[steps_style_neg_:] = 0
 
         
         self.lgw       = F.pad(latent_guide_weights,       (0, self.max_steps), value=0.0)
@@ -286,8 +233,6 @@ class LatentGuide:
         self.lgw_mean  = F.pad(latent_guide_weights_mean,  (0, self.max_steps), value=0.0)
         self.lgw_adain = F.pad(latent_guide_weights_adain, (0, self.max_steps), value=0.0)
         self.lgw_attninj = F.pad(latent_guide_weights_attninj, (0, self.max_steps), value=0.0)
-        self.lgw_style_pos = F.pad(latent_guide_weights_style_pos, (0, self.max_steps), value=0.0)
-        self.lgw_style_neg = F.pad(latent_guide_weights_style_neg, (0, self.max_steps), value=0.0)
 
         
         mask, self.LGW_MASK_RESCALE_MIN = prepare_mask(x, self.mask, self.LGW_MASK_RESCALE_MIN)
@@ -368,9 +313,9 @@ class LatentGuide:
                 mask_mean = self.mask_mean.to(x.device)
                 x = (1-mask_mean) * x + mask_mean * latent_guide_mean_samples.to(x.device) #fixed old approach, which was mask, (1-mask)     # NECESSARY?
             else:
-                x = latent_guide_mean_samples.to(x.device)   #THIS COULD LEAD TO WEIRD BEHAVIOR! OVERWRITING X WITH LG_MEAN AFTER SETTING TO LG above!"""
+                x = latent_guide_mean_samples.to(x.device)   #THIS COULD LEAD TO WEIRD BEHAVIOR! OVERWRITING X WITH LG_MEAN AFTER SETTING TO LG above!
         else:
-            self.y0_mean = torch.zeros_like(x, dtype=self.dtype, device=self.device)
+            self.y0_mean = torch.zeros_like(x, dtype=self.dtype, device=self.device)"""
 
         if latent_guide_adain is not None:
             self.HAS_LATENT_GUIDE_ADAIN = True
@@ -424,67 +369,10 @@ class LatentGuide:
                 else:
                     x = latent_guide_attninj_samples.to(x.device)  
             else:
-                x = latent_guide_attninj_samples.to(x.device)   #THIS COULD LEAD TO WEIRD BEHAVIOR! OVERWRITING X WITH LG_ADAIN AFTER SETTING TO LG above!"""
+                x = latent_guide_attninj_samples.to(x.device)   #THIS COULD LEAD TO WEIRD BEHAVIOR! OVERWRITING X WITH LG_ADAIN AFTER SETTING TO LG above!
         else:
-            self.y0_attninj = torch.zeros_like(x, dtype=self.dtype, device=self.device)
+            self.y0_attninj = torch.zeros_like(x, dtype=self.dtype, device=self.device)"""
 
-
-        if latent_guide_style_pos is not None:
-            self.HAS_LATENT_GUIDE_STYLE_POS = True
-            if type(latent_guide_style_pos) is dict:
-                if latent_guide_style_pos['samples'].shape[0] > 1:
-                    latent_guide_style_pos['samples'] = latent_guide_style_pos['samples'][batch_num].unsqueeze(0)
-                latent_guide_style_pos_samples = self.model.inner_model.inner_model.process_latent_in(latent_guide_style_pos['samples']).clone().to(dtype=self.dtype, device=self.device)
-            elif type(latent_guide_style_pos) is torch.Tensor:
-                latent_guide_style_pos_samples = latent_guide_style_pos.to(dtype=self.dtype, device=self.device)
-            else:
-                raise ValueError(f"Invalid latent type: {type(latent_guide_style_pos)}")
-
-            if self.VIDEO and latent_guide_style_pos_samples.shape[2] == 1:
-                latent_guide_style_pos_samples = latent_guide_style_pos_samples.repeat(1, 1, x.shape[2], 1, 1)
-
-            self.y0_style_pos = latent_guide_style_pos_samples
-            """if self.SAMPLE:
-                self.y0_style_pos = latent_guide_style_pos_samples
-            elif self.UNSAMPLE: # and self.mask is not None:
-                if self.mask_style_pos is not None:
-                    mask_style_pos = self.mask_style_pos.to(x.device)
-                    x = (1-mask_style_pos) * x + mask_style_pos * latent_guide_style_pos_samples.to(x.device) #fixed old approach, which was mask, (1-mask)     # NECESSARY?
-                else:
-                    x = latent_guide_style_pos_samples.to(x.device)  
-            else:
-                x = latent_guide_style_pos_samples.to(x.device)   #THIS COULD LEAD TO WEIRD BEHAVIOR! OVERWRITING X WITH LG_ADAIN AFTER SETTING TO LG above!"""
-        else:
-            self.y0_style_pos = torch.zeros_like(x, dtype=self.dtype, device=self.device)
-
-
-        if latent_guide_style_neg is not None:
-            self.HAS_LATENT_GUIDE_STYLE_NEG = True
-            if type(latent_guide_style_neg) is dict:
-                if latent_guide_style_neg['samples'].shape[0] > 1:
-                    latent_guide_style_neg['samples'] = latent_guide_style_neg['samples'][batch_num].unsqueeze(0)
-                latent_guide_style_neg_samples = self.model.inner_model.inner_model.process_latent_in(latent_guide_style_neg['samples']).clone().to(dtype=self.dtype, device=self.device)
-            elif type(latent_guide_style_neg) is torch.Tensor:
-                latent_guide_style_neg_samples = latent_guide_style_neg.to(dtype=self.dtype, device=self.device)
-            else:
-                raise ValueError(f"Invalid latent type: {type(latent_guide_style_neg)}")
-
-            if self.VIDEO and latent_guide_style_neg_samples.shape[2] == 1:
-                latent_guide_style_neg_samples = latent_guide_style_neg_samples.repeat(1, 1, x.shape[2], 1, 1)
-
-            self.y0_style_neg = latent_guide_style_neg_samples
-            """if self.SAMPLE:
-                self.y0_style_neg = latent_guide_style_neg_samples
-            elif self.UNSAMPLE: # and self.mask is not None:
-                if self.mask_style_neg is not None:
-                    mask_style_neg = self.mask_style_neg.to(x.device)
-                    x = (1-mask_style_neg) * x + mask_style_neg * latent_guide_style_neg_samples.to(x.device) #fixed old approach, which was mask, (1-mask)     # NECESSARY?
-                else:
-                    x = latent_guide_style_neg_samples.to(x.device)  
-            else:
-                x = latent_guide_style_neg_samples.to(x.device)   #THIS COULD LEAD TO WEIRD BEHAVIOR! OVERWRITING X WITH LG_ADAIN AFTER SETTING TO LG above!"""
-        else:
-            self.y0_style_neg = torch.zeros_like(x, dtype=self.dtype, device=self.device)
 
         if self.frame_weights is not None:
             self.frame_weights     = initialize_or_scale(self.frame_weights,     1.0, self.max_steps).to(dtype=self.dtype, device=self.device)
