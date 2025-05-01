@@ -306,13 +306,14 @@ class LatentGuide:
             if self.VIDEO and latent_guide_mean_samples.shape[2] == 1:
                 latent_guide_mean_samples = latent_guide_mean_samples.repeat(1, 1, x.shape[2], 1, 1)
 
-            if self.SAMPLE:
+            self.y0_mean = latent_guide_mean_samples
+            """if self.SAMPLE:
                 self.y0_mean = latent_guide_mean_samples
             elif self.UNSAMPLE: # and self.mask is not None:
                 mask_mean = self.mask_mean.to(x.device)
                 x = (1-mask_mean) * x + mask_mean * latent_guide_mean_samples.to(x.device) #fixed old approach, which was mask, (1-mask)     # NECESSARY?
             else:
-                x = latent_guide_mean_samples.to(x.device)   #THIS COULD LEAD TO WEIRD BEHAVIOR! OVERWRITING X WITH LG_MEAN AFTER SETTING TO LG above!
+                x = latent_guide_mean_samples.to(x.device)   #THIS COULD LEAD TO WEIRD BEHAVIOR! OVERWRITING X WITH LG_MEAN AFTER SETTING TO LG above!"""
         else:
             self.y0_mean = torch.zeros_like(x, dtype=self.dtype, device=self.device)
 
@@ -368,9 +369,9 @@ class LatentGuide:
                 else:
                     x = latent_guide_attninj_samples.to(x.device)  
             else:
-                x = latent_guide_attninj_samples.to(x.device)   #THIS COULD LEAD TO WEIRD BEHAVIOR! OVERWRITING X WITH LG_ADAIN AFTER SETTING TO LG above!
+                x = latent_guide_attninj_samples.to(x.device)   #THIS COULD LEAD TO WEIRD BEHAVIOR! OVERWRITING X WITH LG_ADAIN AFTER SETTING TO LG above!"""
         else:
-            self.y0_attninj = torch.zeros_like(x, dtype=self.dtype, device=self.device)"""
+            self.y0_attninj = torch.zeros_like(x, dtype=self.dtype, device=self.device)
 
 
         if self.frame_weights is not None:
