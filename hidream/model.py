@@ -677,7 +677,7 @@ class HDModel(nn.Module):
         b, c, h, w  = x.shape
         img          = comfy.ldm.common_dit.pad_to_patch_size(x, (self.patch_size, self.patch_size))
         update_cross_attn = transformer_options.get("update_cross_attn")
-        
+        SIGMA = t[0].clone() / 1000
         EO = transformer_options.get("ExtraOptions", ExtraOptions(""))
         if EO is not None:
             EO.mute = True
@@ -690,10 +690,16 @@ class HDModel(nn.Module):
         ADAIN_SINGLE_BLOCKS,   ADAIN_DOUBLE_BLOCKS   = [-1], [-1]
         ATTNINJ_SINGLE_BLOCKS, ATTNINJ_DOUBLE_BLOCKS = [-1], [-1]
         
-        y0_adain,   img_y0_adain,   img_sizes_y0_adain   = None, None, None
-        y0_attninj, img_y0_attninj, img_sizes_y0_attninj = None, None, None
+        y0_adain,     img_y0_adain,     img_sizes_y0_adain     = None, None, None
+        y0_attninj,   img_y0_attninj,   img_sizes_y0_attninj   = None, None, None
+        y0_style_pos, img_y0_style_pos, img_sizes_y0_style_pos = None, None, None
+        y0_style_neg, img_y0_style_neg, img_sizes_y0_style_neg = None, None, None
         blocks_attninj_qkv_scaled = {}
+        STYLE_UNCOND = EO("STYLE_UNCOND", False)
         
+        y0_style_pos        = transformer_options.get("y0_style_pos")
+        y0_style_neg        = transformer_options.get("y0_style_neg")
+
         y0_adain = transformer_options.get("y0_adain")
         if y0_adain is not None:
             y0_adain            = y0_adain.to(x)
@@ -717,6 +723,9 @@ class HDModel(nn.Module):
             IDENTICAL_ADAIN_ATTNINJ = True
         else:
             IDENTICAL_ADAIN_ATTNINJ = False
+
+            
+            
             
         img_orig, t_orig, y_orig, context_orig, llama3_orig = clone_inputs(img, t, y, context, encoder_hidden_states_llama3)
         
@@ -809,6 +818,11 @@ class HDModel(nn.Module):
                 y = y_orig.clone()[0].unsqueeze(0)
                 clip_y0_attninj = t_y0_attninj + self.p_embedder(y)   
 
+                
+            # JUST DOUBLE CHECKING. DELETE THIS FOLLOWING LINE LATER !!!
+            clip_y0_adain = clip.clone()
+            clip_y0_attninj = clip.clone()
+
             img_sizes = None
             img, img_masks, img_sizes = self.patchify(img, self.max_seq, img_sizes)   # for 1024x1024: output is   1,4096,64   None   [[64,64]]     hidden_states rearranged not shrunk, patch_size 1x1???
             if img_masks is None:
@@ -878,9 +892,9 @@ class HDModel(nn.Module):
 
             img_len = img.shape[1]
             
-            if not UNCOND and img_y0_adain is not None:
+            if STYLE_UNCOND == UNCOND and img_y0_adain is not None:
                 txt_init_y0_adain = txt_init.clone()
-            if not UNCOND and img_y0_attninj is not None:
+            if STYLE_UNCOND == UNCOND and img_y0_attninj is not None:
                 txt_init_y0_attninj = txt_init.clone()
             
             for bid, block in enumerate(self.double_stream_blocks):                                                              # len == 16
@@ -914,7 +928,7 @@ class HDModel(nn.Module):
                     img, txt_init = block(img, img_masks, txt, clip, rope, mask, update_cross_attn=update_cross_attn)
                     
                 else:
-                    if not UNCOND and img_y0_attninj is not None:
+                    if STYLE_UNCOND == UNCOND and img_y0_attninj is not None:
                         cache_v = False
                         if bid in ATTNINJ_DOUBLE_BLOCKS:
                             cache_v = True
@@ -927,7 +941,7 @@ class HDModel(nn.Module):
                         
                     img, txt_init = block(img, img_masks, txt, clip, rope, mask, update_cross_attn=update_cross_attn, attninj_opts=blocks_attninj_qkv_scaled)
 
-                    if not UNCOND and img_y0_adain is not None:
+                    if STYLE_UNCOND == UNCOND and img_y0_adain is not None:
                         if IDENTICAL_ADAIN_ATTNINJ:
                             img_y0_adain      = img_y0_attninj
                             txt_init_y0_adain = txt_init_y0_attninj
@@ -939,15 +953,16 @@ class HDModel(nn.Module):
                         if bid in ADAIN_DOUBLE_BLOCKS:
                             adaweight = blocks_adain['double_weights'][bid]
                             img = (1-adaweight) * img + adaweight * adain_seq(img, img_y0_adain)
+                            #img = img + (1-SIGMA) * adaweight * (adain_seq(img, img_y0_adain) - img)
 
                 txt_init = txt_init[:, :txt_init_len]
 
             img_len = img.shape[1]
             img     = torch.cat([img, txt_init], dim=1)   # 4032 + 271 -> 4303     # txt embed from double stream block
             
-            if not UNCOND and y0_adain is not None:
+            if STYLE_UNCOND == UNCOND and y0_adain is not None:
                 img_y0_adain = torch.cat([img_y0_adain, txt_init_y0_adain], dim=1)
-            if not UNCOND and y0_attninj is not None:
+            if STYLE_UNCOND == UNCOND and y0_attninj is not None:
                 img_y0_attninj = torch.cat([img_y0_attninj, txt_init_y0_attninj], dim=1)
                 
             joint_len = img.shape[1]
@@ -981,7 +996,7 @@ class HDModel(nn.Module):
                     img = block(img, img_masks, None, clip, rope, mask_tmp)
                     
                 else:
-                    if not UNCOND and img_y0_attninj is not None:
+                    if STYLE_UNCOND == UNCOND and img_y0_attninj is not None:
                         cache_v = False
                         if bid in ATTNINJ_SINGLE_BLOCKS:
                             cache_v = True
@@ -996,7 +1011,7 @@ class HDModel(nn.Module):
 
                 img = img[:, :joint_len]   # slice off txt_llama
                 
-                if not UNCOND and img_y0_adain is not None:
+                if STYLE_UNCOND == UNCOND and img_y0_adain is not None:
                     if IDENTICAL_ADAIN_ATTNINJ:
                         img_y0_adain = img_y0_attninj
                     else:
@@ -1007,6 +1022,7 @@ class HDModel(nn.Module):
                     if bid in ADAIN_SINGLE_BLOCKS:
                         adaweight = blocks_adain['single_weights'][bid]
                         img = (1-adaweight) * img + adaweight * adain_seq(img, img_y0_adain)
+                        #img = img + (1-SIGMA) * adaweight * (adain_seq(img, img_y0_adain) - img)
                 
             img = img[:, :img_len, ...]
             img = self.final_layer(img, clip)
@@ -1016,7 +1032,83 @@ class HDModel(nn.Module):
             
         output = torch.stack(out_list, dim=0).squeeze(dim=1)
         
-        return -output[:, :, :h, :w]
+        eps = -output[:, :, :h, :w]
+        
+        
+        if y0_style_pos is not None:
+            y0_style_pos_weight    = transformer_options.get("y0_style_pos_weight")
+            y0_style_pos_synweight = transformer_options.get("y0_style_pos_synweight")
+            y0_style_pos_synweight *= y0_style_pos_weight
+            
+            y0_style_pos = y0_style_pos.to(torch.float64)
+            x   = x.to(torch.float64)
+            eps = eps.to(torch.float64)
+            eps_orig = eps.clone()
+            
+            sigma = t_orig[0].to(torch.float64) / 1000
+            denoised = x - sigma * eps
+            
+            img = comfy.ldm.common_dit.pad_to_patch_size(denoised, (self.patch_size, self.patch_size))
+            img_sizes = None
+            img, img_masks, img_sizes = self.patchify(img, self.max_seq, img_sizes) 
+            denoised_embed = self.x_embedder(img)
+            
+            img_y0_adain = comfy.ldm.common_dit.pad_to_patch_size(y0_style_pos, (self.patch_size, self.patch_size))
+            img_sizes_y0_adain = None
+            img_y0_adain, img_masks_y0_adain, img_sizes_y0_adain = self.patchify(img_y0_adain, self.max_seq, img_sizes_y0_adain) 
+            y0_adain_embed = self.x_embedder(img_y0_adain)
+            
+            denoised_embed = adain_seq(denoised_embed, y0_adain_embed)
+            
+            W = self.x_embedder.proj.weight.data.to(torch.float64)   # shape [2560, 64]
+            b = self.x_embedder.proj.bias.data.to(torch.float64)     # shape [2560]
+            denoised_approx = (denoised_embed - b) @ torch.linalg.pinv(W).T
+            denoised_approx = denoised_approx.to(eps)
+            denoised_approx = self.unpatchify (denoised_approx, img_sizes)
+            
+            eps = (x - denoised_approx) / sigma
+            eps[1] = eps_orig[1] + y0_style_pos_weight * (eps[1] - eps_orig[1])
+            #eps[0] = eps_orig[0]
+            eps[0] = eps_orig[0] + y0_style_pos_synweight * (eps[0] - eps_orig[0])
+
+        if y0_style_neg is not None:
+            y0_style_neg_weight    = transformer_options.get("y0_style_neg_weight")
+            y0_style_neg_synweight = transformer_options.get("y0_style_neg_synweight")
+            y0_style_neg_synweight *= y0_style_neg_weight
+            
+            y0_style_neg = y0_style_neg.to(torch.float64)
+            x   = x.to(torch.float64)
+            eps = eps.to(torch.float64)
+            eps_orig = eps.clone()
+            
+            sigma = t_orig[0].to(torch.float64) / 1000
+            denoised = x - sigma * eps
+            
+            img = comfy.ldm.common_dit.pad_to_patch_size(denoised, (self.patch_size, self.patch_size))
+            img_sizes = None
+            img, img_masks, img_sizes = self.patchify(img, self.max_seq, img_sizes) 
+            denoised_embed = self.x_embedder(img)
+            
+            img_y0_adain = comfy.ldm.common_dit.pad_to_patch_size(y0_style_neg, (self.patch_size, self.patch_size))
+            img_sizes_y0_adain = None
+            img_y0_adain, img_masks_y0_adain, img_sizes_y0_adain = self.patchify(img_y0_adain, self.max_seq, img_sizes_y0_adain) 
+            y0_adain_embed = self.x_embedder(img_y0_adain)
+            
+            denoised_embed = adain_seq(denoised_embed, y0_adain_embed)
+            
+            W = self.x_embedder.proj.weight.data.to(torch.float64)   # shape [2560, 64]
+            b = self.x_embedder.proj.bias.data.to(torch.float64)     # shape [2560]
+            denoised_approx = (denoised_embed - b) @ torch.linalg.pinv(W).T
+            denoised_approx = denoised_approx.to(eps)
+            denoised_approx = self.unpatchify (denoised_approx, img_sizes)
+            
+            eps = (x - denoised_approx) / sigma
+            eps[0] = eps_orig[0] + y0_style_neg_weight * (eps[0] - eps_orig[0])
+            #eps[1] = eps_orig[1]
+            eps[1] = eps_orig[1] + y0_style_neg_synweight * (eps[1] - eps_orig[1])
+        
+        
+        return eps
 
 
 
