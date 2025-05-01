@@ -1798,5 +1798,55 @@ def downsample_tokens(cond: torch.Tensor, target_tokens: int, mode="bicubic") ->
 
 
 
+class CrossAttn_EraseReplace_HiDream:
+    @classmethod
+    def INPUT_TYPES(s):
+        return {"required": {
+            "clip": ("CLIP", ),
+            "t5xxl_erase":   ("STRING", {"multiline": True, "dynamicPrompts": True}),
+            "llama_erase":   ("STRING", {"multiline": True, "dynamicPrompts": True}),
+            "t5xxl_replace": ("STRING", {"multiline": True, "dynamicPrompts": True}),
+            "llama_replace": ("STRING", {"multiline": True, "dynamicPrompts": True}),
+            "t5xxl_erase_token":   ("STRING", {"multiline": True, "dynamicPrompts": True}),
+            "llama_erase_token":   ("STRING", {"multiline": True, "dynamicPrompts": True}),
+            "t5xxl_replace_token": ("STRING", {"multiline": True, "dynamicPrompts": True}),
+            "llama_replace_token": ("STRING", {"multiline": True, "dynamicPrompts": True}),
+            }}
+    RETURN_TYPES = ("CONDITIONING","CONDITIONING",)
+    RETURN_NAMES = ("positive",    "negative",)
+    FUNCTION = "encode"
+
+    CATEGORY = "advanced/conditioning"
+
+    def encode(self, t5xxl_erase, llama_erase, t5xxl_replace, llama_replace, t5xxl_erase_token, llama_erase_token, t5xxl_replace_token, llama_replace_token):
+
+        tokens_erase      = clip.tokenize("")
+        tokens_erase["l"] = clip.tokenize("")["l"]
+        tokens_replace      = clip.tokenize("")
+        tokens_replace["l"] = clip.tokenize("")["l"]
+        
+        tokens_erase  ["t5xxl"] = clip.tokenize(t5xxl_erase)  ["t5xxl"]
+        tokens_erase  ["llama"] = clip.tokenize(llama_erase)  ["llama"]
+        tokens_replace["t5xxl"] = clip.tokenize(t5xxl_replace)["t5xxl"]
+        tokens_replace["llama"] = clip.tokenize(llama_replace)["llama"]
+        
+        
+        tokens_erase_token      = clip.tokenize("")
+        tokens_erase_token["l"] = clip.tokenize("")["l"]
+        tokens_replace_token      = clip.tokenize("")
+        tokens_replace_token["l"] = clip.tokenize("")["l"]
+        
+        tokens_erase_token  ["t5xxl"] = clip.tokenize(t5xxl_erase_token)  ["t5xxl"]
+        tokens_erase_token  ["llama"] = clip.tokenize(llama_erase_token)  ["llama"]
+        tokens_replace_token["t5xxl"] = clip.tokenize(t5xxl_replace_token)["t5xxl"]
+        tokens_replace_token["llama"] = clip.tokenize(llama_replace_token)["llama"]
+        
+        
+        encoded_erase   = clip.encode_from_tokens_scheduled(tokens_erase)
+        encoded_replace = clip.encode_from_tokens_scheduled(tokens_replace)
+        
+        return (encoded_replace, encoded_erase, )
+
+
 
 

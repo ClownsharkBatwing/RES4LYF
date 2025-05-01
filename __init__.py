@@ -86,6 +86,7 @@ NODE_CLASS_MAPPINGS = {
     "ConditioningZeroAndTruncate"         : conditioning.ConditioningZeroAndTruncate,
     "ConditioningTruncate"                : conditioning.ConditioningTruncate,
     "StyleModelApplyAdvanced_"            : conditioning.StyleModelApplyAdvanced,
+    "CrossAttn_EraseReplace_HiDream"      : conditioning.CrossAttn_EraseReplace_HiDream,
 
     "ConditioningDownsample (T5)"         : conditioning.ConditioningDownsampleT5,
 
