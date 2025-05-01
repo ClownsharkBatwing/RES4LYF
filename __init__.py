@@ -85,7 +85,7 @@ NODE_CLASS_MAPPINGS = {
     "StableCascade_StageB_Conditioning64" : conditioning.StableCascade_StageB_Conditioning64,
     "ConditioningZeroAndTruncate"         : conditioning.ConditioningZeroAndTruncate,
     "ConditioningTruncate"                : conditioning.ConditioningTruncate,
-    "StyleModelApplyAdvanced"             : conditioning.StyleModelApplyAdvanced,
+    "StyleModelApplyAdvanced_"            : conditioning.StyleModelApplyAdvanced,
 
     "ConditioningDownsample (T5)"         : conditioning.ConditioningDownsampleT5,
 
