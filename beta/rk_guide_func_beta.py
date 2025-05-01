@@ -330,13 +330,17 @@ class LatentGuide:
             if self.VIDEO and latent_guide_adain_samples.shape[2] == 1:
                 latent_guide_adain_samples = latent_guide_adain_samples.repeat(1, 1, x.shape[2], 1, 1)
 
-            if self.SAMPLE:
+            self.y0_adain = latent_guide_adain_samples
+            """if self.SAMPLE:
                 self.y0_adain = latent_guide_adain_samples
             elif self.UNSAMPLE: # and self.mask is not None:
-                mask_adain = self.mask_adain.to(x.device)
-                x = (1-mask_adain) * x + mask_adain * latent_guide_adain_samples.to(x.device) #fixed old approach, which was mask, (1-mask)     # NECESSARY?
+                if self.mask_adain is not None:
+                    mask_adain = self.mask_adain.to(x.device)
+                    x = (1-mask_adain) * x + mask_adain * latent_guide_adain_samples.to(x.device) #fixed old approach, which was mask, (1-mask)     # NECESSARY?
+                else:
+                    x = latent_guide_adain_samples.to(x.device)
             else:
-                x = latent_guide_adain_samples.to(x.device)   #THIS COULD LEAD TO WEIRD BEHAVIOR! OVERWRITING X WITH LG_ADAIN AFTER SETTING TO LG above!
+                x = latent_guide_adain_samples.to(x.device)   #THIS COULD LEAD TO WEIRD BEHAVIOR! OVERWRITING X WITH LG_ADAIN AFTER SETTING TO LG above!"""
         else:
             self.y0_adain = torch.zeros_like(x, dtype=self.dtype, device=self.device)
 
@@ -354,15 +358,19 @@ class LatentGuide:
             if self.VIDEO and latent_guide_attninj_samples.shape[2] == 1:
                 latent_guide_attninj_samples = latent_guide_attninj_samples.repeat(1, 1, x.shape[2], 1, 1)
 
-            if self.SAMPLE:
+            self.y0_attninj = latent_guide_attninj_samples
+            """if self.SAMPLE:
                 self.y0_attninj = latent_guide_attninj_samples
             elif self.UNSAMPLE: # and self.mask is not None:
-                mask_attninj = self.mask_attninj.to(x.device)
-                x = (1-mask_attninj) * x + mask_attninj * latent_guide_attninj_samples.to(x.device) #fixed old approach, which was mask, (1-mask)     # NECESSARY?
+                if self.mask_attninj is not None:
+                    mask_attninj = self.mask_attninj.to(x.device)
+                    x = (1-mask_attninj) * x + mask_attninj * latent_guide_attninj_samples.to(x.device) #fixed old approach, which was mask, (1-mask)     # NECESSARY?
+                else:
+                    x = latent_guide_attninj_samples.to(x.device)  
             else:
                 x = latent_guide_attninj_samples.to(x.device)   #THIS COULD LEAD TO WEIRD BEHAVIOR! OVERWRITING X WITH LG_ADAIN AFTER SETTING TO LG above!
         else:
-            self.y0_attninj = torch.zeros_like(x, dtype=self.dtype, device=self.device)
+            self.y0_attninj = torch.zeros_like(x, dtype=self.dtype, device=self.device)"""
 
 
         if self.frame_weights is not None:
