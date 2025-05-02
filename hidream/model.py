@@ -1,4 +1,6 @@
 import torch
+import torch.nn.functional as F
+
 import torch.nn as nn
 from torch import Tensor, FloatTensor
 from typing import Optional, Callable, Tuple, List, Dict, Any, Union, TYPE_CHECKING, TypeVar
@@ -1051,17 +1053,21 @@ class HDModel(nn.Module):
                 img = comfy.ldm.common_dit.pad_to_patch_size(denoised, (self.patch_size, self.patch_size))
                 img_sizes = None
                 img, img_masks, img_sizes = self.patchify(img, self.max_seq, img_sizes) 
-                denoised_embed = self.x_embedder(img)
+                #denoised_embed = self.x_embedder(img)
                 
                 img_y0_adain = comfy.ldm.common_dit.pad_to_patch_size(y0_style_pos, (self.patch_size, self.patch_size))
                 img_sizes_y0_adain = None
                 img_y0_adain, img_masks_y0_adain, img_sizes_y0_adain = self.patchify(img_y0_adain, self.max_seq, img_sizes_y0_adain) 
-                y0_adain_embed = self.x_embedder(img_y0_adain)
-                
-                denoised_embed = adain_seq(denoised_embed, y0_adain_embed)
+                #y0_adain_embed = self.x_embedder(img_y0_adain)
                 
                 W = self.x_embedder.proj.weight.data.to(torch.float64)   # shape [2560, 64]
                 b = self.x_embedder.proj.bias.data.to(torch.float64)     # shape [2560]
+                
+                denoised_embed = F.linear(img         .to(W), W, b).to(img)
+                y0_adain_embed = F.linear(img_y0_adain.to(W), W, b).to(img_y0_adain)
+                
+                denoised_embed = adain_seq(denoised_embed, y0_adain_embed)
+                
                 denoised_approx = (denoised_embed - b) @ torch.linalg.pinv(W).T
                 denoised_approx = denoised_approx.to(eps)
                 denoised_approx = self.unpatchify (denoised_approx, img_sizes)
@@ -1092,17 +1098,22 @@ class HDModel(nn.Module):
                 img = comfy.ldm.common_dit.pad_to_patch_size(denoised, (self.patch_size, self.patch_size))
                 img_sizes = None
                 img, img_masks, img_sizes = self.patchify(img, self.max_seq, img_sizes) 
-                denoised_embed = self.x_embedder(img)
+                #denoised_embed = self.x_embedder(img)
                 
                 img_y0_adain = comfy.ldm.common_dit.pad_to_patch_size(y0_style_neg, (self.patch_size, self.patch_size))
                 img_sizes_y0_adain = None
                 img_y0_adain, img_masks_y0_adain, img_sizes_y0_adain = self.patchify(img_y0_adain, self.max_seq, img_sizes_y0_adain) 
-                y0_adain_embed = self.x_embedder(img_y0_adain)
-                
-                denoised_embed = adain_seq(denoised_embed, y0_adain_embed)
+                #y0_adain_embed = self.x_embedder(img_y0_adain)
                 
                 W = self.x_embedder.proj.weight.data.to(torch.float64)   # shape [2560, 64]
                 b = self.x_embedder.proj.bias.data.to(torch.float64)     # shape [2560]
+                
+                denoised_embed = F.linear(img         .to(W), W, b).to(img)
+                y0_adain_embed = F.linear(img_y0_adain.to(W), W, b).to(img_y0_adain)
+
+                
+                denoised_embed = adain_seq(denoised_embed, y0_adain_embed)
+                
                 denoised_approx = (denoised_embed - b) @ torch.linalg.pinv(W).T
                 denoised_approx = denoised_approx.to(eps)
                 denoised_approx = self.unpatchify (denoised_approx, img_sizes)
