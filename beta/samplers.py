@@ -227,7 +227,7 @@ class SharkSampler:
                         "sampler_mode": "NULL",
                     })
                 x_null = torch.zeros_like(latent_image['samples'])
-                _ = comfy.sample.sample_custom(work_model, x_null, cfg, sampler_null, torch.linspace(1, 0, 10).to(x_null.dtype).to(x_null.device), positive, positive, x_null, noise_mask=None, callback=None, disable_pbar=disable_pbar, seed=noise_seed)
+                _ = comfy.sample.sample_custom(work_model, x_null, cfg, sampler_null, torch.linspace(1, 0, 10).to(x_null.dtype).to(x_null.device), negative, negative, x_null, noise_mask=None, callback=None, disable_pbar=disable_pbar, seed=noise_seed)
 
             sigma_min = work_model.get_model_object('model_sampling').sigma_min
             sigma_max = work_model.get_model_object('model_sampling').sigma_max
@@ -416,7 +416,7 @@ class SharkSampler:
 
             # SETUP REGIONAL COND
 
-            if pos_cond[0][1] is not None: 
+            """if pos_cond[0][1] is not None: 
                 if 'callback_regional' in pos_cond[0][1]:
                     pos_cond = pos_cond[0][1]['callback_regional'](work_model)
                 
@@ -439,7 +439,7 @@ class SharkSampler:
                     
                     sampler.extra_options['AttnMask_neg'].set_latent(latent_image['samples'])
                     sampler.extra_options['AttnMask_neg'].generate()
-                    
+                    """
                     
             
             
@@ -539,9 +539,10 @@ class SharkSampler:
                         #state_info     = copy.deepcopy(latent_image['state_info']) if 'state_info' in latent_image else {}
                         state_info_out = {}
                         sampler.extra_options['state_info_out'] = state_info_out
-
+                        
                     if type(pos_cond[0][0]) == list:
                         pos_cond_tmp = pos_cond[batch_num]
+                        positive_tmp = positive[batch_num]
                     else:
                         pos_cond_tmp = pos_cond
                     
@@ -550,27 +551,57 @@ class SharkSampler:
                             neg_cond[i][1]['control']          = negative[i][1]['control']
                             if hasattr(negative[i][1]['control'], 'base'):
                                 neg_cond[i][1]['control'].base     = negative[i][1]['control'].base
-                    for i in range(len(pos_cond)): # crude fix for copy.deepcopy converting superclass into real object
-                        if 'control' in pos_cond[i][1]:
-                            pos_cond_tmp[i][1]['control']      = positive[i][1]['control']
+                    for i in range(len(pos_cond_tmp)): # crude fix for copy.deepcopy converting superclass into real object
+                        if 'control' in pos_cond_tmp[i][1]:
+                            pos_cond_tmp[i][1]['control']      = positive_tmp[i][1]['control']
                             if hasattr(positive[i][1]['control'], 'base'):
-                                pos_cond_tmp[i][1]['control'].base = positive[i][1]['control'].base
+                                pos_cond_tmp[i][1]['control'].base = positive_tmp[i][1]['control'].base
+                    
+                    # SETUP REGIONAL COND
+                    
+                    if pos_cond_tmp[0][1] is not None: 
+                        if 'callback_regional' in pos_cond_tmp[0][1]:
+                            pos_cond_tmp = pos_cond_tmp[0][1]['callback_regional'](work_model)
+                        
+                        if 'AttnMask' in pos_cond_tmp[0][1]:
+                            sampler.extra_options['AttnMask']   = pos_cond_tmp[0][1]['AttnMask']
+                            sampler.extra_options['RegContext'] = pos_cond_tmp[0][1]['RegContext']
+                            sampler.extra_options['RegParam']   = pos_cond_tmp[0][1]['RegParam']
+                            
+                            sampler.extra_options['AttnMask'].set_latent(latent_image['samples'])
+                            sampler.extra_options['AttnMask'].generate()
+                            
+                    if neg_cond[0][1] is not None: 
+                        if 'callback_regional' in neg_cond[0][1]:
+                            neg_cond = neg_cond[0][1]['callback_regional'](work_model)
+                        
+                        if 'AttnMask' in neg_cond[0][1]:
+                            sampler.extra_options['AttnMask_neg']   = neg_cond[0][1]['AttnMask']
+                            sampler.extra_options['RegContext_neg'] = neg_cond[0][1]['RegContext']
+                            sampler.extra_options['RegParam_neg']   = neg_cond[0][1]['RegParam']
+                            
+                            sampler.extra_options['AttnMask_neg'].set_latent(latent_image['samples'])
+                            sampler.extra_options['AttnMask_neg'].generate()
+                    
+                    
+                    
+                    
                     
                     if guider is None:
                         guider = SharkGuider(work_model)
-                        flow_cond = options_mgr.get('flow_cond', {})
-                        if flow_cond != {} and 'yt_positive' in flow_cond and not 'yt_inv;_positive' in flow_cond:
-                            guider.set_conds(yt_positive=flow_cond.get('yt_positive'), yt_negative=flow_cond.get('yt_negative'),)
-                            guider.set_cfgs(yt=flow_cond.get('yt_cfg'), xt=cfg)
-                        elif flow_cond != {} and 'yt_positive' in flow_cond and 'yt_inv_positive' in flow_cond:
-                            guider.set_conds(yt_positive=flow_cond.get('yt_positive'), yt_negative=flow_cond.get('yt_negative'), yt_inv_positive=flow_cond.get('yt_inv_positive'), yt_inv_negative=flow_cond.get('yt_inv_negative'),)
-                            guider.set_cfgs(yt=flow_cond.get('yt_cfg'), yt_inv=flow_cond.get('yt_inv_cfg'), xt=cfg)
-                        else:
-                            guider.set_cfgs(xt=cfg)
-                        
-                        guider.set_conds(xt_positive=pos_cond_tmp, xt_negative=neg_cond)
+                    flow_cond = options_mgr.get('flow_cond', {})
+                    if flow_cond != {} and 'yt_positive' in flow_cond and not 'yt_inv;_positive' in flow_cond:
+                        guider.set_conds(yt_positive=flow_cond.get('yt_positive'), yt_negative=flow_cond.get('yt_negative'),)
+                        guider.set_cfgs(yt=flow_cond.get('yt_cfg'), xt=cfg)
+                    elif flow_cond != {} and 'yt_positive' in flow_cond and 'yt_inv_positive' in flow_cond:
+                        guider.set_conds(yt_positive=flow_cond.get('yt_positive'), yt_negative=flow_cond.get('yt_negative'), yt_inv_positive=flow_cond.get('yt_inv_positive'), yt_inv_negative=flow_cond.get('yt_inv_negative'),)
+                        guider.set_cfgs(yt=flow_cond.get('yt_cfg'), yt_inv=flow_cond.get('yt_inv_cfg'), xt=cfg)
                     else:
-                        guider.set_conds(pos_cond_tmp, neg_cond)
+                        guider.set_cfgs(xt=cfg)
+                    
+                    guider.set_conds(xt_positive=pos_cond_tmp, xt_negative=neg_cond)
+                    #else:
+                    #    guider.set_conds(pos_cond_tmp, neg_cond)
 
                     samples = guider.sample(noise, x.clone(), sampler, sigmas, denoise_mask=noise_mask, callback=callback, disable_pbar=disable_pbar, seed=noise_seed)
 
