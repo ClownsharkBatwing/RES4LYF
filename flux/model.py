@@ -281,95 +281,97 @@ class ReFlux(Flux):
         
         
         
-
-        if y0_style_pos is not None:
-            y0_style_pos_weight    = transformer_options.get("y0_style_pos_weight")
-            y0_style_pos_synweight = transformer_options.get("y0_style_pos_synweight")
-            y0_style_pos_synweight *= y0_style_pos_weight
-            
-            y0_style_pos = y0_style_pos.to(torch.float32)
-            x   = x.to(torch.float32)
-            eps = eps.to(torch.float32)
-            eps_orig = eps.clone()
-            
-            sigma = SIGMA #t_orig[0].to(torch.float32) / 1000
-            denoised = x - sigma * eps
-            
-            img = comfy.ldm.common_dit.pad_to_patch_size(denoised, (self.patch_size, self.patch_size))
-
-            h_len = ((h + (patch_size // 2)) // patch_size) # h_len 96
-            w_len = ((w + (patch_size // 2)) // patch_size) # w_len 96
-            img = rearrange(img, "b c (h ph) (w pw) -> b (h w) (c ph pw)", ph=patch_size, pw=patch_size) # img 1,9216,64     1,16,128,128 -> 1,4096,64
-
-            denoised_embed = self.img_in(img.to(self.img_in.weight)).to(img)
-            
-            img_y0_adain = comfy.ldm.common_dit.pad_to_patch_size(y0_style_pos, (self.patch_size, self.patch_size))
-
-            h_len = ((h + (patch_size // 2)) // patch_size) # h_len 96
-            w_len = ((w + (patch_size // 2)) // patch_size) # w_len 96
-            img_y0_adain = rearrange(img_y0_adain, "b c (h ph) (w pw) -> b (h w) (c ph pw)", ph=patch_size, pw=patch_size) # img 1,9216,64     1,16,128,128 -> 1,4096,64
-
-            y0_adain_embed = self.img_in(img_y0_adain.to(self.img_in.weight)).to(img_y0_adain)
-            
-            denoised_embed = adain_seq(denoised_embed, y0_adain_embed)
-            
-            W = self.img_in.weight.data.to(torch.float32)   # shape [2560, 64]
-            b = self.img_in.bias.data.to(torch.float32)     # shape [2560]
-            denoised_approx = (denoised_embed - b.to(denoised_embed)) @ torch.linalg.pinv(W).T.to(denoised_embed)
-            denoised_approx = denoised_approx.to(eps)
-            
-            denoised_approx = rearrange(denoised_approx, "b (h w) (c ph pw) -> b c (h ph) (w pw)", h=h_len, w=w_len, ph=2, pw=2)[:,:,:h,:w]
-            
-            eps = (x - denoised_approx) / sigma
-            if eps.shape[0] > 1:
-                eps[1] = eps_orig[1] + y0_style_pos_weight * (eps[1] - eps_orig[1])
-                eps[0] = eps_orig[0] + y0_style_pos_synweight * (eps[0] - eps_orig[0])
-            else:
-                eps[0] = eps_orig[0] + y0_style_pos_weight * (eps[0] - eps_orig[0])
+        if eps.shape[0] == 2 or (eps.shape[0] == 1 and not UNCOND):
+            if y0_style_pos is not None:
+                y0_style_pos_weight    = transformer_options.get("y0_style_pos_weight")
+                y0_style_pos_synweight = transformer_options.get("y0_style_pos_synweight")
+                y0_style_pos_synweight *= y0_style_pos_weight
                 
-            eps = eps.float()
-            
-        if y0_style_neg is not None:
-            y0_style_neg_weight    = transformer_options.get("y0_style_neg_weight")
-            y0_style_neg_synweight = transformer_options.get("y0_style_neg_synweight")
-            y0_style_neg_synweight *= y0_style_neg_weight
-            
-            y0_style_neg = y0_style_neg.to(torch.float32)
-            x   = x.to(torch.float32)
-            eps = eps.to(torch.float32)
-            eps_orig = eps.clone()
-            
-            sigma = SIGMA #t_orig[0].to(torch.float32) / 1000
-            denoised = x - sigma * eps
-            
-            img = comfy.ldm.common_dit.pad_to_patch_size(denoised, (self.patch_size, self.patch_size))
+                y0_style_pos = y0_style_pos.to(torch.float32)
+                x   = x.to(torch.float32)
+                eps = eps.to(torch.float32)
+                eps_orig = eps.clone()
+                
+                sigma = SIGMA #t_orig[0].to(torch.float32) / 1000
+                denoised = x - sigma * eps
+                
+                img = comfy.ldm.common_dit.pad_to_patch_size(denoised, (self.patch_size, self.patch_size))
 
-            h_len = ((h + (patch_size // 2)) // patch_size) # h_len 96
-            w_len = ((w + (patch_size // 2)) // patch_size) # w_len 96
-            img = rearrange(img, "b c (h ph) (w pw) -> b (h w) (c ph pw)", ph=patch_size, pw=patch_size) # img 1,9216,64     1,16,128,128 -> 1,4096,64
+                h_len = ((h + (patch_size // 2)) // patch_size) # h_len 96
+                w_len = ((w + (patch_size // 2)) // patch_size) # w_len 96
+                img = rearrange(img, "b c (h ph) (w pw) -> b (h w) (c ph pw)", ph=patch_size, pw=patch_size) # img 1,9216,64     1,16,128,128 -> 1,4096,64
 
-            denoised_embed = self.img_in(img.to(self.img_in.weight)).to(img)
-            
-            img_y0_adain = comfy.ldm.common_dit.pad_to_patch_size(y0_style_neg, (self.patch_size, self.patch_size))
+                denoised_embed = self.img_in(img.to(self.img_in.weight)).to(img)
+                
+                img_y0_adain = comfy.ldm.common_dit.pad_to_patch_size(y0_style_pos, (self.patch_size, self.patch_size))
 
-            h_len = ((h + (patch_size // 2)) // patch_size) # h_len 96
-            w_len = ((w + (patch_size // 2)) // patch_size) # w_len 96
-            img_y0_adain = rearrange(img_y0_adain, "b c (h ph) (w pw) -> b (h w) (c ph pw)", ph=patch_size, pw=patch_size) # img 1,9216,64     1,16,128,128 -> 1,4096,64
+                h_len = ((h + (patch_size // 2)) // patch_size) # h_len 96
+                w_len = ((w + (patch_size // 2)) // patch_size) # w_len 96
+                img_y0_adain = rearrange(img_y0_adain, "b c (h ph) (w pw) -> b (h w) (c ph pw)", ph=patch_size, pw=patch_size) # img 1,9216,64     1,16,128,128 -> 1,4096,64
 
-            y0_adain_embed = self.img_in(img_y0_adain.to(self.img_in.weight)).to(img_y0_adain)
-            
-            denoised_embed = adain_seq(denoised_embed, y0_adain_embed)
-            
-            W = self.img_in.weight.data.to(torch.float32)   # shape [2560, 64]
-            b = self.img_in.bias.data.to(torch.float32)     # shape [2560]
-            denoised_approx = (denoised_embed - b.to(denoised_embed)) @ torch.linalg.pinv(W).T.to(denoised_embed)
-            denoised_approx = denoised_approx.to(eps)
-            
-            denoised_approx = rearrange(denoised_approx, "b (h w) (c ph pw) -> b c (h ph) (w pw)", h=h_len, w=w_len, ph=2, pw=2)[:,:,:h,:w]
-            
-            eps = (x - denoised_approx) / sigma
-            eps[0] = eps_orig[0] + y0_style_neg_weight * (eps[0] - eps_orig[0])
-            eps[1] = eps_orig[1] + y0_style_neg_synweight * (eps[1] - eps_orig[1])
+                y0_adain_embed = self.img_in(img_y0_adain.to(self.img_in.weight)).to(img_y0_adain)
+                
+                denoised_embed = adain_seq(denoised_embed, y0_adain_embed)
+                
+                W = self.img_in.weight.data.to(torch.float32)   # shape [2560, 64]
+                b = self.img_in.bias.data.to(torch.float32)     # shape [2560]
+                denoised_approx = (denoised_embed - b.to(denoised_embed)) @ torch.linalg.pinv(W).T.to(denoised_embed)
+                denoised_approx = denoised_approx.to(eps)
+                
+                denoised_approx = rearrange(denoised_approx, "b (h w) (c ph pw) -> b c (h ph) (w pw)", h=h_len, w=w_len, ph=2, pw=2)[:,:,:h,:w]
+                
+                eps = (x - denoised_approx) / sigma
+                if eps.shape[0] == 2:
+                    eps[1] = eps_orig[1] + y0_style_pos_weight * (eps[1] - eps_orig[1])
+                    eps[0] = eps_orig[0] + y0_style_pos_synweight * (eps[0] - eps_orig[0])
+                else:
+                    eps[0] = eps_orig[0] + y0_style_pos_weight * (eps[0] - eps_orig[0])
+                
+                eps = eps.float()
+        
+        if eps.shape[0] == 2 or (eps.shape[0] == 1 and UNCOND):
+            if y0_style_neg is not None:
+                y0_style_neg_weight    = transformer_options.get("y0_style_neg_weight")
+                y0_style_neg_synweight = transformer_options.get("y0_style_neg_synweight")
+                y0_style_neg_synweight *= y0_style_neg_weight
+                
+                y0_style_neg = y0_style_neg.to(torch.float32)
+                x   = x.to(torch.float32)
+                eps = eps.to(torch.float32)
+                eps_orig = eps.clone()
+                
+                sigma = SIGMA #t_orig[0].to(torch.float32) / 1000
+                denoised = x - sigma * eps
+                
+                img = comfy.ldm.common_dit.pad_to_patch_size(denoised, (self.patch_size, self.patch_size))
+
+                h_len = ((h + (patch_size // 2)) // patch_size) # h_len 96
+                w_len = ((w + (patch_size // 2)) // patch_size) # w_len 96
+                img = rearrange(img, "b c (h ph) (w pw) -> b (h w) (c ph pw)", ph=patch_size, pw=patch_size) # img 1,9216,64     1,16,128,128 -> 1,4096,64
+
+                denoised_embed = self.img_in(img.to(self.img_in.weight)).to(img)
+                
+                img_y0_adain = comfy.ldm.common_dit.pad_to_patch_size(y0_style_neg, (self.patch_size, self.patch_size))
+
+                h_len = ((h + (patch_size // 2)) // patch_size) # h_len 96
+                w_len = ((w + (patch_size // 2)) // patch_size) # w_len 96
+                img_y0_adain = rearrange(img_y0_adain, "b c (h ph) (w pw) -> b (h w) (c ph pw)", ph=patch_size, pw=patch_size) # img 1,9216,64     1,16,128,128 -> 1,4096,64
+
+                y0_adain_embed = self.img_in(img_y0_adain.to(self.img_in.weight)).to(img_y0_adain)
+                
+                denoised_embed = adain_seq(denoised_embed, y0_adain_embed)
+                
+                W = self.img_in.weight.data.to(torch.float32)   # shape [2560, 64]
+                b = self.img_in.bias.data.to(torch.float32)     # shape [2560]
+                denoised_approx = (denoised_embed - b.to(denoised_embed)) @ torch.linalg.pinv(W).T.to(denoised_embed)
+                denoised_approx = denoised_approx.to(eps)
+                
+                denoised_approx = rearrange(denoised_approx, "b (h w) (c ph pw) -> b c (h ph) (w pw)", h=h_len, w=w_len, ph=2, pw=2)[:,:,:h,:w]
+                
+                eps = (x - denoised_approx) / sigma
+                eps[0] = eps_orig[0] + y0_style_neg_weight * (eps[0] - eps_orig[0])
+                if eps.shape[0] == 2:
+                    eps[1] = eps_orig[1] + y0_style_neg_synweight * (eps[1] - eps_orig[1])
                 
             eps = eps.float()
             
