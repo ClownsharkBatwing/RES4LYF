@@ -105,6 +105,39 @@ def gram_schmidt_channels_optimized(A, *refs):
 
 
 
+# Efficient implementation equivalent to the following:
+def attention_weights(
+    query, 
+    key, 
+    attn_mask=None
+) -> torch.Tensor:
+    L, S = query.size(-2), key.size(-2)
+    scale_factor = 1 / math.sqrt(query.size(-1))
+    attn_bias = torch.zeros(L, S, dtype=query.dtype).to(query.device)
+
+    if attn_mask is not None:
+        if attn_mask.dtype == torch.bool:
+            attn_bias.masked_fill_(attn_mask.logical_not(), float("-inf"))
+        else:
+            attn_bias += attn_mask
+
+    attn_weight = query @ key.transpose(-2, -1) * scale_factor
+    attn_weight += attn_bias
+    attn_weight = torch.softmax(attn_weight, dim=-1)
+
+    return attn_weight
+
+
+def attention_weights_orig(q, k):
+    # implementation of in-place softmax to reduce memory req
+    scores = torch.matmul(q, k.transpose(-2, -1))
+    scores.div_(math.sqrt(q.size(-1)))
+    torch.exp(scores, out=scores)
+    summed = torch.sum(scores, dim=-1, keepdim=True)
+    scores /= summed
+    return scores.nan_to_num_(0.0, 65504., -65504.)
+
+
 # calculate slerp ratio needed to hit a target cosine similarity score
 def get_slerp_weight_for_cossim(cos_sim, target_cos):
     # assumes unit vector matrices used for cossim
