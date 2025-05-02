@@ -1034,84 +1034,85 @@ class HDModel(nn.Module):
         
         eps = -output[:, :, :h, :w]
         
-        
-        if y0_style_pos is not None:
-            y0_style_pos_weight    = transformer_options.get("y0_style_pos_weight")
-            y0_style_pos_synweight = transformer_options.get("y0_style_pos_synweight")
-            y0_style_pos_synweight *= y0_style_pos_weight
-            
-            y0_style_pos = y0_style_pos.to(torch.float64)
-            x   = x.to(torch.float64)
-            eps = eps.to(torch.float64)
-            eps_orig = eps.clone()
-            
-            sigma = t_orig[0].to(torch.float64) / 1000
-            denoised = x - sigma * eps
-            
-            img = comfy.ldm.common_dit.pad_to_patch_size(denoised, (self.patch_size, self.patch_size))
-            img_sizes = None
-            img, img_masks, img_sizes = self.patchify(img, self.max_seq, img_sizes) 
-            denoised_embed = self.x_embedder(img)
-            
-            img_y0_adain = comfy.ldm.common_dit.pad_to_patch_size(y0_style_pos, (self.patch_size, self.patch_size))
-            img_sizes_y0_adain = None
-            img_y0_adain, img_masks_y0_adain, img_sizes_y0_adain = self.patchify(img_y0_adain, self.max_seq, img_sizes_y0_adain) 
-            y0_adain_embed = self.x_embedder(img_y0_adain)
-            
-            denoised_embed = adain_seq(denoised_embed, y0_adain_embed)
-            
-            W = self.x_embedder.proj.weight.data.to(torch.float64)   # shape [2560, 64]
-            b = self.x_embedder.proj.bias.data.to(torch.float64)     # shape [2560]
-            denoised_approx = (denoised_embed - b) @ torch.linalg.pinv(W).T
-            denoised_approx = denoised_approx.to(eps)
-            denoised_approx = self.unpatchify (denoised_approx, img_sizes)
-            
-            eps = (x - denoised_approx) / sigma
-            if eps.shape[0] > 1:
-                eps[1] = eps_orig[1] + y0_style_pos_weight * (eps[1] - eps_orig[1])
-                eps[0] = eps_orig[0] + y0_style_pos_synweight * (eps[0] - eps_orig[0])
-            else:
-                eps[0] = eps_orig[0] + y0_style_pos_weight * (eps[0] - eps_orig[0])
+        if eps.shape[0] == 2 or (eps.shape[0] == 1 and not UNCOND):
+            if y0_style_pos is not None:
+                y0_style_pos_weight    = transformer_options.get("y0_style_pos_weight")
+                y0_style_pos_synweight = transformer_options.get("y0_style_pos_synweight")
+                y0_style_pos_synweight *= y0_style_pos_weight
                 
-            eps = eps.float()
+                y0_style_pos = y0_style_pos.to(torch.float64)
+                x   = x.to(torch.float64)
+                eps = eps.to(torch.float64)
+                eps_orig = eps.clone()
+                
+                sigma = t_orig[0].to(torch.float64) / 1000
+                denoised = x - sigma * eps
+                
+                img = comfy.ldm.common_dit.pad_to_patch_size(denoised, (self.patch_size, self.patch_size))
+                img_sizes = None
+                img, img_masks, img_sizes = self.patchify(img, self.max_seq, img_sizes) 
+                denoised_embed = self.x_embedder(img)
+                
+                img_y0_adain = comfy.ldm.common_dit.pad_to_patch_size(y0_style_pos, (self.patch_size, self.patch_size))
+                img_sizes_y0_adain = None
+                img_y0_adain, img_masks_y0_adain, img_sizes_y0_adain = self.patchify(img_y0_adain, self.max_seq, img_sizes_y0_adain) 
+                y0_adain_embed = self.x_embedder(img_y0_adain)
+                
+                denoised_embed = adain_seq(denoised_embed, y0_adain_embed)
+                
+                W = self.x_embedder.proj.weight.data.to(torch.float64)   # shape [2560, 64]
+                b = self.x_embedder.proj.bias.data.to(torch.float64)     # shape [2560]
+                denoised_approx = (denoised_embed - b) @ torch.linalg.pinv(W).T
+                denoised_approx = denoised_approx.to(eps)
+                denoised_approx = self.unpatchify (denoised_approx, img_sizes)
+                
+                eps = (x - denoised_approx) / sigma
+                if eps.shape[0] == 2:
+                    eps[1] = eps_orig[1] + y0_style_pos_weight * (eps[1] - eps_orig[1])
+                    eps[0] = eps_orig[0] + y0_style_pos_synweight * (eps[0] - eps_orig[0])
+                else:
+                    eps[0] = eps_orig[0] + y0_style_pos_weight * (eps[0] - eps_orig[0])
+                    
+                eps = eps.float()
 
-        if y0_style_neg is not None and eps.shape[0] > 1:
-            y0_style_neg_weight    = transformer_options.get("y0_style_neg_weight")
-            y0_style_neg_synweight = transformer_options.get("y0_style_neg_synweight")
-            y0_style_neg_synweight *= y0_style_neg_weight
+        if eps.shape[0] == 2 or (eps.shape[0] == 1 and UNCOND):
+            if y0_style_neg is not None and eps.shape[0] > 1:
+                y0_style_neg_weight    = transformer_options.get("y0_style_neg_weight")
+                y0_style_neg_synweight = transformer_options.get("y0_style_neg_synweight")
+                y0_style_neg_synweight *= y0_style_neg_weight
+                
+                y0_style_neg = y0_style_neg.to(torch.float64)
+                x   = x.to(torch.float64)
+                eps = eps.to(torch.float64)
+                eps_orig = eps.clone()
+                
+                sigma = t_orig[0].to(torch.float64) / 1000
+                denoised = x - sigma * eps
+                
+                img = comfy.ldm.common_dit.pad_to_patch_size(denoised, (self.patch_size, self.patch_size))
+                img_sizes = None
+                img, img_masks, img_sizes = self.patchify(img, self.max_seq, img_sizes) 
+                denoised_embed = self.x_embedder(img)
+                
+                img_y0_adain = comfy.ldm.common_dit.pad_to_patch_size(y0_style_neg, (self.patch_size, self.patch_size))
+                img_sizes_y0_adain = None
+                img_y0_adain, img_masks_y0_adain, img_sizes_y0_adain = self.patchify(img_y0_adain, self.max_seq, img_sizes_y0_adain) 
+                y0_adain_embed = self.x_embedder(img_y0_adain)
+                
+                denoised_embed = adain_seq(denoised_embed, y0_adain_embed)
+                
+                W = self.x_embedder.proj.weight.data.to(torch.float64)   # shape [2560, 64]
+                b = self.x_embedder.proj.bias.data.to(torch.float64)     # shape [2560]
+                denoised_approx = (denoised_embed - b) @ torch.linalg.pinv(W).T
+                denoised_approx = denoised_approx.to(eps)
+                denoised_approx = self.unpatchify (denoised_approx, img_sizes)
+                
+                eps = (x - denoised_approx) / sigma
+                eps[0] = eps_orig[0] + y0_style_neg_weight * (eps[0] - eps_orig[0])
+                if eps.shape[0] == 2:
+                    eps[1] = eps_orig[1] + y0_style_neg_synweight * (eps[1] - eps_orig[1])
+                eps = eps.float()
             
-            y0_style_neg = y0_style_neg.to(torch.float64)
-            x   = x.to(torch.float64)
-            eps = eps.to(torch.float64)
-            eps_orig = eps.clone()
-            
-            sigma = t_orig[0].to(torch.float64) / 1000
-            denoised = x - sigma * eps
-            
-            img = comfy.ldm.common_dit.pad_to_patch_size(denoised, (self.patch_size, self.patch_size))
-            img_sizes = None
-            img, img_masks, img_sizes = self.patchify(img, self.max_seq, img_sizes) 
-            denoised_embed = self.x_embedder(img)
-            
-            img_y0_adain = comfy.ldm.common_dit.pad_to_patch_size(y0_style_neg, (self.patch_size, self.patch_size))
-            img_sizes_y0_adain = None
-            img_y0_adain, img_masks_y0_adain, img_sizes_y0_adain = self.patchify(img_y0_adain, self.max_seq, img_sizes_y0_adain) 
-            y0_adain_embed = self.x_embedder(img_y0_adain)
-            
-            denoised_embed = adain_seq(denoised_embed, y0_adain_embed)
-            
-            W = self.x_embedder.proj.weight.data.to(torch.float64)   # shape [2560, 64]
-            b = self.x_embedder.proj.bias.data.to(torch.float64)     # shape [2560]
-            denoised_approx = (denoised_embed - b) @ torch.linalg.pinv(W).T
-            denoised_approx = denoised_approx.to(eps)
-            denoised_approx = self.unpatchify (denoised_approx, img_sizes)
-            
-            eps = (x - denoised_approx) / sigma
-            eps[0] = eps_orig[0] + y0_style_neg_weight * (eps[0] - eps_orig[0])
-            #eps[1] = eps_orig[1]
-            eps[1] = eps_orig[1] + y0_style_neg_synweight * (eps[1] - eps_orig[1])
-            eps = eps.float()
-        
         
         return eps
 
