@@ -301,7 +301,7 @@ class ReFlux(Flux):
                 w_len = ((w + (patch_size // 2)) // patch_size) # w_len 96
                 img = rearrange(img, "b c (h ph) (w pw) -> b (h w) (c ph pw)", ph=patch_size, pw=patch_size) # img 1,9216,64     1,16,128,128 -> 1,4096,64
 
-                denoised_embed = self.img_in(img.to(self.img_in.weight)).to(img)
+                #denoised_embed = self.img_in(img.to(torch.bfloat16).to(self.img_in.weight.device)).to(img)
                 
                 img_y0_adain = comfy.ldm.common_dit.pad_to_patch_size(y0_style_pos, (self.patch_size, self.patch_size))
 
@@ -309,12 +309,16 @@ class ReFlux(Flux):
                 w_len = ((w + (patch_size // 2)) // patch_size) # w_len 96
                 img_y0_adain = rearrange(img_y0_adain, "b c (h ph) (w pw) -> b (h w) (c ph pw)", ph=patch_size, pw=patch_size) # img 1,9216,64     1,16,128,128 -> 1,4096,64
 
-                y0_adain_embed = self.img_in(img_y0_adain.to(self.img_in.weight)).to(img_y0_adain)
-                
-                denoised_embed = adain_seq(denoised_embed, y0_adain_embed)
+                #y0_adain_embed = self.img_in(img_y0_adain.to(torch.bfloat16).to(self.img_in.weight.device)).to(img_y0_adain)
                 
                 W = self.img_in.weight.data.to(torch.float32)   # shape [2560, 64]
                 b = self.img_in.bias.data.to(torch.float32)     # shape [2560]
+                
+                denoised_embed = F.linear(img         .to(W), W, b).to(img)
+                y0_adain_embed = F.linear(img_y0_adain.to(W), W, b).to(img_y0_adain)
+                
+                denoised_embed = adain_seq(denoised_embed, y0_adain_embed)
+                
                 denoised_approx = (denoised_embed - b.to(denoised_embed)) @ torch.linalg.pinv(W).T.to(denoised_embed)
                 denoised_approx = denoised_approx.to(eps)
                 
@@ -349,20 +353,21 @@ class ReFlux(Flux):
                 w_len = ((w + (patch_size // 2)) // patch_size) # w_len 96
                 img = rearrange(img, "b c (h ph) (w pw) -> b (h w) (c ph pw)", ph=patch_size, pw=patch_size) # img 1,9216,64     1,16,128,128 -> 1,4096,64
 
-                denoised_embed = self.img_in(img.to(self.img_in.weight)).to(img)
+                #denoised_embed = self.img_in(img.to(torch.bfloat16).to(self.img_in.weight.device)).to(img)
                 
                 img_y0_adain = comfy.ldm.common_dit.pad_to_patch_size(y0_style_neg, (self.patch_size, self.patch_size))
 
-                h_len = ((h + (patch_size // 2)) // patch_size) # h_len 96
-                w_len = ((w + (patch_size // 2)) // patch_size) # w_len 96
                 img_y0_adain = rearrange(img_y0_adain, "b c (h ph) (w pw) -> b (h w) (c ph pw)", ph=patch_size, pw=patch_size) # img 1,9216,64     1,16,128,128 -> 1,4096,64
 
-                y0_adain_embed = self.img_in(img_y0_adain.to(self.img_in.weight)).to(img_y0_adain)
+                #y0_adain_embed = self.img_in(img_y0_adain.to(torch.bfloat16).to(self.img_in.weight.device)).to(img_y0_adain)
+                W = self.img_in.weight.data.to(torch.float32)   # shape [2560, 64]
+                b = self.img_in.bias.data.to(torch.float32)     # shape [2560]
+                
+                denoised_embed = F.linear(img         .to(W), W, b).to(img)
+                y0_adain_embed = F.linear(img_y0_adain.to(W), W, b).to(img_y0_adain)
                 
                 denoised_embed = adain_seq(denoised_embed, y0_adain_embed)
                 
-                W = self.img_in.weight.data.to(torch.float32)   # shape [2560, 64]
-                b = self.img_in.bias.data.to(torch.float32)     # shape [2560]
                 denoised_approx = (denoised_embed - b.to(denoised_embed)) @ torch.linalg.pinv(W).T.to(denoised_embed)
                 denoised_approx = denoised_approx.to(eps)
                 
