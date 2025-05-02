@@ -788,7 +788,7 @@ class RK_NoiseSampler:
                         d_noise            : float,
                         d_noise_start_step : int,
                         sampler_mode       : str) -> Tuple[Tensor,bool]:
-        
+        SIGMA_MIN = torch.full_like(self.sigma_min, 0.00227896) if self.sigma_min < 0.00227896 else self.sigma_min        # prevent black image with unsampling flux, which has a sigma_min of 0.0002
         if sigmas_override is not None:
             sigmas = sigmas_override.clone().to(sigmas.device).to(sigmas.dtype)
             
@@ -814,13 +814,13 @@ class RK_NoiseSampler:
         sigmas = sigmas[consecutive_duplicate_mask]
                 
         if sigmas[-1] == 0:
-            if sigmas[-2] < self.sigma_min:
-                sigmas[-2] = self.sigma_min
-            elif (sigmas[-2] - self.sigma_min).abs() > 1e-4:
-                sigmas = torch.cat((sigmas[:-1], self.sigma_min.unsqueeze(0), sigmas[-1:]))
+            if sigmas[-2] < SIGMA_MIN:
+                sigmas[-2] = SIGMA_MIN
+            elif (sigmas[-2] - SIGMA_MIN).abs() > 1e-4:
+                sigmas = torch.cat((sigmas[:-1], SIGMA_MIN.unsqueeze(0), sigmas[-1:]))
                 
-        elif UNSAMPLE_FROM_ZERO and not torch.isclose(sigmas[0], self.sigma_min):
-            sigmas = torch.cat([self.sigma_min.unsqueeze(0), sigmas])
+        elif UNSAMPLE_FROM_ZERO and not torch.isclose(sigmas[0], SIGMA_MIN):
+            sigmas = torch.cat([SIGMA_MIN.unsqueeze(0), sigmas])
         
         self.sigmas       = sigmas
         self.UNSAMPLE     = UNSAMPLE
