@@ -5,6 +5,8 @@ import torch.nn.functional as F
 from torch import Tensor, nn
 from typing import Optional, Callable, Tuple, Dict, Any, Union
 
+from ..helper import ExtraOptions
+
 from dataclasses import dataclass
 import copy
 
@@ -88,14 +90,14 @@ class ReFlux(Flux):
                         y        : Tensor,
                         guidance : Tensor   = None,
                         control             = None,
-                        reg_vec             = None,
+                        update_cross_attn   = None,
                         transformer_options = {},
                         ) -> Tensor:
         
         if img.ndim != 3 or txt.ndim != 3:
             raise ValueError("Input img and txt tensors must have 3 dimensions.")
 
-        # running on sequences img
+        # running on sequences img   img -> 1,4096,3072
         img = self.img_in(img)    # 1,9216,64  == 768x192       # 1,9216,64   ==   1,16,128,256 + 1,16,64,64    # 1,8192,64 with uncond/cond   #:,:,64 -> :,:,3072
         vec = self.time_in(timestep_embedding(timesteps, 256).to(img.dtype)) # 1 -> 1,3072
         
@@ -105,33 +107,9 @@ class ReFlux(Flux):
             else:
                 vec = vec + self.guidance_in(timestep_embedding(guidance, 256).to(img.dtype))
 
-        vec_orig = vec.clone()
         vec = vec + self.vector_in(y)  #y.shape=1,768  y==all 0s
         
-        txt_a, txt_b = None, None
-        if txt.shape[1] > 256:
-            txt_a = self.txt_in(txt[:,:256,:])
-            txt_b = self.txt_in(txt[:,256:,:])
-            #txt_a = self.txt_in(txt[:,0:1,:])
-            #txt_b = self.txt_in(txt[:,256:257:,:])
-        
-        txt = self.txt_in(txt)         #
-        
-        txt_ids_a = txt_ids[:,256:,:]
-        txt_ids_b = txt_ids[:,:256,:]
-        #txt_ids_a = txt_ids[:,0:1,:]
-        #txt_ids_b = txt_ids[:,:256:257,:]
-        
-        ids_a = torch.cat((txt_ids_a, img_ids), dim=1)
-        ids_b = torch.cat((txt_ids_b, img_ids), dim=1)
-        pe_a  = self.pe_embedder(ids_a)
-        pe_b  = self.pe_embedder(ids_b)
-        
-        if reg_vec is not None:
-            reg_vec_a = vec_orig + self.vector_in(reg_vec[:,:768].to(torch.bfloat16))
-            reg_vec_b = vec_orig + self.vector_in(reg_vec[:,768:1536].to(torch.bfloat16))
-            #reg_vec_c = vec_orig + self.vector_in(reg_vec[:,1536:2304].to(torch.bfloat16))
-            #reg_vec = torch.cat((reg_vec_a, reg_vec_b), dim=-1)
+        txt = self.txt_in(txt)
 
         ids = torch.cat((txt_ids, img_ids), dim=1) # img_ids.shape=1,8192,3    txt_ids.shape=1,512,3    #ids.shape=1,8704,3
         pe  = self.pe_embedder(ids)                 # pe.shape 1,1,8704,64,2,2
@@ -139,10 +117,6 @@ class ReFlux(Flux):
         weight    = transformer_options['reg_cond_weight'] if 'reg_cond_weight' in transformer_options else 0.0
         floor     = transformer_options['reg_cond_floor']  if 'reg_cond_floor'  in transformer_options else 0.0
         floor     = min(floor, weight)
-        reg_cond_mask_expanded = transformer_options.get('reg_cond_mask_expanded')
-        reg_cond_mask_expanded = reg_cond_mask_expanded.to(img.dtype).to(img.device) if reg_cond_mask_expanded is not None else None
-        reg_cond_mask = None
-
         
         AttnMask = transformer_options.get('AttnMask')
         mask     = None
@@ -156,27 +130,14 @@ class ReFlux(Flux):
             text_len                  = txt.shape[1] # mask_obj[0].text_len
             
             mask[text_len:,text_len:] = torch.clamp(mask[text_len:,text_len:], min=floor.to(mask.device))   #ORIGINAL SELF-ATTN REGION BLEED
-            reg_cond_mask = reg_cond_mask_expanded.unsqueeze(0).clone() if reg_cond_mask_expanded is not None else None
 
-        #heatmaps_a, heatmaps_b = [], []
-        #cdicts = []
-        
         total_layers = len(self.double_blocks) + len(self.single_blocks)
-        img_a, img_b = img.clone(), img.clone()
         
         for i, block in enumerate(self.double_blocks):
             if mask is not None and mask_type_bool and weight < (i / (total_layers-1)):
                 mask = mask.to(img.dtype)
 
-            img, txt, attn_mask = block(img=img, txt=txt, vec=vec, pe=pe, mask=mask, reg_cond_mask=reg_cond_mask, idx=i) #, weight=weight) #, mask=mask)
-            #img_a, txt_a, _, _ = block(img=img.clone(), txt=txt_a, vec=reg_vec_a, pe=pe_a, mask=None, reg_cond_mask=None, reg_vec=None) #, mask=mask)
-            #img_b, txt_b, _, _ = block(img=img.clone(), txt=txt_b, vec=reg_vec_b, pe=pe_b, mask=None, reg_cond_mask=None, reg_vec=None) #, mask=mask)
-            
-            #img, txt, heatmap_a, heatmap_b = block(img=img, txt=txt, vec=vec, pe=pe, mask=mask, reg_cond_mask=reg_cond_mask, reg_vec=reg_vec, vec_a=reg_vec_a, vec_b=reg_vec_b, txt_a=txt_a, txt_b=txt_b, pe_a=pe_a, pe_b=pe_b, ) #, mask=mask)
-            
-            #img, txt, txt_a, c_attention_dict = block(img=img, txt=txt, vec=vec, pe=pe, c_txt=txt_a, c_vec=reg_vec_a, c_pe=pe_a) #, mask=mask)
-
-            
+            img, txt, attn_mask = block(img=img, txt=txt, vec=vec, pe=pe, mask=mask, idx=i,update_cross_attn=update_cross_attn)
 
             if control is not None: # Controlnet
                 control_i = control.get("input")
@@ -184,17 +145,13 @@ class ReFlux(Flux):
                     add = control_i[i]
                     if add is not None:
                         img[:1] += add
-            #heatmaps_a.append(heatmap_a)
-            #heatmaps_b.append(heatmap_b)
-            #cdicts.append(c_attention_dict)
 
         img = torch.cat((txt, img), 1)   #first 256 is txt embed
         for i, block in enumerate(self.single_blocks):
             if mask is not None and mask_type_bool and weight < ((len(self.double_blocks) + i) / (total_layers-1)):
                 mask = mask.to(img.dtype)
             
-            #img = block(img, vec=vec, pe=pe, timestep=timesteps, transformer_options=transformer_options, mask=mask, weight=weight)
-            img = block(img, vec=vec, pe=pe, mask=mask, reg_cond_mask=reg_cond_mask, reg_vec=reg_vec, idx=i)
+            img = block(img, vec=vec, pe=pe, mask=mask, idx=i)
 
             if control is not None: # Controlnet
                 control_o = control.get("output")
@@ -202,9 +159,7 @@ class ReFlux(Flux):
                     add = control_o[i]
                     if add is not None:
                         img[:1, txt.shape[1] :, ...] += add
-                        
-                        
-                        
+
         img = img[:, txt.shape[1] :, ...]
         img = self.final_layer(img, vec)  # (N, T, patch_size ** 2 * out_channels)     1,8192,3072 -> 1,8192,64 
         return img
@@ -226,50 +181,55 @@ class ReFlux(Flux):
                 guidance,
                 control             = None,
                 transformer_options = {},
-                cs:    Optional[Tensor] = None,
-                c_ids: Optional[Tensor] = None,
-                c_vec: Optional[Tensor] = None,
                 **kwargs
                 ):
+        SIGMA = timestep[0].unsqueeze(0)
+        update_cross_attn = transformer_options.get("update_cross_attn")
+        EO = transformer_options.get("ExtraOptions", ExtraOptions(""))
+        if EO is not None:
+            EO.mute = True
 
-        #y_orig = y.clone()
+        y0_style_pos        = transformer_options.get("y0_style_pos")
+        y0_style_neg        = transformer_options.get("y0_style_neg")
+
+
         out_list = []
         for i in range(len(transformer_options['cond_or_uncond'])):
             UNCOND = transformer_options['cond_or_uncond'][i] == 1
-
+            
+            if update_cross_attn is not None:
+                update_cross_attn['UNCOND'] = UNCOND
+                
+            if update_cross_attn is not None and update_cross_attn['skip_cross_attn']:
+                if UNCOND:
+                    img = transformer_options['y0_inv'].clone().to(x)
+                else:
+                    img = transformer_options['y0'].clone().to(x)
+            else:
+                img = x
+                    
             bs, c, h, w = x.shape
             patch_size  = 2
-            x           = comfy.ldm.common_dit.pad_to_patch_size(x, (patch_size, patch_size))    # 1,16,192,192
-            #y = y_orig.clone()
-            #vec_tmp = None
+            img           = comfy.ldm.common_dit.pad_to_patch_size(img, (patch_size, patch_size))    # 1,16,192,192
             
-            transformer_options['original_shape'] = x.shape
+            transformer_options['original_shape'] = img.shape
             transformer_options['patch_size']     = patch_size
 
             h_len = ((h + (patch_size // 2)) // patch_size) # h_len 96
             w_len = ((w + (patch_size // 2)) // patch_size) # w_len 96
 
-            img = rearrange(x, "b c (h ph) (w pw) -> b (h w) (c ph pw)", ph=patch_size, pw=patch_size) # img 1,9216,64     1,16,128,128 -> 1,4096,64
-            vec_full=None
-            #if UNCOND:
-            #    transformer_options['reg_cond_weight'] = 0.0 # -1
-            #    context_tmp = context[i][None,...].clone()
-            
+            img = rearrange(img, "b c (h ph) (w pw) -> b (h w) (c ph pw)", ph=patch_size, pw=patch_size) # img 1,9216,64     1,16,128,128 -> 1,4096,64
+
             if UNCOND:
-                #transformer_options['reg_cond_weight'] = -1
-                #context_tmp = context[i][None,...].clone()
-                
                 transformer_options['reg_cond_weight'] = transformer_options.get("regional_conditioning_weight", 0.0) #transformer_options['regional_conditioning_weight']
                 transformer_options['reg_cond_floor']  = transformer_options.get("regional_conditioning_floor",  0.0) #transformer_options['regional_conditioning_floor'] #if "regional_conditioning_floor" in transformer_options else 0.0
-                transformer_options['reg_cond_mask_orig'] = transformer_options.get('regional_conditioning_mask_orig')
                 
                 AttnMask   = transformer_options.get('AttnMask',   None)                    
                 RegContext = transformer_options.get('RegContext', None)
                 
                 if AttnMask is not None and transformer_options['reg_cond_weight'] > 0.0:
-                    AttnMask.attn_mask_recast(x.dtype)
+                    AttnMask.attn_mask_recast(img.dtype)
                     context_tmp = RegContext.get().to(context.dtype)
-                    #context_tmp = 0 * context_tmp.clone()
                     
                     A = context[i][None,...].clone()
                     B = context_tmp
@@ -282,7 +242,6 @@ class ReFlux(Flux):
             elif UNCOND == False:
                 transformer_options['reg_cond_weight'] = transformer_options.get("regional_conditioning_weight", 0.0) 
                 transformer_options['reg_cond_floor']  = transformer_options.get("regional_conditioning_floor",  0.0) 
-                transformer_options['reg_cond_mask_orig'] = transformer_options.get('regional_conditioning_mask_orig')
                                 
                 AttnMask   = transformer_options.get('AttnMask',   None)                    
                 RegContext = transformer_options.get('RegContext', None)
@@ -296,25 +255,155 @@ class ReFlux(Flux):
             if context_tmp is None:
                 context_tmp = context[i][None,...].clone()
             context_tmp = context_tmp.to(context.dtype)
-            txt_ids      = torch.zeros((bs, context_tmp.shape[1], 3), device=x.device, dtype=x.dtype)      # txt_ids        1, 256,3
-            img_ids_orig = self._get_img_ids(x, bs, h_len, w_len, 0, h_len, 0, w_len)                  # img_ids_orig = 1,9216,3
+            txt_ids      = torch.zeros((bs, context_tmp.shape[1], 3), device=img.device, dtype=img.dtype)      # txt_ids        1, 256,3
+            img_ids_orig = self._get_img_ids(img, bs, h_len, w_len, 0, h_len, 0, w_len)                  # img_ids_orig = 1,9216,3
 
-            #vec_tmp = vec_tmp if vec_tmp is not None else y[i][None,...]
 
             out_tmp = self.forward_blocks(img       [i][None,...].clone(), 
                                         img_ids_orig[i][None,...].clone(), 
                                         context_tmp,
                                         txt_ids     [i][None,...].clone(), 
                                         timestep    [i][None,...].clone(), 
-                                        #y,
                                         y           [i][None,...].clone(),
                                         guidance    [i][None,...].clone(),
                                         control, 
-                                        vec_full, 
+                                        update_cross_attn=update_cross_attn,
                                         transformer_options=transformer_options)  # context 1,256,4096   y 1,768
             out_list.append(out_tmp)
             
         out = torch.stack(out_list, dim=0).squeeze(dim=1)
         
-        return rearrange(out, "b (h w) (c ph pw) -> b c (h ph) (w pw)", h=h_len, w=w_len, ph=2, pw=2)[:,:,:h,:w]
+        eps = rearrange(out, "b (h w) (c ph pw) -> b c (h ph) (w pw)", h=h_len, w=w_len, ph=2, pw=2)[:,:,:h,:w]
+        
+        
+        
+        
+        
+        
+        
+
+        if y0_style_pos is not None:
+            y0_style_pos_weight    = transformer_options.get("y0_style_pos_weight")
+            y0_style_pos_synweight = transformer_options.get("y0_style_pos_synweight")
+            y0_style_pos_synweight *= y0_style_pos_weight
+            
+            y0_style_pos = y0_style_pos.to(torch.float32)
+            x   = x.to(torch.float32)
+            eps = eps.to(torch.float32)
+            eps_orig = eps.clone()
+            
+            sigma = SIGMA #t_orig[0].to(torch.float32) / 1000
+            denoised = x - sigma * eps
+            
+            img = comfy.ldm.common_dit.pad_to_patch_size(denoised, (self.patch_size, self.patch_size))
+
+            h_len = ((h + (patch_size // 2)) // patch_size) # h_len 96
+            w_len = ((w + (patch_size // 2)) // patch_size) # w_len 96
+            img = rearrange(img, "b c (h ph) (w pw) -> b (h w) (c ph pw)", ph=patch_size, pw=patch_size) # img 1,9216,64     1,16,128,128 -> 1,4096,64
+
+            denoised_embed = self.img_in(img.to(self.img_in.weight)).to(img)
+            
+            img_y0_adain = comfy.ldm.common_dit.pad_to_patch_size(y0_style_pos, (self.patch_size, self.patch_size))
+
+            h_len = ((h + (patch_size // 2)) // patch_size) # h_len 96
+            w_len = ((w + (patch_size // 2)) // patch_size) # w_len 96
+            img_y0_adain = rearrange(img_y0_adain, "b c (h ph) (w pw) -> b (h w) (c ph pw)", ph=patch_size, pw=patch_size) # img 1,9216,64     1,16,128,128 -> 1,4096,64
+
+            y0_adain_embed = self.img_in(img_y0_adain.to(self.img_in.weight)).to(img_y0_adain)
+            
+            denoised_embed = adain_seq(denoised_embed, y0_adain_embed)
+            
+            W = self.img_in.weight.data.to(torch.float32)   # shape [2560, 64]
+            b = self.img_in.bias.data.to(torch.float32)     # shape [2560]
+            denoised_approx = (denoised_embed - b.to(denoised_embed)) @ torch.linalg.pinv(W).T.to(denoised_embed)
+            denoised_approx = denoised_approx.to(eps)
+            
+            denoised_approx = rearrange(denoised_approx, "b (h w) (c ph pw) -> b c (h ph) (w pw)", h=h_len, w=w_len, ph=2, pw=2)[:,:,:h,:w]
+            
+            eps = (x - denoised_approx) / sigma
+            if eps.shape[0] > 1:
+                eps[1] = eps_orig[1] + y0_style_pos_weight * (eps[1] - eps_orig[1])
+                eps[0] = eps_orig[0] + y0_style_pos_synweight * (eps[0] - eps_orig[0])
+            else:
+                eps[0] = eps_orig[0] + y0_style_pos_weight * (eps[0] - eps_orig[0])
+                
+            eps = eps.float()
+            
+        if y0_style_neg is not None:
+            y0_style_neg_weight    = transformer_options.get("y0_style_neg_weight")
+            y0_style_neg_synweight = transformer_options.get("y0_style_neg_synweight")
+            y0_style_neg_synweight *= y0_style_neg_weight
+            
+            y0_style_neg = y0_style_neg.to(torch.float32)
+            x   = x.to(torch.float32)
+            eps = eps.to(torch.float32)
+            eps_orig = eps.clone()
+            
+            sigma = SIGMA #t_orig[0].to(torch.float32) / 1000
+            denoised = x - sigma * eps
+            
+            img = comfy.ldm.common_dit.pad_to_patch_size(denoised, (self.patch_size, self.patch_size))
+
+            h_len = ((h + (patch_size // 2)) // patch_size) # h_len 96
+            w_len = ((w + (patch_size // 2)) // patch_size) # w_len 96
+            img = rearrange(img, "b c (h ph) (w pw) -> b (h w) (c ph pw)", ph=patch_size, pw=patch_size) # img 1,9216,64     1,16,128,128 -> 1,4096,64
+
+            denoised_embed = self.img_in(img.to(self.img_in.weight)).to(img)
+            
+            img_y0_adain = comfy.ldm.common_dit.pad_to_patch_size(y0_style_neg, (self.patch_size, self.patch_size))
+
+            h_len = ((h + (patch_size // 2)) // patch_size) # h_len 96
+            w_len = ((w + (patch_size // 2)) // patch_size) # w_len 96
+            img_y0_adain = rearrange(img_y0_adain, "b c (h ph) (w pw) -> b (h w) (c ph pw)", ph=patch_size, pw=patch_size) # img 1,9216,64     1,16,128,128 -> 1,4096,64
+
+            y0_adain_embed = self.img_in(img_y0_adain.to(self.img_in.weight)).to(img_y0_adain)
+            
+            denoised_embed = adain_seq(denoised_embed, y0_adain_embed)
+            
+            W = self.img_in.weight.data.to(torch.float32)   # shape [2560, 64]
+            b = self.img_in.bias.data.to(torch.float32)     # shape [2560]
+            denoised_approx = (denoised_embed - b.to(denoised_embed)) @ torch.linalg.pinv(W).T.to(denoised_embed)
+            denoised_approx = denoised_approx.to(eps)
+            
+            denoised_approx = rearrange(denoised_approx, "b (h w) (c ph pw) -> b c (h ph) (w pw)", h=h_len, w=w_len, ph=2, pw=2)[:,:,:h,:w]
+            
+            eps = (x - denoised_approx) / sigma
+            eps[0] = eps_orig[0] + y0_style_neg_weight * (eps[0] - eps_orig[0])
+            eps[1] = eps_orig[1] + y0_style_neg_synweight * (eps[1] - eps_orig[1])
+                
+            eps = eps.float()
+            
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        return eps
     
+
+
+
+def adain_seq(content: torch.Tensor, style: torch.Tensor, eps: float = 1e-7) -> torch.Tensor:
+    return ((content - content.mean(1, keepdim=True)) / (content.std(1, keepdim=True) + eps)) * (style.std(1, keepdim=True) + eps) + style.mean(1, keepdim=True)
+
+
+
+
+
+def adain_seq_oom(content: torch.Tensor, style: torch.Tensor, eps: float = 1e-7) -> torch.Tensor: # [B,L,C]
+    mean_c = content.mean(dim=1, keepdim=True)       # [B,1,C]
+    std_c  = content.std (dim=1, keepdim=True) + eps # [B,1,C]
+    mean_s = style.  mean(dim=1, keepdim=True)       # [B,1,C]
+    std_s  = style.  std (dim=1, keepdim=True) + eps # [B,1,C]
+
+    normalized = (content - mean_c) / std_c
+    return normalized * std_s + mean_s               # [B,L,C]
+
+
+
+
+
