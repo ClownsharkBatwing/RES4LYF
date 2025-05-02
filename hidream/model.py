@@ -1067,11 +1067,15 @@ class HDModel(nn.Module):
             denoised_approx = self.unpatchify (denoised_approx, img_sizes)
             
             eps = (x - denoised_approx) / sigma
-            eps[1] = eps_orig[1] + y0_style_pos_weight * (eps[1] - eps_orig[1])
-            #eps[0] = eps_orig[0]
-            eps[0] = eps_orig[0] + y0_style_pos_synweight * (eps[0] - eps_orig[0])
+            if eps.shape[0] > 1:
+                eps[1] = eps_orig[1] + y0_style_pos_weight * (eps[1] - eps_orig[1])
+                eps[0] = eps_orig[0] + y0_style_pos_synweight * (eps[0] - eps_orig[0])
+            else:
+                eps[0] = eps_orig[0] + y0_style_pos_weight * (eps[0] - eps_orig[0])
+                
+            eps = eps.float()
 
-        if y0_style_neg is not None:
+        if y0_style_neg is not None and eps.shape[0] > 1:
             y0_style_neg_weight    = transformer_options.get("y0_style_neg_weight")
             y0_style_neg_synweight = transformer_options.get("y0_style_neg_synweight")
             y0_style_neg_synweight *= y0_style_neg_weight
@@ -1106,6 +1110,7 @@ class HDModel(nn.Module):
             eps[0] = eps_orig[0] + y0_style_neg_weight * (eps[0] - eps_orig[0])
             #eps[1] = eps_orig[1]
             eps[1] = eps_orig[1] + y0_style_neg_synweight * (eps[1] - eps_orig[1])
+            eps = eps.float()
         
         
         return eps
@@ -1175,11 +1180,6 @@ def clone_inputs(*args, index: int=None):
 
 
 
-
-
-
-
-
 def adain_seq(content: torch.Tensor, style: torch.Tensor, eps: float = 1e-7) -> torch.Tensor: # [B,L,C]
     mean_c = content.mean(dim=1, keepdim=True)       # [B,1,C]
     std_c  = content.std (dim=1, keepdim=True) + eps # [B,1,C]
@@ -1188,146 +1188,3 @@ def adain_seq(content: torch.Tensor, style: torch.Tensor, eps: float = 1e-7) -> 
 
     normalized = (content - mean_c) / std_c
     return normalized * std_s + mean_s               # [B,L,C]
-
-
-def wct_transform(Fc, Fs, eps=1e-5):
-    """
-    Fc:  [B, C, N] content features
-    Fs:  [B, C, N] style features
-    returns: [B, C, N] content whitened & recolored
-    """
-    dtype = Fc.dtype
-    Fc = Fc.to(torch.float32)
-    Fs = Fs.to(torch.float32)
-    B, C, N = Fc.shape
-    # 1) compute content covariance
-    mu_c = Fc.mean(-1, keepdim=True)           # [B,C,1]
-    Fc0  = Fc - mu_c
-    cov_c = (Fc0 @ Fc0.transpose(1,2)) / (N - 1)  # [B,C,C]
-    
-    # 2) whiten via SVD
-    Uc, Sc, _ = torch.linalg.svd(cov_c + eps*torch.eye(C, device=Fc.device)[None], full_matrices=False)
-    Dc = torch.diag_embed(1.0 / torch.sqrt(Sc))
-    Fw = Uc @ (Dc @ (Uc.transpose(1,2) @ Fc0))   # [B,C,N]
-    
-    # 3) color to style covariance
-    mu_s = Fs.mean(-1, keepdim=True)
-    Fs0  = Fs - mu_s
-    cov_s = (Fs0 @ Fs0.transpose(1,2)) / (N - 1)
-    Us, Ss, _ = torch.linalg.svd(cov_s + eps*torch.eye(C, device=Fc.device)[None], full_matrices=False)
-    Ds = torch.diag_embed(torch.sqrt(Ss))
-    Fcs = Us @ (Ds @ (Us.transpose(1,2) @ Fw))   # [B,C,N]
-    return (Fcs + mu_s).to(dtype)
-
-
-
-def wct_cholesky(Fc, Fs, eps=1e-5):
-    # Fc, Fs: [B, C, N]
-    dtype = Fc.dtype
-    Fc = Fc.to(torch.float32)
-    Fs = Fs.to(torch.float32)
-    
-    B, C, N = Fc.shape
-    mu_c = Fc.mean(-1, keepdim=True)         # [B,C,1]
-    Fc0  = Fc - mu_c
-    cov_c = (Fc0 @ Fc0.transpose(1,2))/(N-1) + eps*torch.eye(C, device=Fc.device)[None]
-    Lc    = torch.linalg.cholesky(cov_c)     # [B,C,C]
-    # whiten: Lc Lc^T = cov_c  → inv(Lc) Fc0
-    Fc_w  = torch.linalg.solve_triangular(Lc, Fc0, upper=False)
-    Fc_w  = torch.linalg.solve_triangular(Lc.transpose(1,2), Fc_w, upper=True)
-
-    mu_s = Fs.mean(-1, keepdim=True)
-    Fs0  = Fs - mu_s
-    cov_s = (Fs0 @ Fs0.transpose(1,2))/(N-1) + eps*torch.eye(C, device=Fs.device)[None]
-    Ls    = torch.linalg.cholesky(cov_s)
-    # color: Ls Fc_w
-    Fcs   = Ls @ Fc_w
-
-    return (Fcs + mu_s).to(dtype)
-
-
-def adaptive_adain(x, y, eps=1e-7):
-    # x: [B, N, C] content feats,  y: [B, N, C] style feats
-    μc = x.mean(-2, keepdim=True)
-    σc = x.var( -2, keepdim=True).add(eps).sqrt()
-    μs = y.mean(-2, keepdim=True)
-    σs = y.var( -2, keepdim=True).add(eps).sqrt()
-
-    x_norm = (x - μc) / σc
-    adain  = x_norm * σs + μs      # [B, N, C]
-
-    # build per-channel stats
-    stats = torch.cat([
-        μc .squeeze(-2)[...,None],
-        σc .squeeze(-2)[...,None],
-        μs .squeeze(-2)[...,None],
-        σs .squeeze(-2)[...,None],
-    ], dim=-1)  # [B, C, 4]
-
-    α = torch.softmax(gate_net(stats), dim=-1).unsqueeze(-2)  # [B,1,C]
-
-    return α * adain + (1-α) * x
-
-
-
-def adain_onehot(x: Tensor, y: Tensor, eps=1e-5) -> Tensor:
-    """
-    One-shot AdaIN with per-channel strength α based on channelwise difference.
-    x: content feats [B, N, C]
-    y:   style feats [B, N, C]
-    returns: mixed feats [B, N, C]
-    """
-    # 1) compute stats
-    μc = x.mean(dim=-2, keepdim=True)                # [B,1,C]
-    σc = x.var( dim=-2, keepdim=True, unbiased=False).add(eps).sqrt()
-    μs = y.mean(dim=-2, keepdim=True)
-    σs = y.var( dim=-2, keepdim=True, unbiased=False).add(eps).sqrt()
-
-    # 2) standard AdaIN result
-    x_norm = (x - μc) / σc
-    adain  = x_norm * σs + μs                        # [B,N,C]
-
-    # 3) per-channel “difference magnitude”
-    #    (sum of abs mean‐shift + abs std‐shift)
-    diff = (μs - μc).abs() + (σs - σc).abs()          # [B,1,C]
-
-    # 4) normalize to [0,1] per batch (so largest diff → 1.0)
-    max_diff = diff.max(dim=-1, keepdim=True).values # [B,1,1]
-    α = diff / (max_diff + eps)                      # [B,1,C]
-
-    # 5) mix
-    return α * adain + (1 - α) * x
-
-
-
-def adain_softmax(x: Tensor, y: Tensor, temperature: float = 1.0, eps: float = 1e-5) -> Tensor:
-    """
-    Adaptive Instance Norm with a per-channel gating α computed via softmax.
-    x: content feats [B, N, C]
-    y:   style feats [B, N, C]
-    temperature: higher → softer (more uniform) gating
-    returns: mixed feats [B, N, C]
-    """
-    # 1) content / style stats
-    μc = x.mean (dim=-2, keepdim=True)                              # [B,1,C]
-    σc = x.var  (dim=-2, keepdim=True, unbiased=False).add(eps).sqrt()  
-    μs = y.mean (dim=-2, keepdim=True)
-    σs = y.var  (dim=-2, keepdim=True, unbiased=False).add(eps).sqrt()
-
-    # 2) standard AdaIN
-    x_norm = (x - μc) / σc
-    adain  = x_norm * σs + μs                                      # [B,N,C]
-
-    # 3) per-channel diff magnitude
-    diff = (μs - μc).abs() + (σs - σc).abs()                       # [B,1,C]
-
-    # 4) softmax gating across channels
-    #    flatten out the spatial dim so we can softmax over C
-    scores = diff.squeeze(1) / temperature                         # [B,C]
-    α      = F.softmax(scores, dim=-1).unsqueeze(1)                # [B,1,C]
-
-    # 5) channelwise blend
-    return α * adain + (1 - α) * x
-
-
-
