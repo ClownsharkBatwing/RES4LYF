@@ -214,7 +214,81 @@ class Film_Grain:
             
         img_highlights = torch.stack(img_list, dim=0)
         return img_highlights
-    
+
+
+
+class Image_Grain_Add: 
+    def __init__(self):
+        pass
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "image": ("IMAGE",),
+                "weight": ("FLOAT", {"default": 0.5, "min": -10000.0, "max": 10000.0, "step": 0.01}),
+                #"density": ("FLOAT", {"default": 1.0, "min": 0.01, "max": 1.0, "step": 0.01}),
+                #"intensity": ("FLOAT", {"default": 1.0, "min": 0.01, "max": 1.0, "step": 0.01}),
+                #"highlights": ("FLOAT", {"default": 1.0, "min": 0.01, "max": 255.0, "step": 0.01}),
+                #"supersample_factor": ("INT", {"default": 4, "min": 1, "max": 8, "step": 1}),
+                #"repeats": ("INT", {"default": 1, "min": 1, "max": 1000, "step": 1})
+            }
+        }
+    RETURN_TYPES = ("IMAGE",)
+    FUNCTION = "main"
+
+    CATEGORY = "RES4LYF/images"
+
+    def main(self, image, weight=0.5, density=1.0, intensity=1.0, highlights=1.0, supersample_factor=1.0, repeats=1):
+        image = image.repeat(repeats, 1, 1, 1)
+        image_grain = self.apply_film_grain(image, density, intensity, highlights, supersample_factor)
+        
+        return (image + weight * (hard_light_blend(image_grain, image) - image), )
+
+
+    def apply_film_grain(self, img, density=0.1, intensity=1.0, highlights=1.0, supersample_factor=4):
+
+        img_batch = img.clone()
+        img_list = []
+        for i in range(img_batch.shape[0]):
+            img = img_batch[i].unsqueeze(0)
+            img = tensor2pil(img)
+            device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        
+            # apply grayscale noise with specified density/intensity/highlights to PIL image
+            img_gray = img.convert('L')
+            original_size = img.size
+            img_gray = img_gray.resize(
+                ((img.size[0] * supersample_factor), (img.size[1] * supersample_factor)), Image.Resampling(2))
+            num_pixels = int(density * img_gray.size[0] * img_gray.size[1])
+
+            img_gray_tensor = torch.from_numpy(np.array(img_gray).astype(np.float32) / 255.0).to(device)
+            img_gray_flat = img_gray_tensor.view(-1)
+            num_pixels = int(density * img_gray_flat.numel())
+            indices = torch.randint(0, img_gray_flat.numel(), (num_pixels,), device=img_gray_flat.device)
+            values = torch.randint(0, 256, (num_pixels,), device=img_gray_flat.device, dtype=torch.float32) / 255.0
+            
+            img_gray_flat[indices] = values
+            img_gray = img_gray_flat.view(img_gray_tensor.shape)
+            
+            img_gray_np = (img_gray.cpu().numpy() * 255).astype(np.uint8)
+            img_gray = Image.fromarray(img_gray_np)
+
+            img_noise = img_gray.convert('RGB')
+            img_noise = img_noise.filter(ImageFilter.GaussianBlur(radius=0.125))
+            img_noise = img_noise.resize(original_size, Image.Resampling(1))
+            img_noise = img_noise.filter(ImageFilter.EDGE_ENHANCE_MORE)
+            img_final = Image.blend(img, img_noise, intensity)
+            enhancer = ImageEnhance.Brightness(img_final)
+            img_highlights = enhancer.enhance(highlights)
+            
+            img_list.append(pil2tensor(img_highlights).squeeze(dim=0))
+            
+        img_highlights = torch.stack(img_list, dim=0)
+        return img_highlights
+
+
+
 
 class Frequency_Separation_Hard_Light:
     def __init__(self):

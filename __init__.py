@@ -261,6 +261,8 @@ NODE_CLASS_MAPPINGS = {
     "Frames Concat"                       : images.Frames_Concat,
     
     "Mask Sketch"                         : images.MaskSketch,
+    
+    "Image Grain Add"                     : images.Image_Grain_Add,
 
     "Frames Concat Masks"                 : nodes_latents.Frames_Concat_Masks,
 
