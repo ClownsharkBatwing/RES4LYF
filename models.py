@@ -374,6 +374,7 @@ class ReHiDreamPatcherAdvanced:
                 "model"                : ("MODEL",),
                 "double_stream_blocks" : ("STRING",  {"default": "all", "multiline": True}),
                 "single_stream_blocks" : ("STRING",  {"default": "all", "multiline": True}),
+                "style_dtype"          : (["default", "bfloat16", "float16", "float32", "float64"],  {"default": "default"}),
                 "enable"               : ("BOOLEAN", {"default": True}),
             }
         }
@@ -382,10 +383,12 @@ class ReHiDreamPatcherAdvanced:
     CATEGORY     = "RES4LYF/model_patches"
     FUNCTION     = "main"
 
-    def main(self, model, double_stream_blocks, single_stream_blocks, enable=True, force=False):
+    def main(self, model, double_stream_blocks, single_stream_blocks, style_dtype, enable=True, force=False):
         
         double_stream_blocks = parse_range_string(double_stream_blocks)
         single_stream_blocks = parse_range_string(single_stream_blocks)
+        
+        model.model.diffusion_model.style_dtype = getattr(torch, style_dtype) if style_dtype != "default" else None
         
         if (enable or force) and model.model.diffusion_model.__class__ == HiDreamImageTransformer2DModel:
             m = model.clone()
@@ -457,16 +460,18 @@ class ReHiDreamPatcher(ReHiDreamPatcherAdvanced):
     def INPUT_TYPES(cls):
         return {
             "required": {
-                "model"  : ("MODEL",),
-                "enable" : ("BOOLEAN", {"default": True}),
+                "model"       : ("MODEL",),
+                "style_dtype" : (["default", "bfloat16", "float16", "float32", "float64"],  {"default": "default"}),
+                "enable"      : ("BOOLEAN", {"default": True}),
             }
         }
 
-    def main(self, model, enable=True, force=False):
+    def main(self, model, style_dtype, enable=True, force=False):
         return super().main(
             model                = model,
             double_stream_blocks = "all",
             single_stream_blocks = "all",
+            style_dtype          = "default",
             enable               = enable,
             force                = force
         )    
