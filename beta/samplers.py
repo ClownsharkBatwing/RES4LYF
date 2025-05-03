@@ -545,6 +545,7 @@ class SharkSampler:
                         positive_tmp = positive[batch_num]
                     else:
                         pos_cond_tmp = pos_cond
+                        positive_tmp = positive
                     
                     for i in range(len(neg_cond)): # crude fix for copy.deepcopy converting superclass into real object
                         if 'control' in neg_cond[i][1]:
