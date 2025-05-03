@@ -34,6 +34,7 @@ RK_SAMPLER_NAMES_BETA_FOLDERS = ["none",
                     "exponential/res_2s_rkmk2e", 
                     "exponential/res_2s", 
                     "exponential/res_3s",
+                    "exponential/res_3s_non-monotonic",
                     "exponential/res_3s_alt",
                     "exponential/res_3s_cox_matthews",
                     "exponential/res_3s_lie",
@@ -1768,6 +1769,32 @@ def get_rk_methods_beta(rk_type       : str,
             ]
             
             a, b = gen_first_col_exp(a,b,ci,φ)
+            
+        case "res_3s_non-monotonic":
+            c2 = float(get_extra_options_kv("c2", "1.0", extra_options))
+            c3 = float(get_extra_options_kv("c3", "0.5", extra_options))
+            
+            ci = [0,c2,c3]
+            φ = Phi(h, ci, use_analytic_solution)
+            
+            gamma = calculate_gamma(c2, c3)
+
+            a3_2 = gamma * c2 * φ(2,2) + (c3 ** 2 / c2) * φ(2, 3)
+            
+            b3 = (1 / (gamma * c2 + c3)) * φ(2)   
+            b2 = gamma * b3  #simplified version of: b2 = (gamma / (gamma * c2 + c3)) * phi_2_h  
+            
+            a = [
+                    [0, 0, 0],
+                    [0, 0, 0],
+                    [0, a3_2, 0],
+            ]
+            b = [
+                    [0, b2, b3],
+            ]
+            
+            a, b = gen_first_col_exp(a,b,ci,φ)
+            
             
         case "res_3s_alt":
             c2 = 1/3

@@ -298,6 +298,12 @@ class LatentGuide:
             self.mask_inv = mask_inv.to(dtype=self.dtype, device=self.device)
         else:
             self.mask_inv = (1-self.mask)
+            
+        mask_style_pos, self.LGW_MASK_RESCALE_MIN = prepare_mask(x, self.mask_style_pos, self.LGW_MASK_RESCALE_MIN)
+        self.mask_style_pos = mask_style_pos.to(dtype=self.dtype, device=self.device)
+        
+        mask_style_neg, self.LGW_MASK_RESCALE_MIN = prepare_mask(x, self.mask_style_neg, self.LGW_MASK_RESCALE_MIN)
+        self.mask_style_neg = mask_style_neg.to(dtype=self.dtype, device=self.device)
     
         if latent_guide is not None:
             self.HAS_LATENT_GUIDE = True

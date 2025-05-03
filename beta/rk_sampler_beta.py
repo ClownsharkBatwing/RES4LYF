@@ -501,20 +501,24 @@ def sample_rk_beta(
                 RK.update_transformer_options({'y0_style_pos':        None})
                 RK.update_transformer_options({'y0_style_pos_weight': 0.0})
                 RK.update_transformer_options({'y0_style_pos_synweight': 0.0})
+                RK.update_transformer_options({'y0_style_pos_mask': None})
             else:
                 RK.update_transformer_options({'y0_style_pos':        LG.y0_style_pos.clone()})
                 RK.update_transformer_options({'y0_style_pos_weight': LG.lgw_style_pos[step]})
                 RK.update_transformer_options({'y0_style_pos_synweight': guides['synweight_style_pos']})
+                RK.update_transformer_options({'y0_style_pos_mask': LG.mask_style_pos})
 
         if LG.HAS_LATENT_GUIDE_STYLE_NEG:
             if LG.lgw_style_neg[step] == 0.0:
                 RK.update_transformer_options({'y0_style_neg':        None})
                 RK.update_transformer_options({'y0_style_neg_weight': 0.0})
                 RK.update_transformer_options({'y0_style_neg_synweight': 0.0})
+                RK.update_transformer_options({'y0_style_neg_mask': None})
             else:
                 RK.update_transformer_options({'y0_style_neg':        LG.y0_style_neg.clone()})
                 RK.update_transformer_options({'y0_style_neg_weight': LG.lgw_style_neg[step]})
                 RK.update_transformer_options({'y0_style_neg_synweight': guides['synweight_style_neg']})
+                RK.update_transformer_options({'y0_style_neg_mask': LG.mask_style_neg})
 
         if AttnMask_neg is not None:
             RK.update_transformer_options({'regional_conditioning_weight_neg': RegParam_neg.weights[step]})
