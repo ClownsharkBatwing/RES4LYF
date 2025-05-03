@@ -430,6 +430,42 @@ class ClownOptions_ImplicitSteps_Beta:
 
 
 
+class ClownOptions_Restarts_Beta:
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {"required":
+                    {
+                    "restarts":   ("INT",   {"default": 0,   "min": 0,      "max": 10000}),
+                    #"steps_to_cycle": ("INT",   {"default": 0,   "min": 0,      "max": 10000}),
+                    "rewind_cfg": ("FLOAT", {"default": 1.0, "min": -10000, "max": 10000, "step":0.01}),
+                    },
+                "optional": 
+                    {
+                    "options":    ("OPTIONS", ),   
+                    }
+                }
+
+    RETURN_TYPES = ("OPTIONS",)
+    RETURN_NAMES = ("options",)
+    FUNCTION     = "main"
+    CATEGORY     = "RES4LYF/sampler_options"
+    
+    def main(self,
+            restarts   = 0,
+            rewind_cfg = 1.0,
+            options    = None
+            ): 
+        
+        options = options if options is not None else {}
+            
+        options['restarts']   = restarts
+        options['rewind_cfg'] = rewind_cfg
+
+        return (options,)
+
+
+
+
 class ClownOptions_ExtraOptions_Beta:
     @classmethod
     def INPUT_TYPES(cls):

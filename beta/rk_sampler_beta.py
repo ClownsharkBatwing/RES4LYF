@@ -119,7 +119,7 @@ def sample_rk_beta(
         sampler_mode                  : str                = "standard",
 
         rk_type                       : str                = "res_2m",
-        implicit_sampler_name         : str                = "explicit_full",
+        implicit_sampler_name         : str                = "use_explicit",
 
         c1                            : float              =  0.0,
         c2                            : float              =  0.5,
@@ -255,7 +255,7 @@ def sample_rk_beta(
             
             if state_info['sampler_mode'] in {"standard","resample"} and sampler_mode == "unsample":
                 sigmas = torch.flip(state_info['sigmas'], dims=[0])
-                start_step = (len(sigmas)-1) - (state_info['end_step']-1)
+                start_step = (len(sigmas)-1) - (state_info['end_step']) #-1) #removed -1 at the end here. correct?
                 
             if state_info['sampler_mode'] == "unsample"              and sampler_mode == "resample":
                 sigmas = torch.flip(state_info['sigmas'], dims=[0])
@@ -315,6 +315,11 @@ def sample_rk_beta(
             start_step  = 1
         else:
             start_step -= 1
+            
+    state_info_sigma_next = state_info.get('sigma_next', -1)
+    state_info_start_step = (sigmas == state_info_sigma_next).nonzero().flatten()
+    if state_info_start_step.shape[0] > 0:
+        start_step = state_info_start_step.item()
     
     SDE_NOISE_EXTERNAL = False
     if sde_noise is not None:

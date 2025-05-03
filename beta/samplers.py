@@ -122,6 +122,9 @@ class SharkSampler:
             sde_noise                                   = None,
             sde_noise_steps    : int                    =  1,
             
+            restarts           : int                    =  0,
+            rewind_cfg         : float                  = 1.0,
+            
             #ultracascade_stage : str = "stage_UP",
             ultracascade_latent_image : Optional[dict[str,Any]] = None,
             ultracascade_guide_weights: Optional[Tuple] = None,
@@ -154,6 +157,9 @@ class SharkSampler:
             k_init          = options_mgr.get('k_init',           k_init)
             sde_noise       = options_mgr.get('sde_noise',        sde_noise)
             sde_noise_steps = options_mgr.get('sde_noise_steps',  sde_noise_steps)
+            restarts        = options_mgr.get('restarts',         restarts)
+            rewind_cfg      = options_mgr.get('rewind_cfg',       rewind_cfg)
+
             
             #ultracascade_stage        = options_mgr.get('ultracascade_stage',         ultracascade_stage)
             ultracascade_latent_image  = options_mgr.get('ultracascade_latent_image',  ultracascade_latent_image)
@@ -532,9 +538,9 @@ class SharkSampler:
                     if 'BONGMATH' in sampler.extra_options: # verify the sampler is rk_sampler_beta()
                         sampler.extra_options['state_info']     = copy.deepcopy(state_info)         ##############################
                         if state_info != {}:
-                            sampler.extra_options['state_info']['raw_x'] = state_info['raw_x'][batch_num]
-                            sampler.extra_options['state_info']['data_prev_'] = state_info['data_prev_'][batch_num]
-                            sampler.extra_options['state_info']['last_rng'] = state_info['last_rng'][batch_num]
+                            sampler.extra_options['state_info']['raw_x']            = state_info['raw_x']           [batch_num]
+                            sampler.extra_options['state_info']['data_prev_']       = state_info['data_prev_']      [batch_num]
+                            sampler.extra_options['state_info']['last_rng']         = state_info['last_rng']        [batch_num]
                             sampler.extra_options['state_info']['last_rng_substep'] = state_info['last_rng_substep'][batch_num]
                         #state_info     = copy.deepcopy(latent_image['state_info']) if 'state_info' in latent_image else {}
                         state_info_out = {}
@@ -606,6 +612,41 @@ class SharkSampler:
 
                     samples = guider.sample(noise, x.clone(), sampler, sigmas, denoise_mask=noise_mask, callback=callback, disable_pbar=disable_pbar, seed=noise_seed)
 
+                    if restarts > 0: #EO("restarts"):
+                        #restarts = EO("restarts", 1)
+                        noise_seed_cached = sampler.extra_options['noise_seed']
+                        cfgs_cached = guider.cfgs
+                        
+                        for restarts_iter in range(restarts):
+                            sampler.extra_options['state_info'] = sampler.extra_options['state_info_out']
+                            
+                            steps = sampler.extra_options['state_info_out']['sigmas'].shape[-1] - 3
+                            sigmas = sampler.extra_options['state_info_out']['sigmas'] if sigmas is None else sigmas
+                            if len(sigmas) > 2 and sigmas[1] < sigmas[2] and sampler.extra_options['state_info_out']['sampler_mode'] == "unsample": # and sampler_mode == "resample":
+                                sigmas = torch.flip(sigmas, dims=[0])
+                                
+                            if   sampler.extra_options['sampler_mode'] == "standard":
+                                sampler.extra_options['sampler_mode'] = "unsample"
+                            elif sampler.extra_options['sampler_mode'] == "unsample":
+                                sampler.extra_options['sampler_mode'] = "resample"
+                            elif sampler.extra_options['sampler_mode'] == "resample":
+                                sampler.extra_options['sampler_mode'] = "unsample"
+                            
+                            sampler.extra_options['noise_seed'] = -1
+                            
+                            if sampler.extra_options['sampler_mode'] == "unsample":
+                                guider.cfgs = {
+                                    'xt': rewind_cfg,
+                                    'yt': rewind_cfg,
+                                }
+                            else:
+                                guider.cfgs = cfgs_cached
+                            samples = guider.sample(noise, samples.clone(), sampler, sigmas, denoise_mask=noise_mask, callback=callback, disable_pbar=disable_pbar, seed=-1)
+                        sampler.extra_options['noise_seed'] = noise_seed_cached
+                        guider.cfgs = cfgs_cached
+                            
+                            
+        
 
 
                     out = latent_unbatch.copy()

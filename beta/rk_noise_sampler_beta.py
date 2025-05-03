@@ -801,7 +801,10 @@ class RK_NoiseSampler:
             UNSAMPLE = True
             if sigmas[-1] == 0.0:
                 UNSAMPLE_FROM_ZERO = True
-            sigmas   = sigmas[1:-1]
+            #sigmas   = sigmas[1:-1]   # was cleaving off 1.0 at the end when restart looping
+            sigmas   = sigmas[1:]
+            if sigmas[-1] == 0.0:
+                sigmas = sigmas[:-1]
         else:
             UNSAMPLE = False
         
