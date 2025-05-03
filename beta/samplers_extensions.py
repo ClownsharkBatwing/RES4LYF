@@ -446,14 +446,14 @@ class ClownOptions_ImplicitSteps_Beta:
 
 
 
-class ClownOptions_Restarts_Beta:
+class ClownOptions_Cycles_Beta:
     @classmethod
     def INPUT_TYPES(cls):
         return {"required":
                     {
-                    "restarts":   ("INT",   {"default": 0,   "min": 0,      "max": 10000}),
-                    #"steps_to_cycle": ("INT",   {"default": 0,   "min": 0,      "max": 10000}),
-                    "rewind_cfg": ("FLOAT", {"default": 1.0, "min": -10000, "max": 10000, "step":0.01}),
+                    "cycles":   ("FLOAT",   {"default": 00,   "min": 00,      "max": 100000, "step":0.5, "round": 0.5}),
+                    "unsample_eta": ("FLOAT", {"default": 0.5, "min": -10000, "max": 10000, "step":0.01}),
+                    "unsample_cfg": ("FLOAT", {"default": 1.0, "min": -10000, "max": 10000, "step":0.01}),
                     },
                 "optional": 
                     {
@@ -467,15 +467,17 @@ class ClownOptions_Restarts_Beta:
     CATEGORY     = "RES4LYF/sampler_options"
     
     def main(self,
-            restarts   = 0,
-            rewind_cfg = 1.0,
-            options    = None
+            cycles       = 0,
+            unsample_eta = 0.5,
+            unsample_cfg = 1.0,
+            options      = None
             ): 
         
         options = options if options is not None else {}
             
-        options['restarts']   = restarts
-        options['rewind_cfg'] = rewind_cfg
+        options['rebounds']     = int(cycles * 2)
+        options['unsample_eta'] = unsample_eta
+        options['unsample_cfg'] = unsample_cfg
 
         return (options,)
 

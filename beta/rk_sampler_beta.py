@@ -465,7 +465,14 @@ def sample_rk_beta(
         RK.update_transformer_options({'blocks_adain_cache': []})
     if LG.HAS_LATENT_GUIDE_ATTNINJ:
         RK.update_transformer_options({'blocks_attninj_cache': []})
-
+    sigmas_scheduled = sigmas.clone() # store for return in state_info_out
+    
+    if EO("sigma_restarts"):
+        sigma_restarts = 1 + EO("sigma_restarts", 0)
+        sigmas = sigmas[step:num_steps+1].repeat(sigma_restarts)
+        step = 0
+        num_steps = 2 * sigma_restarts - 1
+    
     while step < num_steps:
         sigma, sigma_next = sigmas[step], sigmas[step+1]
         
@@ -1616,7 +1623,7 @@ def sample_rk_beta(
         state_info_out['data_prev_']        = data_prev_.to('cpu')
         state_info_out['end_step']          = step
         state_info_out['sigma_next']        = sigma_next.clone()
-        state_info_out['sigmas']            = sigmas.clone()
+        state_info_out['sigmas']            = sigmas_scheduled.clone()
         state_info_out['sampler_mode']      = sampler_mode
         state_info_out['last_rng']          = NS.noise_sampler .generator.get_state().clone()
         state_info_out['last_rng_substep']  = NS.noise_sampler2.generator.get_state().clone()

@@ -45,7 +45,7 @@ def add_beta(NODE_CLASS_MAPPINGS, extra_samplers):
 
         "ClownOptions_Momentum_Beta"      : samplers_extensions.ClownOptions_Momentum_Beta,
         "ClownOptions_ImplicitSteps_Beta" : samplers_extensions.ClownOptions_ImplicitSteps_Beta,
-        "ClownOptions_Restarts_Beta"      : samplers_extensions.ClownOptions_Restarts_Beta,
+        "ClownOptions_Cycles_Beta"        : samplers_extensions.ClownOptions_Cycles_Beta,
         "ClownOptions_SwapSampler_Beta"   : samplers_extensions.ClownOptions_SwapSampler_Beta,
         
         "ClownOptions_ExtraOptions_Beta"  : samplers_extensions.ClownOptions_ExtraOptions_Beta,
