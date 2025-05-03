@@ -86,6 +86,22 @@ class ClownOptions_SDE_Beta:
             ): 
         
         options = options if options is not None else {}
+        
+        if noise_mode_sde == "none":
+            noise_mode_sde = "hard"
+            eta = 0.0
+            
+        if noise_mode_sde_substep == "none":
+            noise_mode_sde_substep = "hard"
+            eta_substep = 0.0
+            
+        if noise_type_sde == "none":
+            noise_type_sde = "gaussian"
+            eta = 0.0
+            
+        if noise_type_sde_substep == "none":
+            noise_type_sde_substep = "gaussian"
+            eta_substep = 0.0
             
         options['noise_type_sde']         = noise_type_sde
         options['noise_type_sde_substep'] = noise_type_sde_substep
