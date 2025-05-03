@@ -253,11 +253,11 @@ def sample_rk_beta(
 
         if state_info['completed'] != True and state_info['end_step'] != 0 and state_info['end_step'] != -1 and state_info['end_step'] < len(state_info['sigmas'])-1 :   #incomplete run in previous sampler node
             
-            if state_info['sampler_mode'] in {"standard","resample"} and sampler_mode == "unsample":
+            if state_info['sampler_mode'] in {"standard","resample"} and sampler_mode == "unsample" and sigmas[2] < sigmas[1]:
                 sigmas = torch.flip(state_info['sigmas'], dims=[0])
                 start_step = (len(sigmas)-1) - (state_info['end_step']) #-1) #removed -1 at the end here. correct?
                 
-            if state_info['sampler_mode'] == "unsample"              and sampler_mode == "resample":
+            if state_info['sampler_mode'] == "unsample"              and sampler_mode == "resample" and sigmas[2] > sigmas[1]:
                 sigmas = torch.flip(state_info['sigmas'], dims=[0])
                 start_step = (len(sigmas)-1) - state_info['end_step'] #-1)
         elif state_info['sampler_mode'] == "unsample" and sampler_mode == "resample":
