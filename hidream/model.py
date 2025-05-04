@@ -1098,7 +1098,7 @@ class HDModel(nn.Module):
                 eps          = eps.to(dtype)
                 eps_orig     = eps.clone()
                 
-                mask = y0_style_pos_mask if y0_style_pos_mask is not None else torch.ones_like(x)
+                mask = y0_style_neg_mask if y0_style_neg_mask is not None else torch.ones_like(x)
                 
                 sigma    = t_orig[0].to(dtype) / 1000
                 denoised = x - sigma * eps
@@ -1140,7 +1140,7 @@ class HDModel(nn.Module):
                 eps          = eps.to(dtype)
                 eps_orig     = eps.clone()
                 
-                mask = y0_style_pos_mask if y0_style_pos_mask is not None else torch.ones_like(x)
+                mask = y0_style_neg_mask if y0_style_neg_mask is not None else torch.ones_like(x)
                 
                 sigma = t_orig[0].to(dtype) / 1000
                 denoised = x - sigma * eps
