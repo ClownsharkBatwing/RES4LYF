@@ -125,6 +125,7 @@ class SharkSampler:
             rebounds           : int                    =  0,
             unsample_cfg       : float                  = 1.0,
             unsample_eta       : float                  = 0.5,
+            eta_decay_scale : float                  = 1.0,
             
             #ultracascade_stage : str = "stage_UP",
             ultracascade_latent_image : Optional[dict[str,Any]] = None,
@@ -161,6 +162,7 @@ class SharkSampler:
             rebounds        = options_mgr.get('rebounds',         rebounds)
             unsample_cfg    = options_mgr.get('unsample_cfg',     unsample_cfg)
             unsample_eta    = options_mgr.get('unsample_eta',     unsample_eta)
+            eta_decay_scale = options_mgr.get('eta_decay_scale',     eta_decay_scale)
 
             
             #ultracascade_stage        = options_mgr.get('ultracascade_stage',         ultracascade_stage)
@@ -616,15 +618,31 @@ class SharkSampler:
                         cfgs_cached = guider.cfgs
                         eta_cached = sampler.extra_options['eta']
                         eta_substep_cached = sampler.extra_options['eta_substep']
+                        
+                        etas_cached = sampler.extra_options['etas'].clone()
+                        etas_substep_cached = sampler.extra_options['etas_substep'].clone()
+                        
+                        unsample_etas = torch.full_like(etas_cached, unsample_eta)
+                        
                         if sampler.extra_options['sampler_mode'] == "unsample":
                             guider.cfgs = {
                                 'xt': unsample_cfg,
                                 'yt': unsample_cfg,
                             }
-                            sampler.extra_options['eta_substep'] = unsample_eta
-                            sampler.extra_options['eta']         = unsample_eta
+                            sampler.extra_options['eta_substep']  = unsample_eta
+                            sampler.extra_options['eta']          = unsample_eta
+                            sampler.extra_options['etas_substep'] = unsample_etas
+                            sampler.extra_options['etas']         = unsample_etas
                         else:
                             guider.cfgs = cfgs_cached
+                            
+                        eta_decay = eta_cached
+                        eta_substep_decay = eta_substep_cached
+                        unsample_eta_decay = unsample_eta
+                        
+                        etas_decay = etas_cached
+                        etas_substep_decay = etas_substep_cached
+                        unsample_etas_decay = unsample_etas
 
                     samples = guider.sample(noise, x.clone(), sampler, sigmas, denoise_mask=noise_mask, callback=callback, disable_pbar=disable_pbar, seed=noise_seed)
 
@@ -655,19 +673,34 @@ class SharkSampler:
                                     'xt': unsample_cfg,
                                     'yt': unsample_cfg,
                                 }
-                                sampler.extra_options['eta_substep'] = unsample_eta
-                                sampler.extra_options['eta']         = unsample_eta
+                                sampler.extra_options['eta_substep']  = unsample_eta_decay
+                                sampler.extra_options['eta']          = unsample_eta_decay
+                                sampler.extra_options['etas_substep'] = unsample_etas
+                                sampler.extra_options['etas']         = unsample_etas
                             else:
                                 guider.cfgs = cfgs_cached
-                                sampler.extra_options['eta_substep'] = eta_substep_cached
-                                sampler.extra_options['eta']         = eta_cached
+                                sampler.extra_options['eta_substep']  = eta_substep_decay
+                                sampler.extra_options['eta']          = eta_decay
+                                sampler.extra_options['etas_substep'] = etas_substep_decay
+                                sampler.extra_options['etas']         = etas_decay
                                 
                             samples = guider.sample(noise, samples.clone(), sampler, sigmas, denoise_mask=noise_mask, callback=callback, disable_pbar=disable_pbar, seed=-1)
+
+                            eta_substep_decay   *= eta_decay_scale
+                            eta_decay           *= eta_decay_scale
+                            unsample_eta_decay  *= eta_decay_scale
+                            
+                            etas_substep_decay  *= eta_decay_scale
+                            etas_decay          *= eta_decay_scale
+                            unsample_etas_decay *= eta_decay_scale                        
+                        
                         sampler.extra_options['noise_seed'] = noise_seed_cached
                         guider.cfgs = cfgs_cached
                         sampler.extra_options['sampler_mode'] = sampler_mode_cached
-                        sampler.extra_options['eta_substep'] = eta_substep_cached
-                        sampler.extra_options['eta']         = eta_cached
+                        sampler.extra_options['eta_substep']  = eta_substep_cached
+                        sampler.extra_options['eta']          = eta_cached
+                        sampler.extra_options['etas_substep'] = etas_substep_cached
+                        sampler.extra_options['etas']         = etas_cached
                             
         
 
