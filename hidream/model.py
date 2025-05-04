@@ -1038,7 +1038,56 @@ class HDModel(nn.Module):
         
         dtype = eps.dtype if self.style_dtype is None else self.style_dtype
         pinv_dtype = torch.float32 if dtype != torch.float64 else dtype
-        if eps.shape[0] == 2 or (eps.shape[0] == 1 and not UNCOND):
+        
+        if EO("style_eps") and (eps.shape[0] == 2 or (eps.shape[0] == 1 and not UNCOND)):
+            if y0_style_pos is not None:
+                y0_style_pos_weight     = transformer_options.get("y0_style_pos_weight")
+                y0_style_pos_synweight  = transformer_options.get("y0_style_pos_synweight")
+                y0_style_pos_synweight *= y0_style_pos_weight
+                y0_style_pos_mask       = transformer_options.get("y0_style_pos_mask")
+                
+                y0_style_pos = y0_style_pos.to(dtype)
+                x            = x.to(dtype)
+                eps          = eps.to(dtype)
+                eps_orig     = eps.clone()
+                
+                mask = y0_style_pos_mask if y0_style_pos_mask is not None else torch.ones_like(x)
+                
+                sigma = t_orig[0].to(dtype) / 1000
+                denoised = x - sigma * eps
+                
+                eps_target = (x - y0_style_pos) / sigma
+
+                W_final = self.final_layer.linear.weight.to(dtype)
+                b_final = self.final_layer.linear.bias.to(dtype)
+                eps_target_pad = comfy.ldm.common_dit.pad_to_patch_size(eps_target, (self.patch_size, self.patch_size))
+                eps_target_patch, img_masks, img_sizes = self.patchify(eps_target_pad, self.max_seq, None)
+                eps_target_embed = (eps_target_patch - b_final) @ torch.linalg.pinv(W_final.to(pinv_dtype)).T.to(dtype)
+
+
+                W_final = self.final_layer.linear.weight.to(dtype)
+                b_final = self.final_layer.linear.bias.to(dtype)
+                eps_source_pad = comfy.ldm.common_dit.pad_to_patch_size(eps, (self.patch_size, self.patch_size))
+                eps_source_patch, img_masks, img_sizes = self.patchify(eps_source_pad, self.max_seq, None)
+                eps_source_embed = (eps_source_patch - b_final) @ torch.linalg.pinv(W_final.to(pinv_dtype)).T.to(dtype)
+
+
+                eps_source_embed = adain_seq(eps_source_embed, eps_target_embed)
+
+                eps_embed_adain = F.linear(eps_source_embed.to(W_final), W_final, b_final).to(eps_source_embed)
+
+                eps_adain = self.unpatchify (eps_embed_adain, img_sizes)
+                eps = eps_adain
+
+                if eps.shape[0] == 2:
+                    eps[1] = eps_orig[1] + mask * y0_style_pos_weight    * (eps[1] - eps_orig[1])
+                    eps[0] = eps_orig[0] + mask * y0_style_pos_synweight * (eps[0] - eps_orig[0])
+                else:
+                    eps[0] = eps_orig[0] + mask * y0_style_pos_weight    * (eps[0] - eps_orig[0])
+        
+
+        
+        elif eps.shape[0] == 2 or (eps.shape[0] == 1 and not UNCOND):
             if y0_style_pos is not None:
                 y0_style_pos_weight     = transformer_options.get("y0_style_pos_weight")
                 y0_style_pos_synweight  = transformer_options.get("y0_style_pos_synweight")
@@ -1069,11 +1118,121 @@ class HDModel(nn.Module):
                 b = self.x_embedder.proj.bias.data.to(dtype)     # shape [2560]
                 
                 denoised_embed = F.linear(img         .to(W), W, b).to(img)
+                denoised_embed_y0 = denoised_embed.clone()
                 y0_adain_embed = F.linear(img_y0_adain.to(W), W, b).to(img_y0_adain)
                 
                 denoised_embed = adain_seq_inplace(denoised_embed, y0_adain_embed)
+                denoised_adain = denoised_embed.clone()  ####
                 
-                denoised_embed = (denoised_embed - b) @ torch.linalg.pinv(W.to(pinv_dtype)).T.to(dtype)
+                
+                if EO("train_source"):
+                    W_pinv =  torch.linalg.pinv(W.to(pinv_dtype)).to(dtype)
+                    with torch.inference_mode(False), torch.enable_grad():
+                        W_inv = W_pinv.clone().detach().requires_grad_(True)
+                        b     = b.clone().detach().requires_grad_(True)
+
+                        y_target = denoised_embed_y0.clone().detach()
+                        x_true   = img.clone().detach()
+
+                        opt = torch.optim.Adam([W_inv, b], lr=1e-4)
+                        losses = []
+
+                        for step in range(100):
+                            opt.zero_grad()
+                            x_pred = (y_target - b) @ W_inv.T
+                            loss = F.mse_loss(x_pred, x_true)
+                            loss.backward()
+
+                            # Calculate gradient norm (combined for both parameters)
+                            total_grad_norm = 0.0
+                            for p in [W_inv, b]:
+                                if p.grad is not None:
+                                    total_grad_norm += p.grad.norm().item() ** 2
+                            total_grad_norm = total_grad_norm ** 0.5
+
+                            print(f"[Step {step:03d}] Loss: {loss.item():.6f} | Grad norm: {total_grad_norm:.6e}", flush=True)
+
+                            opt.step()
+                            losses.append(loss.item())
+
+                    denoised_embed = (denoised_embed - b) @ W_inv.T
+                    
+                elif EO("train_both"):
+                    W_pinv =  torch.linalg.pinv(W.to(pinv_dtype)).to(dtype)
+                    with torch.inference_mode(False), torch.enable_grad():
+                        W_inv = W_pinv.clone().detach().requires_grad_(True)
+                        b     = b.clone().detach().requires_grad_(True)
+
+                        y_target_1 = denoised_embed_y0.clone().detach()  # [B, T, 2560]
+                        x_true_1   = img.clone().detach()                # [B, T, 64]
+
+                        y_target_2 = y0_adain_embed.clone().detach()     # [B, T, 2560]
+                        x_true_2   = img_y0_adain.clone().detach()       # [B, T, 64]
+
+                        opt = torch.optim.Adam([W_inv, b], lr=1e-4)
+                        losses = []
+
+                        for step in range(100):
+                            opt.zero_grad()
+
+                            x_pred_1 = (y_target_1 - b) @ W_inv.T
+                            loss_1 = F.mse_loss(x_pred_1, x_true_1)
+
+                            x_pred_2 = (y_target_2 - b) @ W_inv.T
+                            loss_2 = F.mse_loss(x_pred_2, x_true_2)
+
+                            loss = loss_1 + loss_2
+
+                            loss.backward()
+
+                            total_grad_norm = 0.0
+                            for p in [W_inv, b]:
+                                if p.grad is not None:
+                                    total_grad_norm += p.grad.norm().item() ** 2
+                            total_grad_norm = total_grad_norm ** 0.5
+
+                            print(f"[Step {step:03d}] Loss: {loss.item():.6f} | Grad norm: {total_grad_norm:.6e}", flush=True)
+
+                            opt.step()
+                            losses.append(loss.item())
+                            
+                    denoised_embed = (denoised_embed - b) @ W_inv.T
+                elif EO("train_guide"):
+                    W_pinv =  torch.linalg.pinv(W.to(pinv_dtype)).to(dtype)
+                    with torch.inference_mode(False), torch.enable_grad():
+                        W_inv = W_pinv.clone().detach().requires_grad_(True)
+                        b     = b.clone().detach().requires_grad_(True)
+
+                        y_target = y0_adain_embed.clone().detach()     # [B, T, 2560]
+                        x_true   = img_y0_adain.clone().detach()       # [B, T, 64]
+
+                        opt = torch.optim.Adam([W_inv, b], lr=1e-4)
+                        losses = []
+
+                        for step in range(100):
+                            opt.zero_grad()
+                            x_pred = (y_target - b) @ W_inv.T
+                            loss = F.mse_loss(x_pred, x_true)
+                            loss.backward()
+
+                            # Calculate gradient norm (combined for both parameters)
+                            total_grad_norm = 0.0
+                            for p in [W_inv, b]:
+                                if p.grad is not None:
+                                    total_grad_norm += p.grad.norm().item() ** 2
+                            total_grad_norm = total_grad_norm ** 0.5
+
+                            print(f"[Step {step:03d}] Loss: {loss.item():.6f} | Grad norm: {total_grad_norm:.6e}", flush=True)
+
+                            opt.step()
+                            losses.append(loss.item())
+
+                    denoised_embed = (denoised_embed - b) @ W_inv.T
+                    
+                else:
+                    denoised_embed = (denoised_embed - b) @ torch.linalg.pinv(W.to(pinv_dtype)).T.to(dtype)
+                    
+                denoised_adain_out = denoised_embed.clone()  ####
                 denoised_embed = self.unpatchify (denoised_embed, img_sizes)
                 
                 eps = (x - denoised_embed) / sigma
@@ -1086,7 +1245,53 @@ class HDModel(nn.Module):
                 #eps = eps.float()
                 
         
-        if eps.shape[0] == 2 or (eps.shape[0] == 1 and UNCOND)    and not EO("use_style_neg_as_pos"):
+        if EO("style_eps") and (eps.shape[0] == 2 or (eps.shape[0] == 1 and UNCOND)    and not EO("use_style_neg_as_pos")):
+            if y0_style_neg is not None:
+                y0_style_neg_weight     = transformer_options.get("y0_style_neg_weight")
+                y0_style_neg_synweight  = transformer_options.get("y0_style_neg_synweight")
+                y0_style_neg_synweight *= y0_style_neg_weight
+                y0_style_neg_mask       = transformer_options.get("y0_style_neg_mask")
+                
+                y0_style_neg = y0_style_neg.to(dtype)
+                x            = x.to(dtype)
+                eps          = eps.to(dtype)
+                eps_orig     = eps.clone()
+                
+                mask = y0_style_neg_mask if y0_style_neg_mask is not None else torch.ones_like(x)
+                
+                sigma = t_orig[0].to(dtype) / 1000
+                denoised = x - sigma * eps
+                
+                eps_target = (x - y0_style_neg) / sigma
+
+                W_final = self.final_layer.linear.weight.to(dtype)
+                b_final = self.final_layer.linear.bias.to(dtype)
+                eps_target_pad = comfy.ldm.common_dit.pad_to_patch_size(eps_target, (self.patch_size, self.patch_size))
+                eps_target_patch, img_masks, img_sizes = self.patchify(eps_target_pad, self.max_seq, None)
+                eps_target_embed = (eps_target_patch - b_final) @ torch.linalg.pinv(W_final.to(pinv_dtype)).T.to(dtype)
+
+
+                W_final = self.final_layer.linear.weight.to(dtype)
+                b_final = self.final_layer.linear.bias.to(dtype)
+                eps_source_pad = comfy.ldm.common_dit.pad_to_patch_size(eps, (self.patch_size, self.patch_size))
+                eps_source_patch, img_masks, img_sizes = self.patchify(eps_source_pad, self.max_seq, None)
+                eps_source_embed = (eps_source_patch - b_final) @ torch.linalg.pinv(W_final.to(pinv_dtype)).T.to(dtype)
+
+
+                eps_source_embed = adain_seq(eps_source_embed, eps_target_embed)
+
+                eps_embed_adain = F.linear(eps_source_embed.to(W_final), W_final, b_final).to(eps_source_embed)
+
+                eps_adain = self.unpatchify (eps_embed_adain, img_sizes)
+                eps = eps_adain
+
+                eps[0]     = eps_orig[0] + mask * y0_style_neg_weight    * (eps[0] - eps_orig[0])
+                if eps.shape[0] == 2:
+                    eps[1] = eps_orig[1] + mask * y0_style_neg_synweight * (eps[1] - eps_orig[1])
+        
+        
+        
+        elif eps.shape[0] == 2 or (eps.shape[0] == 1 and UNCOND)    and not EO("use_style_neg_as_pos"):
             if y0_style_neg is not None and eps.shape[0] > 1:
                 y0_style_neg_weight     = transformer_options.get("y0_style_neg_weight")
                 y0_style_neg_synweight  = transformer_options.get("y0_style_neg_synweight")
