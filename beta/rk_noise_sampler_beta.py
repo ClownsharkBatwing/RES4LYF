@@ -789,7 +789,7 @@ class RK_NoiseSampler:
                         d_noise_start_step : int,
                         sampler_mode       : str) -> Tuple[Tensor,bool]:
         #SIGMA_MIN = torch.full_like(self.sigma_min, 0.00227896) if self.sigma_min < 0.00227896 else self.sigma_min        # prevent black image with unsampling flux, which has a sigma_min of 0.0002
-        SIGMA_MIN = torch.full_like(self.sigma_min, max(0.003, self.sigma_min.item()))
+        SIGMA_MIN = self.sigma_min #torch.full_like(self.sigma_min, max(0.01, self.sigma_min.item()))
         if sigmas_override is not None:
             sigmas = sigmas_override.clone().to(sigmas.device).to(sigmas.dtype)
             

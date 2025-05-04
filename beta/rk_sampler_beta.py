@@ -465,6 +465,12 @@ def sample_rk_beta(
         RK.update_transformer_options({'blocks_adain_cache': []})
     if LG.HAS_LATENT_GUIDE_ATTNINJ:
         RK.update_transformer_options({'blocks_attninj_cache': []})
+        
+    if sigmas[1] == NS.sigma_min and sigmas[0] == 0.0:
+        sigmas = 0.99 * sigmas + 0.01
+        sigmas[0] = 0.0
+    
+        
     sigmas_scheduled = sigmas.clone() # store for return in state_info_out
     
     if EO("sigma_restarts"):
