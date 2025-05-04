@@ -466,7 +466,7 @@ def sample_rk_beta(
     if LG.HAS_LATENT_GUIDE_ATTNINJ:
         RK.update_transformer_options({'blocks_attninj_cache': []})
         
-    if sigmas[1] == NS.sigma_min and sigmas[0] == 0.0:
+    if start_step==1 and sigmas[1] == NS.sigma_min and sigmas[0] == 0.0:
         sigmas = 0.99 * sigmas + 0.01
         sigmas[0] = 0.0
     
