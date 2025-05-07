@@ -8,7 +8,7 @@ from . import samplers_tiled
 
 
 
-def add_legacy(NODE_CLASS_MAPPINGS, extra_samplers):
+def add_legacy(NODE_CLASS_MAPPINGS, NODE_DISPLAY_NAME_MAPPINGS, extra_samplers):
     
     NODE_CLASS_MAPPINGS.update({
         "Legacy_ClownSampler"                 : legacy_samplers.Legacy_SamplerRK,
@@ -41,6 +41,38 @@ def add_legacy(NODE_CLASS_MAPPINGS, extra_samplers):
 
         "UltraSharkSampler Tiled"             : samplers_tiled.UltraSharkSampler_Tiled,
     })
+    
+    NODE_DISPLAY_NAME_MAPPINGS.update({
+        "Legacy_SamplerRK"                            : "Legacy_ClownSampler",
+        "Legacy_SharkSampler"                         : "Legacy_SharkSampler",
+        "Legacy_ClownsharKSampler"                    : "Legacy_ClownsharKSampler",
+        "Legacy_ClownsharKSamplerGuides"              : "Legacy_ClownsharKSamplerGuides",
+        
+        "ClownSampler"                                : "Legacy2_ClownSampler",
+        "ClownSamplerAdvanced"                        : "Legacy2_ClownSamplerAdvanced",
+        "ClownsharKSampler"                           : "Legacy2_ClownsharKSampler",
+        
+        "ClownsharKSamplerGuides"                     : "Legacy2_ClownsharKSamplerGuides",
+        "ClownsharKSamplerGuide"                      : "Legacy2_ClownsharKSamplerGuide",
+
+        "ClownOptions_SDE_Noise"                      : "Legacy2_ClownOptions_SDE_Noise",
+        "ClownOptions_FrameWeights"                   : "Legacy2_ClownOptions_FrameWeights",
+
+        "ClownInpaint"                                : "Legacy2_ClownInpaint",
+        "ClownInpaintSimple"                          : "Legacy2_ClownInpaintSimple",
+
+        "ClownsharKSamplerOptions"                    : "Legacy2_ClownsharKSamplerOptions",
+
+        "ClownsharKSamplerAutomation"                 : "Legacy2_ClownsharKSamplerAutomation",
+        "ClownsharKSamplerAutomation_Advanced"        : "Legacy2_ClownsharKSamplerAutomation_Advanced",
+        "SamplerOptions_TimestepScaling"              : "Legacy2_SamplerOptions_TimestepScaling",
+        "SamplerOptions_GarbageCollection"            : "Legacy2_SamplerOptions_GarbageCollection",
+
+        "UltraSharkSampler"                           : "Legacy2_UltraSharkSampler",
+        "UltraSharkSampler_Tiled"                     : "Legacy2_UltraSharkSampler Tiled",
+    })
+
+
 
     extra_samplers.update({
         #"res_2m"     : rk_sampler.sample_res_2m,
@@ -59,10 +91,10 @@ def add_legacy(NODE_CLASS_MAPPINGS, extra_samplers):
         #"deis_2m_sde": rk_sampler.sample_deis_2m_sde,
         #"deis_3m_sde": rk_sampler.sample_deis_3m_sde,
         #"deis_4m_sde": rk_sampler.sample_deis_4m_sde,
-        "rk"         : rk_sampler.sample_rk,
+        "legacy2_rk"         : rk_sampler.sample_rk,
         
         "legacy_rk"  : legacy_sampler_rk.legacy_sample_rk,
     })
     
-    return NODE_CLASS_MAPPINGS, extra_samplers
+    return NODE_CLASS_MAPPINGS, NODE_DISPLAY_NAME_MAPPINGS, extra_samplers
 

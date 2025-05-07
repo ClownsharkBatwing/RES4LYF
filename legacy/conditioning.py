@@ -731,7 +731,7 @@ class FluxRegionalConditioning:
         return (copy.deepcopy(conditioning),)
 
 
-
+"""
 from .models import ReFluxPatcher
 
 class ClownRegionalConditioningFlux:
@@ -811,4 +811,4 @@ class ClownRegionalConditioningFlux:
             model, = ReFluxPatcher().main(model, enable=True)
             return (model, positive,)
 
-
+"""

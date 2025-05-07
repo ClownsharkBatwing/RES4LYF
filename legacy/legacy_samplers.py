@@ -146,6 +146,7 @@ class Legacy_ClownsharKSampler:
     FUNCTION = "main"
 
     CATEGORY = "RES4LYF/legacy/samplers"
+    DEPRECATED = True
     
     def main(self, model, cfg, truncate_conditioning, sampler_mode, scheduler, steps, denoise=1.0, denoise_alt=1.0,
              noise_type_init="gaussian", noise_type_sde="brownian", noise_mode_sde="hard", latent_image=None, 
@@ -415,6 +416,7 @@ class Legacy_SamplerRK:
     CATEGORY = "RES4LYF/legacy/samplers"
 
     FUNCTION = "get_sampler"
+    DEPRECATED = True
 
     def get_sampler(self, eta=0.25, eta_var=0.0, d_noise=1.0, s_noise=1.0, alpha=-1.0, k=1.0, cfgpp=0.0, multistep=False, noise_sampler_type="brownian", noise_mode="hard", noise_seed=-1, rk_type="dormand-prince", 
                     exp_mode=False, t_fn_formula=None, sigma_fn_formula=None, implicit_steps=0,
@@ -462,6 +464,7 @@ class Legacy_ClownsharKSamplerGuides:
     CATEGORY = "RES4LYF/legacy/samplers"
 
     FUNCTION = "get_sampler"
+    DEPRECATED = True
 
     def get_sampler(self, model=None, scheduler="constant", steps=30, denoise=1.0, latent_guide=None, latent_guide_inv=None, latent_guide_weight=0.0, guide_mode="blend", latent_guide_weights=None, latent_guide_mask=None, rescale_floor=True, t_is=None,
                     ):
@@ -530,7 +533,8 @@ class Legacy_SharkSampler:
     FUNCTION = "main"
 
     CATEGORY = "RES4LYF/legacy/samplers"
-        
+    DEPRECATED = True
+    
     def main(self, model, add_noise, noise_stdev, noise_mean, noise_normalize, noise_is_latent, noise_type, noise_seed, cfg, truncate_conditioning, alpha, k, positive, negative, sampler,
              latent_image, sampler_mode, scheduler, steps, denoise, sigmas=None, latent_noise=None, latent_noise_match=None,): 
 

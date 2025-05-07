@@ -15,7 +15,7 @@ import torch.nn.functional as F
 
 import copy
 
-from .helper import initialize_or_scale, get_res4lyf_scheduler_list, get_extra_options_kv, extra_options_flag
+from .helper import initialize_or_scale, get_res4lyf_scheduler_list
 
 
 def move_to_same_device(*tensors):
@@ -48,8 +48,9 @@ class SamplerOptions_TimestepScaling:
     RETURN_NAMES = ("sampler",)
     FUNCTION = "set_sampler_extra_options"
     
-    CATEGORY = "RES4LYF/sampler_extensions"
+    CATEGORY = "RES4LYF/legacy/sampler_extensions"
     DESCRIPTION = "Patches ClownSampler's t_fn and sigma_fn (sigma <-> timestep) formulas to allow picking Runge-Kutta Ci values (midpoints) with different scaling."
+    DEPRECATED = True
 
     def set_sampler_extra_options(self, sampler, t_fn_formula=None, sigma_fn_formula=None, ):
 
@@ -77,9 +78,9 @@ class SamplerOptions_GarbageCollection:
     RETURN_TYPES = ("SAMPLER",)
     RETURN_NAMES = ("sampler",)
     FUNCTION = "set_sampler_extra_options"
-    
-    CATEGORY = "RES4LYF/sampler_extensions"
-    DESCRIPTION = "Patches ClownSampler's to use garbage collection after every step. This can help with OOM issues during inference for large models like Flux. The tradeoff is slower sampling."
+    CATEGORY = "RES4LYF/legacy/sampler_extensions"
+    DESCRIPTION = "Patches ClownSampler to use garbage collection after every step. This can help with OOM issues during inference for large models like Flux. The tradeoff is slower sampling."
+    DEPRECATED = True
 
     def set_sampler_extra_options(self, sampler, garbage_collection):
         sampler = copy.deepcopy(sampler)
@@ -137,9 +138,10 @@ class ClownInpaint: ############################################################
                }
     RETURN_TYPES = ("MODEL","CONDITIONING","CONDITIONING","LATENT","GUIDES",)
     RETURN_NAMES = ("model","positive"    ,"negative"    ,"latent","guides",)
-    CATEGORY = "RES4LYF/sampler_extensions"
+    CATEGORY = "RES4LYF/legacy/sampler_extensions"
 
     FUNCTION = "main"
+    DEPRECATED = True
 
     def main(self, guide_weight_scheduler="constant", guide_weight_scheduler_bkg="constant", guide_end_step=10000, guide_bkg_end_step=30, guide_weight_scale=1.0, guide_weight_bkg_scale=1.0, guide=None, guide_bkg=None, guide_weight=1.0, guide_weight_bkg=1.0, 
                     guide_mode="epsilon", guide_weights=None, guide_weights_bkg=None, guide_mask_bkg=None,
@@ -208,9 +210,10 @@ class ClownInpaintSimple: ######################################################
                }
     RETURN_TYPES = ("MODEL","CONDITIONING","CONDITIONING","LATENT","GUIDES",)
     RETURN_NAMES = ("model","positive"    ,"negative"    ,"latent","guides",)
-    CATEGORY = "RES4LYF/sampler_extensions"
+    CATEGORY = "RES4LYF/legacy/sampler_extensions"
 
     FUNCTION = "main"
+    DEPRECATED = True
 
     def main(self, guide_weight_scheduler="constant", guide_weight_scheduler_bkg="constant", guide_end_step=10000, guide_bkg_end_step=30, guide_weight_scale=1.0, guide_weight_bkg_scale=1.0, guide=None, guide_bkg=None, guide_weight=1.0, guide_weight_bkg=1.0, 
                     guide_mode="epsilon", guide_weights=None, guide_weights_bkg=None, guide_mask_bkg=None,
@@ -288,9 +291,10 @@ class ClownsharKSamplerGuide:
                }
     RETURN_TYPES = ("GUIDES",)
     RETURN_NAMES = ("guides",)
-    CATEGORY = "RES4LYF/sampler_extensions"
+    CATEGORY     = "RES4LYF/legacy/sampler_extensions"
 
-    FUNCTION = "main"
+    FUNCTION     = "main"
+    DEPRECATED = True
 
     def main(self, guide_weight_scheduler="constant", guide_weight_scheduler_bkg="constant", guide_end_step=30, guide_bkg_end_step=30, guide_weight_scale=1.0, guide_weight_bkg_scale=1.0, guide=None, guide_bkg=None, guide_weight=0.0, guide_weight_bkg=0.0, 
                     guide_mode="blend", guide_weights=None, guide_weights_bkg=None, guide_mask=None, guide_mask_bkg=None,
@@ -348,9 +352,10 @@ class ClownsharKSamplerGuides:
                }
     RETURN_TYPES = ("GUIDES",)
     RETURN_NAMES = ("guides",)
-    CATEGORY = "RES4LYF/sampler_extensions"
+    CATEGORY     = "RES4LYF/legacy/sampler_extensions"
 
-    FUNCTION = "main"
+    FUNCTION     = "main"
+    DEPRECATED = True
 
     def main(self, guide_weight_scheduler="constant", guide_weight_scheduler_bkg="constant", guide_end_step=30, guide_bkg_end_step=30, guide_weight_scale=1.0, guide_weight_bkg_scale=1.0, guide=None, guide_bkg=None, guide_weight=0.0, guide_weight_bkg=0.0, 
                     guide_mode="blend", guide_weights=None, guide_weights_bkg=None, guide_mask=None, guide_mask_bkg=None,
@@ -400,9 +405,10 @@ class ClownsharKSamplerAutomation:
                }
     RETURN_TYPES = ("AUTOMATION",)
     RETURN_NAMES = ("automation",)
-    CATEGORY = "RES4LYF/sampler_extensions"
+    CATEGORY = "RES4LYF/legacy/sampler_extensions"
     
     FUNCTION = "main"
+    DEPRECATED = True
 
     def main(self, etas=None, s_noises=None, unsample_resample_scales=None,):
         automation = (etas, s_noises, unsample_resample_scales)
@@ -430,9 +436,10 @@ class ClownsharKSamplerAutomation_Advanced:
                }
     RETURN_TYPES = ("AUTOMATION",)
     RETURN_NAMES = ("automation",)
-    CATEGORY = "RES4LYF/sampler_extensions"
+    CATEGORY = "RES4LYF/legacy/sampler_extensions"
     
     FUNCTION = "main"
+    DEPRECATED = True
 
     def main(self, automation=None, etas=None, etas_substep=None, s_noises=None, unsample_resample_scales=None, frame_weights=None, frame_weights_bkg=None):
         
@@ -483,9 +490,10 @@ class ClownsharKSamplerOptions:
     
     RETURN_TYPES = ("OPTIONS",)
     RETURN_NAMES = ("options",)
-    CATEGORY = "RES4LYF/sampler_extensions"
+    CATEGORY = "RES4LYF/legacy/sampler_extensions"
 
     FUNCTION = "main"
+    DEPRECATED = True
 
     def main(self, noise_init_stdev, noise_init_mean, c1, c2, c3, eta, s_noise, d_noise, noise_type_init, noise_type_sde, noise_mode_sde, noise_seed,
                     alpha_init, k_init, alpha_sde, k_sde, t_fn_formula=None, sigma_fn_formula=None, unsampler_type="linear",
@@ -529,15 +537,15 @@ class ClownOptions_SDE_Noise:
             },
             "optional": {
                 "sde_noise": ("LATENT",),
-                "options": ("OPTIONS",),
+                "options"  : ("OPTIONS",),
             }
         }
     
     RETURN_TYPES = ("OPTIONS",)
     RETURN_NAMES = ("options",)
-    CATEGORY = "RES4LYF/sampler_options"
-
-    FUNCTION = "main"
+    CATEGORY     = "RES4LYF/legacy/sampler_options"
+    FUNCTION     = "main"
+    DEPRECATED = True
 
     def main(self, sde_noise_steps, sde_noise, options=None,):
     
@@ -566,9 +574,10 @@ class ClownOptions_FrameWeights:
     DEPRECATED = True
     RETURN_TYPES = ("OPTIONS",)
     RETURN_NAMES = ("options",)
-    CATEGORY = "RES4LYF/sampler_options"
+    CATEGORY = "RES4LYF/legacy/sampler_options"
 
     FUNCTION = "main"
+    DEPRECATED = True
 
     def main(self, frame_weights, options=None,):
 

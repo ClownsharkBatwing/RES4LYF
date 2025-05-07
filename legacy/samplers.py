@@ -76,7 +76,8 @@ class ClownSamplerAdvanced:
 
     FUNCTION = "main"
 
-    CATEGORY = "RES4LYF/samplers"
+    CATEGORY = "RES4LYF/legacy/samplers"
+    DEPRECATED = True
     
     def main(self, 
              noise_type_sde="gaussian", noise_type_sde_substep="gaussian", noise_mode_sde="hard",
@@ -187,7 +188,8 @@ class ClownSampler:
 
     FUNCTION = "main"
 
-    CATEGORY = "RES4LYF/samplers"
+    CATEGORY = "RES4LYF/legacy/samplers"
+    DEPRECATED = True
     
     def main(self, 
              noise_type_sde="gaussian", noise_type_sde_substep="gaussian", noise_mode_sde="hard",
@@ -261,7 +263,8 @@ class SharkSamplerAlpha:
 
     FUNCTION = "main"
 
-    CATEGORY = "RES4LYF/samplers"
+    CATEGORY = "RES4LYF/legacy/samplers"
+    DEPRECATED = True
     
     def main(self, model, cfg, scheduler, steps, sampler_mode="standard",denoise=1.0, denoise_alt=1.0,
              noise_type_init="gaussian", latent_image=None, 
@@ -615,7 +618,8 @@ class ClownsharKSampler:
 
     FUNCTION = "main"
 
-    CATEGORY = "RES4LYF/samplers"
+    CATEGORY = "RES4LYF/legacy/samplers"
+    DEPRECATED = True
     
     def main(self, model, cfg, sampler_mode, scheduler, steps, denoise=1.0, denoise_alt=1.0,
              noise_type_init="gaussian", noise_type_sde="brownian", noise_mode_sde="hard", latent_image=None, 
@@ -697,8 +701,9 @@ class UltraSharkSampler:
 
     FUNCTION = "main"
 
-    CATEGORY = "RES4LYF/samplers/UltraCascade"
+    CATEGORY = "RES4LYF/legacy/samplers/UltraCascade"
     DESCRIPTION = "For use with Stable Cascade and UltraCascade."
+    DEPRECATED = True
     
     def main(self, model, add_noise, normalize_noise, noise_type, noise_seed, cfg, alpha, k, positive, negative, sampler, 
                sigmas, guide_type, guide_weight, latent_image, latent_noise=None, guide=None, guide_weights=None, style=None, img_style=None): 
