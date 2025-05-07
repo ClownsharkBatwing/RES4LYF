@@ -55,7 +55,6 @@ class SharkGuider(CFGGuider):
 
 
 class SharkSampler:
-
     @classmethod
     def INPUT_TYPES(cls):
         return {
@@ -92,6 +91,7 @@ class SharkSampler:
     
     FUNCTION     = "main"
     CATEGORY     = "RES4LYF/samplers"
+    EXPERIMENTAL = True
     
     def main(self, 
             model                                       = None,

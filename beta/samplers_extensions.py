@@ -451,10 +451,10 @@ class ClownOptions_Cycles_Beta:
     def INPUT_TYPES(cls):
         return {"required":
                     {
-                    "cycles":   ("FLOAT",   {"default": 00,   "min": 00,      "max": 100000, "step":0.5, "round": 0.5}),
-                    "eta_decay_scale": ("FLOAT", {"default": 1.0, "min": -10000, "max": 10000, "step":0.01, "tooltip": "Multiplies etas by this number after every cycle. May help drive convergence." }),
-                    "unsample_eta": ("FLOAT", {"default": 0.5, "min": -10000, "max": 10000, "step":0.01}),
-                    "unsample_cfg": ("FLOAT", {"default": 1.0, "min": -10000, "max": 10000, "step":0.01}),
+                    "cycles"          : ("FLOAT", {"default": 0.0, "min":  0.0,   "max": 10000, "step":0.5,  "round": 0.5}),
+                    "eta_decay_scale" : ("FLOAT", {"default": 1.0, "min": -10000, "max": 10000, "step":0.01, "tooltip": "Multiplies etas by this number after every cycle. May help drive convergence." }),
+                    "unsample_eta"    : ("FLOAT", {"default": 0.5, "min": -10000, "max": 10000, "step":0.01}),
+                    "unsample_cfg"    : ("FLOAT", {"default": 1.0, "min": -10000, "max": 10000, "step":0.01}),
                     },
                 "optional": 
                     {
@@ -468,11 +468,11 @@ class ClownOptions_Cycles_Beta:
     CATEGORY     = "RES4LYF/sampler_options"
     
     def main(self,
-            cycles       = 0,
-            unsample_eta = 0.5,
+            cycles          = 0,
+            unsample_eta    = 0.5,
             eta_decay_scale = 1.0,
-            unsample_cfg = 1.0,
-            options      = None
+            unsample_cfg    = 1.0,
+            options         = None
             ): 
         
         options = options if options is not None else {}
