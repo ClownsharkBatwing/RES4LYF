@@ -272,9 +272,9 @@ NODE_CLASS_MAPPINGS = {
     "Frames Concat Latent"                : nodes_latents.Frames_Concat_Latent,
 
 
-    "Frame Select Latent Raw"                 : nodes_latents.Frame_Select_Latent_Raw,
-    "Frames Slice Latent Raw"                 : nodes_latents.Frames_Slice_Latent_Raw,
-    "Frames Concat Latent Raw"                : nodes_latents.Frames_Concat_Latent_Raw,
+    "Frame Select Latent Raw"             : nodes_latents.Frame_Select_Latent_Raw,
+    "Frames Slice Latent Raw"             : nodes_latents.Frames_Slice_Latent_Raw,
+    "Frames Concat Latent Raw"            : nodes_latents.Frames_Concat_Latent_Raw,
 
 
 

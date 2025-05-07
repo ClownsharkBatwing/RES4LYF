@@ -17,7 +17,7 @@ import gc
 from .sigmas  import get_sigmas
 
 from .helper  import initialize_or_scale, precision_tool, get_res4lyf_scheduler_list
-from .latents import get_orthogonal, get_collinear
+from .latents import get_orthogonal, get_collinear, get_edge_mask, checkerboard_variable
 from .res4lyf import RESplain
 from .beta.constants import MAX_STEPS
 
@@ -739,40 +739,4 @@ class SplitAttentionMask(BaseAttentionMask):
         attn_mask = torch.cat([cross_attn_mask, self_attn_mask], dim=1)
         
         self.attn_mask = CoreAttnMask(attn_mask, mask_type=mask_type)
-
-
-def get_edge_mask(mask: torch.Tensor, dilation: int = 3) -> torch.Tensor:
-    if dilation == 0:                                                         # safeguard for zero kernel size...
-        return mask
-    mask_tmp = mask.squeeze().to('cuda')
-    mask_tmp = mask_tmp.float()
-    
-    eroded = -F.max_pool2d(-mask_tmp.unsqueeze(0).unsqueeze(0), kernel_size=3, stride=1, padding=1)
-    eroded = eroded.squeeze(0).squeeze(0)
-    
-    edge = mask_tmp - eroded
-    edge = (edge > 0).float()
-    
-    dilated_edge = F.max_pool2d(edge.unsqueeze(0).unsqueeze(0), kernel_size=dilation, stride=1, padding=dilation//2)
-    dilated_edge = dilated_edge.squeeze(0).squeeze(0)
-    
-    return dilated_edge[...,:mask.shape[-2], :mask.shape[-1]].view_as(mask).to(mask.device)
-
-
-
-def checkerboard_variable(widths, dtype=torch.float16, device='cpu'):
-    total = sum(widths)
-    mask = torch.zeros((total, total), dtype=dtype, device=device)
-
-    x_start = 0
-    for i, w_x in enumerate(widths):
-        y_start = 0
-        for j, w_y in enumerate(widths):
-            if (i + j) % 2 == 0:  # checkerboard logic
-                mask[x_start:x_start+w_x, y_start:y_start+w_y] = 1.0
-            y_start += w_y
-        x_start += w_x
-
-    return mask
-
 
