@@ -284,6 +284,7 @@ class ReFluxPatcherAdvanced:
                 "model"               : ("MODEL",),
                 "doublestream_blocks" : ("STRING",  {"default": "all", "multiline": True}),
                 "singlestream_blocks" : ("STRING",  {"default": "all", "multiline": True}),
+                "style_dtype"          : (["default", "bfloat16", "float16", "float32", "float64"],  {"default": "float32"}),
                 "enable"              : ("BOOLEAN", {"default": True}),
             }
         }
@@ -292,10 +293,14 @@ class ReFluxPatcherAdvanced:
     CATEGORY     = "RES4LYF/model_patches"
     FUNCTION     = "main"
 
-    def main(self, model, doublestream_blocks, singlestream_blocks, enable=True, force=False):
+    def main(self, model, doublestream_blocks, singlestream_blocks, style_dtype, enable=True, force=False):
         
         doublestream_blocks = parse_range_string(doublestream_blocks)
         singlestream_blocks = parse_range_string(singlestream_blocks)
+        
+        model.model.diffusion_model.style_dtype = getattr(torch, style_dtype) if style_dtype != "default" else None
+        model.model.diffusion_model.proj_weights = None
+        model.model.diffusion_model.y0_adain_embed = None
         
         if (enable or force) and model.model.diffusion_model.__class__ == Flux:
             m = model.clone()
@@ -341,16 +346,18 @@ class ReFluxPatcher(ReFluxPatcherAdvanced):
     def INPUT_TYPES(cls):
         return {
             "required": {
-                "model"  : ("MODEL",),
-                "enable" : ("BOOLEAN", {"default": True}),
+                "model"       : ("MODEL",),
+                "style_dtype" : (["default", "bfloat16", "float16", "float32", "float64"],  {"default": "float32"}),
+                "enable"      : ("BOOLEAN", {"default": True}),
             }
         }
 
-    def main(self, model, enable=True, force=False):
+    def main(self, model, style_dtype="float32", enable=True, force=False):
         return super().main(
             model               = model,
             doublestream_blocks = "all",
             singlestream_blocks = "all",
+            style_dtype         = style_dtype,
             enable              = enable,
             force               = force
         )    
