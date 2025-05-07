@@ -276,9 +276,9 @@ class ReFlux(Flux):
         eps = rearrange(out, "b (h w) (c ph pw) -> b c (h ph) (w pw)", h=h_len, w=w_len, ph=2, pw=2)[:,:,:h,:w]
         
         
-        
-        
-        
+        dtype = eps.dtype if self.style_dtype is None else self.style_dtype
+        pinv_dtype = torch.float32 if dtype != torch.float64 else dtype
+        W_inv = None
         
         
         if eps.shape[0] == 2 or (eps.shape[0] == 1 and not UNCOND):
@@ -317,7 +317,42 @@ class ReFlux(Flux):
                 denoised_embed = F.linear(img         .to(W), W, b).to(img)
                 y0_adain_embed = F.linear(img_y0_adain.to(W), W, b).to(img_y0_adain)
                 
-                denoised_embed = adain_seq(denoised_embed, y0_adain_embed)
+                #denoised_embed = adain_seq(denoised_embed, y0_adain_embed)
+                
+                if transformer_options['y0_style_method'] == "AdaIN":
+                    denoised_embed = adain_seq_inplace(denoised_embed, y0_adain_embed)
+                    for adain_iter in range(EO("style_iter", 0)):
+                        denoised_embed = adain_seq_inplace(denoised_embed, y0_adain_embed)
+                        denoised_embed = (denoised_embed - b) @ torch.linalg.pinv(W.to(pinv_dtype)).T.to(dtype)
+                        denoised_embed = F.linear(denoised_embed         .to(W), W, b).to(img)
+                        denoised_embed = adain_seq_inplace(denoised_embed, y0_adain_embed)
+                        
+                elif transformer_options['y0_style_method'] == "WCT":
+                    if self.y0_adain_embed is None or torch.norm(self.y0_adain_embed - y0_adain_embed) > 0:
+                        self.y0_adain_embed = y0_adain_embed
+                        f_s = y0_adain_embed[0].clone()
+                        self.mu_s = f_s.mean(dim=0, keepdim=True)
+                        f_s_centered = f_s - self.mu_s
+                        cov_s = f_s_centered.T @ f_s_centered / (f_s_centered.size(0) - 1)
+                        U_s, S_s, _ = torch.svd(cov_s + 1e-5 * torch.eye(cov_s.size(0), device=cov_s.device))
+                        self.y0_color = U_s.to(dtype) @ torch.diag(S_s.to(dtype).sqrt()) @ U_s.T.to(dtype)
+                        
+                    for wct_i in range(eps.shape[0]):
+                        f_c = denoised_embed[wct_i].clone()
+
+                        mu_c = f_c.mean(dim=0, keepdim=True)
+
+                        f_c_centered = f_c - mu_c
+
+                        cov_c = f_c_centered.T @ f_c_centered / (f_c_centered.size(0) - 1)
+                        U_c, S_c, _ = torch.svd(cov_c + 1e-5 * torch.eye(cov_c.size(0), device=cov_c.device))
+                        whiten = U_c.to(dtype) @ torch.diag(S_c.to(dtype).rsqrt()) @ U_c.T.to(dtype)
+                        f_c_whitened = f_c_centered @ whiten.T
+
+                        f_cs = f_c_whitened @ self.y0_color.T + self.mu_s
+                        
+                        denoised_embed[wct_i] = f_cs
+
                 
                 denoised_approx = (denoised_embed - b.to(denoised_embed)) @ torch.linalg.pinv(W).T.to(denoised_embed)
                 denoised_approx = denoised_approx.to(eps)
@@ -366,7 +401,41 @@ class ReFlux(Flux):
                 denoised_embed = F.linear(img         .to(W), W, b).to(img)
                 y0_adain_embed = F.linear(img_y0_adain.to(W), W, b).to(img_y0_adain)
                 
-                denoised_embed = adain_seq(denoised_embed, y0_adain_embed)
+                #denoised_embed = adain_seq(denoised_embed, y0_adain_embed)
+                
+                if transformer_options['y0_style_method'] == "AdaIN":
+                    denoised_embed = adain_seq_inplace(denoised_embed, y0_adain_embed)
+                    for adain_iter in range(EO("style_iter", 0)):
+                        denoised_embed = adain_seq_inplace(denoised_embed, y0_adain_embed)
+                        denoised_embed = (denoised_embed - b) @ torch.linalg.pinv(W.to(pinv_dtype)).T.to(dtype)
+                        denoised_embed = F.linear(denoised_embed         .to(W), W, b).to(img)
+                        denoised_embed = adain_seq_inplace(denoised_embed, y0_adain_embed)
+                        
+                elif transformer_options['y0_style_method'] == "WCT":
+                    if self.y0_adain_embed is None or torch.norm(self.y0_adain_embed - y0_adain_embed) > 0:
+                        self.y0_adain_embed = y0_adain_embed
+                        f_s = y0_adain_embed[0].clone()
+                        self.mu_s = f_s.mean(dim=0, keepdim=True)
+                        f_s_centered = f_s - self.mu_s
+                        cov_s = f_s_centered.T @ f_s_centered / (f_s_centered.size(0) - 1)
+                        U_s, S_s, _ = torch.svd(cov_s + 1e-5 * torch.eye(cov_s.size(0), device=cov_s.device))
+                        self.y0_color = U_s.to(dtype) @ torch.diag(S_s.to(dtype).sqrt()) @ U_s.T.to(dtype)
+                        
+                    for wct_i in range(eps.shape[0]):
+                        f_c = denoised_embed[wct_i].clone()
+
+                        mu_c = f_c.mean(dim=0, keepdim=True)
+
+                        f_c_centered = f_c - mu_c
+
+                        cov_c = f_c_centered.T @ f_c_centered / (f_c_centered.size(0) - 1)
+                        U_c, S_c, _ = torch.svd(cov_c + 1e-5 * torch.eye(cov_c.size(0), device=cov_c.device))
+                        whiten = U_c.to(dtype) @ torch.diag(S_c.to(dtype).rsqrt()) @ U_c.T.to(dtype)
+                        f_c_whitened = f_c_centered @ whiten.T
+
+                        f_cs = f_c_whitened @ self.y0_color.T + self.mu_s
+                        
+                        denoised_embed[wct_i] = f_cs
                 
                 denoised_approx = (denoised_embed - b.to(denoised_embed)) @ torch.linalg.pinv(W).T.to(denoised_embed)
                 denoised_approx = denoised_approx.to(eps)
@@ -411,6 +480,16 @@ def adain_seq_oom(content: torch.Tensor, style: torch.Tensor, eps: float = 1e-7)
     return normalized * std_s + mean_s               # [B,L,C]
 
 
+
+
+def adain_seq_inplace(content: torch.Tensor, style: torch.Tensor, eps: float = 1e-7) -> torch.Tensor:
+    mean_c = content.mean(1, keepdim=True)
+    std_c  = content.std (1, keepdim=True).add_(eps)  # in-place add
+    mean_s = style.mean  (1, keepdim=True)
+    std_s  = style.std   (1, keepdim=True).add_(eps)
+
+    content.sub_(mean_c).div_(std_c).mul_(std_s).add_(mean_s)  # in-place chain
+    return content
 
 
 

@@ -306,5 +306,18 @@ class LastLayer(nn.Module):
         x = self.linear(x)
         return x
 
+    def forward_scale_shift(self, x: Tensor, vec: Tensor) -> Tensor:
+        shift, scale = self.adaLN_modulation(vec).chunk(2, dim=1)
+        
+        x = (1 + scale[:, None, :]) * self.norm_final(x) + shift[:, None, :]
+        return x
+
+    def forward_linear(self, x: Tensor, vec: Tensor) -> Tensor:
+        x = self.linear(x)
+        return x
+
+
+
+
 
 
