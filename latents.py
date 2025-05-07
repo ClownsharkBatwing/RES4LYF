@@ -646,3 +646,55 @@ def checkerboard_variable(widths, dtype=torch.float16, device='cpu'):
 
     return mask
 
+
+
+
+
+def interpolate_spd(cov1, cov2, t, eps=1e-5):
+    """
+    Geodesic interpolation on the SPD manifold between cov1 and cov2.
+
+    Args:
+      cov1, cov2: [D×D] symmetric positive-definite covariances (torch.Tensor).
+      t:         interpolation factor in [0,1].
+      eps:       jitter added to diagonal for numerical stability.
+
+    Returns:
+      cov_t:     the SPD matrix at fraction t along the geodesic from cov1 to cov2.
+    """
+    cov1 = cov1.double()
+    cov2 = cov2.double()
+
+    # add jitter in-place (no full eye allocation)
+    M1 = cov1.clone()
+    M1.diagonal().add_(eps)
+    M2 = cov2.clone()
+    M2.diagonal().add_(eps)
+
+    # compute M1^{-1/2}
+    S1, U1 = torch.linalg.eigh(M1)
+    S1_clamped = S1.clamp(min=eps)
+    inv_sqrt_S1 = S1_clamped.rsqrt()
+    M1_inv_sqrt = U1 @ torch.diag(inv_sqrt_S1) @ U1.T
+
+    # form the “middle” = M1^{-1/2} M2 M1^{-1/2}
+    middle = M1_inv_sqrt @ M2 @ M1_inv_sqrt
+
+    # eigen-decompose the middle
+    Sm, Um = torch.linalg.eigh(middle)
+    Sm_clamped = Sm.clamp(min=eps)
+
+    # raise to the t power
+    Sm_t = Sm_clamped.pow(t)
+
+    # rebuild the interpolated matrix
+    middle_t = Um @ torch.diag(Sm_t) @ Um.T
+
+    # map back: cov_t = M1^{1/2} * middle^t * M1^{1/2}
+    sqrt_S1 = S1_clamped.sqrt()
+    M1_sqrt = U1 @ torch.diag(sqrt_S1) @ U1.T
+
+    cov_t = M1_sqrt @ middle_t @ M1_sqrt
+
+    return cov_t.to(cov1.dtype) 
+

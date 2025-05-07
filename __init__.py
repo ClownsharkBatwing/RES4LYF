@@ -281,9 +281,12 @@ NODE_CLASS_MAPPINGS = {
 }
 
 
+NODE_DISPLAY_NAME_MAPPINGS = {
+    
+}
+
 
 WEB_DIRECTORY = "./web/js"
-__all__ = ["NODE_CLASS_MAPPINGS",  "WEB_DIRECTORY"]
 
 
 
@@ -322,7 +325,7 @@ if os.path.exists(file_path):
 
 try:
     from .legacy import add_legacy
-    NODE_CLASS_MAPPINGS, extra_samplers = add_legacy(NODE_CLASS_MAPPINGS, extra_samplers)
+    NODE_CLASS_MAPPINGS, NODE_DISPLAY_NAME_MAPPINGS, extra_samplers = add_legacy(NODE_CLASS_MAPPINGS, NODE_DISPLAY_NAME_MAPPINGS, extra_samplers)
     flags["legacy_samplers"] = True
     RESplain("Importing legacy samplers.")
 except ImportError:
@@ -346,7 +349,7 @@ except ImportError:
 
 try:
     from .beta import add_beta
-    NODE_CLASS_MAPPINGS, extra_samplers = add_beta(NODE_CLASS_MAPPINGS, extra_samplers)
+    NODE_CLASS_MAPPINGS, NODE_DISPLAY_NAME_MAPPINGS, extra_samplers = add_beta(NODE_CLASS_MAPPINGS, NODE_DISPLAY_NAME_MAPPINGS, extra_samplers)
     flags["beta_samplers"] = True
     RESplain("Importing beta samplers.")
 except ImportError:
@@ -374,5 +377,6 @@ except ImportError:
 add_samplers()
 
 
+__all__ = ["NODE_CLASS_MAPPINGS", "NODE_DISPLAY_NAME_MAPPINGS", "WEB_DIRECTORY"]
 
 

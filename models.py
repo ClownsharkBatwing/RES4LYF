@@ -487,13 +487,6 @@ class ReHiDreamPatcher(ReHiDreamPatcherAdvanced):
 
 
 
-
-
-
-
-
-
-
 class ReJointBlockNoMask(ReJointBlock):
     def forward(self, c, mask=None):
         return super().forward(c, mask=None)
@@ -505,6 +498,7 @@ class ReSD35PatcherAdvanced:
             "required": { 
                 "model":  ("MODEL",),
                 "joint_blocks" : ("STRING",  {"default": "all", "multiline": True}),
+                "style_dtype"  : (["default", "bfloat16", "float16", "float32", "float64"],  {"default": "float32"}),
                 "enable": ("BOOLEAN", {"default": True}),
             }
         }
@@ -513,7 +507,11 @@ class ReSD35PatcherAdvanced:
     CATEGORY     = "RES4LYF/model_patches"
     FUNCTION     = "main"
 
-    def main(self, model, joint_blocks, enable=True, force=False):
+    def main(self, model, joint_blocks, style_dtype, enable=True, force=False):
+        
+        model.model.diffusion_model.style_dtype = getattr(torch, style_dtype) if style_dtype != "default" else None
+        model.model.diffusion_model.proj_weights = None
+        model.model.diffusion_model.y0_adain_embed = None
         
         joint_blocks = parse_range_string(joint_blocks)
         
@@ -549,14 +547,16 @@ class ReSD35Patcher(ReSD35PatcherAdvanced):
         return {
             "required": {
                 "model"  : ("MODEL",),
+                "style_dtype" : (["default", "bfloat16", "float16", "float32", "float64"],  {"default": "float32"}),
                 "enable" : ("BOOLEAN", {"default": True}),
             }
         }
 
-    def main(self, model, enable=True, force=False):
+    def main(self, model, style_dtype="float32", enable=True, force=False):
         return super().main(
             model        = model,
             joint_blocks = "all",
+            style_dtype  = style_dtype,
             enable       = enable,
             force        = force
         )    
