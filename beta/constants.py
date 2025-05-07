@@ -11,20 +11,6 @@ IMPLICIT_TYPE_NAMES = [
 
 
 
-GUIDE_MODE_NAMES_BETA_MISC = [
-    "hard_light", 
-    "blend", 
-    "blend_projection",
-    "mean_std", 
-    "mean", 
-    "mean_tiled",
-    "std", 
-    "data",
-    "none",
-]
-
-
-
 GUIDE_MODE_NAMES_BETA_SIMPLE = [
     "flow",
     "lure",

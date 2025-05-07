@@ -465,11 +465,7 @@ def sample_rk_beta(
         RK.update_transformer_options({'blocks_adain_cache': []})
     if LG.HAS_LATENT_GUIDE_ATTNINJ:
         RK.update_transformer_options({'blocks_attninj_cache': []})
-        
-    #if start_step==1 and sigmas[1] == NS.sigma_min and sigmas[0] == 0.0:
-    #    sigmas = 0.99 * sigmas + 0.01
-    #    sigmas[0] = 0.0
-    
+
         
     sigmas_scheduled = sigmas.clone() # store for return in state_info_out
     
@@ -641,7 +637,6 @@ def sample_rk_beta(
         implicit_steps_total = (implicit_steps_full + 1) * (implicit_steps_diag + 1)
 
         # BEGIN FULLY IMPLICIT LOOP
-        #for full_iter in range(implicit_steps_full + 1):
         cossim_counter = 0
         adaptive_lgw = LG.lgw.clone()
         full_iter = 0
@@ -666,7 +661,6 @@ def sample_rk_beta(
 
             # TABLEAU LOOP
             for row in range(RK.rows - RK.multistep_stages - RK.row_offset + 1):
-                #for diag_iter in range(implicit_steps_diag+1):
                 diag_iter = 0
                 while diag_iter < implicit_steps_diag+1:
                     
@@ -1452,9 +1446,7 @@ def sample_rk_beta(
             
             eps = (x_0 - x_next) / (sigma - sigma_next)
             denoised = x_0 - sigma * eps
-            
-            #x_next = LG.process_guides_poststep(x_next, denoised, eps, step)
-            
+
             if EO("kill_step_sde_mask"):
                 sde_mask = None
                 
@@ -1512,7 +1504,6 @@ def sample_rk_beta(
             
             if LG.lgw[step] > 0 and step >= EO("guide_cutoff_start_step", 0) and cossim_counter < EO("guide_cutoff_max_iter", 10) and (EO("guide_cutoff") or EO("guide_min")):
                 guide_cutoff = EO("guide_cutoff", 1.0)
-                #denoised_norm = denoised - denoised.mean(dim=(-2,-1), keepdim=True)
                 denoised_norm = data_[0] - data_[0].mean(dim=(-2,-1), keepdim=True)
                 y0_norm       = LG.y0    - LG.y0   .mean(dim=(-2,-1), keepdim=True)
                 y0_cossim     = get_cosine_similarity(denoised_norm, y0_norm)
@@ -1585,9 +1576,7 @@ def sample_rk_beta(
         
         if LG.lgw[step] > 0 and step >= EO("guide_step_cutoff_start_step", 0) and cossim_counter < EO("guide_step_cutoff_max_iter", 10) and (EO("guide_step_cutoff") or EO("guide_step_min")):
             guide_cutoff = EO("guide_step_cutoff", 1.0)
-            #denoised_norm = denoised - denoised.mean(dim=(-2,-1), keepdim=True)
             eps_trash, data_trash = RK(x, sigma_next, x_0, sigma)
-            #denoised_norm = data_[0] - data_[0].mean(dim=(-2,-1), keepdim=True)
             denoised_norm = data_trash - data_trash.mean(dim=(-2,-1), keepdim=True)
             y0_norm       = LG.y0    - LG.y0   .mean(dim=(-2,-1), keepdim=True)
             y0_cossim     = get_cosine_similarity(denoised_norm, y0_norm)
@@ -1620,7 +1609,6 @@ def sample_rk_beta(
     
     progress_bar.close()
 
-    #if not (UNSAMPLE and sigmas[1] > sigmas[0]) and not EO("preview_last_step_always"):
     if not (UNSAMPLE and sigmas[1] > sigmas[0]) and not EO("preview_last_step_always") and sigma is not None   and   not (FLOW_STARTED and not FLOW_STOPPED):
         callback_step = len(sigmas)-1 - step if sampler_mode == "unsample" else step
         preview_callback(x, eps, denoised, x_, eps_, data_, callback_step, sigma, sigma_next, callback, EO)

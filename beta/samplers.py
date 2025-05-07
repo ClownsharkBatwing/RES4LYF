@@ -423,37 +423,6 @@ class SharkSampler:
                 neg_cond[0][1]['pooled_output'] = get_orthogonal(neg_cond[0][1]['pooled_output'], pos_cond[0][1]['pooled_output'])
             
 
-
-            # SETUP REGIONAL COND
-
-            """if pos_cond[0][1] is not None: 
-                if 'callback_regional' in pos_cond[0][1]:
-                    pos_cond = pos_cond[0][1]['callback_regional'](work_model)
-                
-                if 'AttnMask' in pos_cond[0][1]:
-                    sampler.extra_options['AttnMask']   = pos_cond[0][1]['AttnMask']
-                    sampler.extra_options['RegContext'] = pos_cond[0][1]['RegContext']
-                    sampler.extra_options['RegParam']   = pos_cond[0][1]['RegParam']
-                    
-                    sampler.extra_options['AttnMask'].set_latent(latent_image['samples'])
-                    sampler.extra_options['AttnMask'].generate()
-                    
-            if neg_cond[0][1] is not None: 
-                if 'callback_regional' in neg_cond[0][1]:
-                    neg_cond = neg_cond[0][1]['callback_regional'](work_model)
-                
-                if 'AttnMask' in neg_cond[0][1]:
-                    sampler.extra_options['AttnMask_neg']   = neg_cond[0][1]['AttnMask']
-                    sampler.extra_options['RegContext_neg'] = neg_cond[0][1]['RegContext']
-                    sampler.extra_options['RegParam_neg']   = neg_cond[0][1]['RegParam']
-                    
-                    sampler.extra_options['AttnMask_neg'].set_latent(latent_image['samples'])
-                    sampler.extra_options['AttnMask_neg'].generate()
-                    """
-                    
-            
-            
-            
             if "noise_seed" in sampler.extra_options:
                 if sampler.extra_options['noise_seed'] == -1 and noise_seed != -1:
                     sampler.extra_options['noise_seed'] = noise_seed + 1
@@ -616,10 +585,10 @@ class SharkSampler:
                     
                     if rebounds > 0:
                         cfgs_cached = guider.cfgs
-                        eta_cached = sampler.extra_options['eta']
+                        eta_cached         = sampler.extra_options['eta']
                         eta_substep_cached = sampler.extra_options['eta_substep']
                         
-                        etas_cached = sampler.extra_options['etas'].clone()
+                        etas_cached         = sampler.extra_options['etas'].clone()
                         etas_substep_cached = sampler.extra_options['etas_substep'].clone()
                         
                         unsample_etas = torch.full_like(etas_cached, unsample_eta)
@@ -636,19 +605,19 @@ class SharkSampler:
                         else:
                             guider.cfgs = cfgs_cached
                             
-                        eta_decay = eta_cached
-                        eta_substep_decay = eta_substep_cached
-                        unsample_eta_decay = unsample_eta
+                        eta_decay           = eta_cached
+                        eta_substep_decay   = eta_substep_cached
+                        unsample_eta_decay  = unsample_eta
                         
-                        etas_decay = etas_cached
-                        etas_substep_decay = etas_substep_cached
+                        etas_decay          = etas_cached
+                        etas_substep_decay  = etas_substep_cached
                         unsample_etas_decay = unsample_etas
 
                     samples = guider.sample(noise, x.clone(), sampler, sigmas, denoise_mask=noise_mask, callback=callback, disable_pbar=disable_pbar, seed=noise_seed)
 
                     if rebounds > 0: 
-                        noise_seed_cached = sampler.extra_options['noise_seed']
-                        cfgs_cached = guider.cfgs
+                        noise_seed_cached   = sampler.extra_options['noise_seed']
+                        cfgs_cached         = guider.cfgs
                         sampler_mode_cached = sampler.extra_options['sampler_mode']
                         
                         for restarts_iter in range(rebounds):
@@ -763,30 +732,6 @@ class SharkSampler:
             
 
             return (out, out_denoised, sde_noise,)
-
-
-
-
-def get_edge_mask(mask: torch.Tensor, dilation: int = 3) -> torch.Tensor:
-
-    mask = mask.float()
-    
-    eroded = -F.max_pool2d(-mask.unsqueeze(0).unsqueeze(0), kernel_size=3, stride=1, padding=1)
-    eroded = eroded.squeeze(0).squeeze(0)
-    
-    edge = mask - eroded
-    edge = (edge > 0).float()
-    
-    dilated_edge = F.max_pool2d(edge.unsqueeze(0).unsqueeze(0), kernel_size=dilation, stride=1, padding=dilation//2)
-    dilated_edge = dilated_edge.squeeze(0).squeeze(0)
-    
-    return dilated_edge
-
-
-
-
-
-
 
 
 
