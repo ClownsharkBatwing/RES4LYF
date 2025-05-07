@@ -466,9 +466,9 @@ def sample_rk_beta(
     if LG.HAS_LATENT_GUIDE_ATTNINJ:
         RK.update_transformer_options({'blocks_attninj_cache': []})
         
-    if start_step==1 and sigmas[1] == NS.sigma_min and sigmas[0] == 0.0:
-        sigmas = 0.99 * sigmas + 0.01
-        sigmas[0] = 0.0
+    #if start_step==1 and sigmas[1] == NS.sigma_min and sigmas[0] == 0.0:
+    #    sigmas = 0.99 * sigmas + 0.01
+    #    sigmas[0] = 0.0
     
         
     sigmas_scheduled = sigmas.clone() # store for return in state_info_out
@@ -790,7 +790,7 @@ def sample_rk_beta(
                                     if row > 0:
                                         if not LG.guide_mode.startswith("flow") or (LG.lgw[step] == 0 and LG.lgw[step+1] == 0   and   LG.lgw_inv[step] == 0 and LG.lgw_inv[step+1] == 0):
                                             x_[row+RK.row_offset] = NS.swap_noise_substep(x_0, x_[row+RK.row_offset])
-                                        if BONGMATH and step < sigmas.shape[0]-1 and not EO("disable_implicit_prebong"):
+                                        if BONGMATH and step < sigmas.shape[0]-1 and sigma > 0.03 and not EO("disable_implicit_prebong"):
                                             x_0, x_, eps_ = RK.bong_iter(x_0, x_, eps_, eps_prev_, data_, sigma, NS.s_, row, RK.row_offset, NS.h, step)     # TRY WITH h_new ??
                                     x_tmp = x_[row+RK.row_offset]
 
@@ -1435,7 +1435,8 @@ def sample_rk_beta(
                         if step == 0 and UNSAMPLE:
                             pass
                         elif full_iter == implicit_steps_full or not EO("disable_fully_explicit_bongmath_except_final"):
-                            x_0, x_, eps_ = RK.bong_iter(x_0, x_, eps_, eps_prev_, data_, sigma, NS.s_, row, RK.row_offset, NS.h, step)
+                            if sigma > 0.03:
+                                x_0, x_, eps_ = RK.bong_iter(x_0, x_, eps_, eps_prev_, data_, sigma, NS.s_, row, RK.row_offset, NS.h, step)
 
                     diag_iter += 1
 
