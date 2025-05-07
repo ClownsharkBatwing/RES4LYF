@@ -389,6 +389,8 @@ class ReHiDreamPatcherAdvanced:
         single_stream_blocks = parse_range_string(single_stream_blocks)
         
         model.model.diffusion_model.style_dtype = getattr(torch, style_dtype) if style_dtype != "default" else None
+        model.model.diffusion_model.proj_weights = None
+        model.model.diffusion_model.y0_adain_embed = None
         
         if (enable or force) and model.model.diffusion_model.__class__ == HiDreamImageTransformer2DModel:
             m = model.clone()
@@ -466,12 +468,12 @@ class ReHiDreamPatcher(ReHiDreamPatcherAdvanced):
             }
         }
 
-    def main(self, model, style_dtype, enable=True, force=False):
+    def main(self, model, style_dtype="default", enable=True, force=False):
         return super().main(
             model                = model,
             double_stream_blocks = "all",
             single_stream_blocks = "all",
-            style_dtype          = "default",
+            style_dtype          = style_dtype,
             enable               = enable,
             force                = force
         )    
