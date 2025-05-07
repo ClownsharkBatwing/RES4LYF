@@ -1010,6 +1010,7 @@ class ClownGuide_Style_Beta:
         return {"required":
                     {
                     "apply_to":         (["positive", "negative"],                    {"default": "positive"}),
+                    "method":           (["AdaIN", "WCT"],                            {"default": "WCT"}),
                     "weight":           ("FLOAT",                                     {"default": 1.0, "min":  -100.0, "max": 100.0, "step":0.01, "round": False, "tooltip": "Set the strength of the guide by multiplying all other weights by this value."}),
                     "synweight":        ("FLOAT",                                     {"default": 1.0, "min":  -100.0, "max": 100.0, "step":0.01, "round": False, "tooltip": "Set the strength of the guide by multiplying all other weights by this value."}),
                     "weight_scheduler": (["constant"] + get_res4lyf_scheduler_list(), {"default": "constant"},),
@@ -1033,6 +1034,7 @@ class ClownGuide_Style_Beta:
 
     def main(self,
             apply_to         = "all",
+            method           = "WCT",
             weight           = 1.0,
             synweight        = 1.0,
             weight_scheduler = "constant",
@@ -1073,6 +1075,8 @@ class ClownGuide_Style_Beta:
             synweights = F.pad(synweights, (0, MAX_STEPS), value=0.0)"""
         
         guides = copy.deepcopy(guides) if guides is not None else {}
+        
+        guides['style_method'] = method
         
         if apply_to in {"positive", "all"}:
         
