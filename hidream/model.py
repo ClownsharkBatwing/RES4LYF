@@ -1,8 +1,6 @@
 import torch
 import torch.nn.functional as F
 
-from safetensors.torch import save_file, load_file
-
 
 import torch.nn as nn
 from torch import Tensor, FloatTensor
@@ -1116,21 +1114,18 @@ class HDModel(nn.Module):
                 img = comfy.ldm.common_dit.pad_to_patch_size(denoised, (self.patch_size, self.patch_size))
                 img_sizes = None
                 img, img_masks, img_sizes = self.patchify(img, self.max_seq, img_sizes) 
-                #denoised_embed = self.x_embedder(img)
                 
                 img_y0_adain = comfy.ldm.common_dit.pad_to_patch_size(y0_style_pos, (self.patch_size, self.patch_size))
                 img_sizes_y0_adain = None
                 img_y0_adain, img_masks_y0_adain, img_sizes_y0_adain = self.patchify(img_y0_adain, self.max_seq, img_sizes_y0_adain) 
-                #y0_adain_embed = self.x_embedder(img_y0_adain)
                 
                 W = self.x_embedder.proj.weight.data.to(dtype)   # shape [2560, 64]
                 b = self.x_embedder.proj.bias.data.to(dtype)     # shape [2560]
                 
                 denoised_embed = F.linear(img         .to(W), W, b).to(img)
-                denoised_embed_y0 = denoised_embed.clone()
                 y0_adain_embed = F.linear(img_y0_adain.to(W), W, b).to(img_y0_adain)
                 
-                if not EO("style_wct"):
+                if transformer_options['y0_style_method'] == "AdaIN":
                     denoised_embed = adain_seq_inplace(denoised_embed, y0_adain_embed)
                     for adain_iter in range(EO("style_iter", 0)):
                         denoised_embed = adain_seq_inplace(denoised_embed, y0_adain_embed)
@@ -1138,234 +1133,41 @@ class HDModel(nn.Module):
                         denoised_embed = F.linear(denoised_embed         .to(W), W, b).to(img)
                         denoised_embed = adain_seq_inplace(denoised_embed, y0_adain_embed)
 
-                else:
+                elif transformer_options['y0_style_method'] == "WCT":
                     if self.y0_adain_embed is None or torch.norm(self.y0_adain_embed - y0_adain_embed) > 0:
                         self.y0_adain_embed = y0_adain_embed
-                        f_s = y0_adain_embed[0].clone()
-                        self.mu_s = f_s.mean(dim=0, keepdim=True)
+                        
+                        f_s          = y0_adain_embed[0].clone()
+                        self.mu_s    = f_s.mean(dim=0, keepdim=True)
                         f_s_centered = f_s - self.mu_s
-                        cov_s = f_s_centered.T @ f_s_centered / (f_s_centered.size(0) - 1)
-                        U_s, S_s, _ = torch.svd(cov_s + 1e-5 * torch.eye(cov_s.size(0), device=cov_s.device))
-                        self.y0_color = U_s.to(dtype) @ torch.diag(S_s.to(dtype).sqrt()) @ U_s.T.to(dtype)
-                    
-                    for wct_i in range(eps.shape[0]):
-                        f_c = denoised_embed[wct_i].clone()
                         
-                        #f_c = f_c.squeeze(0)  # [HW, C]
-                        #f_s = f_s.squeeze(0)  # [HW, C]
+                        cov = (f_s_centered.T.double() @ f_s_centered.double()) / (f_s_centered.size(0) - 1)
 
-                        mu_c = f_c.mean(dim=0, keepdim=True)
+                        S_eig, U_eig = torch.linalg.eigh(cov + 1e-5 * torch.eye(cov.size(0), dtype=cov.dtype, device=cov.device))
+                        S_eig_sqrt    = S_eig.clamp(min=0).sqrt() # eigenvalues -> singular values
                         
+                        whiten = U_eig @ torch.diag(S_eig_sqrt) @ U_eig.T
+                        self.y0_color  = whiten.to(f_s_centered)
+
+                    for wct_i in range(eps.shape[0]):
+                        f_c          = denoised_embed[wct_i].clone()
+                        mu_c         = f_c.mean(dim=0, keepdim=True)
                         f_c_centered = f_c - mu_c
                         
-                        # Content whitening
-                        cov_c = f_c_centered.T @ f_c_centered / (f_c_centered.size(0) - 1)
-                        U_c, S_c, _ = torch.svd(cov_c + 1e-5 * torch.eye(cov_c.size(0), device=cov_c.device))
-                        whiten = U_c.to(dtype) @ torch.diag(S_c.to(dtype).rsqrt()) @ U_c.T.to(dtype)
-                        f_c_whitened = f_c_centered @ whiten.T
+                        cov = (f_c_centered.T.double() @ f_c_centered.double()) / (f_c_centered.size(0) - 1)
 
-                        f_cs = f_c_whitened @ self.y0_color.T + self.mu_s
+                        S_eig, U_eig  = torch.linalg.eigh(cov + 1e-5 * torch.eye(cov.size(0), dtype=cov.dtype, device=cov.device))
+                        inv_sqrt_eig  = S_eig.clamp(min=0).rsqrt() 
+                        
+                        whiten = U_eig @ torch.diag(inv_sqrt_eig) @ U_eig.T
+                        whiten = whiten.to(f_c_centered)
+
+                        f_c_whitened = f_c_centered @ whiten.T
+                        f_cs         = f_c_whitened @ self.y0_color.T + self.mu_s
                         
                         denoised_embed[wct_i] = f_cs
 
-                if EO("style_project"):
-                    z = (denoised_embed - b) @ W
-                    denoised_embed = z @ W.T + b
-                
-                
-                
-                
-                
-                #denoised_adain = denoised_embed.clone()  ####
-                
-                if EO("train_output_rev"):
-                    #W_pinv = torch.linalg.pinv(W.to(pinv_dtype)).to(dtype)
-                    #denoised_embed = (denoised_embed - b) @ torch.linalg.pinv(W.to(pinv_dtype)).T.to(dtype)
-
-                    with torch.inference_mode(False), torch.enable_grad():
-                        W_orig = W.clone().detach().to(dtype)
-                        b_orig = b.clone().detach().to(dtype)
-                        denoised_embed = denoised_embed.clone().detach().to(dtype)
-
-                        post_layer = nn.Linear(64, 2560, bias=True).to(dtype).to(img.device)
-                        with torch.no_grad():
-                            post_layer.weight.copy_(W_orig.to(dtype).to(img.device))
-                            post_layer.bias.copy_(b_orig.to(dtype).to(img.device))
-
-                        # Input to optimize: start from W_pinv @ denoised as estimate
-                        x_init = torch.matmul(denoised_embed - b_orig, torch.linalg.pinv(W_orig.T)).to(dtype).to(img.device)
-                        x_pred_3 = nn.Parameter(x_init.detach().clone(), requires_grad=True)  # this is key
-
-                        opt = torch.optim.Adam([x_pred_3], lr=EO("opt_input_lr", 1e-2))
-
-                        for step in range(EO("train_iter", 100)):
-                            opt.zero_grad()
-
-                            embed_pred = post_layer(x_pred_3)   # [B, 2560]
-
-                            loss = F.mse_loss(embed_pred, denoised_embed)
-                            loss.backward()
-
-                            grad_norm = x_pred_3.grad.norm().item()
-                            print(f"[Step {step:03d}] Loss: {loss.item():.6f} | Grad norm: {grad_norm:.6e}", flush=True)
-
-                            opt.step()
-
-                        denoised_embed = x_pred_3.detach().clone()
-
-
-                elif EO("train_v2_both_expanded_rev"):
-                    W_pinv = torch.linalg.pinv(W.to(pinv_dtype)).to(dtype)
-
-                    with torch.inference_mode(False), torch.enable_grad():
-                        if not hasattr(self, "proj_model") or not hasattr(self, "proj_optimizer"):
-                            from safetensors.torch import load_file
-                            import os
-
-                            # --- Try loading model weights ---
-                            try:
-                                filename = EO("train_v2_both_expanded_rev", "proj_weights_v2_rev.safetensors")
-                                loaded = load_file(filename)
-
-                                pre_layer = IdentityLinear(2560, 2560).to(dtype).to(img.device)
-                                post_layer = nn.Linear(2560, 64, bias=True).to(dtype).to(img.device)
-
-                                with torch.no_grad():
-                                    pre_layer.weight.copy_(loaded["pre_weight"].to(dtype).to(img.device))
-                                    pre_layer.bias.copy_(loaded["pre_bias"].to(dtype).to(img.device))
-                                    post_layer.weight.copy_(loaded["W_inv"].to(dtype).to(img.device))
-                                    post_layer.bias.copy_(loaded["b_inv"].to(dtype).to(img.device))
-
-                            except Exception:
-                                pre_layer = IdentityLinear(2560, 2560).to(dtype).to(img.device)
-                                post_layer = nn.Linear(2560, 64, bias=True).to(dtype).to(img.device)
-                                with torch.no_grad():
-                                    post_layer.weight.copy_(W_pinv)
-                                    post_layer.bias.copy_((-b @ W_pinv.T))
-
-                            dropout  = EO("dropout" , 0.0)
-                            train_lr = EO("train_lr", 1e-5)
-                            weight_decay = EO("weight_decay", 1e-4)
-
-                            self.proj_model = nn.Sequential(
-                                pre_layer, 
-                                nn.Dropout(dropout),
-                                nn.LayerNorm(2560, elementwise_affine=False),
-                                post_layer,
-                                ).to(dtype).to(img.device)
-                            
-                            self.proj_model.train()
-
-                            # --- Try loading optimizer state ---
-                            opt_path = EO("train_v2_both_expanded_rev", "proj_optimizer_rev.pt")
-                            if os.path.exists(opt_path):
-                                self.proj_optimizer = torch.optim.AdamW(self.proj_model.parameters(), lr=train_lr, weight_decay=weight_decay)
-                                self.proj_optimizer.load_state_dict(torch.load(opt_path, map_location=img.device))
-                            else:
-                                self.proj_optimizer = torch.optim.AdamW(self.proj_model.parameters(), lr=train_lr, weight_decay=weight_decay)
-
-                        else:
-                            self.proj_model.train()
-
-                        model = self.proj_model
-                        opt = self.proj_optimizer
-
-                        # Inputs
-                        y_target_1 = denoised_embed_y0.clone().detach()
-                        x_true_1   = img.clone().detach()
-                        y_target_2 = y0_adain_embed.clone().detach()
-                        x_true_2   = img_y0_adain.clone().detach()
-                        y_target_3 = denoised_embed.clone().detach()
-
-                        W_orig = W.clone().detach()
-                        b_orig = b.clone().detach()
-
-                        for step in range(EO("train_iter", 100)):
-                            opt.zero_grad()
-                            x_pred_1 = model(y_target_1)
-                            x_pred_2 = model(y_target_2)
-                            x_pred_3 = model(y_target_3)
-                            y_pred_3 = F.linear(x_pred_3.to(W_orig), W_orig, b_orig).to(x_pred_3)
-
-                            loss = (
-                                F.mse_loss(x_pred_1, x_true_1) +
-                                F.mse_loss(x_pred_2, x_true_2) +
-                                F.mse_loss(y_pred_3, y_target_3)
-                            )
-                            loss.backward()
-                            
-                            
-
-                            total_grad_norm = sum(p.grad.norm().item()**2 for p in model.parameters() if p.grad is not None) ** 0.5
-                            print(f"[Step {step:03d}] Loss: {loss.item():.6f} | Grad norm: {total_grad_norm:.6e}", flush=True)
-
-                            nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
-
-                            opt.step()
-
-                        # Save latest trained weights
-                        self.proj_weights = {
-                            'W_inv': model[-1].weight.detach().clone(),
-                            'b_inv': model[-1].bias.detach().clone(),
-                            'pre_weight': model[0].weight.detach().clone(),
-                            'pre_bias': model[0].bias.detach().clone(),
-                        }
-
-                        #denoised_embed = model(denoised_embed)
-                        denoised_embed = x_pred_3.detach().clone()
-
-                                    
-                elif EO("inference_v2_both_expanded_rev"):
-                    W_pinv = torch.linalg.pinv(W.to(pinv_dtype)).to(dtype)
-                    pre_weight, pre_bias = None, None
-                    if self.proj_weights is None:
-                        from safetensors.torch import load_file
-                        try:
-                            filename_safetensors = EO("inference_v2_both_expanded_rev", "proj_weights_v2_rev.safetensors")
-                            loaded = load_file(filename_safetensors)
-                            W_inv = loaded["W_inv"].to(dtype).to(img.device)
-                            b_inv = loaded["b_inv"].to(dtype).to(img.device)
-                            pre_weight = loaded["pre_weight"].to(dtype).to(img.device)
-                            pre_bias = loaded["pre_bias"].to(dtype).to(img.device)
-
-                            self.proj_weights = {
-                                'W_inv': W_inv,
-                                'b_inv': b_inv,
-                                'pre_weight': pre_weight,
-                                'pre_bias': pre_bias,
-                            }
-                        except Exception as e:
-                            W_inv = W_pinv.clone()
-                            b_inv = (-b @ W_pinv.T).clone()
-                            self.proj_weights = {
-                                'W_inv': W_inv,
-                                'b_inv': b_inv,
-                            }
-                    else:
-                        W_inv = self.proj_weights['W_inv'].clone()
-                        b_inv = self.proj_weights['b_inv'].clone()
-
-                    if 'pre_weight' in self.proj_weights and 'pre_bias' in self.proj_weights:
-                        pre_layer = IdentityLinear(2560, 2560).to(dtype).to(img.device)
-                        with torch.no_grad():
-                            pre_layer.weight.copy_(self.proj_weights['pre_weight'])
-                            pre_layer.bias.copy_(self.proj_weights['pre_bias'])
-                    else:
-                        pre_layer = IdentityLinear(2560, 2560).to(dtype).to(img.device)
-                        
-                    post_layer = nn.Linear(2560, 64, bias=True).to(dtype).to(img.device)
-                    with torch.no_grad():
-                        post_layer.weight.copy_(W_inv)
-                        post_layer.bias.copy_(b_inv)
-                            
-                    model = nn.Sequential(pre_layer, post_layer).to(dtype).to(img.device)
-                    
-                    denoised_embed = model(denoised_embed)
-                    
-                else:
-                    denoised_embed = (denoised_embed - b) @ torch.linalg.pinv(W.to(pinv_dtype)).T.to(dtype)
-                    
-                denoised_adain_out = denoised_embed.clone()  ####
+                denoised_embed = (denoised_embed - b) @ torch.linalg.pinv(W.to(pinv_dtype)).T.to(dtype)
                 denoised_embed = self.unpatchify (denoised_embed, img_sizes)
                 
                 eps = (x - denoised_embed) / sigma
@@ -1374,9 +1176,6 @@ class HDModel(nn.Module):
                     eps[0] = eps_orig[0] + mask * y0_style_pos_synweight * (eps[0] - eps_orig[0])
                 else:
                     eps[0] = eps_orig[0] + mask * y0_style_pos_weight    * (eps[0] - eps_orig[0])
-                    
-
-
 
 
         if EO("style_eps") and (eps.shape[0] == 2 or (eps.shape[0] == 1 and UNCOND)    and not EO("use_style_neg_as_pos")):
@@ -1423,12 +1222,8 @@ class HDModel(nn.Module):
                 if eps.shape[0] == 2:
                     eps[1] = eps_orig[1] + mask * y0_style_neg_synweight * (eps[1] - eps_orig[1])
         
-        
-        
-        
-        
 
-        
+
         elif eps.shape[0] == 2 or (eps.shape[0] == 1 and UNCOND)    and not EO("use_style_neg_as_pos"):
             if y0_style_neg is not None:
                 y0_style_neg_weight     = transformer_options.get("y0_style_neg_weight")
@@ -1449,377 +1244,69 @@ class HDModel(nn.Module):
                 img = comfy.ldm.common_dit.pad_to_patch_size(denoised, (self.patch_size, self.patch_size))
                 img_sizes = None
                 img, img_masks, img_sizes = self.patchify(img, self.max_seq, img_sizes) 
-                #denoised_embed = self.x_embedder(img)
                 
                 img_y0_adain = comfy.ldm.common_dit.pad_to_patch_size(y0_style_neg, (self.patch_size, self.patch_size))
                 img_sizes_y0_adain = None
                 img_y0_adain, img_masks_y0_adain, img_sizes_y0_adain = self.patchify(img_y0_adain, self.max_seq, img_sizes_y0_adain) 
-                #y0_adain_embed = self.x_embedder(img_y0_adain)
                 
                 W = self.x_embedder.proj.weight.data.to(dtype)   # shape [2560, 64]
                 b = self.x_embedder.proj.bias.data.to(dtype)     # shape [2560]
                 
                 denoised_embed = F.linear(img         .to(W), W, b).to(img)
-                denoised_embed_y0 = denoised_embed.clone()
                 y0_adain_embed = F.linear(img_y0_adain.to(W), W, b).to(img_y0_adain)
+                                
                 
-                #denoised_embed = adain_seq_inplace(denoised_embed, y0_adain_embed)
-                
-                
-                if not EO("style_wct"):
+                if transformer_options['y0_style_method'] == "AdaIN":
                     denoised_embed = adain_seq_inplace(denoised_embed, y0_adain_embed)
                     for adain_iter in range(EO("style_iter", 0)):
                         denoised_embed = adain_seq_inplace(denoised_embed, y0_adain_embed)
                         denoised_embed = (denoised_embed - b) @ torch.linalg.pinv(W.to(pinv_dtype)).T.to(dtype)
                         denoised_embed = F.linear(denoised_embed         .to(W), W, b).to(img)
                         denoised_embed = adain_seq_inplace(denoised_embed, y0_adain_embed)
-                else:
+                        
+                elif transformer_options['y0_style_method'] == "WCT":
                     if self.y0_adain_embed is None or torch.norm(self.y0_adain_embed - y0_adain_embed) > 0:
                         self.y0_adain_embed = y0_adain_embed
-                        f_s = y0_adain_embed[0].clone()
-                        self.mu_s = f_s.mean(dim=0, keepdim=True)
-                        f_s_centered = f_s - self.mu_s
-                        cov_s = f_s_centered.T @ f_s_centered / (f_s_centered.size(0) - 1)
-                        U_s, S_s, _ = torch.svd(cov_s + 1e-5 * torch.eye(cov_s.size(0), device=cov_s.device))
-                        self.y0_color = U_s.to(dtype) @ torch.diag(S_s.to(dtype).sqrt()) @ U_s.T.to(dtype)
                         
+                        f_s          = y0_adain_embed[0].clone()
+                        self.mu_s    = f_s.mean(dim=0, keepdim=True)
+                        f_s_centered = f_s - self.mu_s
+                        
+                        cov = (f_s_centered.T.double() @ f_s_centered.double()) / (f_s_centered.size(0) - 1)
+
+                        S_eig, U_eig = torch.linalg.eigh(cov + 1e-5 * torch.eye(cov.size(0), dtype=cov.dtype, device=cov.device))
+                        S_eig_sqrt    = S_eig.clamp(min=0).sqrt() # eigenvalues -> singular values
+                        
+                        whiten = U_eig @ torch.diag(S_eig_sqrt) @ U_eig.T
+                        self.y0_color  = whiten.to(f_s_centered)
+
                     for wct_i in range(eps.shape[0]):
-                        f_c = denoised_embed[wct_i].clone()
-                        #f_s = y0_adain_embed[wct_i].clone()
-                        #f_c = f_c.squeeze(0)  # [HW, C]
-                        #f_s = f_s.squeeze(0)  # [HW, C]
-
-                        mu_c = f_c.mean(dim=0, keepdim=True)
-                        #mu_s = f_s.mean(dim=0, keepdim=True)
-
+                        f_c          = denoised_embed[wct_i].clone()
+                        mu_c         = f_c.mean(dim=0, keepdim=True)
                         f_c_centered = f_c - mu_c
-                        #f_s_centered = f_s - mu_s
+                        
+                        cov = (f_c_centered.T.double() @ f_c_centered.double()) / (f_c_centered.size(0) - 1)
 
-                        # Content whitening
-                        cov_c = f_c_centered.T @ f_c_centered / (f_c_centered.size(0) - 1)
-                        U_c, S_c, _ = torch.svd(cov_c + 1e-5 * torch.eye(cov_c.size(0), device=cov_c.device))
-                        whiten = U_c.to(dtype) @ torch.diag(S_c.to(dtype).rsqrt()) @ U_c.T.to(dtype)
+                        S_eig, U_eig  = torch.linalg.eigh(cov + 1e-5 * torch.eye(cov.size(0), dtype=cov.dtype, device=cov.device))
+                        inv_sqrt_eig  = S_eig.clamp(min=0).rsqrt() 
+                        
+                        whiten = U_eig @ torch.diag(inv_sqrt_eig) @ U_eig.T
+                        whiten = whiten.to(f_c_centered)
+
                         f_c_whitened = f_c_centered @ whiten.T
-
-                        #cov_s = f_s_centered.T @ f_s_centered / (f_s_centered.size(0) - 1)
-                        #U_s, S_s, _ = torch.svd(cov_s + 1e-5 * torch.eye(cov_s.size(0), device=cov_s.device))
-                        #color = U_s @ torch.diag(S_s.sqrt()) @ U_s.T
-                        f_cs = f_c_whitened @ self.y0_color.T + self.mu_s
+                        f_cs         = f_c_whitened @ self.y0_color.T + self.mu_s
                         
                         denoised_embed[wct_i] = f_cs
 
-                if EO("style_project"):
-                    z = (denoised_embed - b) @ W
-                    denoised_embed = z @ W.T + b
-                
-                #denoised_adain = denoised_embed.clone()  ####
-
-
-                if EO("train_output_rev"):
-                    W_orig = W.clone().detach().to(dtype)
-                    b_orig = b.clone().detach().to(dtype)
-                    denoised_target = denoised_embed.clone().detach().to(dtype)
-
-                    with torch.inference_mode(False), torch.enable_grad():
-                        if not hasattr(self, "post_layer") or not hasattr(self, "post_optimizer"):
-                            # Define model (64 -> 2560)
-                            self.post_layer = nn.Linear(64, 2560, bias=True).to(dtype).to(img.device)
-                            self.post_layer.train()
-
-                            train_lr = EO("train_lr", 1e-2)
-                            weight_decay = EO("weight_decay", 1e-4)
-                            self.post_optimizer = torch.optim.AdamW(self.post_layer.parameters(), lr=train_lr, weight_decay=weight_decay)
-                        else:
-                            self.post_layer.train()
-
-                        model = self.post_layer
-                        opt = self.post_optimizer
-
-                        # Input to optimize: start from W_pinv @ denoised as estimate
-                        x_pred_3 = nn.Parameter(torch.matmul(denoised_target - b_orig, torch.linalg.pinv(W_orig.T)))
-                        x_pred_3 = x_pred_3.to(dtype).to(img.device)
-
-                        optimizer_input = torch.optim.Adam([x_pred_3], lr=EO("opt_input_lr", 1e-2))
-
-                        for step in range(EO("train_iter", 100)):
-                            opt.zero_grad()
-                            optimizer_input.zero_grad()
-
-                            embed_pred = model(x_pred_3)  # [B, 2560]
-                            denoised_pred = F.linear(embed_pred, W_orig, b_orig)
-
-                            loss = F.mse_loss(denoised_pred, denoised_target)
-                            loss.backward()
-
-                            grad_norm = x_pred_3.grad.norm().item()
-                            print(f"[Step {step:03d}] Loss: {loss.item():.6f} | Grad norm: {grad_norm:.6e}", flush=True)
-
-                            optimizer_input.step()
-                            opt.step()
-
-                        # Save final version
-                        self.proj_weights = {
-                            'W_inv': model.weight.detach().clone(),
-                            'b_inv': model.bias.detach().clone(),
-                        }
-
-                        denoised_embed = embed_pred.detach().clone()
-
-
-                elif EO("train_v2_both_expanded_rev"):
-                    W_pinv = torch.linalg.pinv(W.to(pinv_dtype)).to(dtype)
-
-                    with torch.inference_mode(False), torch.enable_grad():
-                        if not hasattr(self, "proj_model") or not hasattr(self, "proj_optimizer"):
-                            from safetensors.torch import load_file
-                            import os
-
-                            # --- Try loading model weights ---
-                            try:
-                                filename = EO("train_v2_both_expanded_rev", "proj_weights_v2_rev.safetensors")
-                                loaded = load_file(filename)
-
-                                pre_layer = IdentityLinear(2560, 2560).to(dtype).to(img.device)
-                                post_layer = nn.Linear(2560, 64, bias=True).to(dtype).to(img.device)
-
-                                with torch.no_grad():
-                                    pre_layer.weight.copy_(loaded["pre_weight"].to(dtype).to(img.device))
-                                    pre_layer.bias.copy_(loaded["pre_bias"].to(dtype).to(img.device))
-                                    post_layer.weight.copy_(loaded["W_inv"].to(dtype).to(img.device))
-                                    post_layer.bias.copy_(loaded["b_inv"].to(dtype).to(img.device))
-
-                            except Exception:
-                                pre_layer = IdentityLinear(2560, 2560).to(dtype).to(img.device)
-                                post_layer = nn.Linear(2560, 64, bias=True).to(dtype).to(img.device)
-                                with torch.no_grad():
-                                    post_layer.weight.copy_(W_pinv)
-                                    post_layer.bias.copy_((-b @ W_pinv.T))
-
-                            dropout  = EO("dropout" , 0.0)
-                            train_lr = EO("train_lr", 1e-5)
-                            weight_decay = EO("weight_decay", 1e-4)
-
-                            self.proj_model = nn.Sequential(
-                                pre_layer, 
-                                nn.Dropout(dropout),
-                                nn.LayerNorm(2560, elementwise_affine=False),
-                                post_layer,
-                                ).to(dtype).to(img.device)
-                            
-                            self.proj_model.train()
-
-                            # --- Try loading optimizer state ---
-                            opt_path = EO("train_v2_both_expanded_rev", "proj_optimizer_rev.pt")
-                            if os.path.exists(opt_path):
-                                self.proj_optimizer = torch.optim.AdamW(self.proj_model.parameters(), lr=train_lr, weight_decay=weight_decay)
-                                self.proj_optimizer.load_state_dict(torch.load(opt_path, map_location=img.device))
-                            else:
-                                self.proj_optimizer = torch.optim.AdamW(self.proj_model.parameters(), lr=train_lr, weight_decay=weight_decay)
-
-                        else:
-                            self.proj_model.train()
-
-                        model = self.proj_model
-                        opt = self.proj_optimizer
-
-                        # Inputs
-                        y_target_1 = denoised_embed_y0.clone().detach()
-                        x_true_1   = img.clone().detach()
-                        y_target_2 = y0_adain_embed.clone().detach()
-                        x_true_2   = img_y0_adain.clone().detach()
-                        y_target_3 = denoised_embed.clone().detach()
-
-                        W_orig = W.clone().detach()
-                        b_orig = b.clone().detach()
-
-                        for step in range(EO("train_iter", 100)):
-                            opt.zero_grad()
-                            x_pred_1 = model(y_target_1)
-                            x_pred_2 = model(y_target_2)
-                            x_pred_3 = model(y_target_3)
-                            y_pred_3 = F.linear(x_pred_3.to(W_orig), W_orig, b_orig).to(x_pred_3)
-
-                            loss = (
-                                F.mse_loss(x_pred_1, x_true_1) +
-                                F.mse_loss(x_pred_2, x_true_2) +
-                                F.mse_loss(y_pred_3, y_target_3)
-                            )
-                            loss.backward()
-                            
-                            
-
-                            total_grad_norm = sum(p.grad.norm().item()**2 for p in model.parameters() if p.grad is not None) ** 0.5
-                            print(f"[Step {step:03d}] Loss: {loss.item():.6f} | Grad norm: {total_grad_norm:.6e}", flush=True)
-
-                            nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
-
-                            opt.step()
-
-                        # Save latest trained weights
-                        self.proj_weights = {
-                            'W_inv': model[-1].weight.detach().clone(),
-                            'b_inv': model[-1].bias.detach().clone(),
-                            'pre_weight': model[0].weight.detach().clone(),
-                            'pre_bias': model[0].bias.detach().clone(),
-                        }
-
-                        #denoised_embed = model(denoised_embed)
-                        denoised_embed = x_pred_3.detach().clone()
-
-                                    
-                elif EO("inference_v2_both_expanded_rev"):
-                    W_pinv = torch.linalg.pinv(W.to(pinv_dtype)).to(dtype)
-                    pre_weight, pre_bias = None, None
-                    if self.proj_weights is None:
-                        from safetensors.torch import load_file
-                        try:
-                            filename_safetensors = EO("inference_v2_both_expanded_rev", "proj_weights_v2_rev.safetensors")
-                            loaded = load_file(filename_safetensors)
-                            W_inv = loaded["W_inv"].to(dtype).to(img.device)
-                            b_inv = loaded["b_inv"].to(dtype).to(img.device)
-                            pre_weight = loaded["pre_weight"].to(dtype).to(img.device)
-                            pre_bias = loaded["pre_bias"].to(dtype).to(img.device)
-
-                            self.proj_weights = {
-                                'W_inv': W_inv,
-                                'b_inv': b_inv,
-                                'pre_weight': pre_weight,
-                                'pre_bias': pre_bias,
-                            }
-                        except Exception as e:
-                            W_inv = W_pinv.clone()
-                            b_inv = (-b @ W_pinv.T).clone()
-                            self.proj_weights = {
-                                'W_inv': W_inv,
-                                'b_inv': b_inv,
-                            }
-                    else:
-                        W_inv = self.proj_weights['W_inv'].clone()
-                        b_inv = self.proj_weights['b_inv'].clone()
-
-                    if 'pre_weight' in self.proj_weights and 'pre_bias' in self.proj_weights:
-                        pre_layer = IdentityLinear(2560, 2560).to(dtype).to(img.device)
-                        with torch.no_grad():
-                            pre_layer.weight.copy_(self.proj_weights['pre_weight'])
-                            pre_layer.bias.copy_(self.proj_weights['pre_bias'])
-                    else:
-                        pre_layer = IdentityLinear(2560, 2560).to(dtype).to(img.device)
-                        
-                    post_layer = nn.Linear(2560, 64, bias=True).to(dtype).to(img.device)
-                    with torch.no_grad():
-                        post_layer.weight.copy_(W_inv)
-                        post_layer.bias.copy_(b_inv)
-                            
-                    model = nn.Sequential(pre_layer, post_layer).to(dtype).to(img.device)
-                    
-                    denoised_embed = model(denoised_embed)
-                    
-                else:
-                    denoised_embed = (denoised_embed - b) @ torch.linalg.pinv(W.to(pinv_dtype)).T.to(dtype)
-                    
-                denoised_adain_out = denoised_embed.clone()  ####
+                denoised_embed = (denoised_embed - b) @ torch.linalg.pinv(W.to(pinv_dtype)).T.to(dtype)
                 denoised_embed = self.unpatchify (denoised_embed, img_sizes)
                 
                 eps = (x - denoised_embed) / sigma
                 eps[0]     = eps_orig[0] + mask * y0_style_neg_weight    * (eps[0] - eps_orig[0])
                 if eps.shape[0] == 2:
                     eps[1] = eps_orig[1] + mask * y0_style_neg_synweight * (eps[1] - eps_orig[1])
-                #eps = eps.float()
         
         
-        
-        elif eps.shape[0] == 2 or (eps.shape[0] == 1 and UNCOND)    and not EO("use_style_neg_as_pos"):
-            if y0_style_neg is not None and eps.shape[0] > 1:
-                y0_style_neg_weight     = transformer_options.get("y0_style_neg_weight")
-                y0_style_neg_synweight  = transformer_options.get("y0_style_neg_synweight")
-                y0_style_neg_synweight *= y0_style_neg_weight
-                y0_style_neg_mask       = transformer_options.get("y0_style_neg_mask")
-                
-                y0_style_neg = y0_style_neg.to(dtype)
-                x            = x.to(dtype)
-                eps          = eps.to(dtype)
-                eps_orig     = eps.clone()
-                
-                mask = y0_style_neg_mask if y0_style_neg_mask is not None else torch.ones_like(x)
-                
-                sigma    = t_orig[0].to(dtype) / 1000
-                denoised = x - sigma * eps
-                
-                img = comfy.ldm.common_dit.pad_to_patch_size(denoised, (self.patch_size, self.patch_size))
-                img_sizes = None
-                img, img_masks, img_sizes = self.patchify(img, self.max_seq, img_sizes) 
-                
-                img_y0_adain = comfy.ldm.common_dit.pad_to_patch_size(y0_style_neg, (self.patch_size, self.patch_size))
-                img_sizes_y0_adain = None
-                img_y0_adain, img_masks_y0_adain, img_sizes_y0_adain = self.patchify(img_y0_adain, self.max_seq, img_sizes_y0_adain) 
-                
-                W = self.x_embedder.proj.weight.data.to(dtype)   # shape [2560, 64]
-                b = self.x_embedder.proj.bias.data.to(dtype)     # shape [2560]
-                
-                denoised_embed = F.linear(img         .to(W), W, b).to(img)
-                denoised_embed_y0 = denoised_embed.clone()
-                y0_adain_embed = F.linear(img_y0_adain.to(W), W, b).to(img_y0_adain)
-
-                denoised_embed = adain_seq_inplace(denoised_embed, y0_adain_embed)
-                
-                
-                
-                if EO("inference_v2_both_expanded_rev"):
-                    W_pinv = torch.linalg.pinv(W.to(pinv_dtype)).to(dtype)
-                    pre_weight, pre_bias = None, None
-                    if self.proj_weights is None:
-                        from safetensors.torch import load_file
-                        try:
-                            filename_safetensors = EO("inference_v2_both_expanded_rev", "proj_weights_v2_rev.safetensors")
-                            loaded = load_file(filename_safetensors)
-                            W_inv = loaded["W_inv"].to(dtype).to(img.device)
-                            b_inv = loaded["b_inv"].to(dtype).to(img.device)
-                            pre_weight = loaded["pre_weight"].to(dtype).to(img.device)
-                            pre_bias = loaded["pre_bias"].to(dtype).to(img.device)
-
-                            self.proj_weights = {
-                                'W_inv': W_inv,
-                                'b_inv': b_inv,
-                                'pre_weight': pre_weight,
-                                'pre_bias': pre_bias,
-                            }
-                        except Exception as e:
-                            W_inv = W_pinv.clone()
-                            b_inv = (-b @ W_pinv.T).clone()
-                            self.proj_weights = {
-                                'W_inv': W_inv,
-                                'b_inv': b_inv,
-                            }
-                    else:
-                        W_inv = self.proj_weights['W_inv'].clone()
-                        b_inv = self.proj_weights['b_inv'].clone()
-
-                    if 'pre_weight' in self.proj_weights and 'pre_bias' in self.proj_weights:
-                        pre_layer = IdentityLinear(2560, 2560).to(dtype).to(img.device)
-                        with torch.no_grad():
-                            pre_layer.weight.copy_(self.proj_weights['pre_weight'])
-                            pre_layer.bias.copy_(self.proj_weights['pre_bias'])
-                    else:
-                        pre_layer = IdentityLinear(2560, 2560).to(dtype).to(img.device)
-                        
-                    post_layer = nn.Linear(2560, 64, bias=True).to(dtype).to(img.device)
-                    with torch.no_grad():
-                        post_layer.weight.copy_(W_inv)
-                        post_layer.bias.copy_(b_inv)
-                            
-                    model = nn.Sequential(pre_layer, post_layer).to(dtype).to(img.device)
-                    
-                    denoised_embed = model(denoised_embed)
-                else:
-                    denoised_embed = (denoised_embed - b) @ torch.linalg.pinv(W.to(pinv_dtype)).T.to(dtype)
-                denoised_embed = self.unpatchify (denoised_embed, img_sizes)
-                
-                eps = (x - denoised_embed) / sigma
-                eps[0]     = eps_orig[0] + mask * y0_style_neg_weight    * (eps[0] - eps_orig[0])
-                if eps.shape[0] == 2:
-                    eps[1] = eps_orig[1] + mask * y0_style_neg_synweight * (eps[1] - eps_orig[1])
-                #eps = eps.float()
-                
         elif eps.shape[0] == 2 or (eps.shape[0] == 1 and not UNCOND)    and EO("use_style_neg_as_pos"):
             if y0_style_neg is not None and eps.shape[0] > 1:
                 y0_style_neg_weight     = transformer_options.get("y0_style_neg_weight")
@@ -1850,7 +1337,6 @@ class HDModel(nn.Module):
                 
                 denoised_embed = F.linear(img         .to(W), W, b).to(img)
                 y0_adain_embed = F.linear(img_y0_adain.to(W), W, b).to(img_y0_adain)
-
                 
                 denoised_embed = adain_seq_inplace(denoised_embed, y0_adain_embed)
                 
@@ -1863,32 +1349,8 @@ class HDModel(nn.Module):
                     eps[0] = eps_orig[0] + mask * y0_style_neg_synweight * (eps[0] - eps_orig[0])
                 else:
                     eps[0] = eps_orig[0] + mask * y0_style_neg_weight    * (eps[0] - eps_orig[0])
-                #eps = eps.float()
-            
-        if EO("train_save"):
-            from safetensors.torch import save_file
-            filename_safetensors = EO("train_save", "proj_weights.safetensors")
-            data_to_save = {
-                "W_inv": W_inv.cpu(),
-                "b_inv": b_inv.cpu()
-            }
-            save_file(data_to_save, filename_safetensors)
-            
-        if EO("train_v2_save"):
-            from safetensors.torch import save_file
-            filename_safetensors = EO("train_save", "proj_weights_v2.safetensors")
-            data_to_save = {
-                "weight": linear_layer.weight.detach().cpu(),
-                "bias"  : linear_layer.bias  .detach().cpu(),
-            }
-            save_file(data_to_save, filename_safetensors)
-            
-        if EO("train_v2_save_rev"):
-            from safetensors.torch import save_file
-            save_file(self.proj_weights, EO("train_v2_save_rev", "proj_weights_v2_rev.safetensors"))
-            torch.save(self.proj_optimizer.state_dict(), "proj_optimizer_rev.pt")
-        return eps
 
+        return eps
 
 
 
@@ -1967,63 +1429,3 @@ def adain_seq_inplace(content: torch.Tensor, style: torch.Tensor, eps: float = 1
 def adain_seq(content: torch.Tensor, style: torch.Tensor, eps: float = 1e-7) -> torch.Tensor:
     return ((content - content.mean(1, keepdim=True)) / (content.std(1, keepdim=True) + eps)) * (style.std(1, keepdim=True) + eps) + style.mean(1, keepdim=True)
 
-
-class IdentityLinear(nn.Linear):
-    def reset_parameters(self):
-        if self.in_features == self.out_features:
-            nn.init.eye_(self.weight)
-        else:
-            nn.init.kaiming_uniform_(self.weight, a=math.sqrt(5))
-        if self.bias is not None:
-            nn.init.zeros_(self.bias)
-
-
-class AdaLNInverseLayer_orig(nn.Module):
-    def __init__(self, embed_dim=2560, latent_dim=64, condition_dim=2560):
-        super().__init__()
-        self.norm = nn.LayerNorm(embed_dim, elementwise_affine=False, eps=1e-6)
-        self.adaLN = nn.Sequential(
-            nn.SiLU(),
-            nn.Linear(condition_dim, 2 * embed_dim)
-        )
-        self.project = nn.Linear(embed_dim, latent_dim)
-
-    def forward(self, x_embed, cond_vec):
-        """
-        Args:
-            x_embed: [B, T, embed_dim] - the input embedding sequence (e.g., 2560-d)
-            cond_vec: [B, condition_dim] - a per-sample conditioning vector
-
-        Returns:
-            [B, T, latent_dim] - transformed latent representation
-        """
-        shift, scale = self.adaLN(cond_vec).chunk(2, dim=-1)  # [B, embed_dim] x2
-        shift = shift[:, None, :]  # [B, 1, embed_dim]
-        scale = scale[:, None, :]
-
-        x = self.norm(x_embed)
-        x = (1 + scale) * x + shift
-        x = self.project(x)
-        return x
-
-
-
-
-class AdaLNInverseLayer(nn.Module):
-    def __init__(self, embed_dim: int, latent_dim: int, condition_dim: int, dtype=None, device=None):
-        super().__init__()
-        self.norm_final = nn.LayerNorm(embed_dim, elementwise_affine=False, eps=1e-6, dtype=dtype, device=device)
-        self.ada_proj   = nn.Linear(condition_dim, 2 * embed_dim, bias=True, dtype=dtype, device=device)
-        self.adaLN_modulation = nn.Sequential(
-            nn.SiLU(),
-            self.ada_proj
-        )
-        self.linear = nn.Linear(embed_dim, latent_dim, bias=True, dtype=dtype, device=device)
-
-    def forward(self, x: torch.Tensor, vec: torch.Tensor) -> torch.Tensor:
-        shift, scale = self.adaLN_modulation(vec).chunk(2, dim=1)
-        x = (1 + scale[:, None, :]) * self.norm_final(x) + shift[:, None, :]
-        x = self.linear(x)
-        return x
-    
-    
