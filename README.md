@@ -1,4 +1,4 @@
-# BETA NODES AVAILABLE
+# BETA NODES AVAILABLE (UPDATE: NOW MAIN VERSION)
 
 Some of you may be aware that there's been a "beta" version of the nodes in progress for some time now. They are now **vastly superior** to the current "main" versions, and I highly recommend checking them out. Once the various options and parameters are fully settled, they will become the "main" versions of the nodes, and the current versions will remain available but with "Legacy" appended to their names.
 
