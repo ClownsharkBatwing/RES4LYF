@@ -1,6 +1,7 @@
 # original version: https://github.com/Wan-Video/Wan2.1/blob/main/wan/modules/model.py
 # Copyright 2024-2025 The Alibaba Wan Team Authors. All rights reserved.
 import math
+from typing import Optional, Callable, Tuple, Dict, Any, Union
 
 import torch
 import torch.nn as nn
@@ -13,6 +14,8 @@ from comfy.ldm.flux.math import apply_rope
 from comfy.ldm.modules.diffusionmodules.mmdit import RMSNorm
 import comfy.ldm.common_dit
 import comfy.model_management
+
+from ..latents import interpolate_spd
 
 
 def sinusoidal_embedding_1d(dim, position):
@@ -205,7 +208,7 @@ class ReWanSlidingSelfAttention(nn.Module):
 
 class ReWanT2VSlidingCrossAttention(ReWanSlidingSelfAttention):
 
-    def forward(self, x, context, mask=None, grid_sizes=None):
+    def forward(self, x, context, context_clip=None, mask=None, grid_sizes=None):
         r"""
         Args:
             x(Tensor): Shape [B, L1, C]
@@ -221,9 +224,11 @@ class ReWanT2VSlidingCrossAttention(ReWanSlidingSelfAttention):
 
         window_size = self.winderz
         half_window = window_size // 2
-
-        q_ = q.view(b, s, n * d)
-        k_ = k.view(b, s, n * d)
+        
+        b, s, n, d = *x.shape[:2], self.num_heads, self.head_dim
+        q_, k_ = q, k
+        #q_ = q.view(b, s, n * d)
+        #k_ = k.view(b, s, n * d)
         x_list = []
 
         for i in range(total_frames):
@@ -257,8 +262,8 @@ class ReWanT2VSlidingCrossAttention(ReWanSlidingSelfAttention):
 
             x = optimized_attention(
                 q_[:, q_start:q_end, :],           # [B, img_len, C]
-                k_.index_select(1, token_indices), # [B, window_size * img_len, C]
-                v .index_select(1, token_indices),
+                k_, #.index_select(1, token_indices), # [B, window_size * img_len, C]
+                v , #.index_select(1, token_indices),
                 heads=self.num_heads,
             )
 
@@ -319,7 +324,7 @@ class ReWanSelfAttention(nn.Module):
         q, k    = apply_rope(q, k, freqs)
         # q,k.shape = 2,14040,12,128      v.shape = 2,14040,1536
 
-        if mask is not None:
+        if mask is not None and mask.shape[-1] > 0:
             #dtype = mask.dtype if mask.dtype == torch.bool else q.dtype
             #txt_len = mask.shape[1] - mask.shape[0]
             x = attention_pytorch(
@@ -343,7 +348,7 @@ class ReWanSelfAttention(nn.Module):
 
 class ReWanT2VRawCrossAttention(ReWanSelfAttention):
 
-    def forward(self, x, context, mask=None, grid_sizes=None):
+    def forward(self, x, context, context_clip=None, mask=None, grid_sizes=None):
         r"""
         Args:
             x(Tensor): Shape [B, L1, C]
@@ -362,7 +367,7 @@ class ReWanT2VRawCrossAttention(ReWanSelfAttention):
 
 class ReWanT2VCrossAttention(ReWanSelfAttention):
 
-    def forward(self, x, context, mask=None, grid_sizes=None):
+    def forward(self, x, context, context_clip=None, mask=None, grid_sizes=None):
         r"""
         Args:
             x(Tensor): Shape [B, L1, C]
@@ -404,14 +409,25 @@ class ReWanI2VCrossAttention(ReWanSelfAttention):   # image2video only
         # self.alpha = nn.Parameter(torch.zeros((1, )))
         self.norm_k_img = RMSNorm(dim, eps=eps, elementwise_affine=True, device=operation_settings.get("device"), dtype=operation_settings.get("dtype")) if qk_norm else nn.Identity()
 
-    def forward(self, x, context, mask=None, grid_sizes=None):
+    def forward(self, x, context, context_clip=None, mask=None, grid_sizes=None):
         r"""
         Args:
             x(Tensor): Shape [B, L1, C]
             context(Tensor): Shape [B, L2, C]
         """
-        context_img = context[:, :257]
+        """context_img = context[:, :257]
         context     = context[:, 257:]
+        mask_clip = None"""
+        
+        context_img = context_clip
+        
+        mask_clip = None
+        if mask is not None:
+            mask_clip = F.interpolate(mask[None, None, ...].to(torch.float16), (mask.shape[0], 257 * mask.shape[1]//512), mode='nearest-exact').squeeze().to(mask.dtype)
+            """mask_clip = []
+            for i in range(mask.shape[-1]//512):
+                mask_clip.append(mask[:,i*512:i*512 + 257])
+            mask_clip = torch.cat(mask_clip, dim=-1)"""
 
         # compute query, key, value
         q = self.norm_q(self.q(x))
@@ -419,7 +435,7 @@ class ReWanI2VCrossAttention(ReWanSelfAttention):   # image2video only
         v = self.v(context)
         k_img = self.norm_k_img(self.k_img(context_img))
         v_img = self.v_img(context_img)
-        img_x = optimized_attention(q, k_img, v_img, heads=self.num_heads, mask=mask)
+        img_x = optimized_attention(q, k_img, v_img, heads=self.num_heads, mask=mask_clip)
         # compute attention
         x = optimized_attention(q, k, v, heads=self.num_heads, mask=mask)
 
@@ -486,6 +502,7 @@ class ReWanAttentionBlock(nn.Module):
         e,
         freqs,
         context,
+        context_clip=None,
         self_mask=None,
         cross_mask=None,
         grid_sizes = None,
@@ -513,7 +530,7 @@ class ReWanAttentionBlock(nn.Module):
         x = x + y * e[2]
 
         # cross-attention & ffn   # x,y.shape 2,14040,1536   
-        x = x + self.cross_attn(self.norm3(x), context, mask=cross_mask, grid_sizes=grid_sizes,) #mask[:,:txt_len])
+        x = x + self.cross_attn(self.norm3(x), context, context_clip=context_clip, mask=cross_mask, grid_sizes=grid_sizes,) #mask[:,:txt_len])
         #print("before norm2 ", torch.cuda.memory_allocated() / 1024**3)
         y = self.ffn(self.norm2(x) * (1 + e[4]) + e[3])
         #print("after norm2 ", torch.cuda.memory_allocated() / 1024**3)
@@ -690,6 +707,61 @@ class ReWanModel(torch.nn.Module):
         else:
             self.img_emb = None
 
+
+    def invert_patch_embedding(self, z: torch.Tensor, original_shape: torch.Size, grid_sizes: Optional[Tuple[int,int,int]] = None) -> torch.Tensor:
+
+        import torch.nn.functional as F
+        B, C_in, D, H, W = original_shape
+        pD, pH, pW = self.patch_size
+        sD, sH, sW = pD, pH, pW
+
+        if z.ndim == 3:
+            # [B, S, C_out] -> reshape to [B, C_out, D', H', W']
+            S = z.shape[1]
+            if grid_sizes is None:
+                Dp = D // pD
+                Hp = H // pH
+                Wp = W // pW
+            else:
+                Dp, Hp, Wp = grid_sizes
+            C_out = z.shape[2]
+            z = z.transpose(1, 2).reshape(B, C_out, Dp, Hp, Wp)
+        else:
+            B2, C_out, Dp, Hp, Wp = z.shape
+            assert B2 == B, "Batch size mismatch... ya sharked it."
+
+        # kncokout bias
+        b = self.patch_embedding.bias.view(1, C_out, 1, 1, 1)
+        z_nobias = z - b
+
+        # 2D filter -> pinv
+        w3 = self.patch_embedding.weight         # [C_out, C_in, 1, pH, pW]
+        w2 = w3.squeeze(2)                       # [C_out, C_in, pH, pW]
+        out_ch, in_ch, kH, kW = w2.shape
+        W_flat = w2.view(out_ch, -1)            # [C_out, in_ch*pH*pW]
+        W_pinv = torch.linalg.pinv(W_flat)      # [in_ch*pH*pW, C_out]
+
+        # merge depth for 2D unfold wackiness
+        z2 = z_nobias.permute(0,2,1,3,4).reshape(B*Dp, C_out, Hp, Wp)
+
+        # apply pinv ... get patch vectors
+        z_flat    = z2.reshape(B*Dp, C_out, -1)  # [B*Dp, C_out, L]
+        x_patches = W_pinv @ z_flat              # [B*Dp, in_ch*pH*pW, L]
+
+        # fold -> spatial frames
+        x2 = F.fold(
+            x_patches,
+            output_size=(H, W),
+            kernel_size=(pH, pW),
+            stride=(sH, sW)
+        )  # → [B*Dp, C_in, H, W]
+
+        # un-merge depth
+        x2 = x2.reshape(B, Dp, in_ch, H, W)           # [B, Dp,  C_in, H, W]
+        x_recon = x2.permute(0,2,1,3,4).contiguous()  # [B, C_in,   D, H, W]
+        return x_recon
+
+
     def forward_orig(
         self,
         x,
@@ -721,8 +793,31 @@ class ReWanModel(torch.nn.Module):
             List[Tensor]:
                 List of denoised video tensors with original input shapes [C_out, F, H / 8, W / 8]
         """
+        
+        
+        """trash = x[:,16:,...]
+        x_slice_flip = torch.cat([x[:,:16,...], torch.flip(trash, dims=[2])], dim=1)
+        x_slice_flip = self.patch_embedding(x_slice_flip.float()).to(x.dtype) 
+        x          = self.patch_embedding(x.float()).to(x.dtype)  
+        x = torch.cat([x[:,:,:9,...], x_slice_flip[:,:,9:,...]], dim=2)"""
+        
+        """x1 = self.patch_embedding(x[:,:,:8,...].float()).to(x.dtype)
+        
+        x_slice = torch.cat([x[:,:16,8:,...], trash[:,:,0:9, ...]], dim=1)
+        
+        x2          = self.patch_embedding(x_slice.float()).to(x.dtype) 
+        
+        x = torch.cat([x1, x2], dim=2)"""
+        
+
+        y0_style_pos        = transformer_options.get("y0_style_pos")
+        y0_style_neg        = transformer_options.get("y0_style_neg")
+        SIGMA = t[0].clone() / 1000
+        
         # embeddings
         #self.patch_embedding.to(self.time_embedding[0].weight.dtype)
+        x_orig     = x.clone()
+        #x          = self.patch_embedding(x.float()).to(self.time_embedding[0].weight.dtype)     #next line to torch.Size([1, 5120, 17, 30, 30]) from 1,36,17,30,30
         x          = self.patch_embedding(x.float()).to(x.dtype)         # vram jumped from ~16-16.5 up to 17.98     gained 300mb with weights at torch.float8_e4m3fn
         grid_sizes = x.shape[2:]
         x          = x.flatten(2).transpose(1, 2)      # x.shape 1,32400,5120  bfloat16   316.4 MB
@@ -735,15 +830,17 @@ class ReWanModel(torch.nn.Module):
         # context
         context = self.text_embedding(context)
 
+        context_clip = None
         if clip_fea is not None and self.img_emb is not None:
             context_clip = self.img_emb(clip_fea)  # bs x 257 x dim
-            context      = torch.concat([context_clip, context], dim=1)
+            #context      = torch.concat([context_clip, context], dim=1)
 
         # arguments
         kwargs = dict(
             e       = e0,
             freqs   = freqs,              # 1,32400,1,64,2,2 bfloat16 15.8 MB
             context = context,            # 1,1536,5120      bfloat16 15.0 MB
+            context_clip = context_clip,
             grid_sizes = grid_sizes)
 
 
@@ -817,12 +914,236 @@ class ReWanModel(torch.nn.Module):
         x = self.head(x, e)
 
         # unpatchify
-        x = self.unpatchify(x, grid_sizes)
-        return x
+        eps = self.unpatchify(x, grid_sizes)
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        dtype = eps.dtype if self.style_dtype is None else self.style_dtype
+        pinv_dtype = torch.float32 if dtype != torch.float64 else dtype
+        W_inv = None
+        
+        
+        if eps.shape[0] == 2 or (eps.shape[0] == 1 and not UNCOND):
+            if y0_style_pos is not None:
+                y0_style_pos_weight    = transformer_options.get("y0_style_pos_weight")
+                y0_style_pos_synweight = transformer_options.get("y0_style_pos_synweight")
+                y0_style_pos_synweight *= y0_style_pos_weight
+                
+                y0_style_pos = y0_style_pos.to(torch.float32)
+                x   = x_orig.clone().to(torch.float32)
+                eps = eps.to(torch.float32)
+                eps_orig = eps.clone()
+                
+                sigma = SIGMA #t_orig[0].to(torch.float32) / 1000
+                denoised = x - sigma * eps
+
+
+                img = comfy.ldm.common_dit.pad_to_patch_size(denoised, self.patch_size)
+                patch_size = self.patch_size
+
+                denoised_embed          = self.patch_embedding(img.float()) #.to(x.dtype)         # vram jumped from ~16-16.5 up to 17.98     gained 300mb with weights at torch.float8_e4m3fn
+                grid_sizes = denoised_embed.shape[2:]
+                denoised_embed          = denoised_embed.flatten(2).transpose(1, 2) 
+
+
+                img_y0_adain = comfy.ldm.common_dit.pad_to_patch_size(y0_style_pos, self.patch_size)
+                patch_size = self.patch_size
+
+                y0_adain_embed          = self.patch_embedding(img_y0_adain.float()) #.to(x.dtype)         # vram jumped from ~16-16.5 up to 17.98     gained 300mb with weights at torch.float8_e4m3fn
+                grid_sizes = y0_adain_embed.shape[2:]
+                y0_adain_embed          = y0_adain_embed.flatten(2).transpose(1, 2) 
+
+
+                if transformer_options['y0_style_method'] == "AdaIN":
+                    denoised_embed = adain_seq_inplace(denoised_embed, y0_adain_embed)
+                    for adain_iter in range(EO("style_iter", 0)):
+                        denoised_embed = adain_seq_inplace(denoised_embed, y0_adain_embed)
+                        #denoised_embed = (denoised_embed - b) @ torch.linalg.pinv(W.to(pinv_dtype)).T.to(dtype)
+                        denoised_embed = self.invert_patch_embedding(denoised_embed, x_orig.shape, grid_sizes)
+                        denoised_embed          = self.patch_embedding(denoised_embed.float()) #.to(x.dtype)         # vram jumped from ~16-16.5 up to 17.98     gained 300mb with weights at torch.float8_e4m3fn
+                        grid_sizes = denoised_embed.shape[2:]
+                        denoised_embed          = denoised_embed.flatten(2).transpose(1, 2) 
+                        
+                        #denoised_embed = F.linear(denoised_embed         .to(W), W, b).to(img)
+                        denoised_embed = adain_seq_inplace(denoised_embed, y0_adain_embed)
+                        
+                        
+                        
+                        
+                elif transformer_options['y0_style_method'] == "WCT":
+                    if self.y0_adain_embed is None or self.y0_adain_embed.shape != y0_adain_embed.shape or torch.norm(self.y0_adain_embed - y0_adain_embed) > 0:
+                        self.y0_adain_embed = y0_adain_embed
+                        
+                        f_s          = y0_adain_embed[0].clone()
+                        self.mu_s    = f_s.mean(dim=0, keepdim=True)
+                        f_s_centered = f_s - self.mu_s
+                        
+                        cov = (f_s_centered.T.double() @ f_s_centered.double()) / (f_s_centered.size(0) - 1)
+
+                        S_eig, U_eig = torch.linalg.eigh(cov + 1e-5 * torch.eye(cov.size(0), dtype=cov.dtype, device=cov.device))
+                        S_eig_sqrt    = S_eig.clamp(min=0).sqrt() # eigenvalues -> singular values
+                        
+                        whiten = U_eig @ torch.diag(S_eig_sqrt) @ U_eig.T
+                        self.y0_color  = whiten.to(f_s_centered)
+
+                    for wct_i in range(eps.shape[0]):
+                        f_c          = denoised_embed[wct_i].clone()
+                        mu_c         = f_c.mean(dim=0, keepdim=True)
+                        f_c_centered = f_c - mu_c
+                        
+                        cov = (f_c_centered.T.double() @ f_c_centered.double()) / (f_c_centered.size(0) - 1)
+
+                        S_eig, U_eig  = torch.linalg.eigh(cov + 1e-5 * torch.eye(cov.size(0), dtype=cov.dtype, device=cov.device))
+                        inv_sqrt_eig  = S_eig.clamp(min=0).rsqrt() 
+                        
+                        whiten = U_eig @ torch.diag(inv_sqrt_eig) @ U_eig.T
+                        whiten = whiten.to(f_c_centered)
+
+                        f_c_whitened = f_c_centered @ whiten.T
+                        f_cs         = f_c_whitened @ self.y0_color.T + self.mu_s
+                        
+                        denoised_embed[wct_i] = f_cs
+
+                denoised_approx = self.invert_patch_embedding(denoised_embed, x_orig.shape, grid_sizes)
+                
+                denoised_approx = denoised_approx.to(eps)
+
+                eps = (x - denoised_approx) / sigma
+                if eps.shape[0] == 2:
+                    eps[1] = eps_orig[1] + y0_style_pos_weight * (eps[1] - eps_orig[1])
+                    eps[0] = eps_orig[0] + y0_style_pos_synweight * (eps[0] - eps_orig[0])
+                else:
+                    eps[0] = eps_orig[0] + y0_style_pos_weight * (eps[0] - eps_orig[0])
+                
+                eps = eps.float()
+        
+        
+        if eps.shape[0] == 2 or (eps.shape[0] == 1 and UNCOND):
+            if y0_style_neg is not None:
+                y0_style_neg_weight    = transformer_options.get("y0_style_neg_weight")
+                y0_style_neg_synweight = transformer_options.get("y0_style_neg_synweight")
+                y0_style_neg_synweight *= y0_style_neg_weight
+                
+                y0_style_neg = y0_style_neg.to(torch.float32)
+                x   = x_orig.clone().to(torch.float32)
+                eps = eps.to(torch.float32)
+                eps_orig = eps.clone()
+                
+                sigma = SIGMA #t_orig[0].to(torch.float32) / 1000
+                denoised = x - sigma * eps
+
+
+                img = comfy.ldm.common_dit.pad_to_patch_size(denoised, self.patch_size)
+                patch_size = self.patch_size
+
+                denoised_embed          = self.patch_embedding(img.float()) #.to(x.dtype)         # vram jumped from ~16-16.5 up to 17.98     gained 300mb with weights at torch.float8_e4m3fn
+                grid_sizes = denoised_embed.shape[2:]
+                denoised_embed          = denoised_embed.flatten(2).transpose(1, 2) 
+
+
+                img_y0_adain = comfy.ldm.common_dit.pad_to_patch_size(y0_style_neg, self.patch_size)
+                patch_size = self.patch_size
+
+                y0_adain_embed          = self.patch_embedding(img_y0_adain.float()) #.to(x.dtype)         # vram jumped from ~16-16.5 up to 17.98     gained 300mb with weights at torch.float8_e4m3fn
+                grid_sizes = y0_adain_embed.shape[2:]
+                y0_adain_embed          = y0_adain_embed.flatten(2).transpose(1, 2) 
+
+
+                if transformer_options['y0_style_method'] == "AdaIN":
+                    denoised_embed = adain_seq_inplace(denoised_embed, y0_adain_embed)
+                    for adain_iter in range(EO("style_iter", 0)):
+                        denoised_embed = adain_seq_inplace(denoised_embed, y0_adain_embed)
+                        #denoised_embed = (denoised_embed - b) @ torch.linalg.pinv(W.to(pinv_dtype)).T.to(dtype)
+                        denoised_embed = self.invert_patch_embedding(denoised_embed, x_orig.shape, grid_sizes)
+                        denoised_embed = self.patch_embedding(denoised_embed.float()) #.to(x.dtype)         # vram jumped from ~16-16.5 up to 17.98     gained 300mb with weights at torch.float8_e4m3fn
+                        grid_sizes = denoised_embed.shape[2:]
+                        denoised_embed = denoised_embed.flatten(2).transpose(1, 2)                         
+                        
+                        #denoised_embed = F.linear(denoised_embed         .to(W), W, b).to(img)
+                        denoised_embed = adain_seq_inplace(denoised_embed, y0_adain_embed)
+                        
+                        
+                        
+                        
+                elif transformer_options['y0_style_method'] == "WCT":
+                    if self.y0_adain_embed is None or self.y0_adain_embed.shape != y0_adain_embed.shape or torch.norm(self.y0_adain_embed - y0_adain_embed) > 0:
+                        self.y0_adain_embed = y0_adain_embed
+                        
+                        f_s          = y0_adain_embed[0].clone()
+                        self.mu_s    = f_s.mean(dim=0, keepdim=True)
+                        f_s_centered = f_s - self.mu_s
+                        
+                        cov = (f_s_centered.T.double() @ f_s_centered.double()) / (f_s_centered.size(0) - 1)
+
+                        S_eig, U_eig = torch.linalg.eigh(cov + 1e-5 * torch.eye(cov.size(0), dtype=cov.dtype, device=cov.device))
+                        S_eig_sqrt    = S_eig.clamp(min=0).sqrt() # eigenvalues -> singular values
+                        
+                        whiten = U_eig @ torch.diag(S_eig_sqrt) @ U_eig.T
+                        self.y0_color  = whiten.to(f_s_centered)
+
+                    for wct_i in range(eps.shape[0]):
+                        f_c          = denoised_embed[wct_i].clone()
+                        mu_c         = f_c.mean(dim=0, keepdim=True)
+                        f_c_centered = f_c - mu_c
+                        
+                        cov = (f_c_centered.T.double() @ f_c_centered.double()) / (f_c_centered.size(0) - 1)
+
+                        S_eig, U_eig  = torch.linalg.eigh(cov + 1e-5 * torch.eye(cov.size(0), dtype=cov.dtype, device=cov.device))
+                        inv_sqrt_eig  = S_eig.clamp(min=0).rsqrt() 
+                        
+                        whiten = U_eig @ torch.diag(inv_sqrt_eig) @ U_eig.T
+                        whiten = whiten.to(f_c_centered)
+
+                        f_c_whitened = f_c_centered @ whiten.T
+                        f_cs         = f_c_whitened @ self.y0_color.T + self.mu_s
+                        
+                        denoised_embed[wct_i] = f_cs
+
+                denoised_approx = self.invert_patch_embedding(denoised_embed, x_orig.shape, grid_sizes)
+                
+                denoised_approx = denoised_approx.to(eps)
+
+                eps = (x - denoised_approx) / sigma
+                eps[0] = eps_orig[0] + y0_style_neg_weight * (eps[0] - eps_orig[0])
+                if eps.shape[0] == 2:
+                    eps[1] = eps_orig[1] + y0_style_neg_synweight * (eps[1] - eps_orig[1])
+                
+                eps = eps.float()
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        return eps
+    
+    
+    
+    
+    
+    
     # context.shape = 2,512,1536     x.shape = 2,14040,1536      timestep.shape      h_len=30, w_len=52    30 * 52 = 1560
     def forward(self, x, timestep, context, clip_fea=None, transformer_options={}, **kwargs):
         
-        if clip_fea is not None:
+        """if False: #clip_fea is not None:
             bs, c, t, h, w = x.shape
             x = comfy.ldm.common_dit.pad_to_patch_size(x, self.patch_size)
             patch_size = self.patch_size    # tuple = 1,2,2,
@@ -840,9 +1161,12 @@ class ReWanModel(torch.nn.Module):
             img_ids = repeat(img_ids, "t h w c -> b (t h w) c", b=bs)
             # 14040 = 9 * 1560       1560 = 1536 + 24  1560/24 = 65
             freqs = self.rope_embedder(img_ids).movedim(1, 2)
-            return self.forward_orig(x, timestep, context, clip_fea=clip_fea, freqs=freqs)[:, :, :t, :h, :w]
+            return self.forward_orig(x, timestep, context, clip_fea=clip_fea, freqs=freqs)[:, :, :t, :h, :w]"""
+            
         
         
+        
+        #x = torch.cat([x[:,:,:8,...],   torch.flip(x[:,:,8:,...], dims=[2])], dim=2)
         
         x_orig = x.clone()      # 1,16,36,60,60   bfloat16
         timestep_orig = timestep.clone() # 1000    float32
@@ -886,7 +1210,7 @@ class ReWanModel(torch.nn.Module):
                 if AttnMask is not None and transformer_options['reg_cond_weight'] != 0.0:
                     AttnMask.attn_mask_recast(x.dtype)
                     context_tmp = RegContext.get().to(context.dtype)
-                    #context_tmp = 0 * context_tmp.clone()
+                    clip_fea    = RegContext.get_clip_fea().to(x.dtype)
                     
                     A = context[i][None,...].clone()
                     B = context_tmp
@@ -905,12 +1229,11 @@ class ReWanModel(torch.nn.Module):
                 
                 if AttnMask is not None and transformer_options['reg_cond_weight'] != 0.0:
                     AttnMask.attn_mask_recast(x.dtype)
-                    context_tmp = RegContext.get()
-                    
+                    context_tmp  = RegContext.get()
+                    clip_fea     = RegContext.get_clip_fea().to(x.dtype)
                 else:
                     context_tmp = context[i][None,...].clone()
 
-            
             if context_tmp is None:
                 context_tmp = context[i][None,...].clone()
             context_tmp = context_tmp.to(context.dtype)
@@ -944,9 +1267,20 @@ class ReWanModel(torch.nn.Module):
                                         UNCOND              = UNCOND,
                                         )[:, :, :t, :h, :w]
         
+            #out_x = torch.cat([out_x[:,:,:8,...],   torch.flip(out_x[:,:,8:,...], dims=[2])], dim=2)
             out_list.append(out_x)
         
         out_stack = torch.stack(out_list, dim=0).squeeze(dim=1)
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
 
         return out_stack
         
