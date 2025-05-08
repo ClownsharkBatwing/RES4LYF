@@ -1,4 +1,21 @@
-# BETA NODES AVAILABLE (UPDATE: NOW MAIN VERSION)
+# NEW NODES AVAILABLE!
+
+# NEW FEATURES #
+
+**STYLE TRANSFER**
+Currently supported models: HiDream, Flux, SD3.5, and WAN.
+![image](https://github.com/user-attachments/assets/e872e258-c786-4475-8369-c8487ee5ec72)
+
+**REGIONAL CONDITIONING**
+Unlimited zones! Over 10 zones have been used in one image before. 
+Currently supported models: HiDream, Flux, SD3.5, and AuraFlow, and WAN.
+
+**TEMPORAL CONDITIONING**
+Unlimited zones! Ability to change the prompt for each frame.
+Currently supported models: WAN.
+
+![image](https://github.com/user-attachments/assets/743bc972-cfbf-45a8-8745-d6ca1a6b0bab)
+
 
 Some of you may be aware that there's been a "beta" version of the nodes in progress for some time now. They are now **vastly superior** to the current "main" versions, and I highly recommend checking them out. Once the various options and parameters are fully settled, they will become the "main" versions of the nodes, and the current versions will remain available but with "Legacy" appended to their names.
 
