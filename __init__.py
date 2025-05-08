@@ -49,6 +49,7 @@ NODE_CLASS_MAPPINGS = {
 
     "FluxLoader"                          : loaders.FluxLoader,
     "SD35Loader"                          : loaders.SD35Loader,
+    "ClownModelLoader"                    : loaders.RES4LYFModelLoader,
     
     
 
