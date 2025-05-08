@@ -152,6 +152,8 @@ class BaseModelLoader:
         elif vae_name in ["taesd", "taesdxl", "taesd3", "taef1"]:
             sd = self.load_taesd(vae_name)
             return comfy.sd.VAE(sd=sd)
+        elif vae_name == ".none":
+            return None
         else:
             vae_path = folder_paths.get_full_path_or_raise("vae", vae_name)
             sd = comfy.utils.load_torch_file(vae_path)
@@ -252,6 +254,58 @@ class SD35Loader(BaseModelLoader):
             clip = comfy.sd.load_clip(clip_paths,
                                     embedding_directory=folder_paths.get_folder_paths("embeddings"),
                                     clip_type=comfy.sd.CLIPType.SD3)
+
+        vae = self.load_vae(vae_name, ckpt_out)
+
+        return (ckpt_out[0], clip, vae)
+    
+class RES4LYFModelLoader(BaseModelLoader):
+    @classmethod
+    def INPUT_TYPES(s):
+        return {"required": {
+            "model_name":     (s.get_model_files(),),
+            "weight_dtype":   (s.get_weight_options(),),
+            "clip_name1_opt": ([".none"] + s.get_clip_options(),),
+            "clip_name2_opt": ([".none"] + folder_paths.get_filename_list("text_encoders"),),
+            "clip_name3_opt": ([".none"] + folder_paths.get_filename_list("text_encoders"),),
+            "clip_name4_opt": ([".none"] + folder_paths.get_filename_list("text_encoders"),),
+            "clip_type":      (["stable_diffusion", "stable_cascade", "sd3", "stable_audio", "mochi", "ltxv", "pixart", "cosmos", "lumina2", "wan", "hidream", "chroma", "ace"], ),
+            "vae_name":       ([".none", ".use_ckpt_vae"] + folder_paths.get_filename_list("vae") + ["taesd", "taesdxl", "taesd3", "taef1"],),
+        }}
+
+    RETURN_TYPES = ("MODEL", "CLIP", "VAE")
+    RETURN_NAMES = ("model", "clip", "vae")
+    FUNCTION = "main"
+    CATEGORY = "RES4LYF/loaders"
+    
+    def main(self, model_name, weight_dtype, clip_name1_opt, clip_name2_opt, clip_name3_opt, clip_name4_opt, clip_type, vae_name):
+        model_options = self.process_weight_dtype(weight_dtype)
+        
+        torch.manual_seed(42)
+        torch.cuda.manual_seed_all(42)
+        
+        sdCLIPType = getattr(comfy.sd.CLIPType, clip_type.upper(), comfy.sd.CLIPType.STABLE_DIFFUSION)
+        if clip_name1_opt == ".use_ckpt_clip" and (clip_name2_opt != ".none" or clip_name3_opt != ".none" or clip_name4_opt != ".none"):
+            raise ValueError("Cannot specify both \".use_ckpt_clip\" and another clip")
+
+        output_vae = vae_name == ".use_ckpt_vae"
+        output_clip = clip_name1_opt == ".use_ckpt_clip"
+        ckpt_out = self.load_checkpoint(model_name, output_vae, output_clip, model_options)
+
+        if clip_name1_opt == ".use_ckpt_clip":
+            if ckpt_out[1] is None:
+                raise ValueError("Model does not have a clip")
+            clip = ckpt_out[1]
+        elif clip_name1_opt == ".none":
+            clip = None
+        else:
+            clip_paths = [folder_paths.get_full_path_or_raise("text_encoders", clip_name1_opt)]
+            for clip_name in [clip_name2_opt, clip_name3_opt, clip_name4_opt]:
+                if clip_name != ".none":
+                    clip_paths.append(folder_paths.get_full_path_or_raise("text_encoders", clip_name))
+            clip = comfy.sd.load_clip(clip_paths,
+                                    embedding_directory=folder_paths.get_folder_paths("embeddings"),
+                                    clip_type=sdCLIPType)
 
         vae = self.load_vae(vae_name, ckpt_out)
 
