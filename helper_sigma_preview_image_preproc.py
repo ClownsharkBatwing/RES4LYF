@@ -108,8 +108,11 @@ class SigmasPreview(SaveImage):
             "required": {
                 "sigmas":         ("SIGMAS",),
                 "print_as_list" : ("BOOLEAN", {"default": False}),
-            }
+            },
         }
+
+    RETURN_TYPES = ("IMAGE",)
+    RETURN_NAMES = ("preview_image",)
 
     FUNCTION = "sigmas_preview"
     OUTPUT_NODE = True
@@ -148,8 +151,10 @@ class SigmasPreview(SaveImage):
         tensor_image = torch.from_numpy(numpy_image)
         tensor_image = tensor_image.unsqueeze(0)
         images_tensor = torch.cat([tensor_image], 0)
-        
-        return self.save_images(images_tensor, "SigmasPreview")
+        output = self.save_images(images_tensor, "SigmasPreview")
+        output["result"] = torch.movedim(images_tensor[:,:,:,:-1], -1, 0) 
+
+        return output
 
 
 
