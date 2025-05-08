@@ -51,7 +51,6 @@ NODE_CLASS_MAPPINGS = {
     "SD35Loader"                          : loaders.SD35Loader,
     "ClownModelLoader"                    : loaders.RES4LYFModelLoader,
     
-    
 
     "TextBox1"                            : nodes_misc.TextBox1,
     "TextBox2"                            : nodes_misc.TextBox2,

@@ -178,7 +178,7 @@ class ReWanPatcherAdvanced:
                 "cross_attn_blocks": ("STRING",  {"default": "all", "multiline": True}),
                 "enable"           : ("BOOLEAN", {"default": True}),
                 "sliding_window_self_attn" :  (['false', 'standard', 'circular'], {"default": "false"}),
-                "sliding_window_size": ("INT",   {"default": 15,   "min": 1,    "max": 0xffffffffffffffff, "tooltip": "How many real frames each frame sees. Divide frames by 4 to get real frames."}),
+                "sliding_window_frames": ("INT",   {"default": 60,   "min": 4,    "max": 0xffffffffffffffff, "step": 4, "tooltip": "How many real frames each frame sees. Divide frames by 4 to get real frames."}),
             }
         }
     RETURN_TYPES = ("MODEL",)
@@ -186,7 +186,13 @@ class ReWanPatcherAdvanced:
     CATEGORY     = "RES4LYF/model_patches"
     FUNCTION     = "main"
 
-    def main(self, model, self_attn_blocks, cross_attn_blocks, sliding_window_self_attn="false", sliding_window_size=15, enable=True, force=False):
+    def main(self, model, self_attn_blocks, cross_attn_blocks, sliding_window_self_attn="false", sliding_window_frames=60, style_dtype="float32", enable=True, force=False):
+        
+        model.model.diffusion_model.style_dtype = getattr(torch, style_dtype) if style_dtype != "default" else None
+        model.model.diffusion_model.proj_weights = None
+        model.model.diffusion_model.y0_adain_embed = None
+        
+        sliding_window_size = sliding_window_frames // 4
         
         self_attn_blocks  = parse_range_string(self_attn_blocks)
         cross_attn_blocks = parse_range_string(cross_attn_blocks)

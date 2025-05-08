@@ -813,5 +813,3 @@ def check_projection_consistency(x, W, b):
     error = torch.norm(x - x_recon)
     in_subspace = error < 1e-3
     return error, in_subspace
-
-
