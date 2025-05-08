@@ -147,6 +147,47 @@ def cv2_layer(tensor, function):
 
 
 
+    
+
+class ImageRepeatTileToSize:
+    def __init__(self):
+        pass
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "image":  ("IMAGE",),
+                "width":  ("INT",     {"default": 1024, "min": 1, "step": 1,}),
+                "height": ("INT",     {"default": 1024, "min": 1, "step": 1,}),
+                "crop":   ("BOOLEAN", {"default": True}),
+            },
+        }
+
+    RETURN_TYPES = ("IMAGE",)
+    RETURN_NAMES = ("image",)
+    FUNCTION     = "main"
+    CATEGORY     = "RES4LYF/images"
+
+    def main(self, image, width, height, crop):
+
+        img = image.clone().detach()
+        
+        b, h, w, c = img.shape
+        
+        h_tgt = int(torch.ceil(torch.div(height, h)))
+        w_tgt = int(torch.ceil(torch.div(width,  w)))
+        
+        img_tiled = torch.tile(img, (h_tgt, w_tgt, 1))
+        
+        if crop:
+            img_tiled = img_tiled[:,:height, :width, :]
+
+        return (img_tiled,)
+
+
+
+
 # Rewrite of the WAS Film Grain node, much improved speed and efficiency (https://github.com/WASasquatch/was-node-suite-comfyui)
 
 class Film_Grain: 
@@ -157,12 +198,12 @@ class Film_Grain:
     def INPUT_TYPES(cls):
         return {
             "required": {
-                "image": ("IMAGE",),
-                "density": ("FLOAT", {"default": 1.0, "min": 0.01, "max": 1.0, "step": 0.01}),
-                "intensity": ("FLOAT", {"default": 1.0, "min": 0.01, "max": 1.0, "step": 0.01}),
-                "highlights": ("FLOAT", {"default": 1.0, "min": 0.01, "max": 255.0, "step": 0.01}),
-                "supersample_factor": ("INT", {"default": 4, "min": 1, "max": 8, "step": 1}),
-                "repeats": ("INT", {"default": 1, "min": 1, "max": 1000, "step": 1})
+                "image":              ("IMAGE",),
+                "density":            ("FLOAT", {"default": 1.0, "min": 0.01, "max": 1.0, "step": 0.01}),
+                "intensity":          ("FLOAT", {"default": 1.0, "min": 0.01, "max": 1.0, "step": 0.01}),
+                "highlights":         ("FLOAT", {"default": 1.0, "min": 0.01, "max": 255.0, "step": 0.01}),
+                "supersample_factor": ("INT",   {"default": 4, "min": 1, "max": 8, "step": 1}),
+                "repeats":            ("INT",   {"default": 1, "min": 1, "max": 1000, "step": 1})
             }
         }
     RETURN_TYPES = ("IMAGE",)

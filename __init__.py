@@ -263,6 +263,7 @@ NODE_CLASS_MAPPINGS = {
     "Mask Sketch"                         : images.MaskSketch,
     
     "Image Grain Add"                     : images.Image_Grain_Add,
+    "Image Repeat Tile To Size"           : images.ImageRepeatTileToSize,
 
     "Frames Concat Masks"                 : nodes_latents.Frames_Concat_Masks,
 
