@@ -1,20 +1,18 @@
-## NEW NODES AVAILABLE!
+# NEW NODES AVAILABLE!
 
-# NEW FEATURES #
-
-**STYLE TRANSFER**
+# STYLE TRANSFER
 
 Currently supported models: HiDream, Flux, SD3.5, and WAN.
 
 ![image](https://github.com/user-attachments/assets/e872e258-c786-4475-8369-c8487ee5ec72)
 
-**REGIONAL CONDITIONING**
+# REGIONAL CONDITIONING
 
 Unlimited zones! Over 10 zones have been used in one image before. 
 
 Currently supported models: HiDream, Flux, SD3.5, and AuraFlow, and WAN.
 
-**TEMPORAL CONDITIONING**
+# TEMPORAL CONDITIONING
 
 Unlimited zones! Ability to change the prompt for each frame.
 
