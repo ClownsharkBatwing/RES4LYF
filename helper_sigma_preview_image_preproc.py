@@ -112,7 +112,6 @@ class SigmasPreview(SaveImage):
         }
 
     RETURN_TYPES = ("IMAGE",)
-    RETURN_NAMES = ("preview_image",)
 
     FUNCTION = "sigmas_preview"
     OUTPUT_NODE = True
@@ -152,7 +151,7 @@ class SigmasPreview(SaveImage):
         tensor_image = tensor_image.unsqueeze(0)
         images_tensor = torch.cat([tensor_image], 0)
         output = self.save_images(images_tensor, "SigmasPreview")
-        output["result"] = torch.movedim(images_tensor[:,:,:,:-1], -1, 0) 
+        output["result"] = (images_tensor,)
 
         return output
 
