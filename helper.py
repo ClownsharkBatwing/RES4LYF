@@ -728,7 +728,6 @@ class FrameWeightsManager:
         change_frames = max(change_frames, 4)
         t = torch.linspace(0, 1, change_frames, dtype=self.dtype, device=self.device)
         weights = 1.0 - (1.0 - low_value) * (1.0 - torch.exp(-k * t))
-        #weights = torch.pow(low_value, t)
         weights = torch.cat([torch.full((change_start,), 1.0), weights])
         weights = torch.cat([weights, torch.full((num_frames,), weights[-1])])
         weights = weights[:num_frames]
