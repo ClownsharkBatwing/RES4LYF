@@ -192,33 +192,36 @@ class DoubleStreamBlock(nn.Module):
             if not update_cross_attn['skip_cross_attn']:
                 UNCOND      = update_cross_attn['UNCOND']
                 
+                #txt_orig = txt.clone()
+                txt_update = self.txt_norm1(txt.cpu()).float()
+                txt_update = (1 + txt_mod1.scale.to(txt_update)) * txt_update + txt_mod1.shift.to(txt_update)
+                
                 if UNCOND:
-                    llama_start = update_cross_attn['src_llama_start']
-                    llama_end   = update_cross_attn['src_llama_end']
                     t5_start    = update_cross_attn['src_t5_start']
                     t5_end      = update_cross_attn['src_t5_end']
                 
-                    txt_src    = txt[:,t5_start:t5_end,:].clone().float()
+                    txt_src    = txt_update[:,t5_start:t5_end,:].cpu() #.float()
                     self.c_src = txt_src.transpose(-2,-1).squeeze(0)    # shape [C,1]
                 else:
-                    llama_start = update_cross_attn['tgt_llama_start']
-                    llama_end   = update_cross_attn['tgt_llama_end']
                     t5_start    = update_cross_attn['tgt_t5_start']
                     t5_end      = update_cross_attn['tgt_t5_end']
                     
                     lamb  = update_cross_attn['lamb']
                     erase = update_cross_attn['erase']
                     
-                    txt_guide = txt[:,t5_start:t5_end,:].clone().float()
-                    c_guide   = txt_guide.transpose(-2,-1).squeeze(0)  # [C,1]
+                    #txt_guide = txt_update[:,t5_start:t5_end,:].clone().float()
+                    #c_guide   = txt_guide.transpose(-2,-1).squeeze(0)  # [C,1]
                     
-                    Wv_old       = self.txt_attn.qkv.weight.data.float()              # [C,C]
-                    Wk_old       = self.to_k_t.weight.data.float()              # [C,C]
+                    c_guide   = txt_update[:,t5_start:t5_end,:].transpose(-2,-1).squeeze(0)  # [C,1]
+                    
+                    
+                    Wv_old       = self.txt_attn.qkv.weight.data.to(c_guide)              # [C,C]
+                    #Wk_old       = self.to_k_t.weight.data.float()              # [C,C]
 
                     v_star       = Wv_old @ c_guide                             # [C,1]
-                    k_star       = Wk_old @ c_guide                             # [C,1]
+                    #k_star       = Wk_old @ c_guide                             # [C,1]
 
-                    c_src        = self.c_src                                   # [C,1]
+                    c_src        = self.c_src  #.cpu()                                   # [C,1]
 
                     lamb         = lamb
                     erase_scale  = erase
@@ -229,15 +232,56 @@ class DoubleStreamBlock(nn.Module):
 
                     mat1_v       = lamb*Wv_old + erase_scale*(v_star @ c_src.T)     # [C,C]
                     mat2_v       = lamb*I      + erase_scale*(C)                    # [C,C]
-                    Wv_new       = mat1_v @ torch.inverse(mat2_v)                   # [C,C]
+                    
+                    #import gc
+                    I       = I.to("cpu")
+                    C       = C.to("cpu")
+                    c_src   = c_src.to("cpu")
+                    self.c_src   = self.c_src.to("cpu")
+                    v_star  = v_star.to("cpu")
+                    Wv_old  = Wv_old.to("cpu")
+                    c_guide = c_guide.to("cpu")
+                    del I, C, c_src, self.c_src, v_star, Wv_old, c_guide
+                    #torch.cuda.empty_cache()
+                    #gc.collect()
+                    
+                    #Wv_new       = mat1_v @ torch.inverse(mat2_v.float()).to(mat1_v)                   # [C,C]
+                    #Wv_new = torch.linalg.solve(mat2_v, mat1_v)
+                    Wv_new = torch.linalg.solve(mat2_v.T, mat1_v.T).T
 
-                    mat1_k       = lamb*Wk_old + erase_scale*(k_star @ c_src.T)     # [C,C]
-                    mat2_k       = lamb*I      + erase_scale*(C)                    # [C,C]
-                    Wk_new       = mat1_k @ torch.inverse(mat2_k)                   # [C,C]
+                    mat1_v = mat1_v.to("cpu")
+                    mat2_v = mat2_v.to("cpu")
+                    del mat1_v, mat2_v
+                    #del mat1_v, mat2_v, I, C, c_src, v_star, Wv_old, c_guide
+                    
+                    #torch.cuda.empty_cache()
+                    #gc.collect()
+                    #mat1_k       = lamb*Wk_old + erase_scale*(k_star @ c_src.T)     # [C,C]
+                    #mat2_k       = lamb*I      + erase_scale*(C)                    # [C,C]
+                    #Wk_new       = mat1_k @ torch.inverse(mat2_k)                   # [C,C]
 
-                    self.to_v_t.weight.data.copy_(Wv_new.to(self.to_v_t.weight.data.dtype))
-                    self.to_k_t.weight.data.copy_(Wk_new.to(self.to_k_t.weight.data.dtype))
-                            
+                    #self.to_v_t.weight.data.copy_(Wv_new.to(self.to_v_t.weight.data.dtype))
+                    #self.to_k_t.weight.data.copy_(Wk_new.to(self.to_k_t.weight.data.dtype))
+                    
+                    update_q = update_cross_attn['update_q']
+                    update_k = update_cross_attn['update_k']
+                    update_v = update_cross_attn['update_v']
+                    
+                    if not update_q:
+                        Wv_new[:3072,    :] = self.txt_attn.qkv.weight.data[:3072,    :].to(Wv_new)
+                    if not update_k:
+                        Wv_new[3072:6144,:] = self.txt_attn.qkv.weight.data[3072:6144,:].to(Wv_new)
+                    if not update_v:
+                        Wv_new[6144:    ,:] = self.txt_attn.qkv.weight.data[6144:    ,:].to(Wv_new)
+                    
+                    self.txt_attn.qkv.weight.data.copy_(Wv_new.to(self.txt_attn.qkv.weight.data.dtype))
+                    #self.txt_attn.qkv.weight.data = Wv_new.to(self.txt_attn.qkv.weight.data.dtype)
+                    
+                    Wv_new = Wv_new.to("cpu")
+                    del Wv_new
+                    #torch.cuda.empty_cache()
+                    #gc.collect()
+                    
         
         return img, txt, attn_mask
         

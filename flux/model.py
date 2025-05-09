@@ -25,6 +25,8 @@ from comfy.ldm.flux.model import Flux as Flux
 from einops import rearrange, repeat
 import comfy.ldm.common_dit
 
+from ..latents import interpolate_spd
+
 @dataclass
 class FluxParams:
     in_channels        : int
@@ -137,7 +139,7 @@ class ReFlux(Flux):
             if mask is not None and mask_type_bool and weight < (i / (total_layers-1)):
                 mask = mask.to(img.dtype)
 
-            img, txt, attn_mask = block(img=img, txt=txt, vec=vec, pe=pe, mask=mask, idx=i,update_cross_attn=update_cross_attn)
+            img, txt, attn_mask = block(img=img, txt=txt, vec=vec, pe=pe, mask=mask, idx=i, update_cross_attn=update_cross_attn)
 
             if control is not None: # Controlnet
                 control_i = control.get("input")
@@ -200,14 +202,7 @@ class ReFlux(Flux):
             if update_cross_attn is not None:
                 update_cross_attn['UNCOND'] = UNCOND
                 
-            if update_cross_attn is not None and update_cross_attn['skip_cross_attn']:
-                if UNCOND:
-                    img = transformer_options['y0_inv'].clone().to(x)
-                else:
-                    img = transformer_options['y0'].clone().to(x)
-            else:
-                img = x
-                    
+            img = x
             bs, c, h, w = x.shape
             patch_size  = 2
             img           = comfy.ldm.common_dit.pad_to_patch_size(img, (patch_size, patch_size))    # 1,16,192,192
@@ -301,24 +296,18 @@ class ReFlux(Flux):
                 w_len = ((w + (patch_size // 2)) // patch_size) # w_len 96
                 img = rearrange(img, "b c (h ph) (w pw) -> b (h w) (c ph pw)", ph=patch_size, pw=patch_size) # img 1,9216,64     1,16,128,128 -> 1,4096,64
 
-                #denoised_embed = self.img_in(img.to(torch.bfloat16).to(self.img_in.weight.device)).to(img)
-                
                 img_y0_adain = comfy.ldm.common_dit.pad_to_patch_size(y0_style_pos, (self.patch_size, self.patch_size))
 
                 h_len = ((h + (patch_size // 2)) // patch_size) # h_len 96
                 w_len = ((w + (patch_size // 2)) // patch_size) # w_len 96
                 img_y0_adain = rearrange(img_y0_adain, "b c (h ph) (w pw) -> b (h w) (c ph pw)", ph=patch_size, pw=patch_size) # img 1,9216,64     1,16,128,128 -> 1,4096,64
 
-                #y0_adain_embed = self.img_in(img_y0_adain.to(torch.bfloat16).to(self.img_in.weight.device)).to(img_y0_adain)
-                
                 W = self.img_in.weight.data.to(torch.float32)   # shape [2560, 64]
                 b = self.img_in.bias.data.to(torch.float32)     # shape [2560]
                 
                 denoised_embed = F.linear(img         .to(W), W, b).to(img)
                 y0_adain_embed = F.linear(img_y0_adain.to(W), W, b).to(img_y0_adain)
-                
-                #denoised_embed = adain_seq(denoised_embed, y0_adain_embed)
-                
+
                 if transformer_options['y0_style_method'] == "AdaIN":
                     denoised_embed = adain_seq_inplace(denoised_embed, y0_adain_embed)
                     for adain_iter in range(EO("style_iter", 0)):
@@ -328,28 +317,36 @@ class ReFlux(Flux):
                         denoised_embed = adain_seq_inplace(denoised_embed, y0_adain_embed)
                         
                 elif transformer_options['y0_style_method'] == "WCT":
-                    if self.y0_adain_embed is None or torch.norm(self.y0_adain_embed - y0_adain_embed) > 0:
+                    if self.y0_adain_embed is None or self.y0_adain_embed.shape != y0_adain_embed.shape or torch.norm(self.y0_adain_embed - y0_adain_embed) > 0:
                         self.y0_adain_embed = y0_adain_embed
-                        f_s = y0_adain_embed[0].clone()
-                        self.mu_s = f_s.mean(dim=0, keepdim=True)
-                        f_s_centered = f_s - self.mu_s
-                        cov_s = f_s_centered.T @ f_s_centered / (f_s_centered.size(0) - 1)
-                        U_s, S_s, _ = torch.svd(cov_s + 1e-5 * torch.eye(cov_s.size(0), device=cov_s.device))
-                        self.y0_color = U_s.to(dtype) @ torch.diag(S_s.to(dtype).sqrt()) @ U_s.T.to(dtype)
                         
+                        f_s          = y0_adain_embed[0].clone()
+                        self.mu_s    = f_s.mean(dim=0, keepdim=True)
+                        f_s_centered = f_s - self.mu_s
+                        
+                        cov = (f_s_centered.T.double() @ f_s_centered.double()) / (f_s_centered.size(0) - 1)
+
+                        S_eig, U_eig = torch.linalg.eigh(cov + 1e-5 * torch.eye(cov.size(0), dtype=cov.dtype, device=cov.device))
+                        S_eig_sqrt    = S_eig.clamp(min=0).sqrt() # eigenvalues -> singular values
+                        
+                        whiten = U_eig @ torch.diag(S_eig_sqrt) @ U_eig.T
+                        self.y0_color  = whiten.to(f_s_centered)
+
                     for wct_i in range(eps.shape[0]):
-                        f_c = denoised_embed[wct_i].clone()
-
-                        mu_c = f_c.mean(dim=0, keepdim=True)
-
+                        f_c          = denoised_embed[wct_i].clone()
+                        mu_c         = f_c.mean(dim=0, keepdim=True)
                         f_c_centered = f_c - mu_c
+                        
+                        cov = (f_c_centered.T.double() @ f_c_centered.double()) / (f_c_centered.size(0) - 1)
 
-                        cov_c = f_c_centered.T @ f_c_centered / (f_c_centered.size(0) - 1)
-                        U_c, S_c, _ = torch.svd(cov_c + 1e-5 * torch.eye(cov_c.size(0), device=cov_c.device))
-                        whiten = U_c.to(dtype) @ torch.diag(S_c.to(dtype).rsqrt()) @ U_c.T.to(dtype)
+                        S_eig, U_eig  = torch.linalg.eigh(cov + 1e-5 * torch.eye(cov.size(0), dtype=cov.dtype, device=cov.device))
+                        inv_sqrt_eig  = S_eig.clamp(min=0).rsqrt() 
+                        
+                        whiten = U_eig @ torch.diag(inv_sqrt_eig) @ U_eig.T
+                        whiten = whiten.to(f_c_centered)
+
                         f_c_whitened = f_c_centered @ whiten.T
-
-                        f_cs = f_c_whitened @ self.y0_color.T + self.mu_s
+                        f_cs         = f_c_whitened @ self.y0_color.T + self.mu_s
                         
                         denoised_embed[wct_i] = f_cs
 
@@ -387,21 +384,16 @@ class ReFlux(Flux):
                 h_len = ((h + (patch_size // 2)) // patch_size) # h_len 96
                 w_len = ((w + (patch_size // 2)) // patch_size) # w_len 96
                 img = rearrange(img, "b c (h ph) (w pw) -> b (h w) (c ph pw)", ph=patch_size, pw=patch_size) # img 1,9216,64     1,16,128,128 -> 1,4096,64
-
-                #denoised_embed = self.img_in(img.to(torch.bfloat16).to(self.img_in.weight.device)).to(img)
                 
                 img_y0_adain = comfy.ldm.common_dit.pad_to_patch_size(y0_style_neg, (self.patch_size, self.patch_size))
 
                 img_y0_adain = rearrange(img_y0_adain, "b c (h ph) (w pw) -> b (h w) (c ph pw)", ph=patch_size, pw=patch_size) # img 1,9216,64     1,16,128,128 -> 1,4096,64
 
-                #y0_adain_embed = self.img_in(img_y0_adain.to(torch.bfloat16).to(self.img_in.weight.device)).to(img_y0_adain)
                 W = self.img_in.weight.data.to(torch.float32)   # shape [2560, 64]
                 b = self.img_in.bias.data.to(torch.float32)     # shape [2560]
                 
                 denoised_embed = F.linear(img         .to(W), W, b).to(img)
                 y0_adain_embed = F.linear(img_y0_adain.to(W), W, b).to(img_y0_adain)
-                
-                #denoised_embed = adain_seq(denoised_embed, y0_adain_embed)
                 
                 if transformer_options['y0_style_method'] == "AdaIN":
                     denoised_embed = adain_seq_inplace(denoised_embed, y0_adain_embed)
@@ -412,31 +404,39 @@ class ReFlux(Flux):
                         denoised_embed = adain_seq_inplace(denoised_embed, y0_adain_embed)
                         
                 elif transformer_options['y0_style_method'] == "WCT":
-                    if self.y0_adain_embed is None or torch.norm(self.y0_adain_embed - y0_adain_embed) > 0:
+                    if self.y0_adain_embed is None or self.y0_adain_embed.shape != y0_adain_embed.shape or torch.norm(self.y0_adain_embed - y0_adain_embed) > 0:
                         self.y0_adain_embed = y0_adain_embed
-                        f_s = y0_adain_embed[0].clone()
-                        self.mu_s = f_s.mean(dim=0, keepdim=True)
-                        f_s_centered = f_s - self.mu_s
-                        cov_s = f_s_centered.T @ f_s_centered / (f_s_centered.size(0) - 1)
-                        U_s, S_s, _ = torch.svd(cov_s + 1e-5 * torch.eye(cov_s.size(0), device=cov_s.device))
-                        self.y0_color = U_s.to(dtype) @ torch.diag(S_s.to(dtype).sqrt()) @ U_s.T.to(dtype)
                         
+                        f_s          = y0_adain_embed[0].clone()
+                        self.mu_s    = f_s.mean(dim=0, keepdim=True)
+                        f_s_centered = f_s - self.mu_s
+                        
+                        cov = (f_s_centered.T.double() @ f_s_centered.double()) / (f_s_centered.size(0) - 1)
+
+                        S_eig, U_eig = torch.linalg.eigh(cov + 1e-5 * torch.eye(cov.size(0), dtype=cov.dtype, device=cov.device))
+                        S_eig_sqrt    = S_eig.clamp(min=0).sqrt() # eigenvalues -> singular values
+                        
+                        whiten = U_eig @ torch.diag(S_eig_sqrt) @ U_eig.T
+                        self.y0_color  = whiten.to(f_s_centered)
+
                     for wct_i in range(eps.shape[0]):
-                        f_c = denoised_embed[wct_i].clone()
-
-                        mu_c = f_c.mean(dim=0, keepdim=True)
-
+                        f_c          = denoised_embed[wct_i].clone()
+                        mu_c         = f_c.mean(dim=0, keepdim=True)
                         f_c_centered = f_c - mu_c
+                        
+                        cov = (f_c_centered.T.double() @ f_c_centered.double()) / (f_c_centered.size(0) - 1)
 
-                        cov_c = f_c_centered.T @ f_c_centered / (f_c_centered.size(0) - 1)
-                        U_c, S_c, _ = torch.svd(cov_c + 1e-5 * torch.eye(cov_c.size(0), device=cov_c.device))
-                        whiten = U_c.to(dtype) @ torch.diag(S_c.to(dtype).rsqrt()) @ U_c.T.to(dtype)
+                        S_eig, U_eig  = torch.linalg.eigh(cov + 1e-5 * torch.eye(cov.size(0), dtype=cov.dtype, device=cov.device))
+                        inv_sqrt_eig  = S_eig.clamp(min=0).rsqrt() 
+                        
+                        whiten = U_eig @ torch.diag(inv_sqrt_eig) @ U_eig.T
+                        whiten = whiten.to(f_c_centered)
+
                         f_c_whitened = f_c_centered @ whiten.T
-
-                        f_cs = f_c_whitened @ self.y0_color.T + self.mu_s
+                        f_cs         = f_c_whitened @ self.y0_color.T + self.mu_s
                         
                         denoised_embed[wct_i] = f_cs
-                
+
                 denoised_approx = (denoised_embed - b.to(denoised_embed)) @ torch.linalg.pinv(W).T.to(denoised_embed)
                 denoised_approx = denoised_approx.to(eps)
                 
@@ -449,36 +449,12 @@ class ReFlux(Flux):
                 
             eps = eps.float()
             
-        
-        
-        
-        
-        
-        
-        
-        
-        
         return eps
-    
 
 
 
 def adain_seq(content: torch.Tensor, style: torch.Tensor, eps: float = 1e-7) -> torch.Tensor:
     return ((content - content.mean(1, keepdim=True)) / (content.std(1, keepdim=True) + eps)) * (style.std(1, keepdim=True) + eps) + style.mean(1, keepdim=True)
-
-
-
-
-
-def adain_seq_oom(content: torch.Tensor, style: torch.Tensor, eps: float = 1e-7) -> torch.Tensor: # [B,L,C]
-    mean_c = content.mean(dim=1, keepdim=True)       # [B,1,C]
-    std_c  = content.std (dim=1, keepdim=True) + eps # [B,1,C]
-    mean_s = style.  mean(dim=1, keepdim=True)       # [B,1,C]
-    std_s  = style.  std (dim=1, keepdim=True) + eps # [B,1,C]
-
-    normalized = (content - mean_c) / std_c
-    return normalized * std_s + mean_s               # [B,L,C]
-
 
 
 
