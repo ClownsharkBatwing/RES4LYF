@@ -74,6 +74,11 @@ For example, the prompt for the below was simply "a gritty illustration of a jap
 
 ![image](https://github.com/user-attachments/assets/fb071885-48b8-4698-9288-63a2866cb67b)
 
+# KILL FLUX BLUR (and HiDream blur)
+
+**Consecutive seeds, no cherrypicking.**
+
+![antiblur](https://github.com/user-attachments/assets/5bc0e1e3-82e1-4ccc-8d39-64a939815e57)
 
 
 # REGIONAL CONDITIONING
