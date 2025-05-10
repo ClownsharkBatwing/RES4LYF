@@ -8,6 +8,33 @@ RES_3M vs. Uni-PC (WAN). Typically only 20 steps are needed with RES samplers. F
 ![res_3m_vs_unipc_2](https://github.com/user-attachments/assets/d7ab48e4-51dd-4fa7-8622-160c8f9e33d6)
 
 
+**INSTALLATION:** 
+
+If you are using a venv, you will need to first run from within your ComfyUI folder (that contains your "venv" folder):
+
+_Linux:_
+
+source venv/bin/activate
+
+_Windows:_
+
+venv\Scripts\activate
+
+_Then, "cd" into your "custom_nodes" folder and run the following commands:_
+
+git clone https://github.com/ClownsharkBatwing/RES4LYF/
+
+cd RES4LYF
+
+_If you are using a venv, run these commands:_
+
+pip install -r requirements.txt
+
+_Alternatively, if you are using the portable version of ComfyUI you will need to replace "pip" with the path to your embedded pip executable. For example, on Windows:_
+
+X:\path\to\your\comfy_portable_folder\python_embedded\Scripts\pip.exe install -r requirements.txt
+
+
 # IMPORTANT UPDATE INFO
 
 The previous versions will remain available but with "Legacy" prepended to their names.
@@ -238,7 +265,7 @@ crouzeix_2/3s
 
 irk_exp_diag_2s (features an exponential integrator)
 
-# CURRENT FLUX WORKFLOWS
+# PREVIOUS FLUX WORKFLOWS
 
 ## TXT2IMG:
 This uses my amateur cell phone lora, which is freely available (https://huggingface.co/ClownsharkBatwing/CSBW_Style/blob/main/amateurphotos_1_amateurcellphonephoto_recapt2.safetensors). It significantly reduces the plastic, blurred look of Flux Dev.
@@ -322,30 +349,3 @@ Input images and mask:
 https://github.com/ClownsharkBatwing/RES4LYF/blob/main/workflows/img2img%20dual%20guided%20masked%20unsampling%20SD35M%20input1.png
 https://github.com/ClownsharkBatwing/RES4LYF/blob/main/workflows/img2img%20dual%20guided%20masked%20unsampling%20SD35M%20input2.png
 https://github.com/ClownsharkBatwing/RES4LYF/blob/main/workflows/img2img%20dual%20guided%20masked%20unsampling%20SD35M%20mask.png
-
-**INSTALLATION:** 
-
-If you are using a venv, you will need to first run from within your ComfyUI folder (that contains your "venv" folder):
-
-_Linux:_
-
-source venv/bin/activate
-
-_Windows:_
-
-venv\Scripts\activate
-
-_Then, "cd" into your "custom_nodes" folder and run the following commands:_
-
-git clone https://github.com/ClownsharkBatwing/RES4LYF/
-
-cd RES4LYF
-
-_If you are using a venv, run these commands:_
-
-pip install -r requirements.txt
-
-_Alternatively, if you are using the portable version of ComfyUI you will need to replace "pip" with the path to your embedded pip executable. For example, on Windows:_
-
-X:\path\to\your\comfy_portable_folder\python_embedded\Scripts\pip.exe install -r requirements.txt
-
