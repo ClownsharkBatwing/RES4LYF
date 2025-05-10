@@ -54,7 +54,7 @@ If these menus do not show up after restarting ComfyUI and refreshing the page (
 ![image](https://github.com/user-attachments/assets/db46fc90-df1a-4d1c-b6ed-c44d26b8a9b3)
 
 
-## BETA NODE DOCUMENTATION ##
+## NEW VERSION DOCUMENTATION ##
 
 I have prepared a detailed explanation of many of the concepts of sampling with exmaples in this workflow. There's also many tips, explanations of parameters, and all of the most important nodes are laid out for you to see. Some new workflow-enhancing tricks like "chainsamplers" are demonstrated, and **regional AND temporal prompting** are explained (supporting Flux, HiDream, SD3.5, AuraFlow, and WAN - you can even change the conditioning on a frame-by-frame basis!).
 
@@ -66,7 +66,7 @@ I have prepared a detailed explanation of many of the concepts of sampling with 
 
 
 
-# RES4LYF
+## PREVIOUS VERSION NODE DOCUMENTATION
 
 At the heart of this repository is the "ClownsharKSampler", which was specifically designed to support both rectified flow and probability flow models. It features 69 different selectible samplers (44 explicit, 18 fully implicit, 7 diagonally implicit) all available in both ODE or SDE modes with 20 noise types, 9 noise scaling modes, and options for implicit Runge-Kutta sampling refinement steps. Several new explicit samplers are implemented, most notably RES_2M, RES_3S, and RES_5S. Additionally, img2img capabilities include both latent image guidance and unsampling/resampling (via new forms of rectified noise inversion). 
 
