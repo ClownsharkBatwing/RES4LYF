@@ -15,6 +15,7 @@ For example, the prompt for the below was simply "a gritty illustration of a jap
 ![image](https://github.com/user-attachments/assets/fea026cc-48ec-4690-9d18-7054a760478a)
 
 **OUTPUT**
+
 ![ComfyUI_15622_](https://github.com/user-attachments/assets/638af7a6-aa7c-4efe-88c6-f1d9c29633c7)
 
 ![image](https://github.com/user-attachments/assets/fb071885-48b8-4698-9288-63a2866cb67b)
