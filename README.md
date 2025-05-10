@@ -8,6 +8,30 @@ RES_3M vs. Uni-PC (WAN). Typically only 20 steps are needed with RES samplers. F
 ![res_3m_vs_unipc_2](https://github.com/user-attachments/assets/d7ab48e4-51dd-4fa7-8622-160c8f9e33d6)
 
 
+# IMPORTANT UPDATE INFO
+
+The previous versions will remain available but with "Legacy" prepended to their names.
+
+If you wish to use the sampler menu shown below, you will need to install https://github.com/rgthree/rgthree-comfy (which I highly recommend you have regardless).
+
+![image](https://github.com/user-attachments/assets/b36360bb-a59e-4654-aed7-6b6f53673826)
+
+If these menus do not show up after restarting ComfyUI and refreshing the page (hit F5, not just "r") verify that these menus are enabled in the rgthree settings (click the gear in the bottom left of ComfyUI, select rgthree, and ensure "Auto Nest Subdirectories" is checked):
+
+![image](https://github.com/user-attachments/assets/db46fc90-df1a-4d1c-b6ed-c44d26b8a9b3)
+
+
+# NEW VERSION DOCUMENTATION
+
+I have prepared a detailed explanation of many of the concepts of sampling with exmaples in this workflow. There's also many tips, explanations of parameters, and all of the most important nodes are laid out for you to see. Some new workflow-enhancing tricks like "chainsamplers" are demonstrated, and **regional AND temporal prompting** are explained (supporting Flux, HiDream, SD3.5, AuraFlow, and WAN - you can even change the conditioning on a frame-by-frame basis!).
+
+[example_workflows/intro to clownsampling.json
+]((https://github.com/ClownsharkBatwing/RES4LYF/blob/main/example_workflows/intro%20to%20clownsampling.json))
+
+![intro to clownsampling](https://github.com/user-attachments/assets/40c23993-c70e-4a71-9207-4cee4b7e71e0)
+
+
+
 # STYLE TRANSFER
 
 Currently supported models: HiDream, Flux, SD3.5, and WAN. Currently, best results are with HiDream, or Flux with a style lora (Flux Dev is very lacking with style knowledge). Include some mention of the style you wish to use in the prompt. (Try with the guide off to confirm the prompt is not doing the heavy lifting!)
@@ -58,29 +82,6 @@ Currently supported models: WAN.
 ![image](https://github.com/user-attachments/assets/743bc972-cfbf-45a8-8745-d6ca1a6b0bab)
 
 ![temporal conditioning 09580](https://github.com/user-attachments/assets/eef0e04c-d1b2-49b7-a1ca-f8cb651dd3a7)
-
-
-# IMPORTANT UPDATE INFO
-
-The previous versions will remain available but with "Legacy" prepended to their names.
-
-If you wish to use the sampler menu shown below, you will need to install https://github.com/rgthree/rgthree-comfy (which I highly recommend you have regardless).
-
-![image](https://github.com/user-attachments/assets/b36360bb-a59e-4654-aed7-6b6f53673826)
-
-If these menus do not show up after restarting ComfyUI and refreshing the page (hit F5, not just "r") verify that these menus are enabled in the rgthree settings (click the gear in the bottom left of ComfyUI, select rgthree, and ensure "Auto Nest Subdirectories" is checked):
-
-![image](https://github.com/user-attachments/assets/db46fc90-df1a-4d1c-b6ed-c44d26b8a9b3)
-
-
-# NEW VERSION DOCUMENTATION
-
-I have prepared a detailed explanation of many of the concepts of sampling with exmaples in this workflow. There's also many tips, explanations of parameters, and all of the most important nodes are laid out for you to see. Some new workflow-enhancing tricks like "chainsamplers" are demonstrated, and **regional AND temporal prompting** are explained (supporting Flux, HiDream, SD3.5, AuraFlow, and WAN - you can even change the conditioning on a frame-by-frame basis!).
-
-[example_workflows/intro to clownsampling.json
-]([https://github.com/ClownsharkBatwing/RES4LYF/blob/0096defce83b1e38f9e2b9c7feda240f43797423/workflows/intro_to_clownsampling_beta.json](https://github.com/ClownsharkBatwing/RES4LYF/blob/main/example_workflows/intro%20to%20clownsampling.json))
-
-![intro to clownsampling](https://github.com/user-attachments/assets/1f90a877-87a6-478e-9b84-317152d66f2c)
 
 
 
