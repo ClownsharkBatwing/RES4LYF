@@ -77,8 +77,11 @@ If these menus do not show up after restarting ComfyUI and refreshing the page (
 
 I have prepared a detailed explanation of many of the concepts of sampling with exmaples in this workflow. There's also many tips, explanations of parameters, and all of the most important nodes are laid out for you to see. Some new workflow-enhancing tricks like "chainsamplers" are demonstrated, and **regional AND temporal prompting** are explained (supporting Flux, HiDream, SD3.5, AuraFlow, and WAN - you can even change the conditioning on a frame-by-frame basis!).
 
-[workflows/intro_to_clownsampling_beta.json
-](https://github.com/ClownsharkBatwing/RES4LYF/blob/0096defce83b1e38f9e2b9c7feda240f43797423/workflows/intro_to_clownsampling_beta.json)
+[example_workflows/intro to clownsampling.json
+]([https://github.com/ClownsharkBatwing/RES4LYF/blob/0096defce83b1e38f9e2b9c7feda240f43797423/workflows/intro_to_clownsampling_beta.json](https://github.com/ClownsharkBatwing/RES4LYF/blob/main/example_workflows/intro%20to%20clownsampling.json))
+
+![intro to clownsampling](https://github.com/user-attachments/assets/1f90a877-87a6-478e-9b84-317152d66f2c)
+
 
 ![image](https://github.com/user-attachments/assets/35f4657e-1f56-4a47-9702-fbef8f47a70a)
 
