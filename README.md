@@ -57,7 +57,9 @@ Currently supported models: WAN.
 ![temporal conditioning 09580](https://github.com/user-attachments/assets/eef0e04c-d1b2-49b7-a1ca-f8cb651dd3a7)
 
 
-Some of you may be aware that there's been a "beta" version of the nodes in progress for some time now. They are now **vastly superior** to the current "main" versions, and I highly recommend checking them out. Once the various options and parameters are fully settled, they will become the "main" versions of the nodes, and the current versions will remain available but with "Legacy" appended to their names.
+# IMPORTANT UPDATE INFO
+
+The previous versions will remain available but with "Legacy" prepended to their names.
 
 If you wish to use the sampler menu shown below, you will need to install https://github.com/rgthree/rgthree-comfy (which I highly recommend you have regardless).
 
