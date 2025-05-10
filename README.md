@@ -2,9 +2,24 @@
 
 # STYLE TRANSFER
 
-Currently supported models: HiDream, Flux, SD3.5, and WAN.
+Currently supported models: HiDream, Flux, SD3.5, and WAN. Currently, best results are with HiDream, or Flux with a style lora (Flux Dev is very lacking with style knowledge). Include some mention of the style you wish to use in the prompt. (Try with the guide off to confirm the prompt is not doing the heavy lifting!)
+
+For example, the prompt for the below was simply "a gritty illustration of a japanese woman with traditional hair in traditional clothes". Mostly you just need to make clear whether it's supposed to be a photo or an illustration, etc. so that the conditioning isn't fighting the style guide (every model has its inherent biases).
 
 ![image](https://github.com/user-attachments/assets/e872e258-c786-4475-8369-c8487ee5ec72)
+
+**COMPOSITION INPUT**
+![image](https://github.com/user-attachments/assets/5d935212-1be5-4c00-a34b-302c8af06bb0)
+
+**STYLE INPUT**
+![image](https://github.com/user-attachments/assets/fea026cc-48ec-4690-9d18-7054a760478a)
+
+**OUTPUT**
+![ComfyUI_15622_](https://github.com/user-attachments/assets/638af7a6-aa7c-4efe-88c6-f1d9c29633c7)
+
+![image](https://github.com/user-attachments/assets/fb071885-48b8-4698-9288-63a2866cb67b)
+
+
 
 # REGIONAL CONDITIONING
 
