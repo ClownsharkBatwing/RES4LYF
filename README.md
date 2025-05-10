@@ -83,10 +83,6 @@ I have prepared a detailed explanation of many of the concepts of sampling with 
 ![intro to clownsampling](https://github.com/user-attachments/assets/1f90a877-87a6-478e-9b84-317152d66f2c)
 
 
-![image](https://github.com/user-attachments/assets/35f4657e-1f56-4a47-9702-fbef8f47a70a)
-
-
-
 
 # PREVIOUS VERSION NODE DOCUMENTATION
 
