@@ -54,7 +54,7 @@ If these menus do not show up after restarting ComfyUI and refreshing the page (
 ![image](https://github.com/user-attachments/assets/db46fc90-df1a-4d1c-b6ed-c44d26b8a9b3)
 
 
-## NEW VERSION DOCUMENTATION ##
+# NEW VERSION DOCUMENTATION
 
 I have prepared a detailed explanation of many of the concepts of sampling with exmaples in this workflow. There's also many tips, explanations of parameters, and all of the most important nodes are laid out for you to see. Some new workflow-enhancing tricks like "chainsamplers" are demonstrated, and **regional AND temporal prompting** are explained (supporting Flux, HiDream, SD3.5, AuraFlow, and WAN - you can even change the conditioning on a frame-by-frame basis!).
 
