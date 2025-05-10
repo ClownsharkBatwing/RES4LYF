@@ -1,5 +1,13 @@
 # NEW NODES AVAILABLE!
 
+# SUPERIOR SAMPLING: THE POWER OF BONGMATH
+
+RES_3M vs. Uni-PC (WAN). Typically only 20 steps are needed with RES samplers. Far more are needed with Uni-PC and other common samplers, and they never reach the same level of quality.
+
+![res_3m_vs_unipc_1](https://github.com/user-attachments/assets/9321baf9-2d68-4fe8-9427-fcf0609bd02b)
+![res_3m_vs_unipc_2](https://github.com/user-attachments/assets/d7ab48e4-51dd-4fa7-8622-160c8f9e33d6)
+
+
 # STYLE TRANSFER
 
 Currently supported models: HiDream, Flux, SD3.5, and WAN. Currently, best results are with HiDream, or Flux with a style lora (Flux Dev is very lacking with style knowledge). Include some mention of the style you wish to use in the prompt. (Try with the guide off to confirm the prompt is not doing the heavy lifting!)
@@ -59,13 +67,6 @@ If you wish to use the sampler menu shown below, you will need to install https:
 If these menus do not show up after restarting ComfyUI and refreshing the page (hit F5, not just "r") verify that these menus are enabled in the rgthree settings (click the gear in the bottom left of ComfyUI, select rgthree, and ensure "Auto Nest Subdirectories" is checked):
 
 ![image](https://github.com/user-attachments/assets/db46fc90-df1a-4d1c-b6ed-c44d26b8a9b3)
-
-# SUPERIOR SAMPLING: THE POWER OF BONGMATH
-
-RES_3M vs. Uni-PC (WAN). Typically only 20 steps are needed with RES samplers. Far more are needed with Uni-PC and other common samplers, and they never reach the same level of quality.
-
-![res_3m_vs_unipc_1](https://github.com/user-attachments/assets/9321baf9-2d68-4fe8-9427-fcf0609bd02b)
-![res_3m_vs_unipc_2](https://github.com/user-attachments/assets/d7ab48e4-51dd-4fa7-8622-160c8f9e33d6)
 
 
 # NEW VERSION DOCUMENTATION
