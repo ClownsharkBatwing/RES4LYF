@@ -12,6 +12,9 @@ RES_3M vs. Uni-PC (WAN). Typically only 20 steps are needed with RES samplers. F
 
 Currently supported models: HiDream, Flux, SD3.5, and WAN. Currently, best results are with HiDream, or Flux with a style lora (Flux Dev is very lacking with style knowledge). Include some mention of the style you wish to use in the prompt. (Try with the guide off to confirm the prompt is not doing the heavy lifting!)
 
+![image](https://github.com/user-attachments/assets/a62593fa-b104-4347-bf69-e1e50217ce2d)
+
+
 For example, the prompt for the below was simply "a gritty illustration of a japanese woman with traditional hair in traditional clothes". Mostly you just need to make clear whether it's supposed to be a photo or an illustration, etc. so that the conditioning isn't fighting the style guide (every model has its inherent biases).
 
 ![image](https://github.com/user-attachments/assets/e872e258-c786-4475-8369-c8487ee5ec72)
