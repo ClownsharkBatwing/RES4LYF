@@ -34,6 +34,11 @@ Masks can be drawn freely, or more traditional rigid ones may be used, such as i
 
 ![ComfyUI_16020_](https://github.com/user-attachments/assets/5f45cdcb-f879-43ca-bcf4-bcae60aa4bbc)
 
+![ComfyUI_12157_](https://github.com/user-attachments/assets/b9e385d2-3359-4a13-99b9-4a7243863b0d)
+
+![ComfyUI_12039_](https://github.com/user-attachments/assets/6d36ae62-ce8c-41e3-b52c-823e9c1b1d50)
+
+
 # TEMPORAL CONDITIONING
 
 Unlimited zones! Ability to change the prompt for each frame.
@@ -54,6 +59,13 @@ If you wish to use the sampler menu shown below, you will need to install https:
 If these menus do not show up after restarting ComfyUI and refreshing the page (hit F5, not just "r") verify that these menus are enabled in the rgthree settings (click the gear in the bottom left of ComfyUI, select rgthree, and ensure "Auto Nest Subdirectories" is checked):
 
 ![image](https://github.com/user-attachments/assets/db46fc90-df1a-4d1c-b6ed-c44d26b8a9b3)
+
+# SUPERIOR SAMPLING: THE POWER OF BONGMATH
+
+RES_3M vs. Uni-PC (WAN). Typically only 20 steps are needed with RES samplers. Far more are needed with Uni-PC and other common samplers, and they never reach the same level of quality.
+
+![res_3m_vs_unipc_1](https://github.com/user-attachments/assets/9321baf9-2d68-4fe8-9427-fcf0609bd02b)
+![res_3m_vs_unipc_2](https://github.com/user-attachments/assets/d7ab48e4-51dd-4fa7-8622-160c8f9e33d6)
 
 
 # NEW VERSION DOCUMENTATION
