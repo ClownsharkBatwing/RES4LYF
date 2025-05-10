@@ -17,9 +17,7 @@ For example, the prompt for the below was simply "a gritty illustration of a jap
 ![image](https://github.com/user-attachments/assets/e872e258-c786-4475-8369-c8487ee5ec72)
 
 **COMPOSITION INPUT, STYLE INPUT, OUTPUT**
-![image](https://github.com/user-attachments/assets/5d935212-1be5-4c00-a34b-302c8af06bb0)
-![image](https://github.com/user-attachments/assets/fea026cc-48ec-4690-9d18-7054a760478a)
-![ComfyUI_15622_](https://github.com/user-attachments/assets/638af7a6-aa7c-4efe-88c6-f1d9c29633c7)
+![image](https://github.com/user-attachments/assets/5d935212-1be5-4c00-a34b-302c8af06bb0)![image](https://github.com/user-attachments/assets/fea026cc-48ec-4690-9d18-7054a760478a)![ComfyUI_15622_](https://github.com/user-attachments/assets/638af7a6-aa7c-4efe-88c6-f1d9c29633c7)
 
 ![image](https://github.com/user-attachments/assets/fb071885-48b8-4698-9288-63a2866cb67b)
 
