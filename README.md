@@ -68,14 +68,9 @@ For example, the prompt for the below was simply "a gritty illustration of a jap
 
 ![image](https://github.com/user-attachments/assets/e872e258-c786-4475-8369-c8487ee5ec72)
 
-**COMPOSITION INPUT**
-![image](https://github.com/user-attachments/assets/5d935212-1be5-4c00-a34b-302c8af06bb0)
+**COMPOSITION GUIDE; OUTPUT; STYLE GUIDE**
 
-**STYLE INPUT**
-![image](https://github.com/user-attachments/assets/fea026cc-48ec-4690-9d18-7054a760478a)
-
-**OUTPUT**
-![ComfyUI_15622_](https://github.com/user-attachments/assets/638af7a6-aa7c-4efe-88c6-f1d9c29633c7)
+![style example](https://github.com/user-attachments/assets/4970c6ea-d142-4e4e-967a-59ff93528840)
 
 ![image](https://github.com/user-attachments/assets/fb071885-48b8-4698-9288-63a2866cb67b)
 
