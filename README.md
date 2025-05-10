@@ -1,6 +1,4 @@
-# NEW NODES AVAILABLE!
-
-# SUPERIOR SAMPLING: THE POWER OF BONGMATH
+# SUPERIOR SAMPLING WITH RES4LYF: THE POWER OF BONGMATH
 
 RES_3M vs. Uni-PC (WAN). Typically only 20 steps are needed with RES samplers. Far more are needed with Uni-PC and other common samplers, and they never reach the same level of quality.
 
@@ -8,7 +6,7 @@ RES_3M vs. Uni-PC (WAN). Typically only 20 steps are needed with RES samplers. F
 ![res_3m_vs_unipc_2](https://github.com/user-attachments/assets/d7ab48e4-51dd-4fa7-8622-160c8f9e33d6)
 
 
-**INSTALLATION:** 
+# INSTALLATION
 
 If you are using a venv, you will need to first run from within your ComfyUI folder (that contains your "venv" folder):
 
