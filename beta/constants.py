@@ -58,4 +58,3 @@ GUIDE_MODE_NAMES_PSEUDOIMPLICIT = [
     "fully_pseudoimplicit_cw", 
     "fully_pseudoimplicit_projection_cw"
 ]
-

@@ -454,6 +454,12 @@ def sample_rk_beta(
             'tgt_t5_start':    EO('tgt_t5_start', 0),
             'tgt_t5_end':      EO('tgt_t5_end', 0),
             'skip_cross_attn': EO('skip_cross_attn', False),
+            
+            'update_q':        EO('update_q', False),
+            'update_k':        EO('update_k', True),
+            'update_v':        EO('update_v', True),
+            
+            
             'lamb':  EO('lamb', 0.01),
             'erase': EO('erase', 10.0),
         }

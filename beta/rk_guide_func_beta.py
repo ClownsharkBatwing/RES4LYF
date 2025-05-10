@@ -669,6 +669,7 @@ class LatentGuide:
                                                 row,
                                                 RK.row_offset,
                                                 NS.h,
+                                                step,
                                                 )
         else:
             eps_[row] = RK.get_epsilon(x_0, x_[row], denoised_prev, sigma, NS.s_[row])
@@ -732,6 +733,7 @@ class LatentGuide:
                                         row,
                                         RK.row_offset,
                                         NS.h,
+                                        step,
                                         ) 
             
         return x_0, x_, eps_, x_row_pseudoimplicit, sub_sigma_pseudoimplicit
@@ -812,6 +814,7 @@ class LatentGuide:
                                                         r,
                                                         RK.row_offset,
                                                         NS.h,
+                                                        step,
                                                         )
                             
                 if self.EO("fully_pseudoimplicit_denoised_prev"):
