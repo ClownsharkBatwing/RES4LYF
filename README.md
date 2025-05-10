@@ -12,6 +12,12 @@ Unlimited zones! Over 10 zones have been used in one image before.
 
 Currently supported models: HiDream, Flux, SD3.5, and AuraFlow, and WAN.
 
+Masks can be drawn freely, or more traditional rigid ones may be used, such as in this example:
+
+![image](https://github.com/user-attachments/assets/edfb076a-78e2-4077-b53f-3e8bab07040a)
+
+![ComfyUI_16020_](https://github.com/user-attachments/assets/5f45cdcb-f879-43ca-bcf4-bcae60aa4bbc)
+
 # TEMPORAL CONDITIONING
 
 Unlimited zones! Ability to change the prompt for each frame.
