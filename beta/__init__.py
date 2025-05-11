@@ -57,7 +57,7 @@ def add_beta(NODE_CLASS_MAPPINGS, NODE_DISPLAY_NAME_MAPPINGS, extra_samplers):
         
         "ClownOptions_Combine"            : samplers_extensions.ClownOptions_Combine,
         "ClownOptions_Frameweights"       : samplers_extensions.ClownOptions_Frameweights,
-        "ClownOptions_GuiderInput"        : samplers_extensions.ClownOptions_GuiderInput,
+        "SharkOptions_GuiderInput"        : samplers_extensions.SharkOptions_GuiderInput,
 
     })
 
@@ -102,22 +102,22 @@ def add_beta(NODE_CLASS_MAPPINGS, NODE_DISPLAY_NAME_MAPPINGS, extra_samplers):
             "ClownSamplerSelector_Beta"             : "ClownSamplerSelector",
             "ClownOptions_SDE_Mask_Beta"            : "ClownOptions SDE Mask",
             "ClownOptions_SDE_Beta"                 : "ClownOptions SDE",
-            "ClownOptions_StepSize_Beta"            : "ClownOptions StepSize",
-            "ClownOptions_DetailBoost_Beta"         : "ClownOptions DetailBoost",
-            "ClownOptions_SigmaScaling_Beta"        : "ClownOptions SigmaScaling",
+            "ClownOptions_StepSize_Beta"            : "ClownOptions Step Size",
+            "ClownOptions_DetailBoost_Beta"         : "ClownOptions Detail Boost",
+            "ClownOptions_SigmaScaling_Beta"        : "ClownOptions Sigma Scaling",
             "ClownOptions_Momentum_Beta"            : "ClownOptions Momentum",
-            "ClownOptions_ImplicitSteps_Beta"       : "ClownOptions ImplicitSteps",
+            "ClownOptions_ImplicitSteps_Beta"       : "ClownOptions Implicit Steps",
             "ClownOptions_Cycles_Beta"              : "ClownOptions Cycles",
-            "ClownOptions_SwapSampler_Beta"         : "ClownOptions SwapSampler",
-            "ClownOptions_ExtraOptions_Beta"        : "ClownOptions ExtraOptions",
+            "ClownOptions_SwapSampler_Beta"         : "ClownOptions Swap Sampler",
+            "ClownOptions_ExtraOptions_Beta"        : "ClownOptions Extra Options",
             "ClownOptions_Automation_Beta"          : "ClownOptions Automation",
-            "SharkOptions_GuideCond_Beta"           : "SharkOptions GuideCond",
-            "SharkOptions_GuideConds_Beta"          : "SharkOptions GuideConds",
+            "SharkOptions_GuideCond_Beta"           : "SharkOptions Guide Cond",
+            "SharkOptions_GuideConds_Beta"          : "SharkOptions Guide Conds",
             "SharkOptions_Beta"                     : "SharkOptions",
             "SharkOptions_UltraCascade_Latent_Beta" : "SharkOptions UltraCascade Latent",
             "ClownOptions_Combine"                  : "ClownOptions Combine",
             "ClownOptions_Frameweights"             : "ClownOptions Frameweights",
-            "ClownOptions_GuiderInput"              : "ClownOptions GuiderInput",
+            "SharkOptions_GuiderInput"              : "SharkOptions Guider Input",
     })
     
     return NODE_CLASS_MAPPINGS, NODE_DISPLAY_NAME_MAPPINGS, extra_samplers

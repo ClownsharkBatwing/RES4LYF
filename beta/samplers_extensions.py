@@ -1802,7 +1802,7 @@ class ClownOptions_Frameweights:
         return (options_mgr.as_dict(),)
 
 
-class ClownOptions_GuiderInput:
+class SharkOptions_GuiderInput:
     @classmethod
     def INPUT_TYPES(s):
         return {"required":
