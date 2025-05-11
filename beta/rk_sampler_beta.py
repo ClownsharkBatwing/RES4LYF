@@ -7,6 +7,7 @@ import math
 import copy
 
 from comfy.model_sampling import EPS
+import comfy
 
 from ..res4lyf              import RESplain
 from ..helper               import ExtraOptions, FrameWeightsManager
@@ -102,6 +103,26 @@ def init_implicit_sampling(
     x_, eps_ = RK.newton_iter(x_0, x_, eps_, eps_prev_, data_, s_, 0, h, sigmas, step, "init")
     return x_, eps_, data_
 
+import torch.nn.functional as F
+
+def upscale_to_match_spatial(tensor_5d, ref_4d, mode='bicubic'):
+    """
+    Upscales a 5D tensor [B, C, T, H1, W1] to match the spatial size of a 4D tensor [1, C, H2, W2].
+    
+    Args:
+        tensor_5d: Tensor of shape [B, C, T, H1, W1]
+        ref_4d: Tensor of shape [1, C, H2, W2] — used as spatial reference
+        mode: Interpolation mode ('bilinear' or 'bicubic')
+    
+    Returns:
+        Resized tensor of shape [B, C, T, H2, W2]
+    """
+    b, c, t, _, _ = tensor_5d.shape
+    _, _, h_target, w_target = ref_4d.shape
+
+    tensor_reshaped = tensor_5d.reshape(b * c, t, tensor_5d.shape[-2], tensor_5d.shape[-1])
+    upscaled = F.interpolate(tensor_reshaped, size=(h_target, w_target), mode=mode, align_corners=False)
+    return upscaled.view(b, c, t, h_target, w_target)
 
 
 
@@ -243,7 +264,8 @@ def sample_rk_beta(
     state_info_out = {} if state_info_out is None else state_info_out
 
     if 'raw_x' in state_info and sampler_mode in {"resample", "unsample"}:
-        x = state_info['raw_x'].to(work_device) #clone()
+        if x.shape == state_info['raw_x'].shape:
+            x = state_info['raw_x'].to(work_device) #clone()
         RESplain("Continuing from raw latent from previous sampler.", debug=False)
     
 
@@ -471,7 +493,10 @@ def sample_rk_beta(
         RK.update_transformer_options({'blocks_adain_cache': []})
     if LG.HAS_LATENT_GUIDE_ATTNINJ:
         RK.update_transformer_options({'blocks_attninj_cache': []})
-
+    if LG.HAS_LATENT_GUIDE_STYLE_POS:
+        if LG.HAS_LATENT_GUIDE:
+            y0_cache = LG.y0.clone().cpu()
+            RK.update_transformer_options({'y0_standard_guide': LG.y0})
         
     sigmas_scheduled = sigmas.clone() # store for return in state_info_out
     
@@ -528,6 +553,15 @@ def sample_rk_beta(
                 RK.update_transformer_options({'y0_style_pos_synweight': guides['synweight_style_pos']})
                 RK.update_transformer_options({'y0_style_pos_mask': LG.mask_style_pos})
                 RK.update_transformer_options({'y0_style_method': guides['style_method']})
+                
+                #if LG.HAS_LATENT_GUIDE:
+                #    y0_cache = LG.y0.clone().cpu()
+                #    RK.update_transformer_options({'y0_standard_guide': LG.y0})
+                    
+                if LG.HAS_LATENT_GUIDE_INV:
+                    y0_inv_cache = LG.y0_inv.clone().cpu()
+                    RK.update_transformer_options({'y0_inv_standard_guide': LG.y0_inv})
+                    
 
         if LG.HAS_LATENT_GUIDE_STYLE_NEG:
             if LG.lgw_style_neg[step] == 0.0:
@@ -601,7 +635,11 @@ def sample_rk_beta(
             if sampler_mode in {"unsample", "resample"}:
                 data_prev_ = state_info.get('data_prev_')
                 if data_prev_ is not None:
-                    data_prev_ = state_info['data_prev_'].clone().to(dtype=default_dtype, device=work_device)
+                    if x.shape == state_info['raw_x'].shape:
+                        data_prev_ = state_info['data_prev_'].clone().to(dtype=default_dtype, device=work_device)
+                    else:
+                        data_prev_ = torch.stack([comfy.utils.bislerp(data_prev_item, x.shape[-1], x.shape[-2]) for data_prev_item in state_info['data_prev_']])
+                        data_prev_ = data_prev_.to(x)
                 else:
                     data_prev_ =  torch.zeros(4, *x.shape, dtype=default_dtype, device=work_device) # multistep max is 4m... so 4 needed
             else:
@@ -1231,7 +1269,16 @@ def sample_rk_beta(
                                         #eps_[row] = (eps_[row] + eps_row_roll) / 2
                                         #data_[row] = (data_[row] + data_row_roll) / 2
                                         
+                                    if RK.extra_args['model_options']['transformer_options'].get('y0_standard_guide') is not None:
+                                        LG.y0 = model.inner_model.inner_model.diffusion_model.y0_standard_guide.clone() # RK.extra_args['model_options']['transformer_options'].get('y0_standard_guide')
+                                        del model.inner_model.inner_model.diffusion_model.y0_standard_guide
+                                        RK.extra_args['model_options']['transformer_options']['y0_standard_guide'] = None
                                         
+                                    if RK.extra_args['model_options']['transformer_options'].get('y0_inv_standard_guide') is not None:
+                                        LG.y0_inv = RK.extra_args['model_options']['transformer_options'].get('y0_inv_standard_guide')
+                                        RK.extra_args['model_options']['transformer_options']['y0_inv_standard_guide'] = None
+                                
+                                
 
 
                             if LG.guide_mode.startswith("lure") and (LG.lgw[step] > 0 or LG.lgw_inv[step] > 0):
