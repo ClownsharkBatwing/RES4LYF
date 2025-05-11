@@ -26,22 +26,22 @@ from .layers import (
 
 @dataclass
 class ChromaParams:
-    in_channels: int
-    out_channels: int
-    context_in_dim: int
-    hidden_size: int
-    mlp_ratio: float
-    num_heads: int
-    depth: int
+    in_channels        : int
+    out_channels       : int
+    context_in_dim     : int
+    hidden_size        : int
+    mlp_ratio          : float
+    num_heads          : int
+    depth              : int
     depth_single_blocks: int
-    axes_dim: list
-    theta: int
-    patch_size: int
-    qkv_bias: bool
-    in_dim: int
-    out_dim: int
-    hidden_dim: int
-    n_layers: int
+    axes_dim           : list
+    theta              : int
+    patch_size         : int
+    qkv_bias           : bool
+    in_dim             : int
+    out_dim            : int
+    hidden_dim         : int
+    n_layers           : int
 
 
 
@@ -53,11 +53,11 @@ class ReChroma(nn.Module):
 
     def __init__(self, image_model=None, final_layer=True, dtype=None, device=None, operations=None, **kwargs):
         super().__init__()
-        self.dtype = dtype
-        params = ChromaParams(**kwargs)
-        self.params = params
-        self.patch_size = params.patch_size
-        self.in_channels = params.in_channels
+        self.dtype        = dtype
+        params            = ChromaParams(**kwargs)
+        self.params       = params
+        self.patch_size   = params.patch_size
+        self.in_channels  = params.in_channels
         self.out_channels = params.out_channels
         if params.hidden_size % params.num_heads != 0:
             raise ValueError(
@@ -67,14 +67,14 @@ class ReChroma(nn.Module):
         if sum(params.axes_dim) != pe_dim:
             raise ValueError(f"Got {params.axes_dim} but expected positional dim {pe_dim}")
         self.hidden_size = params.hidden_size
-        self.num_heads = params.num_heads
-        self.in_dim = params.in_dim
-        self.out_dim = params.out_dim
-        self.hidden_dim = params.hidden_dim
-        self.n_layers = params.n_layers
+        self.num_heads   = params.num_heads
+        self.in_dim      = params.in_dim
+        self.out_dim     = params.out_dim
+        self.hidden_dim  = params.hidden_dim
+        self.n_layers    = params.n_layers
         self.pe_embedder = EmbedND(dim=pe_dim, theta=params.theta, axes_dim=params.axes_dim)
-        self.img_in = operations.Linear(self.in_channels, self.hidden_size, bias=True, dtype=dtype, device=device)
-        self.txt_in = operations.Linear(params.context_in_dim, self.hidden_size, dtype=dtype, device=device)
+        self.img_in      = operations.Linear(self.in_channels, self.hidden_size, bias=True, dtype=dtype, device=device)
+        self.txt_in      = operations.Linear(params.context_in_dim, self.hidden_size, dtype=dtype, device=device)
         # set as nn identity for now, will overwrite it later.
         self.distilled_guidance_layer = Approximator(
                     in_dim=self.in_dim,
@@ -142,16 +142,16 @@ class ReChroma(nn.Module):
 
     def forward_blocks(
         self,
-        img: Tensor,
-        img_ids: Tensor,
-        txt: Tensor,
-        txt_ids: Tensor,
-        timesteps: Tensor,
-        guidance: Tensor = None,
-        control = None,
-        update_cross_attn = None,
-        transformer_options={},
-        attn_mask: Tensor = None,
+        img       : Tensor,
+        img_ids   : Tensor,
+        txt       : Tensor,
+        txt_ids   : Tensor,
+        timesteps : Tensor,
+        guidance  : Tensor  = None,
+        control             = None,
+        update_cross_attn   = None,
+        transformer_options ={},
+        attn_mask : Tensor  = None,
     ) -> Tensor:
         patches_replace = transformer_options.get("patches_replace", {})
         if img.ndim != 3 or txt.ndim != 3:
@@ -303,7 +303,14 @@ class ReChroma(nn.Module):
         y0_style_pos        = transformer_options.get("y0_style_pos")
         y0_style_neg        = transformer_options.get("y0_style_neg")
 
+        y0_style_pos_weight    = transformer_options.get("y0_style_pos_weight", 0.0)
+        y0_style_pos_synweight = transformer_options.get("y0_style_pos_synweight", 0.0)
+        y0_style_pos_synweight *= y0_style_pos_weight
 
+        y0_style_neg_weight    = transformer_options.get("y0_style_neg_weight", 0.0)
+        y0_style_neg_synweight = transformer_options.get("y0_style_neg_synweight", 0.0)
+        y0_style_neg_synweight *= y0_style_neg_weight
+                
         out_list = []
         for i in range(len(transformer_options['cond_or_uncond'])):
             UNCOND = transformer_options['cond_or_uncond'][i] == 1
@@ -385,12 +392,8 @@ class ReChroma(nn.Module):
         W_inv = None
         
         
-        if eps.shape[0] == 2 or (eps.shape[0] == 1 and not UNCOND):
-            if y0_style_pos is not None:
-                y0_style_pos_weight    = transformer_options.get("y0_style_pos_weight")
-                y0_style_pos_synweight = transformer_options.get("y0_style_pos_synweight")
-                y0_style_pos_synweight *= y0_style_pos_weight
-                
+        if eps.shape[0] == 2 or (eps.shape[0] == 1): #: and not UNCOND):
+            if y0_style_pos is not None and y0_style_pos_weight != 0.0:
                 y0_style_pos = y0_style_pos.to(torch.float32)
                 x   = x.to(torch.float32)
                 eps = eps.to(torch.float32)
@@ -466,20 +469,22 @@ class ReChroma(nn.Module):
                 denoised_approx = rearrange(denoised_approx, "b (h w) (c ph pw) -> b c (h ph) (w pw)", h=h_len, w=w_len, ph=2, pw=2)[:,:,:h,:w]
                 
                 eps = (x - denoised_approx) / sigma
-                if eps.shape[0] == 2:
-                    eps[1] = eps_orig[1] + y0_style_pos_weight * (eps[1] - eps_orig[1])
-                    eps[0] = eps_orig[0] + y0_style_pos_synweight * (eps[0] - eps_orig[0])
-                else:
-                    eps[0] = eps_orig[0] + y0_style_pos_weight * (eps[0] - eps_orig[0])
+                
+                if not UNCOND:
+                    if eps.shape[0] == 2:
+                        eps[1] = eps_orig[1] + y0_style_pos_weight * (eps[1] - eps_orig[1])
+                        eps[0] = eps_orig[0] + y0_style_pos_synweight * (eps[0] - eps_orig[0])
+                    else:
+                        eps[0] = eps_orig[0] + y0_style_pos_weight * (eps[0] - eps_orig[0])
+                elif eps.shape[0] == 1 and UNCOND:
+                    eps[0] = eps_orig[0] + y0_style_neg_synweight * (eps[0] - eps_orig[0])
+                    #if eps.shape[0] == 2:
+                    #    eps[1] = eps_orig[1] + y0_style_neg_synweight * (eps[1] - eps_orig[1])
                 
                 eps = eps.float()
         
-        if eps.shape[0] == 2 or (eps.shape[0] == 1 and UNCOND):
-            if y0_style_neg is not None:
-                y0_style_neg_weight    = transformer_options.get("y0_style_neg_weight")
-                y0_style_neg_synweight = transformer_options.get("y0_style_neg_synweight")
-                y0_style_neg_synweight *= y0_style_neg_weight
-                
+        if eps.shape[0] == 2 or (eps.shape[0] == 1): # and UNCOND):
+            if y0_style_neg is not None and y0_style_neg_weight != 0.0:
                 y0_style_neg = y0_style_neg.to(torch.float32)
                 x   = x.to(torch.float32)
                 eps = eps.to(torch.float32)
@@ -551,10 +556,13 @@ class ReChroma(nn.Module):
                 
                 denoised_approx = rearrange(denoised_approx, "b (h w) (c ph pw) -> b c (h ph) (w pw)", h=h_len, w=w_len, ph=2, pw=2)[:,:,:h,:w]
                 
-                eps = (x - denoised_approx) / sigma
-                eps[0] = eps_orig[0] + y0_style_neg_weight * (eps[0] - eps_orig[0])
-                if eps.shape[0] == 2:
-                    eps[1] = eps_orig[1] + y0_style_neg_synweight * (eps[1] - eps_orig[1])
+                if UNCOND:
+                    eps = (x - denoised_approx) / sigma
+                    eps[0] = eps_orig[0] + y0_style_neg_weight * (eps[0] - eps_orig[0])
+                    if eps.shape[0] == 2:
+                        eps[1] = eps_orig[1] + y0_style_neg_synweight * (eps[1] - eps_orig[1])
+                elif eps.shape[0] == 1 and not UNCOND:
+                    eps[0] = eps_orig[0] + y0_style_pos_synweight * (eps[0] - eps_orig[0])
                 
             eps = eps.float()
             
