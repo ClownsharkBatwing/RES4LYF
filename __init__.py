@@ -1,385 +1,162 @@
-import importlib
-import os
 
-from . import loaders
-from . import sigmas
-from . import conditioning
-from . import images
-from . import models
-from . import helper_sigma_preview_image_preproc
-from . import nodes_misc
+from . import rk_sampler_beta
+from . import samplers
+from . import samplers_extensions
 
-from . import nodes_latents
-from . import nodes_precision
 
-from .res4lyf import RESplain
-
-#torch.use_deterministic_algorithms(True)
-#torch.backends.cudnn.deterministic = True
-#torch.backends.cudnn.benchmark = False
-
-res4lyf.init()
-
-discard_penultimate_sigma_samplers = set((
-))
-
-def add_samplers():
-    from comfy.samplers import KSampler, k_diffusion_sampling
-    if hasattr(KSampler, "DISCARD_PENULTIMATE_SIGMA_SAMPLERS"):
-        KSampler.DISCARD_PENULTIMATE_SIGMA_SAMPLERS |= discard_penultimate_sigma_samplers
-    added = 0
-    for sampler in extra_samplers: #getattr(self, "sample_{}".format(extra_samplers))
-        if sampler not in KSampler.SAMPLERS:
-            try:
-                idx = KSampler.SAMPLERS.index("uni_pc_bh2") # *should* be last item in samplers list
-                KSampler.SAMPLERS.insert(idx+1, sampler) # add custom samplers (presumably) to end of list
-                setattr(k_diffusion_sampling, "sample_{}".format(sampler), extra_samplers[sampler])
-                added += 1
-            except ValueError as _err:
-                pass
-    if added > 0:
-        import importlib
-        importlib.reload(k_diffusion_sampling)
-
-extra_samplers = {}
-
-extra_samplers = dict(reversed(extra_samplers.items()))
-
-NODE_CLASS_MAPPINGS = {
-
-    "FluxLoader"                          : loaders.FluxLoader,
-    "SD35Loader"                          : loaders.SD35Loader,
-    "ClownModelLoader"                    : loaders.RES4LYFModelLoader,
+def add_beta(NODE_CLASS_MAPPINGS, NODE_DISPLAY_NAME_MAPPINGS, extra_samplers):
     
+    NODE_CLASS_MAPPINGS.update({
+        #"SharkSampler"                    : samplers.SharkSampler,
+        #"SharkSamplerAdvanced_Beta"       : samplers.SharkSampler, #SharkSamplerAdvanced_Beta,
 
-    "TextBox1"                            : nodes_misc.TextBox1,
-    "TextBox2"                            : nodes_misc.TextBox2,
-    "TextBox3"                            : nodes_misc.TextBox3,
+        "SharkSampler_Beta"               : samplers.SharkSampler_Beta,
+        
+        "SharkChainsampler_Beta"          : samplers.SharkChainsampler_Beta,
+
+        "BongSampler"                     : samplers.BongSampler,
+
+        "ClownsharKSampler_Beta"          : samplers.ClownsharKSampler_Beta,
+        "ClownsharkChainsampler_Beta"     : samplers.ClownsharkChainsampler_Beta,
+        
+        
+        "ClownSampler_Beta"               : samplers.ClownSampler_Beta,
+        "ClownSamplerAdvanced_Beta"       : samplers.ClownSamplerAdvanced_Beta,
+
+        "ClownGuide_Mean_Beta"            : samplers_extensions.ClownGuide_Mean_Beta,
+        "ClownGuide_AdaIN_MMDiT_Beta"     : samplers_extensions.ClownGuide_AdaIN_MMDiT_Beta,
+        "ClownGuide_AttnInj_MMDiT_Beta"   : samplers_extensions.ClownGuide_AttnInj_MMDiT_Beta,
+        "ClownGuide_Style_Beta"           : samplers_extensions.ClownGuide_Style_Beta,
+
+        "ClownGuide_Beta"                 : samplers_extensions.ClownGuide_Beta,
+        "ClownGuides_Beta"                : samplers_extensions.ClownGuides_Beta,
+        "ClownGuidesAB_Beta"              : samplers_extensions.ClownGuidesAB_Beta,
+                
+        "ClownSamplerSelector_Beta"       : samplers_extensions.ClownSamplerSelector_Beta,
+
+        "ClownOptions_SDE_Mask_Beta"      : samplers_extensions.ClownOptions_SDE_Mask_Beta,
+        "ClownOptions_SDE_Beta"           : samplers_extensions.ClownOptions_SDE_Beta,
+        
+        "ClownOptions_StepSize_Beta"      : samplers_extensions.ClownOptions_StepSize_Beta,
+        "ClownOptions_DetailBoost_Beta"   : samplers_extensions.ClownOptions_DetailBoost_Beta,
+        "ClownOptions_SigmaScaling_Beta"  : samplers_extensions.ClownOptions_SigmaScaling_Beta,
+
+        "ClownOptions_Momentum_Beta"      : samplers_extensions.ClownOptions_Momentum_Beta,
+        "ClownOptions_ImplicitSteps_Beta" : samplers_extensions.ClownOptions_ImplicitSteps_Beta,
+        "ClownOptions_Cycles_Beta"        : samplers_extensions.ClownOptions_Cycles_Beta,
+        "ClownOptions_SwapSampler_Beta"   : samplers_extensions.ClownOptions_SwapSampler_Beta,
+        
+        "ClownOptions_ExtraOptions_Beta"  : samplers_extensions.ClownOptions_ExtraOptions_Beta,
+        "ClownOptions_Automation_Beta"    : samplers_extensions.ClownOptions_Automation_Beta,
+        "SharkOptions_GuideCond_Beta"     : samplers_extensions.SharkOptions_GuideCond_Beta,
+        "SharkOptions_GuideConds_Beta"    : samplers_extensions.SharkOptions_GuideConds_Beta,
+
+        "SharkOptions_Beta"               : samplers_extensions.SharkOptions_Beta,
+        "SharkOptions_UltraCascade_Latent_Beta"  : samplers_extensions.SharkOptions_UltraCascade_Latent_Beta,
+        
+        
+        "ClownOptions_Combine"            : samplers_extensions.ClownOptions_Combine,
+        "ClownOptions_Frameweights"       : samplers_extensions.ClownOptions_Frameweights,
+        "SharkOptions_GuiderInput"        : samplers_extensions.SharkOptions_GuiderInput,
+
+    })
+
+    extra_samplers.update({
+        "res_2m"     : sample_res_2m,
+        "res_3m"     : sample_res_3m,
+        "res_2s"     : sample_res_2s,
+        "res_3s"     : sample_res_3s,
+        "res_5s"     : sample_res_5s,
+        "res_6s"     : sample_res_6s,
+        "res_2m_ode" : sample_res_2m_ode,
+        "res_3m_ode" : sample_res_3m_ode,
+        "res_2s_ode" : sample_res_2s_ode,
+        "res_3s_ode" : sample_res_3s_ode,
+        "res_5s_ode" : sample_res_5s_ode,
+        "res_6s_ode" : sample_res_6s_ode,
+
+        "deis_2m"    : sample_deis_2m,
+        "deis_3m"    : sample_deis_3m,
+        "deis_2m_ode": sample_deis_2m_ode,
+        "deis_3m_ode": sample_deis_3m_ode,
+        "rk_beta": rk_sampler_beta.sample_rk_beta,
+    })
     
-    "TextConcatenate"                     : nodes_misc.TextConcatenate,
-    "TextBoxConcatenate"                  : nodes_misc.TextBoxConcatenate,
+    NODE_DISPLAY_NAME_MAPPINGS.update({
+            #"SharkSampler"                          : "SharkSampler",
+            #"SharkSamplerAdvanced_Beta"             : "SharkSamplerAdvanced",
+            "SharkSampler_Beta"                     : "SharkSampler",
+            "SharkChainsampler_Beta"                : "SharkChainsampler",
+            "BongSampler"                           : "BongSampler",
+            "ClownsharKSampler_Beta"                : "ClownsharKSampler",
+            "ClownsharkChainsampler_Beta"           : "ClownsharkChainsampler",
+            "ClownSampler_Beta"                     : "ClownSampler",
+            "ClownSamplerAdvanced_Beta"             : "ClownSamplerAdvanced",
+            "ClownGuide_Mean_Beta"                  : "ClownGuide Mean",
+            "ClownGuide_AdaIN_MMDiT_Beta"           : "ClownGuide AdaIN (MMDiT)",
+            "ClownGuide_AttnInj_MMDiT_Beta"         : "ClownGuide AttnInj (MMDiT)",
+            "ClownGuide_Style_Beta"                 : "ClownGuide Style",
+            "ClownGuide_Beta"                       : "ClownGuide",
+            "ClownGuides_Beta"                      : "ClownGuides",
+            "ClownGuidesAB_Beta"                    : "ClownGuidesAB",
+            "ClownSamplerSelector_Beta"             : "ClownSamplerSelector",
+            "ClownOptions_SDE_Mask_Beta"            : "ClownOptions SDE Mask",
+            "ClownOptions_SDE_Beta"                 : "ClownOptions SDE",
+            "ClownOptions_StepSize_Beta"            : "ClownOptions Step Size",
+            "ClownOptions_DetailBoost_Beta"         : "ClownOptions Detail Boost",
+            "ClownOptions_SigmaScaling_Beta"        : "ClownOptions Sigma Scaling",
+            "ClownOptions_Momentum_Beta"            : "ClownOptions Momentum",
+            "ClownOptions_ImplicitSteps_Beta"       : "ClownOptions Implicit Steps",
+            "ClownOptions_Cycles_Beta"              : "ClownOptions Cycles",
+            "ClownOptions_SwapSampler_Beta"         : "ClownOptions Swap Sampler",
+            "ClownOptions_ExtraOptions_Beta"        : "ClownOptions Extra Options",
+            "ClownOptions_Automation_Beta"          : "ClownOptions Automation",
+            "SharkOptions_GuideCond_Beta"           : "SharkOptions Guide Cond",
+            "SharkOptions_GuideConds_Beta"          : "SharkOptions Guide Conds",
+            "SharkOptions_Beta"                     : "SharkOptions",
+            "SharkOptions_UltraCascade_Latent_Beta" : "SharkOptions UltraCascade Latent",
+            "ClownOptions_Combine"                  : "ClownOptions Combine",
+            "ClownOptions_Frameweights"             : "ClownOptions Frameweights",
+            "SharkOptions_GuiderInput"              : "SharkOptions Guider Input",
+    })
     
-    "TextLoadFile"                        : nodes_misc.TextLoadFile,
-    "TextShuffle"                         : nodes_misc.TextShuffle,
-    "TextShuffleAndTruncate"              : nodes_misc.TextShuffleAndTruncate,
-    "TextTruncateTokens"                  : nodes_misc.TextTruncateTokens,
-
-    "SeedGenerator"                       : nodes_misc.SeedGenerator,
-    
-    "ClownRegionalConditioning"           : conditioning.ClownRegionalConditioning,
-    "ClownRegionalConditionings"          : conditioning.ClownRegionalConditionings,
-    
-    "ClownRegionalConditioning2"          : conditioning.ClownRegionalConditioning2,
-    "ClownRegionalConditioning3"          : conditioning.ClownRegionalConditioning3,
-    
-    "ClownRegionalConditioning_AB"        : conditioning.ClownRegionalConditioning_AB,
-    "ClownRegionalConditioning_ABC"       : conditioning.ClownRegionalConditioning_ABC,
-
-    "CLIPTextEncodeFluxUnguided"          : conditioning.CLIPTextEncodeFluxUnguided,
-    "ConditioningOrthoCollin"             : conditioning.ConditioningOrthoCollin,
-
-    "ConditioningAverageScheduler"        : conditioning.ConditioningAverageScheduler,
-    "ConditioningMultiply"                : conditioning.ConditioningMultiply,
-    "ConditioningAdd"                     : conditioning.ConditioningAdd,
-    "Conditioning Recast FP64"            : conditioning.Conditioning_Recast64,
-    "StableCascade_StageB_Conditioning64" : conditioning.StableCascade_StageB_Conditioning64,
-    "ConditioningZeroAndTruncate"         : conditioning.ConditioningZeroAndTruncate,
-    "ConditioningTruncate"                : conditioning.ConditioningTruncate,
-    "StyleModelApplyAdvanced_"            : conditioning.StyleModelApplyAdvanced,
-    "CrossAttn_EraseReplace_HiDream"      : conditioning.CrossAttn_EraseReplace_HiDream,
-
-    "ConditioningDownsample (T5)"         : conditioning.ConditioningDownsampleT5,
-
-    "ConditioningToBase64"                : conditioning.ConditioningToBase64,
-    "Base64ToConditioning"                : conditioning.Base64ToConditioning,
-    
-    "ConditioningBatch4"                  : conditioning.ConditioningBatch4,
-    "ConditioningBatch8"                  : conditioning.ConditioningBatch8,
-    
-    "TemporalMaskGenerator"               : conditioning.TemporalMaskGenerator,
-    "TemporalSplitAttnMask"               : conditioning.TemporalSplitAttnMask,
-    "TemporalSplitAttnMask (Midframe)"    : conditioning.TemporalSplitAttnMask_Midframe,
-    "TemporalCrossAttnMask"               : conditioning.TemporalCrossAttnMask,
+    return NODE_CLASS_MAPPINGS, NODE_DISPLAY_NAME_MAPPINGS, extra_samplers
 
 
 
-    "Set Precision"                       : nodes_precision.set_precision,
-    "Set Precision Universal"             : nodes_precision.set_precision_universal,
-    "Set Precision Advanced"              : nodes_precision.set_precision_advanced,
-    
-    
-    
-    "LatentNoised"                        : nodes_latents.LatentNoised,
-    "LatentNoiseList"                     : nodes_latents.LatentNoiseList,
-    "AdvancedNoise"                       : nodes_latents.AdvancedNoise,
+def sample_res_2m(model, x, sigmas, extra_args=None, callback=None, disable=None):
+    return rk_sampler_beta.sample_rk_beta(model, x, sigmas, None, extra_args, callback, disable, rk_type="res_2m",)
+def sample_res_3m(model, x, sigmas, extra_args=None, callback=None, disable=None):
+    return rk_sampler_beta.sample_rk_beta(model, x, sigmas, None, extra_args, callback, disable, rk_type="res_3m",)
+def sample_res_2s(model, x, sigmas, extra_args=None, callback=None, disable=None):
+    return rk_sampler_beta.sample_rk_beta(model, x, sigmas, None, extra_args, callback, disable, rk_type="res_2s",)
+def sample_res_3s(model, x, sigmas, extra_args=None, callback=None, disable=None):
+    return rk_sampler_beta.sample_rk_beta(model, x, sigmas, None, extra_args, callback, disable, rk_type="res_3s",)
+def sample_res_5s(model, x, sigmas, extra_args=None, callback=None, disable=None):
+    return rk_sampler_beta.sample_rk_beta(model, x, sigmas, None, extra_args, callback, disable, rk_type="res_5s",)
+def sample_res_6s(model, x, sigmas, extra_args=None, callback=None, disable=None):
+    return rk_sampler_beta.sample_rk_beta(model, x, sigmas, None, extra_args, callback, disable, rk_type="res_6s",)
 
-    "LatentNoiseBatch_perlin"             : nodes_latents.LatentNoiseBatch_perlin,
-    "LatentNoiseBatch_fractal"            : nodes_latents.LatentNoiseBatch_fractal,
-    "LatentNoiseBatch_gaussian"           : nodes_latents.LatentNoiseBatch_gaussian,
-    "LatentNoiseBatch_gaussian_channels"  : nodes_latents.LatentNoiseBatch_gaussian_channels,
-    
-    "LatentBatch_channels"                : nodes_latents.LatentBatch_channels,
-    "LatentBatch_channels_16"             : nodes_latents.LatentBatch_channels_16,
-    
-    "Latent Get Channel Means"            : nodes_latents.latent_get_channel_means,
-    
-    "Latent Match Channelwise"            : nodes_latents.latent_channelwise_match,
-    
-    "Latent to RawX"                      : nodes_latents.latent_to_raw_x,
-    "Latent Clear State Info"             : nodes_latents.latent_clear_state_info,
-    "Latent Replace State Info"           : nodes_latents.latent_replace_state_info,
-    "Latent Display State Info"           : nodes_latents.latent_display_state_info,
-    "Latent Transfer State Info"          : nodes_latents.latent_transfer_state_info,
-    "Latent to Cuda"                      : nodes_latents.latent_to_cuda,
-    "Latent Batcher"                      : nodes_latents.latent_batch,
-    "Latent Normalize Channels"           : nodes_latents.latent_normalize_channels,
-    "Latent Channels From To"             : nodes_latents.latent_mean_channels_from_to,
+def sample_res_2m_ode(model, x, sigmas, extra_args=None, callback=None, disable=None):
+    return rk_sampler_beta.sample_rk_beta(model, x, sigmas, None, extra_args, callback, disable, rk_type="res_2m", eta=0.0, eta_substep=0.0, )
+def sample_res_3m_ode(model, x, sigmas, extra_args=None, callback=None, disable=None):
+    return rk_sampler_beta.sample_rk_beta(model, x, sigmas, None, extra_args, callback, disable, rk_type="res_3m", eta=0.0, eta_substep=0.0, )
+def sample_res_2s_ode(model, x, sigmas, extra_args=None, callback=None, disable=None):
+    return rk_sampler_beta.sample_rk_beta(model, x, sigmas, None, extra_args, callback, disable, rk_type="res_2s", eta=0.0, eta_substep=0.0, )
+def sample_res_3s_ode(model, x, sigmas, extra_args=None, callback=None, disable=None):
+    return rk_sampler_beta.sample_rk_beta(model, x, sigmas, None, extra_args, callback, disable, rk_type="res_3s", eta=0.0, eta_substep=0.0, )
+def sample_res_5s_ode(model, x, sigmas, extra_args=None, callback=None, disable=None):
+    return rk_sampler_beta.sample_rk_beta(model, x, sigmas, None, extra_args, callback, disable, rk_type="res_5s", eta=0.0, eta_substep=0.0, )
+def sample_res_6s_ode(model, x, sigmas, extra_args=None, callback=None, disable=None):
+    return rk_sampler_beta.sample_rk_beta(model, x, sigmas, None, extra_args, callback, disable, rk_type="res_6s", eta=0.0, eta_substep=0.0, )
 
+def sample_deis_2m(model, x, sigmas, extra_args=None, callback=None, disable=None):
+    return rk_sampler_beta.sample_rk_beta(model, x, sigmas, None, extra_args, callback, disable, rk_type="deis_2m",)
+def sample_deis_3m(model, x, sigmas, extra_args=None, callback=None, disable=None):
+    return rk_sampler_beta.sample_rk_beta(model, x, sigmas, None, extra_args, callback, disable, rk_type="deis_3m",)
 
-
-    "LatentPhaseMagnitude"                : nodes_latents.LatentPhaseMagnitude,
-    "LatentPhaseMagnitudeMultiply"        : nodes_latents.LatentPhaseMagnitudeMultiply,
-    "LatentPhaseMagnitudeOffset"          : nodes_latents.LatentPhaseMagnitudeOffset,
-    "LatentPhaseMagnitudePower"           : nodes_latents.LatentPhaseMagnitudePower,
-    
-    "MaskToggle"                          : nodes_latents.MaskToggle,
-    "Frames Masks Uninterpolate"          : nodes_latents.Frames_Masks_Uninterpolate,
-    "Frames Masks ZeroOut"                : nodes_latents.Frames_Masks_ZeroOut,
-    "Frames Latent ReverseOrder"          : nodes_latents.Frames_Latent_ReverseOrder,
-
-    
-    "EmptyLatentImage64"                  : nodes_latents.EmptyLatentImage64,
-    "EmptyLatentImageCustom"              : nodes_latents.EmptyLatentImageCustom,
-    "StableCascade_StageC_VAEEncode_Exact": nodes_latents.StableCascade_StageC_VAEEncode_Exact,
-    
-    
-    
-    "PrepForUnsampling"                   : helper_sigma_preview_image_preproc.VAEEncodeAdvanced,
-    "VAEEncodeAdvanced"                   : helper_sigma_preview_image_preproc.VAEEncodeAdvanced,
-    
-    "SigmasPreview"                       : helper_sigma_preview_image_preproc.SigmasPreview,
-    "SigmasSchedulePreview"               : helper_sigma_preview_image_preproc.SigmasSchedulePreview,
-
-
-    "TorchCompileModelFluxAdv"            : models.TorchCompileModelFluxAdvanced,
-    "TorchCompileModelAura"               : models.TorchCompileModelAura,
-    "TorchCompileModelSD35"               : models.TorchCompileModelSD35,
-    "TorchCompileModels"                  : models.TorchCompileModels,
-    "ClownpileModelWanVideo"              : models.ClownpileModelWanVideo,
-
-
-    "ModelTimestepPatcher"                : models.ModelSamplingAdvanced,
-    "ModelSamplingAdvanced"               : models.ModelSamplingAdvanced,
-    "ModelSamplingAdvancedResolution"     : models.ModelSamplingAdvancedResolution,
-    "FluxGuidanceDisable"                 : models.FluxGuidanceDisable,
-
-    "ReWanPatcher"                        : models.ReWanPatcher,
-    "ReFluxPatcher"                       : models.ReFluxPatcher,
-    "ReChromaPatcher"                     : models.ReChromaPatcher,
-    "ReSD35Patcher"                       : models.ReSD35Patcher,
-    "ReAuraPatcher"                       : models.ReAuraPatcher,
-    "ReHiDreamPatcher"                    : models.ReHiDreamPatcher,
-    
-    "ReWanPatcherAdvanced"                : models.ReWanPatcherAdvanced,
-    "ReFluxPatcherAdvanced"               : models.ReFluxPatcherAdvanced,
-    "ReChromaPatcherAdvanced"             : models.ReChromaPatcherAdvanced,
-    "ReSD35PatcherAdvanced"               : models.ReSD35PatcherAdvanced,
-    "ReAuraPatcherAdvanced"               : models.ReAuraPatcherAdvanced,
-    
-    "ReHiDreamPatcherAdvanced"            : models.ReHiDreamPatcherAdvanced,
-    
-    "FluxOrthoCFGPatcher"                 : models.FluxOrthoCFGPatcher,
-
-    
-    "UNetSave"                            : models.UNetSave,
-
-
-
-    "Sigmas Recast"                       : sigmas.set_precision_sigmas,
-    "Sigmas Noise Inversion"              : sigmas.sigmas_noise_inversion,
-    "Sigmas From Text"                    : sigmas.sigmas_from_text, 
-
-    "Sigmas Variance Floor"               : sigmas.sigmas_variance_floor,
-    "Sigmas Truncate"                     : sigmas.sigmas_truncate,
-    "Sigmas Start"                        : sigmas.sigmas_start,
-    "Sigmas Split"                        : sigmas.sigmas_split,
-    "Sigmas Concat"                       : sigmas.sigmas_concatenate,
-    "Sigmas Pad"                          : sigmas.sigmas_pad,
-    "Sigmas Unpad"                        : sigmas.sigmas_unpad,
-    
-    "Sigmas SetFloor"                     : sigmas.sigmas_set_floor,
-    "Sigmas DeleteBelowFloor"             : sigmas.sigmas_delete_below_floor,
-    "Sigmas DeleteDuplicates"             : sigmas.sigmas_delete_consecutive_duplicates,
-    "Sigmas Cleanup"                      : sigmas.sigmas_cleanup,
-    
-    "Sigmas Mult"                         : sigmas.sigmas_mult,
-    "Sigmas Modulus"                      : sigmas.sigmas_modulus,
-    "Sigmas Quotient"                     : sigmas.sigmas_quotient,
-    "Sigmas Add"                          : sigmas.sigmas_add,
-    "Sigmas Power"                        : sigmas.sigmas_power,
-    "Sigmas Abs"                          : sigmas.sigmas_abs,
-    
-    "Sigmas2 Mult"                        : sigmas.sigmas2_mult,
-    "Sigmas2 Add"                         : sigmas.sigmas2_add,
-    
-    "Sigmas Rescale"                      : sigmas.sigmas_rescale,
-
-    "Sigmas Math1"                        : sigmas.sigmas_math1,
-    "Sigmas Math3"                        : sigmas.sigmas_math3,
-
-    "Sigmas Iteration Karras"             : sigmas.sigmas_iteration_karras,
-    "Sigmas Iteration Polyexp"            : sigmas.sigmas_iteration_polyexp,
-
-    "ClownScheduler"                      : sigmas.ClownScheduler, # for modulating parameters
-    "Tan Scheduler"                       : sigmas.tan_scheduler,
-    "Tan Scheduler 2"                     : sigmas.tan_scheduler_2stage,
-    "Tan Scheduler 2 Simple"              : sigmas.tan_scheduler_2stage_simple,
-    "Constant Scheduler"                  : sigmas.constant_scheduler,
-    "Linear Quadratic Advanced"           : sigmas.linear_quadratic_advanced,
-    
-    "Image Get Color Swatches"            : images.Image_Get_Color_Swatches,
-    "Masks From Color Swatches"           : images.Masks_From_Color_Swatches,
-    "Masks From Colors"                   : images.Masks_From_Colors,
-    
-    "Masks Unpack 4"                      : images.Masks_Unpack4,
-    "Masks Unpack 8"                      : images.Masks_Unpack8,
-    "Masks Unpack 16"                     : images.Masks_Unpack16,
-
-    
-    "Image Sharpen FS"                    : images.ImageSharpenFS,
-    "Image Channels LAB"                  : images.Image_Channels_LAB,
-    "Image Median Blur"                   : images.ImageMedianBlur,
-    "Image Gaussian Blur"                 : images.ImageGaussianBlur,
-
-    "Image Pair Split"                    : images.Image_Pair_Split,
-    "Image Crop Location Exact"           : images.Image_Crop_Location_Exact,
-    "Film Grain"                          : images.Film_Grain,
-    "Frequency Separation Linear Light"   : images.Frequency_Separation_Linear_Light,
-    "Frequency Separation Hard Light"     : images.Frequency_Separation_Hard_Light,
-    "Frequency Separation Hard Light LAB" : images.Frequency_Separation_Hard_Light_LAB,
-    
-    "Frame Select"                        : images.Frame_Select,
-    "Frames Slice"                        : images.Frames_Slice,
-    "Frames Concat"                       : images.Frames_Concat,
-    
-    "Mask Sketch"                         : images.MaskSketch,
-    
-    "Image Grain Add"                     : images.Image_Grain_Add,
-    "Image Repeat Tile To Size"           : images.ImageRepeatTileToSize,
-
-    "Frames Concat Masks"                 : nodes_latents.Frames_Concat_Masks,
-
-
-    "Frame Select Latent"                 : nodes_latents.Frame_Select_Latent,
-    "Frames Slice Latent"                 : nodes_latents.Frames_Slice_Latent,
-    "Frames Concat Latent"                : nodes_latents.Frames_Concat_Latent,
-
-
-    "Frame Select Latent Raw"             : nodes_latents.Frame_Select_Latent_Raw,
-    "Frames Slice Latent Raw"             : nodes_latents.Frames_Slice_Latent_Raw,
-    "Frames Concat Latent Raw"            : nodes_latents.Frames_Concat_Latent_Raw,
-
-
-
-}
-
-
-NODE_DISPLAY_NAME_MAPPINGS = {
-    
-}
-
-
-WEB_DIRECTORY = "./web/js"
-
-
-
-flags = {
-    "zampler"        : False,
-    "beta_samplers"  : False,
-    "legacy_samplers": False,
-}
-
-
-file_path = os.path.join(os.path.dirname(__file__), "zampler_test_code.txt")
-if os.path.exists(file_path):
-    try:
-        from .zampler import add_zamplers
-        NODE_CLASS_MAPPINGS, extra_samplers = add_zamplers(NODE_CLASS_MAPPINGS, extra_samplers)
-        flags["zampler"] = True
-        RESplain("Importing zampler.")
-    except ImportError:
-        try:
-            import importlib
-            for module_name in ["RES4LYF.zampler", "res4lyf.zampler"]:
-                try:
-                    zampler_module = importlib.import_module(module_name)
-                    add_zamplers = zampler_module.add_zamplers
-                    NODE_CLASS_MAPPINGS, extra_samplers = add_zamplers(NODE_CLASS_MAPPINGS, extra_samplers)
-                    flags["zampler"] = True
-                    RESplain(f"Importing zampler via {module_name}.")
-                    break
-                except ImportError:
-                    continue
-            else:
-                raise ImportError("Zampler module not found in any path")
-        except Exception as e:
-            print(f"(RES4LYF) Failed to import zamplers: {e}")
-
-
-try:
-    from .legacy import add_legacy
-    NODE_CLASS_MAPPINGS, NODE_DISPLAY_NAME_MAPPINGS, extra_samplers = add_legacy(NODE_CLASS_MAPPINGS, NODE_DISPLAY_NAME_MAPPINGS, extra_samplers)
-    flags["legacy_samplers"] = True
-    RESplain("Importing legacy samplers.")
-except ImportError:
-    try:
-        import importlib
-        for module_name in ["RES4LYF.legacy", "res4lyf.legacy"]:
-            try:
-                legacy_module = importlib.import_module(module_name)
-                add_legacy = legacy_module.add_legacy
-                NODE_CLASS_MAPPINGS, extra_samplers = add_legacy(NODE_CLASS_MAPPINGS, extra_samplers)
-                flags["legacy_samplers"] = True
-                RESplain(f"Importing legacy samplers via {module_name}.")
-                break
-            except ImportError:
-                continue
-        else:
-            raise ImportError("Legacy module not found in any path")
-    except Exception as e:
-        print(f"(RES4LYF) Failed to import legacy samplers: {e}")
-
-
-try:
-    from .beta import add_beta
-    NODE_CLASS_MAPPINGS, NODE_DISPLAY_NAME_MAPPINGS, extra_samplers = add_beta(NODE_CLASS_MAPPINGS, NODE_DISPLAY_NAME_MAPPINGS, extra_samplers)
-    flags["beta_samplers"] = True
-    RESplain("Importing beta samplers.")
-except ImportError:
-    try:
-        import importlib
-        for module_name in ["RES4LYF.beta", "res4lyf.beta"]:
-            try:
-                beta_module = importlib.import_module(module_name)
-                add_beta = beta_module.add_beta
-                NODE_CLASS_MAPPINGS, extra_samplers = add_beta(NODE_CLASS_MAPPINGS, extra_samplers)
-                flags["beta_samplers"] = True
-                RESplain(f"Importing beta samplers via {module_name}.")
-                break
-            except ImportError:
-                continue
-        else:
-            raise ImportError("Beta module not found in any path")
-    except Exception as e:
-        print(f"(RES4LYF) Failed to import beta samplers: {e}")
-
-
-
-
-
-add_samplers()
-
-
-__all__ = ["NODE_CLASS_MAPPINGS", "NODE_DISPLAY_NAME_MAPPINGS", "WEB_DIRECTORY"]
-
+def sample_deis_2m_ode(model, x, sigmas, extra_args=None, callback=None, disable=None):
+    return rk_sampler_beta.sample_rk_beta(model, x, sigmas, None, extra_args, callback, disable, rk_type="deis_2m", eta=0.0, eta_substep=0.0, )
+def sample_deis_3m_ode(model, x, sigmas, extra_args=None, callback=None, disable=None):
+    return rk_sampler_beta.sample_rk_beta(model, x, sigmas, None, extra_args, callback, disable, rk_type="deis_3m", eta=0.0, eta_substep=0.0, )
 
