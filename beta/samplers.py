@@ -1518,7 +1518,7 @@ class ClownsharKSampler_Beta:
         #start_at_step          = options_mgr.get('start_at_step'         , start_at_step)
         #stop_at_ste            = options_mgr.get('stop_at_step'          , stop_at_step)
                 
-        if channelwise_cfg != 1.0:
+        if channelwise_cfg: # != 1.0:
             cfg = -abs(cfg)  # set cfg negative for shark, to flag as cfg_cw
 
 
@@ -1896,7 +1896,7 @@ class ClownSampler_Beta:
         #start_at_step          = options_mgr.get('start_at_step'         , start_at_step)
         #stop_at_ste            = options_mgr.get('stop_at_step'          , stop_at_step)
                 
-        if channelwise_cfg != 1.0:
+        if channelwise_cfg: # != 1.0:
             cfg = -abs(cfg)  # set cfg negative for shark, to flag as cfg_cw
 
         noise_seed_sde = seed
@@ -2179,7 +2179,7 @@ class BongSampler:
         #start_at_step          = options_mgr.get('start_at_step'         , start_at_step)
         #stop_at_ste            = options_mgr.get('stop_at_step'          , stop_at_step)
                 
-        if channelwise_cfg != 1.0:
+        if channelwise_cfg: # != 1.0:
             cfg = -abs(cfg)  # set cfg negative for shark, to flag as cfg_cw
 
 
