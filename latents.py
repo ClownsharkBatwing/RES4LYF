@@ -1,6 +1,6 @@
 import torch
 import torch.nn.functional as F
-
+from typing import Tuple, List
 
 
 # TENSOR PROJECTION OPS
@@ -697,4 +697,77 @@ def interpolate_spd(cov1, cov2, t, eps=1e-5):
     cov_t = M1_sqrt @ middle_t @ M1_sqrt
 
     return cov_t.to(cov1.dtype) 
+
+
+
+
+
+
+
+def tile_latent(latent: torch.Tensor, tile_size: Tuple[int,int]):
+    """
+    Split `latent` into tiles of shape (t_h, t_w), evenly spaced so that
+    the first tile starts at 0, the last tile ends at H/W, and no padding is needed.
+    Returns:
+        tiles:      (B * rows * cols, C, t_h, t_w)
+        orig_shape: (B, C, H, W)
+        tile_hw:    (t_h, t_w)
+        positions:  (rows, cols) lists of start y and x positions
+    """
+    B, C, H, W = latent.shape
+    t_h, t_w = tile_size
+
+    # how many tiles to cover without padding
+    rows = (H + t_h - 1) // t_h
+    cols = (W + t_w - 1) // t_w
+
+    if rows == 1:
+        pos_h = [0]
+    else:
+        pos_h = [round(i*(H - t_h)/(rows-1)) for i in range(rows)]
+    if cols == 1:
+        pos_w = [0]
+    else:
+        pos_w = [round(j*(W - t_w)/(cols-1)) for j in range(cols)]
+
+    tiles = []
+    for y in pos_h:
+        for x in pos_w:
+            tile = latent[:, :, y:y+t_h, x:x+t_w]
+            tiles.append(tile)
+    # stack into (B*rows*cols, C, t_h, t_w)
+    tiles = torch.cat(tiles, dim=0).view(B*rows*cols, C, t_h, t_w)
+
+    #ret   tiles, orig_shape,   tile_hw,    positions
+    return tiles, (B, C, H, W), (t_h, t_w), (pos_h, pos_w)   
+
+
+def untile_latent(tiles      : torch.Tensor,
+                orig_shape : Tuple[int,int,int,int],
+                tile_hw    : Tuple[int,int],
+                positions  : Tuple[List[int],List[int]]):
+    """
+    Reconstruct the original latent from tiles + their start positions,
+    averaging in overlapping regions.
+    """
+    B, C, H, W = orig_shape
+    t_h, t_w = tile_hw
+    pos_h, pos_w = positions
+    rows, cols = len(pos_h), len(pos_w)
+
+    # prepare accumulators
+    output = torch.zeros((B, C, H, W), device=tiles.device, dtype=tiles.dtype)
+    weight = torch.zeros_like(output)
+
+    # reshape tiles back to (B, rows, cols, C, t_h, t_w)
+    tiles = tiles.view(B, rows, cols, C, t_h, t_w)
+    for bi in range(B):
+        for i, y in enumerate(pos_h):
+            for j, x in enumerate(pos_w):
+                output[bi, :, y:y+t_h, x:x+t_w] += tiles[bi, i, j]
+                weight[bi, :, y:y+t_h, x:x+t_w] += 1
+
+    # avoid division by zero
+    output /= weight.clamp(min=1.0)
+    return output
 
