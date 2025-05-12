@@ -189,6 +189,7 @@ class SharkSampler:
             unsample_eta    = options_mgr.get('unsample_eta',     unsample_eta)
             eta_decay_scale = options_mgr.get('eta_decay_scale',  eta_decay_scale)
             start_at_step   = options_mgr.get('start_at_step',    -1)
+            tile_sizes      = options_mgr.get('tile_sizes',       None)
 
             
             #ultracascade_stage        = options_mgr.get('ultracascade_stage',         ultracascade_stage)
@@ -197,6 +198,7 @@ class SharkSampler:
             ultracascade_latent_height = options_mgr.get('ultracascade_latent_height', ultracascade_latent_height)
             
             sampler.extra_options['start_at_step'] = start_at_step
+            sampler.extra_options['tile_sizes']    = tile_sizes
                         
             is_chained = False
             if latent_image is not None:
@@ -640,7 +642,9 @@ class SharkSampler:
                             sampler.extra_options['etas']         = unsample_etas
                         else:
                             guider.cfgs = cfgs_cached
-                            
+                        
+                        guider.cfgs = cfgs_cached
+                        
                         eta_decay           = eta_cached
                         eta_substep_decay   = eta_substep_cached
                         unsample_eta_decay  = unsample_eta

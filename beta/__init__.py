@@ -59,6 +59,9 @@ def add_beta(NODE_CLASS_MAPPINGS, NODE_DISPLAY_NAME_MAPPINGS, extra_samplers):
         "ClownOptions_Combine"            : samplers_extensions.ClownOptions_Combine,
         "ClownOptions_Frameweights"       : samplers_extensions.ClownOptions_Frameweights,
         "SharkOptions_GuiderInput"        : samplers_extensions.SharkOptions_GuiderInput,
+        
+        "ClownOptions_Tile_Beta"         : samplers_extensions.ClownOptions_Tile_Beta,
+        "ClownOptions_Tile_Advanced_Beta": samplers_extensions.ClownOptions_Tile_Advanced_Beta,
 
     })
 
@@ -120,6 +123,9 @@ def add_beta(NODE_CLASS_MAPPINGS, NODE_DISPLAY_NAME_MAPPINGS, extra_samplers):
             "ClownOptions_Combine"                  : "ClownOptions Combine",
             "ClownOptions_Frameweights"             : "ClownOptions Frameweights",
             "SharkOptions_GuiderInput"              : "SharkOptions Guider Input",
+            "ClownOptions_Tile_Beta"               : "ClownOptions Tile",
+            "ClownOptions_Tile_Advanced_Beta"      : "ClownOptions Tile Advanced",
+
     })
     
     return NODE_CLASS_MAPPINGS, NODE_DISPLAY_NAME_MAPPINGS, extra_samplers

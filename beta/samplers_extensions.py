@@ -8,7 +8,7 @@ import copy
 
 from nodes import MAX_RESOLUTION
 
-from ..helper                import OptionsManager, FrameWeightsManager, initialize_or_scale, get_res4lyf_scheduler_list, parse_range_string
+from ..helper                import OptionsManager, FrameWeightsManager, initialize_or_scale, get_res4lyf_scheduler_list, parse_range_string, parse_tile_sizes
 
 from .rk_coefficients_beta   import RK_SAMPLER_NAMES_BETA_FOLDERS, get_default_sampler_name, get_sampler_name_list, process_sampler_name
 
@@ -520,7 +520,7 @@ class SharkOptions_StartStep_Beta:
 
 
 
-class ClownOptions_Tiled_Beta:
+class ClownOptions_Tile_Beta:
     @classmethod
     def INPUT_TYPES(cls):
         return {"required":
@@ -546,14 +546,16 @@ class ClownOptions_Tiled_Beta:
             ): 
         
         options = options if options is not None else {}
-            
-        options['start_at_step'] = start_at_step
+        
+        tile_sizes = options.get('tile_sizes', [])
+        tile_sizes.append((tile_height, tile_width))
+        options['tile_sizes'] = tile_sizes
 
         return (options,)
 
 
 
-class ClownOptions_Tiled_Advanced_Beta:
+class ClownOptions_Tile_Advanced_Beta:
     @classmethod
     def INPUT_TYPES(cls):
         return {"required":
@@ -573,12 +575,12 @@ class ClownOptions_Tiled_Advanced_Beta:
     
     def main(self,
             tile_sizes = "1024,1024",
-            options     = None
+            options    = None
             ): 
         
         options = options if options is not None else {}
             
-        options['start_at_step'] = start_at_step
+        options['tile_sizes'] = parse_tile_sizes(tile_sizes)
 
         return (options,)
 

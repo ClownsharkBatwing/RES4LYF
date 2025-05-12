@@ -2,7 +2,7 @@ import torch
 from torch import Tensor
 from tqdm.auto import trange
 import gc
-from typing import Optional, Callable, Tuple, Dict, Any, Union
+from typing import Optional, Callable, Tuple, List, Dict, Any, Union
 import math
 import copy
 
@@ -235,11 +235,12 @@ def sample_rk_beta(
         
         steps_to_run                  : int                = -1,
         start_at_step                 : int                = -1,
+        tile_sizes                    : Optional[List[Tuple[int,int]]] = None,
         
         sde_mask                      : Optional[Tensor]   = None,
         
         batch_num                     : int                = 0,
-
+        
         extra_options                 : str                = "",
         
         AttnMask   = None,
@@ -330,6 +331,7 @@ def sample_rk_beta(
         
     RK            = RK_Method_Beta.create(model, rk_type, noise_anchor, noise_boost_normalize, model_device=model_device, work_device=work_device, dtype=default_dtype, extra_options=extra_options)
     RK.extra_args = RK.init_cfg_channelwise(x, cfg_cw, **extra_args)
+    RK.tile_sizes = tile_sizes
     RK.extra_args['model_options']['transformer_options']['regional_conditioning_weight'] = 0.0
     RK.extra_args['model_options']['transformer_options']['regional_conditioning_floor']  = 0.0
 

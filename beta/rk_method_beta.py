@@ -1,6 +1,6 @@
 import torch
 from torch import Tensor
-from typing import Optional, Callable, Tuple, Dict, Any, Union
+from typing import Optional, Callable, Tuple, List, Dict, Any, Union
 
 import comfy.model_patcher
 import comfy.supported_models
@@ -86,6 +86,10 @@ class RK_Method_Beta:
         self.reorder_tableau_indices     : list[int]                = self.EO("reorder_tableau_indices", [-1])
 
         self.LINEAR_ANCHOR_X_0           : float                    = noise_anchor
+        
+        self.tile_sizes                  : Optional[List[Tuple[int,int]]] = None
+        self.tile_cnt                    : int                      = 0
+        self.latent_compression_ratio    : int                      = 8
 
     @staticmethod
     def is_exponential(rk_type:str) -> bool:
@@ -129,6 +133,7 @@ class RK_Method_Beta:
     
     def model_denoised(self, x:Tensor, sigma:Tensor, **extra_args) -> Tensor:
         s_in     = x.new_ones([x.shape[0]])
+        control_tiles = None
         
         if self.EO("tile_model_calls"):
             tile_h = self.EO("tile_h", 128)
@@ -149,10 +154,66 @@ class RK_Method_Beta:
             
             denoised = untile_latent(denoised_tiles, orig_shape, grid, strides)
             
+        elif self.tile_sizes is not None:
+            tile_h_full = self.tile_sizes[self.tile_cnt % len(self.tile_sizes)][0]
+            tile_w_full = self.tile_sizes[self.tile_cnt % len(self.tile_sizes)][1] 
+            
+            tile_h = tile_h_full // self.latent_compression_ratio
+            tile_w = tile_w_full // self.latent_compression_ratio
+            
+            self.tile_cnt += 1
+            
+            #if len(self.tile_sizes) == 1 and self.tile_cnt % 2 == 1:
+            #    tile_h, tile_w = tile_w, tile_h
+            #    tile_h_full, tile_w_full = tile_w_full, tile_h_full
+            
+            if (self.tile_cnt // len(self.tile_sizes)) % 2 == 1:
+                tile_h, tile_w = tile_w, tile_h
+                tile_h_full, tile_w_full = tile_w_full, tile_h_full
+            
+            xt_negative = self.model.inner_model.conds.get('xt_negative', self.model.inner_model.conds.get('negative'))
+            negative_control = xt_negative[0].get('control')
+            
+            if negative_control is not None and hasattr(negative_control, 'cond_hint_original'):
+                negative_cond_hint_init = negative_control.cond_hint.clone() if negative_control.cond_hint is not None else None
+            
+            xt_positive = self.model.inner_model.conds.get('xt_positive', self.model.inner_model.conds.get('positive'))
+            positive_control = xt_positive[0].get('control')
+            
+            if positive_control is not None and hasattr(positive_control, 'cond_hint_original'):
+                positive_cond_hint_init = positive_control.cond_hint.clone() if positive_control.cond_hint is not None else None
+                #positive_control_pretile = comfy.utils.bislerp(positive_control.cond_hint_original.clone().to(torch.float16).to('cuda'), x.shape[-2] * self.latent_compression_ratio, x.shape[-1] * self.latent_compression_ratio)
+                positive_control_pretile = positive_control.cond_hint_original.clone().to(torch.float16).to('cuda')
+                control_tiles, control_orig_shape, control_grid, control_strides = tile_latent(positive_control_pretile, tile_size=(tile_h_full,tile_w_full))
+            
+            denoised_tiles = []
+            
+            tiles, orig_shape, grid, strides = tile_latent(x, tile_size=(tile_h,tile_w))
+            
+            for i in range(tiles.shape[0]):
+                tile = tiles[i].unsqueeze(0)
+                
+                if control_tiles is not None:
+                    positive_control.cond_hint = control_tiles[i].unsqueeze(0).to(positive_control.cond_hint)
+                    if negative_control is not None:
+                        negative_control.cond_hint = control_tiles[i].unsqueeze(0).to(positive_control.cond_hint)
+                
+                denoised_tile = self.model(tile, sigma * s_in, **extra_args)
+                
+                denoised_tiles.append(denoised_tile)
+                
+            denoised_tiles = torch.cat(denoised_tiles, dim=0)
+            
+            denoised = untile_latent(denoised_tiles, orig_shape, grid, strides)
             
         else:
             denoised = self.model(x, sigma * s_in, **extra_args)
         
+        if control_tiles is not None:
+            positive_control.cond_hint = positive_cond_hint_init
+            if negative_control is not None:
+                negative_control.cond_hint = negative_cond_hint_init
+                                
         denoised = self.calc_cfg_channelwise(denoised)
         return denoised
 
