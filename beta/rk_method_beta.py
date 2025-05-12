@@ -167,7 +167,7 @@ class RK_Method_Beta:
             #    tile_h, tile_w = tile_w, tile_h
             #    tile_h_full, tile_w_full = tile_w_full, tile_h_full
             
-            if (self.tile_cnt // len(self.tile_sizes)) % 2 == 1:
+            if (self.tile_cnt // len(self.tile_sizes)) % 2 == 1 and self.EO("tiles_autorotate"):
                 tile_h, tile_w = tile_w, tile_h
                 tile_h_full, tile_w_full = tile_w_full, tile_h_full
             
