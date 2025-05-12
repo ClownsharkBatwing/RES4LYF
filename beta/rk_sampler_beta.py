@@ -512,7 +512,10 @@ def sample_rk_beta(
         num_steps = 2 * sigma_restarts - 1
         
     if RENOISE:
-        x = (1 - sigmas[step]) * x + sigmas[step] * NS.noise_sampler(sigma=sigmas[step], sigma_next=sigmas[step+1])
+        if VE_MODEL:
+            x = x + sigmas[step] * NS.noise_sampler(sigma=sigmas[step], sigma_next=sigmas[step+1])
+        else:
+            x = (1 - sigmas[step]) * x + sigmas[step] * NS.noise_sampler(sigma=sigmas[step], sigma_next=sigmas[step+1])
     
     while step < num_steps:
         sigma, sigma_next = sigmas[step], sigmas[step+1]
@@ -904,21 +907,21 @@ def sample_rk_beta(
                                 else:
                                     yx0_prev = data_cached
                                     if EO("flow_manual_masks"):
-                                        yx0      = (1 - (LG.HAS_LATENT_GUIDE * LG.lgw[step] * LG.mask + LG.HAS_LATENT_GUIDE_INV * LG.lgw_inv[step] * LG.mask_inv)) * yx0_prev   +   LG.HAS_LATENT_GUIDE * LG.lgw[step] * LG.mask * x_tmp   +   LG.HAS_LATENT_GUIDE_INV * LG.lgw_inv[step] * LG.mask_inv * x_tmp
+                                        yx0 = (1 - (LG.HAS_LATENT_GUIDE * LG.lgw[step] * LG.mask + LG.HAS_LATENT_GUIDE_INV * LG.lgw_inv[step] * LG.mask_inv)) * yx0_prev   +   LG.HAS_LATENT_GUIDE * LG.lgw[step] * LG.mask * x_tmp   +   LG.HAS_LATENT_GUIDE_INV * LG.lgw_inv[step] * LG.mask_inv * x_tmp
                                     else:
-                                        yx0  = (1 - (lgw_mask_ + lgw_mask_inv_)) * yx0_prev   +   (lgw_mask_ + lgw_mask_inv_) * x_tmp
+                                        yx0 = (1 - (lgw_mask_ + lgw_mask_inv_)) * yx0_prev   +   (lgw_mask_ + lgw_mask_inv_) * x_tmp
 
                                     if not EO("flow_static_guides"):
                                         if EO("flow_manual_masks"):
-                                            y0       = (1 - (LG.HAS_LATENT_GUIDE * LG.lgw[step] * LG.mask + LG.HAS_LATENT_GUIDE_INV * LG.lgw_inv[step] * LG.mask_inv)) * yx0_prev   +   LG.HAS_LATENT_GUIDE * LG.lgw[step] * LG.mask * LG.y0   +   LG.HAS_LATENT_GUIDE_INV * LG.lgw_inv[step] * LG.mask_inv * LG.y0_inv
+                                            y0 = (1 - (LG.HAS_LATENT_GUIDE * LG.lgw[step] * LG.mask + LG.HAS_LATENT_GUIDE_INV * LG.lgw_inv[step] * LG.mask_inv)) * yx0_prev   +   LG.HAS_LATENT_GUIDE * LG.lgw[step] * LG.mask * LG.y0   +   LG.HAS_LATENT_GUIDE_INV * LG.lgw_inv[step] * LG.mask_inv * LG.y0_inv
                                         else:
-                                            y0  = (1 - (lgw_mask_ + lgw_mask_inv_)) * yx0_prev   +   lgw_mask_ * LG.y0   +   lgw_mask_inv_ * LG.y0_inv
+                                            y0 = (1 - (lgw_mask_ + lgw_mask_inv_)) * yx0_prev   +   lgw_mask_ * LG.y0   +   lgw_mask_inv_ * LG.y0_inv
                                             
                                         if EO("flow_slerp"):
                                             if EO("flow_manual_masks"):
-                                                y0_inv  = (1 - (LG.HAS_LATENT_GUIDE * LG.lgw[step] * LG.mask + LG.HAS_LATENT_GUIDE_INV * LG.lgw_inv[step] * LG.mask_inv)) * yx0_prev   +   LG.HAS_LATENT_GUIDE * LG.lgw[step] * LG.mask * LG.y0_inv   +   LG.HAS_LATENT_GUIDE_INV * LG.lgw_inv[step] * LG.mask_inv * LG.y0
+                                                y0_inv = (1 - (LG.HAS_LATENT_GUIDE * LG.lgw[step] * LG.mask + LG.HAS_LATENT_GUIDE_INV * LG.lgw_inv[step] * LG.mask_inv)) * yx0_prev   +   LG.HAS_LATENT_GUIDE * LG.lgw[step] * LG.mask * LG.y0_inv   +   LG.HAS_LATENT_GUIDE_INV * LG.lgw_inv[step] * LG.mask_inv * LG.y0
                                             else:
-                                                y0_inv  = (1 - (lgw_mask_ + lgw_mask_inv_)) * yx0_prev   +   lgw_mask_ * LG.y0_inv   +   lgw_mask_inv_ * LG.y0
+                                                y0_inv = (1 - (lgw_mask_ + lgw_mask_inv_)) * yx0_prev   +   lgw_mask_ * LG.y0_inv   +   lgw_mask_inv_ * LG.y0
 
                                 y0_orig = y0.clone()
                                 #yx0_orig = yx0.clone()
