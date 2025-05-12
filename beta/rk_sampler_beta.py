@@ -726,6 +726,7 @@ def sample_rk_beta(
                 diag_iter = 0
                 while diag_iter < implicit_steps_diag+1:
                     
+
                     if noise_sampler_type_substep == "brownian" and (full_iter > 0 or diag_iter > 0):
                         eta_substep = 0.
                     

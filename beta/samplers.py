@@ -613,8 +613,10 @@ class SharkSampler:
                         guider.set_conds(xt_positive=pos_cond_tmp, xt_negative=neg_cond)
                         
                     elif type(guider) == SharkGuider:
+                        guider.set_cfgs(xt=cfg)
                         guider.set_conds(xt_positive=pos_cond_tmp, xt_negative=neg_cond)
                     else:
+                        guider.set_cfg(cfg)
                         guider.set_conds(pos_cond_tmp, neg_cond)
                     
                     if rebounds > 0:
@@ -1427,7 +1429,7 @@ class ClownsharKSampler_Beta:
         noise_type_init = "gaussian"
         noise_stdev     = 1.0
         denoise_alt     = 1.0
-        channelwise_cfg = 1.0
+        channelwise_cfg = False
         
         if denoise < 0:
             denoise_alt = -denoise
@@ -1538,7 +1540,7 @@ class ClownsharKSampler_Beta:
         options_mgr.update('noise_type_init', noise_type_init)
         options_mgr.update('noise_stdev',     noise_stdev)
         options_mgr.update('denoise_alt',     denoise_alt)
-        options_mgr.update('channelwise_cfg', channelwise_cfg)
+        #options_mgr.update('channelwise_cfg', channelwise_cfg)
         
         sigmas                 = options_mgr.get('sigmas'                , sigmas)
         
@@ -1856,7 +1858,7 @@ class ClownSampler_Beta:
         noise_type_init = "gaussian"
         noise_stdev     = 1.0
         denoise_alt     = 1.0
-        channelwise_cfg = 1.0
+        channelwise_cfg = False #1.0
         
         
         #if options is not None:
@@ -2144,7 +2146,7 @@ class BongSampler:
         noise_type_init = "gaussian"
         noise_stdev     = 1.0
         denoise_alt     = 1.0
-        channelwise_cfg = 1.0
+        channelwise_cfg = False #1.0
         
         
         #if options is not None:

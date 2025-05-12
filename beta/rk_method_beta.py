@@ -10,7 +10,7 @@ import itertools
 from .phi_functions        import Phi
 from .rk_coefficients_beta import get_implicit_sampler_name_list, get_rk_methods_beta
 from ..helper              import ExtraOptions
-from ..latents             import get_orthogonal, get_collinear, get_cosine_similarity
+from ..latents             import get_orthogonal, get_collinear, get_cosine_similarity, tile_latent, untile_latent
 
 from ..res4lyf             import RESplain
 
@@ -129,7 +129,30 @@ class RK_Method_Beta:
     
     def model_denoised(self, x:Tensor, sigma:Tensor, **extra_args) -> Tensor:
         s_in     = x.new_ones([x.shape[0]])
-        denoised = self.model(x, sigma * s_in, **extra_args)
+        
+        if self.EO("tile_model_calls"):
+            tile_h = self.EO("tile_h", 128)
+            tile_w = self.EO("tile_w", 128)
+            
+            denoised_tiles = []
+            
+            tiles, orig_shape, grid, strides = tile_latent(x, tile_size=(tile_h,tile_w))
+            
+            for i in range(tiles.shape[0]):
+                tile = tiles[i].unsqueeze(0)
+                
+                denoised_tile = self.model(tile, sigma * s_in, **extra_args)
+                
+                denoised_tiles.append(denoised_tile)
+                
+            denoised_tiles = torch.cat(denoised_tiles, dim=0)
+            
+            denoised = untile_latent(denoised_tiles, orig_shape, grid, strides)
+            
+            
+        else:
+            denoised = self.model(x, sigma * s_in, **extra_args)
+        
         denoised = self.calc_cfg_channelwise(denoised)
         return denoised
 

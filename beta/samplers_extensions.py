@@ -520,6 +520,70 @@ class SharkOptions_StartStep_Beta:
 
 
 
+class ClownOptions_Tiled_Beta:
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {"required":
+                    {
+                    "tile_height": ("INT", {"default": 1024, "min": -1, "max": 10000, "step":1,}),
+                    "tile_width" : ("INT", {"default": 1024, "min": -1, "max": 10000, "step":1,}),
+                    },
+                "optional": 
+                    {
+                    "options":    ("OPTIONS", ),   
+                    }
+                }
+
+    RETURN_TYPES = ("OPTIONS",)
+    RETURN_NAMES = ("options",)
+    FUNCTION     = "main"
+    CATEGORY     = "RES4LYF/sampler_options"
+    
+    def main(self,
+            tile_height = 1024,
+            tile_width  = 1024,
+            options     = None
+            ): 
+        
+        options = options if options is not None else {}
+            
+        options['start_at_step'] = start_at_step
+
+        return (options,)
+
+
+
+class ClownOptions_Tiled_Advanced_Beta:
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {"required":
+                    {
+                    "tile_sizes": ("STRING", {"default": "1024,1024", "multiline": True}),   
+                    },
+                "optional": 
+                    {
+                    "options":    ("OPTIONS", ),   
+                    }
+                }
+
+    RETURN_TYPES = ("OPTIONS",)
+    RETURN_NAMES = ("options",)
+    FUNCTION     = "main"
+    CATEGORY     = "RES4LYF/sampler_options"
+    
+    def main(self,
+            tile_sizes = "1024,1024",
+            options     = None
+            ): 
+        
+        options = options if options is not None else {}
+            
+        options['start_at_step'] = start_at_step
+
+        return (options,)
+
+
+
 
 class ClownOptions_ExtraOptions_Beta:
     @classmethod
