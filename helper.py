@@ -313,7 +313,17 @@ def parse_range_string_int(s):
             result.append(int(part))
     return result
 
-
+def parse_tile_sizes(tile_sizes: str):
+    """
+    Converts multiline string like:
+        "1024,1024\n768,1344\n1344,768"
+    into:
+        [(1024, 1024), (768, 1344), (1344, 768)]
+    """
+    return [tuple(map(int, line.strip().split(',')))
+            for line in tile_sizes.strip().splitlines()
+            if line.strip()]
+    
 
 
 # COMFY OPS

@@ -704,6 +704,13 @@ def interpolate_spd(cov1, cov2, t, eps=1e-5):
 
 
 
+
+
+
+
+
+
+
 def tile_latent(latent: torch.Tensor, tile_size: Tuple[int,int]):
     """
     Split `latent` into tiles of shape (t_h, t_w), evenly spaced so that
@@ -770,4 +777,6 @@ def untile_latent(tiles      : torch.Tensor,
     # avoid division by zero
     output /= weight.clamp(min=1.0)
     return output
+
+
 
