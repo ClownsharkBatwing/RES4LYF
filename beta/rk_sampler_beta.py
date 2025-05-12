@@ -1278,13 +1278,15 @@ def sample_rk_beta(
                                         #data_[row] = (data_[row] + data_row_roll) / 2
                                         
                                     if RK.extra_args['model_options']['transformer_options'].get('y0_standard_guide') is not None:
-                                        LG.y0 = model.inner_model.inner_model.diffusion_model.y0_standard_guide.clone() # RK.extra_args['model_options']['transformer_options'].get('y0_standard_guide')
-                                        del model.inner_model.inner_model.diffusion_model.y0_standard_guide
-                                        RK.extra_args['model_options']['transformer_options']['y0_standard_guide'] = None
+                                        if hasattr(model.inner_model.inner_model.diffusion_model, "y0_standard_guide"):
+                                            LG.y0 = model.inner_model.inner_model.diffusion_model.y0_standard_guide.clone() # RK.extra_args['model_options']['transformer_options'].get('y0_standard_guide')
+                                            del model.inner_model.inner_model.diffusion_model.y0_standard_guide
+                                            RK.extra_args['model_options']['transformer_options']['y0_standard_guide'] = None
                                         
                                     if RK.extra_args['model_options']['transformer_options'].get('y0_inv_standard_guide') is not None:
-                                        LG.y0_inv = RK.extra_args['model_options']['transformer_options'].get('y0_inv_standard_guide')
-                                        RK.extra_args['model_options']['transformer_options']['y0_inv_standard_guide'] = None
+                                        if hasattr(model.inner_model.inner_model.diffusion_model, "y0_inv_standard_guide"):
+                                            LG.y0_inv = RK.extra_args['model_options']['transformer_options'].get('y0_inv_standard_guide')
+                                            RK.extra_args['model_options']['transformer_options']['y0_inv_standard_guide'] = None
                                 
                                 
 
