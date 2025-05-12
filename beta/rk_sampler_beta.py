@@ -263,9 +263,14 @@ def sample_rk_beta(
     state_info     = {} if state_info     is None else state_info
     state_info_out = {} if state_info_out is None else state_info_out
 
+    RENOISE = False
     if 'raw_x' in state_info and sampler_mode in {"resample", "unsample"}:
         if x.shape == state_info['raw_x'].shape:
             x = state_info['raw_x'].to(work_device) #clone()
+        else:
+            denoised = comfy.utils.bislerp(state_info['denoised'], x.shape[-1], x.shape[-2])
+            x = denoised.to(x)
+            RENOISE = True
         RESplain("Continuing from raw latent from previous sampler.", debug=False)
     
 
@@ -505,6 +510,9 @@ def sample_rk_beta(
         sigmas = sigmas[step:num_steps+1].repeat(sigma_restarts)
         step = 0
         num_steps = 2 * sigma_restarts - 1
+        
+    if RENOISE:
+        x = (1 - sigmas[step]) * x + sigmas[step] * NS.noise_sampler(sigma=sigmas[step], sigma_next=sigmas[step+1])
     
     while step < num_steps:
         sigma, sigma_next = sigmas[step], sigmas[step+1]
@@ -1670,6 +1678,7 @@ def sample_rk_beta(
         state_info_out = state_info
     else:
         state_info_out['raw_x']             = x.to('cpu')
+        state_info_out['denoised']          = denoised.to('cpu')
         state_info_out['data_prev_']        = data_prev_.to('cpu')
         state_info_out['end_step']          = step
         state_info_out['sigma_next']        = sigma_next.clone()
