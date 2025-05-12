@@ -29,6 +29,31 @@ from .rk_noise_sampler_beta import NOISE_MODE_NAMES
 from .rk_coefficients_beta  import get_default_sampler_name, get_sampler_name_list, process_sampler_name
 
 
+def copy_cond(conditioning):
+    new_conditioning = []
+    if type(conditioning[0][0]) == list:
+        for i in range(len(conditioning)):
+            new_conditioning_i = []
+            for embedding, cond in conditioning[i]:
+                cond_copy = {}
+                for k, v in cond.items():
+                    if isinstance(v, torch.Tensor):
+                        cond_copy[k] = v.clone()
+                    else:
+                        cond_copy[k] = v  # ensure we're not copying huge shit like controlnets
+                new_conditioning_i.append([embedding.clone(), cond_copy])
+            new_conditioning.append(new_conditioning_i)
+    else:
+        for embedding, cond in conditioning:
+            cond_copy = {}
+            for k, v in cond.items():
+                if isinstance(v, torch.Tensor):
+                    cond_copy[k] = v.clone()
+                else:
+                    cond_copy[k] = v  # ensure we're not copying huge shit like controlnets
+            new_conditioning.append([embedding.clone(), cond_copy])
+            
+    return new_conditioning
 
 
 class SharkGuider(CFGGuider):
@@ -125,7 +150,7 @@ class SharkSampler:
             rebounds           : int                    =  0,
             unsample_cfg       : float                  = 1.0,
             unsample_eta       : float                  = 0.5,
-            eta_decay_scale : float                  = 1.0,
+            eta_decay_scale   : float                  = 1.0,
             
             #ultracascade_stage : str = "stage_UP",
             ultracascade_latent_image : Optional[dict[str,Any]] = None,
@@ -162,36 +187,41 @@ class SharkSampler:
             rebounds        = options_mgr.get('rebounds',         rebounds)
             unsample_cfg    = options_mgr.get('unsample_cfg',     unsample_cfg)
             unsample_eta    = options_mgr.get('unsample_eta',     unsample_eta)
-            eta_decay_scale = options_mgr.get('eta_decay_scale',     eta_decay_scale)
+            eta_decay_scale = options_mgr.get('eta_decay_scale',  eta_decay_scale)
+            start_at_step   = options_mgr.get('start_at_step',    -1)
 
             
             #ultracascade_stage        = options_mgr.get('ultracascade_stage',         ultracascade_stage)
             ultracascade_latent_image  = options_mgr.get('ultracascade_latent_image',  ultracascade_latent_image)
             ultracascade_latent_width  = options_mgr.get('ultracascade_latent_width',  ultracascade_latent_width)
             ultracascade_latent_height = options_mgr.get('ultracascade_latent_height', ultracascade_latent_height)
+            
+            sampler.extra_options['start_at_step'] = start_at_step
                         
-            latent_image['samples'] = comfy.sample.fix_empty_latent_channels(model, latent_image['samples'])
-
             is_chained = False
-            if 'positive' in latent_image and positive is None:
-                positive = copy.deepcopy(latent_image['positive'])
-                if positive is not None and 'control' in positive[0][1]:
-                    for i in range(len(positive)):
-                        positive[i][1]['control']      = latent_image['positive'][i][1]['control']
-                        if hasattr(latent_image['positive'][i][1]['control'], 'base'):
-                            positive[i][1]['control'].base = latent_image['positive'][i][1]['control'].base
-                is_chained = True
-            if 'negative' in latent_image and negative is None:
-                negative = copy.deepcopy(latent_image['negative'])
-                if negative is not None and 'control' in negative[0][1]:
-                    for i in range(len(negative)):
-                        negative[i][1]['control']      = latent_image['negative'][i][1]['control']
-                        if hasattr(latent_image['negative'][i][1]['control'], 'base'):
-                            negative[i][1]['control'].base = latent_image['negative'][i][1]['control'].base
-                is_chained = True
-            if 'sampler' in latent_image and sampler is None:
-                sampler = copy.deepcopy(latent_image['sampler'])  #.clone()
-                is_chained = True
+            if latent_image is not None:
+                latent_image['samples'] = comfy.sample.fix_empty_latent_channels(model, latent_image['samples'])
+
+                if 'positive' in latent_image and positive is None:
+                    positive = copy_cond(latent_image['positive'])
+                    if positive is not None and 'control' in positive[0][1]:
+                        for i in range(len(positive)):
+                            positive[i][1]['control']      = latent_image['positive'][i][1]['control']
+                            if hasattr(latent_image['positive'][i][1]['control'], 'base'):
+                                positive[i][1]['control'].base = latent_image['positive'][i][1]['control'].base
+                    is_chained = True
+                if 'negative' in latent_image and negative is None:
+                    negative = copy_cond(latent_image['negative'])
+                    if negative is not None and 'control' in negative[0][1]:
+                        for i in range(len(negative)):
+                            negative[i][1]['control']      = latent_image['negative'][i][1]['control']
+                            if hasattr(latent_image['negative'][i][1]['control'], 'base'):
+                                negative[i][1]['control'].base = latent_image['negative'][i][1]['control'].base
+                    is_chained = True
+                if 'sampler' in latent_image and sampler is None:
+                    sampler = copy_cond(latent_image['sampler'])  #.clone()
+                    is_chained = True
+                    
             if 'steps_to_run' in sampler.extra_options:
                 sampler.extra_options['steps_to_run'] = steps_to_run
 
@@ -236,7 +266,8 @@ class SharkSampler:
                     {
                         "sampler_mode": "NULL",
                     })
-                x_null = torch.zeros_like(latent_image['samples'])
+                x_null = comfy.sample.fix_empty_latent_channels(model, torch.zeros((1,4,64,64)))
+                #x_null = torch.zeros_like(latent_image['samples'])
                 _ = comfy.sample.sample_custom(work_model, x_null, cfg, sampler_null, torch.linspace(1, 0, 10).to(x_null.dtype).to(x_null.device), negative, negative, x_null, noise_mask=None, callback=None, disable_pbar=disable_pbar, seed=noise_seed)
 
             sigma_min = work_model.get_model_object('model_sampling').sigma_min
@@ -275,7 +306,7 @@ class SharkSampler:
                 latent_x['samples'] = latent_image['samples'].clone()
                 if 'noise_mask' in latent_image:
                     latent_x['noise_mask'] = latent_image['noise_mask'].clone()
-                state_info     = copy.deepcopy(latent_image['state_info']) if 'state_info' in latent_image else {}
+                state_info = copy.deepcopy(latent_image['state_info']) if 'state_info' in latent_image else {}
             else:
                 state_info = {}
             state_info_out = {}
@@ -284,8 +315,8 @@ class SharkSampler:
             
             # SETUP CONDITIONING EMBEDS
             
-            pos_cond    = copy.deepcopy(positive)
-            neg_cond    = copy.deepcopy(negative)
+            pos_cond = copy_cond(positive)
+            neg_cond = copy_cond(negative)
             
             
             
@@ -322,7 +353,7 @@ class SharkSampler:
                         state_info['data_prev_'] = data_prev_.unsqueeze(1)
                     
                     else:
-                        state_info['data_prev_'] = None
+                        state_info['data_prev_'] = data_prev_ #None   # = None was leading to errors even with sampler_mode=standard due to below with = state_info['data_prev_'][batch_num]
                 
                 if x_lr is not None:
                     if x_lr.shape[-2:] != latent_image['samples'].shape[-2:]:
@@ -345,8 +376,8 @@ class SharkSampler:
                     work_model.model.diffusion_model.set_x_lr           (x_lr            = x_lr)
                 
             elif work_model.model.model_config.unet_config.get('stable_cascade_stage') == 'b':
-                if sampler_mode != "resample":
-                    state_info['data_prev_'] = None
+                #if sampler_mode != "resample":
+                #    state_info['data_prev_'] = None    #commented out as it was throwing an error below with = state_info['data_prev_'][batch_num]
                 
                 c_pos, c_neg = [], []
                 for t in pos_cond:
@@ -502,7 +533,7 @@ class SharkSampler:
 
                     x0_output = {}
 
-                    if 'state_info' in latent_image and 'sigmas' in latent_image['state_info']:
+                    if latent_image is not None and 'state_info' in latent_image and 'sigmas' in latent_image['state_info']:
                         steps_len = max(sigmas.shape[-1] - 1,    latent_image['state_info']['sigmas'].shape[-1]-1)
                     else:
                         steps_len = sigmas.shape[-1]-1
@@ -510,7 +541,7 @@ class SharkSampler:
 
                     if 'BONGMATH' in sampler.extra_options: # verify the sampler is rk_sampler_beta()
                         sampler.extra_options['state_info']     = copy.deepcopy(state_info)         ##############################
-                        if state_info != {}:
+                        if state_info != {} and state_info != {'data_prev_': None}:  #second condition is for ultracascade
                             sampler.extra_options['state_info']['raw_x']            = state_info['raw_x']           [batch_num]
                             sampler.extra_options['state_info']['data_prev_']       = state_info['data_prev_']      [batch_num]
                             sampler.extra_options['state_info']['last_rng']         = state_info['last_rng']        [batch_num]
@@ -579,6 +610,9 @@ class SharkSampler:
                         else:
                             guider.set_cfgs(xt=cfg)
                         
+                        guider.set_conds(xt_positive=pos_cond_tmp, xt_negative=neg_cond)
+                        
+                    elif type(guider) == SharkGuider:
                         guider.set_conds(xt_positive=pos_cond_tmp, xt_negative=neg_cond)
                     else:
                         guider.set_conds(pos_cond_tmp, neg_cond)
@@ -700,8 +734,9 @@ class SharkSampler:
                     
                     # INCREMENT BATCH LOOP
                     seed += 1
-                    if latent_image.get('state_info', {}).get('last_rng', None) is None:
-                        torch.manual_seed(seed)
+                    if latent_image is not None: #needed for ultracascade, where latent_image input is not really used for stage C/first stage
+                        if latent_image.get('state_info', {}).get('last_rng', None) is None:
+                            torch.manual_seed(seed)
 
 
             gc.collect()
@@ -1400,13 +1435,13 @@ class ClownsharKSampler_Beta:
         
         is_chained = False
 
-        if 'positive' in latent_image and positive is None:
+        if latent_image is not None and 'positive' in latent_image and positive is None:
             positive = latent_image['positive']
             is_chained = True
-        if 'negative' in latent_image and negative is None:
+        if latent_image is not None and 'negative' in latent_image and negative is None:
             negative = latent_image['negative']
             is_chained = True
-        if 'model' in latent_image and model is None:
+        if latent_image is not None and 'model' in latent_image and model is None:
             model = latent_image['model']
             is_chained = True
         

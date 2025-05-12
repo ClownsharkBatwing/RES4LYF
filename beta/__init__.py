@@ -54,6 +54,7 @@ def add_beta(NODE_CLASS_MAPPINGS, NODE_DISPLAY_NAME_MAPPINGS, extra_samplers):
         "SharkOptions_Beta"               : samplers_extensions.SharkOptions_Beta,
         "SharkOptions_UltraCascade_Latent_Beta"  : samplers_extensions.SharkOptions_UltraCascade_Latent_Beta,
         
+        "SharkOptions_StartStep_Beta"     : samplers_extensions.SharkOptions_StartStep_Beta,
         
         "ClownOptions_Combine"            : samplers_extensions.ClownOptions_Combine,
         "ClownOptions_Frameweights"       : samplers_extensions.ClownOptions_Frameweights,
@@ -114,6 +115,7 @@ def add_beta(NODE_CLASS_MAPPINGS, NODE_DISPLAY_NAME_MAPPINGS, extra_samplers):
             "SharkOptions_GuideCond_Beta"           : "SharkOptions Guide Cond",
             "SharkOptions_GuideConds_Beta"          : "SharkOptions Guide Conds",
             "SharkOptions_Beta"                     : "SharkOptions",
+            "SharkOptions_StartStep_Beta"           : "SharkOptions Start Step",
             "SharkOptions_UltraCascade_Latent_Beta" : "SharkOptions UltraCascade Latent",
             "ClownOptions_Combine"                  : "ClownOptions Combine",
             "ClownOptions_Frameweights"             : "ClownOptions Frameweights",

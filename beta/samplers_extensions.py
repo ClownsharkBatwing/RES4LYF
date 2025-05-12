@@ -487,6 +487,40 @@ class ClownOptions_Cycles_Beta:
 
 
 
+class SharkOptions_StartStep_Beta:
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {"required":
+                    {
+                    "start_at_step": ("INT", {"default": 0, "min": -1, "max": 10000, "step":1,}),
+
+                    },
+                "optional": 
+                    {
+                    "options":    ("OPTIONS", ),   
+                    }
+                }
+
+    RETURN_TYPES = ("OPTIONS",)
+    RETURN_NAMES = ("options",)
+    FUNCTION     = "main"
+    CATEGORY     = "RES4LYF/sampler_options"
+    
+    def main(self,
+            start_at_step = 0,
+            options       = None
+            ): 
+        
+        options = options if options is not None else {}
+            
+        options['start_at_step'] = start_at_step
+
+        return (options,)
+
+
+
+
+
 class ClownOptions_ExtraOptions_Beta:
     @classmethod
     def INPUT_TYPES(cls):
@@ -573,10 +607,10 @@ class SharkOptions_GuideCond_Beta:
     def INPUT_TYPES(cls):
         return {"required": {},
                 "optional": {
-                    "positive": ("CONDITIONING", ),
-                    "negative": ("CONDITIONING", ),
-                    "cfg":("FLOAT",   {"default": 1.0, "min": -10000, "max": 10000, "step":0.01}),
-                    "options":  ("OPTIONS",),  
+                    "positive" : ("CONDITIONING", ),
+                    "negative" : ("CONDITIONING", ),
+                    "cfg"      : ("FLOAT",   {"default": 1.0, "min": -10000, "max": 10000, "step":0.01}),
+                    "options"  : ("OPTIONS",),  
                     }  
                 }
     RETURN_TYPES = ("OPTIONS",)
@@ -611,13 +645,13 @@ class SharkOptions_GuideConds_Beta:
     def INPUT_TYPES(cls):
         return {"required": {},
                 "optional": {
-                    "positive_masked": ("CONDITIONING", ),
-                    "positive_unmasked": ("CONDITIONING", ),
-                    "negative_masked": ("CONDITIONING", ),
-                    "negative_unmasked": ("CONDITIONING", ),
-                    "cfg_masked":("FLOAT",   {"default": 1.0, "min": -10000, "max": 10000, "step":0.01}),
-                    "cfg_unmasked":("FLOAT",   {"default": 1.0, "min": -10000, "max": 10000, "step":0.01}),
-                    "options":  ("OPTIONS",),  
+                    "positive_masked"   : ("CONDITIONING", ),
+                    "positive_unmasked" : ("CONDITIONING", ),
+                    "negative_masked"   : ("CONDITIONING", ),
+                    "negative_unmasked" : ("CONDITIONING", ),
+                    "cfg_masked"        : ("FLOAT",   {"default": 1.0, "min": -10000, "max": 10000, "step":0.01}),
+                    "cfg_unmasked"      : ("FLOAT",   {"default": 1.0, "min": -10000, "max": 10000, "step":0.01}),
+                    "options"           : ("OPTIONS",),  
                     }  
                 }
     RETURN_TYPES = ("OPTIONS",)

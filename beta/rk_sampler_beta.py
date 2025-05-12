@@ -234,6 +234,7 @@ def sample_rk_beta(
         rk_swap_print                 : bool               = False,
         
         steps_to_run                  : int                = -1,
+        start_at_step                 : int                = -1,
         
         sde_mask                      : Optional[Tensor]   = None,
         
@@ -343,10 +344,14 @@ def sample_rk_beta(
         else:
             start_step -= 1
             
-    state_info_sigma_next = state_info.get('sigma_next', -1)
-    state_info_start_step = (sigmas == state_info_sigma_next).nonzero().flatten()
-    if state_info_start_step.shape[0] > 0:
-        start_step = state_info_start_step.item()
+    if sampler_mode in {"resample", "unsample"}:
+        state_info_sigma_next = state_info.get('sigma_next', -1)
+        state_info_start_step = (sigmas == state_info_sigma_next).nonzero().flatten()
+        if state_info_start_step.shape[0] > 0:
+            start_step = state_info_start_step.item()
+            
+    start_step = start_at_step if start_at_step >= 0 else start_step
+
     
     SDE_NOISE_EXTERNAL = False
     if sde_noise is not None:
@@ -516,7 +521,9 @@ def sample_rk_beta(
             x = x + sigmas[step] * NS.noise_sampler(sigma=sigmas[step], sigma_next=sigmas[step+1])
         else:
             x = (1 - sigmas[step]) * x + sigmas[step] * NS.noise_sampler(sigma=sigmas[step], sigma_next=sigmas[step+1])
-    
+                
+    # BEGIN SAMPLING LOOP
+                
     while step < num_steps:
         sigma, sigma_next = sigmas[step], sigmas[step+1]
         
