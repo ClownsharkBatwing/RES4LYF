@@ -134,6 +134,9 @@ class RK_Method_Beta:
     def model_denoised(self, x:Tensor, sigma:Tensor, **extra_args) -> Tensor:
         s_in     = x.new_ones([x.shape[0]])
         control_tiles = None
+        y0_style_pos = self.extra_args['model_options']['transformer_options'].get("y0_style_pos")
+        y0_style_neg = self.extra_args['model_options']['transformer_options'].get("y0_style_neg")
+        y0_style_pos_tile, sy0_style_neg_tiles = None, None
         
         if self.EO("tile_model_calls"):
             tile_h = self.EO("tile_h", 128)
@@ -182,13 +185,21 @@ class RK_Method_Beta:
             
             if positive_control is not None and hasattr(positive_control, 'cond_hint_original'):
                 positive_cond_hint_init = positive_control.cond_hint.clone() if positive_control.cond_hint is not None else None
-                #positive_control_pretile = comfy.utils.bislerp(positive_control.cond_hint_original.clone().to(torch.float16).to('cuda'), x.shape[-2] * self.latent_compression_ratio, x.shape[-1] * self.latent_compression_ratio)
+                if positive_control.cond_hint_original.shape[-1] != x.shape[-2] * self.latent_compression_ratio or positive_control.cond_hint_original.shape[-2] != x.shape[-1] * self.latent_compression_ratio:
+                    positive_control_pretile = comfy.utils.bislerp(positive_control.cond_hint_original.clone().to(torch.float16).to('cuda'), x.shape[-1] * self.latent_compression_ratio, x.shape[-2] * self.latent_compression_ratio)
+                    positive_control.cond_hint_original = positive_control_pretile.to(positive_control.cond_hint_original)
                 positive_control_pretile = positive_control.cond_hint_original.clone().to(torch.float16).to('cuda')
                 control_tiles, control_orig_shape, control_grid, control_strides = tile_latent(positive_control_pretile, tile_size=(tile_h_full,tile_w_full))
+                control_tiles = control_tiles
             
             denoised_tiles = []
             
             tiles, orig_shape, grid, strides = tile_latent(x, tile_size=(tile_h,tile_w))
+            
+            if y0_style_pos is not None:
+                y0_style_pos_tiles, _, _, _ = tile_latent(y0_style_pos, tile_size=(tile_h,tile_w))
+            if y0_style_neg is not None:
+                y0_style_neg_tiles, _, _, _ = tile_latent(y0_style_neg, tile_size=(tile_h,tile_w))
             
             for i in range(tiles.shape[0]):
                 tile = tiles[i].unsqueeze(0)
@@ -197,6 +208,11 @@ class RK_Method_Beta:
                     positive_control.cond_hint = control_tiles[i].unsqueeze(0).to(positive_control.cond_hint)
                     if negative_control is not None:
                         negative_control.cond_hint = control_tiles[i].unsqueeze(0).to(positive_control.cond_hint)
+                
+                if y0_style_pos is not None:
+                    self.extra_args['model_options']['transformer_options']['y0_style_pos'] = y0_style_pos_tiles[i].unsqueeze(0)
+                if y0_style_neg is not None:
+                    self.extra_args['model_options']['transformer_options']['y0_style_neg'] = y0_style_neg_tiles[i].unsqueeze(0)
                 
                 denoised_tile = self.model(tile, sigma * s_in, **extra_args)
                 
@@ -213,7 +229,12 @@ class RK_Method_Beta:
             positive_control.cond_hint = positive_cond_hint_init
             if negative_control is not None:
                 negative_control.cond_hint = negative_cond_hint_init
-                                
+                
+        if y0_style_pos is not None:
+            self.extra_args['model_options']['transformer_options']['y0_style_pos'] = y0_style_pos
+        if y0_style_neg is not None:
+            self.extra_args['model_options']['transformer_options']['y0_style_neg'] = y0_style_neg
+        
         denoised = self.calc_cfg_channelwise(denoised)
         return denoised
 
