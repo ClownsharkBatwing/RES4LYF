@@ -22,7 +22,7 @@ import comfy.model_management
 import comfy.ldm.common_dit
 
 from ..helper  import ExtraOptions
-from ..latents import slerp_tensor
+from ..latents import slerp_tensor, interpolate_spd
 
 @dataclass
 class ModulationOut:
@@ -430,7 +430,6 @@ class HDAttention(nn.Module):
 
                         c_src        = self.c_src                                   # [C,1]
 
-                        lamb         = lamb
                         erase_scale  = erase
                         d            = c_src.shape[0]
 
@@ -822,10 +821,9 @@ class HDModel(nn.Module):
                 y = y_orig.clone()[0].unsqueeze(0)
                 clip_y0_attninj = t_y0_attninj + self.p_embedder(y)   
 
-                
-            # JUST DOUBLE CHECKING. DELETE THIS FOLLOWING LINE LATER !!!
-            clip_y0_adain = clip.clone()
-            clip_y0_attninj = clip.clone()
+            if EO("adain_swap_clip"):
+                clip_y0_adain = clip.clone()
+                clip_y0_attninj = clip.clone()
 
             img_sizes = None
             #img_prepatchify = img.clone()
@@ -1134,7 +1132,7 @@ class HDModel(nn.Module):
                         denoised_embed = adain_seq_inplace(denoised_embed, y0_adain_embed)
 
                 elif transformer_options['y0_style_method'] == "WCT":
-                    if self.y0_adain_embed is None or torch.norm(self.y0_adain_embed - y0_adain_embed) > 0:
+                    if self.y0_adain_embed is None or self.y0_adain_embed.shape != y0_adain_embed.shape or torch.norm(self.y0_adain_embed - y0_adain_embed) > 0:
                         self.y0_adain_embed = y0_adain_embed
                         
                         f_s          = y0_adain_embed[0].clone()
@@ -1166,6 +1164,58 @@ class HDModel(nn.Module):
                         f_cs         = f_c_whitened @ self.y0_color.T + self.mu_s
                         
                         denoised_embed[wct_i] = f_cs
+                        
+                    if transformer_options.get('y0_standard_guide') is not None:
+                        y0_standard_guide = transformer_options.get('y0_standard_guide')
+                        
+                        img_y0_standard_guide = comfy.ldm.common_dit.pad_to_patch_size(y0_standard_guide, (self.patch_size, self.patch_size))
+                        img_sizes_y0_standard_guide = None
+                        img_y0_standard_guide, img_masks_y0_standard_guide, img_sizes_y0_standard_guide = self.patchify(img_y0_standard_guide, self.max_seq, img_sizes_y0_standard_guide) 
+                        y0_standard_guide_embed = F.linear(img_y0_standard_guide.to(W), W, b).to(img_y0_standard_guide)
+
+                        
+                        f_c          = y0_standard_guide_embed[0].clone()
+                        mu_c         = f_c.mean(dim=0, keepdim=True)
+                        f_c_centered = f_c - mu_c
+                        
+                        cov = (f_c_centered.T.double() @ f_c_centered.double()) / (f_c_centered.size(0) - 1)
+
+                        S_eig, U_eig  = torch.linalg.eigh(cov + 1e-5 * torch.eye(cov.size(0), dtype=cov.dtype, device=cov.device))
+                        inv_sqrt_eig  = S_eig.clamp(min=0).rsqrt() 
+                        
+                        whiten = U_eig @ torch.diag(inv_sqrt_eig) @ U_eig.T
+                        whiten = whiten.to(f_c_centered)
+
+                        f_c_whitened = f_c_centered @ whiten.T
+                        f_cs         = f_c_whitened @ self.y0_color.T.to(y0_standard_guide) + self.mu_s.to(y0_standard_guide)
+                        
+                        f_cs = (f_cs - b) @ torch.linalg.pinv(W.to(f_cs)).T.to(f_cs)
+                        y0_standard_guide = self.unpatchify (f_cs.unsqueeze(0), img_sizes_y0_standard_guide)
+                        self.y0_standard_guide = y0_standard_guide
+                        #transformer_options['y0_standard_guide'] = y0_standard_guide
+                        #transformer_options['y0_standard_guide'] = None
+                        
+                    if transformer_options.get('y0_inv_standard_guide') is not None:
+                        y0_inv_standard_guide = transformer_options.get('y0_inv_standard_guide')
+                        
+                        f_c          = y0_inv_standard_guide[0].clone()
+                        mu_c         = f_c.mean(dim=0, keepdim=True)
+                        f_c_centered = f_c - mu_c
+                        
+                        cov = (f_c_centered.T.double() @ f_c_centered.double()) / (f_c_centered.size(0) - 1)
+
+                        S_eig, U_eig  = torch.linalg.eigh(cov + 1e-5 * torch.eye(cov.size(0), dtype=cov.dtype, device=cov.device))
+                        inv_sqrt_eig  = S_eig.clamp(min=0).rsqrt() 
+                        
+                        whiten = U_eig @ torch.diag(inv_sqrt_eig) @ U_eig.T
+                        whiten = whiten.to(f_c_centered)
+
+                        f_c_whitened = f_c_centered @ whiten.T
+                        f_cs         = f_c_whitened @ self.y0_color.T + self.mu_s
+                        
+                        y0_inv_standard_guide_embed[0] = f_cs
+                        transformer_options['y0_inv_standard_guide'] = y0_inv_standard_guide
+                        
 
                 denoised_embed = (denoised_embed - b) @ torch.linalg.pinv(W.to(pinv_dtype)).T.to(dtype)
                 denoised_embed = self.unpatchify (denoised_embed, img_sizes)
@@ -1265,7 +1315,7 @@ class HDModel(nn.Module):
                         denoised_embed = adain_seq_inplace(denoised_embed, y0_adain_embed)
                         
                 elif transformer_options['y0_style_method'] == "WCT":
-                    if self.y0_adain_embed is None or torch.norm(self.y0_adain_embed - y0_adain_embed) > 0:
+                    if self.y0_adain_embed is None or self.y0_adain_embed.shape != y0_adain_embed.shape or torch.norm(self.y0_adain_embed - y0_adain_embed) > 0:
                         self.y0_adain_embed = y0_adain_embed
                         
                         f_s          = y0_adain_embed[0].clone()
