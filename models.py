@@ -46,6 +46,13 @@ from comfy.ldm.chroma.layers import SingleStreamBlock as ChromaSingleStreamBlock
 from .chroma.model import ReChroma
 from .chroma.layers import ReChromaSingleStreamBlock, ReChromaDoubleStreamBlock
 
+from comfy.ldm.lightricks.model import LTXVModel
+#from comfy.ldm.chroma.layers import SingleStreamBlock as ChromaSingleStreamBlock, DoubleStreamBlock as ChromaDoubleStreamBlock
+
+from .lightricks.model import ReLTXVModel
+#from .chroma.layers import ReChromaSingleStreamBlock, ReChromaDoubleStreamBlock
+
+
 from .latents import get_orthogonal, get_cosine_similarity
 from .res4lyf import RESplain
 
@@ -74,13 +81,13 @@ class TorchCompileModels:
     @classmethod
     def INPUT_TYPES(s):
         return {"required": { 
-                    "model":         ("MODEL",),
-                    "backend":       (["inductor", "cudagraphs"],),
-                    "fullgraph":     ("BOOLEAN",                                                                    {"default": False, "tooltip": "Enable full graph mode"}),
-                    "mode":          (["default", "max-autotune", "max-autotune-no-cudagraphs", "reduce-overhead"], {"default": "default"}),
-                    "dynamic":       ("BOOLEAN",                                                                    {"default": False, "tooltip": "Enable dynamic mode"}),
-                    "dynamo_cache_size_limit"   : ("INT",                     {"default"                : 64, "min"                          : 0, "max": 1024, "step": 1, "tooltip": "torch._dynamo.config.cache_size_limit"}),
-                    "triton_max_block_x": ("INT", {"default": 0, "min": 0, "max": 4294967296, "step": 1})
+                    "model"                   : ("MODEL",),
+                    "backend"                 : (["inductor", "cudagraphs"],),
+                    "fullgraph"               : ("BOOLEAN",                    {"default": False, "tooltip": "Enable full graph mode"}),
+                    "mode"                    : (COMPILE_MODES,                {"default": "default"}),
+                    "dynamic"                 : ("BOOLEAN",                    {"default": False, "tooltip": "Enable dynamic mode"}),
+                    "dynamo_cache_size_limit" : ("INT",                        {"default": 64, "min": 0, "max": 1024,       "step": 1, "tooltip": "torch._dynamo.config.cache_size_limit"}),
+                    "triton_max_block_x"      : ("INT",                        {"default": 0,  "min": 0, "max": 4294967296, "step": 1})
                 }}
         
     RETURN_TYPES = ("MODEL",)
@@ -178,13 +185,13 @@ class ReWanPatcherAdvanced:
     def INPUT_TYPES(s):
         return {
             "required": { 
-                "model"            : ("MODEL",),
+                "model"                    : ("MODEL",),
                 #"self_attn_blocks" : ("STRING",  {"default": "0,1,2,3,4,5,6,7,8,9,", "multiline": True}),
-                "self_attn_blocks" : ("STRING",  {"default": "all", "multiline": True}),
-                "cross_attn_blocks": ("STRING",  {"default": "all", "multiline": True}),
-                "enable"           : ("BOOLEAN", {"default": True}),
-                "sliding_window_self_attn" :  (['false', 'standard', 'circular'], {"default": "false"}),
-                "sliding_window_frames": ("INT",   {"default": 60,   "min": 4,    "max": 0xffffffffffffffff, "step": 4, "tooltip": "How many real frames each frame sees. Divide frames by 4 to get real frames."}),
+                "self_attn_blocks"         : ("STRING",  {"default": "all", "multiline": True}),
+                "cross_attn_blocks"        : ("STRING",  {"default": "all", "multiline": True}),
+                "enable"                   : ("BOOLEAN", {"default": True}),
+                "sliding_window_self_attn" : (['false', 'standard', 'circular'], {"default": "false"}),
+                "sliding_window_frames"    : ("INT",   {"default": 60,   "min": 4,    "max": 0xffffffffffffffff, "step": 4, "tooltip": "How many real frames each frame sees. Divide frames by 4 to get real frames."}),
             }
         }
     RETURN_TYPES = ("MODEL",)
@@ -296,7 +303,7 @@ class ReFluxPatcherAdvanced:
                 "model"               : ("MODEL",),
                 "doublestream_blocks" : ("STRING",  {"default": "all", "multiline": True}),
                 "singlestream_blocks" : ("STRING",  {"default": "all", "multiline": True}),
-                "style_dtype"          : (["default", "bfloat16", "float16", "float32", "float64"],  {"default": "float32"}),
+                "style_dtype"         : (["default", "bfloat16", "float16", "float32", "float64"],  {"default": "float32"}),
                 "enable"              : ("BOOLEAN", {"default": True}),
             }
         }
@@ -393,7 +400,7 @@ class ReChromaPatcherAdvanced:
                 "model"               : ("MODEL",),
                 "doublestream_blocks" : ("STRING",  {"default": "all", "multiline": True}),
                 "singlestream_blocks" : ("STRING",  {"default": "all", "multiline": True}),
-                "style_dtype"          : (["default", "bfloat16", "float16", "float32", "float64"],  {"default": "float32"}),
+                "style_dtype"         : (["default", "bfloat16", "float16", "float32", "float64"],  {"default": "float32"}),
                 "enable"              : ("BOOLEAN", {"default": True}),
             }
         }
@@ -470,6 +477,107 @@ class ReChromaPatcher(ReChromaPatcherAdvanced):
             enable              = enable,
             force               = force
         )    
+
+
+
+
+
+
+
+"""class ReLTXVDoubleStreamBlockNoMask(ReLTXVDoubleStreamBlock):
+    def forward(self, c, mask=None):
+        return super().forward(c, mask=None)
+    
+class ReLTXVSingleStreamBlockNoMask(ReLTXVSingleStreamBlock):
+    def forward(self, c, mask=None):
+        return super().forward(c, mask=None)"""
+
+class ReLTXVPatcherAdvanced:
+    @classmethod
+    def INPUT_TYPES(s):
+        return {
+            "required": { 
+                "model"               : ("MODEL",),
+                "doublestream_blocks" : ("STRING",  {"default": "all", "multiline": True}),
+                "singlestream_blocks" : ("STRING",  {"default": "all", "multiline": True}),
+                "style_dtype"         : (["default", "bfloat16", "float16", "float32", "float64"],  {"default": "float32"}),
+                "enable"              : ("BOOLEAN", {"default": True}),
+            }
+        }
+    RETURN_TYPES = ("MODEL",)
+    RETURN_NAMES = ("model",)
+    CATEGORY     = "RES4LYF/model_patches"
+    FUNCTION     = "main"
+
+    def main(self, model, doublestream_blocks, singlestream_blocks, style_dtype, enable=True, force=False):
+        
+        doublestream_blocks = parse_range_string(doublestream_blocks)
+        singlestream_blocks = parse_range_string(singlestream_blocks)
+        
+        model.model.diffusion_model.style_dtype = getattr(torch, style_dtype) if style_dtype != "default" else None
+        model.model.diffusion_model.proj_weights = None
+        model.model.diffusion_model.y0_adain_embed = None
+        
+        if (enable or force) and model.model.diffusion_model.__class__ == LTXVModel:
+            m = model.clone()
+            m.model.diffusion_model.__class__     = ReLTXVModel
+            m.model.diffusion_model.threshold_inv = False
+            
+            """for i, block in enumerate(m.model.diffusion_model.double_blocks):
+                if i in doublestream_blocks:
+                    block.__class__ = ReChromaDoubleStreamBlock
+                else:
+                    block.__class__ = ReChromaDoubleStreamBlockNoMask
+                block.idx       = i
+
+            for i, block in enumerate(m.model.diffusion_model.single_blocks):
+                if i in singlestream_blocks:
+                    block.__class__ = ReChromaSingleStreamBlock
+                else:
+                    block.__class__ = ReChromaSingleStreamBlockNoMask
+                block.idx       = i"""
+                
+        
+        elif not enable and model.model.diffusion_model.__class__ == ReLTXVModel:
+            m = model.clone()
+            m.model.diffusion_model.__class__ = LTXVModel
+            
+            """for i, block in enumerate(m.model.diffusion_model.double_blocks):
+                block.__class__ = DoubleStreamBlock
+                block.idx       = i
+
+            for i, block in enumerate(m.model.diffusion_model.single_blocks):
+                block.__class__ = SingleStreamBlock
+                block.idx       = i"""
+                
+        elif model.model.diffusion_model.__class__ != LTXVModel and model.model.diffusion_model.__class__ != ReLTXVModel:
+            raise ValueError("This node is for enabling regional conditioning for LTXV only!")
+        else:
+            m = model
+        
+        return (m,)
+    
+class ReLTXVPatcher(ReLTXVPatcherAdvanced):
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "model"       : ("MODEL",),
+                "style_dtype" : (["default", "bfloat16", "float16", "float32", "float64"],  {"default": "float32"}),
+                "enable"      : ("BOOLEAN", {"default": True}),
+            }
+        }
+
+    def main(self, model, style_dtype="float32", enable=True, force=False):
+        return super().main(
+            model               = model,
+            doublestream_blocks = "all",
+            singlestream_blocks = "all",
+            style_dtype         = style_dtype,
+            enable              = enable,
+            force               = force
+        )    
+
 
 
 
@@ -608,10 +716,10 @@ class ReSD35PatcherAdvanced:
     def INPUT_TYPES(s):
         return {
             "required": { 
-                "model":  ("MODEL",),
+                "model"        : ("MODEL",),
                 "joint_blocks" : ("STRING",  {"default": "all", "multiline": True}),
                 "style_dtype"  : (["default", "bfloat16", "float16", "float32", "float64"],  {"default": "float32"}),
-                "enable": ("BOOLEAN", {"default": True}),
+                "enable"       : ("BOOLEAN", {"default": True}),
             }
         }
     RETURN_TYPES = ("MODEL",)
@@ -658,9 +766,9 @@ class ReSD35Patcher(ReSD35PatcherAdvanced):
     def INPUT_TYPES(cls):
         return {
             "required": {
-                "model"  : ("MODEL",),
+                "model"       : ("MODEL",),
                 "style_dtype" : (["default", "bfloat16", "float16", "float32", "float64"],  {"default": "float32"}),
-                "enable" : ("BOOLEAN", {"default": True}),
+                "enable"      : ("BOOLEAN", {"default": True}),
             }
         }
 
@@ -686,10 +794,11 @@ class ReAuraPatcherAdvanced:
     def INPUT_TYPES(s):
         return {
             "required": { 
-                "model":  ("MODEL",),
+                "model"              : ("MODEL",),
                 "doublelayer_blocks" : ("STRING",  {"default": "all", "multiline": True}),
                 "singlelayer_blocks" : ("STRING",  {"default": "all", "multiline": True}),
-                "enable": ("BOOLEAN", {"default": True}),
+                "style_dtype"        : (["default", "bfloat16", "float16", "float32", "float64"],  {"default": "float32"}),
+                "enable"             : ("BOOLEAN", {"default": True}),
             }
         }
     RETURN_TYPES = ("MODEL",)
@@ -697,10 +806,14 @@ class ReAuraPatcherAdvanced:
     CATEGORY     = "RES4LYF/model_patches"
     FUNCTION     = "main"
 
-    def main(self, model, doublelayer_blocks, singlelayer_blocks, enable=True, force=False):
+    def main(self, model, doublelayer_blocks, singlelayer_blocks, style_dtype, enable=True, force=False):
         
         doublelayer_blocks = parse_range_string(doublelayer_blocks)
         singlelayer_blocks = parse_range_string(singlelayer_blocks)
+        
+        model.model.diffusion_model.style_dtype = getattr(torch, style_dtype) if style_dtype != "default" else None
+        model.model.diffusion_model.proj_weights = None
+        model.model.diffusion_model.y0_adain_embed = None
         
         if (enable or force) and model.model.diffusion_model.__class__ == MMDiT:
             m = model.clone()
@@ -748,16 +861,18 @@ class ReAuraPatcher(ReAuraPatcherAdvanced):
     def INPUT_TYPES(cls):
         return {
             "required": {
-                "model"  : ("MODEL",),
-                "enable" : ("BOOLEAN", {"default": True}),
+                "model"       : ("MODEL",),
+                "style_dtype" : (["default", "bfloat16", "float16", "float32", "float64"],  {"default": "float32"}),
+                "enable"      : ("BOOLEAN", {"default": True}),
             }
         }
 
-    def main(self, model, enable=True, force=False):
+    def main(self, model, style_dtype="float32", enable=True, force=False):
         return super().main(
             model              = model,
             doublelayer_blocks = "all",
             singlelayer_blocks = "all",
+            style_dtype         = style_dtype,
             enable             = enable,
             force              = force
         )    

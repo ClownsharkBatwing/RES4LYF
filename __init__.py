@@ -178,6 +178,7 @@ NODE_CLASS_MAPPINGS = {
     "ReChromaPatcher"                     : models.ReChromaPatcher,
     "ReSD35Patcher"                       : models.ReSD35Patcher,
     "ReAuraPatcher"                       : models.ReAuraPatcher,
+    "ReLTXVPatcher"                       : models.ReLTXVPatcher,
     "ReHiDreamPatcher"                    : models.ReHiDreamPatcher,
     
     "ReWanPatcherAdvanced"                : models.ReWanPatcherAdvanced,
@@ -185,6 +186,8 @@ NODE_CLASS_MAPPINGS = {
     "ReChromaPatcherAdvanced"             : models.ReChromaPatcherAdvanced,
     "ReSD35PatcherAdvanced"               : models.ReSD35PatcherAdvanced,
     "ReAuraPatcherAdvanced"               : models.ReAuraPatcherAdvanced,
+    "ReLTXVPatcherAdvanced"               : models.ReLTXVPatcherAdvanced,
+
     
     "ReHiDreamPatcherAdvanced"            : models.ReHiDreamPatcherAdvanced,
     
