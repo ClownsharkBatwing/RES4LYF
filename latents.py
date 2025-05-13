@@ -1,6 +1,7 @@
 import torch
 import torch.nn.functional as F
-from typing import Tuple, List
+from typing import Tuple, List, Union
+import math
 
 
 # TENSOR PROJECTION OPS
@@ -702,22 +703,17 @@ def interpolate_spd(cov1, cov2, t, eps=1e-5):
 
 
 
-
-
-
-
-
-def tile_latent(latent    : torch.Tensor,
-                tile_size : Tuple[int,int]
-                ) -> Tuple[ torch.Tensor,
-                            Tuple[int,...],
-                            Tuple[int,int],
-                            Tuple[List[int],List[int]]]:
+def tile_latent(latent: torch.Tensor,
+                tile_size: Tuple[int,int]
+                ) -> Tuple[torch.Tensor,
+                           Tuple[int,...],
+                           Tuple[int,int],
+                           Tuple[List[int],List[int]]]:
     """
     Split `latent` into spatial tiles of shape (t_h, t_w).
     Works on either:
-        - 4D [B,C,H,W]
-        - 5D [B,C,T,H,W]
+       - 4D [B,C,H,W]
+       - 5D [B,C,T,H,W]
     Returns:
         tiles:      [B*rows*cols, C, (T,), t_h, t_w]
         orig_shape: the full shape of `latent`
@@ -750,7 +746,6 @@ def tile_latent(latent    : torch.Tensor,
                 tile = latent[:, :, :, y:y+t_h, x:x+t_w]
             else:
                 tile = latent[:, :, y:y+t_h, x:x+t_w]
-
             tiles.append(tile)
 
     tiles = torch.cat(tiles, dim=0)
@@ -758,21 +753,21 @@ def tile_latent(latent    : torch.Tensor,
     return tiles, orig_shape, (t_h, t_w), (pos_h, pos_w)
 
 
-def untile_latent(  tiles      : torch.Tensor,
-                    orig_shape : Tuple[int,...],
-                    tile_hw    : Tuple[int,int],             
-                    positions  : Tuple[List[int],List[int]] 
-                    ) -> torch.Tensor:
+def untile_latent(tiles: torch.Tensor,
+                  orig_shape: Tuple[int,...],
+                  tile_hw: Tuple[int,int],
+                  positions: Tuple[List[int],List[int]]
+                  ) -> torch.Tensor:
     """
     Reconstruct latent from tiles + their start positions.
     Works on either 4D or 5D original.
     Args:
-        tiles:      [B*rows*cols, C, (T,), t_h, t_w]
-        orig_shape: shape of original latent (B,C,H,W) or (B,C,T,H,W)
-        tile_hw:    (t_h, t_w)
-        positions:  (pos_h, pos_w)
+      tiles:      [B*rows*cols, C, (T,), t_h, t_w]
+      orig_shape: shape of original latent (B,C,H,W) or (B,C,T,H,W)
+      tile_hw:    (t_h, t_w)
+      positions:  (pos_h, pos_w)
     Returns:
-        reconstructed latent of shape `orig_shape`
+      reconstructed latent of shape `orig_shape`
     """
     *lead, H, W = orig_shape
     B, C = lead[0], lead[1]
@@ -790,7 +785,7 @@ def untile_latent(  tiles      : torch.Tensor,
         for bi in range(B):
             for i, y in enumerate(pos_h):
                 for j, x in enumerate(pos_w):
-                    tile = tiles[bi, i, j] 
+                    tile = tiles[bi, i, j]
                     out[bi, :, :, y:y+t_h, x:x+t_w] += tile
                     count[bi, :, :, y:y+t_h, x:x+t_w] += 1
     else:
@@ -807,6 +802,4 @@ def untile_latent(  tiles      : torch.Tensor,
     valid = count > 0
     out[valid] = out[valid] / count[valid]
     return out
-
-
 
