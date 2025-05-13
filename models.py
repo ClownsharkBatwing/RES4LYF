@@ -1044,7 +1044,7 @@ class ModelSamplingAdvanced:
             sampling_type = comfy.model_sampling.CONST
 
         elif isinstance(m.model.model_config, comfy.supported_models.LTXV):
-            self.multiplier = 1000
+            self.multiplier = 1000 # incorrect?
             timesteps = 1000
             sampling_base = comfy.model_sampling.ModelSamplingFlux
             sampling_type = comfy.model_sampling.CONST

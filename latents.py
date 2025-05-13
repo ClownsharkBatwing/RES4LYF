@@ -707,24 +707,30 @@ def interpolate_spd(cov1, cov2, t, eps=1e-5):
 
 
 
-
-
-
-
-def tile_latent(latent: torch.Tensor, tile_size: Tuple[int,int]):
+def tile_latent(latent    : torch.Tensor,
+                tile_size : Tuple[int,int]
+                ) -> Tuple[ torch.Tensor,
+                            Tuple[int,...],
+                            Tuple[int,int],
+                            Tuple[List[int],List[int]]]:
     """
-    Split `latent` into tiles of shape (t_h, t_w), evenly spaced so that
-    the first tile starts at 0, the last tile ends at H/W, and no padding is needed.
+    Split `latent` into spatial tiles of shape (t_h, t_w).
+    Works on either:
+        - 4D [B,C,H,W]
+        - 5D [B,C,T,H,W]
     Returns:
-        tiles:      (B * rows * cols, C, t_h, t_w)
-        orig_shape: (B, C, H, W)
+        tiles:      [B*rows*cols, C, (T,), t_h, t_w]
+        orig_shape: the full shape of `latent`
         tile_hw:    (t_h, t_w)
-        positions:  (rows, cols) lists of start y and x positions
+        positions:  (pos_h, pos_w) lists of start y and x positions
     """
-    B, C, H, W = latent.shape
+    *lead, H, W = latent.shape
+    B, C = lead[0], lead[1]
+    has_time = (latent.ndim == 5)
+    if has_time:
+        T = lead[2]
     t_h, t_w = tile_size
 
-    # how many tiles to cover without padding
     rows = (H + t_h - 1) // t_h
     cols = (W + t_w - 1) // t_w
 
@@ -740,43 +746,67 @@ def tile_latent(latent: torch.Tensor, tile_size: Tuple[int,int]):
     tiles = []
     for y in pos_h:
         for x in pos_w:
-            tile = latent[:, :, y:y+t_h, x:x+t_w]
+            if has_time:
+                tile = latent[:, :, :, y:y+t_h, x:x+t_w]
+            else:
+                tile = latent[:, :, y:y+t_h, x:x+t_w]
+
             tiles.append(tile)
-    # stack into (B*rows*cols, C, t_h, t_w)
-    tiles = torch.cat(tiles, dim=0).view(B*rows*cols, C, t_h, t_w)
 
-    #ret   tiles, orig_shape,   tile_hw,    positions
-    return tiles, (B, C, H, W), (t_h, t_w), (pos_h, pos_w)   
+    tiles = torch.cat(tiles, dim=0)
+    orig_shape = tuple(latent.shape)
+    return tiles, orig_shape, (t_h, t_w), (pos_h, pos_w)
 
 
-def untile_latent(tiles      : torch.Tensor,
-                orig_shape : Tuple[int,int,int,int],
-                tile_hw    : Tuple[int,int],
-                positions  : Tuple[List[int],List[int]]):
+def untile_latent(  tiles      : torch.Tensor,
+                    orig_shape : Tuple[int,...],
+                    tile_hw    : Tuple[int,int],             
+                    positions  : Tuple[List[int],List[int]] 
+                    ) -> torch.Tensor:
     """
-    Reconstruct the original latent from tiles + their start positions,
-    averaging in overlapping regions.
+    Reconstruct latent from tiles + their start positions.
+    Works on either 4D or 5D original.
+    Args:
+        tiles:      [B*rows*cols, C, (T,), t_h, t_w]
+        orig_shape: shape of original latent (B,C,H,W) or (B,C,T,H,W)
+        tile_hw:    (t_h, t_w)
+        positions:  (pos_h, pos_w)
+    Returns:
+        reconstructed latent of shape `orig_shape`
     """
-    B, C, H, W = orig_shape
+    *lead, H, W = orig_shape
+    B, C = lead[0], lead[1]
+    has_time = (len(orig_shape) == 5)
+    if has_time:
+        T = lead[2]
     t_h, t_w = tile_hw
     pos_h, pos_w = positions
     rows, cols = len(pos_h), len(pos_w)
 
-    # prepare accumulators
-    output = torch.zeros((B, C, H, W), device=tiles.device, dtype=tiles.dtype)
-    weight = torch.zeros_like(output)
+    if has_time:
+        out = torch.zeros(B, C, T, H, W, device=tiles.device, dtype=tiles.dtype)
+        count = torch.zeros_like(out)
+        tiles = tiles.view(B, rows, cols, C, T, t_h, t_w)
+        for bi in range(B):
+            for i, y in enumerate(pos_h):
+                for j, x in enumerate(pos_w):
+                    tile = tiles[bi, i, j] 
+                    out[bi, :, :, y:y+t_h, x:x+t_w] += tile
+                    count[bi, :, :, y:y+t_h, x:x+t_w] += 1
+    else:
+        out = torch.zeros(B, C, H, W, device=tiles.device, dtype=tiles.dtype)
+        count = torch.zeros_like(out)
+        tiles = tiles.view(B, rows, cols, C, t_h, t_w)
+        for bi in range(B):
+            for i, y in enumerate(pos_h):
+                for j, x in enumerate(pos_w):
+                    tile = tiles[bi, i, j]
+                    out[bi, :, y:y+t_h, x:x+t_w] += tile
+                    count[bi, :, y:y+t_h, x:x+t_w] += 1
 
-    # reshape tiles back to (B, rows, cols, C, t_h, t_w)
-    tiles = tiles.view(B, rows, cols, C, t_h, t_w)
-    for bi in range(B):
-        for i, y in enumerate(pos_h):
-            for j, x in enumerate(pos_w):
-                output[bi, :, y:y+t_h, x:x+t_w] += tiles[bi, i, j]
-                weight[bi, :, y:y+t_h, x:x+t_w] += 1
-
-    # avoid division by zero
-    output /= weight.clamp(min=1.0)
-    return output
+    valid = count > 0
+    out[valid] = out[valid] / count[valid]
+    return out
 
 
 
