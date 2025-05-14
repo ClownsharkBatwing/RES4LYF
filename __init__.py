@@ -234,7 +234,7 @@ NODE_CLASS_MAPPINGS = {
     "Sigmas Iteration Karras"             : sigmas.sigmas_iteration_karras,
     "Sigmas Iteration Polyexp"            : sigmas.sigmas_iteration_polyexp,
 
-    # Új Sigma Nodes hozzáadása
+    # New Sigma Nodes
     "Sigmas Lerp"                         : sigmas.sigmas_lerp,
     "Sigmas InvLerp"                      : sigmas.sigmas_invlerp,
     "Sigmas ArcSine"                      : sigmas.sigmas_arcsine,
@@ -266,6 +266,20 @@ NODE_CLASS_MAPPINGS = {
     "Sigmas LambertW"                     : sigmas.sigmas_lambert_w,
     "Sigmas ZetaEta"                      : sigmas.sigmas_zeta_eta,
     "Sigmas GammaBeta"                    : sigmas.sigmas_gamma_beta,
+    
+    
+    "Sigmas GaussianCDF"                  : sigmas.sigmas_gaussian_cdf,
+    "Sigmas StepwiseMultirate"            : sigmas.sigmas_stepwise_multirate,
+    "Sigmas HarmonicDecay"                : sigmas.sigmas_harmonic_decay,
+    "Sigmas AdaptiveNoiseFloor"           : sigmas.sigmas_adaptive_noise_floor,
+    "Sigmas CollatzIteration"             : sigmas.sigmas_collatz_iteration,
+    "Sigmas ConwaySequence"               : sigmas.sigmas_conway_sequence,
+    "Sigmas GilbreathSequence"            : sigmas.sigmas_gilbreath_sequence,
+    "Sigmas CNFInverse"                   : sigmas.sigmas_cnf_inverse,
+    "Sigmas RiemannianFlow"               : sigmas.sigmas_riemannian_flow,
+    "Sigmas LangevinDynamics"             : sigmas.sigmas_langevin_dynamics,
+    "Sigmas PersistentHomology"           : sigmas.sigmas_persistent_homology,
+    "Sigmas NormalizingFlows"             : sigmas.sigmas_normalizing_flows,
 
     "ClownScheduler"                      : sigmas.ClownScheduler, # for modulating parameters
     "Tan Scheduler"                       : sigmas.tan_scheduler,
