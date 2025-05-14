@@ -59,7 +59,7 @@ I have prepared a detailed explanation of many of the concepts of sampling with 
 
 # STYLE TRANSFER
 
-Supported models: HiDream, Flux, AuraFlow, SD3.5, LTXV, and WAN. 
+Supported models: HiDream, Flux, AuraFlow, SD1.5, SDXL, SD3.5, LTXV, and WAN. Also supported: Stable Cascade (and UltraPixel) which has an excellent understanding of style (https://github.com/ClownsharkBatwing/UltraCascade).
 
 Currently, best results are with HiDream or Chroma, or Flux with a style lora (Flux Dev is very lacking with style knowledge). Include some mention of the style you wish to use in the prompt. (Try with the guide off to confirm the prompt is not doing the heavy lifting!)
 
@@ -110,7 +110,11 @@ Currently supported models: WAN.
 
 ![temporal conditioning 09580](https://github.com/user-attachments/assets/eef0e04c-d1b2-49b7-a1ca-f8cb651dd3a7)
 
+# VIDEO 2 VIDEO EDITING
 
+Viable with any video model, demo with WAN:
+
+![wan vid2vid compressed](https://github.com/user-attachments/assets/431c30f7-339e-4b86-8d02-6180b09b15b2)
 
 # PREVIOUS VERSION NODE DOCUMENTATION
 
