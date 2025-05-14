@@ -180,6 +180,7 @@ NODE_CLASS_MAPPINGS = {
     "ReAuraPatcher"                       : models.ReAuraPatcher,
     "ReLTXVPatcher"                       : models.ReLTXVPatcher,
     "ReHiDreamPatcher"                    : models.ReHiDreamPatcher,
+    "ReSDPatcher"                         : models.ReSDPatcher,
     
     "ReWanPatcherAdvanced"                : models.ReWanPatcherAdvanced,
     "ReFluxPatcherAdvanced"               : models.ReFluxPatcherAdvanced,

@@ -52,6 +52,9 @@ from comfy.ldm.lightricks.model import LTXVModel
 from .lightricks.model import ReLTXVModel
 #from .chroma.layers import ReChromaSingleStreamBlock, ReChromaDoubleStreamBlock
 
+from comfy.ldm.modules.diffusionmodules.openaimodel import UNetModel
+from .sd.openaimodel import ReUNetModel
+
 
 from .latents import get_orthogonal, get_cosine_similarity
 from .res4lyf import RESplain
@@ -563,6 +566,97 @@ class ReLTXVPatcher(ReLTXVPatcherAdvanced):
         return {
             "required": {
                 "model"       : ("MODEL",),
+                "style_dtype" : (["default", "bfloat16", "float16", "float32", "float64"],  {"default": "float64"}),
+                "enable"      : ("BOOLEAN", {"default": True}),
+            }
+        }
+
+    def main(self, model, style_dtype="float32", enable=True, force=False):
+        return super().main(
+            model               = model,
+            doublestream_blocks = "all",
+            singlestream_blocks = "all",
+            style_dtype         = style_dtype,
+            enable              = enable,
+            force               = force
+        )    
+
+
+
+
+
+class ReSDPatcherAdvanced:
+    @classmethod
+    def INPUT_TYPES(s):
+        return {
+            "required": { 
+                "model"               : ("MODEL",),
+                "doublestream_blocks" : ("STRING",  {"default": "all", "multiline": True}),
+                "singlestream_blocks" : ("STRING",  {"default": "all", "multiline": True}),
+                "style_dtype"         : (["default", "bfloat16", "float16", "float32", "float64"],  {"default": "float32"}),
+                "enable"              : ("BOOLEAN", {"default": True}),
+            }
+        }
+    RETURN_TYPES = ("MODEL",)
+    RETURN_NAMES = ("model",)
+    CATEGORY     = "RES4LYF/model_patches"
+    FUNCTION     = "main"
+    EXPERIMENTAL = True
+
+    def main(self, model, doublestream_blocks, singlestream_blocks, style_dtype, enable=True, force=False):
+        
+        doublestream_blocks = parse_range_string(doublestream_blocks)
+        singlestream_blocks = parse_range_string(singlestream_blocks)
+        
+        model.model.diffusion_model.style_dtype = getattr(torch, style_dtype) if style_dtype != "default" else None
+        model.model.diffusion_model.proj_weights = None
+        model.model.diffusion_model.y0_adain_embed = None
+        
+        if (enable or force) and model.model.diffusion_model.__class__ == UNetModel:
+            m = model.clone()
+            m.model.diffusion_model.__class__     = ReUNetModel
+            m.model.diffusion_model.threshold_inv = False
+            
+            """for i, block in enumerate(m.model.diffusion_model.double_blocks):
+                if i in doublestream_blocks:
+                    block.__class__ = ReChromaDoubleStreamBlock
+                else:
+                    block.__class__ = ReChromaDoubleStreamBlockNoMask
+                block.idx       = i
+
+            for i, block in enumerate(m.model.diffusion_model.single_blocks):
+                if i in singlestream_blocks:
+                    block.__class__ = ReChromaSingleStreamBlock
+                else:
+                    block.__class__ = ReChromaSingleStreamBlockNoMask
+                block.idx       = i"""
+                
+        
+        elif not enable and model.model.diffusion_model.__class__ == ReUNetModel:
+            m = model.clone()
+            m.model.diffusion_model.__class__ = UNetModel
+            
+            """for i, block in enumerate(m.model.diffusion_model.double_blocks):
+                block.__class__ = DoubleStreamBlock
+                block.idx       = i
+
+            for i, block in enumerate(m.model.diffusion_model.single_blocks):
+                block.__class__ = SingleStreamBlock
+                block.idx       = i"""
+                
+        elif model.model.diffusion_model.__class__ != UNetModel and model.model.diffusion_model.__class__ != ReUNetModel:
+            raise ValueError("This node is for enabling regional conditioning for SD1.5 and SDXL only!")
+        else:
+            m = model
+        
+        return (m,)
+    
+class ReSDPatcher(ReSDPatcherAdvanced):
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "model"       : ("MODEL",),
                 "style_dtype" : (["default", "bfloat16", "float16", "float32", "float64"],  {"default": "float32"}),
                 "enable"      : ("BOOLEAN", {"default": True}),
             }
@@ -577,6 +671,7 @@ class ReLTXVPatcher(ReLTXVPatcherAdvanced):
             enable              = enable,
             force               = force
         )    
+
 
 
 
