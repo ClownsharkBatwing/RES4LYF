@@ -59,7 +59,7 @@ I have prepared a detailed explanation of many of the concepts of sampling with 
 
 # STYLE TRANSFER
 
-Supported models: HiDream, Flux, AuraFlow, SD1.5, SDXL, SD3.5, LTXV, and WAN. 
+Supported models: HiDream, Flux, AuraFlow, SD1.5, SDXL, SD3.5, LTXV, and WAN. Also supported: Stable Cascade (and UltraPixel) which has an excellent understanding of style (https://github.com/ClownsharkBatwing/UltraCascade).
 
 Currently, best results are with HiDream or Chroma, or Flux with a style lora (Flux Dev is very lacking with style knowledge). Include some mention of the style you wish to use in the prompt. (Try with the guide off to confirm the prompt is not doing the heavy lifting!)
 
