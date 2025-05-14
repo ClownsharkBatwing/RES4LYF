@@ -110,7 +110,11 @@ Currently supported models: WAN.
 
 ![temporal conditioning 09580](https://github.com/user-attachments/assets/eef0e04c-d1b2-49b7-a1ca-f8cb651dd3a7)
 
+# VIDEO 2 VIDEO EDITING
 
+Viable with any video model, demo with WAN:
+
+![wan vid2vid compressed](https://github.com/user-attachments/assets/431c30f7-339e-4b86-8d02-6180b09b15b2)
 
 # PREVIOUS VERSION NODE DOCUMENTATION
 
