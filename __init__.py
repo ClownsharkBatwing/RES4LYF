@@ -234,6 +234,39 @@ NODE_CLASS_MAPPINGS = {
     "Sigmas Iteration Karras"             : sigmas.sigmas_iteration_karras,
     "Sigmas Iteration Polyexp"            : sigmas.sigmas_iteration_polyexp,
 
+    # Új Sigma Nodes hozzáadása
+    "Sigmas Lerp"                         : sigmas.sigmas_lerp,
+    "Sigmas InvLerp"                      : sigmas.sigmas_invlerp,
+    "Sigmas ArcSine"                      : sigmas.sigmas_arcsine,
+    "Sigmas LinearSine"                   : sigmas.sigmas_linearsine,
+    "Sigmas Append"                       : sigmas.sigmas_append,
+    "Sigmas ArcCosine"                    : sigmas.sigmas_arccosine,
+    "Sigmas ArcTangent"                   : sigmas.sigmas_arctangent,
+    "Sigmas CrossProduct"                 : sigmas.sigmas_crossproduct,
+    "Sigmas DotProduct"                   : sigmas.sigmas_dotproduct,
+    "Sigmas Fmod"                         : sigmas.sigmas_fmod,
+    "Sigmas Frac"                         : sigmas.sigmas_frac,
+    "Sigmas If"                           : sigmas.sigmas_if,
+    "Sigmas Logarithm2"                   : sigmas.sigmas_logarithm2,
+    "Sigmas SmoothStep"                   : sigmas.sigmas_smoothstep,
+    "Sigmas SquareRoot"                   : sigmas.sigmas_squareroot,
+    "Sigmas TimeStep"                     : sigmas.sigmas_timestep,
+    "Sigmas Sigmoid"                      : sigmas.sigmas_sigmoid,
+    "Sigmas Easing"                       : sigmas.sigmas_easing,
+    "Sigmas Hyperbolic"                   : sigmas.sigmas_hyperbolic,
+    "Sigmas Gaussian"                     : sigmas.sigmas_gaussian,
+    "Sigmas Percentile"                   : sigmas.sigmas_percentile,
+    "Sigmas KernelSmooth"                 : sigmas.sigmas_kernel_smooth,
+    "Sigmas QuantileNorm"                 : sigmas.sigmas_quantile_norm,
+    "Sigmas AdaptiveStep"                 : sigmas.sigmas_adaptive_step,
+    "Sigmas Chaos"                        : sigmas.sigmas_chaos,
+    "Sigmas ReactionDiffusion"            : sigmas.sigmas_reaction_diffusion,
+    "Sigmas Attractor"                    : sigmas.sigmas_attractor,
+    "Sigmas CatmullRom"                   : sigmas.sigmas_catmull_rom,
+    "Sigmas LambertW"                     : sigmas.sigmas_lambert_w,
+    "Sigmas ZetaEta"                      : sigmas.sigmas_zeta_eta,
+    "Sigmas GammaBeta"                    : sigmas.sigmas_gamma_beta,
+
     "ClownScheduler"                      : sigmas.ClownScheduler, # for modulating parameters
     "Tan Scheduler"                       : sigmas.tan_scheduler,
     "Tan Scheduler 2"                     : sigmas.tan_scheduler_2stage,
@@ -385,5 +418,3 @@ add_samplers()
 
 
 __all__ = ["NODE_CLASS_MAPPINGS", "NODE_DISPLAY_NAME_MAPPINGS", "WEB_DIRECTORY"]
-
-
