@@ -1,12 +1,14 @@
 import torch
-
 import numpy as np
 from math import *
 import builtins
 from scipy.interpolate import CubicSpline
+from scipy import special, stats
 import torch.nn.functional as F
 import torch.nn as nn
 import torch.optim as optim
+import math
+
 
 from comfy.k_diffusion.sampling import get_sigmas_polyexponential, get_sigmas_karras
 import comfy.samplers
@@ -1394,5 +1396,1857 @@ def get_sigmas(model, scheduler, steps, denoise, shift=0.0, lq_inflection_percen
     sigmas = sigmas[-(steps + 1):]
     return sigmas
 
+#/// Adam Kormendi /// Inspired from Unreal Engine Maths ///
 
 
+# Sigmoid Function
+class sigmas_sigmoid:
+    def __init__(self):
+        pass
+    
+    @classmethod
+    def INPUT_TYPES(s):
+        return {
+            "required": {
+                "sigmas": ("SIGMAS", {"forceInput": True}),
+                "variant": (["logistic", "tanh", "softsign", "hardswish", "mish", "swish"], {"default": "logistic"}),
+                "gain": ("FLOAT", {"default": 1.0, "min": 0.01, "max": 10.0, "step": 0.01}),
+                "offset": ("FLOAT", {"default": 0.0, "min": -10.0, "max": 10.0, "step": 0.01}),
+                "normalize_output": ("BOOLEAN", {"default": True})
+            }
+        }
+
+    FUNCTION = "main"
+    RETURN_TYPES = ("SIGMAS",)
+    CATEGORY = "RES4LYF/sigmas"
+    
+    def main(self, sigmas, variant, gain, offset, normalize_output):
+        # Apply gain and offset
+        x = gain * (sigmas + offset)
+        
+        if variant == "logistic":
+            result = 1.0 / (1.0 + torch.exp(-x))
+        elif variant == "tanh":
+            result = torch.tanh(x)
+        elif variant == "softsign":
+            result = x / (1.0 + torch.abs(x))
+        elif variant == "hardswish":
+            result = x * torch.minimum(torch.maximum(x + 3, torch.zeros_like(x)), torch.tensor(6.0)) / 6.0
+        elif variant == "mish":
+            result = x * torch.tanh(torch.log(1.0 + torch.exp(x)))
+        elif variant == "swish":
+            result = x * torch.sigmoid(x)
+        
+        if normalize_output:
+            # Normalize to [min(sigmas), max(sigmas)]
+            result = ((result - result.min()) / (result.max() - result.min())) * (sigmas.max() - sigmas.min()) + sigmas.min()
+            
+        return (result,)
+
+# ----- Easing Function -----
+class sigmas_easing:
+    def __init__(self):
+        pass
+    
+    @classmethod
+    def INPUT_TYPES(s):
+        return {
+            "required": {
+                "sigmas": ("SIGMAS", {"forceInput": True}),
+                "easing_type": (["sine", "quad", "cubic", "quart", "quint", "expo", "circ", 
+                                 "back", "elastic", "bounce"], {"default": "cubic"}),
+                "easing_mode": (["in", "out", "in_out"], {"default": "in_out"}),
+                "normalize_input": ("BOOLEAN", {"default": True}),
+                "normalize_output": ("BOOLEAN", {"default": True}),
+                "strength": ("FLOAT", {"default": 1.0, "min": 0.1, "max": 10.0, "step": 0.1})
+            }
+        }
+
+    FUNCTION = "main"
+    RETURN_TYPES = ("SIGMAS",)
+    CATEGORY = "RES4LYF/sigmas"
+    
+    def main(self, sigmas, easing_type, easing_mode, normalize_input, normalize_output, strength):
+        # Normalize input to [0, 1] if requested
+        if normalize_input:
+            t = (sigmas - sigmas.min()) / (sigmas.max() - sigmas.min())
+        else:
+            t = torch.clamp(sigmas, 0.0, 1.0)
+        
+        # Apply strength
+        t_orig = t.clone()
+        t = t ** strength
+            
+        # Apply easing function based on type and mode
+        if easing_mode == "in":
+            result = self._ease_in(t, easing_type)
+        elif easing_mode == "out":
+            result = self._ease_out(t, easing_type)
+        else:  # in_out
+            result = self._ease_in_out(t, easing_type)
+            
+        # Normalize output if requested
+        if normalize_output:
+            if normalize_input:
+                result = ((result - result.min()) / (result.max() - result.min())) * (sigmas.max() - sigmas.min()) + sigmas.min()
+            else:
+                result = ((result - result.min()) / (result.max() - result.min()))
+                
+        return (result,)
+    
+    def _ease_in(self, t, easing_type):
+        if easing_type == "sine":
+            return 1 - torch.cos((t * math.pi) / 2)
+        elif easing_type == "quad":
+            return t * t
+        elif easing_type == "cubic":
+            return t * t * t
+        elif easing_type == "quart":
+            return t * t * t * t
+        elif easing_type == "quint":
+            return t * t * t * t * t
+        elif easing_type == "expo":
+            return torch.where(t == 0, torch.zeros_like(t), torch.pow(2, 10 * t - 10))
+        elif easing_type == "circ":
+            return 1 - torch.sqrt(1 - torch.pow(t, 2))
+        elif easing_type == "back":
+            c1 = 1.70158
+            c3 = c1 + 1
+            return c3 * t * t * t - c1 * t * t
+        elif easing_type == "elastic":
+            c4 = (2 * math.pi) / 3
+            return torch.where(
+                t == 0, 
+                torch.zeros_like(t),
+                torch.where(
+                    t == 1,
+                    torch.ones_like(t),
+                    -torch.pow(2, 10 * t - 10) * torch.sin((t * 10 - 10.75) * c4)
+                )
+            )
+        elif easing_type == "bounce":
+            return 1 - self._ease_out_bounce(1 - t)
+    
+    def _ease_out(self, t, easing_type):
+        if easing_type == "sine":
+            return torch.sin((t * math.pi) / 2)
+        elif easing_type == "quad":
+            return 1 - (1 - t) * (1 - t)
+        elif easing_type == "cubic":
+            return 1 - torch.pow(1 - t, 3)
+        elif easing_type == "quart":
+            return 1 - torch.pow(1 - t, 4)
+        elif easing_type == "quint":
+            return 1 - torch.pow(1 - t, 5)
+        elif easing_type == "expo":
+            return torch.where(t == 1, torch.ones_like(t), 1 - torch.pow(2, -10 * t))
+        elif easing_type == "circ":
+            return torch.sqrt(1 - torch.pow(t - 1, 2))
+        elif easing_type == "back":
+            c1 = 1.70158
+            c3 = c1 + 1
+            return 1 + c3 * torch.pow(t - 1, 3) + c1 * torch.pow(t - 1, 2)
+        elif easing_type == "elastic":
+            c4 = (2 * math.pi) / 3
+            return torch.where(
+                t == 0, 
+                torch.zeros_like(t),
+                torch.where(
+                    t == 1,
+                    torch.ones_like(t),
+                    torch.pow(2, -10 * t) * torch.sin((t * 10 - 0.75) * c4) + 1
+                )
+            )
+        elif easing_type == "bounce":
+            return self._ease_out_bounce(t)
+    
+    def _ease_in_out(self, t, easing_type):
+        if easing_type == "sine":
+            return -(torch.cos(math.pi * t) - 1) / 2
+        elif easing_type == "quad":
+            return torch.where(t < 0.5, 2 * t * t, 1 - torch.pow(-2 * t + 2, 2) / 2)
+        elif easing_type == "cubic":
+            return torch.where(t < 0.5, 4 * t * t * t, 1 - torch.pow(-2 * t + 2, 3) / 2)
+        elif easing_type == "quart":
+            return torch.where(t < 0.5, 8 * t * t * t * t, 1 - torch.pow(-2 * t + 2, 4) / 2)
+        elif easing_type == "quint":
+            return torch.where(t < 0.5, 16 * t * t * t * t * t, 1 - torch.pow(-2 * t + 2, 5) / 2)
+        elif easing_type == "expo":
+            return torch.where(
+                t < 0.5, 
+                torch.pow(2, 20 * t - 10) / 2,
+                (2 - torch.pow(2, -20 * t + 10)) / 2
+            )
+        elif easing_type == "circ":
+            return torch.where(
+                t < 0.5,
+                (1 - torch.sqrt(1 - torch.pow(2 * t, 2))) / 2,
+                (torch.sqrt(1 - torch.pow(-2 * t + 2, 2)) + 1) / 2
+            )
+        elif easing_type == "back":
+            c1 = 1.70158
+            c2 = c1 * 1.525
+            return torch.where(
+                t < 0.5,
+                (torch.pow(2 * t, 2) * ((c2 + 1) * 2 * t - c2)) / 2,
+                (torch.pow(2 * t - 2, 2) * ((c2 + 1) * (t * 2 - 2) + c2) + 2) / 2
+            )
+        elif easing_type == "elastic":
+            c5 = (2 * math.pi) / 4.5
+            return torch.where(
+                t < 0.5,
+                -(torch.pow(2, 20 * t - 10) * torch.sin((20 * t - 11.125) * c5)) / 2,
+                (torch.pow(2, -20 * t + 10) * torch.sin((20 * t - 11.125) * c5)) / 2 + 1
+            )
+        elif easing_type == "bounce":
+            return torch.where(
+                t < 0.5,
+                (1 - self._ease_out_bounce(1 - 2 * t)) / 2,
+                (1 + self._ease_out_bounce(2 * t - 1)) / 2
+            )
+    
+    def _ease_out_bounce(self, t):
+        n1 = 7.5625
+        d1 = 2.75
+        
+        mask1 = t < 1 / d1
+        mask2 = t < 2 / d1
+        mask3 = t < 2.5 / d1
+        
+        result = torch.zeros_like(t)
+        result = torch.where(mask1, n1 * t * t, result)
+        result = torch.where(mask2 & ~mask1, n1 * (t - 1.5 / d1) * (t - 1.5 / d1) + 0.75, result)
+        result = torch.where(mask3 & ~mask2, n1 * (t - 2.25 / d1) * (t - 2.25 / d1) + 0.9375, result)
+        result = torch.where(~mask3, n1 * (t - 2.625 / d1) * (t - 2.625 / d1) + 0.984375, result)
+        
+        return result
+
+# -----  Hyperbolic Function -----
+class sigmas_hyperbolic:
+    def __init__(self):
+        pass
+    
+    @classmethod
+    def INPUT_TYPES(s):
+        return {
+            "required": {
+                "sigmas": ("SIGMAS", {"forceInput": True}),
+                "function": (["sinh", "cosh", "tanh", "asinh", "acosh", "atanh"], {"default": "tanh"}),
+                "scale": ("FLOAT", {"default": 1.0, "min": 0.01, "max": 10.0, "step": 0.01}),
+                "normalize_output": ("BOOLEAN", {"default": True})
+            }
+        }
+
+    FUNCTION = "main"
+    RETURN_TYPES = ("SIGMAS",)
+    CATEGORY = "RES4LYF/sigmas"
+    
+    def main(self, sigmas, function, scale, normalize_output):
+        # Apply scaling
+        x = sigmas * scale
+        
+        if function == "sinh":
+            result = torch.sinh(x)
+        elif function == "cosh":
+            result = torch.cosh(x)
+        elif function == "tanh":
+            result = torch.tanh(x)
+        elif function == "asinh":
+            result = torch.asinh(x)
+        elif function == "acosh":
+            # Domain of acosh is [1, inf)
+            result = torch.acosh(torch.clamp(x, min=1.0))
+        elif function == "atanh":
+            # Domain of atanh is (-1, 1)
+            result = torch.atanh(torch.clamp(x, min=-0.99, max=0.99))
+        
+        if normalize_output:
+            # Normalize to [min(sigmas), max(sigmas)]
+            result = ((result - result.min()) / (result.max() - result.min())) * (sigmas.max() - sigmas.min()) + sigmas.min()
+            
+        return (result,)
+
+# ----- Gaussian Distribution Function -----
+class sigmas_gaussian:
+    def __init__(self):
+        pass
+    
+    @classmethod
+    def INPUT_TYPES(s):
+        return {
+            "required": {
+                "sigmas": ("SIGMAS", {"forceInput": True}),
+                "mean": ("FLOAT", {"default": 0.0, "min": -10.0, "max": 10.0, "step": 0.01}),
+                "std": ("FLOAT", {"default": 1.0, "min": 0.01, "max": 10.0, "step": 0.01}),
+                "operation": (["pdf", "cdf", "inverse_cdf", "transform", "modulate"], {"default": "transform"}),
+                "normalize_output": ("BOOLEAN", {"default": True})
+            }
+        }
+
+    FUNCTION = "main"
+    RETURN_TYPES = ("SIGMAS",)
+    CATEGORY = "RES4LYF/sigmas"
+    
+    def main(self, sigmas, mean, std, operation, normalize_output):
+        # Standardize values (z-score)
+        z = (sigmas - sigmas.mean()) / sigmas.std()
+        
+        if operation == "pdf":
+            # Probability density function
+            result = (1 / (std * math.sqrt(2 * math.pi))) * torch.exp(-0.5 * ((sigmas - mean) / std) ** 2)
+        elif operation == "cdf":
+            # Cumulative distribution function
+            result = 0.5 * (1 + torch.erf((sigmas - mean) / (std * math.sqrt(2))))
+        elif operation == "inverse_cdf":
+            # Inverse CDF (quantile function)
+            # First normalize to [0.01, 0.99] to avoid numerical issues
+            normalized = ((sigmas - sigmas.min()) / (sigmas.max() - sigmas.min())) * 0.98 + 0.01
+            result = mean + std * torch.sqrt(2) * torch.erfinv(2 * normalized - 1)
+        elif operation == "transform":
+            # Transform to Gaussian distribution with specified mean and std
+            result = z * std + mean
+        elif operation == "modulate":
+            # Modulate with a Gaussian curve centered at mean
+            result = sigmas * torch.exp(-0.5 * ((sigmas - mean) / std) ** 2)
+        
+        if normalize_output:
+            # Normalize to [min(sigmas), max(sigmas)]
+            result = ((result - result.min()) / (result.max() - result.min())) * (sigmas.max() - sigmas.min()) + sigmas.min()
+            
+        return (result,)
+
+# ----- Percentile Function -----
+class sigmas_percentile:
+    def __init__(self):
+        pass
+    
+    @classmethod
+    def INPUT_TYPES(s):
+        return {
+            "required": {
+                "sigmas": ("SIGMAS", {"forceInput": True}),
+                "percentile_min": ("FLOAT", {"default": 5.0, "min": 0.0, "max": 49.0, "step": 0.1}),
+                "percentile_max": ("FLOAT", {"default": 95.0, "min": 51.0, "max": 100.0, "step": 0.1}),
+                "target_min": ("FLOAT", {"default": 0.0, "min": -10000.0, "max": 10000.0, "step": 0.01}),
+                "target_max": ("FLOAT", {"default": 1.0, "min": -10000.0, "max": 10000.0, "step": 0.01}),
+                "clip_outliers": ("BOOLEAN", {"default": True})
+            }
+        }
+
+    FUNCTION = "main"
+    RETURN_TYPES = ("SIGMAS",)
+    CATEGORY = "RES4LYF/sigmas"
+    
+    def main(self, sigmas, percentile_min, percentile_max, target_min, target_max, clip_outliers):
+        # Convert to numpy for percentile computation
+        sigmas_np = sigmas.cpu().numpy()
+        
+        # Compute percentiles
+        p_min = np.percentile(sigmas_np, percentile_min)
+        p_max = np.percentile(sigmas_np, percentile_max)
+        
+        # Convert back to tensor
+        p_min = torch.tensor(p_min, device=sigmas.device, dtype=sigmas.dtype)
+        p_max = torch.tensor(p_max, device=sigmas.device, dtype=sigmas.dtype)
+        
+        # Map values from [p_min, p_max] to [target_min, target_max]
+        if clip_outliers:
+            sigmas_clipped = torch.clamp(sigmas, p_min, p_max)
+            result = ((sigmas_clipped - p_min) / (p_max - p_min)) * (target_max - target_min) + target_min
+        else:
+            result = ((sigmas - p_min) / (p_max - p_min)) * (target_max - target_min) + target_min
+            
+        return (result,)
+
+# ----- Kernel Smooth Function -----
+class sigmas_kernel_smooth:
+    def __init__(self):
+        pass
+    
+    @classmethod
+    def INPUT_TYPES(s):
+        return {
+            "required": {
+                "sigmas": ("SIGMAS", {"forceInput": True}),
+                "kernel": (["gaussian", "box", "triangle", "epanechnikov", "cosine"], {"default": "gaussian"}),
+                "kernel_size": ("INT", {"default": 5, "min": 3, "max": 51, "step": 2}),  # Must be odd
+                "sigma": ("FLOAT", {"default": 1.0, "min": 0.1, "max": 10.0, "step": 0.1}),
+            }
+        }
+
+    FUNCTION = "main"
+    RETURN_TYPES = ("SIGMAS",)
+    CATEGORY = "RES4LYF/sigmas"
+    
+    def main(self, sigmas, kernel, kernel_size, sigma):
+        # Ensure kernel_size is odd
+        if kernel_size % 2 == 0:
+            kernel_size += 1
+            
+        # Define kernel weights
+        if kernel == "gaussian":
+            # Gaussian kernel
+            kernel_1d = self._gaussian_kernel(kernel_size, sigma)
+        elif kernel == "box":
+            # Box (uniform) kernel
+            kernel_1d = torch.ones(kernel_size, device=sigmas.device, dtype=sigmas.dtype) / kernel_size
+        elif kernel == "triangle":
+            # Triangle kernel
+            x = torch.linspace(-(kernel_size//2), kernel_size//2, kernel_size, device=sigmas.device, dtype=sigmas.dtype)
+            kernel_1d = (1.0 - torch.abs(x) / (kernel_size//2))
+            kernel_1d = kernel_1d / kernel_1d.sum()
+        elif kernel == "epanechnikov":
+            # Epanechnikov kernel
+            x = torch.linspace(-(kernel_size//2), kernel_size//2, kernel_size, device=sigmas.device, dtype=sigmas.dtype)
+            x = x / (kernel_size//2)  # Scale to [-1, 1]
+            kernel_1d = 0.75 * (1 - x**2)
+            kernel_1d = kernel_1d / kernel_1d.sum()
+        elif kernel == "cosine":
+            # Cosine kernel
+            x = torch.linspace(-(kernel_size//2), kernel_size//2, kernel_size, device=sigmas.device, dtype=sigmas.dtype)
+            x = x / (kernel_size//2) * (math.pi/2)  # Scale to [-π/2, π/2]
+            kernel_1d = torch.cos(x)
+            kernel_1d = kernel_1d / kernel_1d.sum()
+            
+        # Pad input to handle boundary conditions
+        pad_size = kernel_size // 2
+        padded = F.pad(sigmas.unsqueeze(0).unsqueeze(0), (pad_size, pad_size), mode='reflect')
+        
+        # Apply convolution
+        smoothed = F.conv1d(padded, kernel_1d.unsqueeze(0).unsqueeze(0))
+        
+        return (smoothed.squeeze(),)
+    
+    def _gaussian_kernel(self, kernel_size, sigma):
+        # Generate 1D Gaussian kernel
+        x = torch.linspace(-(kernel_size//2), kernel_size//2, kernel_size)
+        kernel = torch.exp(-x**2 / (2*sigma**2))
+        return kernel / kernel.sum()
+
+# ----- Quantile Normalization -----
+class sigmas_quantile_norm:
+    def __init__(self):
+        pass
+    
+    @classmethod
+    def INPUT_TYPES(s):
+        return {
+            "required": {
+                "sigmas": ("SIGMAS", {"forceInput": True}),
+                "target_distribution": (["uniform", "normal", "exponential", "logistic", "custom"], {"default": "uniform"}),
+                "num_quantiles": ("INT", {"default": 100, "min": 10, "max": 1000, "step": 10}),
+            },
+            "optional": {
+                "reference_sigmas": ("SIGMAS", {"forceInput": False}),
+            }
+        }
+
+    FUNCTION = "main"
+    RETURN_TYPES = ("SIGMAS",)
+    CATEGORY = "RES4LYF/sigmas"
+    
+    def main(self, sigmas, target_distribution, num_quantiles, reference_sigmas=None):
+        # Convert to numpy for processing
+        sigmas_np = sigmas.cpu().numpy()
+        
+        # Sort values
+        sorted_values = np.sort(sigmas_np)
+        
+        # Create rank for each value (fractional rank)
+        ranks = np.zeros_like(sigmas_np)
+        for i, val in enumerate(sigmas_np):
+            ranks[i] = np.searchsorted(sorted_values, val, side='right') / len(sorted_values)
+        
+        # Generate target distribution
+        if target_distribution == "uniform":
+            # Uniform distribution between min and max of sigmas
+            target_values = np.linspace(sigmas_np.min(), sigmas_np.max(), num_quantiles)
+        elif target_distribution == "normal":
+            # Normal distribution with same mean and std as sigmas
+            target_values = np.random.normal(sigmas_np.mean(), sigmas_np.std(), num_quantiles)
+            target_values.sort()
+        elif target_distribution == "exponential":
+            # Exponential distribution with lambda=1/mean
+            target_values = np.random.exponential(1/max(1e-6, sigmas_np.mean()), num_quantiles)
+            target_values.sort()
+        elif target_distribution == "logistic":
+            # Logistic distribution
+            target_values = np.random.logistic(0, 1, num_quantiles)
+            target_values.sort()
+            # Rescale to match sigmas range
+            target_values = (target_values - target_values.min()) / (target_values.max() - target_values.min())
+            target_values = target_values * (sigmas_np.max() - sigmas_np.min()) + sigmas_np.min()
+        elif target_distribution == "custom" and reference_sigmas is not None:
+            # Use provided reference distribution
+            reference_np = reference_sigmas.cpu().numpy()
+            target_values = np.sort(reference_np)
+            if len(target_values) < num_quantiles:
+                # Interpolate if reference is smaller
+                old_indices = np.linspace(0, len(target_values)-1, len(target_values))
+                new_indices = np.linspace(0, len(target_values)-1, num_quantiles)
+                target_values = np.interp(new_indices, old_indices, target_values)
+            else:
+                # Subsample if reference is larger
+                indices = np.linspace(0, len(target_values)-1, num_quantiles, dtype=int)
+                target_values = target_values[indices]
+        else:
+            # Default to uniform
+            target_values = np.linspace(sigmas_np.min(), sigmas_np.max(), num_quantiles)
+        
+        # Map each value to its corresponding quantile in the target distribution
+        result_np = np.interp(ranks, np.linspace(0, 1, len(target_values)), target_values)
+        
+        # Convert back to tensor
+        result = torch.tensor(result_np, device=sigmas.device, dtype=sigmas.dtype)
+        
+        return (result,)
+
+# ----- Adaptive Step Function -----
+class sigmas_adaptive_step:
+    def __init__(self):
+        pass
+    
+    @classmethod
+    def INPUT_TYPES(s):
+        return {
+            "required": {
+                "sigmas": ("SIGMAS", {"forceInput": True}),
+                "adaptation_type": (["gradient", "curvature", "importance", "density"], {"default": "gradient"}),
+                "sensitivity": ("FLOAT", {"default": 1.0, "min": 0.1, "max": 10.0, "step": 0.1}),
+                "min_step": ("FLOAT", {"default": 0.01, "min": 0.0001, "max": 1.0, "step": 0.01}),
+                "max_step": ("FLOAT", {"default": 1.0, "min": 0.01, "max": 10.0, "step": 0.01}),
+                "target_steps": ("INT", {"default": 0, "min": 0, "max": 1000, "step": 1}),
+            }
+        }
+
+    FUNCTION = "main"
+    RETURN_TYPES = ("SIGMAS",)
+    CATEGORY = "RES4LYF/sigmas"
+    
+    def main(self, sigmas, adaptation_type, sensitivity, min_step, max_step, target_steps):
+        if len(sigmas) <= 1:
+            return (sigmas,)
+            
+        # Compute step sizes based on chosen adaptation type
+        if adaptation_type == "gradient":
+            # Compute gradient (first difference)
+            grads = torch.abs(sigmas[1:] - sigmas[:-1])
+            # Normalize gradients
+            if grads.max() > grads.min():
+                norm_grads = (grads - grads.min()) / (grads.max() - grads.min())
+            else:
+                norm_grads = torch.ones_like(grads)
+            
+            # Convert to step sizes: smaller steps where gradient is large
+            step_sizes = 1.0 / (1.0 + norm_grads * sensitivity)
+            
+        elif adaptation_type == "curvature":
+            # Compute second derivative approximation
+            if len(sigmas) >= 3:
+                # Second difference
+                second_diff = sigmas[2:] - 2*sigmas[1:-1] + sigmas[:-2]
+                # Pad to match length
+                second_diff = F.pad(second_diff, (0, 1), mode='replicate')
+            else:
+                second_diff = torch.zeros_like(sigmas[:-1])
+                
+            # Normalize curvature
+            abs_curve = torch.abs(second_diff)
+            if abs_curve.max() > abs_curve.min():
+                norm_curve = (abs_curve - abs_curve.min()) / (abs_curve.max() - abs_curve.min())
+            else:
+                norm_curve = torch.ones_like(abs_curve)
+                
+            # Convert to step sizes: smaller steps where curvature is high
+            step_sizes = 1.0 / (1.0 + norm_curve * sensitivity)
+            
+        elif adaptation_type == "importance":
+            # Importance based on values: focus more on extremes
+            centered = torch.abs(sigmas - sigmas.mean())
+            if centered.max() > centered.min():
+                importance = (centered - centered.min()) / (centered.max() - centered.min())
+            else:
+                importance = torch.ones_like(centered)
+                
+            # Steps are smaller for important regions
+            step_sizes = 1.0 / (1.0 + importance[:-1] * sensitivity)
+            
+        elif adaptation_type == "density":
+            # Density-based adaptation using kernel density estimation
+            # Use a simple histogram approximation
+            sigma_min, sigma_max = sigmas.min(), sigmas.max()
+            bins = 20
+            hist = torch.histc(sigmas, bins=bins, min=sigma_min, max=sigma_max)
+            hist = hist / hist.sum()  # Normalize
+            
+            # Map each sigma to its bin density
+            bin_indices = torch.floor((sigmas - sigma_min) / (sigma_max - sigma_min) * (bins-1)).long()
+            bin_indices = torch.clamp(bin_indices, 0, bins-1)
+            densities = hist[bin_indices]
+            
+            # Compute step sizes: smaller steps in high density regions
+            step_sizes = 1.0 / (1.0 + densities[:-1] * sensitivity)
+        
+        # Scale step sizes to [min_step, max_step]
+        if step_sizes.max() > step_sizes.min():
+            step_sizes = (step_sizes - step_sizes.min()) / (step_sizes.max() - step_sizes.min())
+            step_sizes = step_sizes * (max_step - min_step) + min_step
+        else:
+            step_sizes = torch.ones_like(step_sizes) * min_step
+            
+        # Cumulative sum to get positions
+        positions = torch.cat([torch.tensor([0.0], device=step_sizes.device), torch.cumsum(step_sizes, dim=0)])
+        
+        # Normalize positions to match original range
+        positions = positions / positions[-1] * (sigmas[-1] - sigmas[0]) + sigmas[0]
+        
+        # Resample if target_steps is specified
+        if target_steps > 0:
+            new_positions = torch.linspace(sigmas[0], sigmas[-1], target_steps, device=sigmas.device)
+            # Interpolate to get new sigma values
+            new_sigmas = torch.zeros_like(new_positions)
+            
+            # Simple linear interpolation
+            for i, pos in enumerate(new_positions):
+                # Find enclosing original positions
+                idx = torch.searchsorted(positions, pos)
+                idx = torch.clamp(idx, 1, len(positions)-1)
+                
+                # Linear interpolation
+                t = (pos - positions[idx-1]) / (positions[idx] - positions[idx-1])
+                new_sigmas[i] = sigmas[idx-1] * (1-t) + sigmas[idx-1] * t
+                
+            result = new_sigmas
+        else:
+            result = positions
+            
+        return (result,)
+
+# ----- Chaos Function -----
+class sigmas_chaos:
+    def __init__(self):
+        pass
+    
+    @classmethod
+    def INPUT_TYPES(s):
+        return {
+            "required": {
+                "sigmas": ("SIGMAS", {"forceInput": True}),
+                "system": (["logistic", "henon", "tent", "sine", "cubic"], {"default": "logistic"}),
+                "parameter": ("FLOAT", {"default": 3.9, "min": 0.1, "max": 5.0, "step": 0.01}),
+                "iterations": ("INT", {"default": 10, "min": 1, "max": 100, "step": 1}),
+                "normalize_output": ("BOOLEAN", {"default": True}),
+                "use_as_seed": ("BOOLEAN", {"default": False})
+            }
+        }
+
+    FUNCTION = "main"
+    RETURN_TYPES = ("SIGMAS",)
+    CATEGORY = "RES4LYF/sigmas"
+    
+    def main(self, sigmas, system, parameter, iterations, normalize_output, use_as_seed):
+        # Normalize input to [0,1] for chaotic maps
+        if use_as_seed:
+            # Use input as initial seed
+            x = (sigmas - sigmas.min()) / (sigmas.max() - sigmas.min())
+        else:
+            # Use single initial value and apply iterations
+            x = torch.zeros_like(sigmas)
+            for i in range(len(sigmas)):
+                # Use i/len as initial value for variety
+                x[i] = i / len(sigmas)
+        
+        # Apply chaos map iterations
+        for _ in range(iterations):
+            if system == "logistic":
+                # Logistic map: x_{n+1} = r * x_n * (1 - x_n)
+                x = parameter * x * (1 - x)
+                
+            elif system == "henon":
+                # Simplified 1D version of Henon map
+                x = 1 - parameter * x**2
+                
+            elif system == "tent":
+                # Tent map
+                x = torch.where(x < 0.5, parameter * x, parameter * (1 - x))
+                
+            elif system == "sine":
+                # Sine map: x_{n+1} = r * sin(pi * x_n)
+                x = parameter * torch.sin(math.pi * x)
+                
+            elif system == "cubic":
+                # Cubic map: x_{n+1} = r * x_n * (1 - x_n^2)
+                x = parameter * x * (1 - x**2)
+                
+        # Normalize output if requested
+        if normalize_output:
+            result = ((x - x.min()) / (x.max() - x.min())) * (sigmas.max() - sigmas.min()) + sigmas.min()
+        else:
+            result = x
+            
+        return (result,)
+
+# ----- Reaction Diffusion Function -----
+class sigmas_reaction_diffusion:
+    def __init__(self):
+        pass
+    
+    @classmethod
+    def INPUT_TYPES(s):
+        return {
+            "required": {
+                "sigmas": ("SIGMAS", {"forceInput": True}),
+                "system": (["gray_scott", "fitzhugh_nagumo", "brusselator"], {"default": "gray_scott"}),
+                "iterations": ("INT", {"default": 10, "min": 1, "max": 100, "step": 1}),
+                "dt": ("FLOAT", {"default": 0.1, "min": 0.01, "max": 1.0, "step": 0.01}),
+                "param_a": ("FLOAT", {"default": 0.04, "min": 0.01, "max": 0.1, "step": 0.001}),
+                "param_b": ("FLOAT", {"default": 0.06, "min": 0.01, "max": 0.1, "step": 0.001}),
+                "diffusion_a": ("FLOAT", {"default": 0.1, "min": 0.01, "max": 1.0, "step": 0.01}),
+                "diffusion_b": ("FLOAT", {"default": 0.05, "min": 0.01, "max": 1.0, "step": 0.01}),
+                "normalize_output": ("BOOLEAN", {"default": True})
+            }
+        }
+
+    FUNCTION = "main"
+    RETURN_TYPES = ("SIGMAS",)
+    CATEGORY = "RES4LYF/sigmas"
+    
+    def main(self, sigmas, system, iterations, dt, param_a, param_b, diffusion_a, diffusion_b, normalize_output):
+        # Initialize a and b based on sigmas
+        a = (sigmas - sigmas.min()) / (sigmas.max() - sigmas.min())
+        b = 1.0 - a
+        
+        # Pad for diffusion calculation (periodic boundary)
+        a_pad = F.pad(a.unsqueeze(0).unsqueeze(0), (1, 1), mode='circular').squeeze()
+        b_pad = F.pad(b.unsqueeze(0).unsqueeze(0), (1, 1), mode='circular').squeeze()
+        
+        # Simple 1D reaction-diffusion
+        for _ in range(iterations):
+            # Compute Laplacian (diffusion term) as second derivative
+            laplacian_a = a_pad[:-2] + a_pad[2:] - 2 * a
+            laplacian_b = b_pad[:-2] + b_pad[2:] - 2 * b
+            
+            if system == "gray_scott":
+                # Gray-Scott model for pattern formation
+                # a is "U" (activator), b is "V" (inhibitor)
+                feed = 0.055  # feed rate
+                kill = 0.062  # kill rate
+                
+                # Update equations
+                a_new = a + dt * (diffusion_a * laplacian_a - a * b**2 + feed * (1 - a))
+                b_new = b + dt * (diffusion_b * laplacian_b + a * b**2 - (feed + kill) * b)
+                
+            elif system == "fitzhugh_nagumo":
+                # FitzHugh-Nagumo model (simplified)
+                # a is the membrane potential, b is the recovery variable
+                
+                # Update equations
+                a_new = a + dt * (diffusion_a * laplacian_a + a - a**3 - b + param_a)
+                b_new = b + dt * (diffusion_b * laplacian_b + param_b * (a - b))
+                
+            elif system == "brusselator":
+                # Brusselator model
+                # a is U, b is V
+                
+                # Update equations
+                a_new = a + dt * (diffusion_a * laplacian_a + 1 - (param_b + 1) * a + param_a * a**2 * b)
+                b_new = b + dt * (diffusion_b * laplacian_b + param_b * a - param_a * a**2 * b)
+            
+            # Update and repad
+            a, b = a_new, b_new
+            a_pad = F.pad(a.unsqueeze(0).unsqueeze(0), (1, 1), mode='circular').squeeze()
+            b_pad = F.pad(b.unsqueeze(0).unsqueeze(0), (1, 1), mode='circular').squeeze()
+            
+        # Use the activator component as the result
+        result = a
+        
+        # Normalize output if requested
+        if normalize_output:
+            result = ((result - result.min()) / (result.max() - result.min())) * (sigmas.max() - sigmas.min()) + sigmas.min()
+            
+        return (result,)
+
+# ----- Attractor Function -----
+class sigmas_attractor:
+    def __init__(self):
+        pass
+    
+    @classmethod
+    def INPUT_TYPES(s):
+        return {
+            "required": {
+                "sigmas": ("SIGMAS", {"forceInput": True}),
+                "attractor": (["lorenz", "rossler", "aizawa", "chen", "thomas"], {"default": "lorenz"}),
+                "iterations": ("INT", {"default": 5, "min": 1, "max": 50, "step": 1}),
+                "dt": ("FLOAT", {"default": 0.01, "min": 0.001, "max": 0.1, "step": 0.001}),
+                "component": (["x", "y", "z", "magnitude"], {"default": "x"}),
+                "normalize_output": ("BOOLEAN", {"default": True})
+            }
+        }
+
+    FUNCTION = "main"
+    RETURN_TYPES = ("SIGMAS",)
+    CATEGORY = "RES4LYF/sigmas"
+    
+    def main(self, sigmas, attractor, iterations, dt, component, normalize_output):
+        # Initialize 3D state from sigmas
+        n = len(sigmas)
+        
+        # Normalize sigmas to a reasonable range for the attractor
+        norm_sigmas = (sigmas - sigmas.min()) / (sigmas.max() - sigmas.min()) * 2.0 - 1.0
+        
+        # Create initial state
+        x = norm_sigmas
+        y = torch.roll(norm_sigmas, 1)  # Shifted version for variety
+        z = torch.roll(norm_sigmas, 2)  # Another shifted version
+        
+        # Parameters for the attractors
+        if attractor == "lorenz":
+            sigma, rho, beta = 10.0, 28.0, 8.0/3.0
+        elif attractor == "rossler":
+            a, b, c = 0.2, 0.2, 5.7
+        elif attractor == "aizawa":
+            a, b, c, d, e, f = 0.95, 0.7, 0.6, 3.5, 0.25, 0.1
+        elif attractor == "chen":
+            a, b, c = 5.0, -10.0, -0.38
+        elif attractor == "thomas":
+            b = 0.208186
+            
+        # Run the attractor dynamics
+        for _ in range(iterations):
+            if attractor == "lorenz":
+                # Lorenz attractor
+                dx = sigma * (y - x)
+                dy = x * (rho - z) - y
+                dz = x * y - beta * z
+                
+            elif attractor == "rossler":
+                # Rössler attractor
+                dx = -y - z
+                dy = x + a * y
+                dz = b + z * (x - c)
+                
+            elif attractor == "aizawa":
+                # Aizawa attractor
+                dx = (z - b) * x - d * y
+                dy = d * x + (z - b) * y
+                dz = c + a * z - z**3/3 - (x**2 + y**2) * (1 + e * z) + f * z * x**3
+                
+            elif attractor == "chen":
+                # Chen attractor
+                dx = a * (y - x)
+                dy = (c - a) * x - x * z + c * y
+                dz = x * y - b * z
+                
+            elif attractor == "thomas":
+                # Thomas attractor
+                dx = -b * x + torch.sin(y)
+                dy = -b * y + torch.sin(z)
+                dz = -b * z + torch.sin(x)
+                
+            # Update state
+            x = x + dt * dx
+            y = y + dt * dy
+            z = z + dt * dz
+            
+        # Select component
+        if component == "x":
+            result = x
+        elif component == "y":
+            result = y
+        elif component == "z":
+            result = z
+        elif component == "magnitude":
+            result = torch.sqrt(x**2 + y**2 + z**2)
+            
+        # Normalize output if requested
+        if normalize_output:
+            result = ((result - result.min()) / (result.max() - result.min())) * (sigmas.max() - sigmas.min()) + sigmas.min()
+            
+        return (result,)
+
+# ----- Catmull-Rom Spline -----
+class sigmas_catmull_rom:
+    def __init__(self):
+        pass
+    
+    @classmethod
+    def INPUT_TYPES(s):
+        return {
+            "required": {
+                "sigmas": ("SIGMAS", {"forceInput": True}),
+                "tension": ("FLOAT", {"default": 0.5, "min": 0.0, "max": 1.0, "step": 0.01}),
+                "points": ("INT", {"default": 100, "min": 5, "max": 1000, "step": 5}),
+                "boundary_condition": (["repeat", "clamp", "mirror"], {"default": "clamp"})
+            }
+        }
+
+    FUNCTION = "main"
+    RETURN_TYPES = ("SIGMAS",)
+    CATEGORY = "RES4LYF/sigmas"
+    
+    def main(self, sigmas, tension, points, boundary_condition):
+        n = len(sigmas)
+        
+        # Need at least 4 points for Catmull-Rom interpolation
+        if n < 4:
+            # If we have fewer, just use linear interpolation
+            t = torch.linspace(0, 1, points, device=sigmas.device)
+            result = torch.zeros(points, device=sigmas.device, dtype=sigmas.dtype)
+            
+            for i in range(points):
+                idx = min(int(i * (n - 1) / (points - 1)), n - 2)
+                alpha = (i * (n - 1) / (points - 1)) - idx
+                result[i] = (1 - alpha) * sigmas[idx] + alpha * sigmas[idx + 1]
+                
+            return (result,)
+        
+        # Handle boundary conditions for control points
+        if boundary_condition == "repeat":
+            # Repeat endpoints
+            p0 = sigmas[0]
+            p3 = sigmas[-1]
+        elif boundary_condition == "clamp":
+            # Extrapolate
+            p0 = 2 * sigmas[0] - sigmas[1]
+            p3 = 2 * sigmas[-1] - sigmas[-2]
+        elif boundary_condition == "mirror":
+            # Mirror
+            p0 = sigmas[1]
+            p3 = sigmas[-2]
+            
+        # Create extended control points
+        control_points = torch.cat([torch.tensor([p0], device=sigmas.device), sigmas, torch.tensor([p3], device=sigmas.device)])
+        
+        # Compute spline
+        result = torch.zeros(points, device=sigmas.device, dtype=sigmas.dtype)
+        
+        # Parameter to adjust curve tension (0 = Catmull-Rom, 1 = Linear)
+        alpha = 1.0 - tension
+        
+        for i in range(points):
+            # Determine which segment we're in
+            t = i / (points - 1) * (n - 1)
+            idx = min(int(t), n - 2)
+            
+            # Normalized parameter within the segment [0, 1]
+            t_local = t - idx
+            
+            # Get control points for this segment
+            p0 = control_points[idx]
+            p1 = control_points[idx + 1]
+            p2 = control_points[idx + 2]
+            p3 = control_points[idx + 3]
+            
+            # Catmull-Rom basis functions
+            t2 = t_local * t_local
+            t3 = t2 * t_local
+            
+            # Compute spline point
+            result[i] = (
+                (-alpha * t3 + 2 * alpha * t2 - alpha * t_local) * p0 +
+                ((2 - alpha) * t3 + (alpha - 3) * t2 + 1) * p1 +
+                ((alpha - 2) * t3 + (3 - 2 * alpha) * t2 + alpha * t_local) * p2 +
+                (alpha * t3 - alpha * t2) * p3
+            ) * 0.5
+            
+        return (result,)
+
+# ----- Lambert W-Function -----
+class sigmas_lambert_w:
+    def __init__(self):
+        pass
+    
+    @classmethod
+    def INPUT_TYPES(s):
+        return {
+            "required": {
+                "sigmas": ("SIGMAS", {"forceInput": True}),
+                "branch": (["principal", "secondary"], {"default": "principal"}),
+                "scale": ("FLOAT", {"default": 1.0, "min": 0.01, "max": 10.0, "step": 0.01}),
+                "normalize_output": ("BOOLEAN", {"default": True}),
+                "max_iterations": ("INT", {"default": 20, "min": 5, "max": 100, "step": 1})
+            }
+        }
+
+    FUNCTION = "main"
+    RETURN_TYPES = ("SIGMAS",)
+    CATEGORY = "RES4LYF/sigmas"
+    
+    def main(self, sigmas, branch, scale, normalize_output, max_iterations):
+        # Apply scaling
+        x = sigmas * scale
+        
+        # Lambert W function (numerically approximated)
+        result = torch.zeros_like(x)
+        
+        # Process each value separately (since Lambert W is non-vectorized)
+        for i in range(len(x)):
+            xi = x[i].item()
+            
+            # Initial guess varies by branch
+            if branch == "principal":
+                # Valid for x >= -1/e
+                if xi < -1/math.e:
+                    xi = -1/math.e  # Clamp to domain
+                
+                # Initial guess for W₀(x)
+                if xi < 0:
+                    w = 0.0
+                elif xi < 1:
+                    w = xi * (1 - xi * (1 - 0.5 * xi))
+                else:
+                    w = math.log(xi)
+                    
+            else:  # secondary branch
+                # Valid for -1/e <= x < 0
+                if xi < -1/math.e:
+                    xi = -1/math.e  # Clamp to lower bound
+                elif xi >= 0:
+                    xi = -0.01  # Clamp to upper bound
+                
+                # Initial guess for W₋₁(x)
+                w = math.log(-xi)
+                
+            # Halley's method for numerical approximation
+            for _ in range(max_iterations):
+                ew = math.exp(w)
+                wew = w * ew
+                
+                # If we've converged, break
+                if abs(wew - xi) < 1e-10:
+                    break
+                
+                # Halley's update
+                wpe = w + 1  # w plus 1
+                div = ew * wpe - (ew * w - xi) * wpe / (2 * wpe * ew)
+                w_next = w - (wew - xi) / div
+                
+                # Check for convergence
+                if abs(w_next - w) < 1e-10:
+                    w = w_next
+                    break
+                    
+                w = w_next
+                
+            result[i] = w
+            
+        # Normalize output if requested
+        if normalize_output:
+            result = ((result - result.min()) / (result.max() - result.min())) * (sigmas.max() - sigmas.min()) + sigmas.min()
+            
+        return (result,)
+
+# ----- Zeta & Eta Functions -----
+class sigmas_zeta_eta:
+    def __init__(self):
+        pass
+    
+    @classmethod
+    def INPUT_TYPES(s):
+        return {
+            "required": {
+                "sigmas": ("SIGMAS", {"forceInput": True}),
+                "function": (["riemann_zeta", "dirichlet_eta", "lerch_phi"], {"default": "riemann_zeta"}),
+                "offset": ("FLOAT", {"default": 0.0, "min": -10.0, "max": 10.0, "step": 0.1}),
+                "scale": ("FLOAT", {"default": 1.0, "min": 0.01, "max": 10.0, "step": 0.01}),
+                "normalize_output": ("BOOLEAN", {"default": True}),
+                "approx_terms": ("INT", {"default": 100, "min": 10, "max": 1000, "step": 10})
+            }
+        }
+
+    FUNCTION = "main"
+    RETURN_TYPES = ("SIGMAS",)
+    CATEGORY = "RES4LYF/sigmas"
+    
+    def main(self, sigmas, function, offset, scale, normalize_output, approx_terms):
+        # Apply offset and scaling
+        s = sigmas * scale + offset
+        
+        # Process based on function type
+        if function == "riemann_zeta":
+            # Riemann zeta function
+            # For Re(s) > 1, ζ(s) = sum(1/n^s, n=1 to infinity)
+            # For performance reasons, we'll use scipy's implementation for CPU
+            # and a truncated series approximation for GPU
+            
+            # Move to CPU for scipy
+            s_cpu = s.cpu().numpy()
+            
+            # Apply zeta function
+            result_np = np.zeros_like(s_cpu)
+            
+            for i, si in enumerate(s_cpu):
+                # Handle special values
+                if si == 1.0:
+                    # ζ(1) is the harmonic series, which diverges to infinity
+                    result_np[i] = float('inf')
+                elif si < 0 and si == int(si) and int(si) % 2 == 0:
+                    # ζ(-2n) = 0 for n > 0
+                    result_np[i] = 0.0
+                else:
+                    try:
+                        # Use scipy for computation
+                        result_np[i] = float(special.zeta(si))
+                    except (ValueError, OverflowError):
+                        # Fall back to approximation for problematic values
+                        if si > 1:
+                            # Truncated series for Re(s) > 1
+                            result_np[i] = sum(1.0 / np.power(n, si) for n in range(1, approx_terms))
+                        else:
+                            # Use functional equation for Re(s) < 0
+                            if si < 0:
+                                # ζ(s) = 2^s π^(s-1) sin(πs/2) Γ(1-s) ζ(1-s)
+                                # Gamma function blows up at negative integers, so use the fact that
+                                # ζ(-n) = -B_{n+1}/(n+1) for n > 0, where B is a Bernoulli number
+                                # However, as this gets complex, we'll use a simpler approximation
+                                result_np[i] = 0.0  # Default for problematic values
+            
+            # Convert back to tensor
+            result = torch.tensor(result_np, device=sigmas.device, dtype=sigmas.dtype)
+            
+        elif function == "dirichlet_eta":
+            # Dirichlet eta function (alternating zeta function)
+            # η(s) = sum((-1)^(n+1)/n^s, n=1 to infinity)
+            
+            # For GPU efficiency, compute directly using alternating series
+            result = torch.zeros_like(s)
+            
+            # Use a fixed number of terms for approximation
+            for i in range(1, approx_terms + 1):
+                term = torch.pow(i, -s) * (1 if i % 2 == 1 else -1)
+                result += term
+                
+        elif function == "lerch_phi":
+            # Lerch transcendent with fixed parameters
+            # Φ(z, s, a) = sum(z^n / (n+a)^s, n=0 to infinity)
+            # We'll use z=0.5, a=1 for simplicity
+            z, a = 0.5, 1.0
+            
+            result = torch.zeros_like(s)
+            for i in range(approx_terms):
+                term = torch.pow(z, i) / torch.pow(i + a, s)
+                result += term
+            
+        # Replace infinities and NaNs with large or small values
+        result = torch.where(torch.isfinite(result), result, torch.sign(result) * 1e10)
+        
+        # Normalize output if requested
+        if normalize_output:
+            result = ((result - result.min()) / (result.max() - result.min())) * (sigmas.max() - sigmas.min()) + sigmas.min()
+            
+        return (result,)
+
+# ----- Gamma & Beta Functions -----
+class sigmas_gamma_beta:
+    def __init__(self):
+        pass
+    
+    @classmethod
+    def INPUT_TYPES(s):
+        return {
+            "required": {
+                "sigmas": ("SIGMAS", {"forceInput": True}),
+                "function": (["gamma", "beta", "incomplete_gamma", "incomplete_beta", "log_gamma"], {"default": "gamma"}),
+                "offset": ("FLOAT", {"default": 0.0, "min": -10.0, "max": 10.0, "step": 0.1}),
+                "scale": ("FLOAT", {"default": 0.1, "min": 0.01, "max": 10.0, "step": 0.01}),
+                "parameter_a": ("FLOAT", {"default": 0.5, "min": 0.1, "max": 10.0, "step": 0.1}),
+                "parameter_b": ("FLOAT", {"default": 0.5, "min": 0.1, "max": 10.0, "step": 0.1}),
+                "normalize_output": ("BOOLEAN", {"default": True})
+            }
+        }
+
+    FUNCTION = "main"
+    RETURN_TYPES = ("SIGMAS",)
+    CATEGORY = "RES4LYF/sigmas"
+    
+    def main(self, sigmas, function, offset, scale, parameter_a, parameter_b, normalize_output):
+        # Apply offset and scaling
+        x = sigmas * scale + offset
+        
+        # Convert to numpy for special functions
+        x_np = x.cpu().numpy()
+        
+        # Apply function
+        if function == "gamma":
+            # Gamma function Γ(x)
+            # For performance and stability, use scipy
+            result_np = np.zeros_like(x_np)
+            
+            for i, xi in enumerate(x_np):
+                # Handle special cases
+                if xi <= 0 and xi == int(xi):
+                    # Gamma has poles at non-positive integers
+                    result_np[i] = float('inf')
+                else:
+                    try:
+                        result_np[i] = float(special.gamma(xi))
+                    except (ValueError, OverflowError):
+                        # Use approximation for large values
+                        result_np[i] = float('inf')
+                        
+        elif function == "log_gamma":
+            # Log Gamma function log(Γ(x))
+            # More numerically stable for large values
+            result_np = np.zeros_like(x_np)
+            
+            for i, xi in enumerate(x_np):
+                # Handle special cases
+                if xi <= 0 and xi == int(xi):
+                    # log(Γ(x)) is undefined for non-positive integers
+                    result_np[i] = float('inf')
+                else:
+                    try:
+                        result_np[i] = float(special.gammaln(xi))
+                    except (ValueError, OverflowError):
+                        # Use approximation for large values
+                        result_np[i] = float('inf')
+                    
+        elif function == "beta":
+            # Beta function B(a, x)
+            result_np = np.zeros_like(x_np)
+            
+            for i, xi in enumerate(x_np):
+                try:
+                    result_np[i] = float(special.beta(parameter_a, xi))
+                except (ValueError, OverflowError):
+                    # Handle cases where beta is undefined
+                    result_np[i] = float('inf')
+                    
+        elif function == "incomplete_gamma":
+            # Regularized incomplete gamma function P(a, x)
+            result_np = np.zeros_like(x_np)
+            
+            for i, xi in enumerate(x_np):
+                if xi < 0:
+                    # Undefined for negative x
+                    result_np[i] = 0.0
+                else:
+                    try:
+                        result_np[i] = float(special.gammainc(parameter_a, xi))
+                    except (ValueError, OverflowError):
+                        result_np[i] = 1.0  # Approach 1 for large x
+                    
+        elif function == "incomplete_beta":
+            # Regularized incomplete beta function I(x; a, b)
+            result_np = np.zeros_like(x_np)
+            
+            for i, xi in enumerate(x_np):
+                # Clamp to [0,1] for domain of incomplete beta
+                xi_clamped = min(max(xi, 0), 1)
+                
+                try:
+                    result_np[i] = float(special.betainc(parameter_a, parameter_b, xi_clamped))
+                except (ValueError, OverflowError):
+                    result_np[i] = 0.5  # Default for errors
+                    
+        # Convert back to tensor
+        result = torch.tensor(result_np, device=sigmas.device, dtype=sigmas.dtype)
+        
+        # Replace infinities and NaNs
+        result = torch.where(torch.isfinite(result), result, torch.sign(result) * 1e10)
+        
+        # Normalize output if requested
+        if normalize_output:
+            # Handle cases where result has infinities
+            if torch.isinf(result).any() or torch.isnan(result).any():
+                # Replace inf/nan with max/min finite values
+                max_val = torch.max(result[torch.isfinite(result)]) if torch.any(torch.isfinite(result)) else 1e10
+                min_val = torch.min(result[torch.isfinite(result)]) if torch.any(torch.isfinite(result)) else -1e10
+                
+                result = torch.where(torch.isinf(result) & (result > 0), max_val, result)
+                result = torch.where(torch.isinf(result) & (result < 0), min_val, result)
+                result = torch.where(torch.isnan(result), (max_val + min_val) / 2, result)
+            
+            # Now normalize
+            result = ((result - result.min()) / (result.max() - result.min())) * (sigmas.max() - sigmas.min()) + sigmas.min()
+            
+        return (result,)
+
+# ----- Sigma Lerp -----
+class sigmas_lerp:
+    def __init__(self):
+        pass
+    
+    @classmethod
+    def INPUT_TYPES(s):
+        return {
+            "required": {
+                "sigmas_a": ("SIGMAS", {"forceInput": True}),
+                "sigmas_b": ("SIGMAS", {"forceInput": True}),
+                "t": ("FLOAT", {"default": 0.5, "min": 0.0, "max": 1.0, "step": 0.01}),
+                "ensure_length": ("BOOLEAN", {"default": True})
+            }
+        }
+
+    FUNCTION = "main"
+    RETURN_TYPES = ("SIGMAS",)
+    CATEGORY = "RES4LYF/sigmas"
+    
+    def main(self, sigmas_a, sigmas_b, t, ensure_length):
+        if ensure_length and len(sigmas_a) != len(sigmas_b):
+            # Resize the smaller one to match the larger one
+            if len(sigmas_a) < len(sigmas_b):
+                sigmas_a = torch.nn.functional.interpolate(
+                    sigmas_a.unsqueeze(0).unsqueeze(0), 
+                    size=len(sigmas_b), 
+                    mode='linear'
+                ).squeeze(0).squeeze(0)
+            else:
+                sigmas_b = torch.nn.functional.interpolate(
+                    sigmas_b.unsqueeze(0).unsqueeze(0), 
+                    size=len(sigmas_a), 
+                    mode='linear'
+                ).squeeze(0).squeeze(0)
+        
+        return ((1 - t) * sigmas_a + t * sigmas_b,)
+
+# ----- Sigma InvLerp -----
+class sigmas_invlerp:
+    def __init__(self):
+        pass
+    
+    @classmethod
+    def INPUT_TYPES(s):
+        return {
+            "required": {
+                "sigmas": ("SIGMAS", {"forceInput": True}),
+                "min_value": ("FLOAT", {"default": 0.0, "min": -10000.0, "max": 10000.0, "step": 0.01}),
+                "max_value": ("FLOAT", {"default": 1.0, "min": -10000.0, "max": 10000.0, "step": 0.01})
+            }
+        }
+
+    FUNCTION = "main"
+    RETURN_TYPES = ("SIGMAS",)
+    CATEGORY = "RES4LYF/sigmas"
+    
+    def main(self, sigmas, min_value, max_value):
+        # Clamp values to avoid division by zero
+        if min_value == max_value:
+            max_value = min_value + 1e-5
+            
+        normalized = (sigmas - min_value) / (max_value - min_value)
+        # Clamp the values to be in [0, 1]
+        normalized = torch.clamp(normalized, 0.0, 1.0)
+        return (normalized,)
+
+# ----- Sigma ArcSine -----
+class sigmas_arcsine:
+    def __init__(self):
+        pass
+    
+    @classmethod
+    def INPUT_TYPES(s):
+        return {
+            "required": {
+                "sigmas": ("SIGMAS", {"forceInput": True}),
+                "normalize_input": ("BOOLEAN", {"default": True}),
+                "scale_output": ("BOOLEAN", {"default": True}),
+                "out_min": ("FLOAT", {"default": 0.0, "min": -10000.0, "max": 10000.0, "step": 0.01}),
+                "out_max": ("FLOAT", {"default": 1.0, "min": -10000.0, "max": 10000.0, "step": 0.01})
+            }
+        }
+
+    FUNCTION = "main"
+    RETURN_TYPES = ("SIGMAS",)
+    CATEGORY = "RES4LYF/sigmas"
+    
+    def main(self, sigmas, normalize_input, scale_output, out_min, out_max):
+        if normalize_input:
+            sigmas = torch.clamp(sigmas, -1.0, 1.0)
+        else:
+            # Ensure values are in valid arcsin domain
+            sigmas = torch.clamp(sigmas, -1.0, 1.0)
+            
+        result = torch.asin(sigmas)
+        
+        if scale_output:
+            # ArcSine output is in range [-π/2, π/2]
+            # Normalize to [0, 1] and then scale to [out_min, out_max]
+            result = (result + math.pi/2) / math.pi
+            result = result * (out_max - out_min) + out_min
+            
+        return (result,)
+
+# ----- Sigma LinearSine -----
+class sigmas_linearsine:
+    def __init__(self):
+        pass
+    
+    @classmethod
+    def INPUT_TYPES(s):
+        return {
+            "required": {
+                "sigmas": ("SIGMAS", {"forceInput": True}),
+                "amplitude": ("FLOAT", {"default": 0.5, "min": 0.0, "max": 10.0, "step": 0.01}),
+                "frequency": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 10.0, "step": 0.01}),
+                "phase": ("FLOAT", {"default": 0.0, "min": -6.28, "max": 6.28, "step": 0.01}), # -2π to 2π
+                "linear_weight": ("FLOAT", {"default": 0.5, "min": 0.0, "max": 1.0, "step": 0.01})
+            }
+        }
+
+    FUNCTION = "main"
+    RETURN_TYPES = ("SIGMAS",)
+    CATEGORY = "RES4LYF/sigmas"
+    
+    def main(self, sigmas, amplitude, frequency, phase, linear_weight):
+        # Create indices for the sine function
+        indices = torch.linspace(0, 1, len(sigmas), device=sigmas.device)
+        
+        # Calculate sine component
+        sine_component = amplitude * torch.sin(2 * math.pi * frequency * indices + phase)
+        
+        # Blend linear and sine components
+        step_indices = torch.linspace(0, 1, len(sigmas), device=sigmas.device)
+        result = linear_weight * sigmas + (1 - linear_weight) * (step_indices.unsqueeze(0) * sine_component)
+        
+        return (result.squeeze(0),)
+
+# ----- Sigmas Append -----
+class sigmas_append:
+    def __init__(self):
+        pass
+    
+    @classmethod
+    def INPUT_TYPES(s):
+        return {
+            "required": {
+                "sigmas": ("SIGMAS", {"forceInput": True}),
+                "value": ("FLOAT", {"default": 0.0, "min": -10000.0, "max": 10000.0, "step": 0.01}),
+                "count": ("INT", {"default": 1, "min": 1, "max": 100, "step": 1})
+            },
+            "optional": {
+                "additional_sigmas": ("SIGMAS", {"forceInput": False})
+            }
+        }
+
+    FUNCTION = "main"
+    RETURN_TYPES = ("SIGMAS",)
+    CATEGORY = "RES4LYF/sigmas"
+    
+    def main(self, sigmas, value, count, additional_sigmas=None):
+        # Create tensor of the value to append
+        append_values = torch.full((count,), value, device=sigmas.device, dtype=sigmas.dtype)
+        
+        # Append the values
+        result = torch.cat([sigmas, append_values], dim=0)
+        
+        # If additional sigmas provided, append those as well
+        if additional_sigmas is not None:
+            result = torch.cat([result, additional_sigmas], dim=0)
+            
+        return (result,)
+
+# ----- Sigma Arccosine -----
+class sigmas_arccosine:
+    def __init__(self):
+        pass
+    
+    @classmethod
+    def INPUT_TYPES(s):
+        return {
+            "required": {
+                "sigmas": ("SIGMAS", {"forceInput": True}),
+                "normalize_input": ("BOOLEAN", {"default": True}),
+                "scale_output": ("BOOLEAN", {"default": True}),
+                "out_min": ("FLOAT", {"default": 0.0, "min": -10000.0, "max": 10000.0, "step": 0.01}),
+                "out_max": ("FLOAT", {"default": 1.0, "min": -10000.0, "max": 10000.0, "step": 0.01})
+            }
+        }
+
+    FUNCTION = "main"
+    RETURN_TYPES = ("SIGMAS",)
+    CATEGORY = "RES4LYF/sigmas"
+    
+    def main(self, sigmas, normalize_input, scale_output, out_min, out_max):
+        if normalize_input:
+            sigmas = torch.clamp(sigmas, -1.0, 1.0)
+        else:
+            # Ensure values are in valid arccos domain
+            sigmas = torch.clamp(sigmas, -1.0, 1.0)
+            
+        result = torch.acos(sigmas)
+        
+        if scale_output:
+            # ArcCosine output is in range [0, π]
+            # Normalize to [0, 1] and then scale to [out_min, out_max]
+            result = result / math.pi
+            result = result * (out_max - out_min) + out_min
+            
+        return (result,)
+
+# ----- Sigma Arctangent -----
+class sigmas_arctangent:
+    def __init__(self):
+        pass
+    
+    @classmethod
+    def INPUT_TYPES(s):
+        return {
+            "required": {
+                "sigmas": ("SIGMAS", {"forceInput": True}),
+                "scale_output": ("BOOLEAN", {"default": True}),
+                "out_min": ("FLOAT", {"default": 0.0, "min": -10000.0, "max": 10000.0, "step": 0.01}),
+                "out_max": ("FLOAT", {"default": 1.0, "min": -10000.0, "max": 10000.0, "step": 0.01})
+            }
+        }
+
+    FUNCTION = "main"
+    RETURN_TYPES = ("SIGMAS",)
+    CATEGORY = "RES4LYF/sigmas"
+    
+    def main(self, sigmas, scale_output, out_min, out_max):
+        result = torch.atan(sigmas)
+        
+        if scale_output:
+            # ArcTangent output is in range [-π/2, π/2]
+            # Normalize to [0, 1] and then scale to [out_min, out_max]
+            result = (result + math.pi/2) / math.pi
+            result = result * (out_max - out_min) + out_min
+            
+        return (result,)
+
+# ----- Sigma CrossProduct -----
+class sigmas_crossproduct:
+    def __init__(self):
+        pass
+    
+    @classmethod
+    def INPUT_TYPES(s):
+        return {
+            "required": {
+                "sigmas_a": ("SIGMAS", {"forceInput": True}),
+                "sigmas_b": ("SIGMAS", {"forceInput": True}),
+            }
+        }
+
+    FUNCTION = "main"
+    RETURN_TYPES = ("SIGMAS",)
+    CATEGORY = "RES4LYF/sigmas"
+    
+    def main(self, sigmas_a, sigmas_b):
+        # Ensure we have at least 3 elements in each tensor
+        # If not, pad with zeros or truncate
+        if len(sigmas_a) < 3:
+            sigmas_a = torch.nn.functional.pad(sigmas_a, (0, 3 - len(sigmas_a)))
+        if len(sigmas_b) < 3:
+            sigmas_b = torch.nn.functional.pad(sigmas_b, (0, 3 - len(sigmas_b)))
+        
+        # Take the first 3 elements of each tensor
+        a = sigmas_a[:3]
+        b = sigmas_b[:3]
+        
+        # Compute cross product
+        c = torch.zeros(3, device=sigmas_a.device, dtype=sigmas_a.dtype)
+        c[0] = a[1] * b[2] - a[2] * b[1]
+        c[1] = a[2] * b[0] - a[0] * b[2]
+        c[2] = a[0] * b[1] - a[1] * b[0]
+        
+        return (c,)
+
+# ----- Sigma DotProduct -----
+class sigmas_dotproduct:
+    def __init__(self):
+        pass
+    
+    @classmethod
+    def INPUT_TYPES(s):
+        return {
+            "required": {
+                "sigmas_a": ("SIGMAS", {"forceInput": True}),
+                "sigmas_b": ("SIGMAS", {"forceInput": True}),
+                "normalize": ("BOOLEAN", {"default": False})
+            }
+        }
+
+    FUNCTION = "main"
+    RETURN_TYPES = ("SIGMAS",)
+    CATEGORY = "RES4LYF/sigmas"
+    
+    def main(self, sigmas_a, sigmas_b, normalize):
+        # Ensure equal lengths by taking the minimum
+        min_length = min(len(sigmas_a), len(sigmas_b))
+        a = sigmas_a[:min_length]
+        b = sigmas_b[:min_length]
+        
+        if normalize:
+            a_norm = torch.norm(a)
+            b_norm = torch.norm(b)
+            # Avoid division by zero
+            if a_norm > 0 and b_norm > 0:
+                a = a / a_norm
+                b = b / b_norm
+        
+        # Compute dot product
+        result = torch.sum(a * b)
+        
+        # Return as a single-element tensor
+        return (torch.tensor([result], device=sigmas_a.device, dtype=sigmas_a.dtype),)
+
+# ----- Sigma Fmod -----
+class sigmas_fmod:
+    def __init__(self):
+        pass
+    
+    @classmethod
+    def INPUT_TYPES(s):
+        return {
+            "required": {
+                "sigmas": ("SIGMAS", {"forceInput": True}),
+                "divisor": ("FLOAT", {"default": 1.0, "min": 0.0001, "max": 10000.0, "step": 0.01})
+            }
+        }
+
+    FUNCTION = "main"
+    RETURN_TYPES = ("SIGMAS",)
+    CATEGORY = "RES4LYF/sigmas"
+    
+    def main(self, sigmas, divisor):
+        # Ensure divisor is not zero
+        if divisor == 0:
+            divisor = 0.0001
+            
+        result = torch.fmod(sigmas, divisor)
+        return (result,)
+
+# ----- Sigma Frac -----
+class sigmas_frac:
+    def __init__(self):
+        pass
+    
+    @classmethod
+    def INPUT_TYPES(s):
+        return {
+            "required": {
+                "sigmas": ("SIGMAS", {"forceInput": True})
+            }
+        }
+
+    FUNCTION = "main"
+    RETURN_TYPES = ("SIGMAS",)
+    CATEGORY = "RES4LYF/sigmas"
+    
+    def main(self, sigmas):
+        # Get the fractional part (x - floor(x))
+        result = sigmas - torch.floor(sigmas)
+        return (result,)
+
+# ----- Sigma If -----
+class sigmas_if:
+    def __init__(self):
+        pass
+    
+    @classmethod
+    def INPUT_TYPES(s):
+        return {
+            "required": {
+                "condition_sigmas": ("SIGMAS", {"forceInput": True}),
+                "true_sigmas": ("SIGMAS", {"forceInput": True}),
+                "false_sigmas": ("SIGMAS", {"forceInput": True}),
+                "threshold": ("FLOAT", {"default": 0.5, "min": -10000.0, "max": 10000.0, "step": 0.01}),
+                "comp_type": (["greater", "less", "equal", "not_equal"], {"default": "greater"})
+            }
+        }
+
+    FUNCTION = "main"
+    RETURN_TYPES = ("SIGMAS",)
+    CATEGORY = "RES4LYF/sigmas"
+    
+    def main(self, condition_sigmas, true_sigmas, false_sigmas, threshold, comp_type):
+        # Make sure we have values to compare
+        max_length = max(len(condition_sigmas), len(true_sigmas), len(false_sigmas))
+        
+        # Extend all tensors to the maximum length using interpolation
+        if len(condition_sigmas) != max_length:
+            condition_sigmas = torch.nn.functional.interpolate(
+                condition_sigmas.unsqueeze(0).unsqueeze(0), 
+                size=max_length, 
+                mode='linear'
+            ).squeeze(0).squeeze(0)
+            
+        if len(true_sigmas) != max_length:
+            true_sigmas = torch.nn.functional.interpolate(
+                true_sigmas.unsqueeze(0).unsqueeze(0), 
+                size=max_length, 
+                mode='linear'
+            ).squeeze(0).squeeze(0)
+            
+        if len(false_sigmas) != max_length:
+            false_sigmas = torch.nn.functional.interpolate(
+                false_sigmas.unsqueeze(0).unsqueeze(0), 
+                size=max_length, 
+                mode='linear'
+            ).squeeze(0).squeeze(0)
+            
+        # Create mask based on comparison type
+        if comp_type == "greater":
+            mask = condition_sigmas > threshold
+        elif comp_type == "less":
+            mask = condition_sigmas < threshold
+        elif comp_type == "equal":
+            mask = torch.isclose(condition_sigmas, torch.tensor(threshold, device=condition_sigmas.device))
+        elif comp_type == "not_equal":
+            mask = ~torch.isclose(condition_sigmas, torch.tensor(threshold, device=condition_sigmas.device))
+        
+        # Apply the mask to select values
+        result = torch.where(mask, true_sigmas, false_sigmas)
+        
+        return (result,)
+
+# ----- Sigma Logarithm2 -----
+class sigmas_logarithm2:
+    def __init__(self):
+        pass
+    
+    @classmethod
+    def INPUT_TYPES(s):
+        return {
+            "required": {
+                "sigmas": ("SIGMAS", {"forceInput": True}),
+                "handle_negative": ("BOOLEAN", {"default": True}),
+                "epsilon": ("FLOAT", {"default": 1e-10, "min": 1e-15, "max": 0.1, "step": 1e-10})
+            }
+        }
+
+    FUNCTION = "main"
+    RETURN_TYPES = ("SIGMAS",)
+    CATEGORY = "RES4LYF/sigmas"
+    
+    def main(self, sigmas, handle_negative, epsilon):
+        if handle_negative:
+            # For negative values, compute -log2(-x) and negate the result
+            mask_negative = sigmas < 0
+            mask_positive = ~mask_negative
+            
+            # Prepare positive and negative parts
+            pos_part = torch.log2(torch.clamp(sigmas[mask_positive], min=epsilon))
+            neg_part = -torch.log2(torch.clamp(-sigmas[mask_negative], min=epsilon))
+            
+            # Create result tensor
+            result = torch.zeros_like(sigmas)
+            result[mask_positive] = pos_part
+            result[mask_negative] = neg_part
+        else:
+            # Simply compute log2, clamping values to avoid log(0)
+            result = torch.log2(torch.clamp(sigmas, min=epsilon))
+            
+        return (result,)
+
+# ----- Sigma SmoothStep -----
+class sigmas_smoothstep:
+    def __init__(self):
+        pass
+    
+    @classmethod
+    def INPUT_TYPES(s):
+        return {
+            "required": {
+                "sigmas": ("SIGMAS", {"forceInput": True}),
+                "edge0": ("FLOAT", {"default": 0.0, "min": -10000.0, "max": 10000.0, "step": 0.01}),
+                "edge1": ("FLOAT", {"default": 1.0, "min": -10000.0, "max": 10000.0, "step": 0.01}),
+                "mode": (["smoothstep", "smootherstep"], {"default": "smoothstep"})
+            }
+        }
+
+    FUNCTION = "main"
+    RETURN_TYPES = ("SIGMAS",)
+    CATEGORY = "RES4LYF/sigmas"
+    
+    def main(self, sigmas, edge0, edge1, mode):
+        # Normalize the values to the range [0, 1]
+        t = torch.clamp((sigmas - edge0) / (edge1 - edge0), 0.0, 1.0)
+        
+        if mode == "smoothstep":
+            # Smooth step: 3t^2 - 2t^3
+            result = t * t * (3.0 - 2.0 * t)
+        else:  # smootherstep
+            # Smoother step: 6t^5 - 15t^4 + 10t^3
+            result = t * t * t * (t * (t * 6.0 - 15.0) + 10.0)
+            
+        # Scale back to the original range
+        result = result * (edge1 - edge0) + edge0
+        
+        return (result,)
+
+# ----- Sigma SquareRoot -----
+class sigmas_squareroot:
+    def __init__(self):
+        pass
+    
+    @classmethod
+    def INPUT_TYPES(s):
+        return {
+            "required": {
+                "sigmas": ("SIGMAS", {"forceInput": True}),
+                "handle_negative": ("BOOLEAN", {"default": False})
+            }
+        }
+
+    FUNCTION = "main"
+    RETURN_TYPES = ("SIGMAS",)
+    CATEGORY = "RES4LYF/sigmas"
+    
+    def main(self, sigmas, handle_negative):
+        if handle_negative:
+            # For negative values, compute sqrt(-x) and negate the result
+            mask_negative = sigmas < 0
+            mask_positive = ~mask_negative
+            
+            # Prepare positive and negative parts
+            pos_part = torch.sqrt(sigmas[mask_positive])
+            neg_part = -torch.sqrt(-sigmas[mask_negative])
+            
+            # Create result tensor
+            result = torch.zeros_like(sigmas)
+            result[mask_positive] = pos_part
+            result[mask_negative] = neg_part
+        else:
+            # Only compute square root for non-negative values
+            # Negative values will be set to 0
+            result = torch.sqrt(torch.clamp(sigmas, min=0))
+            
+        return (result,)
+
+# ----- Sigma TimeStep -----
+class sigmas_timestep:
+    def __init__(self):
+        pass
+    
+    @classmethod
+    def INPUT_TYPES(s):
+        return {
+            "required": {
+                "sigmas": ("SIGMAS", {"forceInput": True}),
+                "dt": ("FLOAT", {"default": 0.1, "min": 0.0001, "max": 10.0, "step": 0.01}),
+                "scaling": (["linear", "quadratic", "sqrt", "log"], {"default": "linear"}),
+                "decay": ("FLOAT", {"default": 0.0, "min": 0.0, "max": 1.0, "step": 0.01})
+            }
+        }
+
+    FUNCTION = "main"
+    RETURN_TYPES = ("SIGMAS",)
+    CATEGORY = "RES4LYF/sigmas"
+    
+    def main(self, sigmas, dt, scaling, decay):
+        # Create time steps
+        timesteps = torch.arange(len(sigmas), device=sigmas.device, dtype=sigmas.dtype) * dt
+        
+        # Apply scaling
+        if scaling == "quadratic":
+            timesteps = timesteps ** 2
+        elif scaling == "sqrt":
+            timesteps = torch.sqrt(timesteps)
+        elif scaling == "log":
+            # Add small epsilon to avoid log(0)
+            timesteps = torch.log(timesteps + 1e-10)
+            
+        # Apply decay
+        if decay > 0:
+            decay_factor = torch.exp(-decay * timesteps)
+            timesteps = timesteps * decay_factor
+            
+        # Normalize to match the range of sigmas
+        timesteps = ((timesteps - timesteps.min()) / 
+                     (timesteps.max() - timesteps.min())) * (sigmas.max() - sigmas.min()) + sigmas.min()
+            
+        return (timesteps,)
