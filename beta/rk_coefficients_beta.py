@@ -31,6 +31,18 @@ from ..res4lyf import get_display_sampler_category
 RK_SAMPLER_NAMES_BETA_FOLDERS = ["none",
                     "multistep/res_2m",
                     "multistep/res_3m",
+                    
+                    "multistep/dpmpp_2m",
+                    "multistep/dpmpp_3m",
+
+                    "multistep/abnorsett_2m",
+                    "multistep/abnorsett_3m",
+                    "multistep/abnorsett_4m",
+
+                    "multistep/deis_2m",
+                    "multistep/deis_3m", 
+                    "multistep/deis_4m",
+                    
                     "exponential/res_2s_rkmk2e", 
                     "exponential/res_2s", 
                     "exponential/res_3s",
@@ -66,28 +78,6 @@ RK_SAMPLER_NAMES_BETA_FOLDERS = ["none",
                     "exponential/etdrk4_4s",
                     "exponential/etdrk4_4s_alt",
                     
-                    "hybrid/pec423_2h2s",
-                    "hybrid/pec433_2h3s",
-                    
-                    "hybrid/abnorsett2_1h2s",
-                    "hybrid/abnorsett3_2h2s",
-                    "hybrid/abnorsett4_3h2s",
-
-                    "multistep/dpmpp_2m",
-                    "multistep/dpmpp_3m",
-
-                    "multistep/abnorsett_2m",
-                    "multistep/abnorsett_3m",
-                    "multistep/abnorsett_4m",
-
-                    "multistep/deis_2m",
-                    "multistep/deis_3m", 
-                    "multistep/deis_4m",
-                    
-                    "linear/ralston_2s",
-                    "linear/ralston_3s",
-                    "linear/ralston_4s", 
-                    
                     "exponential/dpmpp_2s",
                     "exponential/dpmpp_sde_2s",
                     "exponential/dpmpp_3s",
@@ -98,11 +88,27 @@ RK_SAMPLER_NAMES_BETA_FOLDERS = ["none",
                     "exponential/lawson4_4s",
                     "exponential/lawson41-gen_4s",
                     "exponential/lawson41-gen-mod_4s",
+
+                    "exponential/ddim",
+                    
+                    "hybrid/pec423_2h2s",
+                    "hybrid/pec433_2h3s",
+                    
+                    "hybrid/abnorsett2_1h2s",
+                    "hybrid/abnorsett3_2h2s",
+                    "hybrid/abnorsett4_3h2s",
+                    
                     
                     "hybrid/lawson42-gen-mod_1h4s",
                     "hybrid/lawson43-gen-mod_2h4s",
                     "hybrid/lawson44-gen-mod_3h4s",
                     "hybrid/lawson45-gen-mod_4h4s",
+                    
+                    "linear/ralston_2s",
+                    "linear/ralston_3s",
+                    "linear/ralston_4s", 
+                    
+
                     
                     "linear/midpoint_2s",
                     "linear/heun_2s", 
@@ -127,10 +133,19 @@ RK_SAMPLER_NAMES_BETA_FOLDERS = ["none",
                     "linear/tsi_7s",
                     #"verner_robust_16s",
 
-                    "exponential/ddim",
                     "linear/euler",
                     
                     "diag_implicit/irk_exp_diag_2s",
+                    
+                    "diag_implicit/kraaijevanger_spijker_2s",
+                    "diag_implicit/qin_zhang_2s",
+                    
+                    "diag_implicit/pareschi_russo_2s",
+                    "diag_implicit/pareschi_russo_alt_2s",
+                    
+                    "diag_implicit/crouzeix_2s",
+                    "diag_implicit/crouzeix_3s",
+                    "diag_implicit/crouzeix_3s_alt",
                     
                     "fully_implicit/gauss-legendre_2s",
                     "fully_implicit/gauss-legendre_3s", 
@@ -169,16 +184,6 @@ RK_SAMPLER_NAMES_BETA_FOLDERS = ["none",
                     "fully_implicit/lobatto_iiid_2s",
                     "fully_implicit/lobatto_iiid_3s",
                     
-                    "diag_implicit/kraaijevanger_spijker_2s",
-                    "diag_implicit/qin_zhang_2s",
-                    
-                    "diag_implicit/pareschi_russo_2s",
-                    "diag_implicit/pareschi_russo_alt_2s",
-                    
-                    "diag_implicit/crouzeix_2s",
-                    "diag_implicit/crouzeix_3s",
-                    "diag_implicit/crouzeix_3s_alt",
-
                     ]
 
 
@@ -1294,6 +1299,7 @@ def get_rk_methods_beta(rk_type       : str,
     EO                            = ExtraOptions(extra_options)
     use_analytic_solution         = not EO("disable_analytic_solution")
     multistep_initial_sampler     = EO("multistep_initial_sampler", "")
+    multistep_fallback_sampler    = EO("multistep_fallback_sampler", "")
     multistep_extra_initial_steps = EO("multistep_extra_initial_steps", 1)
     
     #if RK_Method_Beta.is_exponential(rk_type): 
@@ -1358,7 +1364,9 @@ def get_rk_methods_beta(rk_type       : str,
                 rk_type = "res_2s"
                 rk_type = multistep_initial_sampler if multistep_initial_sampler else rk_type
         else:
-            rk_type = "res_2s"
+            #rk_type = "res_2s"
+            rk_type = "euler"
+            rk_type = multistep_fallback_sampler if multistep_fallback_sampler else rk_type
             
     if rk_type[-2:] == "3m": #multistep method
         rk_type = rk_type[:-2] + "3s"
@@ -1375,7 +1383,9 @@ def get_rk_methods_beta(rk_type       : str,
                 rk_type = "res_3s"
                 rk_type = multistep_initial_sampler if multistep_initial_sampler else rk_type
         else:
-            rk_type = "res_3s"
+            #rk_type = "res_3s"
+            rk_type = "euler"
+            rk_type = multistep_fallback_sampler if multistep_fallback_sampler else rk_type
             
     if rk_type[-2:] == "4m": #multistep method
         rk_type = rk_type[:-2] + "4s"
@@ -1396,7 +1406,9 @@ def get_rk_methods_beta(rk_type       : str,
                 rk_type = "res_4s_strehmel_weiner"
                 rk_type = multistep_initial_sampler if multistep_initial_sampler else rk_type
         else:
-            rk_type = "res_4s_strehmel_weiner"
+            #rk_type = "res_4s_strehmel_weiner"
+            rk_type = "euler"
+            rk_type = multistep_fallback_sampler if multistep_fallback_sampler else rk_type
                         
     if rk_type[-3] == "h" and rk_type[-1] == "s": #hybrid method 
         if step < int(rk_type[-4]) + multistep_extra_initial_steps:

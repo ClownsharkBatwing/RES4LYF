@@ -9,59 +9,59 @@ def add_beta(NODE_CLASS_MAPPINGS, NODE_DISPLAY_NAME_MAPPINGS, extra_samplers):
     NODE_CLASS_MAPPINGS.update({
         #"SharkSampler"                    : samplers.SharkSampler,
         #"SharkSamplerAdvanced_Beta"       : samplers.SharkSampler, #SharkSamplerAdvanced_Beta,
+        "SharkOptions_Beta"               : samplers_extensions.SharkOptions_Beta,
+        "ClownOptions_SDE_Beta"           : samplers_extensions.ClownOptions_SDE_Beta,
+        "ClownOptions_DetailBoost_Beta"   : samplers_extensions.ClownOptions_DetailBoost_Beta,
+        "ClownGuide_Style_Beta"           : samplers_extensions.ClownGuide_Style_Beta,
+        "ClownGuide_Beta"                 : samplers_extensions.ClownGuide_Beta,
+        "ClownGuides_Beta"                : samplers_extensions.ClownGuides_Beta,
+        "ClownGuidesAB_Beta"              : samplers_extensions.ClownGuidesAB_Beta,
+        
+        "SharkOptions_GuiderInput"        : samplers_extensions.SharkOptions_GuiderInput,
+        "ClownOptions_ImplicitSteps_Beta" : samplers_extensions.ClownOptions_ImplicitSteps_Beta,
+        "ClownOptions_Cycles_Beta"        : samplers_extensions.ClownOptions_Cycles_Beta,
+
+        "SharkOptions_GuideCond_Beta"     : samplers_extensions.SharkOptions_GuideCond_Beta,
+        "SharkOptions_GuideConds_Beta"    : samplers_extensions.SharkOptions_GuideConds_Beta,
+        
+        "ClownOptions_Tile_Beta"          : samplers_extensions.ClownOptions_Tile_Beta,
+        "ClownOptions_Tile_Advanced_Beta" : samplers_extensions.ClownOptions_Tile_Advanced_Beta,
+
+
+        "ClownGuide_Mean_Beta"            : samplers_extensions.ClownGuide_Mean_Beta,
+        "ClownGuide_AdaIN_MMDiT_Beta"     : samplers_extensions.ClownGuide_AdaIN_MMDiT_Beta,
+        "ClownGuide_AttnInj_MMDiT_Beta"   : samplers_extensions.ClownGuide_AttnInj_MMDiT_Beta,
+
+        "ClownOptions_SDE_Mask_Beta"      : samplers_extensions.ClownOptions_SDE_Mask_Beta,
+        
+        "ClownOptions_StepSize_Beta"      : samplers_extensions.ClownOptions_StepSize_Beta,
+        "ClownOptions_SigmaScaling_Beta"  : samplers_extensions.ClownOptions_SigmaScaling_Beta,
+
+        "ClownOptions_Momentum_Beta"      : samplers_extensions.ClownOptions_Momentum_Beta,
+        "ClownOptions_SwapSampler_Beta"   : samplers_extensions.ClownOptions_SwapSampler_Beta,
+        "ClownOptions_ExtraOptions_Beta"  : samplers_extensions.ClownOptions_ExtraOptions_Beta,
+        "ClownOptions_Automation_Beta"    : samplers_extensions.ClownOptions_Automation_Beta,
+
+        "SharkOptions_UltraCascade_Latent_Beta"  : samplers_extensions.SharkOptions_UltraCascade_Latent_Beta,
+        "SharkOptions_StartStep_Beta"     : samplers_extensions.SharkOptions_StartStep_Beta,
+        
+        "ClownOptions_Combine"            : samplers_extensions.ClownOptions_Combine,
+        "ClownOptions_Frameweights"       : samplers_extensions.ClownOptions_Frameweights,
+        
+
+        "ClownSamplerSelector_Beta"       : samplers_extensions.ClownSamplerSelector_Beta,
 
         "SharkSampler_Beta"               : samplers.SharkSampler_Beta,
         
         "SharkChainsampler_Beta"          : samplers.SharkChainsampler_Beta,
 
-        "BongSampler"                     : samplers.BongSampler,
-
         "ClownsharKSampler_Beta"          : samplers.ClownsharKSampler_Beta,
         "ClownsharkChainsampler_Beta"     : samplers.ClownsharkChainsampler_Beta,
         
-        
         "ClownSampler_Beta"               : samplers.ClownSampler_Beta,
         "ClownSamplerAdvanced_Beta"       : samplers.ClownSamplerAdvanced_Beta,
-
-        "ClownGuide_Mean_Beta"            : samplers_extensions.ClownGuide_Mean_Beta,
-        "ClownGuide_AdaIN_MMDiT_Beta"     : samplers_extensions.ClownGuide_AdaIN_MMDiT_Beta,
-        "ClownGuide_AttnInj_MMDiT_Beta"   : samplers_extensions.ClownGuide_AttnInj_MMDiT_Beta,
-        "ClownGuide_Style_Beta"           : samplers_extensions.ClownGuide_Style_Beta,
-
-        "ClownGuide_Beta"                 : samplers_extensions.ClownGuide_Beta,
-        "ClownGuides_Beta"                : samplers_extensions.ClownGuides_Beta,
-        "ClownGuidesAB_Beta"              : samplers_extensions.ClownGuidesAB_Beta,
-                
-        "ClownSamplerSelector_Beta"       : samplers_extensions.ClownSamplerSelector_Beta,
-
-        "ClownOptions_SDE_Mask_Beta"      : samplers_extensions.ClownOptions_SDE_Mask_Beta,
-        "ClownOptions_SDE_Beta"           : samplers_extensions.ClownOptions_SDE_Beta,
         
-        "ClownOptions_StepSize_Beta"      : samplers_extensions.ClownOptions_StepSize_Beta,
-        "ClownOptions_DetailBoost_Beta"   : samplers_extensions.ClownOptions_DetailBoost_Beta,
-        "ClownOptions_SigmaScaling_Beta"  : samplers_extensions.ClownOptions_SigmaScaling_Beta,
-
-        "ClownOptions_Momentum_Beta"      : samplers_extensions.ClownOptions_Momentum_Beta,
-        "ClownOptions_ImplicitSteps_Beta" : samplers_extensions.ClownOptions_ImplicitSteps_Beta,
-        "ClownOptions_Cycles_Beta"        : samplers_extensions.ClownOptions_Cycles_Beta,
-        "ClownOptions_SwapSampler_Beta"   : samplers_extensions.ClownOptions_SwapSampler_Beta,
-        
-        "ClownOptions_ExtraOptions_Beta"  : samplers_extensions.ClownOptions_ExtraOptions_Beta,
-        "ClownOptions_Automation_Beta"    : samplers_extensions.ClownOptions_Automation_Beta,
-        "SharkOptions_GuideCond_Beta"     : samplers_extensions.SharkOptions_GuideCond_Beta,
-        "SharkOptions_GuideConds_Beta"    : samplers_extensions.SharkOptions_GuideConds_Beta,
-
-        "SharkOptions_Beta"               : samplers_extensions.SharkOptions_Beta,
-        "SharkOptions_UltraCascade_Latent_Beta"  : samplers_extensions.SharkOptions_UltraCascade_Latent_Beta,
-        
-        "SharkOptions_StartStep_Beta"     : samplers_extensions.SharkOptions_StartStep_Beta,
-        
-        "ClownOptions_Combine"            : samplers_extensions.ClownOptions_Combine,
-        "ClownOptions_Frameweights"       : samplers_extensions.ClownOptions_Frameweights,
-        "SharkOptions_GuiderInput"        : samplers_extensions.SharkOptions_GuiderInput,
-        
-        "ClownOptions_Tile_Beta"         : samplers_extensions.ClownOptions_Tile_Beta,
-        "ClownOptions_Tile_Advanced_Beta": samplers_extensions.ClownOptions_Tile_Advanced_Beta,
+        "BongSampler"                     : samplers.BongSampler,
 
     })
 
@@ -123,8 +123,8 @@ def add_beta(NODE_CLASS_MAPPINGS, NODE_DISPLAY_NAME_MAPPINGS, extra_samplers):
             "ClownOptions_Combine"                  : "ClownOptions Combine",
             "ClownOptions_Frameweights"             : "ClownOptions Frameweights",
             "SharkOptions_GuiderInput"              : "SharkOptions Guider Input",
-            "ClownOptions_Tile_Beta"               : "ClownOptions Tile",
-            "ClownOptions_Tile_Advanced_Beta"      : "ClownOptions Tile Advanced",
+            "ClownOptions_Tile_Beta"                : "ClownOptions Tile",
+            "ClownOptions_Tile_Advanced_Beta"       : "ClownOptions Tile Advanced",
 
     })
     

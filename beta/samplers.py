@@ -269,8 +269,11 @@ class SharkSampler:
                         "sampler_mode": "NULL",
                     })
                 if latent_image is not None and 'samples' in latent_image:
-                    x_null = torch.zeros_like(latent_image['samples'])
+                    x_null = torch.zeros_like(latent_image['samples']).repeat_interleave(2, dim=-1)
+                elif ultracascade_latent_height * ultracascade_latent_width > 0:
+                    x_null = comfy.sample.fix_empty_latent_channels(model, torch.zeros((1,16,ultracascade_latent_height,ultracascade_latent_width)))
                 else:
+                    print("Fallback: spawning dummy 1,16,256,256 latent.")
                     x_null = comfy.sample.fix_empty_latent_channels(model, torch.zeros((1,16,256,256)))
                 _ = comfy.sample.sample_custom(work_model, x_null, cfg, sampler_null, torch.linspace(1, 0, 10).to(x_null.dtype).to(x_null.device), negative, negative, x_null, noise_mask=None, callback=None, disable_pbar=disable_pbar, seed=noise_seed)
 

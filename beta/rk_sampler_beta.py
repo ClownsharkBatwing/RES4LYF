@@ -103,28 +103,6 @@ def init_implicit_sampling(
     x_, eps_ = RK.newton_iter(x_0, x_, eps_, eps_prev_, data_, s_, 0, h, sigmas, step, "init")
     return x_, eps_, data_
 
-import torch.nn.functional as F
-
-def upscale_to_match_spatial(tensor_5d, ref_4d, mode='bicubic'):
-    """
-    Upscales a 5D tensor [B, C, T, H1, W1] to match the spatial size of a 4D tensor [1, C, H2, W2].
-    
-    Args:
-        tensor_5d: Tensor of shape [B, C, T, H1, W1]
-        ref_4d: Tensor of shape [1, C, H2, W2] — used as spatial reference
-        mode: Interpolation mode ('bilinear' or 'bicubic')
-    
-    Returns:
-        Resized tensor of shape [B, C, T, H2, W2]
-    """
-    b, c, t, _, _ = tensor_5d.shape
-    _, _, h_target, w_target = ref_4d.shape
-
-    tensor_reshaped = tensor_5d.reshape(b * c, t, tensor_5d.shape[-2], tensor_5d.shape[-1])
-    upscaled = F.interpolate(tensor_reshaped, size=(h_target, w_target), mode=mode, align_corners=False)
-    return upscaled.view(b, c, t, h_target, w_target)
-
-
 
 @torch.no_grad()
 def sample_rk_beta(
