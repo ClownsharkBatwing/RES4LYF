@@ -601,7 +601,7 @@ class ReSDPatcherAdvanced:
     RETURN_NAMES = ("model",)
     CATEGORY     = "RES4LYF/model_patches"
     FUNCTION     = "main"
-    EXPERIMENTAL = True
+    #EXPERIMENTAL = True
 
     def main(self, model, doublestream_blocks, singlestream_blocks, style_dtype, enable=True, force=False):
         
