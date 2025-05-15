@@ -1150,7 +1150,7 @@ class tan_scheduler_2stage_simple:
         
         return sigmas
 
-    def main(self, steps, start, middle, end, pivot_1, pivot_2, slope_1, slope_2, pad):
+    def main(self, steps, start=1.0, middle=0.5, end=0.0, pivot_1=0.6, pivot_2=0.6, slope_1=0.2, slope_2=0.2, pad=False, model_sampling=None):
         steps += 2
 
         midpoint = int( (steps*pivot_1 + steps*pivot_2) / 2 )
@@ -3960,3 +3960,46 @@ class sigmas_normalizing_flows:
             result = (result - result[0]) / (result[-1] - result[0]) * (end_value - start_value) + start_value
         
         return (result,)
+
+
+
+
+
+
+
+
+
+def get_bong_tangent_sigmas(steps, slope, pivot, start, end):
+    smax = ((2/pi)*atan(-slope*(0-pivot))+1)/2
+    smin = ((2/pi)*atan(-slope*((steps-1)-pivot))+1)/2
+
+    srange = smax-smin
+    sscale = start - end
+
+    sigmas = [  ( (((2/pi)*atan(-slope*(x-pivot))+1)/2) - smin) * (1/srange) * sscale + end    for x in range(steps)]
+    
+    return sigmas
+
+def bong_tangent_scheduler(model_sampling, steps, start=1.0, middle=0.5, end=0.0, pivot_1=0.6, pivot_2=0.6, slope_1=0.2, slope_2=0.2, pad=False):
+    steps += 2
+
+    midpoint = int( (steps*pivot_1 + steps*pivot_2) / 2 )
+    pivot_1 = int(steps * pivot_1)
+    pivot_2 = int(steps * pivot_2)
+
+    slope_1 = slope_1 / (steps/40)
+    slope_2 = slope_2 / (steps/40)
+
+    stage_2_len = steps - midpoint
+    stage_1_len = steps - stage_2_len
+
+    tan_sigmas_1 = get_bong_tangent_sigmas(stage_1_len, slope_1, pivot_1, start, middle)
+    tan_sigmas_2 = get_bong_tangent_sigmas(stage_2_len, slope_2, pivot_2 - stage_1_len, middle, end)
+    
+    tan_sigmas_1 = tan_sigmas_1[:-1]
+    if pad:
+        tan_sigmas_2 = tan_sigmas_2+[0]
+
+    tan_sigmas = torch.tensor(tan_sigmas_1 + tan_sigmas_2)
+
+    return tan_sigmas

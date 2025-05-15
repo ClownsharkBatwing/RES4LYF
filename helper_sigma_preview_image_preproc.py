@@ -584,7 +584,5 @@ class SigmasSchedulePreview(SaveImage):
         images_tensor = torch.cat([tensor_image], 0)
 
         return self.save_images(images_tensor, "SigmasSchedulePreview")
-
-
-
-
+    
+    

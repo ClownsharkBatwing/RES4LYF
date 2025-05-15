@@ -12,6 +12,19 @@ from . import nodes_misc
 from . import nodes_latents
 from . import nodes_precision
 
+
+import torch
+from math import *
+
+
+from comfy.samplers import SchedulerHandler, SCHEDULER_HANDLERS, SCHEDULER_NAMES
+new_scheduler_name = "bong_tangent"
+if new_scheduler_name not in SCHEDULER_HANDLERS:
+    bong_tangent_handler = SchedulerHandler(handler=sigmas.bong_tangent_scheduler, use_ms=True)
+    SCHEDULER_HANDLERS[new_scheduler_name] = bong_tangent_handler
+    SCHEDULER_NAMES.append(new_scheduler_name)
+
+
 from .res4lyf import RESplain
 
 #torch.use_deterministic_algorithms(True)
@@ -22,6 +35,7 @@ res4lyf.init()
 
 discard_penultimate_sigma_samplers = set((
 ))
+
 
 def add_samplers():
     from comfy.samplers import KSampler, k_diffusion_sampling
@@ -280,7 +294,7 @@ NODE_CLASS_MAPPINGS = {
     "Sigmas LangevinDynamics"             : sigmas.sigmas_langevin_dynamics,
     "Sigmas PersistentHomology"           : sigmas.sigmas_persistent_homology,
     "Sigmas NormalizingFlows"             : sigmas.sigmas_normalizing_flows,
-
+    
     "ClownScheduler"                      : sigmas.ClownScheduler, # for modulating parameters
     "Tan Scheduler"                       : sigmas.tan_scheduler,
     "Tan Scheduler 2"                     : sigmas.tan_scheduler_2stage,
@@ -377,29 +391,6 @@ if os.path.exists(file_path):
             print(f"(RES4LYF) Failed to import zamplers: {e}")
 
 
-try:
-    from .legacy import add_legacy
-    NODE_CLASS_MAPPINGS, NODE_DISPLAY_NAME_MAPPINGS, extra_samplers = add_legacy(NODE_CLASS_MAPPINGS, NODE_DISPLAY_NAME_MAPPINGS, extra_samplers)
-    flags["legacy_samplers"] = True
-    RESplain("Importing legacy samplers.")
-except ImportError:
-    try:
-        import importlib
-        for module_name in ["RES4LYF.legacy", "res4lyf.legacy"]:
-            try:
-                legacy_module = importlib.import_module(module_name)
-                add_legacy = legacy_module.add_legacy
-                NODE_CLASS_MAPPINGS, extra_samplers = add_legacy(NODE_CLASS_MAPPINGS, extra_samplers)
-                flags["legacy_samplers"] = True
-                RESplain(f"Importing legacy samplers via {module_name}.")
-                break
-            except ImportError:
-                continue
-        else:
-            raise ImportError("Legacy module not found in any path")
-    except Exception as e:
-        print(f"(RES4LYF) Failed to import legacy samplers: {e}")
-
 
 try:
     from .beta import add_beta
@@ -426,9 +417,35 @@ except ImportError:
 
 
 
+try:
+    from .legacy import add_legacy
+    NODE_CLASS_MAPPINGS, NODE_DISPLAY_NAME_MAPPINGS, extra_samplers = add_legacy(NODE_CLASS_MAPPINGS, NODE_DISPLAY_NAME_MAPPINGS, extra_samplers)
+    flags["legacy_samplers"] = True
+    RESplain("Importing legacy samplers.")
+except ImportError:
+    try:
+        import importlib
+        for module_name in ["RES4LYF.legacy", "res4lyf.legacy"]:
+            try:
+                legacy_module = importlib.import_module(module_name)
+                add_legacy = legacy_module.add_legacy
+                NODE_CLASS_MAPPINGS, extra_samplers = add_legacy(NODE_CLASS_MAPPINGS, extra_samplers)
+                flags["legacy_samplers"] = True
+                RESplain(f"Importing legacy samplers via {module_name}.")
+                break
+            except ImportError:
+                continue
+        else:
+            raise ImportError("Legacy module not found in any path")
+    except Exception as e:
+        print(f"(RES4LYF) Failed to import legacy samplers: {e}")
 
 
 add_samplers()
 
 
 __all__ = ["NODE_CLASS_MAPPINGS", "NODE_DISPLAY_NAME_MAPPINGS", "WEB_DIRECTORY"]
+
+
+
+

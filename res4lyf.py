@@ -13,6 +13,7 @@ from aiohttp import web
 from server import PromptServer
 from tqdm import tqdm
 
+
 CONFIG_FILE_NAME = "res4lyf.config.json"
 DEFAULT_CONFIG_FILE_NAME = "web/js/res4lyf.default.json"
 config = None
