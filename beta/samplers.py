@@ -268,8 +268,10 @@ class SharkSampler:
                     {
                         "sampler_mode": "NULL",
                     })
-                x_null = comfy.sample.fix_empty_latent_channels(model, torch.zeros((1,4,64,64)))
-                #x_null = torch.zeros_like(latent_image['samples'])
+                if latent_image is not None and 'samples' in latent_image:
+                    x_null = torch.zeros_like(latent_image['samples'])
+                else:
+                    x_null = comfy.sample.fix_empty_latent_channels(model, torch.zeros((1,16,256,256)))
                 _ = comfy.sample.sample_custom(work_model, x_null, cfg, sampler_null, torch.linspace(1, 0, 10).to(x_null.dtype).to(x_null.device), negative, negative, x_null, noise_mask=None, callback=None, disable_pbar=disable_pbar, seed=noise_seed)
 
             sigma_min = work_model.get_model_object('model_sampling').sigma_min

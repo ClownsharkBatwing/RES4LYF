@@ -525,8 +525,8 @@ class ClownOptions_Tile_Beta:
     def INPUT_TYPES(cls):
         return {"required":
                     {
-                    "tile_height": ("INT", {"default": 1024, "min": -1, "max": 10000, "step":1,}),
                     "tile_width" : ("INT", {"default": 1024, "min": -1, "max": 10000, "step":1,}),
+                    "tile_height": ("INT", {"default": 1024, "min": -1, "max": 10000, "step":1,}),
                     },
                 "optional": 
                     {
