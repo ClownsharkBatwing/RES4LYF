@@ -1276,7 +1276,9 @@ def sample_rk_beta(
                                         
                                     if RK.extra_args['model_options']['transformer_options'].get('y0_inv_standard_guide') is not None:
                                         if hasattr(model.inner_model.inner_model.diffusion_model, "y0_inv_standard_guide"):
-                                            LG.y0_inv = RK.extra_args['model_options']['transformer_options'].get('y0_inv_standard_guide')
+                                            LG.y0_inv = model.inner_model.inner_model.diffusion_model.y0_inv_standard_guide.clone() # RK.extra_args['model_options']['transformer_options'].get('y0_standard_guide')
+                                            del model.inner_model.inner_model.diffusion_model.y0_inv_standard_guide
+                                            #LG.y0_inv = RK.extra_args['model_options']['transformer_options'].get('y0_inv_standard_guide')
                                             RK.extra_args['model_options']['transformer_options']['y0_inv_standard_guide'] = None
                                 
                                 
