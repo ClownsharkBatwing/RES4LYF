@@ -150,6 +150,7 @@ RK_SAMPLER_NAMES_BETA_FOLDERS = ["none",
                     "fully_implicit/gauss-legendre_2s",
                     "fully_implicit/gauss-legendre_3s", 
                     "fully_implicit/gauss-legendre_4s",
+                    "fully_implicit/gauss-legendre_4s_alternating_a",
                     "fully_implicit/gauss-legendre_4s_ascending_a",
                     "fully_implicit/gauss-legendre_4s_alt",
                     "fully_implicit/gauss-legendre_5s",                    
@@ -169,7 +170,7 @@ RK_SAMPLER_NAMES_BETA_FOLDERS = ["none",
                     "fully_implicit/radau_iia_11s",
                     
                     "fully_implicit/lobatto_iiia_2s",
-                    "fully_implicit/lobatto_iiia_3s",
+                    "fully_implicit/lobatto_iiia_3s", 
                     "fully_implicit/lobatto_iiia_4s",
                     "fully_implicit/lobatto_iiib_2s",
                     "fully_implicit/lobatto_iiib_3s",
@@ -556,6 +557,27 @@ rk_coeff = {
             1/2 + 15**0.5 / 10,                                         
             1/2 + 15**0.5 / 10,                                        
             1/2 - 15**0.5 / 10                                         
+        ]
+    ),
+    "gauss-legendre_4s_alternating_a": (
+        [
+            [1/4, 1/4 - 15**0.5 / 6, 1/4 + 15**0.5 / 6, 1/4],            
+            [1/4 + 15**0.5 / 6, 1/4, 1/4 - 15**0.5 / 6, 1/4],   
+            [1/4 - 15**0.5 / 6, 1/4, 1/4 + 15**0.5 / 6, 1/4],       
+            [1/4, 1/4 + 15**0.5 / 6, 1/4, 1/4 - 15**0.5 / 6],            
+        ],
+        [    
+            [
+            1/8, 
+            3/8, 
+            1/8, 
+            3/8,]                                        
+        ],
+        [
+            1/2 - 15**0.5 / 10,      # 0.11270166537925831148207346002176004                               
+            1/2 + 15**0.5 / 10,     
+            1/2 - 15**0.5 / 10,                                         
+            1/2 + 15**0.5 / 10,                                        
         ]
     ),
     "gauss-legendre_4s_ascending_a": (
@@ -1365,7 +1387,7 @@ def get_rk_methods_beta(rk_type       : str,
                 rk_type = multistep_initial_sampler if multistep_initial_sampler else rk_type
         else:
             #rk_type = "res_2s"
-            rk_type = "euler"
+            rk_type = "euler" if sigma < 0.1 else "res_2s"
             rk_type = multistep_fallback_sampler if multistep_fallback_sampler else rk_type
             
     if rk_type[-2:] == "3m": #multistep method
@@ -1384,7 +1406,7 @@ def get_rk_methods_beta(rk_type       : str,
                 rk_type = multistep_initial_sampler if multistep_initial_sampler else rk_type
         else:
             #rk_type = "res_3s"
-            rk_type = "euler"
+            rk_type = "euler" if sigma < 0.1 else "res_3s"
             rk_type = multistep_fallback_sampler if multistep_fallback_sampler else rk_type
             
     if rk_type[-2:] == "4m": #multistep method
@@ -1407,7 +1429,7 @@ def get_rk_methods_beta(rk_type       : str,
                 rk_type = multistep_initial_sampler if multistep_initial_sampler else rk_type
         else:
             #rk_type = "res_4s_strehmel_weiner"
-            rk_type = "euler"
+            rk_type = "euler" if sigma < 0.1 else "res_4s_strehmel_weiner"
             rk_type = multistep_fallback_sampler if multistep_fallback_sampler else rk_type
                         
     if rk_type[-3] == "h" and rk_type[-1] == "s": #hybrid method 

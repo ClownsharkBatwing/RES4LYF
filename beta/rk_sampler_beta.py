@@ -987,7 +987,7 @@ def sample_rk_beta(
                                 if EO("flow_slerp"):
                                     eps_y_inv, data_y_inv = RK(yt_inv, s_tmp, y0_noised_inv, sigma, transformer_options={'latent_type': 'yt_inv'})
                                 
-                                if LG.lgw[step+1] == 0 and LG.lgw_inv[step+1] == 0:
+                                if LG.lgw[step+1] == 0 and LG.lgw_inv[step+1] == 0:    # break out of differentiating x0 and return to differentiating eps/velocity field
                                     eps_ [row]       = eps_x
                                     data_[row]       = data_x
                                     x_   [row] = x_0 = xt 
@@ -1686,6 +1686,7 @@ def sample_rk_beta(
         state_info_out['FLOW_STOPPED']      = FLOW_STOPPED
         if FLOW_STARTED and not FLOW_STOPPED:
             state_info_out['y0']           = y0.to('cpu') 
+            #state_info_out['y0_inv']       = y0_inv.to('cpu')       # TODO: implement this?
             state_info_out['data_cached']  = data_cached.to('cpu')
             state_info_out['data_x_prev_'] = data_x_prev_.to('cpu')
 

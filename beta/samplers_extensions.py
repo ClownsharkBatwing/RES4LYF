@@ -454,6 +454,7 @@ class ClownOptions_Cycles_Beta:
                     "cycles"          : ("FLOAT", {"default": 0.0, "min":  0.0,   "max": 10000, "step":0.5,  "round": 0.5}),
                     "eta_decay_scale" : ("FLOAT", {"default": 1.0, "min": -10000, "max": 10000, "step":0.01, "tooltip": "Multiplies etas by this number after every cycle. May help drive convergence." }),
                     "unsample_eta"    : ("FLOAT", {"default": 0.5, "min": -10000, "max": 10000, "step":0.01}),
+                    "unsampler_name"  : (get_sampler_name_list(), {"default": "none"}), 
                     "unsample_cfg"    : ("FLOAT", {"default": 1.0, "min": -10000, "max": 10000, "step":0.01}),
                     },
                 "optional": 
@@ -472,6 +473,7 @@ class ClownOptions_Cycles_Beta:
             unsample_eta    = 0.5,
             eta_decay_scale = 1.0,
             unsample_cfg    = 1.0,
+            unsampler_name  = "none",
             options         = None
             ): 
         
@@ -479,6 +481,7 @@ class ClownOptions_Cycles_Beta:
             
         options['rebounds']        = int(cycles * 2)
         options['unsample_eta']    = unsample_eta
+        options['unsampler_name']  = unsampler_name
         options['eta_decay_scale'] = eta_decay_scale
         options['unsample_cfg']    = unsample_cfg
 
@@ -1001,11 +1004,11 @@ class ClownGuide_Style_Beta:
     def INPUT_TYPES(cls):
         return {"required":
                     {
-                    "apply_to":         (["positive", "negative"],                    {"default": "positive"}),
+                    "apply_to":         (["positive", "negative"],                    {"default": "positive", "tooltip": "When using CFG, decides whether to apply the guide to the positive or negative conditioning."}),
                     "method":           (["AdaIN", "WCT"],                            {"default": "WCT"}),
                     "weight":           ("FLOAT",                                     {"default": 1.0, "min":  -100.0, "max": 100.0, "step":0.01, "round": False, "tooltip": "Set the strength of the guide by multiplying all other weights by this value."}),
-                    "synweight":        ("FLOAT",                                     {"default": 1.0, "min":  -100.0, "max": 100.0, "step":0.01, "round": False, "tooltip": "Set the strength of the guide by multiplying all other weights by this value."}),
-                    "weight_scheduler": (["constant"] + get_res4lyf_scheduler_list(), {"default": "constant"},),
+                    "synweight":        ("FLOAT",                                     {"default": 1.0, "min":  -100.0, "max": 100.0, "step":0.01, "round": False, "tooltip": "Set the relative strength of the guide on the opposite conditioning to what was selected: i.e., negative if positive in apply_to. Recommended to avoid CFG burn."}),
+                    "weight_scheduler": (["constant"] + get_res4lyf_scheduler_list(), {"default": "constant", "tooltip": "Selecting any scheduler except constant will cause the strength to gradually decay to zero. Try beta57 vs. linear quadratic."},),
                     "start_step":       ("INT",                                       {"default": 0,    "min":  0,      "max": 10000}),
                     "end_step":         ("INT",                                       {"default": -1,   "min": -1,      "max": 10000}),
                     "invert_mask":      ("BOOLEAN",                                   {"default": False}),
@@ -1023,6 +1026,9 @@ class ClownGuide_Style_Beta:
     RETURN_NAMES = ("guides",)
     FUNCTION     = "main"
     CATEGORY     = "RES4LYF/sampler_extensions"
+    DESCRIPTION  = "Transfer some visual aspects of style from a guide (reference) image. If nothing about style is specified in the prompt, it may just transfer the lighting and color scheme." + \
+                "If using CFG results in burn, or a very dark/bright image in the preview followed by a bad output, try duplicating and chaining this node, so that the guide may be applied to both positive and negative conditioning." + \
+                "Currently supported models: SD1.5, SDXL, Stable Cascade, SD3.5, AuraFlow, Flux, HiDream, WAN, and LTXV."
 
     def main(self,
             apply_to         = "all",

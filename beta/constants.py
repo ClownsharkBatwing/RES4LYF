@@ -16,6 +16,7 @@ GUIDE_MODE_NAMES_BETA_SIMPLE = [
     "lure",
     "data",
     "epsilon",
+    "inversion",
     "pseudoimplicit",
     "fully_pseudoimplicit",
     "none",

@@ -150,6 +150,7 @@ class SharkSampler:
             rebounds           : int                    =  0,
             unsample_cfg       : float                  = 1.0,
             unsample_eta       : float                  = 0.5,
+            unsampler_name     : str                    = "none",
             eta_decay_scale   : float                  = 1.0,
             
             #ultracascade_stage : str = "stage_UP",
@@ -187,9 +188,12 @@ class SharkSampler:
             rebounds        = options_mgr.get('rebounds',         rebounds)
             unsample_cfg    = options_mgr.get('unsample_cfg',     unsample_cfg)
             unsample_eta    = options_mgr.get('unsample_eta',     unsample_eta)
+            unsampler_name  = options_mgr.get('unsampler_name',   unsampler_name)
             eta_decay_scale = options_mgr.get('eta_decay_scale',  eta_decay_scale)
             start_at_step   = options_mgr.get('start_at_step',    -1)
             tile_sizes      = options_mgr.get('tile_sizes',       None)
+            
+            unsampler_name, _ = process_sampler_name(unsampler_name)
 
             
             #ultracascade_stage        = options_mgr.get('ultracascade_stage',         ultracascade_stage)
@@ -197,8 +201,10 @@ class SharkSampler:
             ultracascade_latent_width  = options_mgr.get('ultracascade_latent_width',  ultracascade_latent_width)
             ultracascade_latent_height = options_mgr.get('ultracascade_latent_height', ultracascade_latent_height)
             
-            sampler.extra_options['start_at_step'] = start_at_step
-            sampler.extra_options['tile_sizes']    = tile_sizes
+            
+            if 'BONGMATH' in sampler.extra_options:
+                sampler.extra_options['start_at_step'] = start_at_step
+                sampler.extra_options['tile_sizes']    = tile_sizes
                         
             is_chained = False
             if latent_image is not None:
@@ -223,7 +229,7 @@ class SharkSampler:
                 if 'sampler' in latent_image and sampler is None:
                     sampler = copy_cond(latent_image['sampler'])  #.clone()
                     is_chained = True
-                    
+            
             if 'steps_to_run' in sampler.extra_options:
                 sampler.extra_options['steps_to_run'] = steps_to_run
 
@@ -269,7 +275,8 @@ class SharkSampler:
                         "sampler_mode": "NULL",
                     })
                 if latent_image is not None and 'samples' in latent_image:
-                    x_null = torch.zeros_like(latent_image['samples']).repeat_interleave(2, dim=-1)
+                    latent_vram_factor = EO("latent_vram_factor", 3)
+                    x_null = torch.zeros_like(latent_image['samples']).repeat_interleave(latent_vram_factor, dim=-1)
                 elif ultracascade_latent_height * ultracascade_latent_width > 0:
                     x_null = comfy.sample.fix_empty_latent_channels(model, torch.zeros((1,16,ultracascade_latent_height,ultracascade_latent_width)))
                 else:
@@ -498,7 +505,10 @@ class SharkSampler:
                     else:
                         seed = torch.initial_seed() + 1 + batch_num
                 else:
-                    seed = noise_seed + batch_num
+                    if EO("lock_batch_seed"):
+                        seed = noise_seed
+                    else:
+                        seed = noise_seed + batch_num
                     torch     .manual_seed(seed)
                     torch.cuda.manual_seed(seed)
 
@@ -525,8 +535,14 @@ class SharkSampler:
                             noise_sampler_init.alpha = alpha_init
                             noise_sampler_init.k     = k_init
                             noise_sampler_init.scale = 0.1
-                        
+                            
+                        """if EO("rare_noise"):
+                            noise, _, _ = sample_most_divergent_noise(noise_sampler_init, sigma_max, sigma_min, EO("rare_noise", 100))
+                        else:
+                            noise = noise_sampler_init(sigma=sigma_max * noise_stdev, sigma_next=sigma_min)"""
                         noise = noise_sampler_init(sigma=sigma_max * noise_stdev, sigma_next=sigma_min)
+                        
+                        
 
                     if noise_normalize and noise.std() > 0:
                         channelwise = EO("init_noise_normalize_channelwise", "true")
@@ -635,6 +651,7 @@ class SharkSampler:
                         etas_substep_cached = sampler.extra_options['etas_substep'].clone()
                         
                         unsample_etas = torch.full_like(etas_cached, unsample_eta)
+                        rk_type_cached = sampler.extra_options['rk_type']
                         
                         if sampler.extra_options['sampler_mode'] == "unsample":
                             guider.cfgs = {
@@ -645,6 +662,8 @@ class SharkSampler:
                             sampler.extra_options['eta']          = unsample_eta
                             sampler.extra_options['etas_substep'] = unsample_etas
                             sampler.extra_options['etas']         = unsample_etas
+                            if unsampler_name != "none":
+                                sampler.extra_options['rk_type']      = unsampler_name
                         else:
                             guider.cfgs = cfgs_cached
                         
@@ -691,12 +710,15 @@ class SharkSampler:
                                 sampler.extra_options['eta']          = unsample_eta_decay
                                 sampler.extra_options['etas_substep'] = unsample_etas
                                 sampler.extra_options['etas']         = unsample_etas
+                                if unsampler_name != "none":
+                                    sampler.extra_options['rk_type']  = unsampler_name
                             else:
                                 guider.cfgs = cfgs_cached
                                 sampler.extra_options['eta_substep']  = eta_substep_decay
                                 sampler.extra_options['eta']          = eta_decay
                                 sampler.extra_options['etas_substep'] = etas_substep_decay
                                 sampler.extra_options['etas']         = etas_decay
+                                sampler.extra_options['rk_type']      = rk_type_cached
                                 
                             samples = guider.sample(noise, samples.clone(), sampler, sigmas, denoise_mask=noise_mask, callback=callback, disable_pbar=disable_pbar, seed=-1)
 
@@ -715,6 +737,7 @@ class SharkSampler:
                         sampler.extra_options['eta']          = eta_cached
                         sampler.extra_options['etas_substep'] = etas_substep_cached
                         sampler.extra_options['etas']         = etas_cached
+                        sampler.extra_options['rk_type']      = rk_type_cached
                             
         
 
@@ -744,7 +767,8 @@ class SharkSampler:
                     out_state_info.append(state_info_out)
                     
                     # INCREMENT BATCH LOOP
-                    seed += 1
+                    if not EO("lock_batch_seed"):
+                        seed += 1
                     if latent_image is not None: #needed for ultracascade, where latent_image input is not really used for stage C/first stage
                         if latent_image.get('state_info', {}).get('last_rng', None) is None:
                             torch.manual_seed(seed)
