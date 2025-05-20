@@ -133,14 +133,16 @@ class LatentGuide:
         latent_guide_style_pos    = None
         latent_guide_style_neg    = None
         
-        if self.guide_mode == "inversion":
-            self.guide_mode == "epsilon"
-        else:
-            self.SAMPLE   = True
-            self.UNSAMPLE = False
 
         if guides is not None:
             self.guide_mode                = guides.get("guide_mode", "none")
+            
+            if self.guide_mode == "inversion":
+                self.guide_mode == "epsilon"
+            else:
+                self.SAMPLE   = True
+                self.UNSAMPLE = False
+            
             latent_guide_weight            = guides.get("weight_masked",   0.)
             latent_guide_weight_inv        = guides.get("weight_unmasked", 0.)
             latent_guide_weight_mean       = guides.get("weight_mean",     0.)
