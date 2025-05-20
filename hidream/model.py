@@ -682,6 +682,7 @@ class HDModel(nn.Module):
         update_cross_attn = transformer_options.get("update_cross_attn")
         SIGMA = t[0].clone() / 1000
         EO = transformer_options.get("ExtraOptions", ExtraOptions(""))
+        img_pre_final = []
         if EO is not None:
             EO.mute = True
             
@@ -1030,12 +1031,25 @@ class HDModel(nn.Module):
                         #img = img + (1-SIGMA) * adaweight * (adain_seq(img, img_y0_adain) - img)
                 
             img = img[:, :img_len, ...]
+            
+            img_pre_final.append(img)
+            
             img = self.final_layer(img, clip)
             img = self.unpatchify (img, img_sizes)
             
             out_list.append(img)
             
+            
         output = torch.stack(out_list, dim=0).squeeze(dim=1)
+        
+        if EO("model_pre_cfg"):
+            model_pre_cfg = EO("model_pre_cfg", 1.0)
+            img = img_pre_final[0] + model_pre_cfg * (img_pre_final[1] - img_pre_final[0])
+            #img = img_pre_cfg.repeat(2,1,1)
+            img = self.final_layer(img, clip)
+            img = self.unpatchify (img, img_sizes)
+            output = img.repeat(2,1,1,1)
+            
         
         eps = -output[:, :, :h, :w]
         
@@ -1198,7 +1212,14 @@ class HDModel(nn.Module):
                     if transformer_options.get('y0_inv_standard_guide') is not None:
                         y0_inv_standard_guide = transformer_options.get('y0_inv_standard_guide')
                         
-                        f_c          = y0_inv_standard_guide[0].clone()
+                        img_y0_standard_guide = comfy.ldm.common_dit.pad_to_patch_size(y0_inv_standard_guide, (self.patch_size, self.patch_size))
+                        img_sizes_y0_standard_guide = None
+                        img_y0_standard_guide, img_masks_y0_standard_guide, img_sizes_y0_standard_guide = self.patchify(img_y0_standard_guide, self.max_seq, img_sizes_y0_standard_guide) 
+                        y0_standard_guide_embed = F.linear(img_y0_standard_guide.to(W), W, b).to(img_y0_standard_guide)
+                        
+                        f_c          = y0_standard_guide_embed[0].clone()
+                        
+                        #f_c          = y0_inv_standard_guide[0].clone()
                         mu_c         = f_c.mean(dim=0, keepdim=True)
                         f_c_centered = f_c - mu_c
                         
@@ -1211,10 +1232,17 @@ class HDModel(nn.Module):
                         whiten = whiten.to(f_c_centered)
 
                         f_c_whitened = f_c_centered @ whiten.T
-                        f_cs         = f_c_whitened @ self.y0_color.T + self.mu_s
+                        f_cs         = f_c_whitened @ self.y0_color.T.to(y0_inv_standard_guide) + self.mu_s.to(y0_inv_standard_guide)
                         
-                        y0_inv_standard_guide_embed[0] = f_cs
-                        transformer_options['y0_inv_standard_guide'] = y0_inv_standard_guide
+                        f_cs = (f_cs - b) @ torch.linalg.pinv(W.to(f_cs)).T.to(f_cs)
+                        y0_inv_standard_guide = self.unpatchify (f_cs.unsqueeze(0), img_sizes_y0_standard_guide)
+                        self.y0_inv_standard_guide = y0_inv_standard_guide
+
+                        #f_c_whitened = f_c_centered @ whiten.T
+                        #f_cs         = f_c_whitened @ self.y0_color.T + self.mu_s
+                        
+                        #y0_inv_standard_guide_embed[0] = f_cs
+                        #transformer_options['y0_inv_standard_guide'] = y0_inv_standard_guide
                         
 
                 denoised_embed = (denoised_embed - b) @ torch.linalg.pinv(W.to(pinv_dtype)).T.to(dtype)
@@ -1399,6 +1427,39 @@ class HDModel(nn.Module):
                     eps[0] = eps_orig[0] + mask * y0_style_neg_synweight * (eps[0] - eps_orig[0])
                 else:
                     eps[0] = eps_orig[0] + mask * y0_style_neg_weight    * (eps[0] - eps_orig[0])
+
+
+
+
+
+
+        if EO("model_cfg"):
+            model_cfg = EO("model_cfg", 1.0)
+
+            x            = x.to(dtype)
+            eps          = eps.to(dtype)
+                        
+            sigma = t_orig[0].to(dtype) / 1000
+            denoised = x - sigma * eps
+            
+            img = comfy.ldm.common_dit.pad_to_patch_size(denoised, (self.patch_size, self.patch_size))
+            img_sizes = None
+            img, img_masks, img_sizes = self.patchify(img, self.max_seq, img_sizes) 
+            
+            W = self.x_embedder.proj.weight.data.to(dtype)   # shape [2560, 64]
+            b = self.x_embedder.proj.bias.data.to(dtype)     # shape [2560]
+            
+            denoised_embed = F.linear(img         .to(W), W, b).to(img)
+            
+            denoised_embed_cfg = denoised_embed[0] + model_cfg * (denoised_embed[1] - denoised_embed[0])
+            denoised_embed = denoised_embed_cfg.repeat(2,1,1)
+                            
+            denoised_embed = (denoised_embed - b) @ torch.linalg.pinv(W.to(pinv_dtype)).T.to(dtype)
+            denoised_embed = self.unpatchify (denoised_embed, img_sizes)
+            
+            eps = (x - denoised_embed) / sigma
+
+
 
         return eps
 
