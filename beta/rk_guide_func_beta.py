@@ -138,7 +138,7 @@ class LatentGuide:
             self.guide_mode                = guides.get("guide_mode", "none")
             
             if self.guide_mode == "inversion":
-                self.guide_mode == "epsilon"
+                self.guide_mode = "epsilon"
             else:
                 self.SAMPLE   = True
                 self.UNSAMPLE = False
