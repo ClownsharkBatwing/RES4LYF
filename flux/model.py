@@ -19,13 +19,15 @@ from .layers import (
     timestep_embedding,
 )
 
-from comfy.ldm.flux.layers import timestep_embedding
+from . import layers
+
+#from comfy.ldm.flux.layers import timestep_embedding
 from comfy.ldm.flux.model import Flux as Flux
 
 from einops import rearrange, repeat
 import comfy.ldm.common_dit
 
-from ..latents import interpolate_spd
+#from ..latents import interpolate_spd
 
 @dataclass
 class FluxParams:
@@ -78,7 +80,7 @@ class ReFlux(Flux):
         self.single_blocks = nn.ModuleList([SingleStreamBlock(self.hidden_size, self.num_heads, mlp_ratio=params.mlp_ratio,                           dtype=dtype, device=device, operations=operations, idx=_) for _ in range(params.depth_single_blocks)])
 
         if final_layer:
-            self.final_layer = LastLayer(self.hidden_size, 1, self.out_channels,                                                                      dtype=dtype, device=device, operations=operations)
+            self.final_layer = layers.LastLayer(self.hidden_size, 1, self.out_channels,                                                                      dtype=dtype, device=device, operations=operations)
 
 
     
@@ -124,6 +126,7 @@ class ReFlux(Flux):
         mask     = None
         if AttnMask is not None and weight > 0:
             mask                      = AttnMask.get(weight=weight) #mask_obj[0](transformer_options, weight.item())
+            #mask = transformer_options['AttnMask'].attn_mask.mask.to('cuda')
             
             mask_type_bool = type(mask[0][0].item()) == bool if mask is not None else False
             if not mask_type_bool:
@@ -139,7 +142,7 @@ class ReFlux(Flux):
             if mask is not None and mask_type_bool and weight < (i / (total_layers-1)):
                 mask = mask.to(img.dtype)
 
-            img, txt, attn_mask = block(img=img, txt=txt, vec=vec, pe=pe, mask=mask, idx=i, update_cross_attn=update_cross_attn)
+            img, txt = block(img=img, txt=txt, vec=vec, pe=pe, mask=mask, idx=i, update_cross_attn=update_cross_attn)
 
             if control is not None: # Controlnet
                 control_i = control.get("input")
@@ -237,7 +240,7 @@ class ReFlux(Flux):
             elif UNCOND == False:
                 transformer_options['reg_cond_weight'] = transformer_options.get("regional_conditioning_weight", 0.0) 
                 transformer_options['reg_cond_floor']  = transformer_options.get("regional_conditioning_floor",  0.0) 
-                                
+                
                 AttnMask   = transformer_options.get('AttnMask',   None)                    
                 RegContext = transformer_options.get('RegContext', None)
                 
@@ -267,7 +270,7 @@ class ReFlux(Flux):
             out_list.append(out_tmp)
             
         out = torch.stack(out_list, dim=0).squeeze(dim=1)
-        
+        #return rearrange(out, "b (h w) (c ph pw) -> b c (h ph) (w pw)", h=h_len, w=w_len, ph=2, pw=2)[:,:,:h,:w]
         eps = rearrange(out, "b (h w) (c ph pw) -> b c (h ph) (w pw)", h=h_len, w=w_len, ph=2, pw=2)[:,:,:h,:w]
         
         
@@ -447,7 +450,7 @@ class ReFlux(Flux):
                 if eps.shape[0] == 2:
                     eps[1] = eps_orig[1] + y0_style_neg_synweight * (eps[1] - eps_orig[1])
                 
-            eps = eps.float()
+                eps = eps.float()
             
         return eps
 
