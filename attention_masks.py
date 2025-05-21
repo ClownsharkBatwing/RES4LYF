@@ -495,6 +495,7 @@ class RegionalContext:
         self.llama3   = None
         self.llama3_list = []
         self.t5_list     = []
+        self.pooled_output = None
         self.idle_device = idle_device
         self.work_device = work_device
     

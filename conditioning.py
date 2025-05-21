@@ -1188,7 +1188,9 @@ class ClownRegionalConditioning_AB:
             
             cond = merge_with_base(base=cond, others=[conditioning_A, conditioning_B])
             
-
+            if 'pooled_output' in cond[0][1]:
+                cond[0][1]['pooled_output'] = (conditioning_A[0][1]['pooled_output'] + conditioning_B[0][1]['pooled_output']) / 2
+                
         else:
             cond = conditioning_A
             
@@ -1408,10 +1410,16 @@ class ClownRegionalConditioning_ABC:
             RegContext.add_region(conditioning_B[0][0])
             RegContext.add_region(conditioning_C[0][0])
             
+            #if 'pooled_output' in conditioning_A[0][1]:
+            #    RegContext.pooled_output = conditioning_A[0][1]['pooled_output'] + conditioning_B[0][1]['pooled_output'] + conditioning_C[0][1]['pooled_output']
+            
             conditioning[0][1]['AttnMask']   = AttnMask
             conditioning[0][1]['RegContext'] = RegContext
             
             conditioning = merge_with_base(base=conditioning, others=[conditioning_A, conditioning_B, conditioning_C])
+            
+            if 'pooled_output' in conditioning[0][1]:
+                conditioning[0][1]['pooled_output'] = (conditioning_A[0][1]['pooled_output'] + conditioning_B[0][1]['pooled_output'] + conditioning_C[0][1]['pooled_output']) / 3
             
         else:
             conditioning = conditioning_A
@@ -1722,6 +1730,11 @@ class ClownRegionalConditionings:
         conditioning[0][1]['RegParam']   = RegionalParameters(weights, floors)
         
         conditioning = merge_with_base(base=conditioning, others=cond_list)
+        
+        if 'pooled_output' in conditioning[0][1]:
+            conditioning[0][1]['pooled_output'] = torch.stack([cond_tmp[0][1]['pooled_output'] for cond_tmp in cond_list]).mean(dim=0)
+
+            #conditioning[0][1]['pooled_output'] = cond_list[0][0][1]['pooled_output']
 
         return (conditioning,)
 
