@@ -787,10 +787,10 @@ class SharkOptions_Beta:
         
         options = options if options is not None else {}
             
-        options['noise_type_init'] = noise_type_init
-        options['noise_stdev']     = s_noise_init
-        options['denoise_alt']     = denoise_alt
-        options['channelwise_cfg'] = channelwise_cfg
+        options['noise_type_init']  = noise_type_init
+        options['noise_init_stdev'] = s_noise_init
+        options['denoise_alt']      = denoise_alt
+        options['channelwise_cfg']  = channelwise_cfg
 
         return (options,)
     
