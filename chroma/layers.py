@@ -1,7 +1,7 @@
 import torch
 from torch import Tensor, nn
 
-from comfy.ldm.flux.math import attention
+#from comfy.ldm.flux.math import attention
 from comfy.ldm.flux.layers import (
     MLPEmbedder,
     RMSNorm,
@@ -10,7 +10,7 @@ from comfy.ldm.flux.layers import (
     ModulationOut,
 )
 
-
+from .math import attention, rope, apply_rope
 
 class ChromaModulationOut(ModulationOut):
     @classmethod
