@@ -790,6 +790,14 @@ class HDModel(nn.Module):
             elif UNCOND and 'AttnMask' in transformer_options:
                 AttnMask = transformer_options['AttnMask']
                 mask = transformer_options['AttnMask'].attn_mask.mask.to('cuda')
+                
+                if mask_zero is None:
+                    mask_zero = torch.ones_like(mask)
+                    img_len = transformer_options['AttnMask'].img_len
+                    mask_zero[img_len:, img_len:] = mask[img_len:, img_len:]
+                if weight == 0:                                                                             # ADDED 5/23/2025
+                    mask = None
+                    
                 A       = context
                 B       = transformer_options['RegContext'].context
                 context = A.repeat(1,    (B.shape[1] // A.shape[1]) + 1, 1)[:,   :B.shape[1], :]
