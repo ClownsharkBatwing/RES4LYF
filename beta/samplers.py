@@ -540,7 +540,7 @@ class SharkSampler:
                             noise, _, _ = sample_most_divergent_noise(noise_sampler_init, sigma_max, sigma_min, EO("rare_noise", 100))
                         else:
                             noise = noise_sampler_init(sigma=sigma_max * noise_stdev, sigma_next=sigma_min)"""
-                        noise = noise_sampler_init(sigma=sigma_max * noise_stdev, sigma_next=sigma_min)
+                        noise = noise_sampler_init(sigma=sigma_max * noise_stdev, sigma_next=sigma_min)          # is sigma_max * noise_stdev really a good idea here?
                         
                         
 

@@ -454,7 +454,7 @@ class ClownOptions_Cycles_Beta:
                     "cycles"          : ("FLOAT", {"default": 0.0, "min":  0.0,   "max": 10000, "step":0.5,  "round": 0.5}),
                     "eta_decay_scale" : ("FLOAT", {"default": 1.0, "min": -10000, "max": 10000, "step":0.01, "tooltip": "Multiplies etas by this number after every cycle. May help drive convergence." }),
                     "unsample_eta"    : ("FLOAT", {"default": 0.5, "min": -10000, "max": 10000, "step":0.01}),
-                    "unsampler_name"  : (get_sampler_name_list(), {"default": "none"}), 
+                    "unsampler_override"  : (get_sampler_name_list(), {"default": "none"}), 
                     "unsample_cfg"    : ("FLOAT", {"default": 1.0, "min": -10000, "max": 10000, "step":0.01}),
                     },
                 "optional": 
@@ -473,7 +473,7 @@ class ClownOptions_Cycles_Beta:
             unsample_eta    = 0.5,
             eta_decay_scale = 1.0,
             unsample_cfg    = 1.0,
-            unsampler_name  = "none",
+            unsampler_override  = "none",
             options         = None
             ): 
         
@@ -481,7 +481,7 @@ class ClownOptions_Cycles_Beta:
             
         options['rebounds']        = int(cycles * 2)
         options['unsample_eta']    = unsample_eta
-        options['unsampler_name']  = unsampler_name
+        options['unsampler_name']  = unsampler_override
         options['eta_decay_scale'] = eta_decay_scale
         options['unsample_cfg']    = unsample_cfg
 

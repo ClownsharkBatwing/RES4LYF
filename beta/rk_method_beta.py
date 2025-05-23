@@ -161,8 +161,20 @@ class RK_Method_Beta:
             tile_h_full = self.tile_sizes[self.tile_cnt % len(self.tile_sizes)][0]
             tile_w_full = self.tile_sizes[self.tile_cnt % len(self.tile_sizes)][1] 
             
-            tile_h = tile_h_full // self.latent_compression_ratio
-            tile_w = tile_w_full // self.latent_compression_ratio
+            if tile_h_full == -1:
+                tile_h      = x.shape[-2]
+                tile_h_full = tile_h * self.latent_compression_ratio
+            else:
+                tile_h = tile_h_full // self.latent_compression_ratio
+                
+            if tile_w_full == -1:
+                tile_w      = x.shape[-1]
+                tile_w_full = tile_w * self.latent_compression_ratio
+            else:
+                tile_w = tile_w_full // self.latent_compression_ratio
+            
+            #tile_h = tile_h_full // self.latent_compression_ratio
+            #tile_w = tile_w_full // self.latent_compression_ratio
             
             self.tile_cnt += 1
             
