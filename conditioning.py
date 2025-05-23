@@ -653,7 +653,7 @@ class EmptyConditioningGenerator:
                 self.text_len_base = 154
                 self.text_channels = 4096
                 self.pooled_len    = 2048
-            elif isinstance(self.model_config, (comfy.supported_models.Flux, comfy.supported_models.FluxSchnell)):
+            elif isinstance(self.model_config, (comfy.supported_models.Flux, comfy.supported_models.FluxSchnell, comfy.supported_models.Chroma)):
                 self.text_len_base = 256
                 self.text_channels = 4096
                 self.pooled_len    = 768
@@ -684,7 +684,7 @@ class EmptyConditioningGenerator:
                 self.text_channels = 4096
                 self.pooled_len    = 1
             else:
-                raise ValueError(f"Unknown model config: {type(config)}")
+                raise ValueError(f"Unknown model config: {type(self.model_config)}")
         elif conditioning is not None:
             self.device        = conditioning[0][0].device
             self.dtype         = conditioning[0][0].dtype
@@ -1188,7 +1188,7 @@ class ClownRegionalConditioning_AB:
             
             cond = merge_with_base(base=cond, others=[conditioning_A, conditioning_B])
             
-            if 'pooled_output' in cond[0][1]:
+            if 'pooled_output' in cond[0][1] and cond[0][1]['pooled_output'] is not None:
                 cond[0][1]['pooled_output'] = (conditioning_A[0][1]['pooled_output'] + conditioning_B[0][1]['pooled_output']) / 2
                 
         else:
@@ -1418,7 +1418,7 @@ class ClownRegionalConditioning_ABC:
             
             conditioning = merge_with_base(base=conditioning, others=[conditioning_A, conditioning_B, conditioning_C])
             
-            if 'pooled_output' in conditioning[0][1]:
+            if 'pooled_output' in conditioning[0][1] and conditioning[0][1]['pooled_output'] is not None:
                 conditioning[0][1]['pooled_output'] = (conditioning_A[0][1]['pooled_output'] + conditioning_B[0][1]['pooled_output'] + conditioning_C[0][1]['pooled_output']) / 3
             
         else:
@@ -1731,7 +1731,7 @@ class ClownRegionalConditionings:
         
         conditioning = merge_with_base(base=conditioning, others=cond_list)
         
-        if 'pooled_output' in conditioning[0][1]:
+        if 'pooled_output' in conditioning[0][1] and conditioning[0][1]['pooled_output'] is not None:
             conditioning[0][1]['pooled_output'] = torch.stack([cond_tmp[0][1]['pooled_output'] for cond_tmp in cond_list]).mean(dim=0)
 
             #conditioning[0][1]['pooled_output'] = cond_list[0][0][1]['pooled_output']
