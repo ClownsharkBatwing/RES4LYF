@@ -190,6 +190,7 @@ class ReChroma(nn.Module):
         weight    = -1 * transformer_options.get("regional_conditioning_weight", 0.0)
         floor     = -1 * transformer_options.get("regional_conditioning_floor",  0.0)
         mask_zero = None
+        mask = None
         
         text_len = txt.shape[1] # mask_obj[0].text_len
         
