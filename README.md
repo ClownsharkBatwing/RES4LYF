@@ -87,7 +87,7 @@ For example, the prompt for the below was simply "a gritty illustration of a jap
 
 Unlimited zones! Over 10 zones have been used in one image before. 
 
-Currently supported models: HiDream, Flux, SD3.5, and AuraFlow, and WAN.
+Currently supported models: HiDream, Flux, Chroma, SD3.5, and AuraFlow, and WAN.
 
 Masks can be drawn freely, or more traditional rigid ones may be used, such as in this example:
 
