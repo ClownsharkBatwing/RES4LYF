@@ -27,7 +27,7 @@ from .beta.rk_method_beta        import RK_Method_Beta
 from .beta.rk_noise_sampler_beta import RK_NoiseSampler, NOISE_MODE_NAMES
 from .helper                     import get_res4lyf_scheduler_list
 from .sigmas                     import get_sigmas
-
+from .images                     import image_resize
 
 
 
@@ -157,112 +157,6 @@ class SigmasPreview(SaveImage):
 
 
 
-# adapted from https://github.com/cubiq/ComfyUI_essentials
-def image_resize(image,
-                width,
-                height,
-                method          = "stretch",
-                interpolation   = "nearest",
-                condition       = "always",
-                multiple_of     = 0,
-                keep_proportion = False):
-    
-    _, oh, ow, _ = image.shape
-    x = y = x2 = y2 = 0
-    pad_left = pad_right = pad_top = pad_bottom = 0
-
-    if keep_proportion:
-        method = "keep proportion"
-
-    if multiple_of > 1:
-        width = width - (width % multiple_of)
-        height = height - (height % multiple_of)
-
-    if method == 'keep proportion' or method == 'pad':
-        if width == 0 and oh < height:
-            width = MAX_RESOLUTION
-        elif width == 0 and oh >= height:
-            width = ow
-
-        if height == 0 and ow < width:
-            height = MAX_RESOLUTION
-        elif height == 0 and ow >= width:
-            height = oh
-
-        ratio = min(width / ow, height / oh)
-        new_width = round(ow*ratio)
-        new_height = round(oh*ratio)
-
-        if method == 'pad':
-            pad_left = (width - new_width) // 2
-            pad_right = width - new_width - pad_left
-            pad_top = (height - new_height) // 2
-            pad_bottom = height - new_height - pad_top
-
-        width = new_width
-        height = new_height
-    elif method.startswith('fill'):
-        width = width if width > 0 else ow
-        height = height if height > 0 else oh
-
-        ratio = max(width / ow, height / oh)
-        new_width = round(ow*ratio)
-        new_height = round(oh*ratio)
-        x = (new_width - width) // 2
-        y = (new_height - height) // 2
-        x2 = x + width
-        y2 = y + height
-        if x2 > new_width:
-            x -= (x2 - new_width)
-        if x < 0:
-            x = 0
-        if y2 > new_height:
-            y -= (y2 - new_height)
-        if y < 0:
-            y = 0
-        width = new_width
-        height = new_height
-    else:
-        width = width if width > 0 else ow
-        height = height if height > 0 else oh
-
-    if "always" in condition \
-        or ("downscale if bigger" == condition and (oh > height or ow > width)) or ("upscale if smaller" == condition and (oh < height or ow < width)) \
-        or ("bigger area" in condition and (oh * ow > height * width)) or ("smaller area" in condition and (oh * ow < height * width)):
-
-        outputs = image.permute(0,3,1,2)
-
-        if interpolation == "lanczos":
-            outputs = comfy.utils.lanczos(outputs, width, height)
-        else:
-            outputs = F.interpolate(outputs, size=(height, width), mode=interpolation)
-
-        if method == 'pad':
-            if pad_left > 0 or pad_right > 0 or pad_top > 0 or pad_bottom > 0:
-                outputs = F.pad(outputs, (pad_left, pad_right, pad_top, pad_bottom), value=0)
-
-        outputs = outputs.permute(0,2,3,1)
-
-        if method.startswith('fill'):
-            if x > 0 or y > 0 or x2 > 0 or y2 > 0:
-                outputs = outputs[:, y:y2, x:x2, :]
-    else:
-        outputs = image
-
-    if multiple_of > 1 and (outputs.shape[2] % multiple_of != 0 or outputs.shape[1] % multiple_of != 0):
-        width = outputs.shape[2]
-        height = outputs.shape[1]
-        x = (width % multiple_of) // 2
-        y = (height % multiple_of) // 2
-        x2 = width - ((width % multiple_of) - x)
-        y2 = height - ((height % multiple_of) - y)
-        outputs = outputs[:, y:y2, x:x2, :]
-    
-    outputs = torch.clamp(outputs, 0, 1)
-
-    return outputs
-
-
 
 class VAEEncodeAdvanced:
     @classmethod
@@ -389,6 +283,80 @@ class VAEEncodeAdvanced:
                 width, 
                 height,
                 )
+
+
+class LatentUpscaleWithVAE:
+    def __init__(self):
+        pass
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "latent":   ("LATENT", ),      
+                "width" : ("INT", {"default": 1024, "min": 8, "max": 1024 ** 2, "step": 8}),
+                "height": ("INT", {"default": 1024, "min": 8, "max": 1024 ** 2, "step": 8}),
+                "vae": ("VAE", ),
+                },
+                }
+
+    RETURN_TYPES = ("LATENT",)
+    RETURN_NAMES = ("latent",)
+    FUNCTION     = "main"
+    CATEGORY     = "RES4LYF/latents"
+
+    def main(self,
+            latent,
+            width,
+            height,
+            vae,
+            method          = "stretch",
+            interpolation   = "lanczos",
+            condition       = "always",
+            multiple_of     = 0,
+            keep_proportion = False,
+            ):
+        
+        ratio = 8 # latent compression factor
+        
+        # this is unfortunately required to avoid apparent non-deterministic outputs. 
+        # without setting the seed each time, the outputs of the VAE encode will change with every generation.
+        torch     .manual_seed    (42)          
+        torch.cuda.manual_seed_all(42)
+        
+        images_prev_list, latent_prev_list = [], []
+        
+        if 'state_info' in latent:
+            #images      = vae.decode(latent['state_info']['raw_x']  ) # .to(latent['samples']) )
+            images      = vae.decode(latent['state_info']['denoised']  ) # .to(latent['samples']) )
+            
+            data_prev_ = latent['state_info']['data_prev_'].squeeze(0)
+            for i in range(data_prev_.shape[0]):
+                images_prev_list.append(   vae.decode(data_prev_[i])  ) # .to(latent['samples'])  )
+        else:
+            images = vae.decode(latent['samples'])
+            
+        if len(images.shape) == 5: #Combine batches
+            images = images.reshape(-1, images.shape[-3], images.shape[-2], images.shape[-1])
+            
+        images = image_resize(images, width, height, method, interpolation, condition, multiple_of, keep_proportion)
+        latent_tensor = vae.encode(images[:,:,:,:3])
+        
+        if images_prev_list:
+            for i in range(data_prev_.shape[0]):
+                image_data_p = image_resize(images_prev_list[i], width, height, method, interpolation, condition, multiple_of, keep_proportion)
+                latent_prev_list.append(   vae.encode(image_data_p[:,:,:,:3])   )
+            latent_prev = torch.stack(latent_prev_list).unsqueeze(0)     #.view_as(latent['state_info']['data_prev_'])
+            #images_prev = image_resize(images_prev, width, height, method, interpolation, condition, multiple_of, keep_proportion)
+            #latent_tensor = vae.encode(image_1[:,:,:,:3])
+        
+        if 'state_info' in latent:
+            #latent['state_info']['raw_x']      = latent_tensor
+            latent['state_info']['denoised']   = latent_tensor
+            latent['state_info']['data_prev_'] = latent_prev
+            
+        latent['samples'] = latent_tensor.to(latent['samples'])
+
+        return (latent,)
 
 
 

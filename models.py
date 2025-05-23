@@ -163,7 +163,7 @@ class TorchCompileModels:
                     self._compiled = True
                     
                 if self._compiled == False:
-                    raise RuntimeError("Model not compiled. Verify that this is a Flux, SD3.5, Wan, or Aura model!")
+                    raise RuntimeError("Model not compiled. Verify that this is a Flux, SD3.5, HiDream, WAN, or Aura model!")
                 
                 compile_settings = {
                     "backend": backend,
@@ -174,7 +174,7 @@ class TorchCompileModels:
                 
                 setattr(m.model, "compile_settings", compile_settings)
             except:
-                raise RuntimeError("Failed to compile model. Verify that this is a Flux, SD3.5, Wan, or Aura model!")
+                raise RuntimeError("Failed to compile model. Verify that this is a Flux, SD3.5, HiDream, WAN, or Aura model!")
         
         return (m, )
 
@@ -265,7 +265,7 @@ class ReWanPatcherAdvanced:
                 block.cross_attn.__class__ = WanT2VCrossAttention
                 block.idx       = i
 
-        else:
+        elif model.model.diffusion_model.__class__ not in {ReWanModel, WanModel}:
             raise ValueError("This node is for enabling regional conditioning for WAN only!")
             m = model
         
@@ -306,7 +306,7 @@ class ReFluxPatcherAdvanced:
                 "model"               : ("MODEL",),
                 "doublestream_blocks" : ("STRING",  {"default": "all", "multiline": True}),
                 "singlestream_blocks" : ("STRING",  {"default": "all", "multiline": True}),
-                "style_dtype"         : (["default", "bfloat16", "float16", "float32", "float64"],  {"default": "float32"}),
+                "style_dtype"         : (["default", "bfloat16", "float16", "float32", "float64"],  {"default": "float64"}),
                 "enable"              : ("BOOLEAN", {"default": True}),
             }
         }
@@ -356,7 +356,8 @@ class ReFluxPatcherAdvanced:
                 block.__class__ = SingleStreamBlock
                 block.idx       = i
                 
-        elif model.model.diffusion_model.__class__ != Flux and model.model.diffusion_model.__class__ != ReFlux:
+        #elif model.model.diffusion_model.__class__ != Flux and model.model.diffusion_model.__class__ != ReFlux:
+        elif model.model.diffusion_model.__class__ not in {ReFlux, Flux}:
             raise ValueError("This node is for enabling regional conditioning for Flux only!")
         else:
             m = model
@@ -369,7 +370,7 @@ class ReFluxPatcher(ReFluxPatcherAdvanced):
         return {
             "required": {
                 "model"       : ("MODEL",),
-                "style_dtype" : (["default", "bfloat16", "float16", "float32", "float64"],  {"default": "float32"}),
+                "style_dtype" : (["default", "bfloat16", "float16", "float32", "float64"],  {"default": "float64"}),
                 "enable"      : ("BOOLEAN", {"default": True}),
             }
         }
@@ -403,7 +404,7 @@ class ReChromaPatcherAdvanced:
                 "model"               : ("MODEL",),
                 "doublestream_blocks" : ("STRING",  {"default": "all", "multiline": True}),
                 "singlestream_blocks" : ("STRING",  {"default": "all", "multiline": True}),
-                "style_dtype"         : (["default", "bfloat16", "float16", "float32", "float64"],  {"default": "float32"}),
+                "style_dtype"         : (["default", "bfloat16", "float16", "float32", "float64"],  {"default": "float64"}),
                 "enable"              : ("BOOLEAN", {"default": True}),
             }
         }
@@ -453,7 +454,8 @@ class ReChromaPatcherAdvanced:
                 block.__class__ = SingleStreamBlock
                 block.idx       = i
                 
-        elif model.model.diffusion_model.__class__ != Chroma and model.model.diffusion_model.__class__ != ReChroma:
+        #elif model.model.diffusion_model.__class__ != Chroma and model.model.diffusion_model.__class__ != ReChroma:
+        elif model.model.diffusion_model.__class__ not in {ReChroma, Chroma}:
             raise ValueError("This node is for enabling regional conditioning for Chroma only!")
         else:
             m = model
@@ -466,7 +468,7 @@ class ReChromaPatcher(ReChromaPatcherAdvanced):
         return {
             "required": {
                 "model"       : ("MODEL",),
-                "style_dtype" : (["default", "bfloat16", "float16", "float32", "float64"],  {"default": "float32"}),
+                "style_dtype" : (["default", "bfloat16", "float16", "float32", "float64"],  {"default": "float64"}),
                 "enable"      : ("BOOLEAN", {"default": True}),
             }
         }
@@ -503,7 +505,7 @@ class ReLTXVPatcherAdvanced:
                 "model"               : ("MODEL",),
                 "doublestream_blocks" : ("STRING",  {"default": "all", "multiline": True}),
                 "singlestream_blocks" : ("STRING",  {"default": "all", "multiline": True}),
-                "style_dtype"         : (["default", "bfloat16", "float16", "float32", "float64"],  {"default": "float32"}),
+                "style_dtype"         : (["default", "bfloat16", "float16", "float32", "float64"],  {"default": "float64"}),
                 "enable"              : ("BOOLEAN", {"default": True}),
             }
         }
@@ -553,7 +555,8 @@ class ReLTXVPatcherAdvanced:
                 block.__class__ = SingleStreamBlock
                 block.idx       = i"""
                 
-        elif model.model.diffusion_model.__class__ != LTXVModel and model.model.diffusion_model.__class__ != ReLTXVModel:
+        #elif model.model.diffusion_model.__class__ != LTXVModel and model.model.diffusion_model.__class__ != ReLTXVModel:
+        elif model.model.diffusion_model.__class__ not in {ReLTXVModel, LTXVModel}:
             raise ValueError("This node is for enabling regional conditioning for LTXV only!")
         else:
             m = model
@@ -593,7 +596,7 @@ class ReSDPatcherAdvanced:
                 "model"               : ("MODEL",),
                 "doublestream_blocks" : ("STRING",  {"default": "all", "multiline": True}),
                 "singlestream_blocks" : ("STRING",  {"default": "all", "multiline": True}),
-                "style_dtype"         : (["default", "bfloat16", "float16", "float32", "float64"],  {"default": "float32"}),
+                "style_dtype"         : (["default", "bfloat16", "float16", "float32", "float64"],  {"default": "float64"}),
                 "enable"              : ("BOOLEAN", {"default": True}),
             }
         }
@@ -644,7 +647,8 @@ class ReSDPatcherAdvanced:
                 block.__class__ = SingleStreamBlock
                 block.idx       = i"""
                 
-        elif model.model.diffusion_model.__class__ != UNetModel and model.model.diffusion_model.__class__ != ReUNetModel:
+        #elif model.model.diffusion_model.__class__ != UNetModel and model.model.diffusion_model.__class__ != ReUNetModel:
+        elif model.model.diffusion_model.__class__ not in {ReUNetModel, UNetModel}:
             raise ValueError("This node is for enabling regional conditioning for SD1.5 and SDXL only!")
         else:
             m = model
@@ -657,7 +661,7 @@ class ReSDPatcher(ReSDPatcherAdvanced):
         return {
             "required": {
                 "model"       : ("MODEL",),
-                "style_dtype" : (["default", "bfloat16", "float16", "float32", "float64"],  {"default": "float32"}),
+                "style_dtype" : (["default", "bfloat16", "float16", "float32", "float64"],  {"default": "float64"}),
                 "enable"      : ("BOOLEAN", {"default": True}),
             }
         }
@@ -696,7 +700,7 @@ class ReHiDreamPatcherAdvanced:
                 "model"                : ("MODEL",),
                 "double_stream_blocks" : ("STRING",  {"default": "all", "multiline": True}),
                 "single_stream_blocks" : ("STRING",  {"default": "all", "multiline": True}),
-                "style_dtype"          : (["default", "bfloat16", "float16", "float32", "float64"],  {"default": "default"}),
+                "style_dtype"          : (["default", "bfloat16", "float16", "float32", "float64"],  {"default": "float64"}),
                 "enable"               : ("BOOLEAN", {"default": True}),
             }
         }
@@ -772,7 +776,8 @@ class ReHiDreamPatcherAdvanced:
                     block.block.attn1.__class__ = HiDreamAttention
                 block.idx       = i
                 
-        elif model.model.diffusion_model.__class__ != HDModel and model.model.diffusion_model.__class__ != HiDreamImageTransformer2DModel:
+        #elif model.model.diffusion_model.__class__ != HDModel and model.model.diffusion_model.__class__ != HiDreamImageTransformer2DModel:
+        elif model.model.diffusion_model.__class__ not in {HDModel, HiDreamImageTransformer2DModel}:
             raise ValueError("This node is for enabling regional conditioning for HiDream only!")
         else:
             m = model
@@ -785,7 +790,7 @@ class ReHiDreamPatcher(ReHiDreamPatcherAdvanced):
         return {
             "required": {
                 "model"       : ("MODEL",),
-                "style_dtype" : (["default", "bfloat16", "float16", "float32", "float64"],  {"default": "default"}),
+                "style_dtype" : (["default", "bfloat16", "float16", "float32", "float64"],  {"default": "float64"}),
                 "enable"      : ("BOOLEAN", {"default": True}),
             }
         }
@@ -813,7 +818,7 @@ class ReSD35PatcherAdvanced:
             "required": { 
                 "model"        : ("MODEL",),
                 "joint_blocks" : ("STRING",  {"default": "all", "multiline": True}),
-                "style_dtype"  : (["default", "bfloat16", "float16", "float32", "float64"],  {"default": "float32"}),
+                "style_dtype"  : (["default", "bfloat16", "float16", "float32", "float64"],  {"default": "float64"}),
                 "enable"       : ("BOOLEAN", {"default": True}),
             }
         }
@@ -850,7 +855,7 @@ class ReSD35PatcherAdvanced:
                 block.__class__ = JointBlock
                 block.idx       = i
 
-        else:
+        elif model.model.diffusion_model.__class__ not in {ReOpenAISignatureMMDITWrapper, OpenAISignatureMMDITWrapper}:
             raise ValueError("This node is for enabling regional conditioning for SD3.5 only!")
             m = model
         
@@ -862,7 +867,7 @@ class ReSD35Patcher(ReSD35PatcherAdvanced):
         return {
             "required": {
                 "model"       : ("MODEL",),
-                "style_dtype" : (["default", "bfloat16", "float16", "float32", "float64"],  {"default": "float32"}),
+                "style_dtype" : (["default", "bfloat16", "float16", "float32", "float64"],  {"default": "float64"}),
                 "enable"      : ("BOOLEAN", {"default": True}),
             }
         }
@@ -892,7 +897,7 @@ class ReAuraPatcherAdvanced:
                 "model"              : ("MODEL",),
                 "doublelayer_blocks" : ("STRING",  {"default": "all", "multiline": True}),
                 "singlelayer_blocks" : ("STRING",  {"default": "all", "multiline": True}),
-                "style_dtype"        : (["default", "bfloat16", "float16", "float32", "float64"],  {"default": "float32"}),
+                "style_dtype"        : (["default", "bfloat16", "float16", "float32", "float64"],  {"default": "float64"}),
                 "enable"             : ("BOOLEAN", {"default": True}),
             }
         }
@@ -945,7 +950,7 @@ class ReAuraPatcherAdvanced:
                 block.attn.__class__ = SingleAttention
                 block.idx       = i
 
-        else:
+        elif model.model.diffusion_model.__class__ not in {ReMMDiT, MMDiT}:
             raise ValueError("This node is for enabling regional conditioning for AuraFlow only!")
             m = model
         
@@ -957,7 +962,7 @@ class ReAuraPatcher(ReAuraPatcherAdvanced):
         return {
             "required": {
                 "model"       : ("MODEL",),
-                "style_dtype" : (["default", "bfloat16", "float16", "float32", "float64"],  {"default": "float32"}),
+                "style_dtype" : (["default", "bfloat16", "float16", "float32", "float64"],  {"default": "float64"}),
                 "enable"      : ("BOOLEAN", {"default": True}),
             }
         }

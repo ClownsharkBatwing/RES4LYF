@@ -361,6 +361,9 @@ class latent_display_state_info:
         return {"ui": {"text": text}, "result": (text,)}
 
 
+
+
+
 class latent_transfer_state_info:
     def __init__(self):
         pass

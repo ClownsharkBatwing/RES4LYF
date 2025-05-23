@@ -121,7 +121,7 @@ NODE_CLASS_MAPPINGS = {
     "Set Precision Universal"             : nodes_precision.set_precision_universal,
     "Set Precision Advanced"              : nodes_precision.set_precision_advanced,
     
-    
+    "LatentUpscaleWithVAE"                : helper_sigma_preview_image_preproc.LatentUpscaleWithVAE,
     
     "LatentNoised"                        : nodes_latents.LatentNoised,
     "LatentNoiseList"                     : nodes_latents.LatentNoiseList,
