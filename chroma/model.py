@@ -485,7 +485,7 @@ class ReChroma(nn.Module):
                     context_tmp = context[i][None,...].clone()"""
             
             
-            
+            context_tmp = None
             
             if not UNCOND and 'AttnMask' in transformer_options: # and weight != 0:
                 AttnMask = transformer_options['AttnMask']
