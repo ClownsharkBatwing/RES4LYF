@@ -672,7 +672,7 @@ class EmptyConditioningGenerator:
             elif isinstance(self.model_config, comfy.supported_models.HiDream):
                 self.text_len_base = 128
                 self.text_channels = 4096 # sometimes needs to be 4096, like when initializing in samplers_py in shark?
-                self.pooled_len    = 1
+                self.pooled_len    = 768
             elif isinstance(self.model_config, comfy.supported_models.LTXV):
                 self.text_len_base = 128
                 self.text_channels = 4096
