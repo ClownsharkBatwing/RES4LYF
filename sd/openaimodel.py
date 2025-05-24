@@ -24,15 +24,15 @@ from comfy.ldm.modules.diffusionmodules.openaimodel import TimestepBlock, Timest
 #This is needed because accelerate makes a copy of transformer_options which breaks "transformer_index"
 def forward_timestep_embed(ts, x, emb, context=None, transformer_options={}, output_shape=None, time_context=None, num_video_frames=None, image_only_indicator=None):
     for layer in ts:
-        if isinstance(layer, VideoResBlock):
+        if isinstance(layer, VideoResBlock): # UNUSED
             x = layer(x, emb, num_video_frames, image_only_indicator)
         elif isinstance(layer, TimestepBlock):
             x = layer(x, emb)
-        elif isinstance(layer, SpatialVideoTransformer):
+        elif isinstance(layer, SpatialVideoTransformer):   # UNUSED
             x = layer(x, context, time_context, num_video_frames, image_only_indicator, transformer_options)
             if "transformer_index" in transformer_options:
                 transformer_options["transformer_index"] += 1
-        elif isinstance(layer, SpatialTransformer):
+        elif isinstance(layer, SpatialTransformer):          # USED
             x = layer(x, context, transformer_options)
             if "transformer_index" in transformer_options:
                 transformer_options["transformer_index"] += 1
@@ -605,72 +605,308 @@ class ReUNetModel(nn.Module):
         
         x_orig = x.clone()
 
+        x_orig, timesteps_orig, y_orig, context_orig = clone_inputs(x, timesteps, y, context)
 
-        num_video_frames = kwargs.get("num_video_frames", self.default_num_video_frames)
-        image_only_indicator = kwargs.get("image_only_indicator", None)
-        time_context = kwargs.get("time_context", None)
+        weight    = -1 * transformer_options.get("regional_conditioning_weight", 0.0)
+        floor     = -1 * transformer_options.get("regional_conditioning_floor",  0.0)
+        #floor     = min(floor, weight)
+        mask_zero, mask_up_zero, mask_down_zero, mask_down2_zero = None, None, None, None
+        txt_len = context.shape[1] # mask_obj[0].text_len
 
-        assert (y is not None) == (
-            self.num_classes is not None
-        ), "must specify y if and only if the model is class-conditional"
-        hs = []
-        t_emb = timestep_embedding(timesteps, self.model_channels, repeat_only=False).to(x.dtype)
-        emb = self.time_embed(t_emb)
+        out_list = []
+        for cond_iter in range(len(transformer_options['cond_or_uncond'])):
+            UNCOND = transformer_options['cond_or_uncond'][cond_iter] == 1
+            
+            x, timesteps, context = clone_inputs(x_orig[cond_iter].unsqueeze(0), timesteps_orig[cond_iter].unsqueeze(0), context_orig[cond_iter].unsqueeze(0))
+            y = y_orig[cond_iter].unsqueeze(0).clone() if y_orig is not None else None
+            
+            mask, mask_up, mask_down, mask_down2 = None, None, None, None
+            if not UNCOND and 'AttnMask' in transformer_options: # and weight != 0:
+                AttnMask = transformer_options['AttnMask']
+                mask = transformer_options['AttnMask'].attn_mask.mask.to('cuda')
+                mask_up   = transformer_options['AttnMask'].mask_up.to('cuda')
+                mask_down = transformer_options['AttnMask'].mask_down.to('cuda')
+                if hasattr(transformer_options['AttnMask'], "mask_down2"):
+                    mask_down2 = transformer_options['AttnMask'].mask_down2.to('cuda')
+                if weight == 0:
+                    context = transformer_options['RegContext'].context.to(context.dtype).to(context.device)
+                    mask, mask_up, mask_down, mask_down2 = None, None, None, None
+                else:
+                    context = transformer_options['RegContext'].context.to(context.dtype).to(context.device)
+                    
+                txt_len = context.shape[1]
+                if mask_zero is None:
+                    mask_zero = torch.ones_like(mask)
+                    mask_zero[:, :txt_len] = mask[:, :txt_len]
+                if mask_up_zero is None:
+                    mask_up_zero = torch.ones_like(mask_up)
+                    mask_up_zero[:, :txt_len] = mask_up[:, :txt_len]
+                if mask_down_zero is None:
+                    mask_down_zero = torch.ones_like(mask_down)
+                    mask_down_zero[:, :txt_len] = mask_down[:, :txt_len]
+                if mask_down2_zero is None and mask_down2 is not None:
+                    mask_down2_zero = torch.ones_like(mask_down2)
+                    mask_down2_zero[:, :txt_len] = mask_down2[:, :txt_len]
 
-        if "emb_patch" in transformer_patches:
-            patch = transformer_patches["emb_patch"]
-            for p in patch:
-                emb = p(emb, self.model_channels, transformer_options)
 
-        if self.num_classes is not None:
-            assert y.shape[0] == x.shape[0]
-            emb = emb + self.label_emb(y)
+            if UNCOND and 'AttnMask_neg' in transformer_options: # and weight != 0:
+                AttnMask = transformer_options['AttnMask_neg']
+                mask = transformer_options['AttnMask_neg'].attn_mask.mask.to('cuda')
+                mask_up   = transformer_options['AttnMask_neg'].mask_up.to('cuda')
+                mask_down = transformer_options['AttnMask_neg'].mask_down.to('cuda')
+                if hasattr(transformer_options['AttnMask_neg'], "mask_down2"):
+                    mask_down2 = transformer_options['AttnMask_neg'].mask_down2.to('cuda')
+                if weight == 0:
+                    context = transformer_options['RegContext_neg'].context.to(context.dtype).to(context.device)
+                    mask, mask_up, mask_down, mask_down2 = None, None, None, None
+                else:
+                    context = transformer_options['RegContext_neg'].context.to(context.dtype).to(context.device)
+                    
+                txt_len = context.shape[1]
+                if mask_zero is None:
+                    mask_zero = torch.ones_like(mask)
+                    mask_zero[:, :txt_len] = mask[:, :txt_len]
+                if mask_up_zero is None:
+                    mask_up_zero = torch.ones_like(mask_up)
+                    mask_up_zero[:, :txt_len] = mask_up[:, :txt_len]
+                if mask_down_zero is None:
+                    mask_down_zero = torch.ones_like(mask_down)
+                    mask_down_zero[:, :txt_len] = mask_down[:, :txt_len]
+                if mask_down2_zero is None and mask_down2 is not None:
+                    mask_down2_zero = torch.ones_like(mask_down2)
+                    mask_down2_zero[:, :txt_len] = mask_down2[:, :txt_len]
 
-        h = x
-        for id, module in enumerate(self.input_blocks):
-            transformer_options["block"] = ("input", id)
-            h = forward_timestep_embed(module, h, emb, context, transformer_options, time_context=time_context, num_video_frames=num_video_frames, image_only_indicator=image_only_indicator)
-            h = apply_control(h, control, 'input')
-            if "input_block_patch" in transformer_patches:
-                patch = transformer_patches["input_block_patch"]
+            elif UNCOND and 'AttnMask' in transformer_options:
+                AttnMask = transformer_options['AttnMask']
+                mask = transformer_options['AttnMask'].attn_mask.mask.to('cuda')
+                mask_up   = transformer_options['AttnMask'].mask_up.to('cuda')
+                mask_down = transformer_options['AttnMask'].mask_down.to('cuda')
+                if hasattr(transformer_options['AttnMask'], "mask_down2"):
+                    mask_down2 = transformer_options['AttnMask'].mask_down2.to('cuda')
+                A       = context
+                B       = transformer_options['RegContext'].context
+                context = A.repeat(1,    (B.shape[1] // A.shape[1]) + 1, 1)[:,   :B.shape[1], :]
+                
+                txt_len = context.shape[1]
+                if mask_zero is None:
+                    mask_zero = torch.ones_like(mask)
+                    mask_zero[:, :txt_len] = mask[:, :txt_len]
+                if mask_up_zero is None:
+                    mask_up_zero = torch.ones_like(mask_up)
+                    mask_up_zero[:, :txt_len] = mask_up[:, :txt_len]
+                if mask_down_zero is None:
+                    mask_down_zero = torch.ones_like(mask_down)
+                    mask_down_zero[:, :txt_len] = mask_down[:, :txt_len]
+                if mask_down2_zero is None and mask_down2 is not None:
+                    mask_down2_zero = torch.ones_like(mask_down2)
+                    mask_down2_zero[:, :txt_len] = mask_down2[:, :txt_len]
+                if weight == 0:                                                                             # ADDED 5/23/2025
+                    mask, mask_up, mask_down, mask_down2 = None, None, None, None
+
+
+            if mask is not None:
+                transformer_options['cross_mask'] = mask[:,:txt_len]
+                transformer_options['self_mask']  = mask[:,txt_len:]
+                transformer_options['cross_mask_up'] = mask_up[:,:txt_len]
+                transformer_options['self_mask_up']  = mask_up[:,txt_len:]
+                transformer_options['cross_mask_down'] = mask_down[:,:txt_len]
+                transformer_options['self_mask_down']  = mask_down[:,txt_len:]
+                transformer_options['cross_mask_down2'] = mask_down2[:,:txt_len] if mask_down2 is not None else None
+                transformer_options['self_mask_down2']  = mask_down2[:,txt_len:] if mask_down2 is not None else None
+                
+
+            total_layers = len(self.input_blocks) + len(self.middle_block) + len(self.output_blocks)
+
+            num_video_frames = kwargs.get("num_video_frames", self.default_num_video_frames)
+            image_only_indicator = kwargs.get("image_only_indicator", None)
+            time_context = kwargs.get("time_context", None)
+
+            assert (y is not None) == (
+                self.num_classes is not None
+            ), "must specify y if and only if the model is class-conditional"
+            hs = []
+            t_emb = timestep_embedding(timesteps, self.model_channels, repeat_only=False).to(x.dtype)
+            emb = self.time_embed(t_emb)
+
+            if "emb_patch" in transformer_patches:
+                patch = transformer_patches["emb_patch"]
                 for p in patch:
-                    h = p(h, transformer_options)
+                    emb = p(emb, self.model_channels, transformer_options)
 
-            hs.append(h)
-            if "input_block_patch_after_skip" in transformer_patches:
-                patch = transformer_patches["input_block_patch_after_skip"]
-                for p in patch:
-                    h = p(h, transformer_options)
+            if self.num_classes is not None:
+                assert y.shape[0] == x.shape[0]
+                emb = emb + self.label_emb(y)
 
-        transformer_options["block"] = ("middle", 0)
-        if self.middle_block is not None:
-            h = forward_timestep_embed(self.middle_block, h, emb, context, transformer_options, time_context=time_context, num_video_frames=num_video_frames, image_only_indicator=image_only_indicator)
-        h = apply_control(h, control, 'middle')
+            h = x
+            for id, module in enumerate(self.input_blocks):
+                transformer_options["block"] = ("input", id)
+
+                if mask is not None:
+                    transformer_options['cross_mask'] = mask[:,:txt_len]
+                    transformer_options['self_mask']  = mask[:,txt_len:]
+                    transformer_options['cross_mask_up'] = mask_up[:,:txt_len]
+                    transformer_options['self_mask_up']  = mask_up[:,txt_len:]
+                    transformer_options['cross_mask_down'] = mask_down[:,:txt_len]
+                    transformer_options['self_mask_down']  = mask_down[:,txt_len:]
+                    transformer_options['cross_mask_down2'] = mask_down2[:,:txt_len] if mask_down2 is not None else None
+                    transformer_options['self_mask_down2']  = mask_down2[:,txt_len:] if mask_down2 is not None else None
+                    
+                if   weight > 0 and mask is not None and     weight  <      id/total_layers:
+                    transformer_options['cross_mask'] = None
+                    transformer_options['self_mask']  = None
+                
+                elif weight < 0 and mask is not None and abs(weight) < (1 - id/total_layers):
+                    transformer_options['cross_mask'] = None
+                    transformer_options['self_mask']  = None
+                    
+                elif floor > 0 and mask is not None and       floor  >      id/total_layers:
+                    transformer_options['cross_mask'] = mask_zero[:,:txt_len]
+                    transformer_options['self_mask']  = mask_zero[:,txt_len:]
+                    transformer_options['cross_mask_up'] = mask_up_zero[:,:txt_len]
+                    transformer_options['self_mask_up']  = mask_up_zero[:,txt_len:]
+                    transformer_options['cross_mask_down'] = mask_down_zero[:,:txt_len]
+                    transformer_options['self_mask_down']  = mask_down_zero[:,txt_len:]
+                    transformer_options['cross_mask_down2'] = mask_down2_zero[:,:txt_len] if mask_down2_zero is not None else None
+                    transformer_options['self_mask_down2']  = mask_down2_zero[:,txt_len:] if mask_down2_zero is not None else None
+                
+                elif floor < 0 and mask is not None and   abs(floor) > (1 - id/total_layers):
+                    transformer_options['cross_mask'] = mask_zero[:,:txt_len]
+                    transformer_options['self_mask']  = mask_zero[:,txt_len:]
+                    transformer_options['cross_mask_up'] = mask_up_zero[:,:txt_len]
+                    transformer_options['self_mask_up']  = mask_up_zero[:,txt_len:]
+                    transformer_options['cross_mask_down'] = mask_down_zero[:,:txt_len]
+                    transformer_options['self_mask_down']  = mask_down_zero[:,txt_len:]
+                    transformer_options['cross_mask_down2'] = mask_down2_zero[:,:txt_len] if mask_down2_zero is not None else None
+                    transformer_options['self_mask_down2']  = mask_down2_zero[:,txt_len:] if mask_down2_zero is not None else None
+                
+                
+                h = forward_timestep_embed(module, h, emb, context, transformer_options, time_context=time_context, num_video_frames=num_video_frames, image_only_indicator=image_only_indicator)
+                h = apply_control(h, control, 'input')
+                if "input_block_patch" in transformer_patches:
+                    patch = transformer_patches["input_block_patch"]
+                    for p in patch:
+                        h = p(h, transformer_options)
+
+                hs.append(h)
+                if "input_block_patch_after_skip" in transformer_patches:
+                    patch = transformer_patches["input_block_patch_after_skip"]
+                    for p in patch:
+                        h = p(h, transformer_options)
+
+            transformer_options["block"] = ("middle", 0)
+            if self.middle_block is not None:
+
+                if mask is not None:
+                    transformer_options['cross_mask'] = mask[:,:txt_len]
+                    transformer_options['self_mask']  = mask[:,txt_len:]
+                    transformer_options['cross_mask_up'] = mask_up[:,:txt_len]
+                    transformer_options['self_mask_up']  = mask_up[:,txt_len:]
+                    transformer_options['cross_mask_down'] = mask_down[:,:txt_len]
+                    transformer_options['self_mask_down']  = mask_down[:,txt_len:]
+                    transformer_options['cross_mask_down2'] = mask_down2[:,:txt_len] if mask_down2 is not None else None
+                    transformer_options['self_mask_down2']  = mask_down2[:,txt_len:] if mask_down2 is not None else None
+                    
+                if   weight > 0 and mask is not None and     weight  <      (len(self.input_blocks) + 1)/total_layers:
+                    transformer_options['cross_mask'] = None
+                    transformer_options['self_mask']  = None
+                
+                elif weight < 0 and mask is not None and abs(weight) < (1 - (len(self.input_blocks) + 1)/total_layers):
+                    transformer_options['cross_mask'] = None
+                    transformer_options['self_mask']  = None
+                    
+                elif floor > 0 and mask is not None and       floor  >      (len(self.input_blocks) + 1)/total_layers:
+                    transformer_options['cross_mask'] = mask_zero[:,:txt_len]
+                    transformer_options['self_mask']  = mask_zero[:,txt_len:]
+                    transformer_options['cross_mask_up'] = mask_up_zero[:,:txt_len]
+                    transformer_options['self_mask_up']  = mask_up_zero[:,txt_len:]
+                    transformer_options['cross_mask_down'] = mask_down_zero[:,:txt_len]
+                    transformer_options['self_mask_down']  = mask_down_zero[:,txt_len:]
+                    transformer_options['cross_mask_down2'] = mask_down2_zero[:,:txt_len] if mask_down2_zero is not None else None
+                    transformer_options['self_mask_down2']  = mask_down2_zero[:,txt_len:] if mask_down2_zero is not None else None
+                
+                elif floor < 0 and mask is not None and   abs(floor) > (1 - (len(self.input_blocks) + 1)/total_layers):
+                    transformer_options['cross_mask'] = mask_zero[:,:txt_len]
+                    transformer_options['self_mask']  = mask_zero[:,txt_len:]
+                    transformer_options['cross_mask_up'] = mask_up_zero[:,:txt_len]
+                    transformer_options['self_mask_up']  = mask_up_zero[:,txt_len:]
+                    transformer_options['cross_mask_down'] = mask_down_zero[:,:txt_len]
+                    transformer_options['self_mask_down']  = mask_down_zero[:,txt_len:]
+                    transformer_options['cross_mask_down2'] = mask_down2_zero[:,:txt_len] if mask_down2_zero is not None else None
+                    transformer_options['self_mask_down2']  = mask_down2_zero[:,txt_len:] if mask_down2_zero is not None else None
+
+                h = forward_timestep_embed(self.middle_block, h, emb, context, transformer_options, time_context=time_context, num_video_frames=num_video_frames, image_only_indicator=image_only_indicator)
+            h = apply_control(h, control, 'middle')
 
 
-        for id, module in enumerate(self.output_blocks):
-            transformer_options["block"] = ("output", id)
-            hsp = hs.pop()
-            hsp = apply_control(hsp, control, 'output')
+            for id, module in enumerate(self.output_blocks):
+                transformer_options["block"] = ("output", id)
+                hsp = hs.pop()
+                hsp = apply_control(hsp, control, 'output')
 
-            if "output_block_patch" in transformer_patches:
-                patch = transformer_patches["output_block_patch"]
-                for p in patch:
-                    h, hsp = p(h, hsp, transformer_options)
+                if "output_block_patch" in transformer_patches:
+                    patch = transformer_patches["output_block_patch"]
+                    for p in patch:
+                        h, hsp = p(h, hsp, transformer_options)
 
-            h = th.cat([h, hsp], dim=1)
-            del hsp
-            if len(hs) > 0:
-                output_shape = hs[-1].shape
+                h = th.cat([h, hsp], dim=1)
+                del hsp
+                if len(hs) > 0:
+                    output_shape = hs[-1].shape
+                else:
+                    output_shape = None
+                    
+                    
+                    
+                if mask is not None:
+                    transformer_options['cross_mask'] = mask[:,:txt_len]
+                    transformer_options['self_mask']  = mask[:,txt_len:]
+                    transformer_options['cross_mask_up'] = mask_up[:,:txt_len]
+                    transformer_options['self_mask_up']  = mask_up[:,txt_len:]
+                    transformer_options['cross_mask_down'] = mask_down[:,:txt_len]
+                    transformer_options['self_mask_down']  = mask_down[:,txt_len:]
+                    transformer_options['cross_mask_down2'] = mask_down2[:,:txt_len] if mask_down2 is not None else None
+                    transformer_options['self_mask_down2']  = mask_down2[:,txt_len:] if mask_down2 is not None else None
+                    
+                if   weight > 0 and mask is not None and     weight  <      (len(self.input_blocks) + 1 + id)/total_layers:
+                    transformer_options['cross_mask'] = None
+                    transformer_options['self_mask']  = None
+                
+                elif weight < 0 and mask is not None and abs(weight) < (1 - (len(self.input_blocks) + 1 + id)/total_layers):
+                    transformer_options['cross_mask'] = None
+                    transformer_options['self_mask']  = None
+                    
+                elif floor > 0 and mask is not None and       floor  >      (len(self.input_blocks) + 1 + id)/total_layers:
+                    transformer_options['cross_mask'] = mask_zero[:,:txt_len]
+                    transformer_options['self_mask']  = mask_zero[:,txt_len:]
+                    transformer_options['cross_mask_up'] = mask_up_zero[:,:txt_len]
+                    transformer_options['self_mask_up']  = mask_up_zero[:,txt_len:]
+                    transformer_options['cross_mask_down'] = mask_down_zero[:,:txt_len]
+                    transformer_options['self_mask_down']  = mask_down_zero[:,txt_len:]
+                    transformer_options['cross_mask_down2'] = mask_down2_zero[:,:txt_len] if mask_down2_zero is not None else None
+                    transformer_options['self_mask_down2']  = mask_down2_zero[:,txt_len:] if mask_down2_zero is not None else None
+                
+                elif floor < 0 and mask is not None and   abs(floor) > (1 - (len(self.input_blocks) + 1 + id)/total_layers):
+                    transformer_options['cross_mask'] = mask_zero[:,:txt_len]
+                    transformer_options['self_mask']  = mask_zero[:,txt_len:]
+                    transformer_options['cross_mask_up'] = mask_up_zero[:,:txt_len]
+                    transformer_options['self_mask_up']  = mask_up_zero[:,txt_len:]
+                    transformer_options['cross_mask_down'] = mask_down_zero[:,:txt_len]
+                    transformer_options['self_mask_down']  = mask_down_zero[:,txt_len:]
+                    transformer_options['cross_mask_down2'] = mask_down2_zero[:,:txt_len] if mask_down2_zero is not None else None
+                    transformer_options['self_mask_down2']  = mask_down2_zero[:,txt_len:] if mask_down2_zero is not None else None
+
+                    
+                h = forward_timestep_embed(module, h, emb, context, transformer_options, output_shape, time_context=time_context, num_video_frames=num_video_frames, image_only_indicator=image_only_indicator)
+            h = h.type(x.dtype)
+            
+            if self.predict_codebook_ids:
+                eps = self.id_predictor(h)
             else:
-                output_shape = None
-            h = forward_timestep_embed(module, h, emb, context, transformer_options, output_shape, time_context=time_context, num_video_frames=num_video_frames, image_only_indicator=image_only_indicator)
-        h = h.type(x.dtype)
-        
-        if self.predict_codebook_ids:
-            eps = self.id_predictor(h)
-        else:
-            eps = self.out(h)
+                eps = self.out(h)
+                
+            out_list.append(eps)
+            
+        eps = torch.stack(out_list, dim=0).squeeze(dim=1)
 
 
 
@@ -857,3 +1093,20 @@ def adain_seq_inplace(content: torch.Tensor, style: torch.Tensor, eps: float = 1
 def adain_seq(content: torch.Tensor, style: torch.Tensor, eps: float = 1e-7) -> torch.Tensor:
     return ((content - content.mean(1, keepdim=True)) / (content.std(1, keepdim=True) + eps)) * (style.std(1, keepdim=True) + eps) + style.mean(1, keepdim=True)
 
+    
+def clone_inputs_unsafe(*args, index: int=None):
+
+    if index is None:
+        return tuple(x.clone() for x in args)
+    else:
+        return tuple(x[index].unsqueeze(0).clone() for x in args)
+    
+    
+def clone_inputs(*args, index: int = None):
+    if index is None:
+        return tuple(x.clone() if x is not None else None for x in args)
+    else:
+        return tuple(x[index].unsqueeze(0).clone() if x is not None else None for x in args)
+    
+    
+    
