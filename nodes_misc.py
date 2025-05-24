@@ -5,6 +5,52 @@ import os
 import random
 
 
+class SetImageSize:
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {"required":
+                    {
+                    "width" : ("INT", {"default": 1024, "min": 1, "max": 10000}),
+                    "height": ("INT", {"default": 1024, "min": 1, "max": 10000}),
+                    },
+                    "optional": 
+                    {
+                    }  
+                }
+    RETURN_TYPES = ("INT", "INT",)
+    RETURN_NAMES = ("width","height",)
+    FUNCTION = "main"
+    
+    CATEGORY = "RES4LYF/images"
+    DESCRIPTION = "Generate a pair of integers for image sizes."
+
+    def main(self, width, height):
+        return (width, height,)
+
+
+class SetImageSizeWithScale:
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {"required":
+                    {
+                    "width" : ("INT", {"default": 1024, "min": 1, "max": 10000}),
+                    "height": ("INT", {"default": 1024, "min": 1, "max": 10000}),
+                    "scale_by": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 10000, "step":0.01}),
+                    },
+                    "optional": 
+                    {
+                    }  
+                }
+    RETURN_TYPES = ("INT", "INT", "INT", "INT",)
+    RETURN_NAMES = ("width","height","width_scaled","height_scaled",)
+    FUNCTION = "main"
+    
+    CATEGORY = "RES4LYF/images"
+    DESCRIPTION = "Generate a pair of integers for image sizes."
+
+    def main(self, width, height, scale_by):
+        return (width, height, int(width*scale_by), int(height*scale_by))
+
 
 class TextBox1:
     @classmethod

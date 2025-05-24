@@ -302,6 +302,10 @@ NODE_CLASS_MAPPINGS = {
     "Constant Scheduler"                  : sigmas.constant_scheduler,
     "Linear Quadratic Advanced"           : sigmas.linear_quadratic_advanced,
     
+    "SetImageSizeWithScale"               : nodes_misc.SetImageSizeWithScale,
+    "SetImageSize"                        : nodes_misc.SetImageSize,
+    
+    
     "Image Get Color Swatches"            : images.Image_Get_Color_Swatches,
     "Masks From Color Swatches"           : images.Masks_From_Color_Swatches,
     "Masks From Colors"                   : images.Masks_From_Colors,
