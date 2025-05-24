@@ -1713,7 +1713,7 @@ class ClownRegionalConditionings:
         elif isinstance(model.model.model_config, comfy.supported_models.HiDream):
             AttnMask = FullAttentionMaskHiDream(mask_type, edge_width_list=edge_width_list, use_self_attn_mask_list=use_self_attn_mask_list)
         elif isinstance(model.model.model_config, comfy.supported_models.SDXL) or isinstance(model.model.model_config, comfy.supported_models.SD15):
-            AttnMask = SplitAttentionMask(mask_type, edge_width_list=edge_width_list)
+            AttnMask = SplitAttentionMask(mask_type, edge_width_list=edge_width_list, use_self_attn_mask_list=use_self_attn_mask_list)
         else:
             AttnMask = FullAttentionMask       (mask_type, edge_width_list=edge_width_list, use_self_attn_mask_list=use_self_attn_mask_list)
 
