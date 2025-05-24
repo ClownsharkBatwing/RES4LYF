@@ -677,6 +677,14 @@ class EmptyConditioningGenerator:
                 self.text_len_base = 128
                 self.text_channels = 4096
                 self.pooled_len    = 1
+            elif isinstance(self.model_config, comfy.supported_models.SD15):
+                self.text_len_base = 77
+                self.text_channels = 768
+                self.pooled_len    = 768
+            elif isinstance(self.model_config, comfy.supported_models.SDXL):
+                self.text_len_base = 77
+                self.text_channels = 2048
+                self.pooled_len    = 1280
             elif isinstance(self.model_config, comfy.supported_models.HunyuanVideo) or \
                 isinstance (self.model_config, comfy.supported_models.HunyuanVideoI2V) or \
                 isinstance (self.model_config, comfy.supported_models.HunyuanVideoSkyreelsI2V):
@@ -1148,6 +1156,8 @@ class ClownRegionalConditioning_AB:
                     AttnMask = SplitAttentionMask(mask_type, edge_width)
             elif isinstance(model.model.model_config, comfy.supported_models.HiDream):
                 AttnMask = FullAttentionMaskHiDream(mask_type, edge_width)
+            elif isinstance(model.model.model_config, comfy.supported_models.SDXL) or isinstance(model.model.model_config, comfy.supported_models.SD15):
+                AttnMask = SplitAttentionMask(mask_type, edge_width)
             else:
                 AttnMask = FullAttentionMask(mask_type, edge_width)
 
@@ -1370,6 +1380,8 @@ class ClownRegionalConditioning_ABC:
                     AttnMask = SplitAttentionMask(mask_type, edge_width)
             elif isinstance(model.model.model_config, comfy.supported_models.HiDream):
                 AttnMask = FullAttentionMaskHiDream(mask_type, edge_width)
+            elif isinstance(model.model.model_config, comfy.supported_models.SDXL) or isinstance(model.model.model_config, comfy.supported_models.SD15):
+                AttnMask = SplitAttentionMask(mask_type, edge_width)
             else:
                 AttnMask = FullAttentionMask(mask_type, edge_width)
                 
@@ -1700,6 +1712,8 @@ class ClownRegionalConditionings:
                 AttnMask = SplitAttentionMask  (mask_type, edge_width_list=edge_width_list, use_self_attn_mask_list=use_self_attn_mask_list)
         elif isinstance(model.model.model_config, comfy.supported_models.HiDream):
             AttnMask = FullAttentionMaskHiDream(mask_type, edge_width_list=edge_width_list, use_self_attn_mask_list=use_self_attn_mask_list)
+        elif isinstance(model.model.model_config, comfy.supported_models.SDXL) or isinstance(model.model.model_config, comfy.supported_models.SD15):
+            AttnMask = SplitAttentionMask(mask_type, edge_width_list=edge_width_list)
         else:
             AttnMask = FullAttentionMask       (mask_type, edge_width_list=edge_width_list, use_self_attn_mask_list=use_self_attn_mask_list)
 
