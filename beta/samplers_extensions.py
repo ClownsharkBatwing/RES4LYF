@@ -583,7 +583,8 @@ class ClownOptions_Tile_Advanced_Beta:
         
         options = options if options is not None else {}
             
-        options['tile_sizes'] = parse_tile_sizes(tile_sizes)
+        tiles_height_width = parse_tile_sizes(tile_sizes)
+        options['tile_sizes'] = [(tile[-1], tile[-2]) for tile in tiles_height_width]  # swap height and width to be consistent... width, height
 
         return (options,)
 
