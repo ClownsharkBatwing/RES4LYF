@@ -1429,3 +1429,163 @@ class MaskSketch:
 
 
 
+
+# based on https://github.com/cubiq/ComfyUI_essentials/blob/main/mask.py
+import torchvision.transforms.v2 as T
+
+class MaskBoundingBoxAspectRatio:
+    @classmethod
+    def INPUT_TYPES(s):
+        return {
+            "required": {
+                "mask": ("MASK",),
+                "padding": ("INT", { "default": 0, "min": 0, "max": 4096, "step": 1, }),
+                "blur": ("INT", { "default": 0, "min": 0, "max": 256, "step": 1, }),
+                "aspect_ratio": ("FLOAT", { "default": 1.0, "min": 0.01, "max": 10.0, "step": 0.01 }),
+                "transpose": ("BOOLEAN", {"default": False}),
+            },
+            "optional": {
+                "image": ("IMAGE",),
+            }
+        }
+        
+    RETURN_TYPES = ("MASK", "IMAGE", "INT", "INT", "INT", "INT")
+    RETURN_NAMES = ("mask", "image", "x", "y", "width", "height")
+    FUNCTION = "execute"
+    CATEGORY = "essentials/mask"
+
+    def execute(self, mask, padding, blur, aspect_ratio, transpose, image=None):
+        import torch.nn.functional as F
+
+        # ensure batch dim
+        if mask.dim() == 2:
+            mask = mask.unsqueeze(0)
+            
+        image_optional = image
+
+        # default image = grey where mask is
+        if image_optional is None:
+            image_optional = mask.unsqueeze(3).repeat(1,1,1,3)
+
+        # upscale if sizes mismatch
+        if image_optional.shape[1:] != mask.shape[1:]:
+            image_optional = comfy.utils.common_upscale(
+                image_optional.permute(0,3,1,2),
+                mask.shape[2], mask.shape[1],
+                upscale_method='bicubic', crop='center'
+            ).permute(0,2,3,1)
+
+        # match batch size
+        bs_diff = mask.shape[0] - image_optional.shape[0]
+        if bs_diff > 0:
+            tail = image_optional[-1:].repeat(bs_diff,1,1,1)
+            image_optional = torch.cat([image_optional, tail], dim=0)
+        elif bs_diff < 0:
+            image_optional = image_optional[:mask.shape[0]]
+
+        # optional blur
+        if blur > 0:
+            k = blur + 1 if blur % 2 == 0 else blur
+            mask = T.functional.gaussian_blur(mask.unsqueeze(1), k).squeeze(1)
+
+        # find bounding-box coords
+        _, ys, xs = torch.where(mask)
+        x1 = max(0, xs.min().item() - padding)
+        x2 = min(mask.shape[2], xs.max().item() + 1 + padding)
+        y1 = max(0, ys.min().item() - padding)
+        y2 = min(mask.shape[1], ys.max().item() + 1 + padding)
+
+        # crop out
+        mask = mask[:, y1:y2, x1:x2]
+        image_optional = image_optional[:, y1:y2, x1:x2, :]
+
+        # current size
+        h = y2 - y1
+        w = x2 - x1
+        ar = aspect_ratio
+
+        # decide which ratio to enforce
+        # transpose=False => enforce w/h = ar (landscape)
+        # transpose=True  => enforce h/w = ar (portrait)
+        if not transpose:
+            cur = w / h
+            # pad width?
+            if cur < ar:
+                desired_w = int(torch.ceil(torch.tensor(h * ar)).item())
+                pad_total = desired_w - w
+                ideal_left = pad_total // 2
+                # clamp so x1>=0
+                pad_left = min(ideal_left, x1)
+                pad_right = pad_total - pad_left
+                # mask pad zero
+                mask = F.pad(mask.unsqueeze(1),
+                             (pad_left, pad_right, 0, 0),
+                             mode='constant', value=0.0).squeeze(1)
+                # image pad replicate
+                img = image_optional.permute(0,3,1,2)
+                img = F.pad(img,
+                            (pad_left, pad_right, 0, 0),
+                            mode='replicate')
+                image_optional = img.permute(0,2,3,1)
+                x1 -= pad_left
+                w = desired_w
+
+            # pad height?
+            elif cur > ar:
+                desired_h = int(torch.ceil(torch.tensor(w / ar)).item())
+                pad_total = desired_h - h
+                ideal_top = pad_total // 2
+                pad_top = min(ideal_top, y1)
+                pad_bottom = pad_total - pad_top
+                mask = F.pad(mask.unsqueeze(1),
+                             (0, 0, pad_top, pad_bottom),
+                             mode='constant', value=0.0).squeeze(1)
+                img = image_optional.permute(0,3,1,2)
+                img = F.pad(img,
+                            (0, 0, pad_top, pad_bottom),
+                            mode='replicate')
+                image_optional = img.permute(0,2,3,1)
+                y1 -= pad_top
+                h = desired_h
+
+        else:
+            # portrait mode: enforce h/w = ar
+            cur = h / w
+            if cur < ar:
+                # pad height
+                desired_h = int(torch.ceil(torch.tensor(w * ar)).item())
+                pad_total = desired_h - h
+                ideal_top = pad_total // 2
+                pad_top = min(ideal_top, y1)
+                pad_bottom = pad_total - pad_top
+                mask = F.pad(mask.unsqueeze(1),
+                             (0, 0, pad_top, pad_bottom),
+                             mode='constant', value=0.0).squeeze(1)
+                img = image_optional.permute(0,3,1,2)
+                img = F.pad(img,
+                            (0, 0, pad_top, pad_bottom),
+                            mode='replicate')
+                image_optional = img.permute(0,2,3,1)
+                y1 -= pad_top
+                h = desired_h
+
+            elif cur > ar:
+                # pad width
+                desired_w = int(torch.ceil(torch.tensor(h / ar)).item())
+                pad_total = desired_w - w
+                ideal_left = pad_total // 2
+                pad_left = min(ideal_left, x1)
+                pad_right = pad_total - pad_left
+                mask = F.pad(mask.unsqueeze(1),
+                             (pad_left, pad_right, 0, 0),
+                             mode='constant', value=0.0).squeeze(1)
+                img = image_optional.permute(0,3,1,2)
+                img = F.pad(img,
+                            (pad_left, pad_right, 0, 0),
+                            mode='replicate')
+                image_optional = img.permute(0,2,3,1)
+                x1 -= pad_left
+                w = desired_w
+
+        return (mask, image_optional, x1, y1, w, h)
+    

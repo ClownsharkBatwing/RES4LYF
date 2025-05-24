@@ -305,6 +305,8 @@ NODE_CLASS_MAPPINGS = {
     "SetImageSizeWithScale"               : nodes_misc.SetImageSizeWithScale,
     "SetImageSize"                        : nodes_misc.SetImageSize,
     
+    "Mask Bounding Box Aspect Ratio"      : images.MaskBoundingBoxAspectRatio,
+    
     
     "Image Get Color Swatches"            : images.Image_Get_Color_Swatches,
     "Masks From Color Swatches"           : images.Masks_From_Color_Swatches,
