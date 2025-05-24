@@ -602,6 +602,23 @@ class SharkSampler:
                             sampler.extra_options['RegContext'] = pos_cond_tmp[0][1]['RegContext']
                             sampler.extra_options['RegParam']   = pos_cond_tmp[0][1]['RegParam']
                             
+                            if isinstance(model.model.model_config, comfy.supported_models.SDXL) or isinstance(model.model.model_config, comfy.supported_models.SD15):
+                                latent_up_dummy = F.interpolate(latent_image['samples'].to(torch.float16), size=(latent_image['samples'].shape[-2] * 2, latent_image['samples'].shape[-1] * 2), mode="nearest")
+                                sampler.extra_options['AttnMask'].set_latent(latent_up_dummy)
+                                sampler.extra_options['AttnMask'].generate()
+                                sampler.extra_options['AttnMask'].mask_up   = sampler.extra_options['AttnMask'].attn_mask.mask
+                                
+                                latent_down_dummy = F.interpolate(latent_image['samples'].to(torch.float16), size=(latent_image['samples'].shape[-2] // 2, latent_image['samples'].shape[-1] // 2), mode="nearest")
+                                sampler.extra_options['AttnMask'].set_latent(latent_down_dummy)
+                                sampler.extra_options['AttnMask'].generate()
+                                sampler.extra_options['AttnMask'].mask_down = sampler.extra_options['AttnMask'].attn_mask.mask
+                                
+                                if isinstance(model.model.model_config, comfy.supported_models.SD15):
+                                    latent_down_dummy = F.interpolate(latent_image['samples'].to(torch.float16), size=(latent_image['samples'].shape[-2] // 4, latent_image['samples'].shape[-1] // 4), mode="nearest")
+                                    sampler.extra_options['AttnMask'].set_latent(latent_down_dummy)
+                                    sampler.extra_options['AttnMask'].generate()
+                                    sampler.extra_options['AttnMask'].mask_down2 = sampler.extra_options['AttnMask'].attn_mask.mask
+                                
                             sampler.extra_options['AttnMask'].set_latent(latent_image['samples'])
                             sampler.extra_options['AttnMask'].generate()
                             
@@ -613,6 +630,23 @@ class SharkSampler:
                             sampler.extra_options['AttnMask_neg']   = neg_cond[0][1]['AttnMask']
                             sampler.extra_options['RegContext_neg'] = neg_cond[0][1]['RegContext']
                             sampler.extra_options['RegParam_neg']   = neg_cond[0][1]['RegParam']
+                            
+                            if isinstance(model.model.model_config, comfy.supported_models.SDXL) or isinstance(model.model.model_config, comfy.supported_models.SD15):
+                                latent_up_dummy = F.interpolate(latent_image['samples'].to(torch.float16), size=(latent_image['samples'].shape[-2] * 2, latent_image['samples'].shape[-1] * 2), mode="nearest")
+                                sampler.extra_options['AttnMask_neg'].set_latent(latent_up_dummy)
+                                sampler.extra_options['AttnMask_neg'].generate()
+                                sampler.extra_options['AttnMask_neg'].mask_up   = sampler.extra_options['AttnMask_neg'].attn_mask.mask
+                                
+                                latent_down_dummy = F.interpolate(latent_image['samples'].to(torch.float16), size=(latent_image['samples'].shape[-2] // 2, latent_image['samples'].shape[-1] // 2), mode="nearest")
+                                sampler.extra_options['AttnMask_neg'].set_latent(latent_down_dummy)
+                                sampler.extra_options['AttnMask_neg'].generate()
+                                sampler.extra_options['AttnMask_neg'].mask_down = sampler.extra_options['AttnMask_neg'].attn_mask.mask
+                                
+                                if isinstance(model.model.model_config, comfy.supported_models.SD15):
+                                    latent_down_dummy = F.interpolate(latent_image['samples'].to(torch.float16), size=(latent_image['samples'].shape[-2] // 4, latent_image['samples'].shape[-1] // 4), mode="nearest")
+                                    sampler.extra_options['AttnMask_neg'].set_latent(latent_down_dummy)
+                                    sampler.extra_options['AttnMask_neg'].generate()
+                                    sampler.extra_options['AttnMask_neg'].mask_down2 = sampler.extra_options['AttnMask_neg'].attn_mask.mask
                             
                             sampler.extra_options['AttnMask_neg'].set_latent(latent_image['samples'])
                             sampler.extra_options['AttnMask_neg'].generate()
