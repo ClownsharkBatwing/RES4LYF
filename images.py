@@ -1530,6 +1530,7 @@ class MaskBoundingBoxAspectRatio:
 
         # === crop everything to the bbox ===
         mask = mask[:, y1:y2, x1:x2]
+        image_optional_precrop = image_optional.clone()
         image_optional = image_optional[:, y1:y2, x1:x2, :]
 
         # now enforce aspect ratio / transpose as before
@@ -1605,5 +1606,6 @@ class MaskBoundingBoxAspectRatio:
                 image_optional = img.permute(0,2,3,1)
                 x1 -= pad_left; w = desired_w
 
+        image_optional = image_optional_precrop[:, y1:y1+h, x1:x1+w, :]
         return (mask, image_optional, x1, y1, w, h)
 
