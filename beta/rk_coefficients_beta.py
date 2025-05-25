@@ -50,6 +50,7 @@ RK_SAMPLER_NAMES_BETA_FOLDERS = ["none",
                     "exponential/res_3s_alt",
                     "exponential/res_3s_cox_matthews",
                     "exponential/res_3s_lie",
+                    "exponential/res_3s_sunstar",
 
                     "exponential/res_3s_strehmel_weiner",
                     "exponential/res_4s_krogstad",
@@ -1900,6 +1901,24 @@ def get_rk_methods_beta(rk_type       : str,
                     [0, 
                     6*φ(2) - 18*φ(3),
                     (-3/2)*φ(2) + 9*φ(3)],
+            ]
+            
+            a, b = gen_first_col_exp(a,b,ci,φ)
+        
+        case "res_3s_sunstar": # https://arxiv.org/pdf/2410.00498 pg 5 (tableau 2.7)
+            c1,c2,c3 = 0, 1/3, 2/3
+            ci = [c1,c2,c3]
+            φ = Phi(h, ci, use_analytic_solution)
+            
+            a = [
+                    [0, 0, 0],
+                    [0, 0, 0],
+                    [0, (8/9)*φ(2,3), 0],  # paper said 2 * φ(1,3), but this is the same and more consistent with res_3s_strehmel_weiner
+            ]
+            b = [
+                    [0, 
+                    0,
+                    (3/2)*φ(2)],
             ]
             
             a, b = gen_first_col_exp(a,b,ci,φ)
