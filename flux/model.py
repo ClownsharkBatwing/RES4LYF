@@ -96,6 +96,8 @@ class ReFlux(Flux):
                         control             = None,
                         update_cross_attn   = None,
                         transformer_options = {},
+                        UNCOND : bool = False,
+
                         ) -> Tensor:
         
         if img.ndim != 3 or txt.ndim != 3:
@@ -118,9 +120,52 @@ class ReFlux(Flux):
         ids = torch.cat((txt_ids, img_ids), dim=1) # img_ids.shape=1,8192,3    txt_ids.shape=1,512,3    #ids.shape=1,8704,3
         pe  = self.pe_embedder(ids)                 # pe.shape 1,1,8704,64,2,2
         
-        weight    = transformer_options['reg_cond_weight'] if 'reg_cond_weight' in transformer_options else 0.0
+        
+        
+        weight    = -1 * transformer_options.get("regional_conditioning_weight", 0.0)
+        floor     = -1 * transformer_options.get("regional_conditioning_floor",  0.0)
+        mask_zero = None
+        mask = None
+        
+        text_len = txt.shape[1] # mask_obj[0].text_len
+        
+        #AttnMask = transformer_options.get('AttnMask')
+        if not UNCOND and 'AttnMask' in transformer_options: # and weight != 0:
+            AttnMask = transformer_options['AttnMask']
+            mask = transformer_options['AttnMask'].attn_mask.mask.to('cuda')
+            if mask_zero is None:
+                mask_zero = torch.ones_like(mask)
+                img_len = transformer_options['AttnMask'].img_len
+                mask_zero[:text_len, :text_len] = mask[:text_len, :text_len]
+            if weight == 0:
+                mask = None
+            
+        if UNCOND and 'AttnMask_neg' in transformer_options: # and weight != 0:
+            AttnMask = transformer_options['AttnMask_neg']
+            if mask_zero is None:
+                mask_zero = torch.ones_like(mask)
+                img_len = transformer_options['AttnMask_neg'].img_len
+                mask_zero[:text_len, :text_len] = mask[:text_len, :text_len]
+            if weight == 0:
+                mask = None
+            
+        elif UNCOND and 'AttnMask' in transformer_options:
+            AttnMask = transformer_options['AttnMask']
+            mask = transformer_options['AttnMask'].attn_mask.mask.to('cuda')
+            if mask_zero is None:
+                mask_zero = torch.ones_like(mask)
+                img_len = transformer_options['AttnMask'].img_len
+                mask_zero[:text_len, :text_len] = mask[:text_len, :text_len]
+            if weight == 0:
+                mask = None
+        
+        
+        
+        """weight    = transformer_options['reg_cond_weight'] if 'reg_cond_weight' in transformer_options else 0.0
         floor     = transformer_options['reg_cond_floor']  if 'reg_cond_floor'  in transformer_options else 0.0
         floor     = min(floor, weight)
+        
+        
         
         AttnMask = transformer_options.get('AttnMask')
         mask     = None
@@ -134,15 +179,36 @@ class ReFlux(Flux):
             
             text_len                  = txt.shape[1] # mask_obj[0].text_len
             
-            mask[text_len:,text_len:] = torch.clamp(mask[text_len:,text_len:], min=floor.to(mask.device))   #ORIGINAL SELF-ATTN REGION BLEED
+            mask[text_len:,text_len:] = torch.clamp(mask[text_len:,text_len:], min=floor.to(mask.device))   #ORIGINAL SELF-ATTN REGION BLEED"""
 
         total_layers = len(self.double_blocks) + len(self.single_blocks)
         
         for i, block in enumerate(self.double_blocks):
-            if mask is not None and mask_type_bool and weight < (i / (total_layers-1)):
-                mask = mask.to(img.dtype)
+            #if mask is not None and mask_type_bool and weight < (i / (total_layers-1)):
+            #    mask = mask.to(img.dtype)
+            #img, txt = block(img=img, txt=txt, vec=vec, pe=pe, mask=mask, idx=i, update_cross_attn=update_cross_attn)
 
-            img, txt = block(img=img, txt=txt, vec=vec, pe=pe, mask=mask, idx=i, update_cross_attn=update_cross_attn)
+            if   weight > 0 and mask is not None and     weight  <      i/total_layers:
+                img, txt = block(img=img, txt=txt, vec=vec, pe=pe, mask=mask_zero, idx=i, update_cross_attn=update_cross_attn)
+                
+            elif (weight < 0 and mask is not None and abs(weight) < (1 - i/total_layers)):
+                img_tmpZ, txt_tmpZ = img.clone(), txt.clone()
+                img_tmpZ, txt = block(img=img_tmpZ, txt=txt_tmpZ, vec=vec, pe=pe, mask=mask, idx=i, update_cross_attn=update_cross_attn)
+                img, txt_tmpZ = block(img=img     , txt=txt     , vec=vec, pe=pe, mask=mask_zero, idx=i, update_cross_attn=update_cross_attn)
+                
+            elif floor > 0 and mask is not None and     floor  >      i/total_layers:
+                mask_tmp = mask.clone()
+                mask_tmp[:text_len, :text_len] = 1.0
+                img, txt = block(img=img, txt=txt, vec=vec, pe=pe, mask=mask_tmp, idx=i, update_cross_attn=update_cross_attn)
+                
+            elif floor < 0 and mask is not None and abs(floor) > (1 - i/total_layers):
+                mask_tmp = mask.clone()
+                mask_tmp[:text_len, :text_len] = 1.0
+                img, txt = block(img=img, txt=txt, vec=vec, pe=pe, mask=mask_tmp, idx=i, update_cross_attn=update_cross_attn)
+
+            else:
+                img, txt = block(img=img, txt=txt, vec=vec, pe=pe, mask=mask, idx=i, update_cross_attn=update_cross_attn)
+
 
             if control is not None: # Controlnet
                 control_i = control.get("input")
@@ -153,10 +219,30 @@ class ReFlux(Flux):
 
         img = torch.cat((txt, img), 1)   #first 256 is txt embed
         for i, block in enumerate(self.single_blocks):
-            if mask is not None and mask_type_bool and weight < ((len(self.double_blocks) + i) / (total_layers-1)):
-                mask = mask.to(img.dtype)
-            
-            img = block(img, vec=vec, pe=pe, mask=mask, idx=i)
+            #if mask is not None and mask_type_bool and weight < ((len(self.double_blocks) + i) / (total_layers-1)):
+            #    mask = mask.to(img.dtype)
+            #img = block(img, vec=vec, pe=pe, mask=mask, idx=i)
+
+            if   weight > 0 and mask is not None and     weight  <      (i+len(self.double_blocks))/total_layers:
+                img = block(img, vec=vec, pe=pe, mask=mask_zero)
+                
+            elif weight < 0 and mask is not None and abs(weight) < (1 - (i+len(self.double_blocks))/total_layers):
+                img = block(img, vec=vec, pe=pe, mask=mask_zero)
+                
+            elif floor > 0 and mask is not None and     floor  >      (i+len(self.double_blocks))/total_layers:
+                mask_tmp = mask.clone()
+                mask_tmp[:text_len, :text_len] = 1.0
+                img = block(img, vec=vec, pe=pe, mask=mask_tmp)
+                
+            elif floor < 0 and mask is not None and abs(floor) > (1 - (i+len(self.double_blocks))/total_layers):
+                mask_tmp = mask.clone()
+                mask_tmp[:text_len, :text_len] = 1.0
+                img = block(img, vec=vec, pe=pe, mask=mask_tmp)
+                
+            else:
+                img = block(img, vec=vec, pe=pe, mask=mask)
+
+
 
             if control is not None: # Controlnet
                 control_o = control.get("output")
@@ -197,6 +283,8 @@ class ReFlux(Flux):
         y0_style_pos        = transformer_options.get("y0_style_pos")
         y0_style_neg        = transformer_options.get("y0_style_neg")
 
+        weight    = -1 * transformer_options.get("regional_conditioning_weight", 0.0)
+        floor     = -1 * transformer_options.get("regional_conditioning_floor",  0.0)
 
         out_list = []
         for i in range(len(transformer_options['cond_or_uncond'])):
@@ -218,7 +306,7 @@ class ReFlux(Flux):
 
             img = rearrange(img, "b c (h ph) (w pw) -> b (h w) (c ph pw)", ph=patch_size, pw=patch_size) # img 1,9216,64     1,16,128,128 -> 1,4096,64
 
-            if UNCOND:
+            """ if UNCOND:
                 transformer_options['reg_cond_weight'] = transformer_options.get("regional_conditioning_weight", 0.0) #transformer_options['regional_conditioning_weight']
                 transformer_options['reg_cond_floor']  = transformer_options.get("regional_conditioning_floor",  0.0) #transformer_options['regional_conditioning_floor'] #if "regional_conditioning_floor" in transformer_options else 0.0
                 
@@ -252,7 +340,48 @@ class ReFlux(Flux):
             
             if context_tmp is None:
                 context_tmp = context[i][None,...].clone()
-            context_tmp = context_tmp.to(context.dtype)
+            context_tmp = context_tmp.to(context.dtype)"""
+            
+            
+            
+            
+            
+            context_tmp = None
+            
+            if not UNCOND and 'AttnMask' in transformer_options: # and weight != 0:
+                AttnMask = transformer_options['AttnMask']
+                mask = transformer_options['AttnMask'].attn_mask.mask.to('cuda')
+
+                if weight == 0:
+                    context_tmp = transformer_options['RegContext'].context.to(context.dtype).to(context.device)
+                    mask = None
+                else:
+                    context_tmp = transformer_options['RegContext'].context.to(context.dtype).to(context.device)
+                
+            if UNCOND and 'AttnMask_neg' in transformer_options: # and weight != 0:
+                AttnMask = transformer_options['AttnMask_neg']
+                mask = transformer_options['AttnMask_neg'].attn_mask.mask.to('cuda')
+
+                if weight == 0:
+                    context_tmp = transformer_options['RegContext_neg'].context.to(context.dtype).to(context.device)
+                    mask = None
+                else:
+                    context_tmp = transformer_options['RegContext_neg'].context.to(context.dtype).to(context.device)
+
+            elif UNCOND and 'AttnMask' in transformer_options:
+                AttnMask = transformer_options['AttnMask']
+                mask = transformer_options['AttnMask'].attn_mask.mask.to('cuda')
+                A       = context
+                B       = transformer_options['RegContext'].context
+                context_tmp = A.repeat(1,    (B.shape[1] // A.shape[1]) + 1, 1)[:,   :B.shape[1], :]
+
+            if context_tmp is None:
+                context_tmp = context[i][None,...].clone()
+
+            
+            
+            
+            
             txt_ids      = torch.zeros((bs, context_tmp.shape[1], 3), device=img.device, dtype=img.dtype)      # txt_ids        1, 256,3
             img_ids_orig = self._get_img_ids(img, bs, h_len, w_len, 0, h_len, 0, w_len)                  # img_ids_orig = 1,9216,3
 
@@ -266,7 +395,9 @@ class ReFlux(Flux):
                                         guidance    [i][None,...].clone(),
                                         control, 
                                         update_cross_attn=update_cross_attn,
-                                        transformer_options=transformer_options)  # context 1,256,4096   y 1,768
+                                        transformer_options=transformer_options,
+                                        UNCOND=UNCOND,
+                                        )  # context 1,256,4096   y 1,768
             out_list.append(out_tmp)
             
         out = torch.stack(out_list, dim=0).squeeze(dim=1)
@@ -285,9 +416,9 @@ class ReFlux(Flux):
             y0_style_pos_synweight = transformer_options.get("y0_style_pos_synweight")
             y0_style_pos_synweight *= y0_style_pos_weight
             
-            y0_style_pos = y0_style_pos.to(torch.float32)
-            x   = x.to(torch.float32)
-            eps = eps.to(torch.float32)
+            y0_style_pos = y0_style_pos.to(dtype)
+            x   = x.to(dtype)
+            eps = eps.to(dtype)
             eps_orig = eps.clone()
             
             sigma = SIGMA #t_orig[0].to(torch.float32) / 1000
@@ -305,8 +436,8 @@ class ReFlux(Flux):
             w_len = ((w + (patch_size // 2)) // patch_size) # w_len 96
             img_y0_adain = rearrange(img_y0_adain, "b c (h ph) (w pw) -> b (h w) (c ph pw)", ph=patch_size, pw=patch_size) # img 1,9216,64     1,16,128,128 -> 1,4096,64
 
-            W = self.img_in.weight.data.to(torch.float32)   # shape [2560, 64]
-            b = self.img_in.bias.data.to(torch.float32)     # shape [2560]
+            W = self.img_in.weight.data.to(dtype)   # shape [2560, 64]
+            b = self.img_in.bias.data.to(dtype)     # shape [2560]
             
             denoised_embed = F.linear(img         .to(W), W, b).to(img)
             y0_adain_embed = F.linear(img_y0_adain.to(W), W, b).to(img_y0_adain)
@@ -383,9 +514,9 @@ class ReFlux(Flux):
             y0_style_neg_synweight = transformer_options.get("y0_style_neg_synweight")
             y0_style_neg_synweight *= y0_style_neg_weight
             
-            y0_style_neg = y0_style_neg.to(torch.float32)
-            x   = x.to(torch.float32)
-            eps = eps.to(torch.float32)
+            y0_style_neg = y0_style_neg.to(dtype)
+            x   = x.to(dtype)
+            eps = eps.to(dtype)
             eps_orig = eps.clone()
             
             sigma = SIGMA #t_orig[0].to(torch.float32) / 1000
@@ -401,8 +532,8 @@ class ReFlux(Flux):
 
             img_y0_adain = rearrange(img_y0_adain, "b c (h ph) (w pw) -> b (h w) (c ph pw)", ph=patch_size, pw=patch_size) # img 1,9216,64     1,16,128,128 -> 1,4096,64
 
-            W = self.img_in.weight.data.to(torch.float32)   # shape [2560, 64]
-            b = self.img_in.bias.data.to(torch.float32)     # shape [2560]
+            W = self.img_in.weight.data.to(dtype)   # shape [2560, 64]
+            b = self.img_in.bias.data.to(dtype)     # shape [2560]
             
             denoised_embed = F.linear(img         .to(W), W, b).to(img)
             y0_adain_embed = F.linear(img_y0_adain.to(W), W, b).to(img_y0_adain)
