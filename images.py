@@ -1,5 +1,6 @@
 import torch
 import torch.nn.functional as F
+import math
 
 from torchvision import transforms
 
@@ -1429,183 +1430,147 @@ class MaskSketch:
 
 
 
-
 # based on https://github.com/cubiq/ComfyUI_essentials/blob/main/mask.py
-import torchvision.transforms.v2 as T
+# based on https://github.com/cubiq/ComfyUI_essentials/blob/main/mask.py
+import torch
+import torch.nn.functional as F
+import numpy as np
+from scipy.ndimage import distance_transform_edt
+import comfy.utils
+import math
 
 class MaskBoundingBoxAspectRatio:
     @classmethod
     def INPUT_TYPES(s):
         return {
             "required": {
-                "mask": ("MASK",),
-                "padding": ("INT", { "default": 0, "min": 0, "max": 4096, "step": 1, }),
-                "blur": ("INT", { "default": 0, "min": 0, "max": 256, "step": 1, }),
+                "padding":      ("INT",   { "default": 0, "min": 0, "max": 4096, "step": 1 }),
+                "blur":         ("INT",   { "default": 0, "min": 0, "max": 256,  "step": 1 }),
                 "aspect_ratio": ("FLOAT", { "default": 1.0, "min": 0.01, "max": 10.0, "step": 0.01 }),
-                "transpose": ("BOOLEAN", {"default": False}),
+                "transpose":    ("BOOLEAN", { "default": False }),
             },
             "optional": {
                 "image": ("IMAGE",),
+                "mask":  ("MASK",),
             }
         }
-        
-    RETURN_TYPES = ("MASK", "IMAGE", "INT", "INT", "INT", "INT")
-    RETURN_NAMES = ("mask", "image", "x", "y", "width", "height")
+
+    RETURN_TYPES = ("IMAGE","MASK","MASK","INT","INT","INT","INT")
+    RETURN_NAMES = ("image","mask","mask_blurred","x","y","width","height")
     FUNCTION = "execute"
     CATEGORY = "essentials/mask"
 
     def execute(self, mask, padding, blur, aspect_ratio, transpose, image=None):
-        import torch.nn.functional as F
-        image_optional = image
-        # ensure batch dim
+        # 1) ensure batch dim on mask
         if mask.dim() == 2:
             mask = mask.unsqueeze(0)
-
-        # keep a copy of the *hard* mask for bbox computation
         hard = mask.clone()
 
-        """# optional blur → but only for visual output
+        # 2) outward-only SciPy blur of the hard mask
+        mask_blurred = hard.clone()
         if blur > 0:
-            k = blur + 1 if blur % 2 == 0 else blur
-            pad = k // 2
-            m0 = hard.unsqueeze(1)  # B×1×H×W
-            # dilate so we get full-strength at edge
-            m_dil = F.max_pool2d(m0, kernel_size=k, stride=1, padding=pad)
-            # pad with ones so blur sees full mask
-            m_pad = F.pad(m_dil, (pad, pad, pad, pad), mode='constant', value=1.0)
-            # blur
-            b = T.functional.gaussian_blur(m_pad, k)
-            mask = torch.max(hard, b[:, :, pad:-pad, pad:-pad].squeeze(1))
-        # else mask stays = hard"""
+            hard_np       = hard[0].cpu().numpy().astype(bool)
+            dist_out      = distance_transform_edt(~hard_np)
+            dist_in       = distance_transform_edt( hard_np)
+            alpha         = np.zeros_like(dist_out, dtype=np.float32)
+            alpha[dist_in>0] = 1.0
+            ramp          = np.clip(1.0 - (dist_out / blur), 0.0, 1.0)
+            alpha[dist_out>0] = ramp[dist_out>0]
+            mask_blurred = torch.from_numpy(alpha)[None,...].to(hard.device)
 
-        if blur > 0:
-            import numpy as np
-            from scipy.ndimage import distance_transform_edt
-
-            # hard: your binary mask (B×H×W), values 0.0 or 1.0
-            hard_np = hard[0].cpu().numpy().astype(bool)  # H×W boolean
-
-            # distance **outside** the mask: for each zero-pixel, how far to nearest one
-            dist_out = distance_transform_edt(~hard_np)
-            # distance **inside** the mask: for each one-pixel, how far to nearest zero
-            dist_in  = distance_transform_edt(hard_np)
-
-            # build an alpha map (H×W) that is 1.0 on the inside region,
-            # then from boundary outwards ramps from 1→0 over `blur` pixels
-            alpha = np.zeros_like(dist_out, dtype=np.float32)
-            # inside region: keep full strength
-            alpha[dist_in > 0] = 1.0
-            # outside region: linear ramp down
-            ramp = 1.0 - (dist_out / blur)
-            ramp = np.clip(ramp, 0.0, 1.0)
-            alpha[dist_out > 0] = ramp[dist_out > 0]
-
-            # to torch
-            mask = torch.from_numpy(alpha)[None, ...].to(hard.dtype).to(hard.device)
-
-        # === compute bbox on HARD mask only ===
+        # 3) compute bbox + padding on HARD mask
         _, ys, xs = torch.where(hard)
         x1 = max(0, xs.min().item() - padding)
         x2 = min(hard.shape[2], xs.max().item() + 1 + padding)
         y1 = max(0, ys.min().item() - padding)
         y2 = min(hard.shape[1], ys.max().item() + 1 + padding)
+        h  = y2 - y1
+        w  = x2 - x1
 
-        # prepare image_optional
-        if image_optional is None:
-            image_optional = hard.unsqueeze(3).repeat(1,1,1,3)
+        # 4) prepare full-frame image B×H×W×3
+        if image is None:
+            img_full = hard.unsqueeze(3).repeat(1,1,1,3)
+        else:
+            img_full = image
         # upscale if needed
-        if image_optional.shape[1:] != hard.shape[1:]:
-            image_optional = comfy.utils.common_upscale(
-                image_optional.permute(0,3,1,2),
+        if img_full.shape[1:] != hard.shape[1:]:
+            img_full = comfy.utils.common_upscale(
+                img_full.permute(0,3,1,2),
                 hard.shape[2], hard.shape[1],
                 upscale_method='bicubic', crop='center'
             ).permute(0,2,3,1)
-        # match batch size
-        bs_diff = hard.shape[0] - image_optional.shape[0]
+        # match batch
+        bs_diff = hard.shape[0] - img_full.shape[0]
         if bs_diff > 0:
-            tail = image_optional[-1:].repeat(bs_diff,1,1,1)
-            image_optional = torch.cat([image_optional, tail], dim=0)
+            img_full = torch.cat([img_full, img_full[-1:].repeat(bs_diff,1,1,1)], dim=0)
         elif bs_diff < 0:
-            image_optional = image_optional[:hard.shape[0]]
+            img_full = img_full[:hard.shape[0]]
 
-        # === crop everything to the bbox ===
-        mask = mask[:, y1:y2, x1:x2]
-        image_optional_precrop = image_optional.clone()
-        image_optional = image_optional[:, y1:y2, x1:x2, :]
+        # 5) initial crop
+        pre       = img_full
+        img_crop  = pre[:,    y1:y2, x1:x2, :].clone()
+        mask_crop = hard   [:,    y1:y2, x1:x2   ].clone()
+        mask_blur = mask_blurred[:, y1:y2, x1:x2].clone()
 
-        # now enforce aspect ratio / transpose as before
-        h = y2 - y1
-        w = x2 - x1
+        # 6) enforce aspect ratio by “center → clamp → slice”
+        BF, HF, WF, _ = pre.shape
         ar = aspect_ratio
+
+        def center_clamp_slice(orig1, length, target, maxdim):
+            """
+            orig1 = original start
+            length = original size (w or h)
+            target = desired (target_size)
+            maxdim = WF or HF
+            returns (new1, new2)
+            """
+            # if target larger than dimension, clamp to full
+            ts = min(target, maxdim)
+            # compute centered start
+            new1 = orig1 + (length - ts)//2
+            new2 = new1 + ts
+            # clamp
+            if new1 < 0:
+                new1 = 0
+                new2 = ts
+            elif new2 > maxdim:
+                new2 = maxdim
+                new1 = maxdim - ts
+            return new1, new2, ts
 
         if not transpose:
             cur = w / h
+            # widen
             if cur < ar:
-                desired_w = int(torch.ceil(torch.tensor(h * ar)).item())
-                pad_total = desired_w - w
-                ideal_left = pad_total // 2
-                pad_left = min(ideal_left, x1)
-                pad_right = pad_total - pad_left
-                mask = F.pad(mask.unsqueeze(1),
-                            (pad_left, pad_right, 0, 0),
-                            mode='constant', value=0.0).squeeze(1)
-                img = image_optional.permute(0,3,1,2)
-                img = F.pad(img,
-                            (pad_left, pad_right, 0, 0),
-                            mode='replicate')
-                image_optional = img.permute(0,2,3,1)
-                x1 -= pad_left; w = desired_w
-
+                desired_w = math.ceil(h * ar)
+                x1, x2, w = center_clamp_slice(x1, w, desired_w, WF)
+                img_crop  = pre[:, y1:y2, x1:x2, :]
+                mask_crop = hard[:,    y1:y2, x1:x2]
+                mask_blur = mask_blurred[:,y1:y2, x1:x2]
+            # heighten
             elif cur > ar:
-                desired_h = int(torch.ceil(torch.tensor(w / ar)).item())
-                pad_total = desired_h - h
-                ideal_top = pad_total // 2
-                pad_top = min(ideal_top, y1)
-                pad_bottom = pad_total - pad_top
-                mask = F.pad(mask.unsqueeze(1),
-                            (0, 0, pad_top, pad_bottom),
-                            mode='constant', value=0.0).squeeze(1)
-                img = image_optional.permute(0,3,1,2)
-                img = F.pad(img,
-                            (0, 0, pad_top, pad_bottom),
-                            mode='replicate')
-                image_optional = img.permute(0,2,3,1)
-                y1 -= pad_top; h = desired_h
+                desired_h = math.ceil(w / ar)
+                y1, y2, h = center_clamp_slice(y1, h, desired_h, HF)
+                img_crop  = pre[:, y1:y2, x1:x2, :]
+                mask_crop = hard[:,    y1:y2, x1:x2]
+                mask_blur = mask_blurred[:,y1:y2, x1:x2]
 
         else:
             cur = h / w
+            # portrait heighten
             if cur < ar:
-                desired_h = int(torch.ceil(torch.tensor(w * ar)).item())
-                pad_total = desired_h - h
-                ideal_top = pad_total // 2
-                pad_top = min(ideal_top, y1)
-                pad_bottom = pad_total - pad_top
-                mask = F.pad(mask.unsqueeze(1),
-                            (0, 0, pad_top, pad_bottom),
-                            mode='constant', value=0.0).squeeze(1)
-                img = image_optional.permute(0,3,1,2)
-                img = F.pad(img,
-                            (0, 0, pad_top, pad_bottom),
-                            mode='replicate')
-                image_optional = img.permute(0,2,3,1)
-                y1 -= pad_top; h = desired_h
-
+                desired_h = math.ceil(w * ar)
+                y1, y2, h = center_clamp_slice(y1, h, desired_h, HF)
+                img_crop  = pre[:, y1:y2, x1:x2, :]
+                mask_crop = hard[:,    y1:y2, x1:x2]
+                mask_blur = mask_blurred[:,y1:y2, x1:x2]
+            # portrait widen
             elif cur > ar:
-                desired_w = int(torch.ceil(torch.tensor(h / ar)).item())
-                pad_total = desired_w - w
-                ideal_left = pad_total // 2
-                pad_left = min(ideal_left, x1)
-                pad_right = pad_total - pad_left
-                mask = F.pad(mask.unsqueeze(1),
-                            (pad_left, pad_right, 0, 0),
-                            mode='constant', value=0.0).squeeze(1)
-                img = image_optional.permute(0,3,1,2)
-                img = F.pad(img,
-                            (pad_left, pad_right, 0, 0),
-                            mode='replicate')
-                image_optional = img.permute(0,2,3,1)
-                x1 -= pad_left; w = desired_w
+                desired_w = math.ceil(h / ar)
+                x1, x2, w = center_clamp_slice(x1, w, desired_w, WF)
+                img_crop  = pre[:, y1:y2, x1:x2, :]
+                mask_crop = hard[:,    y1:y2, x1:x2]
+                mask_blur = mask_blurred[:,y1:y2, x1:x2]
 
-        image_optional = image_optional_precrop[:, y1:y1+h, x1:x1+w, :]
-        return (mask, image_optional, x1, y1, w, h)
-
+        # 7) return exactly what ComfyUI expects
+        return (img_crop, mask_crop, mask_blur, x1, y1, w, h)
