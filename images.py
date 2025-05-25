@@ -1431,28 +1431,27 @@ class MaskSketch:
 
 
 # based on https://github.com/cubiq/ComfyUI_essentials/blob/main/mask.py
-# based on https://github.com/cubiq/ComfyUI_essentials/blob/main/mask.py
+import math
 import torch
 import torch.nn.functional as F
+import torchvision.transforms.v2 as T
 import numpy as np
 from scipy.ndimage import distance_transform_edt
-import comfy.utils
-import math
 
 class MaskBoundingBoxAspectRatio:
     @classmethod
     def INPUT_TYPES(s):
         return {
             "required": {
-                "padding":      ("INT",   { "default": 0, "min": 0, "max": 4096, "step": 1 }),
-                "blur":         ("INT",   { "default": 0, "min": 0, "max": 256,  "step": 1 }),
-                "aspect_ratio": ("FLOAT", { "default": 1.0, "min": 0.01, "max": 10.0, "step": 0.01 }),
-                "transpose":    ("BOOLEAN", { "default": False }),
+                "padding":      ("INT",   { "default": 0, "min": 0,   "max": 4096, "step": 1 }),
+                "blur":         ("INT",   { "default": 0, "min": 0,   "max": 256,  "step": 1 }),
+                "aspect_ratio": ("FLOAT", { "default": 1.0, "min": 0.01,"max": 10.0, "step": 0.01 }),
+                "transpose":    ("BOOLEAN",{"default": False}),
             },
             "optional": {
                 "image": ("IMAGE",),
                 "mask":  ("MASK",),
-            }
+            },
         }
 
     RETURN_TYPES = ("IMAGE","MASK","MASK","INT","INT","INT","INT")
@@ -1461,116 +1460,134 @@ class MaskBoundingBoxAspectRatio:
     CATEGORY = "essentials/mask"
 
     def execute(self, mask, padding, blur, aspect_ratio, transpose, image=None):
-        # 1) ensure batch dim on mask
         if mask.dim() == 2:
             mask = mask.unsqueeze(0)
-        hard = mask.clone()
+        B, H, W = mask.shape
+        hard     = mask.clone()
 
-        # 2) outward-only SciPy blur of the hard mask
-        mask_blurred = hard.clone()
+        # build outward-only “blurred” mask via distance transform
         if blur > 0:
-            hard_np       = hard[0].cpu().numpy().astype(bool)
-            dist_out      = distance_transform_edt(~hard_np)
-            dist_in       = distance_transform_edt( hard_np)
-            alpha         = np.zeros_like(dist_out, dtype=np.float32)
-            alpha[dist_in>0] = 1.0
-            ramp          = np.clip(1.0 - (dist_out / blur), 0.0, 1.0)
-            alpha[dist_out>0] = ramp[dist_out>0]
-            mask_blurred = torch.from_numpy(alpha)[None,...].to(hard.device)
+            m_bool = hard[0].cpu().numpy().astype(bool)
+            d_out  = distance_transform_edt(~m_bool)
+            d_in   = distance_transform_edt( m_bool)
+            alpha  = np.zeros_like(d_out, np.float32)
+            alpha[d_in>0] = 1.0
+            ramp = np.clip(1.0 - (d_out / blur), 0.0, 1.0)
+            alpha[d_out>0] = ramp[d_out>0]
+            mask_blur_full = torch.from_numpy(alpha)[None,...].to(hard.device)
+        else:
+            mask_blur_full = hard.clone()
 
-        # 3) compute bbox + padding on HARD mask
-        _, ys, xs = torch.where(hard)
-        x1 = max(0, xs.min().item() - padding)
-        x2 = min(hard.shape[2], xs.max().item() + 1 + padding)
-        y1 = max(0, ys.min().item() - padding)
-        y2 = min(hard.shape[1], ys.max().item() + 1 + padding)
-        h  = y2 - y1
-        w  = x2 - x1
+        # calc tight bbox + padding on the "hard" mask
+        ys, xs = torch.where(hard[0] > 0)
+        x1 = max(0, int(xs.min()) - padding)
+        x2 = min(W, int(xs.max()) + 1 + padding)
+        y1 = max(0, int(ys.min()) - padding)
+        y2 = min(H, int(ys.max()) + 1 + padding)
+        w0 = x2 - x1
+        h0 = y2 - y1
 
-        # 4) prepare full-frame image B×H×W×3
         if image is None:
-            img_full = hard.unsqueeze(3).repeat(1,1,1,3)
+            img_full = hard.unsqueeze(-1).repeat(1,1,1,3).to(torch.float32)
         else:
             img_full = image
-        # upscale if needed
-        if img_full.shape[1:] != hard.shape[1:]:
+            
+        if img_full.shape[1:3] != (H, W):
             img_full = comfy.utils.common_upscale(
                 img_full.permute(0,3,1,2),
-                hard.shape[2], hard.shape[1],
-                upscale_method='bicubic', crop='center'
+                W, H, upscale_method="bicubic", crop="center"
             ).permute(0,2,3,1)
-        # match batch
-        bs_diff = hard.shape[0] - img_full.shape[0]
-        if bs_diff > 0:
-            img_full = torch.cat([img_full, img_full[-1:].repeat(bs_diff,1,1,1)], dim=0)
-        elif bs_diff < 0:
-            img_full = img_full[:hard.shape[0]]
 
-        # 5) initial crop
-        pre       = img_full
-        img_crop  = pre[:,    y1:y2, x1:x2, :].clone()
-        mask_crop = hard   [:,    y1:y2, x1:x2   ].clone()
-        mask_blur = mask_blurred[:, y1:y2, x1:x2].clone()
-
-        # 6) enforce aspect ratio by “center → clamp → slice”
-        BF, HF, WF, _ = pre.shape
         ar = aspect_ratio
+        req_w = math.ceil(h0 * ar)   # how wide we'd need to be to hit AR at h0
+        req_h = math.floor(w0 / ar)  # how tall we'd need to be to hit AR at w0
 
-        def center_clamp_slice(orig1, length, target, maxdim):
-            """
-            orig1 = original start
-            length = original size (w or h)
-            target = desired (target_size)
-            maxdim = WF or HF
-            returns (new1, new2)
-            """
-            # if target larger than dimension, clamp to full
-            ts = min(target, maxdim)
-            # compute centered start
-            new1 = orig1 + (length - ts)//2
-            new2 = new1 + ts
-            # clamp
-            if new1 < 0:
-                new1 = 0
-                new2 = ts
-            elif new2 > maxdim:
-                new2 = maxdim
-                new1 = maxdim - ts
-            return new1, new2, ts
+        new_x1, new_x2 = x1, x2
+        new_y1, new_y2 = y1, y2
+
+        flush_left  = (x1 == 0)
+        flush_right = (x2 == W)
+        flush_top   = (y1 == 0)
+        flush_bot   = (y2 == H)
 
         if not transpose:
-            cur = w / h
-            # widen
-            if cur < ar:
-                desired_w = math.ceil(h * ar)
-                x1, x2, w = center_clamp_slice(x1, w, desired_w, WF)
-                img_crop  = pre[:, y1:y2, x1:x2, :]
-                mask_crop = hard[:,    y1:y2, x1:x2]
-                mask_blur = mask_blurred[:,y1:y2, x1:x2]
-            # heighten
-            elif cur > ar:
-                desired_h = math.ceil(w / ar)
-                y1, y2, h = center_clamp_slice(y1, h, desired_h, HF)
-                img_crop  = pre[:, y1:y2, x1:x2, :]
-                mask_crop = hard[:,    y1:y2, x1:x2]
-                mask_blur = mask_blurred[:,y1:y2, x1:x2]
+            if req_w > w0: # widen?
+                target_w = min(W, req_w)
+                delta    = target_w - w0
+                if flush_right:
+                    new_x1, new_x2 = W - target_w, W
+                elif flush_left:
+                    new_x1, new_x2 = 0, target_w
+                else:
+                    off = delta // 2
+                    new_x1 = max(0, x1 - off)
+                    new_x2 = new_x1 + target_w
+                    if new_x2 > W:
+                        new_x2 = W
+                        new_x1 = W - target_w
+
+            elif req_h > h0: # vertical bloater?
+                target_h = min(H, req_h)
+                delta    = target_h - h0
+                if flush_bot:
+                    new_y1, new_y2 = H - target_h, H
+                elif flush_top:
+                    new_y1, new_y2 = 0, target_h
+                else:
+                    off = delta // 2
+                    new_y1 = max(0, y1 - off)
+                    new_y2 = new_y1 + target_h
+                    if new_y2 > H:
+                        new_y2 = H
+                        new_y1 = H - target_h
 
         else:
-            cur = h / w
-            # portrait heighten
-            if cur < ar:
-                desired_h = math.ceil(w * ar)
-                y1, y2, h = center_clamp_slice(y1, h, desired_h, HF)
-                img_crop  = pre[:, y1:y2, x1:x2, :]
-                mask_crop = hard[:,    y1:y2, x1:x2]
-                mask_blur = mask_blurred[:,y1:y2, x1:x2]
-            # portrait widen
-            elif cur > ar:
-                desired_w = math.ceil(h / ar)
-                x1, x2, w = center_clamp_slice(x1, w, desired_w, WF)
-                img_crop  = pre[:, y1:y2, x1:x2, :]
-                mask_crop = hard[:,    y1:y2, x1:x2]
-                mask_blur = mask_blurred[:,y1:y2, x1:x2]
+            if req_h > h0:
+                target_h = min(H, req_h)
+                delta    = target_h - h0
+                if flush_bot:
+                    new_y1, new_y2 = H - target_h, H
+                elif flush_top:
+                    new_y1, new_y2 = 0, target_h
+                else:
+                    off = delta // 2
+                    new_y1 = max(0, y1 - off)
+                    new_y2 = new_y1 + target_h
+                    if new_y2 > H:
+                        new_y2 = H
+                        new_y1 = H - target_h
 
-        # 7) return exactly what ComfyUI expects
-        return (img_crop, mask_crop, mask_blur, x1, y1, w, h)
+            elif req_w > w0:
+                target_w = min(W, req_w)
+                delta    = target_w - w0
+                if flush_right:
+                    new_x1, new_x2 = W - target_w, W
+                elif flush_left:
+                    new_x1, new_x2 = 0, target_w
+                else:
+                    off = delta // 2
+                    new_x1 = max(0, x1 - off)
+                    new_x2 = new_x1 + target_w
+                    if new_x2 > W:
+                        new_x2 = W
+                        new_x1 = W - target_w
+
+        final_w = new_x2 - new_x1
+        final_h = new_y2 - new_y1
+
+        # done... crop image & masks
+        img_crop      = img_full[:,    new_y1:new_y2, new_x1:new_x2, :]
+        mask_crop     = hard[:,       new_y1:new_y2, new_x1:new_x2   ]
+        mask_blurred  = mask_blur_full[:, new_y1:new_y2, new_x1:new_x2]
+
+        return (
+            img_crop,
+            mask_crop,
+            mask_blurred,
+            new_x1,
+            new_y1,
+            final_w,
+            final_h,
+        )
+
+

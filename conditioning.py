@@ -649,6 +649,9 @@ class EmptyConditioningGenerator:
             import comfy.supported_models
             self.model_config = model.model.model_config
 
+            self.llama3_shape = None
+            self.pooled_len    = 0
+
             if isinstance(self.model_config, comfy.supported_models.SD3):
                 self.text_len_base = 154
                 self.text_channels = 4096
@@ -660,7 +663,7 @@ class EmptyConditioningGenerator:
             elif isinstance(self.model_config, comfy.supported_models.AuraFlow):
                 self.text_len_base = 256
                 self.text_channels = 2048
-                self.pooled_len    = 1
+                #self.pooled_len    = 1
             elif isinstance(self.model_config, comfy.supported_models.Stable_Cascade_C):
                 self.text_len_base = 77
                 self.text_channels = 1280
@@ -668,15 +671,16 @@ class EmptyConditioningGenerator:
             elif isinstance(self.model_config, comfy.supported_models.WAN21_T2V) or isinstance(self.model_config, comfy.supported_models.WAN21_I2V):
                 self.text_len_base = 512
                 self.text_channels = 5120 # sometimes needs to be 4096, like when initializing in samplers_py in shark?
-                self.pooled_len    = 1
+                #self.pooled_len    = 1
             elif isinstance(self.model_config, comfy.supported_models.HiDream):
                 self.text_len_base = 128
                 self.text_channels = 4096 # sometimes needs to be 4096, like when initializing in samplers_py in shark?
-                self.pooled_len    = 768
+                self.pooled_len    = 2048
+                self.llama3_shape  = torch.Size([1,32,128,4096])
             elif isinstance(self.model_config, comfy.supported_models.LTXV):
                 self.text_len_base = 128
                 self.text_channels = 4096
-                self.pooled_len    = 1
+                #self.pooled_len    = 1
             elif isinstance(self.model_config, comfy.supported_models.SD15):
                 self.text_len_base = 77
                 self.text_channels = 768
@@ -690,21 +694,39 @@ class EmptyConditioningGenerator:
                 isinstance (self.model_config, comfy.supported_models.HunyuanVideoSkyreelsI2V):
                 self.text_len_base = 128
                 self.text_channels = 4096
-                self.pooled_len    = 1
+                #self.pooled_len    = 1
             else:
                 raise ValueError(f"Unknown model config: {type(self.model_config)}")
         elif conditioning is not None:
             self.device        = conditioning[0][0].device
             self.dtype         = conditioning[0][0].dtype
             self.text_len_base = conditioning[0][0].shape[-2]
-            self.pooled_len    = conditioning[0][1]['pooled_output'].shape[-1]
+            if 'pooled_output' in conditioning[0][1]:
+                self.pooled_len = conditioning[0][1]['pooled_output'].shape[-1]
+            else:
+                self.pooled_len = 0
             self.text_channels = conditioning[0][0].shape[-1]
             
     def get_empty_conditioning(self):
-        return [[
-            torch.zeros((1, self.text_len_base, self.text_channels)),
-            {'pooled_output': torch.zeros((1, self.pooled_len))}
-        ]]
+        if self.llama3_shape is not None and self.pooled_len > 0:
+            return [[
+                torch.zeros((1, self.text_len_base, self.text_channels)),
+                {
+                    'pooled_output'      : torch.zeros((1, self.pooled_len)),
+                    'conditioning_llama3': torch.zeros(self.llama3_shape),
+                }
+            ]]
+        elif self.pooled_len > 0:
+            return [[
+                torch.zeros((1, self.text_len_base, self.text_channels)),
+                {
+                    'pooled_output': torch.zeros((1, self.pooled_len)),
+                }
+            ]]
+        else:
+            return [[
+                torch.zeros((1, self.text_len_base, self.text_channels)),
+            ]]
 
     def get_empty_conditionings(self, count):
         return [self.get_empty_conditioning() for _ in range(count)]
