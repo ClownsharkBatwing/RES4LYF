@@ -146,13 +146,30 @@ class DoubleStreamBlock(nn.Module):
             operations.Linear(mlp_hidden_dim, hidden_size, bias=True, dtype=dtype, device=device),
         ) # 3072->12288, 12288->3072  (3072*4)
     
-    def img_attn_preproc(self, img, img_mod1):
+    def img_attn_preproc(self, img, img_mod1, cross_self_mask=None):
         img_modulated = self.img_norm1(img)
         img_modulated = (1 + img_mod1.scale) * img_modulated + img_mod1.shift
         img_qkv       = self.img_attn.qkv(img_modulated)
         
         img_q, img_k, img_v = rearrange(img_qkv, "B L (K H D) -> K B H L D", K=3, H=self.num_heads)
+
         img_q, img_k        = self.img_attn.norm(img_q, img_k, img_v)
+
+        
+        if False: #cross_self_mask is not None and cross_self_mask.sum() != 0.0:
+            derp_mask = torch.ones_like(img_q)
+            derp_mask_inv = torch.ones_like(img_q)
+            
+            derp_mask    [:,:,:,:] = (cross_self_mask)   * 0.25 + 1
+            derp_mask_inv[:,:,:,:] = (1-cross_self_mask) * 0.25 + 1
+            #derp_mask_inv[:,:,:,:] = 1 - 0.25 * cross_self_mask
+            
+            #img_q *= derp_mask#_inv
+            #img_k *= derp_mask_inv
+            img_v *= derp_mask_inv
+        
+        
+        
         return img_q, img_k, img_v
     
     def txt_attn_preproc(self, txt, txt_mod1):
@@ -165,17 +182,18 @@ class DoubleStreamBlock(nn.Module):
         return txt_q, txt_k, txt_v
 
 
-    def forward(self, img: Tensor, txt: Tensor, vec: Tensor, pe: Tensor, mask=None, idx=0, update_cross_attn=None) -> Tuple[Tensor, Tensor]: # vec 1,3072  # vec 1,3072    #mask.shape 4608,4608  #img_attn.shape 1,4096,3072    txt_attn.shape 1,512,3072
+    def forward(self, img: Tensor, txt: Tensor, vec: Tensor, pe: Tensor, mask=None, cross_self_mask=None, idx=0, update_cross_attn=None, sigma=None, lamb_t_factor=0.1) -> Tuple[Tensor, Tensor]: # vec 1,3072  # vec 1,3072    #mask.shape 4608,4608  #img_attn.shape 1,4096,3072    txt_attn.shape 1,512,3072
 
         img_mod1, img_mod2  = self.img_mod(vec) # -> 3072, 3072
         txt_mod1, txt_mod2  = self.txt_mod(vec)
         
-        img_q, img_k, img_v = self.img_attn_preproc(img, img_mod1)
+        img_q, img_k, img_v = self.img_attn_preproc(img, img_mod1, cross_self_mask=cross_self_mask)
         txt_q, txt_k, txt_v = self.txt_attn_preproc(txt, txt_mod1)
 
         q, k, v = torch.cat((txt_q, img_q), dim=2), torch.cat((txt_k, img_k), dim=2), torch.cat((txt_v, img_v), dim=2)
 
-        attn = attention(q, k, v, pe=pe, mask=mask)
+        #attn = attention(q, k, v, pe=pe, mask=mask, cross_self_mask=None)
+        attn = attention(q, k, v, pe=pe, mask=mask, cross_self_mask=cross_self_mask, sigma=sigma, lamb_t_factor=lamb_t_factor)
         
         txt_attn = attn[:, : txt.shape[1]   ]                         # 1, 768,3072
         img_attn = attn[:,   txt.shape[1] : ]  
@@ -289,22 +307,39 @@ class SingleStreamBlock(nn.Module):      #attn.shape = 1,4608,3072       mlp.sha
         self.mlp_act        = nn.GELU(approximate="tanh")
         self.modulation     = Modulation(hidden_size, double=False,                                 dtype=dtype, device=device, operations=operations)
         
-    def img_attn(self, img, mod, pe, mask):
+    def img_attn(self, img, mod, pe, mask, cross_self_mask=None, sigma=None, lamb_t_factor=0.1):
         img_mod  = (1 + mod.scale) * self.pre_norm(img) + mod.shift   # mod => vec
         qkv, mlp = torch.split(self.linear1(img_mod), [3*self.hidden_size, self.mlp_hidden_dim], dim=-1)
 
         q, k, v  = rearrange(qkv, "B L (K H D) -> K B H L D", K=3, H=self.num_heads)
-        q, k     = self.norm(q, k, v)
+        
 
-        attn     = attention(q, k, v, pe=pe, mask=mask)
+        
+        q, k     = self.norm(q, k, v)
+        
+        if False: # cross_self_mask is not None and cross_self_mask.sum() != 0.0:
+            derp_mask = torch.ones_like(q)
+            derp_mask_inv = torch.ones_like(q)
+            
+            txt_len = q.shape[-2] - cross_self_mask.shape[0]
+            
+            derp_mask    [:,:,txt_len:,:] = (cross_self_mask)   * 0.25 + 1
+            derp_mask_inv[:,:,txt_len:,:] = (1-cross_self_mask) * 0.25 + 1
+            #derp_mask_inv[:,:,txt_len:,:] = 1 - 0.25 * cross_self_mask
+            #q *= derp_mask_inv
+            #k *= derp_mask#_inv
+            v *= derp_mask_inv
+
+        #attn     = attention(q, k, v, pe=pe, mask=mask, cross_self_mask=None)
+        attn     = attention(q, k, v, pe=pe, mask=mask, cross_self_mask=cross_self_mask, sigma=sigma, lamb_t_factor=0.1)
         
         return attn, mlp
 
     # vec 1,3072    x 1,9984,3072
-    def forward(self, img: Tensor, vec: Tensor, pe: Tensor, mask=None, idx=0) -> Tensor:   # x 1,9984,3072 if 2 reg embeds, 1,9472,3072 if none    # 9216x4096 = 16x1536x1536
+    def forward(self, img: Tensor, vec: Tensor, pe: Tensor, mask=None, cross_self_mask=None, idx=0, sigma=None, lamb_t_factor=0.1) -> Tensor:   # x 1,9984,3072 if 2 reg embeds, 1,9472,3072 if none    # 9216x4096 = 16x1536x1536
         mod, _    = self.modulation(vec)
         
-        attn, mlp = self.img_attn(img, mod, pe, mask)
+        attn, mlp = self.img_attn(img, mod, pe, mask, cross_self_mask, sigma, lamb_t_factor)
         output    = self.linear2(torch.cat((attn, self.mlp_act(mlp)), 2))
 
         img      += mod.gate * output
