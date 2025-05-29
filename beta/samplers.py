@@ -675,8 +675,14 @@ class SharkSampler:
                         guider.set_cfgs(xt=cfg)
                         guider.set_conds(xt_positive=pos_cond_tmp, xt_negative=neg_cond)
                     else:
-                        guider.set_cfg(cfg)
-                        guider.set_conds(pos_cond_tmp, neg_cond)
+                        try:
+                            guider.set_cfg(cfg)
+                        except:
+                            RESplain("SharkWarning: guider.set_cfg failed but assuming cfg already set correctly.")
+                        try:
+                            guider.set_conds(pos_cond_tmp, neg_cond)
+                        except:
+                            RESplain("SharkWarning: guider.set_conds failed but assuming conds already set correctly.")
                     
                     if rebounds > 0:
                         cfgs_cached = guider.cfgs
