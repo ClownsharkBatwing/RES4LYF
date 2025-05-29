@@ -1698,7 +1698,7 @@ def sample_rk_beta(
         state_info_out['FLOW_STARTED']      = FLOW_STARTED
         state_info_out['FLOW_STOPPED']      = FLOW_STOPPED
         
-        if guides is not None and guides['guide_mode'] == 'inversion':
+        if guides is not None and guides.get('guide_mode', "") == 'inversion':
             guide_inversion_y0     = state_info.get('guide_inversion_y0')
             guide_inversion_y0_inv = state_info.get('guide_inversion_y0_inv')
             
