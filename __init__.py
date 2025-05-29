@@ -99,7 +99,7 @@ NODE_CLASS_MAPPINGS = {
     "StableCascade_StageB_Conditioning64" : conditioning.StableCascade_StageB_Conditioning64,
     "ConditioningZeroAndTruncate"         : conditioning.ConditioningZeroAndTruncate,
     "ConditioningTruncate"                : conditioning.ConditioningTruncate,
-    "StyleModelApplyAdvanced_"            : conditioning.StyleModelApplyAdvanced,
+    "StyleModelApplyStyle"                : conditioning.StyleModelApplyStyle,
     "CrossAttn_EraseReplace_HiDream"      : conditioning.CrossAttn_EraseReplace_HiDream,
 
     "ConditioningDownsample (T5)"         : conditioning.ConditioningDownsampleT5,
@@ -195,6 +195,7 @@ NODE_CLASS_MAPPINGS = {
     "ReLTXVPatcher"                       : models.ReLTXVPatcher,
     "ReHiDreamPatcher"                    : models.ReHiDreamPatcher,
     "ReSDPatcher"                         : models.ReSDPatcher,
+    "ReReduxPatcher"                      : models.ReReduxPatcher,
     
     "ReWanPatcherAdvanced"                : models.ReWanPatcherAdvanced,
     "ReFluxPatcherAdvanced"               : models.ReFluxPatcherAdvanced,
