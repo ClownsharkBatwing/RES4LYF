@@ -795,7 +795,7 @@ class RK_NoiseSampler:
             
         if d_noise_start_step == 0:
             sigmas = sigmas.clone() * d_noise
-            
+        
         UNSAMPLE_FROM_ZERO = False
         if sigmas[0] == 0.0:      #remove padding used to prevent comfy from adding noise to the latent (for unsampling, etc.)
             UNSAMPLE = True

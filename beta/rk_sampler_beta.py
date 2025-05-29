@@ -366,9 +366,39 @@ def sample_rk_beta(
     h_prev              = None
     
 
+
+
+    # BEGIN SAMPLING LOOP    
+    num_steps = len(sigmas[start_step:])-2 if sigmas[-1] == 0 else len(sigmas[start_step:])-1
+    
+    if steps_to_run >= 0:
+        current_steps =              min(num_steps, steps_to_run)
+        num_steps     = start_step + min(num_steps, steps_to_run)
+    else:
+        current_steps =              num_steps
+        num_steps     = start_step + num_steps
+    #current_steps = current_steps + 1 if sigmas[-1] == 0 and steps_to_run < 0 and UNSAMPLE else current_steps
+    
+    INIT_SAMPLE_LOOP = True
+    step = start_step
+    sigma, sigma_next, data_prev_ = None, None, None
+    
+    if (num_steps-1) == len(sigmas)-2 and sigmas[-1] == 0 and sigmas[-2] == NS.sigma_min:
+        progress_bar = trange(current_steps+1, disable=disable)
+    else:
+        progress_bar = trange(current_steps, disable=disable)
+    
+    
+    
+    VE_MODEL = isinstance(model.inner_model.inner_model.model_sampling, EPS)
+    
     # SETUP GUIDES
-    LG = LatentGuide(model, sigmas, UNSAMPLE, LGW_MASK_RESCALE_MIN, extra_options, device=work_device, dtype=default_dtype, frame_weights_mgr=frame_weights_mgr)
-    x = LG.init_guides(x, RK.IMPLICIT, guides, NS.noise_sampler, batch_num)
+    LG = LatentGuide(model, sigmas, UNSAMPLE, VE_MODEL, LGW_MASK_RESCALE_MIN, extra_options, device=work_device, dtype=default_dtype, frame_weights_mgr=frame_weights_mgr)
+
+    guide_inversion_y0 = state_info.get('guide_inversion_y0')
+    guide_inversion_y0_inv = state_info.get('guide_inversion_y0_inv')
+
+    x = LG.init_guides(x, RK.IMPLICIT, guides, NS.noise_sampler, batch_num, sigmas[step], guide_inversion_y0, guide_inversion_y0_inv)
     if (LG.mask != 1.0).any()   and  ((LG.y0 == 0).all() or (LG.y0_inv == 0).all()) : #  and   not LG.guide_mode.startswith("flow"):  # (LG.y0.sum() == 0 or LG.y0_inv.sum() == 0):
         SKIP_PSEUDO = True
         RESplain("skipping pseudo...")
@@ -393,7 +423,6 @@ def sample_rk_beta(
         
     #gc.collect()
 
-    VE_MODEL = isinstance(model.inner_model.inner_model.model_sampling, EPS)
     BASE_STARTED = False
     INV_STARTED  = False
     FLOW_STARTED = False
@@ -407,26 +436,6 @@ def sample_rk_beta(
     if EO("flow_use_init_noise"):
         x_init = x.clone()
 
-    # BEGIN SAMPLING LOOP    
-    num_steps = len(sigmas[start_step:])-2 if sigmas[-1] == 0 else len(sigmas[start_step:])-1
-    
-    if steps_to_run >= 0:
-        current_steps =              min(num_steps, steps_to_run)
-        num_steps     = start_step + min(num_steps, steps_to_run)
-    else:
-        current_steps =              num_steps
-        num_steps     = start_step + num_steps
-    #current_steps = current_steps + 1 if sigmas[-1] == 0 and steps_to_run < 0 and UNSAMPLE else current_steps
-    
-    INIT_SAMPLE_LOOP = True
-    step = start_step
-    sigma, sigma_next, data_prev_ = None, None, None
-    
-    if (num_steps-1) == len(sigmas)-2 and sigmas[-1] == 0 and sigmas[-2] == NS.sigma_min:
-        progress_bar = trange(current_steps+1, disable=disable)
-    else:
-        progress_bar = trange(current_steps, disable=disable)
-    
     #progress_bar = trange(len(sigmas)-1-start_step, disable=disable)
         
     if AttnMask is not None:
@@ -496,7 +505,7 @@ def sample_rk_beta(
         step = 0
         num_steps = 2 * sigma_restarts - 1
         
-    if RENOISE:
+    if RENOISE:      # TODO: adapt for noise inversion somehow
         if VE_MODEL:
             x = x + sigmas[step] * NS.noise_sampler(sigma=sigmas[step], sigma_next=sigmas[step+1])
         else:
@@ -506,24 +515,28 @@ def sample_rk_beta(
                 
     while step < num_steps:
         sigma, sigma_next = sigmas[step], sigmas[step+1]
+        if sigma_next > sigma:
+            step_sched = torch.where(torch.flip(sigmas, dims=[0]) == sigma)[0][0].item()
+        else:
+            step_sched = step
         
         if LG.HAS_LATENT_GUIDE_ADAIN:
-            if LG.lgw_adain[step] == 0.0:
+            if LG.lgw_adain[step_sched] == 0.0:
                 RK.update_transformer_options({'y0_adain': None})
                 RK.update_transformer_options({'blocks_adain': {}})
             else:
                 RK.update_transformer_options({'y0_adain': LG.y0_adain.clone()})
                 if 'blocks_adain_mmdit' in guides:
                     blocks_adain = {
-                        "double_weights": [val * LG.lgw_adain[step] for val in guides['blocks_adain_mmdit']['double_weights']],
-                        "single_weights": [val * LG.lgw_adain[step] for val in guides['blocks_adain_mmdit']['single_weights']],
+                        "double_weights": [val * LG.lgw_adain[step_sched] for val in guides['blocks_adain_mmdit']['double_weights']],
+                        "single_weights": [val * LG.lgw_adain[step_sched] for val in guides['blocks_adain_mmdit']['single_weights']],
                         "double_blocks" : guides['blocks_adain_mmdit']['double_blocks'],
                         "single_blocks" : guides['blocks_adain_mmdit']['single_blocks'],
                     }
                 RK.update_transformer_options({'blocks_adain': blocks_adain})
         
         if LG.HAS_LATENT_GUIDE_ATTNINJ:
-            if LG.lgw_attninj[step] == 0.0:
+            if LG.lgw_attninj[step_sched] == 0.0:
                 RK.update_transformer_options({'y0_attninj': None})
                 RK.update_transformer_options({'blocks_attninj'    : {}})
                 RK.update_transformer_options({'blocks_attninj_qkv': {}})
@@ -531,8 +544,8 @@ def sample_rk_beta(
                 RK.update_transformer_options({'y0_attninj': LG.y0_attninj.clone()})
                 if 'blocks_attninj_mmdit' in guides:
                     blocks_attninj = {
-                        "double_weights": [val * LG.lgw_attninj[step] for val in guides['blocks_attninj_mmdit']['double_weights']],
-                        "single_weights": [val * LG.lgw_attninj[step] for val in guides['blocks_attninj_mmdit']['single_weights']],
+                        "double_weights": [val * LG.lgw_attninj[step_sched] for val in guides['blocks_attninj_mmdit']['double_weights']],
+                        "single_weights": [val * LG.lgw_attninj[step_sched] for val in guides['blocks_attninj_mmdit']['single_weights']],
                         "double_blocks" : guides['blocks_attninj_mmdit']['double_blocks'],
                         "single_blocks" : guides['blocks_attninj_mmdit']['single_blocks'],
                     }
@@ -540,14 +553,14 @@ def sample_rk_beta(
                 RK.update_transformer_options({'blocks_attninj_qkv': guides['blocks_attninj_qkv']})
 
         if LG.HAS_LATENT_GUIDE_STYLE_POS:
-            if LG.lgw_style_pos[step] == 0.0:
+            if LG.lgw_style_pos[step_sched] == 0.0:
                 RK.update_transformer_options({'y0_style_pos':        None})
                 RK.update_transformer_options({'y0_style_pos_weight': 0.0})
                 RK.update_transformer_options({'y0_style_pos_synweight': 0.0})
                 RK.update_transformer_options({'y0_style_pos_mask': None})
             else:
                 RK.update_transformer_options({'y0_style_pos':        LG.y0_style_pos.clone()})
-                RK.update_transformer_options({'y0_style_pos_weight': LG.lgw_style_pos[step]})
+                RK.update_transformer_options({'y0_style_pos_weight': LG.lgw_style_pos[step_sched]})
                 RK.update_transformer_options({'y0_style_pos_synweight': guides['synweight_style_pos']})
                 RK.update_transformer_options({'y0_style_pos_mask': LG.mask_style_pos})
                 RK.update_transformer_options({'y0_style_method': guides['style_method']})
@@ -562,37 +575,37 @@ def sample_rk_beta(
                     
 
         if LG.HAS_LATENT_GUIDE_STYLE_NEG:
-            if LG.lgw_style_neg[step] == 0.0:
+            if LG.lgw_style_neg[step_sched] == 0.0:
                 RK.update_transformer_options({'y0_style_neg':        None})
                 RK.update_transformer_options({'y0_style_neg_weight': 0.0})
                 RK.update_transformer_options({'y0_style_neg_synweight': 0.0})
                 RK.update_transformer_options({'y0_style_neg_mask': None})
             else:
                 RK.update_transformer_options({'y0_style_neg':        LG.y0_style_neg.clone()})
-                RK.update_transformer_options({'y0_style_neg_weight': LG.lgw_style_neg[step]})
+                RK.update_transformer_options({'y0_style_neg_weight': LG.lgw_style_neg[step_sched]})
                 RK.update_transformer_options({'y0_style_neg_synweight': guides['synweight_style_neg']})
                 RK.update_transformer_options({'y0_style_neg_mask': LG.mask_style_neg})
                 RK.update_transformer_options({'y0_style_method': guides['style_method']})
 
         if AttnMask_neg is not None:
-            RK.update_transformer_options({'regional_conditioning_weight_neg': RegParam_neg.weights[step]})
-            RK.update_transformer_options({'regional_conditioning_floor_neg':  RegParam_neg.floors[step]})
+            RK.update_transformer_options({'regional_conditioning_weight_neg': RegParam_neg.weights[step_sched]})
+            RK.update_transformer_options({'regional_conditioning_floor_neg':  RegParam_neg.floors[step_sched]})
 
         if AttnMask is not None:
-            RK.update_transformer_options({'regional_conditioning_weight': RegParam.weights[step]})
-            RK.update_transformer_options({'regional_conditioning_floor':  RegParam.floors[step]})
+            RK.update_transformer_options({'regional_conditioning_weight': RegParam.weights[step_sched]})
+            RK.update_transformer_options({'regional_conditioning_floor':  RegParam.floors[step_sched]})
 
         elif regional_conditioning_weights is not None:
-            RK.extra_args['model_options']['transformer_options']['regional_conditioning_weight'] = regional_conditioning_weights[step]
-            RK.extra_args['model_options']['transformer_options']['regional_conditioning_floor']  = regional_conditioning_floors [step]
+            RK.extra_args['model_options']['transformer_options']['regional_conditioning_weight'] = regional_conditioning_weights[step_sched]
+            RK.extra_args['model_options']['transformer_options']['regional_conditioning_floor']  = regional_conditioning_floors [step_sched]
         
-        epsilon_scale        = float(epsilon_scales [step]) if epsilon_scales        is not None else None
-        eta                  = etas                 [step]  if etas                  is not None else eta
-        eta_substep          = etas_substep         [step]  if etas_substep          is not None else eta_substep
-        s_noise              = s_noises             [step]  if s_noises              is not None else s_noise
-        s_noise_substep      = s_noises_substep     [step]  if s_noises_substep      is not None else s_noise_substep
-        noise_scaling_eta    = noise_scaling_etas   [step]  if noise_scaling_etas    is not None else noise_scaling_eta
-        noise_scaling_weight = noise_scaling_weights[step]  if noise_scaling_weights is not None else noise_scaling_weight
+        epsilon_scale        = float(epsilon_scales [step_sched]) if epsilon_scales        is not None else None
+        eta                  = etas                 [step_sched]  if etas                  is not None else eta
+        eta_substep          = etas_substep         [step_sched]  if etas_substep          is not None else eta_substep
+        s_noise              = s_noises             [step_sched]  if s_noises              is not None else s_noise
+        s_noise_substep      = s_noises_substep     [step_sched]  if s_noises_substep      is not None else s_noise_substep
+        noise_scaling_eta    = noise_scaling_etas   [step_sched]  if noise_scaling_etas    is not None else noise_scaling_eta
+        noise_scaling_weight = noise_scaling_weights[step_sched]  if noise_scaling_weights is not None else noise_scaling_weight
         
         NS.set_sde_step(sigma, sigma_next, eta, overshoot, s_noise)
         RK.set_coeff(rk_type, NS.h, c1, c2, c3, step, sigmas, NS.sigma_down)
@@ -753,7 +766,7 @@ def sample_rk_beta(
                                 x_tmp = x_[0]
                                 s_tmp = sigma
                                 
-                            elif implicit_type == "rebound": 
+                            elif implicit_type == "rebound":          # TODO: ADAPT REBOUND IMPLICIT TO WORK WITH FLOW GUIDE MODE
                                 eps_tmp, denoised_tmp = RK(x, sigma_next, x_0, sigma)
                                 eps_tmp = (x - denoised_tmp) / sigma_next
                                 x = denoised_tmp + sigma * eps_tmp
@@ -1684,6 +1697,16 @@ def sample_rk_beta(
         state_info_out['completed']         = step == len(sigmas)-2 and sigmas[-1] == 0 and sigmas[-2] == NS.sigma_min
         state_info_out['FLOW_STARTED']      = FLOW_STARTED
         state_info_out['FLOW_STOPPED']      = FLOW_STOPPED
+        
+        if guides is not None and guides['guide_mode'] == 'inversion':
+            guide_inversion_y0     = state_info.get('guide_inversion_y0')
+            guide_inversion_y0_inv = state_info.get('guide_inversion_y0_inv')
+            
+            state_info_out['guide_inversion_y0'] = guide_inversion_y0 if guide_inversion_y0 is not None else LG.y0.clone()
+            state_info_out['guide_inversion_y0_inv'] = guide_inversion_y0_inv if guide_inversion_y0_inv is not None else LG.y0_inv.clone()
+            
+        #state_info_out['guide_inversion_y0']     = LG.y0     if guides['guide_mode'] == 'inversion' else None
+        #state_info_out['guide_inversion_y0_inv'] = LG.y0_inv if guides['guide_mode'] == 'inversion' else None
         if FLOW_STARTED and not FLOW_STOPPED:
             state_info_out['y0']           = y0.to('cpu') 
             #state_info_out['y0_inv']       = y0_inv.to('cpu')       # TODO: implement this?

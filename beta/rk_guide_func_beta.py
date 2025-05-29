@@ -30,6 +30,7 @@ class LatentGuide:
                 model,
                 sigmas               : Tensor,
                 UNSAMPLE             : bool,
+                VE_MODEL             : bool,
                 LGW_MASK_RESCALE_MIN : bool,
                 extra_options        : str,
                 device               : str = 'cpu',
@@ -50,8 +51,9 @@ class LatentGuide:
         self.sigma_max                 = model_sampling.sigma_max.to(dtype=dtype, device=device)
         self.sigmas                    = sigmas                  .to(dtype=dtype, device=device)
         self.UNSAMPLE                  = UNSAMPLE
+        self.VE_MODEL                  = VE_MODEL
         self.VIDEO                     = is_video_model(model)
-        self.SAMPLE                    = (sigmas[0] > sigmas[1])
+        self.SAMPLE                    = (sigmas[0] > sigmas[1])    # type torch.bool
         self.y0                        = None
         self.y0_inv                    = None
         self.y0_mean                   = None
@@ -92,11 +94,11 @@ class LatentGuide:
         self.cossim_tgt                = torch.full_like(sigmas, 0., dtype=dtype) 
         self.cossim_tgt_inv            = torch.full_like(sigmas, 0., dtype=dtype) 
         
-        self.guide_cossim_cutoff_      = 1.0
-        self.guide_bkg_cossim_cutoff_  = 1.0
-        self.guide_mean_cossim_cutoff_ = 1.0
-        self.guide_adain_cossim_cutoff_= 1.0
-        self.guide_attninj_cossim_cutoff_= 1.0
+        self.guide_cossim_cutoff_          = 1.0
+        self.guide_bkg_cossim_cutoff_      = 1.0
+        self.guide_mean_cossim_cutoff_     = 1.0
+        self.guide_adain_cossim_cutoff_    = 1.0
+        self.guide_attninj_cossim_cutoff_  = 1.0
         self.guide_style_pos_cossim_cutoff_= 1.0
         self.guide_style_neg_cossim_cutoff_= 1.0
 
@@ -108,30 +110,40 @@ class LatentGuide:
         self.EO                       = ExtraOptions(extra_options)
 
 
-    def init_guides(self, x:Tensor, RK_IMPLICIT:bool, guides:Optional[Tensor]=None, noise_sampler:Optional["NoiseGeneratorSubclass"]=None, batch_num:int=0) -> Tensor:
-        latent_guide_weight       = 0.0
-        latent_guide_weight_inv   = 0.0
-        latent_guide_weight_mean  = 0.0
-        latent_guide_weight_adain = 0.0
-        latent_guide_weight_attninj = 0.0
+    def init_guides(self,
+            x:Tensor,
+            RK_IMPLICIT:bool,
+            guides:Optional[Tensor]=None,
+            noise_sampler:Optional["NoiseGeneratorSubclass"]=None,
+            batch_num:int=0,
+            sigma_init = None,
+            guide_inversion_y0 = None,
+            guide_inversion_y0_inv = None,
+        ) -> Tensor:
+        
+        latent_guide_weight           = 0.0
+        latent_guide_weight_inv       = 0.0
+        latent_guide_weight_mean      = 0.0
+        latent_guide_weight_adain     = 0.0
+        latent_guide_weight_attninj   = 0.0
         latent_guide_weight_style_pos = 0.0
         latent_guide_weight_style_neg = 0.0
 
-        latent_guide_weights      = torch.zeros_like(self.sigmas, dtype=self.dtype, device=self.device)
-        latent_guide_weights_inv  = torch.zeros_like(self.sigmas, dtype=self.dtype, device=self.device)
-        latent_guide_weights_mean = torch.zeros_like(self.sigmas, dtype=self.dtype, device=self.device)
-        latent_guide_weights_adain= torch.zeros_like(self.sigmas, dtype=self.dtype, device=self.device)
-        latent_guide_weights_attninj = torch.zeros_like(self.sigmas, dtype=self.dtype, device=self.device)
+        latent_guide_weights           = torch.zeros_like(self.sigmas, dtype=self.dtype, device=self.device)
+        latent_guide_weights_inv       = torch.zeros_like(self.sigmas, dtype=self.dtype, device=self.device)
+        latent_guide_weights_mean      = torch.zeros_like(self.sigmas, dtype=self.dtype, device=self.device)
+        latent_guide_weights_adain     = torch.zeros_like(self.sigmas, dtype=self.dtype, device=self.device)
+        latent_guide_weights_attninj   = torch.zeros_like(self.sigmas, dtype=self.dtype, device=self.device)
         latent_guide_weights_style_pos = torch.zeros_like(self.sigmas, dtype=self.dtype, device=self.device)
         latent_guide_weights_style_neg = torch.zeros_like(self.sigmas, dtype=self.dtype, device=self.device)
 
-        latent_guide              = None
-        latent_guide_inv          = None
-        latent_guide_mean         = None
-        latent_guide_adain        = None
-        latent_guide_attninj      = None
-        latent_guide_style_pos    = None
-        latent_guide_style_neg    = None
+        latent_guide           = None
+        latent_guide_inv       = None
+        latent_guide_mean      = None
+        latent_guide_adain     = None
+        latent_guide_attninj   = None
+        latent_guide_style_pos = None
+        latent_guide_style_neg = None
         
 
         if guides is not None:
@@ -143,11 +155,11 @@ class LatentGuide:
                 self.SAMPLE   = True
                 self.UNSAMPLE = False
             
-            latent_guide_weight            = guides.get("weight_masked",   0.)
-            latent_guide_weight_inv        = guides.get("weight_unmasked", 0.)
-            latent_guide_weight_mean       = guides.get("weight_mean",     0.)
-            latent_guide_weight_adain      = guides.get("weight_adain",    0.)
-            latent_guide_weight_attninj    = guides.get("weight_attninj",  0.)
+            latent_guide_weight            = guides.get("weight_masked",    0.)
+            latent_guide_weight_inv        = guides.get("weight_unmasked",  0.)
+            latent_guide_weight_mean       = guides.get("weight_mean",      0.)
+            latent_guide_weight_adain      = guides.get("weight_adain",     0.)
+            latent_guide_weight_attninj    = guides.get("weight_attninj",   0.)
             latent_guide_weight_style_pos  = guides.get("weight_style_pos", 0.)
             latent_guide_weight_style_neg  = guides.get("weight_style_neg", 0.)
             #latent_guide_synweight_style_pos  = guides.get("synweight_style_pos", 0.)
@@ -329,6 +341,8 @@ class LatentGuide:
 
             if self.SAMPLE:
                 self.y0 = latent_guide_samples
+            elif sigma_init != 0.0:
+                pass
             elif self.UNSAMPLE: # and self.mask is not None:
                 mask = self.mask.to(x.device)
                 x = (1-mask) * x + mask * latent_guide_samples.to(x.device)
@@ -353,6 +367,8 @@ class LatentGuide:
 
             if self.SAMPLE:
                 self.y0_inv = latent_guide_inv_samples
+            elif sigma_init != 0.0:
+                pass
             elif self.UNSAMPLE: # and self.mask is not None:
                 mask_inv = self.mask_inv.to(x.device)
                 x = (1-mask_inv) * x + mask_inv * latent_guide_inv_samples.to(x.device) #fixed old approach, which was mask, (1-mask)
@@ -500,11 +516,19 @@ class LatentGuide:
         else:
             self.y0_style_neg = torch.zeros_like(x, dtype=self.dtype, device=self.device)
 
-        if self.UNSAMPLE and not self.SAMPLE: #sigma_next > sigma:
-            self.y0     = noise_sampler(sigma=self.sigma_max, sigma_next=self.sigma_min).to(dtype=self.dtype, device=self.device)
-            self.y0     = normalize_zscore(self.y0,     channelwise=True, inplace=True)
-            self.y0_inv = noise_sampler(sigma=self.sigma_max, sigma_next=self.sigma_min).to(dtype=self.dtype, device=self.device)
-            self.y0_inv = normalize_zscore(self.y0_inv, channelwise=True, inplace=True)
+        if self.UNSAMPLE and not self.SAMPLE: #sigma_next > sigma:   # TODO: VERIFY APPROACH FOR INVERSION
+            if guide_inversion_y0 is not None:
+                self.y0 = guide_inversion_y0
+            else:
+                self.y0     = noise_sampler(sigma=self.sigma_max, sigma_next=self.sigma_min).to(dtype=self.dtype, device=self.device)
+                self.y0     = normalize_zscore(self.y0,     channelwise=True, inplace=True)
+                
+            if guide_inversion_y0_inv is not None:
+                self.y0_inv = guide_inversion_y0_inv
+            else:
+                self.y0_inv = noise_sampler(sigma=self.sigma_max, sigma_next=self.sigma_min).to(dtype=self.dtype, device=self.device)
+                self.y0_inv = normalize_zscore(self.y0_inv, channelwise=True, inplace=True)
+
             
         if self.VIDEO and self.frame_weights_mgr is not None:
             num_frames = x.shape[2]
@@ -1189,7 +1213,8 @@ class LatentGuide:
             
 
 
-        elif (self.UNSAMPLE or self.guide_mode in {"epsilon", "epsilon_cw", "epsilon_projection", "epsilon_projection_cw"}) and (self.lgw[step] > 0 or self.lgw_inv[step] > 0):
+            #elif (self.UNSAMPLE or self.guide_mode in {"epsilon", "epsilon_cw", "epsilon_projection", "epsilon_projection_cw"}) and (self.lgw[step] > 0 or self.lgw_inv[step] > 0):
+        elif self.guide_mode in {"epsilon", "epsilon_cw", "epsilon_projection", "epsilon_projection_cw"} and (self.lgw[step] > 0 or self.lgw_inv[step] > 0):
             if sigma_down < sigma   or   s_[row] < RK.sigma_max:
                                 
                 eps_substep_guide     = torch.zeros_like(x_0)

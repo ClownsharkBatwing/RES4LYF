@@ -151,6 +151,7 @@ class SharkSampler:
             unsample_cfg       : float                  = 1.0,
             unsample_eta       : float                  = 0.5,
             unsampler_name     : str                    = "none",
+            unsample_steps_to_run : int                 = -1,
             eta_decay_scale   : float                  = 1.0,
             
             #ultracascade_stage : str = "stage_UP",
@@ -189,6 +190,7 @@ class SharkSampler:
             unsample_cfg    = options_mgr.get('unsample_cfg',     unsample_cfg)
             unsample_eta    = options_mgr.get('unsample_eta',     unsample_eta)
             unsampler_name  = options_mgr.get('unsampler_name',   unsampler_name)
+            unsample_steps_to_run = options_mgr.get('unsample_steps_to_run',   unsample_steps_to_run)
             eta_decay_scale = options_mgr.get('eta_decay_scale',  eta_decay_scale)
             start_at_step   = options_mgr.get('start_at_step',    -1)
             tile_sizes      = options_mgr.get('tile_sizes',       None)
@@ -658,7 +660,7 @@ class SharkSampler:
                     if guider is None:
                         guider = SharkGuider(work_model)
                         flow_cond = options_mgr.get('flow_cond', {})
-                        if flow_cond != {} and 'yt_positive' in flow_cond and not 'yt_inv;_positive' in flow_cond:
+                        if flow_cond != {} and 'yt_positive' in flow_cond and not 'yt_inv_positive' in flow_cond:   #and not 'yt_inv;_positive' in flow_cond:   # typo???
                             guider.set_conds(yt_positive=flow_cond.get('yt_positive'), yt_negative=flow_cond.get('yt_negative'),)
                             guider.set_cfgs(yt=flow_cond.get('yt_cfg'), xt=cfg)
                         elif flow_cond != {} and 'yt_positive' in flow_cond and 'yt_inv_positive' in flow_cond:
@@ -678,6 +680,7 @@ class SharkSampler:
                     
                     if rebounds > 0:
                         cfgs_cached = guider.cfgs
+                        steps_to_run_cached = sampler.extra_options['steps_to_run']
                         eta_cached         = sampler.extra_options['eta']
                         eta_substep_cached = sampler.extra_options['eta_substep']
                         
@@ -698,10 +701,14 @@ class SharkSampler:
                             sampler.extra_options['etas']         = unsample_etas
                             if unsampler_name != "none":
                                 sampler.extra_options['rk_type']      = unsampler_name
+                            if unsample_steps_to_run > -1:
+                                sampler.extra_options['steps_to_run'] = unsample_steps_to_run
+                                
                         else:
                             guider.cfgs = cfgs_cached
                         
                         guider.cfgs = cfgs_cached
+                        sampler.extra_options['steps_to_run'] = steps_to_run_cached
                         
                         eta_decay           = eta_cached
                         eta_substep_decay   = eta_substep_cached
@@ -746,6 +753,8 @@ class SharkSampler:
                                 sampler.extra_options['etas']         = unsample_etas
                                 if unsampler_name != "none":
                                     sampler.extra_options['rk_type']  = unsampler_name
+                                if unsample_steps_to_run > -1:
+                                    sampler.extra_options['steps_to_run'] = unsample_steps_to_run
                             else:
                                 guider.cfgs = cfgs_cached
                                 sampler.extra_options['eta_substep']  = eta_substep_decay
@@ -753,6 +762,8 @@ class SharkSampler:
                                 sampler.extra_options['etas_substep'] = etas_substep_decay
                                 sampler.extra_options['etas']         = etas_decay
                                 sampler.extra_options['rk_type']      = rk_type_cached
+                                sampler.extra_options['steps_to_run'] = steps_to_run_cached
+
                                 
                             samples = guider.sample(noise, samples.clone(), sampler, sigmas, denoise_mask=noise_mask, callback=callback, disable_pbar=disable_pbar, seed=-1)
 
@@ -772,7 +783,7 @@ class SharkSampler:
                         sampler.extra_options['etas_substep'] = etas_substep_cached
                         sampler.extra_options['etas']         = etas_cached
                         sampler.extra_options['rk_type']      = rk_type_cached
-                            
+                        sampler.extra_options['steps_to_run'] = steps_to_run_cached   # TODO: verify this is carried on
         
 
 
