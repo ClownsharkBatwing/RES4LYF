@@ -701,10 +701,11 @@ class SharkSampler:
                                 'xt': unsample_cfg,
                                 'yt': unsample_cfg,
                             }
-                            sampler.extra_options['eta_substep']  = unsample_eta
-                            sampler.extra_options['eta']          = unsample_eta
-                            sampler.extra_options['etas_substep'] = unsample_etas
-                            sampler.extra_options['etas']         = unsample_etas
+                            if unsample_eta != -1.0:
+                                sampler.extra_options['eta_substep']  = unsample_eta
+                                sampler.extra_options['eta']          = unsample_eta
+                                sampler.extra_options['etas_substep'] = unsample_etas
+                                sampler.extra_options['etas']         = unsample_etas
                             if unsampler_name != "none":
                                 sampler.extra_options['rk_type']      = unsampler_name
                             if unsample_steps_to_run > -1:
@@ -753,10 +754,16 @@ class SharkSampler:
                                     'xt': unsample_cfg,
                                     'yt': unsample_cfg,
                                 }
-                                sampler.extra_options['eta_substep']  = unsample_eta_decay
-                                sampler.extra_options['eta']          = unsample_eta_decay
-                                sampler.extra_options['etas_substep'] = unsample_etas
-                                sampler.extra_options['etas']         = unsample_etas
+                                if unsample_eta != -1.0:
+                                    sampler.extra_options['eta_substep']  = unsample_eta_decay
+                                    sampler.extra_options['eta']          = unsample_eta_decay
+                                    sampler.extra_options['etas_substep'] = unsample_etas
+                                    sampler.extra_options['etas']         = unsample_etas
+                                else:
+                                    sampler.extra_options['eta_substep']  = eta_substep_decay
+                                    sampler.extra_options['eta']          = eta_decay
+                                    sampler.extra_options['etas_substep'] = etas_substep_decay
+                                    sampler.extra_options['etas']         = etas_decay
                                 if unsampler_name != "none":
                                     sampler.extra_options['rk_type']  = unsampler_name
                                 if unsample_steps_to_run > -1:

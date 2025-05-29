@@ -408,13 +408,13 @@ def sample_rk_beta(
             SKIP_PSEUDO_Y = "y0_inv"
     else:
         SKIP_PSEUDO = False
-        
-    if   LG.y0.sum()     != 0 and LG.y0_inv.sum() != 0:
-        denoised_prev = LG.mask * LG.y0 + (1-LG.mask) * LG.y0_inv
-    elif LG.y0.sum()     != 0:
-        denoised_prev = LG.y0
-    elif LG.y0_inv.sum() != 0:
-        denoised_prev = LG.y0_inv
+    if guides is not None and guides.get('guide_mode', '') != "inversion" or sampler_mode != "unsample":  #do not set denoised_prev to noise guide with inversion!
+        if   LG.y0.sum()     != 0 and LG.y0_inv.sum() != 0:
+            denoised_prev = LG.mask * LG.y0 + (1-LG.mask) * LG.y0_inv         
+        elif LG.y0.sum()     != 0:
+            denoised_prev = LG.y0
+        elif LG.y0_inv.sum() != 0:
+            denoised_prev = LG.y0_inv
     data_cached = None
         
     if EO("pseudo_mix_strength"):
@@ -1685,6 +1685,28 @@ def sample_rk_beta(
     if INIT_SAMPLE_LOOP:
         state_info_out = state_info
     else:
+        if guides is not None and guides.get('guide_mode', "") == 'inversion':
+            guide_inversion_y0     = state_info.get('guide_inversion_y0')
+            guide_inversion_y0_inv = state_info.get('guide_inversion_y0_inv')
+            
+            if sampler_mode == "unsample" and guide_inversion_y0 is None:
+                guide_inversion_y0     = LG.y0.clone()
+            if sampler_mode == "unsample" and guide_inversion_y0_inv is None:
+                guide_inversion_y0_inv = LG.y0_inv.clone()
+                
+            if sampler_mode in {"standard", "resample"} and guide_inversion_y0 is None:
+                guide_inversion_y0 = NS.noise_sampler(sigma=NS.sigma_max, sigma_next=NS.sigma_min).to(x)
+                guide_inversion_y0 = normalize_zscore(guide_inversion_y0, channelwise=True, inplace=True)
+            if sampler_mode in {"standard", "resample"} and guide_inversion_y0_inv is None:
+                guide_inversion_y0_inv = NS.noise_sampler(sigma=NS.sigma_max, sigma_next=NS.sigma_min).to(x)
+                guide_inversion_y0_inv = normalize_zscore(guide_inversion_y0_inv, channelwise=True, inplace=True)
+                
+            state_info_out['guide_inversion_y0']     = guide_inversion_y0
+            state_info_out['guide_inversion_y0_inv'] = guide_inversion_y0_inv
+            
+            #state_info_out['guide_inversion_y0'] = guide_inversion_y0 if guide_inversion_y0 is not None else LG.y0.clone()
+            #state_info_out['guide_inversion_y0_inv'] = guide_inversion_y0_inv if guide_inversion_y0_inv is not None else LG.y0_inv.clone()
+            
         state_info_out['raw_x']             = x.to('cpu')
         state_info_out['denoised']          = denoised.to('cpu')
         state_info_out['data_prev_']        = data_prev_.to('cpu')
@@ -1698,13 +1720,6 @@ def sample_rk_beta(
         state_info_out['FLOW_STARTED']      = FLOW_STARTED
         state_info_out['FLOW_STOPPED']      = FLOW_STOPPED
         
-        if guides is not None and guides.get('guide_mode', "") == 'inversion':
-            guide_inversion_y0     = state_info.get('guide_inversion_y0')
-            guide_inversion_y0_inv = state_info.get('guide_inversion_y0_inv')
-            
-            state_info_out['guide_inversion_y0'] = guide_inversion_y0 if guide_inversion_y0 is not None else LG.y0.clone()
-            state_info_out['guide_inversion_y0_inv'] = guide_inversion_y0_inv if guide_inversion_y0_inv is not None else LG.y0_inv.clone()
-            
         #state_info_out['guide_inversion_y0']     = LG.y0     if guides['guide_mode'] == 'inversion' else None
         #state_info_out['guide_inversion_y0_inv'] = LG.y0_inv if guides['guide_mode'] == 'inversion' else None
         if FLOW_STARTED and not FLOW_STOPPED:
