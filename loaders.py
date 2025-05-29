@@ -14,6 +14,8 @@ import comfy.supported_models
 # Expected results: Fork desync
 # adapted from https://github.com/comfyanonymous/ComfyUI/blob/master/nodes.py
 
+clip_types = ["stable_diffusion", "stable_cascade", "sd3", "stable_audio", "hunyuan_dit", "flux", "mochi", "ltxv", "hunyuan_video", "pixart", "cosmos", "lumina2", "wan", "hidream", "chroma", "ace"]
+
 class BaseModelLoader:
     @staticmethod
     def load_taesd(name):
@@ -45,6 +47,54 @@ class BaseModelLoader:
             sd["vae_shift"] = torch.tensor(shift)
             
         return sd
+    
+    @staticmethod
+    def guess_clip_type(model):
+        import comfy.model_base as mb
+        
+        type_map = [
+            (mb.SDXLRefiner, "sdxl"),
+            (mb.SDXL, "sdxl"),
+            (mb.SD15_instructpix2pix, "stable_diffusion"),
+            (mb.SDXL_instructpix2pix, "sdxl"),
+            (mb.StableCascade_C, "stable_cascade"),
+            (mb.StableCascade_B, "stable_cascade"),
+            (mb.Flux, "flux"),
+            (mb.LTXV, "ltxv"),
+            (mb.HunyuanDiT, "hunyuan_dit"),
+            (mb.HunyuanVideo, "hunyuan_video"),
+            (mb.HunyuanVideoI2V, "hunyuan_video"),
+            (mb.HunyuanVideoSkyreelsI2V, "hunyuan_video"),
+            (mb.PixArt, "pixart"),
+            (mb.CosmosVideo, "cosmos"),
+            (mb.Lumina2, "lumina2"),
+            (mb.WAN21, "wan"),
+            (mb.WAN21_Vace, "wan"),
+            (mb.WAN21_Camera, "wan"),
+            (mb.HiDream, "hidream"),
+            (mb.Chroma, "chroma"),
+            (mb.ACEStep, "ace"),
+            (mb.SD3, "sd3"),
+            (mb.GenmoMochi, "mochi"),
+        ]
+
+        for cls, clip_type in type_map:
+            if isinstance(model, cls):
+                return clip_type.upper()
+
+        # fallback
+        known_types = {
+            "stable_diffusion", "stable_cascade", "sd3", "stable_audio", "hunyuan_dit", "flux", "mochi", "ltxv",
+            "hunyuan_video", "pixart", "cosmos", "lumina2", "wan", "hidream", "chroma", "ace"
+        }
+
+        class_name = model.__class__.__name__.lower()
+        for t in known_types:
+            if t in class_name:
+                return t.upper()
+
+        default_clip_type = "stable_diffusion"
+        return default_clip_type.upper()
 
     @staticmethod
     def get_model_files():
@@ -269,7 +319,7 @@ class RES4LYFModelLoader(BaseModelLoader):
             "clip_name2_opt": ([".none"] + folder_paths.get_filename_list("text_encoders"),),
             "clip_name3_opt": ([".none"] + folder_paths.get_filename_list("text_encoders"),),
             "clip_name4_opt": ([".none"] + folder_paths.get_filename_list("text_encoders"),),
-            "clip_type":      (["stable_diffusion", "stable_cascade", "sd3", "stable_audio", "mochi", "ltxv", "pixart", "cosmos", "lumina2", "wan", "hidream", "chroma", "ace"], ),
+            "clip_type":      ([".auto"] + clip_types,),
             "vae_name":       ([".none", ".use_ckpt_vae"] + folder_paths.get_filename_list("vae") + ["taesd", "taesdxl", "taesd3", "taef1"],),
         }}
 
@@ -283,8 +333,7 @@ class RES4LYFModelLoader(BaseModelLoader):
         
         torch.manual_seed(42)
         torch.cuda.manual_seed_all(42)
-        
-        sdCLIPType = getattr(comfy.sd.CLIPType, clip_type.upper(), comfy.sd.CLIPType.STABLE_DIFFUSION)
+
         if clip_name1_opt == ".use_ckpt_clip" and (clip_name2_opt != ".none" or clip_name3_opt != ".none" or clip_name4_opt != ".none"):
             raise ValueError("Cannot specify both \".use_ckpt_clip\" and another clip")
 
@@ -303,6 +352,10 @@ class RES4LYFModelLoader(BaseModelLoader):
             for clip_name in [clip_name2_opt, clip_name3_opt, clip_name4_opt]:
                 if clip_name != ".none":
                     clip_paths.append(folder_paths.get_full_path_or_raise("text_encoders", clip_name))
+            if "auto" in clip_type and ckpt_out[0].model is not None:
+                sdCLIPType = getattr(comfy.sd.CLIPType, self.guess_clip_type(ckpt_out[0].model), comfy.sd.CLIPType.STABLE_DIFFUSION)
+            else:
+                sdCLIPType = getattr(comfy.sd.CLIPType, clip_type.upper(), comfy.sd.CLIPType.STABLE_DIFFUSION)
             clip = comfy.sd.load_clip(clip_paths,
                                     embedding_directory=folder_paths.get_folder_paths("embeddings"),
                                     clip_type=sdCLIPType)
