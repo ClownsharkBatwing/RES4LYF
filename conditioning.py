@@ -24,6 +24,7 @@ from .res4lyf import RESplain
 from .beta.constants import MAX_STEPS
 from .attention_masks import FullAttentionMask, FullAttentionMaskHiDream, CrossAttentionMask, SplitAttentionMask, RegionalContext
 
+from .flux.redux import ReReduxImageEncoder
 
 def multiply_nested_tensors(structure, scalar):
     if isinstance(structure, torch.Tensor):
@@ -120,7 +121,7 @@ class CLIPTextEncodeFluxUnguided:
         return (conditioning, clip_l_end, t5xxl_end,)
 
 
-class StyleModelApplyAdvanced: 
+class StyleModelApplyStyle: 
     @classmethod
     def INPUT_TYPES(cls):
         return {
@@ -137,14 +138,16 @@ class StyleModelApplyAdvanced:
     FUNCTION     = "main"
     CATEGORY     = "RES4LYF/conditioning"
     DESCRIPTION  = "Use with Flux Redux."
+    EXPERIMENTAL = True
 
     def main(self, clip_vision_output, style_model, conditioning, strength=1.0):
-        cond = style_model.get_cond(clip_vision_output).flatten(start_dim=0, end_dim=1).unsqueeze(dim=0)
-        cond = strength * cond
-        c = []
-        for t in conditioning:
-            n = [torch.cat((t[0], cond), dim=1), t[1].copy()]
-            c.append(n)
+        c = style_model.model.feature_match(conditioning, clip_vision_output)
+        #cond = style_model.get_cond(clip_vision_output).flatten(start_dim=0, end_dim=1).unsqueeze(dim=0)
+        #cond = strength * cond
+        #c = []
+        #for t in conditioning:
+        #    n = [torch.cat((t[0], cond), dim=1), t[1].copy()]
+        #    c.append(n)
         return (c, )
 
 
@@ -1222,7 +1225,13 @@ class ClownRegionalConditioning_AB:
             
             if 'pooled_output' in cond[0][1] and cond[0][1]['pooled_output'] is not None:
                 cond[0][1]['pooled_output'] = (conditioning_A[0][1]['pooled_output'] + conditioning_B[0][1]['pooled_output']) / 2
-                
+            
+            #if 'conditioning_llama3' in cond[0][1] and cond[0][1]['conditioning_llama3'] is not None:
+            #    cond[0][1]['conditioning_llama3'] = (conditioning_A[0][1]['conditioning_llama3'] + conditioning_B[0][1]['conditioning_llama3']) / 2
+            #cond[0] = list(cond[0])
+            #cond[0][0] = (conditioning_A[0][0] + conditioning_B[0][0]) / 2
+            #cond[0] = tuple(cond[0])
+            
         else:
             cond = conditioning_A
             

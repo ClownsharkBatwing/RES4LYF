@@ -16,6 +16,9 @@ import comfy.model_management
 
 from comfy.cli_args import args
 
+from .flux.redux import ReReduxImageEncoder
+from comfy.ldm.flux.redux import ReduxImageEncoder
+
 from comfy.ldm.flux.model  import Flux
 from comfy.ldm.flux.layers import SingleStreamBlock, DoubleStreamBlock
 
@@ -71,11 +74,7 @@ def time_snr_shift_linear(alpha, t):
     return alpha * t / (1 + (alpha - 1) * t)
 
 
-
-
 COMPILE_MODES = ["default", "max-autotune", "max-autotune-no-cudagraphs", "reduce-overhead"]
-
-
 
 
 class TorchCompileModels: 
@@ -386,6 +385,48 @@ class ReFluxPatcher(ReFluxPatcherAdvanced):
             force               = force
         )    
 
+
+
+
+
+
+class ReReduxPatcher:
+    @classmethod
+    def INPUT_TYPES(s):
+        return {
+            "required": { 
+                "style_model" : ("STYLE_MODEL",),
+                "style_dtype" : (["default", "bfloat16", "float16", "float32", "float64"],  {"default": "float64"}),
+                "enable"      : ("BOOLEAN", {"default": True}),
+            }
+        }
+    RETURN_TYPES = ("STYLE_MODEL",)
+    RETURN_NAMES = ("style_model",)
+    CATEGORY     = "RES4LYF/model_patches"
+    FUNCTION     = "main"
+    EXPERIMENTAL = True
+
+    def main(self, style_model, style_dtype, enable=True, force=False):
+        
+        style_model.model.style_dtype = getattr(torch, style_dtype) if style_dtype != "default" else None
+        style_model.model.proj_weights = None
+        style_model.model.y0_adain_embed = None
+        
+        if (enable or force) and style_model.model.__class__ == ReduxImageEncoder:
+            m = style_model#.clone()
+            m.model.__class__     = ReReduxImageEncoder
+            m.model.threshold_inv = False
+        
+        elif not enable and style_model.model.__class__ == ReReduxImageEncoder:
+            m = style_model#.clone()
+            m.model.__class__ = ReduxImageEncoder
+            
+        elif style_model.model.__class__ not in {ReReduxImageEncoder, ReduxImageEncoder}:
+            raise ValueError("This node is for enabling style conditioning for Redux only!")
+        else:
+            m = style_model
+        
+        return (m,)
 
 
 

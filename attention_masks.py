@@ -193,6 +193,8 @@ class FullAttentionMask(BaseAttentionMask):
         
         attn_mask = torch.zeros((text_off+t*img_len, text_len+t*img_len), dtype=dtype)
         
+        #cross_self_mask = torch.zeros((t*img_len, t*img_len), dtype=torch.float16)
+        
         prev_len = 0
         for context_len, mask in zip(self.context_lens, self.masks):
             
@@ -206,6 +208,8 @@ class FullAttentionMask(BaseAttentionMask):
             attn_mask[text_off:        , prev_len:curr_len] = img2txt_mask.repeat(t,1)                    # cross   regional IMG 2 TXT
 
             attn_mask[text_off:, text_len:] = fp_or(attn_mask[text_off:, text_len:], fp_and(img2txt_mask_sq.repeat(t,t), img2txt_mask_sq.transpose(-1, -2).repeat(t,t))) # img2txt_mask_sq, txt2img_mask_sq
+            
+            #cross_self_mask[:,:] = fp_or(cross_self_mask, fp_and(img2txt_mask_sq.repeat(t,t), (1-img2txt_mask_sq).transpose(-1, -2).repeat(t,t)))
             
             prev_len = curr_len
             
@@ -247,8 +251,27 @@ class FullAttentionMask(BaseAttentionMask):
                     attn_mask[text_off:, text_len:] = fp_or(attn_mask[text_off:, text_len:], img2txt_mask_sq)
         
         
+        #cmask = torch.zeros((text_len+t*img_len), dtype=torch.bfloat16)
+        #cmask[text_len:] = cross_self_mask #cmask[text_len:] + 0.25 * cross_self_mask
         
-        self.attn_mask = CoreAttnMask(attn_mask, mask_type=mask_type)
+        #self.cross_self_mask = CoreAttnMask(cmask[None,None,...,None],     mask_type=mask_type)   # shape: 1, 1, txt_len+img_len, 1
+        #self.cross_self_mask = CoreAttnMask(cross_self_mask[None,None,...,None],     mask_type=mask_type)   # shape: 1, 1, txt_len+img_len, 1
+        #self.cross_self_mask = CoreAttnMask(cross_self_mask[None,None,...,None],     mask_type=mask_type)   # shape: 1, 1, txt_len+img_len, 1
+        
+        """
+        cross_self_mask = F.interpolate(self.masks[0].unsqueeze(0).to(torch.bfloat16), (h, w), mode='nearest-exact').to(torch.bfloat16).flatten()#.unsqueeze(1) # .repeat(1, img_len)
+
+        edge_mask = get_edge_mask(self.masks[0], dilation=80)
+        edge_mask = F.interpolate(edge_mask.unsqueeze(0).to(torch.bfloat16), (h, w), mode='nearest-exact').flatten().unsqueeze(1).repeat(1, img_len)
+
+        attn_mask[text_off:, text_len:] = F.interpolate((1-self.masks[0]).unsqueeze(0).to(torch.float16), (h, w), mode='nearest-exact').to(dtype).flatten().unsqueeze(1).repeat(1, img_len)
+        attn_mask = attn_mask.to(torch.bfloat16)
+
+        edge_mask = edge_mask.to(torch.bfloat16)"""
+
+        self.cross_self_mask = CoreAttnMask(torch.zeros_like(img2txt_mask_sq).to(torch.bfloat16).squeeze(),     mask_type=mask_type)
+        
+        self.attn_mask       = CoreAttnMask(attn_mask, mask_type=mask_type)
 
 
 
