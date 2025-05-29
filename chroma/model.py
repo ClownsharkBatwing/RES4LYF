@@ -183,10 +183,6 @@ class ReChroma(nn.Module):
         ids = torch.cat((txt_ids, img_ids), dim=1)
         pe = self.pe_embedder(ids)
         
-        #weight    = transformer_options['reg_cond_weight'] if 'reg_cond_weight' in transformer_options else 0.0
-        #floor     = transformer_options['reg_cond_floor']  if 'reg_cond_floor'  in transformer_options else 0.0
-        #floor     = min(floor, weight)
-        
         weight    = -1 * transformer_options.get("regional_conditioning_weight", 0.0)
         floor     = -1 * transformer_options.get("regional_conditioning_floor",  0.0)
         mask_zero = None
@@ -194,14 +190,15 @@ class ReChroma(nn.Module):
         
         text_len = txt.shape[1] # mask_obj[0].text_len
         
-        #AttnMask = transformer_options.get('AttnMask')
         if not UNCOND and 'AttnMask' in transformer_options: # and weight != 0:
             AttnMask = transformer_options['AttnMask']
             mask = transformer_options['AttnMask'].attn_mask.mask.to('cuda')
             if mask_zero is None:
                 mask_zero = torch.ones_like(mask)
                 img_len = transformer_options['AttnMask'].img_len
-                mask_zero[:text_len, :text_len] = mask[:text_len, :text_len]
+                #mask_zero[:text_len, :text_len] = mask[:text_len, :text_len]
+                mask_zero[:text_len, :] = mask[:text_len, :]
+                mask_zero[:, :text_len] = mask[:, :text_len]
             if weight == 0:
                 mask = None
             
@@ -210,7 +207,9 @@ class ReChroma(nn.Module):
             if mask_zero is None:
                 mask_zero = torch.ones_like(mask)
                 img_len = transformer_options['AttnMask_neg'].img_len
-                mask_zero[:text_len, :text_len] = mask[:text_len, :text_len]
+                #mask_zero[:text_len, :text_len] = mask[:text_len, :text_len]
+                mask_zero[:text_len, :] = mask[:text_len, :]
+                mask_zero[:, :text_len] = mask[:, :text_len]
             if weight == 0:
                 mask = None
             
@@ -220,28 +219,16 @@ class ReChroma(nn.Module):
             if mask_zero is None:
                 mask_zero = torch.ones_like(mask)
                 img_len = transformer_options['AttnMask'].img_len
-                mask_zero[:text_len, :text_len] = mask[:text_len, :text_len]
+                #mask_zero[:text_len, :text_len] = mask[:text_len, :text_len]
+                mask_zero[:text_len, :] = mask[:text_len, :]
+                mask_zero[:, :text_len] = mask[:, :text_len]
             if weight == 0:
                 mask = None
-        
-        """mask     = None
-        if AttnMask is not None and weight > 0:
-            mask                      = AttnMask.get(weight=weight) #mask_obj[0](transformer_options, weight.item())
-            #mask = transformer_options['AttnMask'].attn_mask.mask.to('cuda')
-            
-            mask_type_bool = type(mask[0][0].item()) == bool if mask is not None else False
-            if not mask_type_bool:
-                mask = mask.to(img.dtype)
-            
-            text_len                  = txt.shape[1] # mask_obj[0].text_len
-            
-            mask[text_len:,text_len:] = torch.clamp(mask[text_len:,text_len:], min=floor.to(mask.device))   #ORIGINAL SELF-ATTN REGION BLEED
-            
-            mask_zero = torch.ones_like(mask)
-            mask_zero[:text_len, :text_len] = mask[:text_len, :text_len]
-            
-            if weight == 0:
-                mask = None"""
+
+        if mask is not None and not type(mask[0][0].item()) == bool:
+            mask = mask.to(img.dtype)
+        if mask_zero is not None and not type(mask_zero[0][0].item()) == bool:
+            mask_zero = mask_zero.to(img.dtype)
 
         total_layers = len(self.double_blocks) + len(self.single_blocks)
         
@@ -274,30 +261,23 @@ class ReChroma(nn.Module):
                     img = out["img"]
                 else:
 
-                    if   weight > 0 and mask is not None and     weight  <      i/total_layers:
-                        #img, txt_init = block(img, img_masks, txt, clip, rope, mask_zero)
+                    if   weight > 0 and mask is not None and     weight  <=      i/total_layers:
                         img, txt = block(img=img, txt=txt, vec=double_mod, pe=pe, attn_mask=mask_zero)
                         
-                    elif (weight < 0 and mask is not None and abs(weight) < (1 - i/total_layers)):
+                    elif (weight < 0 and mask is not None and abs(weight) <= (1 - i/total_layers)):
                         img_tmpZ, txt_tmpZ = img.clone(), txt.clone()
 
-                        # more efficient than the commented lines below being used instead in the loop?
-                        #img_tmpZ, txt_init = block(img_tmpZ, img_masks, txt_tmpZ, clip, rope, mask)
-                        #img     , txt_tmpZ = block(img     , img_masks, txt     , clip, rope, mask_zero)
-                        
                         img_tmpZ, txt = block(img=img_tmpZ, txt=txt_tmpZ, vec=double_mod, pe=pe, attn_mask=mask)
                         img, txt_tmpZ = block(img=img     , txt=txt     , vec=double_mod, pe=pe, attn_mask=mask_zero)
                         
-                    elif floor > 0 and mask is not None and     floor  >      i/total_layers:
+                    elif floor > 0 and mask is not None and     floor  >=      i/total_layers:
                         mask_tmp = mask.clone()
-                        mask_tmp[:text_len, :text_len] = 1.0
-                        #img, txt_init = block(img, img_masks, txt, clip, rope, mask_tmp)
+                        mask_tmp[text_len:, text_len:] = 1.0
                         img, txt = block(img=img, txt=txt, vec=double_mod, pe=pe, attn_mask=mask_tmp)
                         
-                    elif floor < 0 and mask is not None and abs(floor) > (1 - i/total_layers):
+                    elif floor < 0 and mask is not None and abs(floor) >= (1 - i/total_layers):
                         mask_tmp = mask.clone()
-                        mask_tmp[:text_len, :text_len] = 1.0
-                        #img, txt_init = block(img, img_masks, txt, clip, rope, mask_tmp)
+                        mask_tmp[text_len:, text_len:] = 1.0
                         img, txt = block(img=img, txt=txt, vec=double_mod, pe=pe, attn_mask=mask_tmp)
                         
                     elif update_cross_attn is not None and update_cross_attn['skip_cross_attn']:
@@ -306,9 +286,7 @@ class ReChroma(nn.Module):
                     
                     else:
                         img, txt = block(img=img, txt=txt, vec=double_mod, pe=pe, attn_mask=attn_mask)
-                        
-                                    
-                    
+
                     #img, txt = block(img=img, txt=txt, vec=double_mod, pe=pe, attn_mask=attn_mask)
 
                 if control is not None: # Controlnet
@@ -340,24 +318,20 @@ class ReChroma(nn.Module):
                     img = out["img"]
                 else:
 
-                    if   weight > 0 and mask is not None and     weight  <      (i+len(self.double_blocks))/total_layers:
-                        #img = block(img, img_masks, None, clip, rope, mask_zero)
+                    if   weight > 0 and mask is not None and     weight  <=      (i+len(self.double_blocks))/total_layers:
                         img = block(img, vec=single_mod, pe=pe, attn_mask=mask_zero)
                         
-                    elif weight < 0 and mask is not None and abs(weight) < (1 - (i+len(self.double_blocks))/total_layers):
-                        #img = block(img, img_masks, None, clip, rope, mask_zero)
+                    elif weight < 0 and mask is not None and abs(weight) <= (1 - (i+len(self.double_blocks))/total_layers):
                         img = block(img, vec=single_mod, pe=pe, attn_mask=mask_zero)
                         
-                    elif floor > 0 and mask is not None and     floor  >      (i+len(self.double_blocks))/total_layers:
+                    elif floor > 0 and mask is not None and     floor  >=      (i+len(self.double_blocks))/total_layers:
                         mask_tmp = mask.clone()
-                        mask_tmp[:text_len, :text_len] = 1.0
-                        #img = block(img, img_masks, None, clip, rope, mask_tmp)
+                        mask_tmp[text_len:, text_len:] = 1.0
                         img = block(img, vec=single_mod, pe=pe, attn_mask=mask_tmp)
                         
-                    elif floor < 0 and mask is not None and abs(floor) > (1 - (i+len(self.double_blocks))/total_layers):
+                    elif floor < 0 and mask is not None and abs(floor) >= (1 - (i+len(self.double_blocks))/total_layers):
                         mask_tmp = mask.clone()
-                        mask_tmp[:text_len, :text_len] = 1.0
-                        #img = block(img, img_masks, None, clip, rope, mask_tmp)
+                        mask_tmp[text_len:, text_len:] = 1.0
                         img = block(img, vec=single_mod, pe=pe, attn_mask=mask_tmp)
                         
                     else:
@@ -453,52 +427,14 @@ class ReChroma(nn.Module):
 
             img = rearrange(img, "b c (h ph) (w pw) -> b (h w) (c ph pw)", ph=patch_size, pw=patch_size) # img 1,9216,64     1,16,128,128 -> 1,4096,64
 
-            """if UNCOND:
-                transformer_options['reg_cond_weight'] = transformer_options.get("regional_conditioning_weight", 0.0) #transformer_options['regional_conditioning_weight']
-                transformer_options['reg_cond_floor']  = transformer_options.get("regional_conditioning_floor",  0.0) #transformer_options['regional_conditioning_floor'] #if "regional_conditioning_floor" in transformer_options else 0.0
-                
-                AttnMask   = transformer_options.get('AttnMask',   None)                    
-                RegContext = transformer_options.get('RegContext', None)
-                
-                if AttnMask is not None and transformer_options['reg_cond_weight'] > 0.0:
-                    AttnMask.attn_mask_recast(img.dtype)
-                    context_tmp = RegContext.get().to(context.dtype)
-                    
-                    A = context[i][None,...].clone()
-                    B = context_tmp
-                    context_tmp = A.repeat(1, (B.shape[1] // A.shape[1]) + 1, 1)[:, :B.shape[1], :]
-
-                else:
-                    context_tmp = context[i][None,...].clone()
-            
-            
-            elif UNCOND == False:
-                transformer_options['reg_cond_weight'] = transformer_options.get("regional_conditioning_weight", 0.0) 
-                transformer_options['reg_cond_floor']  = transformer_options.get("regional_conditioning_floor",  0.0) 
-                                
-                AttnMask   = transformer_options.get('AttnMask',   None)                    
-                RegContext = transformer_options.get('RegContext', None)
-                
-                if AttnMask is not None and transformer_options['reg_cond_weight'] > 0.0:
-                    AttnMask.attn_mask_recast(img.dtype)
-                    context_tmp = RegContext.get()
-                else:
-                    context_tmp = context[i][None,...].clone()"""
-            
-            
             context_tmp = None
             
             if not UNCOND and 'AttnMask' in transformer_options: # and weight != 0:
                 AttnMask = transformer_options['AttnMask']
                 mask = transformer_options['AttnMask'].attn_mask.mask.to('cuda')
-                #if mask_zero is None:
-                #    mask_zero = torch.ones_like(mask)
-                #    img_len = transformer_options['AttnMask'].img_len
-                #    mask_zero[:img_len, :img_len] = mask[:img_len, :img_len]
 
                 if weight == 0:
                     context_tmp = transformer_options['RegContext'].context.to(context.dtype).to(context.device)
-                    #context = context.view(128, -1, context.shape[-1]).sum(dim=-2)                                    # 128 !!!
                     mask = None
                 else:
                     context_tmp = transformer_options['RegContext'].context.to(context.dtype).to(context.device)
@@ -506,14 +442,9 @@ class ReChroma(nn.Module):
             if UNCOND and 'AttnMask_neg' in transformer_options: # and weight != 0:
                 AttnMask = transformer_options['AttnMask_neg']
                 mask = transformer_options['AttnMask_neg'].attn_mask.mask.to('cuda')
-                #if mask_zero is None:
-                #    mask_zero = torch.ones_like(mask)
-                #    img_len = transformer_options['AttnMask_neg'].img_len
-                #    mask_zero[:img_len, :img_len] = mask[:img_len, :img_len]
 
                 if weight == 0:
                     context_tmp = transformer_options['RegContext_neg'].context.to(context.dtype).to(context.device)
-                    #context = context.view(128, -1, context.shape[-1]).sum(dim=-2)                                    # 128 !!!
                     mask = None
                 else:
                     context_tmp = transformer_options['RegContext_neg'].context.to(context.dtype).to(context.device)
@@ -524,12 +455,10 @@ class ReChroma(nn.Module):
                 A       = context
                 B       = transformer_options['RegContext'].context
                 context_tmp = A.repeat(1,    (B.shape[1] // A.shape[1]) + 1, 1)[:,   :B.shape[1], :]
-                
-            
-            
+
             if context_tmp is None:
                 context_tmp = context[i][None,...].clone()
-            #context_tmp = context_tmp.to(context.dtype)
+
             txt_ids      = torch.zeros((bs, context_tmp.shape[1], 3), device=img.device, dtype=img.dtype)      # txt_ids        1, 256,3
             img_ids_orig = self._get_img_ids(img, bs, h_len, w_len, 0, h_len, 0, w_len)                  # img_ids_orig = 1,9216,3
 
