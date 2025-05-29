@@ -468,6 +468,14 @@ class FrameWeightsManager:
             self.dtype = dtype
         return self
     
+    def set_custom_weights(self, config_name, weights):
+        """Set custom weights for a specific configuration"""
+        if config_name not in self._weight_configs:
+            self._weight_configs[config_name] = self._default_config.copy()
+        
+        self._weight_configs[config_name]["frame_weights"] = weights
+        return self
+    
     def add_weight_config(self, name, **kwargs):
         if name not in self._weight_configs:
             self._weight_configs[name] = self._default_config.copy()

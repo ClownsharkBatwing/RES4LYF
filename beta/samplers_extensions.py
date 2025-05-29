@@ -655,8 +655,12 @@ class ClownOptions_Automation_Beta:
             ):
                 
         options = options if options is not None else {}
-            
-        frame_weights_mgr = (frame_weights, frame_weights)
+        options_mgr = OptionsManager(options)
+
+        frame_weights_mgr = options_mgr.get("frame_weights_mgr")
+        if frame_weights_mgr is None and frame_weights is not None:
+            frame_weights_mgr = FrameWeightsManager()
+            frame_weights_mgr.set_custom_weights("frame_weights", frame_weights)
 
         automation = {
             "etas"              : etas,
