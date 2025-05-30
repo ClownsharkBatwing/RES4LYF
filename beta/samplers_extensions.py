@@ -457,6 +457,7 @@ class ClownOptions_Cycles_Beta:
                     "unsampler_override"  : (get_sampler_name_list(), {"default": "none"}),
                     "unsample_steps_to_run"  : ("INT", {"default": -1, "min":  -1,   "max": 10000, "step":1,  "round": 1}),
                     "unsample_cfg"    : ("FLOAT", {"default": 1.0, "min": -10000, "max": 10000, "step":0.01}),
+                    "unsample_bongmath" : ("BOOLEAN", {"default": False}),
                     },
                 "optional": 
                     {
@@ -476,6 +477,7 @@ class ClownOptions_Cycles_Beta:
             unsample_cfg    = 1.0,
             unsampler_override  = "none",
             unsample_steps_to_run = -1,
+            unsample_bongmath = False,
             options         = None
             ): 
         
@@ -487,6 +489,7 @@ class ClownOptions_Cycles_Beta:
         options['eta_decay_scale'] = eta_decay_scale
         options['unsample_steps_to_run'] = unsample_steps_to_run
         options['unsample_cfg']    = unsample_cfg
+        options['unsample_bongmath'] = unsample_bongmath
 
         return (options,)
 

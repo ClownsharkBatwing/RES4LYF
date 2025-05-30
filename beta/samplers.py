@@ -191,6 +191,7 @@ class SharkSampler:
             unsample_eta    = options_mgr.get('unsample_eta',     unsample_eta)
             unsampler_name  = options_mgr.get('unsampler_name',   unsampler_name)
             unsample_steps_to_run = options_mgr.get('unsample_steps_to_run',   unsample_steps_to_run)
+            
             eta_decay_scale = options_mgr.get('eta_decay_scale',  eta_decay_scale)
             start_at_step   = options_mgr.get('start_at_step',    -1)
             tile_sizes      = options_mgr.get('tile_sizes',       None)
@@ -207,7 +208,9 @@ class SharkSampler:
             if 'BONGMATH' in sampler.extra_options:
                 sampler.extra_options['start_at_step'] = start_at_step
                 sampler.extra_options['tile_sizes']    = tile_sizes
-                        
+                
+                sampler.extra_options['unsample_bongmath'] = options_mgr.get('unsample_bongmath', sampler.extra_options['BONGMATH'])   # allow turning off bongmath for unsampling with cycles
+                
             is_chained = False
             if latent_image is not None:
                 latent_image['samples'] = comfy.sample.fix_empty_latent_channels(model, latent_image['samples'])

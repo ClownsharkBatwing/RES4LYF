@@ -596,7 +596,7 @@ class RK_Method_Beta:
         elif x_0.ndim == 5:
             norm_dim = (-4,-2,-1)
         
-        if self.EO("bong_start_step", 0) > step or step > self.EO("bong_stop_step", 10000):
+        if self.EO("bong_start_step", 0) > step or step > self.EO("bong_stop_step", 10000) or (self.unsample_bongmath == False and s_[-1] > s_[0]):
             return x_0, x_, eps_
         
         bong_iter_max_row = self.rows - row_offset

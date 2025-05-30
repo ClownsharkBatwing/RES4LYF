@@ -202,6 +202,7 @@ def sample_rk_beta(
         cfg_cw                        : float              = 1.0,
 
         BONGMATH                      : bool               = True,
+        unsample_bongmath             = None,
 
         state_info                    : Optional[dict[str, Any]] = None,
         state_info_out                : Optional[dict[str, Any]] = None,
@@ -242,7 +243,7 @@ def sample_rk_beta(
 
     state_info     = {} if state_info     is None else state_info
     state_info_out = {} if state_info_out is None else state_info_out
-
+    
     RENOISE = False
     if 'raw_x' in state_info and sampler_mode in {"resample", "unsample"}:
         if x.shape == state_info['raw_x'].shape:
@@ -312,6 +313,9 @@ def sample_rk_beta(
     RK.tile_sizes = tile_sizes
     RK.extra_args['model_options']['transformer_options']['regional_conditioning_weight'] = 0.0
     RK.extra_args['model_options']['transformer_options']['regional_conditioning_floor']  = 0.0
+    
+    RK.unsample_bongmath = BONGMATH if unsample_bongmath is None else unsample_bongmath # allow turning off bongmath for unsampling with cycles
+
 
     # SETUP SIGMAS
     sigmas_orig = sigmas.clone()
