@@ -244,6 +244,8 @@ def sample_rk_beta(
     state_info     = {} if state_info     is None else state_info
     state_info_out = {} if state_info_out is None else state_info_out
     
+    VE_MODEL = isinstance(model.inner_model.inner_model.model_sampling, EPS)
+    
     RENOISE = False
     if 'raw_x' in state_info and sampler_mode in {"resample", "unsample"}:
         if x.shape == state_info['raw_x'].shape:
@@ -254,7 +256,6 @@ def sample_rk_beta(
             RENOISE = True
         RESplain("Continuing from raw latent from previous sampler.", debug=False)
     
-
     
     start_step = 0
     if 'end_step' in state_info and (sampler_mode == "resample" or sampler_mode == "unsample"):
@@ -284,6 +285,7 @@ def sample_rk_beta(
 
     x      = x     .to(dtype=default_dtype, device=work_device)
     sigmas = sigmas.to(dtype=default_dtype, device=work_device)
+    
 
     c1                          = EO("c1"                         , c1)
     c2                          = EO("c2"                         , c2)
@@ -308,7 +310,7 @@ def sample_rk_beta(
     if implicit_sampler_name == "none":
         implicit_steps_diag = implicit_steps_full = 0
         
-    RK            = RK_Method_Beta.create(model, rk_type, noise_anchor, noise_boost_normalize, model_device=model_device, work_device=work_device, dtype=default_dtype, extra_options=extra_options)
+    RK            = RK_Method_Beta.create(model, rk_type, VE_MODEL, noise_anchor, noise_boost_normalize, model_device=model_device, work_device=work_device, dtype=default_dtype, extra_options=extra_options)
     RK.extra_args = RK.init_cfg_channelwise(x, cfg_cw, **extra_args)
     RK.tile_sizes = tile_sizes
     RK.extra_args['model_options']['transformer_options']['regional_conditioning_weight'] = 0.0
@@ -392,10 +394,7 @@ def sample_rk_beta(
     else:
         progress_bar = trange(current_steps, disable=disable)
     
-    
-    
-    VE_MODEL = isinstance(model.inner_model.inner_model.model_sampling, EPS)
-    
+
     # SETUP GUIDES
     LG = LatentGuide(model, sigmas, UNSAMPLE, VE_MODEL, LGW_MASK_RESCALE_MIN, extra_options, device=work_device, dtype=default_dtype, frame_weights_mgr=frame_weights_mgr)
 
@@ -661,7 +660,7 @@ def sample_rk_beta(
                 data_prev_ =  torch.zeros(4, *x.shape, dtype=default_dtype, device=work_device) # multistep max is 4m... so 4 needed
             
             recycled_stages = len(data_prev_)-1
-            
+        
         if RK.rows+2 > x_.shape[0]:
             row_gap = RK.rows+2 - x_.shape[0]
             x_gap_, data_gap_, eps_gap_, eps_prev_gap_ = (torch.zeros(row_gap, *x.shape, dtype=default_dtype, device=work_device) for _ in range(4))

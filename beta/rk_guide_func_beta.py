@@ -522,12 +522,14 @@ class LatentGuide:
             else:
                 self.y0     = noise_sampler(sigma=self.sigma_max, sigma_next=self.sigma_min).to(dtype=self.dtype, device=self.device)
                 self.y0     = normalize_zscore(self.y0,     channelwise=True, inplace=True)
+                self.y0    *= self.sigma_max
                 
             if guide_inversion_y0_inv is not None:
                 self.y0_inv = guide_inversion_y0_inv
             else:
                 self.y0_inv = noise_sampler(sigma=self.sigma_max, sigma_next=self.sigma_min).to(dtype=self.dtype, device=self.device)
                 self.y0_inv = normalize_zscore(self.y0_inv, channelwise=True, inplace=True)
+                self.y0_inv*= self.sigma_max
 
             
         if self.VIDEO and self.frame_weights_mgr is not None:
