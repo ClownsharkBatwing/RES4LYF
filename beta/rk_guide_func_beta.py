@@ -991,7 +991,10 @@ class LatentGuide:
                     d_lerp_ortho_d     = get_orthogonal(d_slerped, data_row)  
                     d_slerped          = d_collinear_d_lerp + d_lerp_ortho_d"""
                     
-                x_row = x_row + lgw_mask     * (self.sigma_max - sigma_row) * (d_slerped - data_row) 
+                if self.VE_MODEL:
+                    x_row = x_row + lgw_mask * (d_slerped - data_row) 
+                else:
+                    x_row = x_row + lgw_mask * (self.sigma_max - sigma_row) * (d_slerped - data_row) 
 
                 
             if self.HAS_LATENT_GUIDE_INV:
@@ -1014,7 +1017,10 @@ class LatentGuide:
                     d_lerp_ortho_d     = get_orthogonal(d_slerped_inv, data_row)  
                     d_slerped_inv      = d_collinear_d_lerp + d_lerp_ortho_d"""
                     
-                x_row = x_row + lgw_mask_inv * (self.sigma_max - sigma_row) * (d_slerped_inv - data_row) 
+                if self.VE_MODEL:
+                    x_row = x_row + lgw_mask_inv * (d_slerped_inv - data_row) 
+                else:
+                    x_row = x_row + lgw_mask_inv * (self.sigma_max - sigma_row) * (d_slerped_inv - data_row) 
 
                     
         return x_row
