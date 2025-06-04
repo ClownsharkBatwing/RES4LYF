@@ -216,6 +216,8 @@ def sample_rk_beta(
         start_at_step                 : int                = -1,
         tile_sizes                    : Optional[List[Tuple[int,int]]] = None,
         
+        flow_sync_eps                 : float              = 0.0,
+        
         sde_mask                      : Optional[Tensor]   = None,
         
         batch_num                     : int                = 0,
@@ -1038,6 +1040,13 @@ def sample_rk_beta(
                                     eps_y_inv, data_y_inv = RK(yt_inv, s_tmp, y0_noised_inv, sigma, transformer_options={'latent_type': 'yt_inv'})
                                 
                                 if LG.lgw[step+1] == 0 and LG.lgw_inv[step+1] == 0:    # break out of differentiating x0 and return to differentiating eps/velocity field
+                                    if EO("flow_shit_out_yx0"):
+                                        eps_ [row]       = eps_x - eps_y
+                                        data_[row]       = yx0
+                                        if row == 0:
+                                            x_[row] = x_0 = xt 
+                                        else:
+                                            x_[row] = xt
                                     if not EO("flow_shit_out_new"):
                                         eps_ [row]       = eps_x
                                         data_[row]       = data_x
@@ -1045,9 +1054,10 @@ def sample_rk_beta(
                                             x_[row] = x_0 = xt 
                                         else:
                                             x_[row] = xt
+                                    
                                     else:
-                                        eps_ [row]       = (1 - (lgw_mask_ + lgw_mask_inv_)) * eps_x   +   (lgw_mask_ + lgw_mask_inv_) * eps_y
-                                        data_[row]       = (1 - (lgw_mask_ + lgw_mask_inv_)) * data_x   +   (lgw_mask_ + lgw_mask_inv_) * data_y
+                                        eps_ [row]        = (1 - (lgw_mask_ + lgw_mask_inv_)) * eps_x   +   (lgw_mask_ + lgw_mask_inv_) * eps_y
+                                        data_[row]        = (1 - (lgw_mask_ + lgw_mask_inv_)) * data_x   +   (lgw_mask_ + lgw_mask_inv_) * data_y
                                         if row == 0:
                                             x_[row] = x_0 = (1 - (lgw_mask_ + lgw_mask_inv_)) * xt   +   (lgw_mask_ + lgw_mask_inv_) * yt 
                                         else:
@@ -1085,13 +1095,49 @@ def sample_rk_beta(
                                         
                                         data_[row] = (1 - (lgw_mask_ + lgw_mask_inv_)) * data_x   +   (lgw_mask_ + lgw_mask_inv_) * data_y
                                         
-                                        if EO("flow_sync_eps"): #(not BONGMATH or EO("flow_sync_eps")) and not EO("flow_disable_sync_eps"):
-                                            flow_sync_eps = EO("flow_sync_eps", 1.0)
+                                        if EO("flow_reverse_data_masks"):
+                                            data_[row] = (1 - (lgw_mask_ + lgw_mask_inv_)) * data_y   +   (lgw_mask_ + lgw_mask_inv_) * data_x
+                                        
+                                        #eps_[row] = eps_x - eps_y
+                                        #data_[row] = x_0 + NS.h * eps_[row]
+                                        #eps_[row]  = eps_xy = (eps_x_alt - eps_y_alt)
+                                        #data_[row] = x_0 + NS.h * (eps_x - eps_y)
+                                        
+                                        if flow_sync_eps != 0.0:
                                             if RK.EXPONENTIAL:
                                                 eps_[row] = (1-flow_sync_eps) * eps_[row] + flow_sync_eps * (data_[row] - x_0)
                                             else:
                                                 eps_[row] = (1-flow_sync_eps) * eps_[row] + flow_sync_eps * (x_0 - data_[row]) / sigma
                                         
+                                        if EO("flow_sync_eps_mask"): #(not BONGMATH or EO("flow_sync_eps")) and not EO("flow_disable_sync_eps"):
+                                            flow_sync_eps = EO("flow_sync_eps_mask", 1.0)
+                                            if RK.EXPONENTIAL:
+                                                eps_[row] = (lgw_mask_ + lgw_mask_inv_) * (1-flow_sync_eps) * eps_[row] + (1 - (lgw_mask_ + lgw_mask_inv_)) * flow_sync_eps * (data_[row] - x_0) 
+                                            else:
+                                                eps_[row] = (lgw_mask_ + lgw_mask_inv_) * (1-flow_sync_eps) * eps_[row] + (1 - (lgw_mask_ + lgw_mask_inv_)) * flow_sync_eps * (x_0 - data_[row]) / sigma
+
+                                        if EO("flow_sync_eps_revmask"): #(not BONGMATH or EO("flow_sync_eps")) and not EO("flow_disable_sync_eps"):
+                                            flow_sync_eps = EO("flow_sync_eps_revmask", 1.0)
+                                            if RK.EXPONENTIAL:
+                                                eps_[row] = (1 - (lgw_mask_ + lgw_mask_inv_)) * (1-flow_sync_eps) * eps_[row] + (lgw_mask_ + lgw_mask_inv_) * flow_sync_eps * (data_[row] - x_0) 
+                                            else:
+                                                eps_[row] = (1 - (lgw_mask_ + lgw_mask_inv_)) * (1-flow_sync_eps) * eps_[row] + (lgw_mask_ + lgw_mask_inv_) * flow_sync_eps * (x_0 - data_[row]) / sigma
+
+                                        if EO("flow_sync_eps_maskonly"): #(not BONGMATH or EO("flow_sync_eps")) and not EO("flow_disable_sync_eps"):
+                                            flow_sync_eps = EO("flow_sync_eps_maskonly", 1.0)
+                                            if RK.EXPONENTIAL:
+                                                eps_[row] = (lgw_mask_ + lgw_mask_inv_) * eps_[row] + (1 - (lgw_mask_ + lgw_mask_inv_)) * (data_[row] - x_0) 
+                                            else:
+                                                eps_[row] = (lgw_mask_ + lgw_mask_inv_) * eps_[row] + (1 - (lgw_mask_ + lgw_mask_inv_)) * (x_0 - data_[row]) / sigma
+
+                                        if EO("flow_sync_eps_revmaskonly"): #(not BONGMATH or EO("flow_sync_eps")) and not EO("flow_disable_sync_eps"):
+                                            flow_sync_eps = EO("flow_sync_eps_revmaskonly", 1.0)
+                                            if RK.EXPONENTIAL:
+                                                eps_[row] = (1 - (lgw_mask_ + lgw_mask_inv_)) * eps_[row] + (lgw_mask_ + lgw_mask_inv_) * (data_[row] - x_0) 
+                                            else:
+                                                eps_[row] = (1 - (lgw_mask_ + lgw_mask_inv_)) * eps_[row] + (lgw_mask_ + lgw_mask_inv_) * (x_0 - data_[row]) / sigma
+
+
                                         #x_[row] =  (1 - (lgw_mask_ + lgw_mask_inv_)) * data_x   -   (lgw_mask_ + lgw_mask_inv_) * data_y #* LG.lgw[step] * LG.mask
                                     
                                     if EO("flow_slerp"):
@@ -1152,8 +1198,8 @@ def sample_rk_beta(
                                             else:
                                                 data_[row] = x_0 - sigma * eps_[row]
 
-                                    data_cached = data_[row] #data_x # (1-eta_substep)* data_x  + eta_substep * data_[row]
-                                    data_cached = data_x
+                                    #data_cached = data_[row] #data_x # (1-eta_substep)* data_x  + eta_substep * data_[row]
+                                    data_cached = data_x 
                                     #if step == 0:
                                     #    data_cached = data_x #denoised # (1 - (lgw_mask_ + lgw_mask_inv_)) * data_x   +   (lgw_mask_ + lgw_mask_inv_) * data_y #* LG.lgw[step] * LG.mask             data_[row] #data_x
                                     #else:

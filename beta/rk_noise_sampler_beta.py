@@ -187,7 +187,7 @@ class RK_NoiseSampler:
                 
             elif sigma_up is not None:
                 if sigma_up >= sigma_next:
-                    RESplain("Maximum VPSDE noise level exceeded: falling back to hard noise mode.")
+                    RESplain("Maximum VPSDE noise level exceeded: falling back to hard noise mode.", debug=True)
                     if eta >= 1:
                         sigma_up = sigma_next * 0.9999 #avoid sqrt(neg_num) later 
                     else:

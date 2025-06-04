@@ -628,14 +628,14 @@ class RK_Method_Beta:
                 
                 if self.EO("bong_iter_lock_x_0_ch_means"):
                     x_0 = x_0 - x_0.mean(dim=norm_dim, keepdim=True) + x_0_ch_means
-                    
+                
                 for rr in range(row+row_offset):
                     x_[rr] = x_0 + h * self.zum(rr, eps_, eps_prev_)
-                    
+                
                 if self.EO("bong_iter_lock_x_row_ch_means"):
                     for rr in range(row+row_offset):
                         x_[rr] = x_[rr] - x_[rr].mean(dim=norm_dim, keepdim=True) + x_row_means[rr]
-                    
+                
                 for rr in range(row+row_offset):
                     if self.EO("zonkytar"):
                         #eps_[rr] = self.get_unsample_epsilon(x_[rr], x_0, data_[rr], sigma, s_[rr])
@@ -984,8 +984,6 @@ class RK_Method_Linear(RK_Method_Beta):
                             epsilon_scale : Optional[Tensor] = None, 
                             ) -> Tensor:
 
-        #if self.VE_MODEL and sigma_down > sigma:
-        #    sigma_ratio = torch.sqrt(1 + sigma_cur ** 2)
         if sigma_down > sigma:
             sigma_ratio = self.sigma_max - sigma_cur.clone()
         else:

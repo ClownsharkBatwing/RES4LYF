@@ -195,6 +195,7 @@ class SharkSampler:
             eta_decay_scale = options_mgr.get('eta_decay_scale',  eta_decay_scale)
             start_at_step   = options_mgr.get('start_at_step',    -1)
             tile_sizes      = options_mgr.get('tile_sizes',       None)
+            flow_sync_eps   = options_mgr.get('flow_sync_eps',    0.0)
             
             unsampler_name, _ = process_sampler_name(unsampler_name)
 
@@ -210,6 +211,7 @@ class SharkSampler:
                 sampler.extra_options['tile_sizes']    = tile_sizes
                 
                 sampler.extra_options['unsample_bongmath'] = options_mgr.get('unsample_bongmath', sampler.extra_options['BONGMATH'])   # allow turning off bongmath for unsampling with cycles
+                sampler.extra_options['flow_sync_eps'] = flow_sync_eps
                 
             is_chained = False
             if latent_image is not None:

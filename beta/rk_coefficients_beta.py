@@ -45,6 +45,7 @@ RK_SAMPLER_NAMES_BETA_FOLDERS = ["none",
                     
                     "exponential/res_2s_rkmk2e", 
                     "exponential/res_2s", 
+                    "exponential/res_2s_stable", 
                     "exponential/res_3s",
                     "exponential/res_3s_non-monotonic",
                     "exponential/res_3s_alt",
@@ -1507,6 +1508,24 @@ def get_rk_methods_beta(rk_type       : str,
 
         case "res_2s":
             c2 = float(get_extra_options_kv("c2", str(c2), extra_options))
+
+            ci = [0, c2]
+            φ = Phi(h, ci, use_analytic_solution)
+            
+            a2_1 = c2 * φ(1,2)
+            b2 = φ(2)/c2
+            b1 = φ(1) - b2
+
+            a = [
+                    [0,0],
+                    [a2_1, 0],
+            ]
+            b = [
+                    [b1, b2],
+            ]
+
+        case "res_2s_stable":
+            c2 = 1.0 #float(get_extra_options_kv("c2", str(c2), extra_options))
 
             ci = [0, c2]
             φ = Phi(h, ci, use_analytic_solution)
