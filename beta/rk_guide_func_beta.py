@@ -123,6 +123,8 @@ class LatentGuide:
         
         latent_guide_weight           = 0.0
         latent_guide_weight_inv       = 0.0
+        latent_guide_weight_sync      = 0.0
+        latent_guide_weight_sync_inv  = 0.0
         latent_guide_weight_mean      = 0.0
         latent_guide_weight_adain     = 0.0
         latent_guide_weight_attninj   = 0.0
@@ -131,6 +133,8 @@ class LatentGuide:
 
         latent_guide_weights           = torch.zeros_like(self.sigmas, dtype=self.dtype, device=self.device)
         latent_guide_weights_inv       = torch.zeros_like(self.sigmas, dtype=self.dtype, device=self.device)
+        latent_guide_weights_sync      = torch.zeros_like(self.sigmas, dtype=self.dtype, device=self.device)
+        latent_guide_weights_sync_inv  = torch.zeros_like(self.sigmas, dtype=self.dtype, device=self.device)
         latent_guide_weights_mean      = torch.zeros_like(self.sigmas, dtype=self.dtype, device=self.device)
         latent_guide_weights_adain     = torch.zeros_like(self.sigmas, dtype=self.dtype, device=self.device)
         latent_guide_weights_attninj   = torch.zeros_like(self.sigmas, dtype=self.dtype, device=self.device)
@@ -157,6 +161,8 @@ class LatentGuide:
             
             latent_guide_weight            = guides.get("weight_masked",    0.)
             latent_guide_weight_inv        = guides.get("weight_unmasked",  0.)
+            latent_guide_weight_sync       = guides.get("weight_masked_sync", 0.)
+            latent_guide_weight_sync_inv   = guides.get("weight_unmasked_sync", 0.)
             latent_guide_weight_mean       = guides.get("weight_mean",      0.)
             latent_guide_weight_adain      = guides.get("weight_adain",     0.)
             latent_guide_weight_attninj    = guides.get("weight_attninj",   0.)
@@ -167,6 +173,8 @@ class LatentGuide:
 
             latent_guide_weights           = guides.get("weights_masked")
             latent_guide_weights_inv       = guides.get("weights_unmasked")
+            latent_guide_weights_sync      = guides.get("weights_masked_sync")
+            latent_guide_weights_sync_inv  = guides.get("weights_unmasked_sync")
             latent_guide_weights_mean      = guides.get("weights_mean")
             latent_guide_weights_adain     = guides.get("weights_adain")
             latent_guide_weights_attninj   = guides.get("weights_attninj")
@@ -193,6 +201,8 @@ class LatentGuide:
 
             scheduler_                     = guides.get("weight_scheduler_masked")
             scheduler_inv_                 = guides.get("weight_scheduler_unmasked")
+            scheduler_sync_                     = guides.get("weight_scheduler_masked_sync")
+            scheduler_sync_inv_                 = guides.get("weight_scheduler_unmasked_sync")
             scheduler_mean_                = guides.get("weight_scheduler_mean")
             scheduler_adain_               = guides.get("weight_scheduler_adain")
             scheduler_attninj_             = guides.get("weight_scheduler_attninj")
@@ -201,6 +211,8 @@ class LatentGuide:
 
             start_steps_                   = guides.get("start_step_masked",   0)
             start_steps_inv_               = guides.get("start_step_unmasked", 0)
+            start_steps_sync_                   = guides.get("start_step_masked_sync",   0)
+            start_steps_sync_inv_               = guides.get("start_step_unmasked_sync", 0)
             start_steps_mean_              = guides.get("start_step_mean",     0)
             start_steps_adain_             = guides.get("start_step_adain",    0)
             start_steps_attninj_           = guides.get("start_step_attninj",  0)
@@ -209,6 +221,9 @@ class LatentGuide:
 
             steps_                         = guides.get("end_step_masked",     1)
             steps_inv_                     = guides.get("end_step_unmasked",   1)
+            steps_sync_                         = guides.get("end_step_masked_sync",     1)
+            steps_sync_inv_                     = guides.get("end_step_unmasked_sync",   1)
+            
             steps_mean_                    = guides.get("end_step_mean",       1)
             steps_adain_                   = guides.get("end_step_adain",      1)
             steps_attninj_                 = guides.get("end_step_attninj",    1)
@@ -223,6 +238,29 @@ class LatentGuide:
             self.guide_style_pos_cossim_cutoff_ = guides.get("cutoff_style_pos",  1.)
             self.guide_style_neg_cossim_cutoff_ = guides.get("cutoff_style_neg",  1.)
 
+            self.SYNC_SEPARATE = False
+            if scheduler_sync_ is not None:
+                self.SYNC_SEPARATE = True
+            
+            if scheduler_sync_ is None and scheduler_ is not None:
+
+                latent_guide_weight_sync = latent_guide_weight
+                latent_guide_weight_sync_inv = latent_guide_weight_sync_inv
+                latent_guide_weights_sync = latent_guide_weights
+                latent_guide_weights_sync_inv = latent_guide_weights_inv
+                
+                scheduler_sync_ = scheduler_
+                scheduler_sync_inv_ = scheduler_sync_inv_
+                
+                start_steps_sync_ = start_steps_
+                start_steps_sync_inv_ = start_steps_inv_
+                
+                steps_sync_ = steps_
+                steps_sync_inv_ = steps_inv_
+                
+                
+                
+
 
 
             if self.mask     is not None and self.mask.shape    [0] > 1 and self.VIDEO is False:
@@ -232,8 +270,8 @@ class LatentGuide:
                 
             if self.guide_mode.startswith("fully_") and not RK_IMPLICIT:
                 self.guide_mode = self.guide_mode[6:]   # fully_pseudoimplicit is only supported for implicit samplers, default back to pseudoimplicit
-            
-            guide_sigma_shift = self.EO("guide_sigma_shift", 0.0)
+
+            guide_sigma_shift = self.EO("guide_sigma_shift", 0.0)                                                                         # effectively hardcoding shift to 0 !!!!!!
             
             if latent_guide_weights is None and scheduler_ is not None:# and self.guide_mode != "none":
                 total_steps          = steps_ - start_steps_
@@ -246,6 +284,22 @@ class LatentGuide:
                 latent_guide_weights_inv = get_sigmas(self.model, scheduler_inv_, total_steps, 1.0, shift=guide_sigma_shift).to(dtype=self.dtype, device=self.device) / self.sigma_max
                 prepend                  = torch.zeros(start_steps_inv_,                               dtype=self.dtype, device=self.device) 
                 latent_guide_weights_inv = torch.cat((prepend, latent_guide_weights_inv.to(self.device)), dim=0)
+                
+                
+                
+            if latent_guide_weights_sync is None and scheduler_sync_ is not None:# and self.guide_mode != "none":
+                total_steps          = steps_sync_ - start_steps_sync_
+                latent_guide_weights_sync = get_sigmas(self.model, scheduler_sync_, total_steps, 1.0, shift=guide_sigma_shift).to(dtype=self.dtype, device=self.device) / self.sigma_max
+                prepend              = torch.zeros(start_steps_sync_,                               dtype=self.dtype, device=self.device)
+                latent_guide_weights_sync = torch.cat((prepend, latent_guide_weights_sync.to(self.device)), dim=0)
+                
+            if latent_guide_weights_sync_inv is None and scheduler_sync_inv_ is not None:# and self.guide_mode != "none":
+                total_steps              = steps_sync_inv_ - start_steps_sync_inv_
+                latent_guide_weights_sync_inv = get_sigmas(self.model, scheduler_sync_inv_, total_steps, 1.0, shift=guide_sigma_shift).to(dtype=self.dtype, device=self.device) / self.sigma_max
+                prepend                  = torch.zeros(start_steps_sync_inv_,                               dtype=self.dtype, device=self.device) 
+                latent_guide_weights_sync_inv = torch.cat((prepend, latent_guide_weights_sync_inv.to(self.device)), dim=0)
+                
+                
                 
             if latent_guide_weights_mean is None and scheduler_mean_ is not None:
                 total_steps               = steps_mean_ - start_steps_mean_
@@ -281,6 +335,12 @@ class LatentGuide:
                 latent_guide_weights      = initialize_or_scale(latent_guide_weights,      latent_guide_weight,      self.max_steps)
             if scheduler_inv_ != "constant" or latent_guide_weights_inv is not None:
                 latent_guide_weights_inv  = initialize_or_scale(latent_guide_weights_inv,  latent_guide_weight_inv,  self.max_steps)
+                
+            if scheduler_sync_ != "constant" or latent_guide_weights_sync is not None:
+                latent_guide_weights_sync      = initialize_or_scale(latent_guide_weights_sync,      latent_guide_weight_sync,      self.max_steps)
+            if scheduler_sync_inv_ != "constant" or latent_guide_weights_sync_inv is not None:
+                latent_guide_weights_sync_inv  = initialize_or_scale(latent_guide_weights_sync_inv,  latent_guide_weight_sync_inv,  self.max_steps)
+                
             if scheduler_mean_ != "constant" or latent_guide_weights_mean is not None:
                 latent_guide_weights_mean = initialize_or_scale(latent_guide_weights_mean, latent_guide_weight_mean, self.max_steps)
             if scheduler_adain_ != "constant" or latent_guide_weights_adain is not None:
@@ -294,6 +354,8 @@ class LatentGuide:
 
             latent_guide_weights      [steps_      :] = 0
             latent_guide_weights_inv  [steps_inv_  :] = 0
+            latent_guide_weights_sync      [steps_sync_      :] = 0
+            latent_guide_weights_sync_inv  [steps_sync_inv_  :] = 0
             latent_guide_weights_mean [steps_mean_ :] = 0
             latent_guide_weights_adain[steps_adain_:] = 0
             latent_guide_weights_attninj[steps_attninj_:] = 0
@@ -303,6 +365,8 @@ class LatentGuide:
         
         self.lgw       = F.pad(latent_guide_weights,       (0, self.max_steps), value=0.0)
         self.lgw_inv   = F.pad(latent_guide_weights_inv,   (0, self.max_steps), value=0.0)
+        self.lgw_sync       = F.pad(latent_guide_weights_sync,       (0, self.max_steps), value=0.0)
+        self.lgw_sync_inv   = F.pad(latent_guide_weights_sync_inv,   (0, self.max_steps), value=0.0)
         self.lgw_mean  = F.pad(latent_guide_weights_mean,  (0, self.max_steps), value=0.0)
         self.lgw_adain = F.pad(latent_guide_weights_adain, (0, self.max_steps), value=0.0)
         self.lgw_attninj = F.pad(latent_guide_weights_attninj, (0, self.max_steps), value=0.0)
@@ -541,9 +605,13 @@ class LatentGuide:
 
         return x
 
-    def prepare_weighted_masks(self, step:int) -> Tuple[Tensor, Tensor]:
-        lgw_     = self.lgw    [step]
-        lgw_inv_ = self.lgw_inv[step]
+    def prepare_weighted_masks(self, step:int, lgw_type="default") -> Tuple[Tensor, Tensor]:
+        if lgw_type == "sync":
+            lgw_     = self.lgw_sync    [step]
+            lgw_inv_ = self.lgw_sync_inv[step]
+        else:
+            lgw_     = self.lgw    [step]
+            lgw_inv_ = self.lgw_inv[step]
         
         mask     = torch.ones_like(self.y0) if self.mask     is None else self.mask
         mask_inv = torch.zeros_like(mask  ) if self.mask_inv is None else self.mask_inv
@@ -569,8 +637,8 @@ class LatentGuide:
         return lgw_mask, lgw_mask_inv
 
 
-    def get_masks_for_step(self, step:int) -> Tuple[Tensor, Tensor]:
-        lgw_mask, lgw_mask_inv = self.prepare_weighted_masks(step)
+    def get_masks_for_step(self, step:int, lgw_type="default") -> Tuple[Tensor, Tensor]:
+        lgw_mask, lgw_mask_inv = self.prepare_weighted_masks(step, lgw_type=lgw_type)
         normalize_frame_weights_per_step = self.EO("normalize_frame_weights_per_step")
         normalize_frame_weights_per_step_inv = self.EO("normalize_frame_weights_per_step_inv")
 

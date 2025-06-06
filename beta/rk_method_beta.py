@@ -611,6 +611,16 @@ class RK_Method_Beta:
         
         if BONGMATH_Y:
             lgw_mask_, lgw_mask_inv_ = LG.get_masks_for_step(step)
+            lgw_mask_sync_, lgw_mask_sync_inv_ = LG.get_masks_for_step(step, lgw_type="sync")
+
+            if LG.SYNC_SEPARATE:
+                sync_mask = lgw_mask_sync_+lgw_mask_sync_inv_
+                weight_mask     = (1-(lgw_mask_+lgw_mask_inv_)) * torch.ones_like(lgw_mask_)   +   (lgw_mask_+lgw_mask_inv_) * (lgw_mask_+lgw_mask_inv_)
+                weight_mask_inv = (1-(lgw_mask_+lgw_mask_inv_)) * torch.ones_like(lgw_mask_)   +   (lgw_mask_+lgw_mask_inv_) * (1-(lgw_mask_+lgw_mask_inv_))
+            else:
+                sync_mask = 1.
+                weight_mask = lgw_mask_+lgw_mask_inv_
+                weight_mask_inv = 1-(lgw_mask_+lgw_mask_inv_)
         
         if self.EO("bong_start_step", 0) > step or step > self.EO("bong_stop_step", 10000) or (self.unsample_bongmath == False and s_[-1] > s_[0]):
             return x_0, x_, eps_
@@ -664,7 +674,15 @@ class RK_Method_Beta:
                         if BONGMATH_Y:
                             if self.EXPONENTIAL:
                                 eps_x_ = data_x_ - x_0
-                                eps_ = (1 - (lgw_mask_ + lgw_mask_inv_)) * (eps_x_ - (lgw_mask_ + lgw_mask_inv_) * eps_y_) +  (lgw_mask_ + lgw_mask_inv_) * sigma * (y0_bongflow - noise_sync)
+                                if self.EO("disable_masks"):
+                                    eps_ = (lgw_mask_+lgw_mask_inv_) * (eps_x_ - eps_y_) + sigma * (y0_bongflow - noise_sync)
+                                elif self.VE_MODEL:
+                                    eps_ = sync_mask * weight_mask_inv * (eps_x_ - weight_mask * eps_y_)    +    weight_mask * sigma*(-noise_sync)
+                                    #eps_ = (lgw_mask_sync_+lgw_mask_sync_inv_) * (1-(lgw_mask_+lgw_mask_inv_)) * (eps_x_ - (lgw_mask_+lgw_mask_inv_) * eps_y_) +  (lgw_mask_+lgw_mask_inv_) * sigma*(y0_bongflow-noise_sync)
+                                else:
+                                    eps_ = sync_mask * weight_mask_inv * (eps_x_ - weight_mask * eps_y_)    +    weight_mask * sigma*(y0_bongflow-noise_sync)
+
+
                                 #eps_ = (1 - (lgw_mask_ + lgw_mask_inv_)) * (eps_x_ - (lgw_mask_ + lgw_mask_inv_) * eps_y_) + sigma * (y0_bongflow - noise_sync)
                                 #eps_ = (1-(lgw_mask_+lgw_mask_inv_)) * eps_x_ - (lgw_mask_+lgw_mask_inv_) * eps_y_ + sigma * (y0_bongflow - noise_sync)
                                 
@@ -672,7 +690,14 @@ class RK_Method_Beta:
                                 #eps_  = ((1-(lgw_mask_+lgw_mask_inv_)) * eps_x_ - (lgw_mask_+lgw_mask_inv_) * eps_y_) + (lgw_mask_+lgw_mask_inv_) * sigma * y0_bongflow - (1-(lgw_mask_+lgw_mask_inv_)) * sigma * noise_sync
                             else:
                                 eps_x_[:s_.shape[0]] = (x_[:s_.shape[0]] - data_x_[:s_.shape[0]]) / s_.view(-1,1,1,1,1)   # or should it be vs x_0???
-                                eps_ = (1 - (lgw_mask_ + lgw_mask_inv_)) * (eps_x_ - (lgw_mask_ + lgw_mask_inv_) * eps_y_) +           (lgw_mask_ + lgw_mask_inv_) * (noise_sync - y0_bongflow)
+                                if self.EO("disable_masks"):
+                                    eps_ = (lgw_mask_+lgw_mask_inv_) * (eps_x_ - eps_y_) + (noise_sync - y0_bongflow)
+                                elif self.VE_MODEL:
+                                    eps_ = sync_mask * weight_mask_inv * (eps_x_ - weight_mask * eps_y_)    +    weight_mask * (noise_sync)
+                                    #eps_ = (lgw_mask_sync_+lgw_mask_sync_inv_) * (1-(lgw_mask_+lgw_mask_inv_)) * (eps_x_ - (lgw_mask_+lgw_mask_inv_) * eps_y_) +           (lgw_mask_+lgw_mask_inv_) * (noise_sync-y0_bongflow)
+                                else:
+                                    eps_ = sync_mask * weight_mask_inv * (eps_x_ - weight_mask * eps_y_)    +    weight_mask * (noise_sync-y0_bongflow)
+
                                 #eps_ = (1 - (lgw_mask_ + lgw_mask_inv_)) * (eps_x_ - (lgw_mask_ + lgw_mask_inv_) * eps_y_) +         (noise_sync - y0_bongflow)
 
                         else:
@@ -698,8 +723,10 @@ class RK_Method_Beta:
                     sigmas     : Tensor,
                     step       : int,
                     newton_name: str,
+                    SYNC_GUIDE_ACTIVE: bool,
                     ) -> Tuple[Tensor, Tensor]:
-        
+        if SYNC_GUIDE_ACTIVE:
+            return x_, eps_
         newton_iter_name = "newton_iter_" + newton_name
         
         default_anchor_x_all = False
