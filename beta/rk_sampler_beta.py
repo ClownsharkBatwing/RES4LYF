@@ -932,7 +932,9 @@ def sample_rk_beta(
                                 if RK.multistep_stages > 0:
                                     s_tmp = lying_sd
 
-                            if LG.guide_mode.startswith("sync") and (LG.lgw[step] != 0 or LG.lgw_inv[step] != 0):
+                            if LG.guide_mode.startswith("sync") and (LG.lgw[step] == 0 and LG.lgw_inv[step] == 0):
+                                data_cached = None
+                            elif LG.guide_mode.startswith("sync") and (LG.lgw[step] != 0 or LG.lgw_inv[step] != 0):
                                 lgw_mask_, lgw_mask_inv_ = LG.get_masks_for_step(step)
 
                                 if noise_bongflow is None:
@@ -950,7 +952,7 @@ def sample_rk_beta(
                                     
                                     noise_bongflow = normalize_zscore(NS.noise_sampler(sigma=sigma, sigma_next=NS.sigma_min), channelwise=True, inplace=True)
 
-                                    y0_bongflow = LG.y0.clone()
+                                    y0_bongflow = LG.HAS_LATENT_GUIDE * LG.mask * LG.y0   +   LG.HAS_LATENT_GUIDE_INV * LG.mask_inv * LG.y0_inv  #LG.y0.clone()
                                     
                                     if VE_MODEL:
                                         yt_0 = y0_bongflow + sigma * noise_bongflow
