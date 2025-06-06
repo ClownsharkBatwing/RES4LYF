@@ -493,6 +493,32 @@ class latent_batch:
 
 
 
+class MaskFloatToBoolean:
+    def __init__(self):
+        pass
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+
+            "required": {
+                "mask": ("MASK",),
+            },
+            "optional": {
+            },
+        }
+        
+    RETURN_TYPES = ("MASK",)
+    RETURN_NAMES = ("binary_mask",)
+    FUNCTION     = "main"
+    CATEGORY     = "RES4LYF/masks"
+
+    def main(self, mask=None,):
+        return (mask.bool().to(mask.dtype),)
+    
+
+
+
 class Frame_Select_Latent_Raw:
     def __init__(self):
         pass

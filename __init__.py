@@ -156,6 +156,8 @@ NODE_CLASS_MAPPINGS = {
     "LatentPhaseMagnitudeOffset"          : nodes_latents.LatentPhaseMagnitudeOffset,
     "LatentPhaseMagnitudePower"           : nodes_latents.LatentPhaseMagnitudePower,
     
+    "MaskFloatToBoolean"                  : nodes_latents.MaskFloatToBoolean,
+    
     "MaskToggle"                          : nodes_latents.MaskToggle,
     "Frames Masks Uninterpolate"          : nodes_latents.Frames_Masks_Uninterpolate,
     "Frames Masks ZeroOut"                : nodes_latents.Frames_Masks_ZeroOut,
@@ -170,6 +172,7 @@ NODE_CLASS_MAPPINGS = {
     
     "PrepForUnsampling"                   : helper_sigma_preview_image_preproc.VAEEncodeAdvanced,
     "VAEEncodeAdvanced"                   : helper_sigma_preview_image_preproc.VAEEncodeAdvanced,
+    "VAEStyleTransferLatent"              : helper_sigma_preview_image_preproc.VAEStyleTransferLatent,
     
     "SigmasPreview"                       : helper_sigma_preview_image_preproc.SigmasPreview,
     "SigmasSchedulePreview"               : helper_sigma_preview_image_preproc.SigmasSchedulePreview,

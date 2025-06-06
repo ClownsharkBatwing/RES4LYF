@@ -1,6 +1,8 @@
 import torch
 import torch.nn.functional as F
 
+from typing import Optional, Callable, Tuple, Dict, Any, Union
+
 import numpy as np
 import folder_paths
 from PIL.PngImagePlugin import PngInfo
@@ -8,6 +10,7 @@ from PIL import Image
 import json
 import os 
 import random
+import copy
 
 from io import BytesIO
 
@@ -283,6 +286,303 @@ class VAEEncodeAdvanced:
                 width, 
                 height,
                 )
+
+
+
+
+class VAEStyleTransferLatent:
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "method":    (["AdaIN", "WCT"], {"default": "AdaIN"}),
+                "latent":    ("LATENT",),
+                "style_ref": ("LATENT",),
+                "vae":       ("VAE", ),
+            },
+            
+            "optional": {
+            }
+        }
+
+    RETURN_TYPES = ("LATENT",)
+                    
+    RETURN_NAMES = ("latent",)
+    
+    FUNCTION = "main"
+    CATEGORY = "RES4LYF/vae"
+
+    def main(self,
+            method    = None,
+            latent    = None,
+            style_ref = None,
+            vae       = False,
+            ):
+        
+        from comfy.ldm.cascade.stage_c_coder import StageC_coder
+        
+        # this is unfortunately required to avoid apparent non-deterministic outputs. 
+        # without setting the seed each time, the outputs of the VAE encode will change with every generation.
+        torch     .manual_seed    (42)          
+        torch.cuda.manual_seed_all(42)
+        
+        denoised = latent   .get('state_info', {}).get('raw_x')
+        y0       = style_ref.get('state_info', {}).get('raw_x')
+        
+        denoised = latent['samples'] if denoised is None else denoised
+        y0       = style_ref['samples'] if y0 is None else y0
+            
+        #denoised = latent.get('state_info', latent['samples'].get('raw_x', latent['samples']))
+        #y0       = style_ref.get('state_info', style_ref['samples'].get('raw_x', style_ref['samples']))
+        
+        if denoised.ndim > 4:
+            denoised = denoised.squeeze(0)
+        if y0.ndim > 4:
+            y0 = y0.squeeze(0)
+        
+        if   hasattr(vae.first_stage_model, "up_blocks"): # probably stable cascade stage A
+            x_embedder = copy.deepcopy(vae.first_stage_model.up_blocks[0][0]).to(torch.float64)
+            denoised_embed = x_embedder(denoised.to(x_embedder.weight))
+            y0_embed       = x_embedder(y0.to(x_embedder.weight))
+            
+            denoised_embed = apply_style_to_latent(denoised_embed, y0_embed, method)
+            
+            denoised_styled = invert_conv2d(x_embedder, denoised_embed, denoised.shape).to(denoised)
+            
+            
+        elif hasattr(vae.first_stage_model, "decoder"):   # probably sd15, sdxl, sd35, flux, wan, etc. vae
+            x_embedder = copy.deepcopy(vae.first_stage_model.decoder.conv_in).to(torch.float64)
+            denoised_embed = x_embedder(denoised.to(x_embedder.weight))
+            y0_embed       = x_embedder(y0.to(x_embedder.weight))
+            
+            denoised_embed = apply_style_to_latent(denoised_embed, y0_embed, method)
+            
+            denoised_styled = invert_conv2d(x_embedder, denoised_embed, denoised.shape).to(denoised)
+        
+        elif type(vae.first_stage_model) == StageC_coder:
+            x_embedder = copy.deepcopy(vae.first_stage_model.encoder.mapper[0]).to(torch.float64)
+            #x_embedder = copy.deepcopy(vae.first_stage_model.previewer.blocks[0]).to(torch.float64) # use with strategy for decoder above, but exploding latent problem, 1.E30 etc. quick to nan
+
+            denoised_embed = invert_conv2d(x_embedder, denoised, denoised.shape)
+            y0_embed       = invert_conv2d(x_embedder, y0, y0.shape)
+            
+            denoised_embed = apply_style_to_latent(denoised_embed, y0_embed, method)
+            
+            denoised_styled = x_embedder(denoised_embed.to(x_embedder.weight))
+            
+            
+            
+        
+        latent_out = latent.copy() 
+        #latent_out['state_info'] = copy.deepcopy(latent['state_info'])
+
+        if latent_out.get('state_info', {}).get('raw_x') is not None:
+            latent_out['state_info']['raw_x'] = denoised_styled
+        latent_out['samples'] = denoised_styled
+        
+        return (latent_out, )
+
+
+
+
+
+
+
+def apply_style_to_latent(denoised_embed, y0_embed, method="WCT"):
+    from einops import rearrange
+    import torch.nn as nn
+    
+    denoised_embed_shape = denoised_embed.shape
+
+    denoised_embed = rearrange(denoised_embed, "B C H W -> B (H W) C")
+    y0_embed       = rearrange(y0_embed,       "B C H W -> B (H W) C")
+    
+    if method == "AdaIN":
+        denoised_embed = adain_seq_inplace(denoised_embed, y0_embed)
+    
+    elif method == "WCT":
+        f_s  = y0_embed[0].clone()           # batched style guides not supported
+        mu_s = f_s.mean(dim=0, keepdim=True)
+        f_s_centered = f_s - mu_s
+        
+        cov = (f_s_centered.transpose(-2,-1).double() @ f_s_centered.double()) / (f_s_centered.size(0) - 1)
+
+        S_eig, U_eig = torch.linalg.eigh(cov + 1e-5 * torch.eye(cov.size(0), dtype=cov.dtype, device=cov.device))
+        S_eig_sqrt    = S_eig.clamp(min=0).sqrt() # eigenvalues -> singular values
+        
+        whiten = U_eig @ torch.diag(S_eig_sqrt) @ U_eig.transpose(-2,-1)
+        y0_color  = whiten.to(f_s_centered)
+
+        for wct_i in range(denoised_embed_shape[0]):
+            f_c          = denoised_embed[wct_i].clone()
+            mu_c         = f_c.mean(dim=0, keepdim=True)
+            f_c_centered = f_c - mu_c
+            
+            cov = (f_c_centered.transpose(-2,-1).double() @ f_c_centered.double()) / (f_c_centered.size(0) - 1)
+
+            S_eig, U_eig  = torch.linalg.eigh(cov + 1e-5 * torch.eye(cov.size(0), dtype=cov.dtype, device=cov.device))
+            inv_sqrt_eig  = S_eig.clamp(min=0).rsqrt() 
+            
+            whiten = U_eig @ torch.diag(inv_sqrt_eig) @ U_eig.transpose(-2,-1)
+            whiten = whiten.to(f_c_centered)
+
+            f_c_whitened = f_c_centered @ whiten.transpose(-2,-1)
+            f_cs         = f_c_whitened @ y0_color.transpose(-2,-1).to(f_c_whitened) + mu_s.to(f_c_whitened)
+            
+            denoised_embed[wct_i] = f_cs
+    
+    denoised_embed = rearrange(denoised_embed, "B (H W) C -> B C H W", W=denoised_embed_shape[-1])
+    
+    return denoised_embed
+
+
+
+def invert_conv2d(
+    conv: torch.nn.Conv2d,
+    z:    torch.Tensor,
+    original_shape: torch.Size,
+) -> torch.Tensor:
+    import torch.nn.functional as F
+
+    B, C_in, H, W = original_shape
+    C_out, _, kH, kW = conv.weight.shape
+    stride_h, stride_w = conv.stride
+    pad_h,    pad_w    = conv.padding
+
+    if conv.bias is not None:
+        b = conv.bias.view(1, C_out, 1, 1).to(z)
+        z_nobias = z - b
+    else:
+        z_nobias = z
+
+    W_flat = conv.weight.view(C_out, -1).to(z)  
+    W_pinv = torch.linalg.pinv(W_flat)    
+
+    Bz, Co, Hp, Wp = z_nobias.shape
+    z_flat = z_nobias.reshape(Bz, Co, -1)  
+
+    x_patches = W_pinv @ z_flat   
+
+    x_sum = F.fold(
+        x_patches,
+        output_size=(H + 2*pad_h, W + 2*pad_w),
+        kernel_size=(kH, kW),
+        stride=(stride_h, stride_w),
+    )
+    ones = torch.ones_like(x_patches)
+    count = F.fold(
+        ones,
+        output_size=(H + 2*pad_h, W + 2*pad_w),
+        kernel_size=(kH, kW),
+        stride=(stride_h, stride_w),
+    )  
+
+    x_recon = x_sum / count.clamp(min=1e-6)
+    if pad_h > 0 or pad_w > 0:
+        x_recon = x_recon[..., pad_h:pad_h+H, pad_w:pad_w+W]
+
+    return x_recon
+
+
+"""def invert_conv3d(conv: torch.nn.Conv3d,
+                z: torch.Tensor, original_shape: torch.Size, grid_sizes: Optional[Tuple[int,int,int]] = None) -> torch.Tensor:
+
+    import torch.nn.functional as F
+    B, C_in, D, H, W = original_shape
+    pD, pH, pW = 1,2,2
+    sD, sH, sW = pD, pH, pW
+
+    if z.ndim == 3:
+        # [B, S, C_out] -> reshape to [B, C_out, D', H', W']
+        S = z.shape[1]
+        if grid_sizes is None:
+            Dp = D // pD
+            Hp = H // pH
+            Wp = W // pW
+        else:
+            Dp, Hp, Wp = grid_sizes
+        C_out = z.shape[2]
+        z = z.transpose(1, 2).reshape(B, C_out, Dp, Hp, Wp)
+    else:
+        B2, C_out, Dp, Hp, Wp = z.shape
+        assert B2 == B, "Batch size mismatch... ya sharked it."
+
+    # kncokout bias
+    if conv.bias is not None:
+        b = conv.bias.view(1, C_out, 1, 1, 1)
+        z_nobias = z - b
+    else:
+        z_nobias = z
+
+    # 2D filter -> pinv
+    w3 = conv.weight         # [C_out, C_in, 1, pH, pW]
+    w2 = w3.squeeze(2)                       # [C_out, C_in, pH, pW]
+    out_ch, in_ch, kH, kW = w2.shape
+    
+    W_flat = w2.view(out_ch, -1)            # [C_out, in_ch*pH*pW]
+    W_pinv = torch.linalg.pinv(W_flat)      # [in_ch*pH*pW, C_out]
+
+    # merge depth for 2D unfold wackiness
+    z2 = z_nobias.permute(0,2,1,3,4).reshape(B*Dp, C_out, Hp, Wp)
+
+    # apply pinv ... get patch vectors
+    z_flat    = z2.reshape(B*Dp, C_out, -1)  # [B*Dp, C_out, L]
+    x_patches = W_pinv @ z_flat              # [B*Dp, in_ch*pH*pW, L]
+
+    # fold -> spatial frames
+    x2 = F.fold(
+        x_patches,
+        output_size=(H, W),
+        kernel_size=(pH, pW),
+        stride=(sH, sW)
+    )  # → [B*Dp, C_in, H, W]
+
+    # un-merge depth
+    x2 = x2.reshape(B, Dp, in_ch, H, W)           # [B, Dp,  C_in, H, W]
+    x_recon = x2.permute(0,2,1,3,4).contiguous()  # [B, C_in,   D, H, W]
+    return x_recon
+"""
+
+
+
+def adain_seq_inplace(content: torch.Tensor, style: torch.Tensor, eps: float = 1e-7) -> torch.Tensor:
+    mean_c = content.mean(1, keepdim=True)
+    std_c  = content.std (1, keepdim=True).add_(eps)  # in-place add
+    mean_s = style.mean  (1, keepdim=True)
+    std_s  = style.std   (1, keepdim=True).add_(eps)
+
+    content.sub_(mean_c).div_(std_c).mul_(std_s).add_(mean_s)  # in-place chain
+    return content
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 class LatentUpscaleWithVAE:
