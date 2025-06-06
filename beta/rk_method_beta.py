@@ -592,12 +592,25 @@ class RK_Method_Beta:
                     row_offset: int,
                     h         : Tensor,
                     step      : int,
+                    BONGMATH_Y : bool = False,
+                    y0_bongflow : Optional[Tensor] = None,
+                    noise_sync: Optional[Tensor] = None,
+                    eps_x_    : Optional[Tensor] = None,
+                    eps_y_    : Optional[Tensor] = None,
+                    data_x_   : Optional[Tensor] = None,
+                    #data_y_   : Optional[Tensor] = None,
+                    #yt_       : Optional[Tensor] = None,
+                    #yt_0      : Optional[Tensor] = None,
+                    LG = None,
                     ) -> Tuple[Tensor, Tensor, Tensor]:
         
         if x_0.ndim == 4:
             norm_dim = (-2,-1)
         elif x_0.ndim == 5:
             norm_dim = (-4,-2,-1)
+        
+        if BONGMATH_Y:
+            lgw_mask_, lgw_mask_inv_ = LG.get_masks_for_step(step)
         
         if self.EO("bong_start_step", 0) > step or step > self.EO("bong_stop_step", 10000) or (self.unsample_bongmath == False and s_[-1] > s_[0]):
             return x_0, x_, eps_
@@ -622,8 +635,15 @@ class RK_Method_Beta:
                 x_0_tmp  = x_0.clone()
                 x_tmp_   = x_.clone()
                 eps_tmp_ = eps_.clone()
-            
-            for i in range(100):
+
+            for i in range(100):     #bongmath for eps_prev_ not implemented?
+                #if BONGMATH_Y:
+                #    if self.EXPONENTIAL:
+                #        eps_ = (1 - (lgw_mask_ + lgw_mask_inv_)) * (eps_x_ - eps_y_) + sigma * (y0_bongflow - noise_sync)
+                #    else:
+                #        eps_ = (1 - (lgw_mask_ + lgw_mask_inv_)) * (eps_x_ - eps_y_) +           noise_sync - y0_bongflow
+                    #x_0 = x_[row+row_offset] - h * self.zum(row+row_offset, ky_, eps_prev_)
+                #else:
                 x_0 = x_[row+row_offset] - h * self.zum(row+row_offset, eps_, eps_prev_)
                 
                 if self.EO("bong_iter_lock_x_0_ch_means"):
@@ -641,14 +661,29 @@ class RK_Method_Beta:
                         #eps_[rr] = self.get_unsample_epsilon(x_[rr], x_0, data_[rr], sigma, s_[rr])
                         eps_[rr] = self.get_epsilon(x_[rr], x_0, data_[rr], sigma, s_[rr])
                     else:
-                        eps_[rr] = self.get_epsilon(x_0, x_[rr], data_[rr], sigma, s_[rr])
+                        if BONGMATH_Y:
+                            if self.EXPONENTIAL:
+                                eps_x_ = data_x_ - x_0
+                                eps_ = (1 - (lgw_mask_ + lgw_mask_inv_)) * (eps_x_ - (lgw_mask_ + lgw_mask_inv_) * eps_y_) +  (lgw_mask_ + lgw_mask_inv_) * sigma * (y0_bongflow - noise_sync)
+                                #eps_ = (1 - (lgw_mask_ + lgw_mask_inv_)) * (eps_x_ - (lgw_mask_ + lgw_mask_inv_) * eps_y_) + sigma * (y0_bongflow - noise_sync)
+                                #eps_ = (1-(lgw_mask_+lgw_mask_inv_)) * eps_x_ - (lgw_mask_+lgw_mask_inv_) * eps_y_ + sigma * (y0_bongflow - noise_sync)
+                                
+                                #eps_  = ((1-(lgw_mask_+lgw_mask_inv_)) * eps_x_ - (lgw_mask_+lgw_mask_inv_) * eps_y_) + (lgw_mask_+lgw_mask_inv_) * sigma * (y0_bongflow - noise_sync)
+                                #eps_  = ((1-(lgw_mask_+lgw_mask_inv_)) * eps_x_ - (lgw_mask_+lgw_mask_inv_) * eps_y_) + (lgw_mask_+lgw_mask_inv_) * sigma * y0_bongflow - (1-(lgw_mask_+lgw_mask_inv_)) * sigma * noise_sync
+                            else:
+                                eps_x_[:s_.shape[0]] = (x_[:s_.shape[0]] - data_x_[:s_.shape[0]]) / s_.view(-1,1,1,1,1)   # or should it be vs x_0???
+                                eps_ = (1 - (lgw_mask_ + lgw_mask_inv_)) * (eps_x_ - (lgw_mask_ + lgw_mask_inv_) * eps_y_) +           (lgw_mask_ + lgw_mask_inv_) * (noise_sync - y0_bongflow)
+                                #eps_ = (1 - (lgw_mask_ + lgw_mask_inv_)) * (eps_x_ - (lgw_mask_ + lgw_mask_inv_) * eps_y_) +         (noise_sync - y0_bongflow)
+
+                        else:
+                            eps_[rr] = self.get_epsilon(x_0, x_[rr], data_[rr], sigma, s_[rr])
                     
             if bong_strength != 1.0:
                 x_0  = x_0_tmp  + bong_strength * (x_0  - x_0_tmp)
                 x_   = x_tmp_   + bong_strength * (x_   - x_tmp_)
                 eps_ = eps_tmp_ + bong_strength * (eps_ - eps_tmp_)
         
-        return x_0, x_, eps_
+        return x_0, x_, eps_ #,   yt_0, yt_
 
 
     def newton_iter(self,

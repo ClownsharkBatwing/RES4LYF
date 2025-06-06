@@ -13,6 +13,7 @@ IMPLICIT_TYPE_NAMES = [
 
 GUIDE_MODE_NAMES_BETA_SIMPLE = [
     "flow",
+    "sync",
     "lure",
     "data",
     "epsilon",

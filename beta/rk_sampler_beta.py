@@ -373,8 +373,21 @@ def sample_rk_beta(
     denoised_data_prev2 = None
     h_prev              = None
     
+    eps_y_              = None
+    eps_prev_y_         = None
+    data_y_             = None
+    yt_                 = None
+    yt_0                = None
+    
+    eps_x_              = None 
+    data_y_             = None
+    data_x_             = None
+    
+    data_prev_y_        = None # for sync
+    data_prev_x_        = None
 
-
+    y0_bongflow         = None
+    noise_bongflow      = state_info.get('noise_bongflow')
 
     # BEGIN SAMPLING LOOP    
     num_steps = len(sigmas[start_step:])-2 if sigmas[-1] == 0 else len(sigmas[start_step:])-1
@@ -427,7 +440,7 @@ def sample_rk_beta(
         orig_y0_inv = LG.y0_inv.clone()
     
     #gc.collect()
-
+    noise_bongflow = None
     BASE_STARTED = False
     INV_STARTED  = False
     FLOW_STARTED = False
@@ -687,9 +700,28 @@ def sample_rk_beta(
         
         # RECYCLE STAGES FOR MULTISTEP
         if RK.multistep_stages > 0 or RK.hybrid_stages > 0:
-            for ms in range(min(len(data_prev_), len(eps_))):
-                eps_[ms] = RK.get_epsilon_anchored(x_0, data_prev_[ms], sigma)
-            eps_prev_ = eps_.clone()
+            if LG.guide_mode.startswith("sync") and (LG.lgw[step] != 0.0 or LG.lgw_inv[step] != 0.0):
+                lgw_mask_, lgw_mask_inv_ = LG.get_masks_for_step(step)
+                if VE_MODEL:
+                    yt_0 = y0_bongflow + sigma * noise_bongflow
+                else:
+                    yt_0 = (1-sigma) * y0_bongflow  + sigma * noise_bongflow
+                for ms in range(min(len(data_prev_), len(eps_))):
+                    eps_x = RK.get_epsilon_anchored(x_0,  data_prev_x_[ms], sigma)
+                    eps_y = RK.get_epsilon_anchored(yt_0, data_prev_y_[ms], sigma)
+
+                    if RK.EXPONENTIAL:
+                        eps_[ms] = (1 - (lgw_mask_ + lgw_mask_inv_)) * (eps_x - (lgw_mask_ + lgw_mask_inv_) * eps_y) +  (lgw_mask_ + lgw_mask_inv_) * sigma * (y0_bongflow - noise_bongflow)
+                    else:
+                        eps_[ms] = (1 - (lgw_mask_ + lgw_mask_inv_)) * (eps_x - (lgw_mask_ + lgw_mask_inv_) * eps_y) +  (lgw_mask_ + lgw_mask_inv_) *        (noise_bongflow - y0_bongflow)
+                eps_prev_ = eps_.clone()
+            
+            else:
+                for ms in range(min(len(data_prev_), len(eps_))):
+                    eps_[ms] = RK.get_epsilon_anchored(x_0, data_prev_[ms], sigma)
+                eps_prev_ = eps_.clone()
+
+
 
         # INITIALIZE IMPLICIT SAMPLING
         if RK.IMPLICIT:
@@ -847,11 +879,41 @@ def sample_rk_beta(
                                     x_[row+RK.row_offset] = NS.rebound_overshoot_substep(x_0, x_[row+RK.row_offset])
                                     if row > 0:
                                         if not LG.guide_mode.startswith("flow") or (LG.lgw[step] == 0 and LG.lgw[step+1] == 0   and   LG.lgw_inv[step] == 0 and LG.lgw_inv[step+1] == 0):
-                                            x_[row+RK.row_offset] = NS.swap_noise_substep(x_0, x_[row+RK.row_offset])
+                                            #x_[row+RK.row_offset] = NS.swap_noise_substep(x_0, x_[row+RK.row_offset])
+                                            
+                                            x_row_tmp = NS.swap_noise_substep(x_0, x_[row+RK.row_offset], mask=sde_mask, guide=LG.y0)
+                                            
+                                            if LG.guide_mode.startswith("sync") and (LG.lgw[step] != 0.0 or LG.lgw_inv[step] != 0.0):
+                                                noise_bongflow_new = (x_row_tmp - x_[row+RK.row_offset]) / s_tmp + noise_bongflow
+                                                yt_[row+RK.row_offset] += s_tmp * (noise_bongflow_new - noise_bongflow)
+                                                noise_bongflow = noise_bongflow_new
+                                                
+                                            x_[row+RK.row_offset] = x_row_tmp
+                                            
+                                        if LG.guide_mode.startswith("sync") and (LG.lgw[step] != 0 or LG.lgw_inv[step] != 0):
+                                            yt_[:NS.s_.shape[0], 0] = y0_bongflow + NS.s_.view(-1, 1, 1, 1) * (noise_bongflow - y0_bongflow)
+                                            yt_0   = y0_bongflow + sigma * (noise_bongflow - y0_bongflow)
+                                            if RK.EXPONENTIAL:
+                                                eps_y_ = data_y_ - yt_0 # yt_        # watch out for fuckery with size of tableau being smaller later in a chained sampler
+                                            else:
+                                                if BONGMATH:
+                                                    eps_y_[:NS.s_.shape[0]] = (yt_[:NS.s_.shape[0]] - data_y_[:NS.s_.shape[0]]) / NS.s_.view(-1,1,1,1,1) 
+                                                else:
+                                                    eps_y_[:NS.s_.shape[0]] = (yt_0.view(NS.s_.shape[0], 1,1,1,1) - data_y_[:NS.s_.shape[0]]) / sigma    # calc exact to c0 node
+                                            if not BONGMATH:
+                                                if RK.EXPONENTIAL:
+                                                    eps_x_ = data_x_ - x_0 
+                                                else:
+                                                    eps_x_ = (x_0 - data_x) / sigma
+                                            
+                                            
+                                            
                                         if BONGMATH and step < sigmas.shape[0]-1 and sigma > 0.03 and not EO("disable_implicit_prebong"):
-                                            x_0, x_, eps_ = RK.bong_iter(x_0, x_, eps_, eps_prev_, data_, sigma, NS.s_, row, RK.row_offset, NS.h, step)     # TRY WITH h_new ??
+                                            BONGMATH_Y = LG.guide_mode.startswith("sync") and (LG.lgw[step] != 0 or LG.lgw_inv[step] != 0)
+                                            
+                                            x_0, x_, eps_ = RK.bong_iter(x_0, x_, eps_, eps_prev_, data_, sigma, NS.s_, row, RK.row_offset, NS.h, step,
+                                                                        BONGMATH_Y, y0_bongflow, noise_bongflow, eps_x_, eps_y_, data_x_, LG)     # TRY WITH h_new ??
                                     x_tmp = x_[row+RK.row_offset]
-
 
                         lying_eps_row_factor = 1.0
                         # MODEL CALL MODEL CALL MODEL CALL MODEL CALL MODEL CALL MODEL CALL MODEL CALL MODEL CALL MODEL CALL MODEL CALL MODEL CALL MODEL CALL MODEL CALL MODEL CALL MODEL CALL MODEL CALL MODEL CALL MODEL CALL
@@ -870,7 +932,102 @@ def sample_rk_beta(
                                 if RK.multistep_stages > 0:
                                     s_tmp = lying_sd
 
-                            if LG.guide_mode.startswith("flow") and (LG.lgw[step] > 0 or LG.lgw_inv[step] > 0) and not FLOW_STOPPED and not EO("flow_sync") :
+                            if LG.guide_mode.startswith("sync") and (LG.lgw[step] != 0 or LG.lgw_inv[step] != 0):
+                                lgw_mask_, lgw_mask_inv_ = LG.get_masks_for_step(step)
+
+                                if noise_bongflow is None:
+                                    eps_x_  = torch.zeros(RK.rows+2, *x.shape, dtype=default_dtype, device=work_device)
+                                    data_x_ = torch.zeros(RK.rows+2, *x.shape, dtype=default_dtype, device=work_device)
+                                    
+                                    eps_y_  = torch.zeros(RK.rows+2, *x.shape, dtype=default_dtype, device=work_device)
+                                    eps_prev_y_  = torch.zeros(RK.rows+2, *x.shape, dtype=default_dtype, device=work_device)
+                                    data_y_ = torch.zeros(RK.rows+2, *x.shape, dtype=default_dtype, device=work_device)
+                                    yt_     = torch.zeros(RK.rows+2, *x.shape, dtype=default_dtype, device=work_device)
+                                    #yt_0    = torch.zeros_like(x_0)
+                                    
+                                    data_prev_x_ = torch.zeros(4, *x.shape, dtype=default_dtype, device=work_device)
+                                    data_prev_y_ = torch.zeros(4, *x.shape, dtype=default_dtype, device=work_device)
+                                    
+                                    noise_bongflow = normalize_zscore(NS.noise_sampler(sigma=sigma, sigma_next=NS.sigma_min), channelwise=True, inplace=True)
+
+                                    y0_bongflow = LG.y0.clone()
+                                    
+                                    if VE_MODEL:
+                                        yt_0 = y0_bongflow + sigma * noise_bongflow
+                                        yt   = y0_bongflow + s_tmp * noise_bongflow
+                                    else:
+                                        yt_0 = (1-sigma) * y0_bongflow  + sigma * noise_bongflow
+                                        yt   = (1-s_tmp) * y0_bongflow  + s_tmp * noise_bongflow
+                                        
+                                    yt_[row] = yt
+                                    
+                                    x_0 = yt_0.clone()
+                                    x_tmp = x_[row] = yt.clone()
+                                else:
+                                    #pass
+                                    if not EO("skip_yt"):
+                                        if VE_MODEL:
+                                            yt_0 = y0_bongflow + sigma * noise_bongflow
+                                            yt   = y0_bongflow + s_tmp * noise_bongflow
+                                        else:
+                                            yt_0 = (1-sigma) * y0_bongflow  + sigma * noise_bongflow
+                                            yt   = (1-s_tmp) * y0_bongflow  + s_tmp * noise_bongflow
+
+                                        yt_[row] = yt
+
+                                #if EO("sync_speed_mode"):
+                                faux_data_y = y0_bongflow.clone()
+                                if RK.EXPONENTIAL:
+                                    faux_eps_y = faux_data_y - yt_0
+                                elif BONGMATH:
+                                    faux_eps_y = (yt_[row] - faux_data_y) / s_tmp
+                                else:
+                                    faux_eps_y = (yt_0 - faux_data_y) / sigma
+
+                                if EO("sync_speed_mode"):
+                                    eps_y, data_y = faux_eps_y, faux_data_y
+                                else:
+                                    eps_y, data_y = RK(yt_[row], s_tmp, yt_0,  sigma, transformer_options={'latent_type': 'yt'})
+                                    
+                                #eps_y  = (1 - (lgw_mask_ + lgw_mask_inv_)) * faux_eps_y      +     (lgw_mask_ + lgw_mask_inv_) * eps_y
+                                #data_y = (1 - (lgw_mask_ + lgw_mask_inv_)) * faux_data_y     +     (lgw_mask_ + lgw_mask_inv_) * data_y
+                                
+                                eps_x, data_x = RK(x_tmp, s_tmp, x_0, sigma, transformer_options={'latent_type': 'xt'})
+                                
+                                if RK.EXPONENTIAL:
+                                    eps_[row]  = (1 - (lgw_mask_ + lgw_mask_inv_)) * (eps_x - (lgw_mask_ + lgw_mask_inv_) * eps_y) + (lgw_mask_ + lgw_mask_inv_) * sigma * (y0_bongflow - noise_bongflow)
+                                    #eps_[row]  = (1 - (lgw_mask_ + lgw_mask_inv_)) * (eps_x - (lgw_mask_ + lgw_mask_inv_) * eps_y) +  sigma * (y0_bongflow - noise_bongflow)
+                                    #eps_[row]  = ((1-(lgw_mask_+lgw_mask_inv_)) * eps_x - (lgw_mask_+lgw_mask_inv_) * eps_y) + (lgw_mask_+lgw_mask_inv_) * sigma * (y0_bongflow - noise_bongflow)
+                                    #eps_[row]  = ((1-(lgw_mask_+lgw_mask_inv_)) * eps_x - (lgw_mask_+lgw_mask_inv_) * eps_y) + sigma * (y0_bongflow - noise_bongflow)
+                                    #eps_[row]  = ((1-(lgw_mask_+lgw_mask_inv_)) * eps_x - (lgw_mask_+lgw_mask_inv_) * eps_y) + (lgw_mask_+lgw_mask_inv_) * sigma * y0_bongflow - (1-(lgw_mask_+lgw_mask_inv_)) * sigma * noise_bongflow
+                                else:
+                                    eps_[row]  = (1 - (lgw_mask_ + lgw_mask_inv_)) * (eps_x - (lgw_mask_ + lgw_mask_inv_) * eps_y) +         (lgw_mask_ + lgw_mask_inv_) * (noise_bongflow - y0_bongflow)
+                                    #eps_[row]  = (1 - (lgw_mask_ + lgw_mask_inv_)) * (eps_x - (lgw_mask_ + lgw_mask_inv_) * eps_y) +         (noise_bongflow - y0_bongflow)
+
+                                data_[row] = x_0   +   (1 - (lgw_mask_ + lgw_mask_inv_)) * NS.h * (eps_x - (lgw_mask_ + lgw_mask_inv_) * eps_y)   -   (lgw_mask_ + lgw_mask_inv_) * sigma * (noise_bongflow - y0_bongflow)
+                                
+                                #data_[row] = x_0   +   (1 - (lgw_mask_ + lgw_mask_inv_)) * NS.h * (eps_x - (lgw_mask_ + lgw_mask_inv_) * eps_y)   -   sigma * (noise_bongflow - y0_bongflow)
+                                
+                                #data_[row] = x_0   +   NS.h * (    (1-(lgw_mask_+lgw_mask_inv_)) * eps_x   -   (lgw_mask_+lgw_mask_inv_) * eps_y   )   -   sigma * (noise_bongflow - y0_bongflow)
+                                
+                                data_cached = data_x
+                                
+                                eps_x_ [row] = eps_x
+                                data_x_[row] = data_x
+                                
+                                eps_y_[row] = eps_y
+                                data_y_[row] = data_y
+
+                                if EO("sync_use_fake_eps_y"):
+                                    if RK.EXPONENTIAL:
+                                        eps_y_ [row] = sigma * (y0_bongflow - noise_bongflow)
+                                    else:
+                                        eps_y_ [row] = noise_bongflow - y0_bongflow
+                                if EO("sync_use_fake_data_y"):
+                                    data_y_[row] = y0_bongflow #data_y
+                                
+                            
+                            elif LG.guide_mode.startswith("flow") and (LG.lgw[step] > 0 or LG.lgw_inv[step] > 0) and not FLOW_STOPPED and not EO("flow_sync") :
                                 lgw_mask_, lgw_mask_inv_ = LG.get_masks_for_step(step)
                                 if not FLOW_STARTED and not FLOW_RESUMED:
                                     FLOW_STARTED = True
@@ -923,7 +1080,6 @@ def sample_rk_beta(
                                             y0 = (1 - (LG.HAS_LATENT_GUIDE * LG.lgw[step] * LG.mask + LG.HAS_LATENT_GUIDE_INV * LG.lgw_inv[step] * LG.mask_inv)) * yx0_prev   +   LG.HAS_LATENT_GUIDE * LG.lgw[step] * LG.mask * LG.y0   +   LG.HAS_LATENT_GUIDE_INV * LG.lgw_inv[step] * LG.mask_inv * LG.y0_inv
                                         else:
                                             y0 = (1 - (lgw_mask_ + lgw_mask_inv_)) * yx0_prev   +   lgw_mask_ * LG.y0   +   lgw_mask_inv_ * LG.y0_inv
-                                            #y0 = (1 - (lgw_mask_ + lgw_mask_inv_)) * x_tmp   +   lgw_mask_ * LG.y0   +   lgw_mask_inv_ * LG.y0_inv
                                         
                                         if EO("flow_slerp"):
                                             if EO("flow_manual_masks"):
@@ -932,7 +1088,6 @@ def sample_rk_beta(
                                                 y0_inv = (1 - (lgw_mask_ + lgw_mask_inv_)) * yx0_prev   +   lgw_mask_ * LG.y0_inv   +   lgw_mask_inv_ * LG.y0
 
                                 y0_orig = y0.clone()
-                                #yx0_orig = yx0.clone()
                                 if EO("flow_proj_xy"):
                                     d_collinear_d_lerp = get_collinear(yx0, y0_orig)  
                                     d_lerp_ortho_d     = get_orthogonal(y0_orig, yx0)  
@@ -958,12 +1113,7 @@ def sample_rk_beta(
                                 del y0_orig
 
                                 flow_cossim_iter = EO("flow_cossim_iter", 1)
-                                
-                                #if EO("flow_use_init_noise_yt"):
-                                #    init_noise_ratio = EO("flow_use_init_noise_yt", 1.0)
-                                #    noise_yt = noise_fn(y0, sigma, sigma_next, NS.noise_sampler, flow_cossim_iter) 
-                                #    noise_yt = init_noise_ratio * x_init.clone()   +   (1 - init_noise_ratio) * noise_yt
-                                #else:
+
                                 if step == 0:
                                     noise_yt = noise_fn(y0, sigma, sigma_next, NS.noise_sampler, flow_cossim_iter) # normalize_zscore(NS.noise_sampler(sigma=sigma, sigma_next=sigma_next), channelwise=True, inplace=True)
                                 if not EO("flow_disable_renoise_y0"):
@@ -971,8 +1121,6 @@ def sample_rk_beta(
                                         noise_yt = noise_fn(x_0, sigma, sigma_next, NS.noise_sampler, flow_cossim_iter)
                                     else:
                                         noise_yt = (1-eta) * noise_yt + eta * noise_fn(x_0, sigma, sigma_next, NS.noise_sampler, flow_cossim_iter)
-                                    #noise_yt = noise_fn(y0, sigma, sigma_next, NS.noise_sampler, flow_cossim_iter) # normalize_zscore(NS.noise_sampler(sigma=sigma, sigma_next=sigma_next), channelwise=True, inplace=True)
-                                    #noise_yt = 0.5 * noise_yt + 0.5 * noise_fn(y0, sigma, sigma_next, NS.noise_sampler, flow_cossim_iter) # normalize_zscore(NS.noise_sampler(sigma=sigma, sigma_next=sigma_next), channelwise=True, inplace=True)
 
                                 if VE_MODEL:
                                     yt        = y0 + s_tmp * noise_yt
@@ -983,7 +1131,6 @@ def sample_rk_beta(
                                         noise_yt = noise_fn(x_0, sigma, sigma_next, NS.noise_sampler, flow_cossim_iter)
                                     else:
                                         noise_yt = (1-eta) * noise_yt + eta * noise_fn(x_0, sigma, sigma_next, NS.noise_sampler, flow_cossim_iter)
-                                    #noise_yt = noise_fn(y0, sigma, sigma_next, NS.noise_sampler, flow_cossim_iter) # normalize_zscore(NS.noise_sampler(sigma=sigma, sigma_next=sigma_next), channelwise=True, inplace=True)
 
                                 if VE_MODEL:
                                     y0_noised = y0 + sigma * noise_yt
@@ -991,23 +1138,18 @@ def sample_rk_beta(
                                     y0_noised = (NS.sigma_max-sigma) * y0 + sigma * noise_yt
                                 
                                 if EO("flow_slerp"):
-                                    noise = noise_fn(y0_inv, sigma, sigma_next, NS.noise_sampler, flow_cossim_iter) # normalize_zscore(NS.noise_sampler(sigma=sigma, sigma_next=sigma_next), channelwise=True, inplace=True)
+                                    noise = noise_fn(y0_inv, sigma, sigma_next, NS.noise_sampler, flow_cossim_iter) 
                                     yt_inv        = (NS.sigma_max-s_tmp) * y0_inv + (s_tmp/NS.sigma_max) * noise
                                     if not EO("flow_disable_doublenoise_y0_inv"):
-                                        noise = noise_fn(y0_inv, sigma, sigma_next, NS.noise_sampler, flow_cossim_iter) # normalize_zscore(NS.noise_sampler(sigma=sigma, sigma_next=sigma_next), channelwise=True, inplace=True)
+                                        noise = noise_fn(y0_inv, sigma, sigma_next, NS.noise_sampler, flow_cossim_iter) 
                                     y0_noised_inv = (NS.sigma_max-sigma) * y0_inv + sigma * noise
                                 
-                                #if EO("flow_use_init_noise_xt"):
-                                #    init_noise_ratio = EO("flow_use_init_noise_x_0", 1.0)
-                                #    noise_xt = noise_fn(x_0, sigma, sigma_next, NS.noise_sampler, flow_cossim_iter) 
-                                #    noise_xt = init_noise_ratio * x_init.clone()   +   (1 - init_noise_ratio) * noise_xt
-                                #else: #if not EO("flow_disable_separatenoise_x_0"):
                                 if step == 0:
-                                    noise_xt = noise_fn(yx0, sigma, sigma_next, NS.noise_sampler, flow_cossim_iter) # normalize_zscore(NS.noise_sampler(sigma=sigma, sigma_next=sigma_next), channelwise=True, inplace=True)
+                                    noise_xt = noise_fn(yx0, sigma, sigma_next, NS.noise_sampler, flow_cossim_iter) 
                                 if EO("flow_slerp"):
                                     xt         = yx0 + (s_tmp/NS.sigma_max) * (noise - y_slerp)
                                     if not EO("flow_disable_doublenoise_x_0"):
-                                        noise = noise_fn(x_0, sigma, sigma_next, NS.noise_sampler, flow_cossim_iter) # normalize_zscore(NS.noise_sampler(sigma=sigma, sigma_next=sigma_next), channelwise=True, inplace=True)
+                                        noise = noise_fn(x_0, sigma, sigma_next, NS.noise_sampler, flow_cossim_iter) 
                                     x_0_noised = x_0 + sigma * (noise - y_slerp)
                                 else:
                                     if not EO("flow_disable_renoise_x_0"):
@@ -1015,9 +1157,6 @@ def sample_rk_beta(
                                             noise_xt = noise_fn(x_0, sigma, sigma_next, NS.noise_sampler, flow_cossim_iter)
                                         else:
                                             noise_xt = (1-eta_substep) * noise_xt + eta_substep * noise_fn(x_0, sigma, sigma_next, NS.noise_sampler, flow_cossim_iter)
-                                        #noise_xt = (1-eta)*noise_xt + eta * noise_fn(x_0, sigma, sigma_next, NS.noise_sampler, flow_cossim_iter)
-                                    #if not EO("flow_disable_doublenoise_x_0"):
-                                    #    noise_xt = (1-eta)*noise_xt + eta * noise_fn(x_0, sigma, sigma_next, NS.noise_sampler, flow_cossim_iter) # normalize_zscore(NS.noise_sampler(sigma=sigma, sigma_next=sigma_next), channelwise=True, inplace=True)
 
                                     if VE_MODEL:
                                         xt         = yx0 + (s_tmp) * yx0 + (s_tmp) * (noise_xt - y0)
@@ -1083,63 +1222,45 @@ def sample_rk_beta(
                                         eps_x_lin           = (x_0 - data_x) / sigma
                                         eps_yx_lin          = (eps_y_lin - eps_x_lin)
                                         
-
-                                        #eps_yx_lin_weighted =  (eps_yx_lin     +      (1 - (lgw_mask_ + lgw_mask_inv_)) * eps_x_lin   -   (lgw_mask_ + lgw_mask_inv_) * eps_y_lin)
-                                        #eps_[row]  = eps_yx_weighted = eps_yx+( (1 - (lgw_mask_ + lgw_mask_inv_)) * eps_x_alt   -   (lgw_mask_ + lgw_mask_inv_) * eps_y_alt)
-                                        
-                                        #data_[row] = yx0 + (1 - (lgw_mask_ + lgw_mask_inv_)) * (data_x - data_y) #x_0 - sigma * eps_yx_lin_weighted
-                                        
-                                        #data_[row] = x_0 - sigma * (eps_yx_lin     +     (1 - (lgw_mask_ + lgw_mask_inv_)) * eps_x_lin   -   (lgw_mask_ + lgw_mask_inv_) * eps_y_lin) #* LG.lgw[step] * LG.mask
-                                        
-                                        #data_[row] = x_0 - sigma * eps_yx_lin   # original version
-                                        
                                         data_[row] = (1 - (lgw_mask_ + lgw_mask_inv_)) * data_x   +   (lgw_mask_ + lgw_mask_inv_) * data_y
                                         
                                         if EO("flow_reverse_data_masks"):
                                             data_[row] = (1 - (lgw_mask_ + lgw_mask_inv_)) * data_y   +   (lgw_mask_ + lgw_mask_inv_) * data_x
-                                        
-                                        #eps_[row] = eps_x - eps_y
-                                        #data_[row] = x_0 + NS.h * eps_[row]
-                                        #eps_[row]  = eps_xy = (eps_x_alt - eps_y_alt)
-                                        #data_[row] = x_0 + NS.h * (eps_x - eps_y)
-                                        
+
                                         if flow_sync_eps != 0.0:
                                             if RK.EXPONENTIAL:
                                                 eps_[row] = (1-flow_sync_eps) * eps_[row] + flow_sync_eps * (data_[row] - x_0)
                                             else:
                                                 eps_[row] = (1-flow_sync_eps) * eps_[row] + flow_sync_eps * (x_0 - data_[row]) / sigma
                                         
-                                        if EO("flow_sync_eps_mask"): #(not BONGMATH or EO("flow_sync_eps")) and not EO("flow_disable_sync_eps"):
+                                        if EO("flow_sync_eps_mask"): 
                                             flow_sync_eps = EO("flow_sync_eps_mask", 1.0)
                                             if RK.EXPONENTIAL:
                                                 eps_[row] = (lgw_mask_ + lgw_mask_inv_) * (1-flow_sync_eps) * eps_[row] + (1 - (lgw_mask_ + lgw_mask_inv_)) * flow_sync_eps * (data_[row] - x_0) 
                                             else:
                                                 eps_[row] = (lgw_mask_ + lgw_mask_inv_) * (1-flow_sync_eps) * eps_[row] + (1 - (lgw_mask_ + lgw_mask_inv_)) * flow_sync_eps * (x_0 - data_[row]) / sigma
 
-                                        if EO("flow_sync_eps_revmask"): #(not BONGMATH or EO("flow_sync_eps")) and not EO("flow_disable_sync_eps"):
+                                        if EO("flow_sync_eps_revmask"): 
                                             flow_sync_eps = EO("flow_sync_eps_revmask", 1.0)
                                             if RK.EXPONENTIAL:
                                                 eps_[row] = (1 - (lgw_mask_ + lgw_mask_inv_)) * (1-flow_sync_eps) * eps_[row] + (lgw_mask_ + lgw_mask_inv_) * flow_sync_eps * (data_[row] - x_0) 
                                             else:
                                                 eps_[row] = (1 - (lgw_mask_ + lgw_mask_inv_)) * (1-flow_sync_eps) * eps_[row] + (lgw_mask_ + lgw_mask_inv_) * flow_sync_eps * (x_0 - data_[row]) / sigma
 
-                                        if EO("flow_sync_eps_maskonly"): #(not BONGMATH or EO("flow_sync_eps")) and not EO("flow_disable_sync_eps"):
+                                        if EO("flow_sync_eps_maskonly"):
                                             flow_sync_eps = EO("flow_sync_eps_maskonly", 1.0)
                                             if RK.EXPONENTIAL:
                                                 eps_[row] = (lgw_mask_ + lgw_mask_inv_) * eps_[row] + (1 - (lgw_mask_ + lgw_mask_inv_)) * (data_[row] - x_0) 
                                             else:
                                                 eps_[row] = (lgw_mask_ + lgw_mask_inv_) * eps_[row] + (1 - (lgw_mask_ + lgw_mask_inv_)) * (x_0 - data_[row]) / sigma
 
-                                        if EO("flow_sync_eps_revmaskonly"): #(not BONGMATH or EO("flow_sync_eps")) and not EO("flow_disable_sync_eps"):
+                                        if EO("flow_sync_eps_revmaskonly"): 
                                             flow_sync_eps = EO("flow_sync_eps_revmaskonly", 1.0)
                                             if RK.EXPONENTIAL:
                                                 eps_[row] = (1 - (lgw_mask_ + lgw_mask_inv_)) * eps_[row] + (lgw_mask_ + lgw_mask_inv_) * (data_[row] - x_0) 
                                             else:
                                                 eps_[row] = (1 - (lgw_mask_ + lgw_mask_inv_)) * eps_[row] + (lgw_mask_ + lgw_mask_inv_) * (x_0 - data_[row]) / sigma
 
-
-                                        #x_[row] =  (1 - (lgw_mask_ + lgw_mask_inv_)) * data_x   -   (lgw_mask_ + lgw_mask_inv_) * data_y #* LG.lgw[step] * LG.mask
-                                    
                                     if EO("flow_slerp"):
                                         if RK.EXPONENTIAL:
                                             eps_y_alt     = data_y     - x_0
@@ -1151,9 +1272,7 @@ def sample_rk_beta(
                                             eps_x_alt     = (x_0 - data_x)     / sigma
                                         
                                         flow_slerp_ratio2 = EO("flow_slerp_ratio2", 0.5)
-                                        #eps_y_slerp       = slerp_tensor(flow_slerp_ratio2, eps_y_alt, eps_y_alt_inv)
-                                        #data_y_slerp      = slerp_tensor(flow_slerp_ratio2, data_y,    data_y_inv)
-                                        
+
                                         eps_yx     = (eps_y_alt - eps_x_alt)
                                         eps_y_lin  = (x_0 - data_y) / sigma
                                         eps_x_lin  = (x_0 - data_x) / sigma
@@ -1198,12 +1317,7 @@ def sample_rk_beta(
                                             else:
                                                 data_[row] = x_0 - sigma * eps_[row]
 
-                                    #data_cached = data_[row] #data_x # (1-eta_substep)* data_x  + eta_substep * data_[row]
                                     data_cached = data_x 
-                                    #if step == 0:
-                                    #    data_cached = data_x #denoised # (1 - (lgw_mask_ + lgw_mask_inv_)) * data_x   +   (lgw_mask_ + lgw_mask_inv_) * data_y #* LG.lgw[step] * LG.mask             data_[row] #data_x
-                                    #else:
-                                    #    data_cached = denoised
 
                             if step < EO("direct_pre_pseudo_guide", 0) and step > 0:
                                 for i_pseudo in range(EO("direct_pre_pseudo_guide_iter", 1)):
@@ -1212,206 +1326,26 @@ def sample_rk_beta(
                             
                             # MODEL CALL MODEL CALL MODEL CALL MODEL CALL MODEL CALL MODEL CALL MODEL CALL MODEL CALL MODEL CALL MODEL CALL MODEL CALL MODEL CALL MODEL CALL MODEL CALL MODEL CALL MODEL CALL MODEL CALL
                             
-                            if (not LG.guide_mode.startswith("flow"))   or   FLOW_STOPPED   or    (LG.guide_mode.startswith("flow") and LG.lgw[step] == 0 and LG.lgw_inv[step] == 0):
-                                if LG.guide_mode.startswith("lure") and (LG.lgw[step] > 0 or LG.lgw_inv[step] > 0):
-                                    eps_[row], data_[row] = RK(x_tmp, s_tmp, x_0, sigma, transformer_options={'latent_type': 'yt'})
-                                else:
-                                    if EO("t_pad"):
-                                        x_tmp_pad = torch.cat([x_tmp, x_tmp[...,0:1,:,:]], dim=-3)
-                                        x_0_pad   = torch.cat([x_0,   x_0  [...,0:1,:,:]], dim=-3)
-                                        if EO("t_pad_flip"):
-                                            x_tmp_pad    = torch.flip(x_tmp_pad, dims=[-3])
-                                        eps_row_pad, data_row_pad = RK(x_tmp_pad, s_tmp, x_0_pad, sigma)
-                                        if EO("t_pad_flip"):
-                                            eps_row_pad  = torch.flip(eps_row_pad,  dims=[-3])    
-                                            data_row_pad = torch.flip(data_row_pad, dims=[-3])    
-                                        eps_ [row] = eps_row_pad [...,:-1,:,:]
-                                        data_[row] = data_row_pad[...,:-1,:,:]
-                                    if EO("t_prepad"):
-                                        x_tmp_pad = torch.cat([x_tmp[...,-1:,:,:], x_tmp], dim=-3)
-                                        x_0_pad   = torch.cat([x_0  [...,-1:,:,:], x_0  ], dim=-3)
-                                        if EO("t_pad_flip"):
-                                            x_tmp_pad    = torch.flip(x_tmp_pad, dims=[-3])
-                                        eps_row_pad, data_row_pad = RK(x_tmp_pad, s_tmp, x_0_pad, sigma)
-                                        if EO("t_pad_flip"):
-                                            eps_row_pad  = torch.flip(eps_row_pad,  dims=[-3])    
-                                            data_row_pad = torch.flip(data_row_pad, dims=[-3])    
-                                        eps_ [row] = eps_row_pad [...,1:,:,:]
-                                        data_[row] = data_row_pad[...,1:,:,:]
-                                        
-                                    if EO("t_prepostpad"):
-                                        
-                                        x_tmp_pad = torch.cat([x_tmp[...,-1:,:,:], x_tmp], dim=-3)
-                                        x_0_pad   = torch.cat([x_0  [...,-1:,:,:], x_0  ], dim=-3)
-                                        
-                                        x_tmp_pad = torch.cat([x_tmp_pad, x_tmp[...,0:1,:,:]], dim=-3)
-                                        x_0_pad   = torch.cat([x_0_pad,   x_0  [...,0:1,:,:]], dim=-3)
-                                        
-                                        if EO("t_pad_flip"):
-                                            x_tmp_pad    = torch.flip(x_tmp_pad, dims=[-3])
-                                        eps_row_pad, data_row_pad = RK(x_tmp_pad, s_tmp, x_0_pad, sigma)
-                                        if EO("t_pad_flip"):
-                                            eps_row_pad  = torch.flip(eps_row_pad,  dims=[-3])    
-                                            data_row_pad = torch.flip(data_row_pad, dims=[-3])    
-                                        eps_ [row] = eps_row_pad [...,1:-1,:,:]
-                                        data_[row] = data_row_pad[...,1:-1,:,:]
-                                        
-                                    elif EO("t_pad2"):
-                                        x_tmp_pad = torch.cat([x_tmp, x_tmp[...,1:2,:,:]], dim=-3)
-                                        x_0_pad   = torch.cat([x_0,   x_0  [...,1:2,:,:]], dim=-3)
-                                        if EO("t_pad2_flip"):
-                                            x_tmp_pad    = torch.flip(x_tmp_pad, dims=[-3])
-                                        eps_row_pad, data_row_pad = RK(x_tmp_pad, s_tmp, x_0_pad, sigma)
-                                        if EO("t_pad2_flip"):
-                                            eps_row_pad  = torch.flip(eps_row_pad,  dims=[-3])    
-                                            data_row_pad = torch.flip(data_row_pad, dims=[-3])    
-                                        eps_ [row] = eps_row_pad [...,:-1,:,:]
-                                        data_[row] = data_row_pad[...,:-1,:,:]
-                                    elif EO("t_pad3"):
-                                        x_tmp_pad = torch.cat([x_tmp, x_tmp], dim=-3)
-                                        x_0_pad   = torch.cat([x_0,   x_0  ], dim=-3)
-                                        if EO("t_pad3_flip"):
-                                            x_tmp_pad    = torch.flip(x_tmp_pad, dims=[-3])
-                                        eps_row_pad, data_row_pad = RK(x_tmp_pad, s_tmp, x_0_pad, sigma)
-                                        if EO("t_pad3_flip"):
-                                            eps_row_pad  = torch.flip(eps_row_pad,  dims=[-3])    
-                                            data_row_pad = torch.flip(data_row_pad, dims=[-3])    
-                                        eps_ [row] = eps_row_pad [...,:eps_[row].shape[-3],:,:]
-                                        data_[row] = data_row_pad[...,:data_[row].shape[-3],:,:]
-                                    elif EO("t_replace"):
-                                        x_tmp[...,-1:,:,:] = x_tmp[...,0:1,:,:]
-                                        x_0[...,-1:,:,:]   = x_0[...,0:1,:,:]
-                                        eps_[row], data_[row] = RK(x_tmp, s_tmp, x_0, sigma)
-                                    elif EO("t_replace_first_with_last"):
-                                        x_tmp[...,0:1,:,:] = x_tmp[...,-1:,:,:]
-                                        x_0[...,0:1,:,:] = x_0[...,-1:,:,:] 
-                                        eps_[row], data_[row] = RK(x_tmp, s_tmp, x_0, sigma)
-                            
-                                    elif EO("t_rotato"):
-                                        if diag_iter % 2 == 0:
-                                            eps_[row], data_[row] = RK(x_tmp, s_tmp, x_0, sigma)
-                                        else:
-                                            x_tmp_roll = torch.roll(x_tmp, dims=-3, shifts=-1)
-                                            x_0_roll = torch.roll(x_0, dims=-3, shifts=-1)
-                                            eps_row_roll, data_row_roll = RK(x_tmp_roll, s_tmp, x_0_roll, sigma)
-                                            eps_row_roll = torch.roll(eps_row_roll, dims=-3, shifts=1)
-                                            data_row_roll = torch.roll(data_row_roll, dims=-3, shifts=1)
-                                            eps_[row] = eps_row_roll
-                                            data_[row] = data_row_roll
-                                            
-                                    elif EO("t_rotato_pos"):
-                                        if diag_iter % 2 == 0:
-                                            eps_[row], data_[row] = RK(x_tmp, s_tmp, x_0, sigma)
-                                        else:
-                                            x_tmp_roll = torch.roll(x_tmp, dims=-3, shifts=1)
-                                            x_0_roll = torch.roll(x_0, dims=-3, shifts=1)
-                                            eps_row_roll, data_row_roll = RK(x_tmp_roll, s_tmp, x_0_roll, sigma)
-                                            eps_row_roll = torch.roll(eps_row_roll, dims=-3, shifts=-1)
-                                            data_row_roll = torch.roll(data_row_roll, dims=-3, shifts=-1)
-                                            eps_[row] = eps_row_roll
-                                            data_[row] = data_row_roll
-                                    
-                                    elif EO("t_stitch"):
-                                        t_blk0_end = EO("t_blk0_end", 11)
-                                        t_blk1_start = EO("t_blk1_start", 10)
-                                        
-                                        eps_row_blk0, data_row_blk0 = RK(x_tmp[...,:t_blk0_end   ,:,:], s_tmp, x_0[...,:t_blk0_end   ,:,:], sigma)
-                                        eps_row_blk1, data_row_blk1 = RK(x_tmp[..., t_blk1_start:,:,:], s_tmp, x_0[... ,t_blk1_start:,:,:], sigma)
-                                        
-                                        eps_ [row] = torch.cat([ eps_row_blk0[...,:t_blk0_end,:,:] ,  eps_row_blk1[...,t_blk0_end-t_blk1_start:,:,:]], dim=-3)
-                                        data_[row] = torch.cat([data_row_blk0[...,:t_blk0_end,:,:] , data_row_blk1[...,t_blk0_end-t_blk1_start:,:,:]], dim=-3)
-                                        
-                                    elif EO("t_stitch_end"):
-                                        t_blk0_end = EO("t_blk0_end", 11)
-                                        t_blk1_start = EO("t_blk1_start", 10)
-                                        
-                                        eps_row_blk0, data_row_blk0 = RK(x_tmp[...,:t_blk0_end   ,:,:], s_tmp, x_0[...,:t_blk0_end   ,:,:], sigma)
-                                        eps_row_blk1, data_row_blk1 = RK(x_tmp[..., t_blk1_start:,:,:], s_tmp, x_0[... ,t_blk1_start:,:,:], sigma)
-                                        
-                                        eps_ [row] = torch.cat([ eps_row_blk0[...,:t_blk1_start,:,:] ,  eps_row_blk1], dim=-3)
-                                        data_[row] = torch.cat([data_row_blk0[...,:t_blk1_start,:,:] , data_row_blk1], dim=-3)
-                                        
-                                        
-                                    elif EO("t_stitch_avg"):
-                                        t_blk0_end = EO("t_blk0_end", 11)
-                                        t_blk1_start = EO("t_blk1_start", 10)
-                                        
-                                        eps_row_blk0, data_row_blk0 = RK(x_tmp[...,:t_blk0_end   ,:,:], s_tmp, x_0[...,:t_blk0_end   ,:,:], sigma)
-                                        eps_row_blk1, data_row_blk1 = RK(x_tmp[..., t_blk1_start:,:,:], s_tmp, x_0[... ,t_blk1_start:,:,:], sigma)
-                                        
-                                        eps_ [row] = torch.cat([
-                                            eps_row_blk0[...,:t_blk1_start,:,:] ,  
-                                            
-                                            (eps_row_blk0[...,t_blk1_start:,:,:]  +  eps_row_blk1[...,:t_blk0_end-t_blk1_start,:,:]) / 2,
-                                            
-                                            eps_row_blk1[...,t_blk0_end-t_blk1_start:,:,:]
-                                            ], dim=-3)
-                                        
-                                        data_[row] = torch.cat([
-                                            data_row_blk0[...,:t_blk1_start,:,:] , 
-                                            
-                                            (data_row_blk0[...,t_blk1_start:,:,:] + data_row_blk1[...,:t_blk0_end-t_blk1_start,:,:]) / 2,
+                            if    LG.guide_mode.startswith("sync") and (LG.lgw[step] != 0 or LG.lgw_inv[step] != 0):
+                                pass
+                            elif not ((not LG.guide_mode.startswith("flow"))   or   FLOW_STOPPED   or    (LG.guide_mode.startswith("flow") and LG.lgw[step] == 0 and LG.lgw_inv[step] == 0)): #(LG.guide_mode.startswith("flow") and (LG.lgw[step] != 0 or LG.lgw_inv[step] != 0)) or FLOW_STOPPED:
+                                pass
+                            elif LG.guide_mode.startswith("lure") and (LG.lgw[step] > 0 or LG.lgw_inv[step] > 0):
+                                eps_[row], data_[row] = RK(x_tmp, s_tmp, x_0, sigma, transformer_options={'latent_type': 'yt'})
+                            else:
+                                eps_[row], data_[row] = RK(x_tmp, s_tmp, x_0, sigma)
 
-                                            data_row_blk1[...,t_blk0_end-t_blk1_start:,:,:]
-                                            ], dim=-3)
-                                        
-                                    elif EO("t_stitch_slerp"):
-                                        t_blk0_end = EO("t_blk0_end", 11)
-                                        t_blk1_start = EO("t_blk1_start", 10)
-                                        
-                                        eps_row_blk0, data_row_blk0 = RK(x_tmp[...,:t_blk0_end   ,:,:], s_tmp, x_0[...,:t_blk0_end   ,:,:], sigma)
-                                        eps_row_blk1, data_row_blk1 = RK(x_tmp[..., t_blk1_start:,:,:], s_tmp, x_0[... ,t_blk1_start:,:,:], sigma)
-                                        
-                                        eps_ [row] = torch.cat([
-                                            eps_row_blk0[...,:t_blk1_start,:,:] ,  
-                                            
-                                            slerp_tensor(0.5, eps_row_blk0[...,t_blk1_start:,:,:], eps_row_blk1[...,:t_blk0_end-t_blk1_start,:,:]),
-                                            
-                                            eps_row_blk1[...,t_blk0_end-t_blk1_start:,:,:]
-                                            ], dim=-3)
-                                        
-                                        data_[row] = torch.cat([
-                                            data_row_blk0[...,:t_blk1_start,:,:] , 
-                                            
-                                            slerp_tensor(0.5, data_row_blk0[...,t_blk1_start:,:,:], data_row_blk1[...,:t_blk0_end-t_blk1_start,:,:]),
-
-                                            data_row_blk1[...,t_blk0_end-t_blk1_start:,:,:]
-                                            ], dim=-3)
+                                if RK.extra_args['model_options']['transformer_options'].get('y0_standard_guide') is not None:
+                                    if hasattr(model.inner_model.inner_model.diffusion_model, "y0_standard_guide"):
+                                        LG.y0 = model.inner_model.inner_model.diffusion_model.y0_standard_guide.clone()
+                                        del model.inner_model.inner_model.diffusion_model.y0_standard_guide
+                                        RK.extra_args['model_options']['transformer_options']['y0_standard_guide'] = None
                                     
-                                    
-                                    elif not EO("t_roll"):
-                                        eps_[row], data_[row] = RK(x_tmp, s_tmp, x_0, sigma)
-                                    elif step % 2 == 0:
-                                        eps_[row], data_[row] = RK(x_tmp, s_tmp, x_0, sigma)
-                                    else:
-                                        #import einops
-                                        #b, c, t, h, w = x.shape
-                                        #patches = einops.rearrange(x, "b c (t h w) c -> b t (h w) c", h=30, w=30)
-                                        x_tmp_roll = torch.roll(x_tmp, dims=-3, shifts=-1)
-                                        x_0_roll = torch.roll(x_0, dims=-3, shifts=-1)
-                                        eps_row_roll, data_row_roll = RK(x_tmp_roll, s_tmp, x_0_roll, sigma)
-                                        eps_row_roll = torch.roll(eps_row_roll, dims=-3, shifts=1)
-                                        data_row_roll = torch.roll(data_row_roll, dims=-3, shifts=1)
-                                        eps_[row] = eps_row_roll
-                                        data_[row] = data_row_roll
-                                        #eps_[row] = (eps_[row] + eps_row_roll) / 2
-                                        #data_[row] = (data_[row] + data_row_roll) / 2
-                                        
-                                    if RK.extra_args['model_options']['transformer_options'].get('y0_standard_guide') is not None:
-                                        if hasattr(model.inner_model.inner_model.diffusion_model, "y0_standard_guide"):
-                                            LG.y0 = model.inner_model.inner_model.diffusion_model.y0_standard_guide.clone() # RK.extra_args['model_options']['transformer_options'].get('y0_standard_guide')
-                                            del model.inner_model.inner_model.diffusion_model.y0_standard_guide
-                                            RK.extra_args['model_options']['transformer_options']['y0_standard_guide'] = None
-                                        
-                                    if RK.extra_args['model_options']['transformer_options'].get('y0_inv_standard_guide') is not None:
-                                        if hasattr(model.inner_model.inner_model.diffusion_model, "y0_inv_standard_guide"):
-                                            LG.y0_inv = model.inner_model.inner_model.diffusion_model.y0_inv_standard_guide.clone() # RK.extra_args['model_options']['transformer_options'].get('y0_standard_guide')
-                                            del model.inner_model.inner_model.diffusion_model.y0_inv_standard_guide
-                                            #LG.y0_inv = RK.extra_args['model_options']['transformer_options'].get('y0_inv_standard_guide')
-                                            RK.extra_args['model_options']['transformer_options']['y0_inv_standard_guide'] = None
-                                
-                                
-
+                                if RK.extra_args['model_options']['transformer_options'].get('y0_inv_standard_guide') is not None:
+                                    if hasattr(model.inner_model.inner_model.diffusion_model, "y0_inv_standard_guide"):
+                                        LG.y0_inv = model.inner_model.inner_model.diffusion_model.y0_inv_standard_guide.clone() # RK.extra_args['model_options']['transformer_options'].get('y0_standard_guide')
+                                        del model.inner_model.inner_model.diffusion_model.y0_inv_standard_guide
+                                        RK.extra_args['model_options']['transformer_options']['y0_inv_standard_guide'] = None
 
                             if LG.guide_mode.startswith("lure") and (LG.lgw[step] > 0 or LG.lgw_inv[step] > 0):
                                 x_tmp = LG.process_guides_data_substep(x_tmp, data_[row], step, s_tmp)
@@ -1489,13 +1423,11 @@ def sample_rk_beta(
 
 
                         # GUIDE 
-                        #if not UNSAMPLE:
                         if not EO("disable_guides_eps_substep"):
                             eps_, x_      = LG.process_guides_substep(x_0, x_, eps_,      data_, row, step, NS.sigma, NS.sigma_next, NS.sigma_down, NS.s_, epsilon_scale, RK)
                         if not EO("disable_guides_eps_prev_substep"):
                             eps_prev_, x_ = LG.process_guides_substep(x_0, x_, eps_prev_, data_, row, step, NS.sigma, NS.sigma_next, NS.sigma_down, NS.s_, epsilon_scale, RK)
                         
-
                         if LG.y0_mean is not None and LG.y0_mean.sum() != 0.0:
                             eps_row_mean = eps_[row] - eps_[row].mean(dim=(-2,-1), keepdim=True) + (LG.y0_mean - x_0).mean(dim=(-2,-1), keepdim=True)
                             
@@ -1504,15 +1436,17 @@ def sample_rk_beta(
                             
                             eps_[row] = eps_[row] + LG.lgw_mean[step] * (eps_row_mean - eps_[row])
                             
-
                         if (full_iter == 0 and diag_iter == 0)   or   EO("newton_iter_post_use_on_implicit_steps"):
                             x_, eps_ = RK.newton_iter(x_0, x_, eps_, eps_prev_, data_, NS.s_, row, NS.h, sigmas, step, "post")
-
 
                     # UPDATE
                     x_ = RK.update_substep(x_0, x_, eps_, eps_prev_, row, RK.row_offset, NS.h_new, NS.h_new_orig, lying_eps_row_factor=lying_eps_row_factor)   #modifies eps_[row] if lying_eps_row_factor != 1.0
                     
                     x_[row+RK.row_offset] = NS.rebound_overshoot_substep(x_0, x_[row+RK.row_offset])
+                    
+                    if LG.guide_mode.startswith("sync") and (LG.lgw[step] != 0 or LG.lgw_inv[step] != 0): #yt_ is not None:
+                        yt_ = RK.update_substep(yt_0, yt_, eps_y_, eps_prev_y_, row, RK.row_offset, NS.h_new, NS.h_new_orig, lying_eps_row_factor=lying_eps_row_factor)   #modifies eps_[row] if lying_eps_row_factor != 1.0
+                        yt_[row+RK.row_offset] = NS.rebound_overshoot_substep(yt_0, yt_[row+RK.row_offset])
                     
                     if not RK.IMPLICIT and NS.noise_mode_sde_substep != "hard_sq":
                         if EO("dynamic_sde_mask") and denoised_prev is not None and denoised_prev.sum() != 0:
@@ -1597,10 +1531,21 @@ def sample_rk_beta(
                             sde_mask = ((sde_mask - sde_mask.min()) * (sde_mask_floor - sde_mask_ceiling)) / (sde_mask.max() - sde_mask.min()) + sde_mask_ceiling     
                             
                         if not LG.guide_mode.startswith("flow") or (LG.lgw[step] == 0 and LG.lgw[step+1] == 0   and   LG.lgw_inv[step] == 0 and LG.lgw_inv[step+1] == 0):
-                            x_[row+RK.row_offset] = NS.swap_noise_substep(x_0, x_[row+RK.row_offset], mask=sde_mask, guide=LG.y0)
+                            #if LG.guide_mode.startswith("sync") and (LG.lgw[step] != 0.0 or LG.lgw_inv[step] != 0.0):
+                            #    x_row_tmp = x_[row+RK.row_offset].clone()
+                                
+                            #x_[row+RK.row_offset] = NS.swap_noise_substep(x_0, x_[row+RK.row_offset], mask=sde_mask, guide=LG.y0)
+                            x_row_tmp = NS.swap_noise_substep(x_0, x_[row+RK.row_offset], mask=sde_mask, guide=LG.y0)
+                            
+                            if LG.guide_mode.startswith("sync") and (LG.lgw[step] != 0.0 or LG.lgw_inv[step] != 0.0):
+                                noise_bongflow_new = (x_row_tmp - x_[row+RK.row_offset]) / s_tmp + noise_bongflow
+                                yt_[row+RK.row_offset] += s_tmp * (noise_bongflow_new - noise_bongflow)
+                                noise_bongflow = noise_bongflow_new
+                                
+                            x_[row+RK.row_offset] = x_row_tmp
+                            
                         elif LG.guide_mode.startswith("flow"):
                             pass
-                            #x_[row+RK.row_offset] = NS.swap_noise_inv_substep(x_0, x_[row+RK.row_offset], eta_substep, row, row+RK.row_offset+RK.multistep_stages, mask=sde_mask, guide=LG.y0)
                         if EO("swap_noise_substep_update_eps"):
                             eps_[row+RK.row_offset] = RK.get_epsilon(x_0, x_[row+RK.row_offset], data_[row+RK.row_offset], sigma, NS.s_[row+RK.row_offset])
                         
@@ -1612,12 +1557,31 @@ def sample_rk_beta(
                     if not LG.guide_mode.startswith("lure"):
                         x_[row+RK.row_offset] = LG.process_guides_data_substep(x_[row+RK.row_offset], data_[row], step, NS.s_[row])
 
+                    if LG.guide_mode.startswith("sync") and (LG.lgw[step] != 0 or LG.lgw_inv[step] != 0):
+                        yt_[:NS.s_.shape[0], 0] = y0_bongflow + NS.s_.view(-1, 1, 1, 1) * (noise_bongflow - y0_bongflow)
+                        yt_0   = y0_bongflow + sigma * (noise_bongflow - y0_bongflow)
+                        if RK.EXPONENTIAL:
+                            eps_y_ = data_y_ - yt_0 # yt_        # watch out for fuckery with size of tableau being smaller later in a chained sampler
+                        else:
+                            if BONGMATH:
+                                eps_y_[:NS.s_.shape[0]] = (yt_[:NS.s_.shape[0]] - data_y_[:NS.s_.shape[0]]) / NS.s_.view(-1,1,1,1,1) 
+                            else:
+                                eps_y_[:NS.s_.shape[0]] = (yt_0.repeat(NS.s_.shape[0], 1,1,1,1) - data_y_[:NS.s_.shape[0]]) / sigma    # calc exact to c0 node
+                        if not BONGMATH:
+                            if RK.EXPONENTIAL:
+                                eps_x_ = data_x_ - x_0 
+                            else:
+                                eps_x_ = (x_0 - data_x_) / sigma
+
                     if BONGMATH and NS.s_[row] > RK.sigma_min and NS.h < RK.sigma_max/2   and   (diag_iter == implicit_steps_diag or EO("enable_diag_explicit_bongmath_all"))   and not EO("disable_terminal_bongmath"):
                         if step == 0 and UNSAMPLE:
                             pass
                         elif full_iter == implicit_steps_full or not EO("disable_fully_explicit_bongmath_except_final"):
                             if sigma > 0.03:
-                                x_0, x_, eps_ = RK.bong_iter(x_0, x_, eps_, eps_prev_, data_, sigma, NS.s_, row, RK.row_offset, NS.h, step)
+                                BONGMATH_Y = LG.guide_mode.startswith("sync") and (LG.lgw[step] != 0 or LG.lgw_inv[step] != 0)
+                                x_0, x_, eps_ = RK.bong_iter(x_0, x_, eps_, eps_prev_, data_, sigma, NS.s_, row, RK.row_offset, NS.h, step, 
+                                                            BONGMATH_Y, y0_bongflow, noise_bongflow, eps_x_, eps_y_, data_x_, LG)
+                                                            #BONGMATH_Y, y0_bongflow, noise_bongflow, eps_x_, eps_y_, data_x_, data_y_, yt_, yt_0, LG)
 
                     diag_iter += 1
 
@@ -1628,6 +1592,10 @@ def sample_rk_beta(
 
             x_next = x_[RK.rows - RK.multistep_stages - RK.row_offset + 1]
             x_next = NS.rebound_overshoot_step(x_0, x_next)
+            
+            if LG.guide_mode.startswith("sync") and (LG.lgw[step] != 0.0 or LG.lgw_inv[step] != 0.0):
+                yt_next = yt_[RK.rows - RK.multistep_stages - RK.row_offset + 1]
+                yt_next = NS.rebound_overshoot_step(yt_0, yt_next)
             
             eps = (x_0 - x_next) / (sigma - sigma_next)
             denoised = x_0 - sigma * eps
@@ -1669,8 +1637,21 @@ def sample_rk_beta(
                 sde_mask_ceiling = EO("sde_mask_ceiling", 1.0)
                 sde_mask = ((sde_mask - sde_mask.min()) * (sde_mask_floor - sde_mask_ceiling)) / (sde_mask.max() - sde_mask.min()) + sde_mask_ceiling    
             
-            if not LG.guide_mode.startswith("flow") or (LG.lgw[step] == 0 and LG.lgw[step+1] == 0   and   LG.lgw_inv[step] == 0 and LG.lgw_inv[step+1] == 0):
+            if eta == 0.0:
+                x = x_next
+                if LG.guide_mode.startswith("sync") and (LG.lgw[step] != 0.0 or LG.lgw_inv[step] != 0.0):
+                    yt_0 = yt_[0] = yt_next
+                #elif LG.guide_mode.startswith("sync") and (LG.lgw[step] != 0.0 or LG.lgw_inv[step] != 0.0):
+                #    noise_sync_new = NS.noise_sampler(sigma=sigma, sigma_next=sigma_next)
+                #    x = x_next + sigma * eta * (noise_sync_new - noise_bongflow)
+                #    noise_bongflow += eta * (noise_sync_new - noise_bongflow)
+            elif not LG.guide_mode.startswith("flow") or (LG.lgw[step] == 0 and LG.lgw[step+1] == 0   and   LG.lgw_inv[step] == 0 and LG.lgw_inv[step+1] == 0):
                 x = NS.swap_noise_step(x_0, x_next, mask=sde_mask)
+                if LG.guide_mode.startswith("sync") and (LG.lgw[step] != 0.0 or LG.lgw_inv[step] != 0.0):
+                    noise_bongflow_new = (x - x_next) / sigma_next + noise_bongflow
+                    yt_next += sigma_next * (noise_bongflow_new - noise_bongflow)
+                    yt_0 = yt_[0] = yt_next
+                    noise_bongflow = noise_bongflow_new
             else:
                 x = x_next
             
@@ -1706,7 +1687,7 @@ def sample_rk_beta(
                     else:
                         LG.lgw *= EO("guide_min_factor", 1.1)
                     full_iter -= 1
-                    
+        
         if FLOW_STARTED and FLOW_STOPPED:
             data_prev_ = data_x_prev_
         if FLOW_STARTED and not FLOW_STOPPED:
@@ -1714,10 +1695,21 @@ def sample_rk_beta(
             for ms in range(recycled_stages):
                 data_x_prev_[recycled_stages - ms] = data_x_prev_[recycled_stages - ms - 1]
 
+        #if LG.guide_mode.startswith("sync") and (LG.lgw[step] != 0.0 or LG.lgw_inv[step] != 0.0):
+        #    data_prev_[0] = x_0 - sigma * eps_[0]
+        #else:
         data_prev_[0] = data_[0]                # with flow mode, this will be the differentiated guide/"denoised"
         for ms in range(recycled_stages):
             data_prev_[recycled_stages - ms] = data_prev_[recycled_stages - ms - 1]   # TODO: verify that this does not run on every substep...
 
+        if LG.guide_mode.startswith("sync") and (LG.lgw[step] != 0.0 or LG.lgw_inv[step] != 0.0):
+            data_prev_x_[0] = data_x      
+            for ms in range(recycled_stages):
+                data_prev_x_[recycled_stages - ms] = data_prev_x_[recycled_stages - ms - 1] 
+
+            data_prev_y_[0] = data_y     
+            for ms in range(recycled_stages):
+                data_prev_y_[recycled_stages - ms] = data_prev_y_[recycled_stages - ms - 1] 
         
         rk_type = RK.swap_rk_type_at_step_or_threshold(x_0, data_prev_, NS, sigmas, step, rk_swap_step, rk_swap_threshold, rk_swap_type, rk_swap_print)
         if step > rk_swap_step:
@@ -1781,7 +1773,7 @@ def sample_rk_beta(
                     LG.lgw *= EO("guide_step_min_factor", 1.1)
                 step -= 1
                 x_0 = x = x_[0] = x_0_orig.clone()
-        # end sampling loop
+        # END SAMPLING LOOP ---------------------------------------------------------------------------------------------------
 
     #progress_bar.close()
     RK.update_transformer_options({'update_cross_attn':  None})
@@ -1821,10 +1813,7 @@ def sample_rk_beta(
                 
             state_info_out['guide_inversion_y0']     = guide_inversion_y0
             state_info_out['guide_inversion_y0_inv'] = guide_inversion_y0_inv
-            
-            #state_info_out['guide_inversion_y0'] = guide_inversion_y0 if guide_inversion_y0 is not None else LG.y0.clone()
-            #state_info_out['guide_inversion_y0_inv'] = guide_inversion_y0_inv if guide_inversion_y0_inv is not None else LG.y0_inv.clone()
-            
+
         state_info_out['raw_x']             = x.to('cpu')
         state_info_out['denoised']          = denoised.to('cpu')
         state_info_out['data_prev_']        = data_prev_.to('cpu')
@@ -1837,9 +1826,8 @@ def sample_rk_beta(
         state_info_out['completed']         = step == len(sigmas)-2 and sigmas[-1] == 0 and sigmas[-2] == NS.sigma_min
         state_info_out['FLOW_STARTED']      = FLOW_STARTED
         state_info_out['FLOW_STOPPED']      = FLOW_STOPPED
-        
-        #state_info_out['guide_inversion_y0']     = LG.y0     if guides['guide_mode'] == 'inversion' else None
-        #state_info_out['guide_inversion_y0_inv'] = LG.y0_inv if guides['guide_mode'] == 'inversion' else None
+        state_info_out['noise_bongflow']    = noise_bongflow
+
         if FLOW_STARTED and not FLOW_STOPPED:
             state_info_out['y0']           = y0.to('cpu') 
             #state_info_out['y0_inv']       = y0_inv.to('cpu')       # TODO: implement this?
