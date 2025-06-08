@@ -245,12 +245,12 @@ class LatentGuide:
             if scheduler_sync_ is None and scheduler_ is not None:
 
                 latent_guide_weight_sync      = latent_guide_weight
-                latent_guide_weight_sync_inv  = latent_guide_weight_sync_inv
+                latent_guide_weight_sync_inv  = latent_guide_weight_inv
                 latent_guide_weights_sync     = latent_guide_weights
                 latent_guide_weights_sync_inv = latent_guide_weights_inv
                 
                 scheduler_sync_               = scheduler_
-                scheduler_sync_inv_           = scheduler_sync_inv_
+                scheduler_sync_inv_           = scheduler_inv_
                 
                 start_steps_sync_             = start_steps_
                 start_steps_sync_inv_         = start_steps_inv_
