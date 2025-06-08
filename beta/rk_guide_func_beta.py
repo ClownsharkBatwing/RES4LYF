@@ -241,7 +241,7 @@ class LatentGuide:
             self.SYNC_SEPARATE = False
             if scheduler_sync_ is not None:
                 self.SYNC_SEPARATE = True
-            
+            self.SYNC_SEPARATE = True
             if scheduler_sync_ is None and scheduler_ is not None:
 
                 latent_guide_weight_sync      = latent_guide_weight
