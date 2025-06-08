@@ -1666,6 +1666,333 @@ class ClownGuides_Sync:
             "weights_masked"            : weights_masked,
             "weights_unmasked"          : weights_unmasked,
             
+            "weight_masked_sync"             : sync_masked,
+            "weight_unmasked_sync"           : sync_unmasked,
+            "weight_scheduler_masked_sync"   : sync_scheduler_masked,
+            "weight_scheduler_unmasked_sync" : sync_scheduler_unmasked,
+            "start_step_masked_sync"         : sync_start_step_masked,
+            "start_step_unmasked_sync"       : sync_start_step_unmasked,
+            "end_step_masked_sync"           : sync_end_step_masked,
+            "end_step_unmasked_sync"         : sync_end_step_unmasked,
+            
+            "weights_masked_sync"            : syncs_masked,
+            "weights_unmasked_sync"          : syncs_unmasked,
+            
+            "cutoff_masked"             : cutoff_masked,
+            "cutoff_unmasked"           : cutoff_unmasked
+        }
+        
+        
+        return (guides, )
+
+
+
+
+
+
+class ClownGuides_Sync_Advanced:
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {"required":
+                    {
+                    "weight_masked":               ("FLOAT",                                     {"default": 1.0, "min": -100.0, "max": 100.0, "step":0.01, "round": False, "tooltip": "Set the strength of the guide."}),
+                    "weight_unmasked":             ("FLOAT",                                     {"default": 1.0, "min": -100.0, "max": 100.0, "step":0.01, "round": False, "tooltip": "Set the strength of the guide_bkg."}),
+                    "weight_scheduler_masked":     (["constant"] + get_res4lyf_scheduler_list(), {"default": "constant"},),
+                    "weight_scheduler_unmasked":   (["constant"] + get_res4lyf_scheduler_list(), {"default": "constant"},),
+                    "weight_start_step_masked":           ("INT",                                       {"default": 0,    "min":  0,      "max": 10000}),
+                    "weight_start_step_unmasked":         ("INT",                                       {"default": 0,    "min":  0,      "max": 10000}),
+                    "weight_end_step_masked":             ("INT",                                       {"default": 30,   "min": -1,      "max": 10000}),
+                    "weight_end_step_unmasked":           ("INT",                                       {"default": -1,   "min": -1,      "max": 10000}),
+                    
+                    "sync_masked":               ("FLOAT",                                     {"default": 0.0, "min": -100.0, "max": 100.0, "step":0.01, "round": False, "tooltip": "Set the strength of the guide."}),
+                    "sync_unmasked":             ("FLOAT",                                     {"default": 1.0, "min": -100.0, "max": 100.0, "step":0.01, "round": False, "tooltip": "Set the strength of the guide_bkg."}),
+                    "sync_scheduler_masked":     (["constant"] + get_res4lyf_scheduler_list(), {"default": "constant"},),
+                    "sync_scheduler_unmasked":   (["constant"] + get_res4lyf_scheduler_list(), {"default": "constant"},),
+                    "sync_start_step_masked":           ("INT",                                       {"default": 0,    "min":  0,      "max": 10000}),
+                    "sync_start_step_unmasked":         ("INT",                                       {"default": 0,    "min":  0,      "max": 10000}),
+                    "sync_end_step_masked":             ("INT",                                       {"default": -1,   "min": -1,      "max": 10000}),
+                    "sync_end_step_unmasked":           ("INT",                                       {"default": -1,   "min": -1,      "max": 10000}),
+                    
+                    "lure_x_masked":               ("FLOAT",                                     {"default": 0.5, "min": -100.0, "max": 100.0, "step":0.01, "round": False, "tooltip": "Set the strength of the guide."}),
+                    "lure_x_unmasked":             ("FLOAT",                                     {"default": 0.5, "min": -100.0, "max": 100.0, "step":0.01, "round": False, "tooltip": "Set the strength of the guide_bkg."}),
+                    "lure_x_scheduler_masked":     (["constant"] + get_res4lyf_scheduler_list(), {"default": "constant"},),
+                    "lure_x_scheduler_unmasked":   (["constant"] + get_res4lyf_scheduler_list(), {"default": "constant"},),
+                    "lure_x_start_step_masked":           ("INT",                                       {"default": 0,    "min":  0,      "max": 10000}),
+                    "lure_x_start_step_unmasked":         ("INT",                                       {"default": 0,    "min":  0,      "max": 10000}),
+                    "lure_x_end_step_masked":             ("INT",                                       {"default": 30,   "min": -1,      "max": 10000}),
+                    "lure_x_end_step_unmasked":           ("INT",                                       {"default": 30,   "min": -1,      "max": 10000}),
+                    
+                    "lure_y_masked":               ("FLOAT",                                     {"default": 0.5, "min": -100.0, "max": 100.0, "step":0.01, "round": False, "tooltip": "Set the strength of the guide."}),
+                    "lure_y_unmasked":             ("FLOAT",                                     {"default": 0.5, "min": -100.0, "max": 100.0, "step":0.01, "round": False, "tooltip": "Set the strength of the guide_bkg."}),
+                    "lure_y_scheduler_masked":     (["constant"] + get_res4lyf_scheduler_list(), {"default": "constant"},),
+                    "lure_y_scheduler_unmasked":   (["constant"] + get_res4lyf_scheduler_list(), {"default": "constant"},),
+                    "lure_y_start_step_masked":           ("INT",                                       {"default": 0,    "min":  0,      "max": 10000}),
+                    "lure_y_start_step_unmasked":         ("INT",                                       {"default": 0,    "min":  0,      "max": 10000}),
+                    "lure_y_end_step_masked":             ("INT",                                       {"default": 30,   "min": -1,      "max": 10000}),
+                    "lure_y_end_step_unmasked":           ("INT",                                       {"default": 30,   "min": -1,      "max": 10000}),
+                    
+                    "lure_iter":           ("INT",                                       {"default": 0,   "min": 0,      "max": 10000}),
+                    "lure_sequence":           (["x -> y", "y -> x", "xy -> xy"],                                   {"default": "y -> x"}),
+                    
+                    "invert_mask":                 ("BOOLEAN",                                   {"default": False}),
+                    },
+                "optional": 
+                    {
+                    "guide_masked":                ("LATENT", ),
+                    "guide_unmasked":              ("LATENT", ),
+                    "mask":                        ("MASK", ),
+                    "weights_masked":              ("SIGMAS", ),
+                    "weights_unmasked":            ("SIGMAS", ),
+                    "syncs_masked":              ("SIGMAS", ),
+                    "syncs_unmasked":            ("SIGMAS", ),
+                    "lure_xs_masked":              ("SIGMAS", ),
+                    "lure_xs_unmasked":            ("SIGMAS", ),
+                    "lure_ys_masked":              ("SIGMAS", ),
+                    "lure_ys_unmasked":            ("SIGMAS", ),
+                    }  
+                }
+        
+    RETURN_TYPES = ("GUIDES",)
+    RETURN_NAMES = ("guides",)
+    FUNCTION     = "main"
+    CATEGORY     = "RES4LYF/sampler_extensions"
+    EXPERIMENTAL = True
+
+    def main(self,
+            weight_masked              = 0.0,
+            weight_unmasked            = 0.0,
+            weight_scheduler_masked    = "constant",
+            weight_scheduler_unmasked  = "constant",
+            weight_start_step_masked   = 0,
+            weight_start_step_unmasked = 0,
+            weight_end_step_masked     = 30,
+            weight_end_step_unmasked   = 30,
+
+            sync_masked                = 0.0,
+            sync_unmasked              = 0.0,
+            sync_scheduler_masked      = "constant",
+            sync_scheduler_unmasked    = "constant",
+            sync_start_step_masked     = 0,
+            sync_start_step_unmasked   = 0,
+            sync_end_step_masked       = 30,
+            sync_end_step_unmasked     = 30,
+
+            lure_x_masked                = 0.0,
+            lure_x_unmasked              = 0.0,
+            lure_x_scheduler_masked      = "constant",
+            lure_x_scheduler_unmasked    = "constant",
+            lure_x_start_step_masked     = 0,
+            lure_x_start_step_unmasked   = 0,
+            lure_x_end_step_masked       = 30,
+            lure_x_end_step_unmasked     = 30,
+            
+            lure_y_masked                = 0.0,
+            lure_y_unmasked              = 0.0,
+            lure_y_scheduler_masked      = "constant",
+            lure_y_scheduler_unmasked    = "constant",
+            lure_y_start_step_masked     = 0,
+            lure_y_start_step_unmasked   = 0,
+            lure_y_end_step_masked       = 30,
+            lure_y_end_step_unmasked     = 30,
+
+            guide_masked               = None,
+            guide_unmasked             = None,
+            
+            weights_masked             = None,
+            weights_unmasked           = None,
+            syncs_masked               = None,
+            syncs_unmasked             = None,
+            lure_xs_masked             = None,
+            lure_xs_unmasked           = None,
+            lure_ys_masked             = None,
+            lure_ys_unmasked           = None,
+            
+            lure_iter                  = 0,
+            lure_sequence              = "x -> y",
+            
+            mask                       = None,
+            unmask                     = None,
+            invert_mask                = False,
+            
+            guide_mode                 = "sync",
+            channelwise_mode           = False,
+            projection_mode            = False,
+            
+            cutoff_masked              = 1.0,
+            cutoff_unmasked            = 1.0,
+            ):
+
+        default_dtype = torch.float64
+        
+        if weight_end_step_masked   == -1:
+            weight_end_step_masked   = MAX_STEPS
+        if weight_end_step_unmasked == -1:
+            weight_end_step_unmasked = MAX_STEPS
+            
+        if sync_end_step_masked   == -1:
+            sync_end_step_masked   = MAX_STEPS
+        if sync_end_step_unmasked == -1:
+            sync_end_step_unmasked = MAX_STEPS
+        if lure_x_end_step_masked   == -1:
+            lure_x_end_step_masked   = MAX_STEPS
+        if lure_x_end_step_unmasked == -1:
+            lure_x_end_step_unmasked = MAX_STEPS
+        if lure_y_end_step_masked   == -1:
+            lure_y_end_step_masked   = MAX_STEPS
+        if lure_y_end_step_unmasked == -1:
+            lure_y_end_step_unmasked = MAX_STEPS
+            
+        
+        
+        if guide_masked is None:
+            weight_scheduler_masked = "constant"
+            weight_start_step_masked       = 0
+            weight_end_step_masked         = 30
+            weight_masked           = 0.0
+            weights_masked          = None
+            
+            sync_scheduler_masked = "constant"
+            sync_start_step_masked       = 0
+            sync_end_step_masked         = 30
+            sync_masked           = 0.0
+            syncs_masked          = None
+        
+            lure_x_scheduler_masked = "constant"
+            lure_x_start_step_masked       = 0
+            lure_x_end_step_masked         = 30
+            lure_x_masked           = 0.0
+            lure_xs_masked          = None
+        
+            lure_y_scheduler_masked = "constant"
+            lure_y_start_step_masked       = 0
+            lure_y_end_step_masked         = 30
+            lure_y_masked           = 0.0
+            lure_ys_masked          = None
+        
+        if guide_unmasked is None:
+            weight_scheduler_unmasked = "constant"
+            weight_start_step_unmasked       = 0
+            weight_end_step_unmasked         = 30
+            weight_unmasked           = 0.0
+            weights_unmasked          = None
+        
+            sync_scheduler_unmasked = "constant"
+            sync_start_step_unmasked       = 0
+            sync_end_step_unmasked         = 30
+            sync_unmasked           = 0.0
+            syncs_unmasked          = None
+        
+            lure_x_scheduler_unmasked = "constant"
+            lure_x_start_step_unmasked       = 0
+            lure_x_end_step_unmasked         = 30
+            lure_x_unmasked           = 0.0
+            lure_xs_unmasked          = None
+        
+            lure_y_scheduler_unmasked = "constant"
+            lure_y_start_step_unmasked       = 0
+            lure_y_end_step_unmasked         = 30
+            lure_y_unmasked           = 0.0
+            lure_ys_unmasked          = None
+        
+        
+        if guide_masked is not None:
+            raw_x = guide_masked.get('state_info', {}).get('raw_x', None)
+            if False: #raw_x is not None:
+                guide_masked   = {'samples': guide_masked['state_info']['raw_x'].clone()}
+            else:
+                guide_masked   = {'samples': guide_masked['samples'].clone()}
+        
+        if guide_unmasked is not None:
+            raw_x = guide_unmasked.get('state_info', {}).get('raw_x', None)
+            if False: #raw_x is not None:
+                guide_unmasked = {'samples': guide_unmasked['state_info']['raw_x'].clone()}
+            else:
+                guide_unmasked = {'samples': guide_unmasked['samples'].clone()}
+        
+        if invert_mask and mask is not None:
+            mask = 1-mask
+                
+        if projection_mode:
+            guide_mode = guide_mode + "_projection"
+        
+        if channelwise_mode:
+            guide_mode = guide_mode + "_cw"
+            
+        if guide_mode == "unsample_cw":
+            guide_mode = "unsample"
+        if guide_mode == "resample_cw":
+            guide_mode = "resample"
+        
+        if weight_scheduler_masked == "constant" and weights_masked == None: 
+            weights_masked = initialize_or_scale(None, weight_masked, weight_end_step_masked).to(default_dtype)
+            prepend      = torch.zeros(weight_start_step_masked, dtype=default_dtype, device=weights_masked.device)
+            weights_masked = torch.cat((prepend, weights_masked), dim=0)
+            weights_masked = F.pad(weights_masked, (0, MAX_STEPS), value=0.0)
+        
+        if weight_scheduler_unmasked == "constant" and weights_unmasked == None: 
+            weights_unmasked = initialize_or_scale(None, weight_unmasked, weight_end_step_unmasked).to(default_dtype)
+            prepend      = torch.zeros(weight_start_step_unmasked, dtype=default_dtype, device=weights_unmasked.device)
+            weights_unmasked = torch.cat((prepend, weights_unmasked), dim=0)
+            weights_unmasked = F.pad(weights_unmasked, (0, MAX_STEPS), value=0.0)
+        
+        # Values for the sync scheduler will be inverted in rk_guide_func_beta.py as it's easier to understand:
+        # makes it so that a sync weight of 1.0 = full guide strength (which previously was 0.0)
+        if sync_scheduler_masked == "constant" and syncs_masked == None: 
+            syncs_masked = initialize_or_scale(None, sync_masked, sync_end_step_masked).to(default_dtype)
+            prepend      = torch.zeros(sync_start_step_masked, dtype=default_dtype, device=syncs_masked.device)
+            syncs_masked = torch.cat((prepend, syncs_masked), dim=0)
+            syncs_masked = F.pad(syncs_masked, (0, MAX_STEPS), value=0.0)
+        
+        if sync_scheduler_unmasked == "constant" and syncs_unmasked == None: 
+            syncs_unmasked = initialize_or_scale(None, sync_unmasked, sync_end_step_unmasked).to(default_dtype)
+            prepend      = torch.zeros(sync_start_step_unmasked, dtype=default_dtype, device=syncs_unmasked.device)
+            syncs_unmasked = torch.cat((prepend, syncs_unmasked), dim=0)
+            syncs_unmasked = F.pad(syncs_unmasked, (0, MAX_STEPS), value=0.0)
+        
+        if lure_x_scheduler_masked == "constant" and lure_xs_masked == None: 
+            lure_xs_masked = initialize_or_scale(None, lure_x_masked, lure_x_end_step_masked).to(default_dtype)
+            prepend      = torch.zeros(lure_x_start_step_masked, dtype=default_dtype, device=lure_xs_masked.device)
+            lure_xs_masked = torch.cat((prepend, lure_xs_masked), dim=0)
+            lure_xs_masked = F.pad(lure_xs_masked, (0, MAX_STEPS), value=0.0)
+        
+        if lure_x_scheduler_unmasked == "constant" and lure_xs_unmasked == None: 
+            lure_xs_unmasked = initialize_or_scale(None, lure_x_unmasked, lure_x_end_step_unmasked).to(default_dtype)
+            prepend      = torch.zeros(lure_x_start_step_unmasked, dtype=default_dtype, device=lure_xs_unmasked.device)
+            lure_xs_unmasked = torch.cat((prepend, lure_xs_unmasked), dim=0)
+            lure_xs_unmasked = F.pad(lure_xs_unmasked, (0, MAX_STEPS), value=0.0)
+        
+        if lure_y_scheduler_masked == "constant" and lure_ys_masked == None: 
+            lure_ys_masked = initialize_or_scale(None, lure_y_masked, lure_y_end_step_masked).to(default_dtype)
+            prepend      = torch.zeros(lure_y_start_step_masked, dtype=default_dtype, device=lure_ys_masked.device)
+            lure_ys_masked = torch.cat((prepend, lure_ys_masked), dim=0)
+            lure_ys_masked = F.pad(lure_ys_masked, (0, MAX_STEPS), value=0.0)
+        
+        if lure_y_scheduler_unmasked == "constant" and lure_ys_unmasked == None: 
+            lure_ys_unmasked = initialize_or_scale(None, lure_y_unmasked, lure_y_end_step_unmasked).to(default_dtype)
+            prepend      = torch.zeros(lure_y_start_step_unmasked, dtype=default_dtype, device=lure_ys_unmasked.device)
+            lure_ys_unmasked = torch.cat((prepend, lure_ys_unmasked), dim=0)
+            lure_ys_unmasked = F.pad(lure_ys_unmasked, (0, MAX_STEPS), value=0.0)
+        
+        
+        guides = {
+            "guide_mode"                : guide_mode,
+
+            "guide_masked"              : guide_masked,
+            "guide_unmasked"            : guide_unmasked,
+            "mask"                      : mask,
+            "unmask"                    : unmask,
+
+            "weight_masked"             : weight_masked,
+            "weight_unmasked"           : weight_unmasked,
+            "weight_scheduler_masked"   : weight_scheduler_masked,
+            "weight_scheduler_unmasked" : weight_scheduler_unmasked,
+            "start_step_masked"         : weight_start_step_masked,
+            "start_step_unmasked"       : weight_start_step_unmasked,
+            "end_step_masked"           : weight_end_step_masked,
+            "end_step_unmasked"         : weight_end_step_unmasked,
+            
+            "weights_masked"            : weights_masked,
+            "weights_unmasked"          : weights_unmasked,
             
             "weight_masked_sync"             : sync_masked,
             "weight_unmasked_sync"           : sync_unmasked,
@@ -1679,6 +2006,35 @@ class ClownGuides_Sync:
             "weights_masked_sync"            : syncs_masked,
             "weights_unmasked_sync"          : syncs_unmasked,
             
+            "weight_masked_lure_x"             : lure_x_masked,
+            "weight_unmasked_lure_x"           : lure_x_unmasked,
+            "weight_scheduler_masked_lure_x"   : lure_x_scheduler_masked,
+            "weight_scheduler_unmasked_lure_x" : lure_x_scheduler_unmasked,
+            "start_step_masked_lure_x"         : lure_x_start_step_masked,
+            "start_step_unmasked_lure_x"       : lure_x_start_step_unmasked,
+            "end_step_masked_lure_x"           : lure_x_end_step_masked,
+            "end_step_unmasked_lure_x"         : lure_x_end_step_unmasked,
+            
+            "weights_masked_lure_x"            : lure_xs_masked,
+            "weights_unmasked_lure_x"          : lure_xs_unmasked,
+            
+            
+            "weight_masked_lure_y"             : lure_y_masked,
+            "weight_unmasked_lure_y"           : lure_y_unmasked,
+            "weight_scheduler_masked_lure_y"   : lure_y_scheduler_masked,
+            "weight_scheduler_unmasked_lure_y" : lure_y_scheduler_unmasked,
+            "start_step_masked_lure_y"         : lure_y_start_step_masked,
+            "start_step_unmasked_lure_y"       : lure_y_start_step_unmasked,
+            "end_step_masked_lure_y"           : lure_y_end_step_masked,
+            "end_step_unmasked_lure_y"         : lure_y_end_step_unmasked,
+            
+            "weights_masked_lure_y"            : lure_ys_masked,
+            "weights_unmasked_lure_y"          : lure_ys_unmasked,
+            
+            "sync_lure_iter"                 : lure_iter,
+            "sync_lure_sequence"             : lure_sequence,
+            
+            
             
             "cutoff_masked"             : cutoff_masked,
             "cutoff_unmasked"           : cutoff_unmasked
@@ -1686,6 +2042,8 @@ class ClownGuides_Sync:
         
         
         return (guides, )
+
+
 
 
 

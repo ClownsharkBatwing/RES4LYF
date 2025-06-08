@@ -125,6 +125,11 @@ class LatentGuide:
         latent_guide_weight_inv       = 0.0
         latent_guide_weight_sync      = 0.0
         latent_guide_weight_sync_inv  = 0.0
+        latent_guide_weight_lure_x      = 0.0
+        latent_guide_weight_lure_x_inv  = 0.0
+        latent_guide_weight_lure_y      = 0.0
+        latent_guide_weight_lure_y_inv  = 0.0
+        
         latent_guide_weight_mean      = 0.0
         latent_guide_weight_adain     = 0.0
         latent_guide_weight_attninj   = 0.0
@@ -135,6 +140,10 @@ class LatentGuide:
         latent_guide_weights_inv       = torch.zeros_like(self.sigmas, dtype=self.dtype, device=self.device)
         latent_guide_weights_sync      = torch.zeros_like(self.sigmas, dtype=self.dtype, device=self.device)
         latent_guide_weights_sync_inv  = torch.zeros_like(self.sigmas, dtype=self.dtype, device=self.device)
+        latent_guide_weights_lure_x    = torch.zeros_like(self.sigmas, dtype=self.dtype, device=self.device)
+        latent_guide_weights_lure_x_inv= torch.zeros_like(self.sigmas, dtype=self.dtype, device=self.device)
+        latent_guide_weights_lure_y    = torch.zeros_like(self.sigmas, dtype=self.dtype, device=self.device)
+        latent_guide_weights_lure_y_inv= torch.zeros_like(self.sigmas, dtype=self.dtype, device=self.device)
         latent_guide_weights_mean      = torch.zeros_like(self.sigmas, dtype=self.dtype, device=self.device)
         latent_guide_weights_adain     = torch.zeros_like(self.sigmas, dtype=self.dtype, device=self.device)
         latent_guide_weights_attninj   = torch.zeros_like(self.sigmas, dtype=self.dtype, device=self.device)
@@ -163,6 +172,10 @@ class LatentGuide:
             latent_guide_weight_inv        = guides.get("weight_unmasked",  0.)
             latent_guide_weight_sync       = guides.get("weight_masked_sync", 0.)
             latent_guide_weight_sync_inv   = guides.get("weight_unmasked_sync", 0.)
+            latent_guide_weight_lure_x       = guides.get("weight_masked_lure_x", 0.)
+            latent_guide_weight_lure_x_inv   = guides.get("weight_unmasked_lure_x", 0.)
+            latent_guide_weight_lure_y       = guides.get("weight_masked_lure_y", 0.)
+            latent_guide_weight_lure_y_inv   = guides.get("weight_unmasked_lure_y", 0.)
             latent_guide_weight_mean       = guides.get("weight_mean",      0.)
             latent_guide_weight_adain      = guides.get("weight_adain",     0.)
             latent_guide_weight_attninj    = guides.get("weight_attninj",   0.)
@@ -175,6 +188,10 @@ class LatentGuide:
             latent_guide_weights_inv       = guides.get("weights_unmasked")
             latent_guide_weights_sync      = guides.get("weights_masked_sync")
             latent_guide_weights_sync_inv  = guides.get("weights_unmasked_sync")
+            latent_guide_weights_lure_x      = guides.get("weights_masked_lure_x")
+            latent_guide_weights_lure_x_inv  = guides.get("weights_unmasked_lure_x")
+            latent_guide_weights_lure_y      = guides.get("weights_masked_lure_y")
+            latent_guide_weights_lure_y_inv  = guides.get("weights_unmasked_lure_y")
             latent_guide_weights_mean      = guides.get("weights_mean")
             latent_guide_weights_adain     = guides.get("weights_adain")
             latent_guide_weights_attninj   = guides.get("weights_attninj")
@@ -203,6 +220,10 @@ class LatentGuide:
             scheduler_inv_                 = guides.get("weight_scheduler_unmasked")
             scheduler_sync_                     = guides.get("weight_scheduler_masked_sync")
             scheduler_sync_inv_                 = guides.get("weight_scheduler_unmasked_sync")
+            scheduler_lure_x_                     = guides.get("weight_scheduler_masked_lure_x")
+            scheduler_lure_x_inv_                 = guides.get("weight_scheduler_unmasked_lure_x")
+            scheduler_lure_y_                     = guides.get("weight_scheduler_masked_lure_y")
+            scheduler_lure_y_inv_                 = guides.get("weight_scheduler_unmasked_lure_y")
             scheduler_mean_                = guides.get("weight_scheduler_mean")
             scheduler_adain_               = guides.get("weight_scheduler_adain")
             scheduler_attninj_             = guides.get("weight_scheduler_attninj")
@@ -213,6 +234,10 @@ class LatentGuide:
             start_steps_inv_               = guides.get("start_step_unmasked", 0)
             start_steps_sync_                   = guides.get("start_step_masked_sync",   0)
             start_steps_sync_inv_               = guides.get("start_step_unmasked_sync", 0)
+            start_steps_lure_x_                   = guides.get("start_step_masked_lure_x",   0)
+            start_steps_lure_x_inv_               = guides.get("start_step_unmasked_lure_x", 0)
+            start_steps_lure_y_                   = guides.get("start_step_masked_lure_y",   0)
+            start_steps_lure_y_inv_               = guides.get("start_step_unmasked_lure_y", 0)
             start_steps_mean_              = guides.get("start_step_mean",     0)
             start_steps_adain_             = guides.get("start_step_adain",    0)
             start_steps_attninj_           = guides.get("start_step_attninj",  0)
@@ -223,6 +248,10 @@ class LatentGuide:
             steps_inv_                     = guides.get("end_step_unmasked",   1)
             steps_sync_                         = guides.get("end_step_masked_sync",     1)
             steps_sync_inv_                     = guides.get("end_step_unmasked_sync",   1)
+            steps_lure_x_                         = guides.get("end_step_masked_lure_x",     1)
+            steps_lure_x_inv_                     = guides.get("end_step_unmasked_lure_x",   1)
+            steps_lure_y_                         = guides.get("end_step_masked_lure_y",     1)
+            steps_lure_y_inv_                     = guides.get("end_step_unmasked_lure_y",   1)
             
             steps_mean_                    = guides.get("end_step_mean",       1)
             steps_adain_                   = guides.get("end_step_adain",      1)
@@ -237,6 +266,9 @@ class LatentGuide:
             self.guide_attninj_cossim_cutoff_ = guides.get("cutoff_attninj",      1.)
             self.guide_style_pos_cossim_cutoff_ = guides.get("cutoff_style_pos",  1.)
             self.guide_style_neg_cossim_cutoff_ = guides.get("cutoff_style_neg",  1.)
+            
+            self.sync_lure_iter                     = guides.get("sync_lure_iter",  0)
+            self.sync_lure_sequence                 = guides.get("sync_lure_sequence")
 
             #self.SYNC_SEPARATE = False
             #if scheduler_sync_ is not None:
@@ -257,6 +289,42 @@ class LatentGuide:
                 
                 steps_sync_                   = steps_
                 steps_sync_inv_               = steps_inv_
+            
+            self.SYNC_LURE_X = True
+            if scheduler_lure_x_ is None and scheduler_ is not None:
+                self.SYNC_LURE_X = False
+
+                latent_guide_weight_lure_x      = latent_guide_weight
+                latent_guide_weight_lure_x_inv  = latent_guide_weight_inv
+                latent_guide_weights_lure_x     = latent_guide_weights
+                latent_guide_weights_lure_x_inv = latent_guide_weights_inv
+                
+                scheduler_lure_x_               = scheduler_
+                scheduler_lure_x_inv_           = scheduler_inv_
+                
+                start_steps_lure_x_             = start_steps_
+                start_steps_lure_x_inv_         = start_steps_inv_
+                
+                steps_lure_x_                   = steps_
+                steps_lure_x_inv_               = steps_inv_
+                
+            self.SYNC_LURE_Y = True
+            if scheduler_lure_y_ is None and scheduler_ is not None:
+                self.SYNC_LURE_Y = False
+
+                latent_guide_weight_lure_y      = latent_guide_weight
+                latent_guide_weight_lure_y_inv  = latent_guide_weight_inv
+                latent_guide_weights_lure_y     = latent_guide_weights
+                latent_guide_weights_lure_y_inv = latent_guide_weights_inv
+                
+                scheduler_lure_y_               = scheduler_
+                scheduler_lure_y_inv_           = scheduler_inv_
+                
+                start_steps_lure_y_             = start_steps_
+                start_steps_lure_y_inv_         = start_steps_inv_
+                
+                steps_lure_y_                   = steps_
+                steps_lure_y_inv_               = steps_inv_
 
             if self.mask     is not None and self.mask.shape    [0] > 1 and self.VIDEO is False:
                 self.mask     = self.mask    [batch_num].unsqueeze(0)
@@ -291,6 +359,31 @@ class LatentGuide:
                 latent_guide_weights_sync_inv = get_sigmas(self.model, scheduler_sync_inv_, total_steps, 1.0, shift=guide_sigma_shift).to(dtype=self.dtype, device=self.device) / self.sigma_max
                 prepend                  = torch.zeros(start_steps_sync_inv_,                               dtype=self.dtype, device=self.device) 
                 latent_guide_weights_sync_inv = torch.cat((prepend, latent_guide_weights_sync_inv.to(self.device)), dim=0)
+                
+            if latent_guide_weights_lure_x is None and scheduler_lure_x_ is not None:# and self.guide_mode != "none":
+                total_steps          = steps_lure_x_ - start_steps_lure_x_
+                latent_guide_weights_lure_x = get_sigmas(self.model, scheduler_lure_x_, total_steps, 1.0, shift=guide_sigma_shift).to(dtype=self.dtype, device=self.device) / self.sigma_max
+                prepend              = torch.zeros(start_steps_lure_x_,                               dtype=self.dtype, device=self.device)
+                latent_guide_weights_lure_x = torch.cat((prepend, latent_guide_weights_lure_x.to(self.device)), dim=0)
+                
+            if latent_guide_weights_lure_x_inv is None and scheduler_lure_x_inv_ is not None:# and self.guide_mode != "none":
+                total_steps              = steps_lure_x_inv_ - start_steps_lure_x_inv_
+                latent_guide_weights_lure_x_inv = get_sigmas(self.model, scheduler_lure_x_inv_, total_steps, 1.0, shift=guide_sigma_shift).to(dtype=self.dtype, device=self.device) / self.sigma_max
+                prepend                  = torch.zeros(start_steps_lure_x_inv_,                               dtype=self.dtype, device=self.device) 
+                latent_guide_weights_lure_x_inv = torch.cat((prepend, latent_guide_weights_lure_x_inv.to(self.device)), dim=0)
+                
+            if latent_guide_weights_lure_y is None and scheduler_lure_y_ is not None:# and self.guide_mode != "none":
+                total_steps          = steps_lure_y_ - start_steps_lure_y_
+                latent_guide_weights_lure_y = get_sigmas(self.model, scheduler_lure_y_, total_steps, 1.0, shift=guide_sigma_shift).to(dtype=self.dtype, device=self.device) / self.sigma_max
+                prepend              = torch.zeros(start_steps_lure_y_,                               dtype=self.dtype, device=self.device)
+                latent_guide_weights_lure_y = torch.cat((prepend, latent_guide_weights_lure_y.to(self.device)), dim=0)
+                
+            if latent_guide_weights_lure_y_inv is None and scheduler_lure_y_inv_ is not None:# and self.guide_mode != "none":
+                total_steps              = steps_lure_y_inv_ - start_steps_lure_y_inv_
+                latent_guide_weights_lure_y_inv = get_sigmas(self.model, scheduler_lure_y_inv_, total_steps, 1.0, shift=guide_sigma_shift).to(dtype=self.dtype, device=self.device) / self.sigma_max
+                prepend                  = torch.zeros(start_steps_lure_y_inv_,                               dtype=self.dtype, device=self.device) 
+                latent_guide_weights_lure_y_inv = torch.cat((prepend, latent_guide_weights_lure_y_inv.to(self.device)), dim=0)
+                
                 
             latent_guide_weights_sync     = 1 - latent_guide_weights_sync     if latent_guide_weights_sync     is not None else latent_guide_weights
             latent_guide_weights_sync_inv = 1 - latent_guide_weights_sync_inv if latent_guide_weights_sync_inv is not None else latent_guide_weights_inv
@@ -352,6 +445,10 @@ class LatentGuide:
             latent_guide_weights_inv  [steps_inv_  :] = 0
             latent_guide_weights_sync      [steps_sync_      :] = 1
             latent_guide_weights_sync_inv  [steps_sync_inv_  :] = 1
+            latent_guide_weights_lure_x      [steps_lure_x_      :] = 0
+            latent_guide_weights_lure_x_inv  [steps_lure_x_inv_  :] = 0
+            latent_guide_weights_lure_y      [steps_lure_y_      :] = 0
+            latent_guide_weights_lure_y_inv  [steps_lure_y_inv_  :] = 0
             latent_guide_weights_mean [steps_mean_ :] = 0
             latent_guide_weights_adain[steps_adain_:] = 0
             latent_guide_weights_attninj[steps_attninj_:] = 0
@@ -362,6 +459,10 @@ class LatentGuide:
         self.lgw_inv   = F.pad(latent_guide_weights_inv,   (0, self.max_steps), value=0.0)
         self.lgw_sync       = F.pad(latent_guide_weights_sync,       (0, self.max_steps), value=1.0)
         self.lgw_sync_inv   = F.pad(latent_guide_weights_sync_inv,   (0, self.max_steps), value=1.0)
+        self.lgw_lure_x       = F.pad(latent_guide_weights_lure_x,       (0, self.max_steps), value=0.0)
+        self.lgw_lure_x_inv   = F.pad(latent_guide_weights_lure_x_inv,   (0, self.max_steps), value=0.0)
+        self.lgw_lure_y       = F.pad(latent_guide_weights_lure_y,       (0, self.max_steps), value=0.0)
+        self.lgw_lure_y_inv   = F.pad(latent_guide_weights_lure_y_inv,   (0, self.max_steps), value=0.0)
         self.lgw_mean  = F.pad(latent_guide_weights_mean,  (0, self.max_steps), value=0.0)
         self.lgw_adain = F.pad(latent_guide_weights_adain, (0, self.max_steps), value=0.0)
         self.lgw_attninj = F.pad(latent_guide_weights_attninj, (0, self.max_steps), value=0.0)
@@ -603,6 +704,12 @@ class LatentGuide:
         if lgw_type == "sync":
             lgw_     = self.lgw_sync    [step]
             lgw_inv_ = self.lgw_sync_inv[step]
+        elif lgw_type == "lure_x":
+            lgw_     = self.lgw_lure_x    [step]
+            lgw_inv_ = self.lgw_lure_x_inv[step]
+        elif lgw_type == "lure_y":
+            lgw_     = self.lgw_lure_y    [step]
+            lgw_inv_ = self.lgw_lure_y_inv[step]
         else:
             lgw_     = self.lgw    [step]
             lgw_inv_ = self.lgw_inv[step]

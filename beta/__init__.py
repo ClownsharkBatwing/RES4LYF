@@ -18,6 +18,7 @@ def add_beta(NODE_CLASS_MAPPINGS, NODE_DISPLAY_NAME_MAPPINGS, extra_samplers):
         "ClownGuidesAB_Beta"              : samplers_extensions.ClownGuidesAB_Beta,
         
         "ClownGuides_Sync"                : samplers_extensions.ClownGuides_Sync,
+        "ClownGuides_Sync_Advanced"       : samplers_extensions.ClownGuides_Sync_Advanced,
 
         
         "SharkOptions_GuiderInput"        : samplers_extensions.SharkOptions_GuiderInput,
@@ -107,6 +108,8 @@ def add_beta(NODE_CLASS_MAPPINGS, NODE_DISPLAY_NAME_MAPPINGS, extra_samplers):
             "ClownGuide_Beta"                       : "ClownGuide",
             "ClownGuides_Beta"                      : "ClownGuides",
             "ClownGuides_Sync"                      : "ClownGuides Sync",
+            "ClownGuides_Sync_Advanced"             : "ClownGuides Sync_Advanced",
+
 
             "ClownGuidesAB_Beta"                    : "ClownGuidesAB",
             "ClownSamplerSelector_Beta"             : "ClownSamplerSelector",

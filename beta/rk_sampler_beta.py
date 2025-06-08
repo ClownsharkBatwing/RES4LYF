@@ -1019,12 +1019,14 @@ def sample_rk_beta(
                             elif SYNC_GUIDE_ACTIVE:
                                 lgw_mask_,      lgw_mask_inv_      = LG.get_masks_for_step(step)
                                 lgw_mask_sync_, lgw_mask_sync_inv_ = LG.get_masks_for_step(step, lgw_type="sync")
+                                lgw_mask_lure_x_, lgw_mask_lure_x_inv_ = LG.get_masks_for_step(step, lgw_type="lure_x")
+                                lgw_mask_lure_y_, lgw_mask_lure_y_inv_ = LG.get_masks_for_step(step, lgw_type="lure_y")
                                 
                                 weight_mask = lgw_mask_+lgw_mask_inv_
-                                if LG.SYNC_SEPARATE:
-                                    sync_mask = lgw_mask_sync_+lgw_mask_sync_inv_
-                                else:
-                                    sync_mask = 1.
+                                lure_x_mask = lgw_mask_lure_x_+lgw_mask_lure_x_inv_
+                                lure_y_mask = lgw_mask_lure_y_+lgw_mask_lure_y_inv_
+                                
+                                sync_mask = lgw_mask_sync_+lgw_mask_sync_inv_
                                 
                                 if eps_x_ is None:
                                     eps_x_  = torch.zeros(RK.rows+2, *x.shape, dtype=default_dtype, device=work_device)
@@ -1083,39 +1085,60 @@ def sample_rk_beta(
                                     
                                 eps_x, data_x = RK(x_tmp, s_tmp, x_0, sigma, transformer_options={'latent_type': 'xt'})
                                 
-                                for sync_lure_iter in range(EO("sync_lure_iter", 1)):
-                                    if EO("sync_lure_y") and weight_mask.abs().sum() > 0:
-                                        lure_source_name = EO("sync_lure_y", "data_x")
-                                        
-                                        if   lure_source_name == "y0_bongflow":
-                                            lure_source = y0_bongflow
-                                        elif lure_source_name == "data_x":
-                                            lure_source = data_x
-                                        
-                                        sync_lure_weight_y = EO("sync_lure_weight_y", 1.0)
-                                        
-                                        y_tmp = yt_[row].clone()
-                                        if VE_MODEL:
-                                            y_tmp = y_tmp + sync_lure_weight_y * weight_mask * (lure_source - data_y) 
-                                        else:
-                                            y_tmp = y_tmp + sync_lure_weight_y * weight_mask * (NS.sigma_max - s_tmp) * (lure_source - data_y) 
-                                        eps_y, data_y = RK(y_tmp, s_tmp, yt_0, sigma, transformer_options={'latent_type': 'yt'})
-                                    
-                                    if EO("sync_lure_x") and weight_mask.abs().sum() > 0:
-                                        lure_source_name = EO("sync_lure_x", "data_y")
-                                        
-                                        if   lure_source_name == "y0_bongflow":
-                                            lure_source = y0_bongflow
-                                        elif lure_source_name == "data_y":
-                                            lure_source = data_y
+                                for sync_lure_iter in range(LG.sync_lure_iter):
+                                    if LG.sync_lure_sequence == "x -> y":
+
+                                        if lure_x_mask.abs().sum() > 0:
+                                            if VE_MODEL:
+                                                x_tmp = x_tmp + lure_x_mask * (data_y - data_x) 
+                                            else:
+                                                x_tmp = x_tmp + lure_x_mask * (NS.sigma_max - s_tmp) * (data_y - data_x) 
+                                            eps_x, data_x = RK(x_tmp, s_tmp, x_0, sigma, transformer_options={'latent_type': 'xt'})
                                             
-                                        sync_lure_weight_x = EO("sync_lure_weight_x", 1.0)
+                                        if lure_y_mask.abs().sum() > 0:                      
+                                            y_tmp = yt_[row].clone()
+                                            if VE_MODEL:
+                                                y_tmp = y_tmp + lure_y_mask * (data_x - data_y) 
+                                            else:
+                                                y_tmp = y_tmp + lure_y_mask * (NS.sigma_max - s_tmp) * (data_x - data_y) 
+                                            eps_y, data_y = RK(y_tmp, s_tmp, yt_0, sigma, transformer_options={'latent_type': 'yt'})
                                         
-                                        if VE_MODEL:
-                                            x_tmp = x_tmp + sync_lure_weight_x * weight_mask * (lure_source - data_x) 
-                                        else:
-                                            x_tmp = x_tmp + sync_lure_weight_x * weight_mask * (NS.sigma_max - s_tmp) * (lure_source - data_x) 
-                                        eps_x, data_x = RK(x_tmp, s_tmp, x_0, sigma, transformer_options={'latent_type': 'xt'})
+                                    elif LG.sync_lure_sequence == "y -> x":
+                                            
+                                        if lure_y_mask.abs().sum() > 0:                      
+                                            y_tmp = yt_[row].clone()
+                                            if VE_MODEL:
+                                                y_tmp = y_tmp + lure_y_mask * (data_x - data_y) 
+                                            else:
+                                                y_tmp = y_tmp + lure_y_mask * (NS.sigma_max - s_tmp) * (data_x - data_y) 
+                                            eps_y, data_y = RK(y_tmp, s_tmp, yt_0, sigma, transformer_options={'latent_type': 'yt'})
+                                        
+                                        if lure_x_mask.abs().sum() > 0:
+                                            if VE_MODEL:
+                                                x_tmp = x_tmp + lure_x_mask * (data_y - data_x) 
+                                            else:
+                                                x_tmp = x_tmp + lure_x_mask * (NS.sigma_max - s_tmp) * (data_y - data_x) 
+                                            eps_x, data_x = RK(x_tmp, s_tmp, x_0, sigma, transformer_options={'latent_type': 'xt'})
+
+                                    elif LG.sync_lure_sequence == "xy -> xy":
+                                        data_x_orig, data_y_orig = data_x.clone(), data_y.clone()
+                                        
+                                        if lure_x_mask.abs().sum() > 0:
+                                            if VE_MODEL:
+                                                x_tmp = x_tmp + lure_x_mask * (data_y_orig - data_x_orig) 
+                                            else:
+                                                x_tmp = x_tmp + lure_x_mask * (NS.sigma_max - s_tmp) * (data_y_orig - data_x_orig) 
+                                            eps_x, data_x = RK(x_tmp, s_tmp, x_0, sigma, transformer_options={'latent_type': 'xt'})
+                                        
+                                        if lure_y_mask.abs().sum() > 0:                      
+                                            y_tmp = yt_[row].clone()
+                                            if VE_MODEL:
+                                                y_tmp = y_tmp + lure_y_mask * (data_x_orig - data_y_orig) 
+                                            else:
+                                                y_tmp = y_tmp + lure_y_mask * (NS.sigma_max - s_tmp) * (data_x_orig - data_y_orig) 
+                                            eps_y, data_y = RK(y_tmp, s_tmp, yt_0, sigma, transformer_options={'latent_type': 'yt'})
+                                        
+                                        
                                 
                                 if EO("sync_proj_y"):
                                     d_collinear_d_lerp = get_collinear(eps_x, eps_y)  
