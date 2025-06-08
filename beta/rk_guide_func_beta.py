@@ -299,8 +299,8 @@ class LatentGuide:
                 prepend                  = torch.zeros(start_steps_sync_inv_,                               dtype=self.dtype, device=self.device) 
                 latent_guide_weights_sync_inv = torch.cat((prepend, latent_guide_weights_sync_inv.to(self.device)), dim=0)
                 
-            latent_guide_weights_sync     = 1 - latent_guide_weights_sync
-            latent_guide_weights_sync_inv = 1 - latent_guide_weights_sync_inv    
+            latent_guide_weights_sync     = 1 - latent_guide_weights_sync     if latent_guide_weights_sync     is not None else latent_guide_weights
+            latent_guide_weights_sync_inv = 1 - latent_guide_weights_sync_inv if latent_guide_weights_sync_inv is not None else latent_guide_weights_inv
             latent_guide_weight_sync      = 1 - latent_guide_weight_sync
             latent_guide_weight_sync_inv  = 1 - latent_guide_weight_sync_inv# these are more intuitive to use if these are reversed... so that sync weight = 1.0 means "maximum guide strength"
             

@@ -1075,8 +1075,32 @@ def sample_rk_beta(
                                         eps_y = (yt_0 - data_y) / sigma
                                 else:
                                     eps_y, data_y = RK(yt_[row], s_tmp, yt_0,  sigma, transformer_options={'latent_type': 'yt'})
+                                    
+                                    
+
+                                    
 
                                 eps_x, data_x = RK(x_tmp, s_tmp, x_0, sigma, transformer_options={'latent_type': 'xt'})
+                                
+                                if EO("sync_proj_y"):
+                                    d_collinear_d_lerp = get_collinear(eps_x, eps_y)  
+                                    d_lerp_ortho_d     = get_orthogonal(eps_y, eps_x)  
+                                    eps_y             = d_collinear_d_lerp + d_lerp_ortho_d
+                                    
+                                if EO("sync_proj_y2"):
+                                    d_collinear_d_lerp = get_collinear(eps_y, eps_x)  
+                                    d_lerp_ortho_d     = get_orthogonal(eps_x, eps_y)  
+                                    eps_y             = d_collinear_d_lerp + d_lerp_ortho_d
+                                    
+                                if EO("sync_proj_x"):
+                                    d_collinear_d_lerp = get_collinear(eps_y, eps_x)  
+                                    d_lerp_ortho_d     = get_orthogonal(eps_x, eps_y)  
+                                    eps_x             = d_collinear_d_lerp + d_lerp_ortho_d
+
+                                if EO("sync_proj_x2"):
+                                    d_collinear_d_lerp = get_collinear(eps_x, eps_y)  
+                                    d_lerp_ortho_d     = get_orthogonal(eps_y, eps_x)  
+                                    eps_x             = d_collinear_d_lerp + d_lerp_ortho_d
 
                                 weight_mask = lgw_mask_+lgw_mask_inv_
                                 if LG.SYNC_SEPARATE:
