@@ -1062,8 +1062,8 @@ def sample_rk_beta(
                                             yt   = (1-s_tmp) * y0_bongflow  + s_tmp * noise_bongflow
 
                                         yt_[row] = yt
-
-                                if (LG.lgw[step].item() in {1,0} and LG.lgw_inv[step].item() in {1,0} and LG.lgw[step] == 1-LG.lgw_sync[step] and LG.lgw_inv[step] == 1-LG.lgw_sync_inv[step]) or EO("sync_speed_mode"):
+                                #if (LG.lgw[step].item() in {1,0} and LG.lgw_inv[step].item() in {1,0} and LG.lgw[step] == 1-LG.lgw_sync[step] and LG.lgw_inv[step] == 1-LG.lgw_sync_inv[step]) or EO("sync_speed_mode"):
+                                if ((LG.lgw[step].item() == 0 and LG.lgw_inv[step].item() == 0 and LG.lgw_sync[step] == 1 and LG.lgw_sync_inv[step] == 1) or EO("sync_speed_mode")) and not EO("disable_sync_speed_mode"):
                                     data_y = y0_bongflow.clone()
                                     #eps_x2y = RK.get_guide_epsilon(x_0,   x_[row], data_y, sigma, NS.s_[row], NS.sigma_down, None)
                                     #eps_y   = RK.get_guide_epsilon(yt_0, yt_[row], data_y, sigma, NS.s_[row], NS.sigma_down, None)
