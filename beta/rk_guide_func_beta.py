@@ -238,9 +238,9 @@ class LatentGuide:
             self.guide_style_pos_cossim_cutoff_ = guides.get("cutoff_style_pos",  1.)
             self.guide_style_neg_cossim_cutoff_ = guides.get("cutoff_style_neg",  1.)
 
-            self.SYNC_SEPARATE = False
-            if scheduler_sync_ is not None:
-                self.SYNC_SEPARATE = True
+            #self.SYNC_SEPARATE = False
+            #if scheduler_sync_ is not None:
+            #    self.SYNC_SEPARATE = True
             self.SYNC_SEPARATE = True
             if scheduler_sync_ is None and scheduler_ is not None:
 
@@ -257,11 +257,6 @@ class LatentGuide:
                 
                 steps_sync_                   = steps_
                 steps_sync_inv_               = steps_inv_
-                
-                
-                
-
-
 
             if self.mask     is not None and self.mask.shape    [0] > 1 and self.VIDEO is False:
                 self.mask     = self.mask    [batch_num].unsqueeze(0)
@@ -284,9 +279,7 @@ class LatentGuide:
                 latent_guide_weights_inv = get_sigmas(self.model, scheduler_inv_, total_steps, 1.0, shift=guide_sigma_shift).to(dtype=self.dtype, device=self.device) / self.sigma_max
                 prepend                  = torch.zeros(start_steps_inv_,                               dtype=self.dtype, device=self.device) 
                 latent_guide_weights_inv = torch.cat((prepend, latent_guide_weights_inv.to(self.device)), dim=0)
-                
-                
-                
+
             if latent_guide_weights_sync is None and scheduler_sync_ is not None:# and self.guide_mode != "none":
                 total_steps          = steps_sync_ - start_steps_sync_
                 latent_guide_weights_sync = get_sigmas(self.model, scheduler_sync_, total_steps, 1.0, shift=guide_sigma_shift).to(dtype=self.dtype, device=self.device) / self.sigma_max
@@ -364,7 +357,6 @@ class LatentGuide:
             latent_guide_weights_attninj[steps_attninj_:] = 0
             latent_guide_weights_style_pos[steps_style_pos_:] = 0
             latent_guide_weights_style_neg[steps_style_neg_:] = 0
-
         
         self.lgw       = F.pad(latent_guide_weights,       (0, self.max_steps), value=0.0)
         self.lgw_inv   = F.pad(latent_guide_weights_inv,   (0, self.max_steps), value=0.0)
@@ -375,7 +367,6 @@ class LatentGuide:
         self.lgw_attninj = F.pad(latent_guide_weights_attninj, (0, self.max_steps), value=0.0)
         self.lgw_style_pos = F.pad(latent_guide_weights_style_pos, (0, self.max_steps), value=0.0)
         self.lgw_style_neg = F.pad(latent_guide_weights_style_neg, (0, self.max_steps), value=0.0)
-
         
         mask, self.LGW_MASK_RESCALE_MIN = prepare_mask(x, self.mask, self.LGW_MASK_RESCALE_MIN)
         self.mask = mask.to(dtype=self.dtype, device=self.device)
