@@ -597,8 +597,9 @@ class RK_Method_Beta:
                     noise_sync: Optional[Tensor] = None,
                     eps_x_    : Optional[Tensor] = None,
                     eps_y_    : Optional[Tensor] = None,
+                    #eps_x2y_  : Optional[Tensor] = None,
                     data_x_   : Optional[Tensor] = None,
-                    #data_y_   : Optional[Tensor] = None,
+                    data_y_   : Optional[Tensor] = None,
                     #yt_       : Optional[Tensor] = None,
                     #yt_0      : Optional[Tensor] = None,
                     LG = None,
@@ -610,17 +611,15 @@ class RK_Method_Beta:
             norm_dim = (-4,-2,-1)
         
         if BONGMATH_Y:
-            lgw_mask_, lgw_mask_inv_ = LG.get_masks_for_step(step)
+            lgw_mask_,      lgw_mask_inv_      = LG.get_masks_for_step(step)
             lgw_mask_sync_, lgw_mask_sync_inv_ = LG.get_masks_for_step(step, lgw_type="sync")
 
+            weight_mask = lgw_mask_+lgw_mask_inv_
             if LG.SYNC_SEPARATE:
                 sync_mask = lgw_mask_sync_+lgw_mask_sync_inv_
-                weight_mask     = (1-(lgw_mask_+lgw_mask_inv_)) * torch.ones_like(lgw_mask_)   +   (lgw_mask_+lgw_mask_inv_) * (lgw_mask_+lgw_mask_inv_)
-                weight_mask_inv = (1-(lgw_mask_+lgw_mask_inv_)) * torch.ones_like(lgw_mask_)   +   (lgw_mask_+lgw_mask_inv_) * (1-(lgw_mask_+lgw_mask_inv_))
             else:
                 sync_mask = 1.
-                weight_mask = lgw_mask_+lgw_mask_inv_
-                weight_mask_inv = 1-(lgw_mask_+lgw_mask_inv_)
+            
         
         if self.EO("bong_start_step", 0) > step or step > self.EO("bong_stop_step", 10000) or (self.unsample_bongmath == False and s_[-1] > s_[0]):
             return x_0, x_, eps_
@@ -647,13 +646,6 @@ class RK_Method_Beta:
                 eps_tmp_ = eps_.clone()
 
             for i in range(100):     #bongmath for eps_prev_ not implemented?
-                #if BONGMATH_Y:
-                #    if self.EXPONENTIAL:
-                #        eps_ = (1 - (lgw_mask_ + lgw_mask_inv_)) * (eps_x_ - eps_y_) + sigma * (y0_bongflow - noise_sync)
-                #    else:
-                #        eps_ = (1 - (lgw_mask_ + lgw_mask_inv_)) * (eps_x_ - eps_y_) +           noise_sync - y0_bongflow
-                    #x_0 = x_[row+row_offset] - h * self.zum(row+row_offset, ky_, eps_prev_)
-                #else:
                 x_0 = x_[row+row_offset] - h * self.zum(row+row_offset, eps_, eps_prev_)
                 
                 if self.EO("bong_iter_lock_x_0_ch_means"):
@@ -674,31 +666,28 @@ class RK_Method_Beta:
                         if BONGMATH_Y:
                             if self.EXPONENTIAL:
                                 eps_x_ = data_x_ - x_0
-                                if self.EO("disable_masks"):
-                                    eps_ = (lgw_mask_+lgw_mask_inv_) * (eps_x_ - eps_y_) + sigma * (y0_bongflow - noise_sync)
-                                elif self.VE_MODEL:
-                                    eps_ = sync_mask * weight_mask_inv * (eps_x_ - weight_mask * eps_y_)    +    weight_mask * sigma*(-noise_sync)
-                                    #eps_ = (lgw_mask_sync_+lgw_mask_sync_inv_) * (1-(lgw_mask_+lgw_mask_inv_)) * (eps_x_ - (lgw_mask_+lgw_mask_inv_) * eps_y_) +  (lgw_mask_+lgw_mask_inv_) * sigma*(y0_bongflow-noise_sync)
+                                eps_x2y_ = data_y_ - x_0
+                                if self.VE_MODEL:
+                                    eps_ = sync_mask * eps_x_   +   (1-sync_mask) * eps_x2y_   +   weight_mask * (-eps_y_+sigma*(-noise_sync))
+                                    if self.EO("sync_x2y"):
+                                        eps_ = sync_mask * eps_x_   +   (1-sync_mask) * eps_x2y_   +   weight_mask * (-eps_x2y_+sigma*(-noise_sync))
                                 else:
-                                    eps_ = sync_mask * weight_mask_inv * (eps_x_ - weight_mask * eps_y_)    +    weight_mask * sigma*(y0_bongflow-noise_sync)
-
-
-                                #eps_ = (1 - (lgw_mask_ + lgw_mask_inv_)) * (eps_x_ - (lgw_mask_ + lgw_mask_inv_) * eps_y_) + sigma * (y0_bongflow - noise_sync)
-                                #eps_ = (1-(lgw_mask_+lgw_mask_inv_)) * eps_x_ - (lgw_mask_+lgw_mask_inv_) * eps_y_ + sigma * (y0_bongflow - noise_sync)
-                                
-                                #eps_  = ((1-(lgw_mask_+lgw_mask_inv_)) * eps_x_ - (lgw_mask_+lgw_mask_inv_) * eps_y_) + (lgw_mask_+lgw_mask_inv_) * sigma * (y0_bongflow - noise_sync)
-                                #eps_  = ((1-(lgw_mask_+lgw_mask_inv_)) * eps_x_ - (lgw_mask_+lgw_mask_inv_) * eps_y_) + (lgw_mask_+lgw_mask_inv_) * sigma * y0_bongflow - (1-(lgw_mask_+lgw_mask_inv_)) * sigma * noise_sync
+                                    eps_ = sync_mask * eps_x_   +   (1-sync_mask) * eps_x2y_   +   weight_mask * (-eps_y_+sigma*(y0_bongflow-noise_sync))
+                                    if self.EO("sync_x2y"):
+                                        eps_ = sync_mask * eps_x_   +   (1-sync_mask) * eps_x2y_   +   weight_mask * (-eps_x2y_+sigma*(y0_bongflow-noise_sync))
                             else:
-                                eps_x_[:s_.shape[0]] = (x_[:s_.shape[0]] - data_x_[:s_.shape[0]]) / s_.view(-1,1,1,1,1)   # or should it be vs x_0???
-                                if self.EO("disable_masks"):
-                                    eps_ = (lgw_mask_+lgw_mask_inv_) * (eps_x_ - eps_y_) + (noise_sync - y0_bongflow)
-                                elif self.VE_MODEL:
-                                    eps_ = sync_mask * weight_mask_inv * (eps_x_ - weight_mask * eps_y_)    +    weight_mask * (noise_sync)
-                                    #eps_ = (lgw_mask_sync_+lgw_mask_sync_inv_) * (1-(lgw_mask_+lgw_mask_inv_)) * (eps_x_ - (lgw_mask_+lgw_mask_inv_) * eps_y_) +           (lgw_mask_+lgw_mask_inv_) * (noise_sync-y0_bongflow)
-                                else:
-                                    eps_ = sync_mask * weight_mask_inv * (eps_x_ - weight_mask * eps_y_)    +    weight_mask * (noise_sync-y0_bongflow)
+                                eps_x_  [:s_.shape[0]] = (x_[:s_.shape[0]] - data_x_[:s_.shape[0]]) / s_.view(-1,1,1,1,1)   # or should it be vs x_0???
+                                eps_x2y_ = torch.zeros_like(eps_x_)
+                                eps_x2y_[:s_.shape[0]] = (x_[:s_.shape[0]] - data_y_[:s_.shape[0]]) / s_.view(-1,1,1,1,1)   # or should it be vs x_0???
 
-                                #eps_ = (1 - (lgw_mask_ + lgw_mask_inv_)) * (eps_x_ - (lgw_mask_ + lgw_mask_inv_) * eps_y_) +         (noise_sync - y0_bongflow)
+                                if self.VE_MODEL:
+                                    eps_ = sync_mask * eps_x_   +   (1-sync_mask) * eps_x2y_   +   weight_mask * (noise_sync-eps_y_)
+                                    if self.EO("sync_x2y"):
+                                        eps_ = sync_mask * eps_x_   +   (1-sync_mask) * eps_x2y_   +   weight_mask * (noise_sync-eps_x2y_)
+                                else: 
+                                    eps_ = sync_mask * eps_x_   +   (1-sync_mask) * eps_x2y_   +   weight_mask * (noise_sync-eps_y_-y0_bongflow)
+                                    if self.EO("sync_x2y"):
+                                        eps_ = sync_mask * eps_x_   +   (1-sync_mask) * eps_x2y_   +   weight_mask * (noise_sync-eps_x2y_-y0_bongflow)
 
                         else:
                             eps_[rr] = self.get_epsilon(x_0, x_[rr], data_[rr], sigma, s_[rr])
@@ -1061,3 +1050,61 @@ class RK_Method_Linear(RK_Method_Beta):
                 return (x - y) / sigma_ratio
 
 
+
+
+"""
+
+
+
+
+if EO("bong2m") and RK.multistep_stages > 0 and step < len(sigmas)-4:
+    h_no_eta       = -torch.log(sigmas[step+1]/sigmas[step])
+    h_prev1_no_eta = -torch.log(sigmas[step]  /sigmas[step-1])
+    c2_prev = (-h_prev1_no_eta / h_no_eta).item()
+    eps_prev = denoised_data_prev - x_0
+    
+    φ = Phi(h_prev, [0.,c2_prev])
+    a2_1 = c2_prev * φ(1,2)
+    for i in range(100):
+        x_prev = x_0 - h_prev * (a2_1 * eps_prev)
+        eps_prev = denoised_data_prev - x_prev
+        
+    eps_[1] = eps_prev
+    
+if EO("bong3m") and RK.multistep_stages > 0 and step < len(sigmas)-10:
+    h_no_eta       = -torch.log(sigmas[step+1]/sigmas[step])
+    h_prev1_no_eta = -torch.log(sigmas[step]  /sigmas[step-1])
+    h_prev2_no_eta = -torch.log(sigmas[step]  /sigmas[step-2])
+    c2_prev        = (-h_prev1_no_eta / h_no_eta).item()
+    c3_prev        = (-h_prev2_no_eta / h_no_eta).item()      
+    
+    eps_prev2 = denoised_data_prev2 - x_0
+    eps_prev  = denoised_data_prev  - x_0
+    
+    φ = Phi(h_prev1_no_eta, [0.,c2_prev, c3_prev])
+    a2_1 = c2_prev * φ(1,2)
+    for i in range(100):
+        x_prev = x_0 - h_prev1_no_eta * (a2_1 * eps_prev)
+        eps_prev = denoised_data_prev2 - x_prev
+        
+    eps_[1] = eps_prev
+    
+    φ = Phi(h_prev2_no_eta, [0.,c3_prev, c3_prev])
+    
+    def calculate_gamma(c2_prev, c3_prev):
+        return (3*(c3_prev**3) - 2*c3_prev) / (c2_prev*(2 - 3*c2_prev))
+    gamma = calculate_gamma(c2_prev, c3_prev)
+    
+    a2_1 = c2_prev * φ(1,2)
+    a3_2 = gamma * c2_prev * φ(2,2) + (c3_prev ** 2 / c2_prev) * φ(2, 3)
+    a3_1 = c3_prev * φ(1,3) - a3_2
+    
+    for i in range(100):
+        x_prev2 = x_0     - h_prev2_no_eta * (a3_1 * eps_prev + a3_2 * eps_prev2)
+        x_prev  = x_prev2 + h_prev2_no_eta * (a2_1 * eps_prev)
+        
+        eps_prev2 = denoised_data_prev - x_prev2
+        eps_prev  = denoised_data_prev2 - x_prev
+        
+    eps_[2] = eps_prev2
+"""

@@ -1622,18 +1622,28 @@ class ClownGuides_Sync:
         
         if weight_scheduler_masked == "constant" and weights_masked == None: 
             weights_masked = initialize_or_scale(None, weight_masked, weight_end_step_masked).to(default_dtype)
+            prepend      = torch.zeros(weight_start_step_masked, dtype=default_dtype, device=weights_masked.device)
+            weights_masked = torch.cat((prepend, weights_masked), dim=0)
             weights_masked = F.pad(weights_masked, (0, MAX_STEPS), value=0.0)
         
         if weight_scheduler_unmasked == "constant" and weights_unmasked == None: 
             weights_unmasked = initialize_or_scale(None, weight_unmasked, weight_end_step_unmasked).to(default_dtype)
+            prepend      = torch.zeros(weight_start_step_unmasked, dtype=default_dtype, device=weights_unmasked.device)
+            weights_unmasked = torch.cat((prepend, weights_unmasked), dim=0)
             weights_unmasked = F.pad(weights_unmasked, (0, MAX_STEPS), value=0.0)
         
+        # Values for the sync scheduler will be inverted in rk_guide_func_beta.py as it's easier to understand:
+        # makes it so that a sync weight of 1.0 = full guide strength (which previously was 0.0)
         if sync_scheduler_masked == "constant" and syncs_masked == None: 
             syncs_masked = initialize_or_scale(None, sync_masked, sync_end_step_masked).to(default_dtype)
+            prepend      = torch.zeros(sync_start_step_masked, dtype=default_dtype, device=syncs_masked.device)
+            syncs_masked = torch.cat((prepend, syncs_masked), dim=0)
             syncs_masked = F.pad(syncs_masked, (0, MAX_STEPS), value=0.0)
         
         if sync_scheduler_unmasked == "constant" and syncs_unmasked == None: 
             syncs_unmasked = initialize_or_scale(None, sync_unmasked, sync_end_step_unmasked).to(default_dtype)
+            prepend      = torch.zeros(sync_start_step_unmasked, dtype=default_dtype, device=syncs_unmasked.device)
+            syncs_unmasked = torch.cat((prepend, syncs_unmasked), dim=0)
             syncs_unmasked = F.pad(syncs_unmasked, (0, MAX_STEPS), value=0.0)
         
         guides = {
@@ -1905,10 +1915,14 @@ class ClownGuides_Beta:
         
         if weight_scheduler_masked == "constant" and weights_masked == None: 
             weights_masked = initialize_or_scale(None, weight_masked, end_step_masked).to(default_dtype)
+            prepend      = torch.zeros(start_step_masked, dtype=default_dtype, device=weights_masked.device)
+            weights_masked = torch.cat((prepend, weights_masked), dim=0)
             weights_masked = F.pad(weights_masked, (0, MAX_STEPS), value=0.0)
         
         if weight_scheduler_unmasked == "constant" and weights_unmasked == None: 
             weights_unmasked = initialize_or_scale(None, weight_unmasked, end_step_unmasked).to(default_dtype)
+            prepend      = torch.zeros(start_step_unmasked, dtype=default_dtype, device=weights_unmasked.device)
+            weights_unmasked = torch.cat((prepend, weights_unmasked), dim=0)
             weights_unmasked = F.pad(weights_unmasked, (0, MAX_STEPS), value=0.0)
         
         guides = {
@@ -2045,10 +2059,14 @@ class ClownGuidesAB_Beta:
         
         if weight_scheduler_A == "constant" and weights_A == None: 
             weights_A = initialize_or_scale(None, weight_A, end_step_A).to(default_dtype)
+            prepend      = torch.zeros(start_step_A, dtype=default_dtype, device=weights_A.device)
+            weights_A = torch.cat((prepend, weights_A), dim=0)
             weights_A = F.pad(weights_A, (0, MAX_STEPS), value=0.0)
         
         if weight_scheduler_B == "constant" and weights_B == None: 
             weights_B = initialize_or_scale(None, weight_B, end_step_B).to(default_dtype)
+            prepend      = torch.zeros(start_step_B, dtype=default_dtype, device=weights_B.device)
+            weights_B = torch.cat((prepend, weights_B), dim=0)
             weights_B = F.pad(weights_B, (0, MAX_STEPS), value=0.0)
             
         if invert_masks:
