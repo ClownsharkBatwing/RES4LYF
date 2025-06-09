@@ -1637,7 +1637,7 @@ def sample_rk_beta(
                     if not LG.guide_mode.startswith("lure"):
                         x_[row+RK.row_offset] = LG.process_guides_data_substep(x_[row+RK.row_offset], data_[row], step, NS.s_[row])
 
-                    if False: #SYNC_GUIDE_ACTIVE: # # # # ## # # ## # YIIIIKES ---------------------------------------------------------------------------------------------------------
+                    if SYNC_GUIDE_ACTIVE: # # # # ## # # ## # YIIIIKES ---------------------------------------------------------------------------------------------------------
                         if VE_MODEL:
                             yt_[:NS.s_.shape[0], 0] = y0_bongflow + NS.s_.view(-1, 1, 1, 1) * (noise_bongflow)
                             yt_0   = y0_bongflow + sigma * (noise_bongflow)

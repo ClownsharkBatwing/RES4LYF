@@ -429,6 +429,14 @@ class LatentGuide:
                 latent_guide_weights_sync      = initialize_or_scale(latent_guide_weights_sync,      latent_guide_weight_sync,      self.max_steps)
             if scheduler_sync_inv_ != "constant" or latent_guide_weights_sync_inv is not None:
                 latent_guide_weights_sync_inv  = initialize_or_scale(latent_guide_weights_sync_inv,  latent_guide_weight_sync_inv,  self.max_steps)
+            if scheduler_lure_x_ != "constant" or latent_guide_weights_lure_x is not None:
+                latent_guide_weights_lure_x      = initialize_or_scale(latent_guide_weights_lure_x,      latent_guide_weight_lure_x,      self.max_steps)
+            if scheduler_lure_x_inv_ != "constant" or latent_guide_weights_lure_x_inv is not None:
+                latent_guide_weights_lure_x_inv  = initialize_or_scale(latent_guide_weights_lure_x_inv,  latent_guide_weight_lure_x_inv,  self.max_steps)
+            if scheduler_lure_y_ != "constant" or latent_guide_weights_lure_y is not None:
+                latent_guide_weights_lure_y      = initialize_or_scale(latent_guide_weights_lure_y,      latent_guide_weight_lure_y,      self.max_steps)
+            if scheduler_lure_y_inv_ != "constant" or latent_guide_weights_lure_y_inv is not None:
+                latent_guide_weights_lure_y_inv  = initialize_or_scale(latent_guide_weights_lure_y_inv,  latent_guide_weight_lure_y_inv,  self.max_steps)
                 
             if scheduler_mean_ != "constant" or latent_guide_weights_mean is not None:
                 latent_guide_weights_mean = initialize_or_scale(latent_guide_weights_mean, latent_guide_weight_mean, self.max_steps)
