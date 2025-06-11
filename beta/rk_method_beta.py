@@ -592,6 +592,7 @@ class RK_Method_Beta:
                     row_offset: int,
                     h         : Tensor,
                     step      : int,
+                    step_sched: int,
                     BONGMATH_Y : bool = False,
                     y0_bongflow : Optional[Tensor] = None,
                     noise_sync: Optional[Tensor] = None,
@@ -611,8 +612,8 @@ class RK_Method_Beta:
             norm_dim = (-4,-2,-1)
         
         if BONGMATH_Y:
-            lgw_mask_,      lgw_mask_inv_      = LG.get_masks_for_step(step)
-            lgw_mask_sync_, lgw_mask_sync_inv_ = LG.get_masks_for_step(step, lgw_type="sync")
+            lgw_mask_,      lgw_mask_inv_      = LG.get_masks_for_step(step_sched)
+            lgw_mask_sync_, lgw_mask_sync_inv_ = LG.get_masks_for_step(step_sched, lgw_type="sync")
 
             weight_mask = lgw_mask_+lgw_mask_inv_
             if LG.SYNC_SEPARATE:
@@ -641,8 +642,8 @@ class RK_Method_Beta:
             bong_strength = self.EO("bong_strength", 1.0)
             
             if bong_strength != 1.0:
-                x_0_tmp  = x_0.clone()
-                x_tmp_   = x_.clone()
+                x_0_tmp  = x_0 .clone()
+                x_tmp_   = x_  .clone()
                 eps_tmp_ = eps_.clone()
 
             for i in range(100):     #bongmath for eps_prev_ not implemented?

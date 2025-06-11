@@ -1713,38 +1713,76 @@ class ClownGuides_Sync_Advanced:
                     "sync_end_step_masked":        ("INT",                                       {"default": -1,   "min": -1,      "max": 10000}),
                     "sync_end_step_unmasked":      ("INT",                                       {"default": -1,   "min": -1,      "max": 10000}),
                     
-                    "lure_x_masked":               ("FLOAT",                                     {"default": 0.5, "min": -100.0, "max": 100.0, "step":0.01, "round": False, "tooltip": "Set the strength of the guide."}),
-                    "lure_x_unmasked":             ("FLOAT",                                     {"default": 0.5, "min": -100.0, "max": 100.0, "step":0.01, "round": False, "tooltip": "Set the strength of the guide_bkg."}),
+                    "drift_x_data":                ("FLOAT",                                     {"default": 0.0, "min": -100.0, "max": 100.0, "step":0.01, "round": False, "tooltip": "Set the strength of the guide."}),
+                    "drift_x_sync":                ("FLOAT",                                     {"default": 0.0, "min": -100.0, "max": 100.0, "step":0.01, "round": False, "tooltip": "Set the strength of the guide."}),
+                    "drift_x_masked":              ("FLOAT",                                     {"default": 1.0, "min": -100.0, "max": 100.0, "step":0.01, "round": False, "tooltip": "Set the strength of the guide."}),
+                    "drift_x_unmasked":            ("FLOAT",                                     {"default": 0.0, "min": -100.0, "max": 100.0, "step":0.01, "round": False, "tooltip": "Set the strength of the guide_bkg."}),
+                    "drift_x_scheduler_masked":    (["constant"] + get_res4lyf_scheduler_list(), {"default": "constant"},),
+                    "drift_x_scheduler_unmasked":  (["constant"] + get_res4lyf_scheduler_list(), {"default": "constant"},),
+                    "drift_x_start_step_masked":   ("INT",                                       {"default": 0,    "min":  0,      "max": 10000}),
+                    "drift_x_start_step_unmasked": ("INT",                                       {"default": 0,    "min":  0,      "max": 10000}),
+                    "drift_x_end_step_masked":     ("INT",                                       {"default": -1,   "min": -1,      "max": 10000}),
+                    "drift_x_end_step_unmasked":   ("INT",                                       {"default": -1,   "min": -1,      "max": 10000}),
+                    
+                    "drift_y_data":                ("FLOAT",                                     {"default": 0.0, "min": -100.0, "max": 100.0, "step":0.01, "round": False, "tooltip": "Set the strength of the guide."}),
+                    "drift_y_sync":                ("FLOAT",                                     {"default": 0.0, "min": -100.0, "max": 100.0, "step":0.01, "round": False, "tooltip": "Set the strength of the guide."}),
+                    "drift_y_guide":               ("FLOAT",                                     {"default": 0.0, "min": -100.0, "max": 100.0, "step":0.01, "round": False, "tooltip": "Set the strength of the guide."}),
+                    "drift_y_masked":              ("FLOAT",                                     {"default": 1.0, "min": -100.0, "max": 100.0, "step":0.01, "round": False, "tooltip": "Set the strength of the guide."}),
+                    "drift_y_unmasked":            ("FLOAT",                                     {"default": 0.0, "min": -100.0, "max": 100.0, "step":0.01, "round": False, "tooltip": "Set the strength of the guide_bkg."}),
+                    "drift_y_scheduler_masked":    (["constant"] + get_res4lyf_scheduler_list(), {"default": "constant"},),
+                    "drift_y_scheduler_unmasked":  (["constant"] + get_res4lyf_scheduler_list(), {"default": "constant"},),
+                    "drift_y_start_step_masked":   ("INT",                                       {"default": 0,    "min":  0,      "max": 10000}),
+                    "drift_y_start_step_unmasked": ("INT",                                       {"default": 0,    "min":  0,      "max": 10000}),
+                    "drift_y_end_step_masked":     ("INT",                                       {"default": -1,   "min": -1,      "max": 10000}),
+                    "drift_y_end_step_unmasked":   ("INT",                                       {"default": -1,   "min": -1,      "max": 10000}),
+                    
+                    "lure_x_masked":               ("FLOAT",                                     {"default": 0.0, "min": -100.0, "max": 100.0, "step":0.01, "round": False, "tooltip": "Set the strength of the guide."}),
+                    "lure_x_unmasked":             ("FLOAT",                                     {"default": 0.0, "min": -100.0, "max": 100.0, "step":0.01, "round": False, "tooltip": "Set the strength of the guide_bkg."}),
                     "lure_x_scheduler_masked":     (["constant"] + get_res4lyf_scheduler_list(), {"default": "constant"},),
                     "lure_x_scheduler_unmasked":   (["constant"] + get_res4lyf_scheduler_list(), {"default": "constant"},),
                     "lure_x_start_step_masked":    ("INT",                                       {"default": 0,    "min":  0,      "max": 10000}),
                     "lure_x_start_step_unmasked":  ("INT",                                       {"default": 0,    "min":  0,      "max": 10000}),
-                    "lure_x_end_step_masked":      ("INT",                                       {"default": 30,   "min": -1,      "max": 10000}),
-                    "lure_x_end_step_unmasked":    ("INT",                                       {"default": 30,   "min": -1,      "max": 10000}),
+                    "lure_x_end_step_masked":      ("INT",                                       {"default": -1,   "min": -1,      "max": 10000}),
+                    "lure_x_end_step_unmasked":    ("INT",                                       {"default": -1,   "min": -1,      "max": 10000}),
                     
-                    "lure_y_masked":               ("FLOAT",                                     {"default": 0.5, "min": -100.0, "max": 100.0, "step":0.01, "round": False, "tooltip": "Set the strength of the guide."}),
-                    "lure_y_unmasked":             ("FLOAT",                                     {"default": 0.5, "min": -100.0, "max": 100.0, "step":0.01, "round": False, "tooltip": "Set the strength of the guide_bkg."}),
+                    "lure_y_masked":               ("FLOAT",                                     {"default": 0.0, "min": -100.0, "max": 100.0, "step":0.01, "round": False, "tooltip": "Set the strength of the guide."}),
+                    "lure_y_unmasked":             ("FLOAT",                                     {"default": 0.0, "min": -100.0, "max": 100.0, "step":0.01, "round": False, "tooltip": "Set the strength of the guide_bkg."}),
                     "lure_y_scheduler_masked":     (["constant"] + get_res4lyf_scheduler_list(), {"default": "constant"},),
                     "lure_y_scheduler_unmasked":   (["constant"] + get_res4lyf_scheduler_list(), {"default": "constant"},),
                     "lure_y_start_step_masked":    ("INT",                                       {"default": 0,    "min":  0,      "max": 10000}),
                     "lure_y_start_step_unmasked":  ("INT",                                       {"default": 0,    "min":  0,      "max": 10000}),
-                    "lure_y_end_step_masked":      ("INT",                                       {"default": 30,   "min": -1,      "max": 10000}),
-                    "lure_y_end_step_unmasked":    ("INT",                                       {"default": 30,   "min": -1,      "max": 10000}),
+                    "lure_y_end_step_masked":      ("INT",                                       {"default": -1,   "min": -1,      "max": 10000}),
+                    "lure_y_end_step_unmasked":    ("INT",                                       {"default": -1,   "min": -1,      "max": 10000}),
                     
                     "lure_iter":          ("INT",                                       {"default": 0,   "min": 0,      "max": 10000}),
-                    "lure_sequence":      (["x -> y", "y -> x", "xy -> xy"],                                   {"default": "xy -> xy"}),
+                    "lure_sequence":      (["x -> y", "y -> x", "xy -> xy"],                                   {"default": "y -> x"}),
                     
                     "invert_mask":        ("BOOLEAN",                                   {"default": False}),
+                    "invert_mask_sync":   ("BOOLEAN",                                   {"default": False}),
+                    "invert_mask_drift_x": ("BOOLEAN",                                  {"default": False}),
+                    "invert_mask_drift_y": ("BOOLEAN",                                  {"default": False}),
+                    "invert_mask_lure_x": ("BOOLEAN",                                   {"default": False}),
+                    "invert_mask_lure_y": ("BOOLEAN",                                   {"default": False}),
+
                     },
                 "optional": 
                     {
                     "guide_masked":       ("LATENT", ),
                     "guide_unmasked":     ("LATENT", ),
                     "mask":               ("MASK", ),
+                    "mask_sync":          ("MASK", ),
+                    "mask_drift_x":        ("MASK", ),
+                    "mask_drift_y":        ("MASK", ),
+                    "mask_lure_x":        ("MASK", ),
+                    "mask_lure_y":        ("MASK", ),
                     "weights_masked":     ("SIGMAS", ),
                     "weights_unmasked":   ("SIGMAS", ),
                     "syncs_masked":       ("SIGMAS", ),
                     "syncs_unmasked":     ("SIGMAS", ),
+                    "drift_xs_masked":     ("SIGMAS", ),
+                    "drift_xs_unmasked":   ("SIGMAS", ),
+                    "drift_ys_masked":     ("SIGMAS", ),
+                    "drift_ys_unmasked":   ("SIGMAS", ),
                     "lure_xs_masked":     ("SIGMAS", ),
                     "lure_xs_unmasked":   ("SIGMAS", ),
                     "lure_ys_masked":     ("SIGMAS", ),
@@ -1776,6 +1814,30 @@ class ClownGuides_Sync_Advanced:
             sync_start_step_unmasked   = 0,
             sync_end_step_masked       = 30,
             sync_end_step_unmasked     = 30,
+            
+            drift_x_data = 0.0,
+            drift_x_sync = 0.0,
+            drift_y_data = 0.0,
+            drift_y_sync = 0.0,
+            drift_y_guide = 0.0,
+
+            drift_x_masked                = 0.0,
+            drift_x_unmasked              = 0.0,
+            drift_x_scheduler_masked      = "constant",
+            drift_x_scheduler_unmasked    = "constant",
+            drift_x_start_step_masked     = 0,
+            drift_x_start_step_unmasked   = 0,
+            drift_x_end_step_masked       = 30,
+            drift_x_end_step_unmasked     = 30,
+            
+            drift_y_masked                = 0.0,
+            drift_y_unmasked              = 0.0,
+            drift_y_scheduler_masked      = "constant",
+            drift_y_scheduler_unmasked    = "constant",
+            drift_y_start_step_masked     = 0,
+            drift_y_start_step_unmasked   = 0,
+            drift_y_end_step_masked       = 30,
+            drift_y_end_step_unmasked     = 30,
 
             lure_x_masked                = 0.0,
             lure_x_unmasked              = 0.0,
@@ -1802,6 +1864,10 @@ class ClownGuides_Sync_Advanced:
             weights_unmasked           = None,
             syncs_masked               = None,
             syncs_unmasked             = None,
+            drift_xs_masked             = None,
+            drift_xs_unmasked           = None,
+            drift_ys_masked             = None,
+            drift_ys_unmasked           = None,
             lure_xs_masked             = None,
             lure_xs_unmasked           = None,
             lure_ys_masked             = None,
@@ -1812,7 +1878,18 @@ class ClownGuides_Sync_Advanced:
             
             mask                       = None,
             unmask                     = None,
+            mask_sync                  = None,
+            mask_drift_x                = None,
+            mask_drift_y                = None,
+            mask_lure_x                = None,
+            mask_lure_y                = None,
+
             invert_mask                = False,
+            invert_mask_sync           = False,
+            invert_mask_drift_x         = False,
+            invert_mask_drift_y         = False,
+            invert_mask_lure_x         = False,
+            invert_mask_lure_y         = False,
             
             guide_mode                 = "sync",
             channelwise_mode           = False,
@@ -1828,11 +1905,21 @@ class ClownGuides_Sync_Advanced:
             weight_end_step_masked   = MAX_STEPS
         if weight_end_step_unmasked == -1:
             weight_end_step_unmasked = MAX_STEPS
-            
+        
         if sync_end_step_masked   == -1:
             sync_end_step_masked   = MAX_STEPS
         if sync_end_step_unmasked == -1:
             sync_end_step_unmasked = MAX_STEPS
+        
+        if drift_x_end_step_masked   == -1:
+            drift_x_end_step_masked   = MAX_STEPS
+        if drift_x_end_step_unmasked == -1:
+            drift_x_end_step_unmasked = MAX_STEPS
+        if drift_y_end_step_masked   == -1:
+            drift_y_end_step_masked   = MAX_STEPS
+        if drift_y_end_step_unmasked == -1:
+            drift_y_end_step_unmasked = MAX_STEPS
+        
         if lure_x_end_step_masked   == -1:
             lure_x_end_step_masked   = MAX_STEPS
         if lure_x_end_step_unmasked == -1:
@@ -1841,7 +1928,7 @@ class ClownGuides_Sync_Advanced:
             lure_y_end_step_masked   = MAX_STEPS
         if lure_y_end_step_unmasked == -1:
             lure_y_end_step_unmasked = MAX_STEPS
-            
+        
         
         
         if guide_masked is None:
@@ -1856,6 +1943,18 @@ class ClownGuides_Sync_Advanced:
             sync_end_step_masked         = 30
             sync_masked           = 0.0
             syncs_masked          = None
+        
+            drift_x_scheduler_masked = "constant"
+            drift_x_start_step_masked       = 0
+            drift_x_end_step_masked         = 30
+            drift_x_masked           = 0.0
+            drift_xs_masked          = None
+        
+            drift_y_scheduler_masked = "constant"
+            drift_y_start_step_masked       = 0
+            drift_y_end_step_masked         = 30
+            drift_y_masked           = 0.0
+            drift_ys_masked          = None
         
             lure_x_scheduler_masked = "constant"
             lure_x_start_step_masked       = 0
@@ -1881,6 +1980,18 @@ class ClownGuides_Sync_Advanced:
             sync_end_step_unmasked         = 30
             sync_unmasked           = 0.0
             syncs_unmasked          = None
+        
+            drift_x_scheduler_unmasked = "constant"
+            drift_x_start_step_unmasked       = 0
+            drift_x_end_step_unmasked         = 30
+            drift_x_unmasked           = 0.0
+            drift_xs_unmasked          = None
+        
+            drift_y_scheduler_unmasked = "constant"
+            drift_y_start_step_unmasked       = 0
+            drift_y_end_step_unmasked         = 30
+            drift_y_unmasked           = 0.0
+            drift_ys_unmasked          = None
         
             lure_x_scheduler_unmasked = "constant"
             lure_x_start_step_unmasked       = 0
@@ -1911,7 +2022,17 @@ class ClownGuides_Sync_Advanced:
         
         if invert_mask and mask is not None:
             mask = 1-mask
-                
+        if invert_mask_sync and mask_sync is not None:
+            mask_sync = 1-mask_sync
+        if invert_mask_drift_x and mask_drift_x is not None:
+            mask_drift_x = 1-mask_drift_x
+        if invert_mask_drift_y and mask_drift_y is not None:
+            mask_drift_y = 1-mask_drift_y
+        if invert_mask_lure_x and mask_lure_x is not None:
+            mask_lure_x = 1-mask_lure_x
+        if invert_mask_lure_y and mask_lure_y is not None:
+            mask_lure_y = 1-mask_lure_y
+        
         if projection_mode:
             guide_mode = guide_mode + "_projection"
         
@@ -1949,6 +2070,30 @@ class ClownGuides_Sync_Advanced:
             syncs_unmasked = torch.cat((prepend, syncs_unmasked), dim=0)
             syncs_unmasked = F.pad(syncs_unmasked, (0, MAX_STEPS), value=0.0)
         
+        if drift_x_scheduler_masked == "constant" and drift_xs_masked == None: 
+            drift_xs_masked = initialize_or_scale(None, drift_x_masked, drift_x_end_step_masked).to(default_dtype)
+            prepend      = torch.zeros(drift_x_start_step_masked, dtype=default_dtype, device=drift_xs_masked.device)
+            drift_xs_masked = torch.cat((prepend, drift_xs_masked), dim=0)
+            drift_xs_masked = F.pad(drift_xs_masked, (0, MAX_STEPS), value=0.0)
+        
+        if drift_x_scheduler_unmasked == "constant" and drift_xs_unmasked == None: 
+            drift_xs_unmasked = initialize_or_scale(None, drift_x_unmasked, drift_x_end_step_unmasked).to(default_dtype)
+            prepend      = torch.zeros(drift_x_start_step_unmasked, dtype=default_dtype, device=drift_xs_unmasked.device)
+            drift_xs_unmasked = torch.cat((prepend, drift_xs_unmasked), dim=0)
+            drift_xs_unmasked = F.pad(drift_xs_unmasked, (0, MAX_STEPS), value=0.0)
+        
+        if drift_y_scheduler_masked == "constant" and drift_ys_masked == None: 
+            drift_ys_masked = initialize_or_scale(None, drift_y_masked, drift_y_end_step_masked).to(default_dtype)
+            prepend      = torch.zeros(drift_y_start_step_masked, dtype=default_dtype, device=drift_ys_masked.device)
+            drift_ys_masked = torch.cat((prepend, drift_ys_masked), dim=0)
+            drift_ys_masked = F.pad(drift_ys_masked, (0, MAX_STEPS), value=0.0)
+        
+        if drift_y_scheduler_unmasked == "constant" and drift_ys_unmasked == None: 
+            drift_ys_unmasked = initialize_or_scale(None, drift_y_unmasked, drift_y_end_step_unmasked).to(default_dtype)
+            prepend      = torch.zeros(drift_y_start_step_unmasked, dtype=default_dtype, device=drift_ys_unmasked.device)
+            drift_ys_unmasked = torch.cat((prepend, drift_ys_unmasked), dim=0)
+            drift_ys_unmasked = F.pad(drift_ys_unmasked, (0, MAX_STEPS), value=0.0)
+        
         if lure_x_scheduler_masked == "constant" and lure_xs_masked == None: 
             lure_xs_masked = initialize_or_scale(None, lure_x_masked, lure_x_end_step_masked).to(default_dtype)
             prepend      = torch.zeros(lure_x_start_step_masked, dtype=default_dtype, device=lure_xs_masked.device)
@@ -1975,69 +2120,101 @@ class ClownGuides_Sync_Advanced:
         
         
         guides = {
-            "guide_mode"                : guide_mode,
+            "guide_mode"                        : guide_mode,
+        
+            "guide_masked"                      : guide_masked,
+            "guide_unmasked"                    : guide_unmasked,
+            "mask"                              : mask,
+            "unmask"                            : unmask,
+            "mask_sync"                         : mask_sync,
+            "mask_lure_x"                       : mask_lure_x,
+            "mask_lure_y"                       : mask_lure_y,
+        
+            "weight_masked"                     : weight_masked,
+            "weight_unmasked"                   : weight_unmasked,
+            "weight_scheduler_masked"           : weight_scheduler_masked,
+            "weight_scheduler_unmasked"         : weight_scheduler_unmasked,
+            "start_step_masked"                 : weight_start_step_masked,
+            "start_step_unmasked"               : weight_start_step_unmasked,
+            "end_step_masked"                   : weight_end_step_masked,
+            "end_step_unmasked"                 : weight_end_step_unmasked,
+            
+            "weights_masked"                    : weights_masked,
+            "weights_unmasked"                  : weights_unmasked,
+            
+            "weight_masked_sync"                : sync_masked,
+            "weight_unmasked_sync"              : sync_unmasked,
+            "weight_scheduler_masked_sync"      : sync_scheduler_masked,
+            "weight_scheduler_unmasked_sync"    : sync_scheduler_unmasked,
+            "start_step_masked_sync"            : sync_start_step_masked,
+            "start_step_unmasked_sync"          : sync_start_step_unmasked,
+            "end_step_masked_sync"              : sync_end_step_masked,
+            "end_step_unmasked_sync"            : sync_end_step_unmasked,
+            
+            "weights_masked_sync"               : syncs_masked,
+            "weights_unmasked_sync"             : syncs_unmasked,
+            
+            "drift_x_data"                      : drift_x_data,
+            "drift_x_sync"                      : drift_x_sync,
+            "drift_y_data"                      : drift_y_data,
+            "drift_y_sync"                      : drift_y_sync,
+            "drift_y_guide"                     : drift_y_guide,
+            
+            "weight_masked_drift_x"             : drift_x_masked,
+            "weight_unmasked_drift_x"           : drift_x_unmasked,
+            "weight_scheduler_masked_drift_x"   : drift_x_scheduler_masked,
+            "weight_scheduler_unmasked_drift_x" : drift_x_scheduler_unmasked,
+            "start_step_masked_drift_x"         : drift_x_start_step_masked,
+            "start_step_unmasked_drift_x"       : drift_x_start_step_unmasked,
+            "end_step_masked_drift_x"           : drift_x_end_step_masked,
+            "end_step_unmasked_drift_x"         : drift_x_end_step_unmasked,
+            
+            "weights_masked_drift_x"            : drift_xs_masked,
+            "weights_unmasked_drift_x"          : drift_xs_unmasked,
+            
+            
+            "weight_masked_drift_y"             : drift_y_masked,
+            "weight_unmasked_drift_y"           : drift_y_unmasked,
+            "weight_scheduler_masked_drift_y"   : drift_y_scheduler_masked,
+            "weight_scheduler_unmasked_drift_y" : drift_y_scheduler_unmasked,
+            "start_step_masked_drift_y"         : drift_y_start_step_masked,
+            "start_step_unmasked_drift_y"       : drift_y_start_step_unmasked,
+            "end_step_masked_drift_y"           : drift_y_end_step_masked,
+            "end_step_unmasked_drift_y"         : drift_y_end_step_unmasked,
+            
+            "weights_masked_drift_y"            : drift_ys_masked,
+            "weights_unmasked_drift_y"          : drift_ys_unmasked,
+            
+            "weight_masked_lure_x"              : lure_x_masked,
+            "weight_unmasked_lure_x"            : lure_x_unmasked,
+            "weight_scheduler_masked_lure_x"    : lure_x_scheduler_masked,
+            "weight_scheduler_unmasked_lure_x"  : lure_x_scheduler_unmasked,
+            "start_step_masked_lure_x"          : lure_x_start_step_masked,
+            "start_step_unmasked_lure_x"        : lure_x_start_step_unmasked,
+            "end_step_masked_lure_x"            : lure_x_end_step_masked,
+            "end_step_unmasked_lure_x"          : lure_x_end_step_unmasked,
+            
+            "weights_masked_lure_x"             : lure_xs_masked,
+            "weights_unmasked_lure_x"           : lure_xs_unmasked,
+            
+            
+            "weight_masked_lure_y"              : lure_y_masked,
+            "weight_unmasked_lure_y"            : lure_y_unmasked,
+            "weight_scheduler_masked_lure_y"    : lure_y_scheduler_masked,
+            "weight_scheduler_unmasked_lure_y"  : lure_y_scheduler_unmasked,
+            "start_step_masked_lure_y"          : lure_y_start_step_masked,
+            "start_step_unmasked_lure_y"        : lure_y_start_step_unmasked,
+            "end_step_masked_lure_y"            : lure_y_end_step_masked,
+            "end_step_unmasked_lure_y"          : lure_y_end_step_unmasked,
+            
+            "weights_masked_lure_y"             : lure_ys_masked,
+            "weights_unmasked_lure_y"           : lure_ys_unmasked,
+            
+            "sync_lure_iter"                    : lure_iter,
+            "sync_lure_sequence"                : lure_sequence,
 
-            "guide_masked"              : guide_masked,
-            "guide_unmasked"            : guide_unmasked,
-            "mask"                      : mask,
-            "unmask"                    : unmask,
-
-            "weight_masked"             : weight_masked,
-            "weight_unmasked"           : weight_unmasked,
-            "weight_scheduler_masked"   : weight_scheduler_masked,
-            "weight_scheduler_unmasked" : weight_scheduler_unmasked,
-            "start_step_masked"         : weight_start_step_masked,
-            "start_step_unmasked"       : weight_start_step_unmasked,
-            "end_step_masked"           : weight_end_step_masked,
-            "end_step_unmasked"         : weight_end_step_unmasked,
-            
-            "weights_masked"            : weights_masked,
-            "weights_unmasked"          : weights_unmasked,
-            
-            "weight_masked_sync"             : sync_masked,
-            "weight_unmasked_sync"           : sync_unmasked,
-            "weight_scheduler_masked_sync"   : sync_scheduler_masked,
-            "weight_scheduler_unmasked_sync" : sync_scheduler_unmasked,
-            "start_step_masked_sync"         : sync_start_step_masked,
-            "start_step_unmasked_sync"       : sync_start_step_unmasked,
-            "end_step_masked_sync"           : sync_end_step_masked,
-            "end_step_unmasked_sync"         : sync_end_step_unmasked,
-            
-            "weights_masked_sync"            : syncs_masked,
-            "weights_unmasked_sync"          : syncs_unmasked,
-            
-            "weight_masked_lure_x"             : lure_x_masked,
-            "weight_unmasked_lure_x"           : lure_x_unmasked,
-            "weight_scheduler_masked_lure_x"   : lure_x_scheduler_masked,
-            "weight_scheduler_unmasked_lure_x" : lure_x_scheduler_unmasked,
-            "start_step_masked_lure_x"         : lure_x_start_step_masked,
-            "start_step_unmasked_lure_x"       : lure_x_start_step_unmasked,
-            "end_step_masked_lure_x"           : lure_x_end_step_masked,
-            "end_step_unmasked_lure_x"         : lure_x_end_step_unmasked,
-            
-            "weights_masked_lure_x"            : lure_xs_masked,
-            "weights_unmasked_lure_x"          : lure_xs_unmasked,
-            
-            
-            "weight_masked_lure_y"             : lure_y_masked,
-            "weight_unmasked_lure_y"           : lure_y_unmasked,
-            "weight_scheduler_masked_lure_y"   : lure_y_scheduler_masked,
-            "weight_scheduler_unmasked_lure_y" : lure_y_scheduler_unmasked,
-            "start_step_masked_lure_y"         : lure_y_start_step_masked,
-            "start_step_unmasked_lure_y"       : lure_y_start_step_unmasked,
-            "end_step_masked_lure_y"           : lure_y_end_step_masked,
-            "end_step_unmasked_lure_y"         : lure_y_end_step_unmasked,
-            
-            "weights_masked_lure_y"            : lure_ys_masked,
-            "weights_unmasked_lure_y"          : lure_ys_unmasked,
-            
-            "sync_lure_iter"                 : lure_iter,
-            "sync_lure_sequence"             : lure_sequence,
-            
-            
-            
-            "cutoff_masked"             : cutoff_masked,
-            "cutoff_unmasked"           : cutoff_unmasked
+            "cutoff_masked"                     : cutoff_masked,
+            "cutoff_unmasked"                   : cutoff_unmasked
         }
         
         
