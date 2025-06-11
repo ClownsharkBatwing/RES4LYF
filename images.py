@@ -751,7 +751,8 @@ class ImageSharpenFS:
         return {
             "required": {
                 "images":    ("IMAGE",),
-                "method":    (["hard", "linear", "vivid"], {"default": "hard"}),
+                #"method":    (["hard", "linear", "vivid"], {"default": "hard"}),
+                "method":    (["hard", "linear"], {"default": "hard"}),
                 "type":      (["median", "gaussian"],      {"default": "median"}),
                 "intensity": ("INT",                       {"default": 6, "min": 1, "step": 1,
                 }),
