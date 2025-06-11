@@ -663,7 +663,7 @@ class RK_Method_Beta:
                         #eps_[rr] = self.get_unsample_epsilon(x_[rr], x_0, data_[rr], sigma, s_[rr])
                         eps_[rr] = self.get_epsilon(x_[rr], x_0, data_[rr], sigma, s_[rr])
                     else:
-                        if BONGMATH_Y:
+                        if BONGMATH_Y and not self.EO("disable_bongmath_y"):
                             if self.EXPONENTIAL:
                                 eps_x_ = data_x_ - x_0
                                 eps_x2y_ = data_y_ - x_0

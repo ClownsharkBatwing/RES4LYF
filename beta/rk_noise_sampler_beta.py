@@ -36,7 +36,7 @@ NOISE_MODE_NAMES = ["none",
 
 
 
-def get_data_from_step(x, x_next, sigma, sigma_next):
+def get_data_from_step(x, x_next, sigma, sigma_next): # assumes 100% linear trajectory
     h = sigma_next - sigma
     return (sigma_next * x - sigma * x_next) / h
 
@@ -757,7 +757,7 @@ class RK_NoiseSampler:
         else:
             return x
     
-    def sigma_from_to(self,
+    def sigma_from_to(self,                           
                         x_0        : Tensor,
                         x_down     : Tensor,
                         sigma      : Tensor,
@@ -766,7 +766,7 @@ class RK_NoiseSampler:
         
         eps      = (x_0 - x_down) / (sigma - sigma_down)
         denoised =  x_0 - sigma * eps
-        x_next   = denoised + sigma_next * eps
+        x_next   = denoised + sigma_next * eps              # VESDE vs VPSDE equiv.?
         return x_next
 
     def rebound_overshoot_step(self, x_0:Tensor, x:Tensor) -> Tensor:

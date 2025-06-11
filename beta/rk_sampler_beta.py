@@ -386,11 +386,12 @@ def sample_rk_beta(
     data_x_             = None
     
     y0_bongflow         = state_info.get('y0_bongflow')
+    y0_bongflow_orig    = state_info.get('y0_bongflow_orig')
     noise_bongflow      = state_info.get('noise_bongflow')
     
     data_prev_y_        = state_info.get('data_prev_y_')
     data_prev_x_        = state_info.get('data_prev_x_')
-    data_prev_x2y_        = state_info.get('data_prev_x2y_')
+    data_prev_x2y_      = state_info.get('data_prev_x2y_')
 
     # BEGIN SAMPLING LOOP    
     num_steps = len(sigmas[start_step:])-2 if sigmas[-1] == 0 else len(sigmas[start_step:])-1
@@ -416,7 +417,7 @@ def sample_rk_beta(
     # SETUP GUIDES
     LG = LatentGuide(model, sigmas, UNSAMPLE, VE_MODEL, LGW_MASK_RESCALE_MIN, extra_options, device=work_device, dtype=default_dtype, frame_weights_mgr=frame_weights_mgr)
 
-    guide_inversion_y0 = state_info.get('guide_inversion_y0')
+    guide_inversion_y0     = state_info.get('guide_inversion_y0')
     guide_inversion_y0_inv = state_info.get('guide_inversion_y0_inv')
 
     x = LG.init_guides(x, RK.IMPLICIT, guides, NS.noise_sampler, batch_num, sigmas[step], guide_inversion_y0, guide_inversion_y0_inv)
@@ -727,20 +728,20 @@ def sample_rk_beta(
 
                     if RK.EXPONENTIAL:
                         if VE_MODEL:
-                            eps_[ms] = sync_mask * eps_x  +  (1-sync_mask) * eps_x2y  +  weight_mask * (-eps_x2y + sigma*(-noise_bongflow))
+                            eps_[ms] = sync_mask * eps_x  +  (1-sync_mask) * eps_x2y  +  weight_mask * (-eps_y + sigma*(-noise_bongflow))
                             if EO("sync_x2y"):
                                 eps_[ms] = sync_mask * eps_x  +  (1-sync_mask) * eps_x2y  +  weight_mask * (-eps_x2y + sigma*(-noise_bongflow))
                         else:
-                            eps_[ms] = sync_mask * eps_x  +  (1-sync_mask) * eps_x2y  +  weight_mask * (-eps_x2y + sigma*(y0_bongflow-noise_bongflow))
+                            eps_[ms] = sync_mask * eps_x  +  (1-sync_mask) * eps_x2y  +  weight_mask * (-eps_y + sigma*(y0_bongflow-noise_bongflow))
                             if EO("sync_x2y"):
                                 eps_[ms] = sync_mask * eps_x  +  (1-sync_mask) * eps_x2y  +  weight_mask * (-eps_x2y + sigma*(y0_bongflow-noise_bongflow))
                     else:
                         if VE_MODEL:
-                            eps_[ms] = sync_mask * eps_x  +  (1-sync_mask) * eps_x2y  +  weight_mask * (-eps_x2y + (noise_bongflow))
+                            eps_[ms] = sync_mask * eps_x  +  (1-sync_mask) * eps_x2y  +  weight_mask * (-eps_y + (noise_bongflow))
                             if EO("sync_x2y"):
                                 eps_[ms] = sync_mask * eps_x  +  (1-sync_mask) * eps_x2y  +  weight_mask * (-eps_x2y + (noise_bongflow))
                         else:
-                            eps_[ms] = sync_mask * eps_x  +  (1-sync_mask) * eps_x2y  +  weight_mask * (-eps_x2y + (noise_bongflow-y0_bongflow))
+                            eps_[ms] = sync_mask * eps_x  +  (1-sync_mask) * eps_x2y  +  weight_mask * (-eps_y + (noise_bongflow-y0_bongflow))
                             if EO("sync_x2y"):
                                 eps_[ms] = sync_mask * eps_x  +  (1-sync_mask) * eps_x2y  +  weight_mask * (-eps_x2y + (noise_bongflow-y0_bongflow))
 
@@ -969,21 +970,21 @@ def sample_rk_beta(
                                             
                                             for ms in range(len(eps_)):
                                                 if RK.EXPONENTIAL:
-                                                    if VE_MODEL:
-                                                        eps_[ms] = sync_mask * eps_x_[ms]  +  (1-sync_mask) * eps_x2y_[ms]  +  weight_mask * (-eps_x2y_[ms] + sigma*(-noise_bongflow))
+                                                    if VE_MODEL:         # ZERO IS THIS                      # ONE IS THIS
+                                                        eps_[ms] = sync_mask * eps_x_[ms]  +  (1-sync_mask) * eps_x2y_[ms]  +  weight_mask * (-eps_y_[ms] + sigma*(-noise_bongflow))
                                                         if EO("sync_x2y"):
                                                             eps_[ms] = sync_mask * eps_x_[ms]  +  (1-sync_mask) * eps_x2y_[ms]  +  weight_mask * (-eps_x2y_[ms] + sigma*(-noise_bongflow))
                                                     else:
-                                                        eps_[ms] = sync_mask * eps_x_[ms]  +  (1-sync_mask) * eps_x2y_[ms]  +  weight_mask * (-eps_x2y_[ms] + sigma*(y0_bongflow-noise_bongflow))
+                                                        eps_[ms] = sync_mask * eps_x_[ms]  +  (1-sync_mask) * eps_x2y_[ms]  +  weight_mask * (-eps_y_[ms] + sigma*(y0_bongflow-noise_bongflow))
                                                         if EO("sync_x2y"):
                                                             eps_[ms] = sync_mask * eps_x_[ms]  +  (1-sync_mask) * eps_x2y_[ms]  +  weight_mask * (-eps_x2y_[ms] + sigma*(y0_bongflow-noise_bongflow))
                                                 else:
                                                     if VE_MODEL:
-                                                        eps_[ms] = sync_mask * eps_x_[ms]  +  (1-sync_mask) * eps_x2y_[ms]  +  weight_mask * (-eps_x2y_[ms] + (noise_bongflow))
+                                                        eps_[ms] = sync_mask * eps_x_[ms]  +  (1-sync_mask) * eps_x2y_[ms]  +  weight_mask * (-eps_y_[ms] + (noise_bongflow))
                                                         if EO("sync_x2y"):
                                                             eps_[ms] = sync_mask * eps_x_[ms]  +  (1-sync_mask) * eps_x2y_[ms]  +  weight_mask * (-eps_x2y_[ms] + (noise_bongflow))
                                                     else:
-                                                        eps_[ms] = sync_mask * eps_x_[ms]  +  (1-sync_mask) * eps_x2y_[ms]  +  weight_mask * (-eps_x2y_[ms] + (noise_bongflow-y0_bongflow))
+                                                        eps_[ms] = sync_mask * eps_x_[ms]  +  (1-sync_mask) * eps_x2y_[ms]  +  weight_mask * (-eps_y_[ms] + (noise_bongflow-y0_bongflow))
                                                         if EO("sync_x2y"):
                                                             eps_[ms] = sync_mask * eps_x_[ms]  +  (1-sync_mask) * eps_x2y_[ms]  +  weight_mask * (-eps_x2y_[ms] + (noise_bongflow-y0_bongflow))
 
@@ -1029,15 +1030,15 @@ def sample_rk_beta(
                                 sync_mask = lgw_mask_sync_+lgw_mask_sync_inv_
                                 
                                 if eps_x_ is None:
-                                    eps_x_  = torch.zeros(RK.rows+2, *x.shape, dtype=default_dtype, device=work_device)
-                                    data_x_ = torch.zeros(RK.rows+2, *x.shape, dtype=default_dtype, device=work_device)
-                                    eps_y2x_  = torch.zeros(RK.rows+2, *x.shape, dtype=default_dtype, device=work_device)
-                                    eps_x2y_  = torch.zeros(RK.rows+2, *x.shape, dtype=default_dtype, device=work_device)
-                                    eps_yt_  = torch.zeros(RK.rows+2, *x.shape, dtype=default_dtype, device=work_device)
-                                    eps_y_  = torch.zeros(RK.rows+2, *x.shape, dtype=default_dtype, device=work_device)
+                                    eps_x_       = torch.zeros(RK.rows+2, *x.shape, dtype=default_dtype, device=work_device)
+                                    data_x_      = torch.zeros(RK.rows+2, *x.shape, dtype=default_dtype, device=work_device)
+                                    eps_y2x_     = torch.zeros(RK.rows+2, *x.shape, dtype=default_dtype, device=work_device)
+                                    eps_x2y_     = torch.zeros(RK.rows+2, *x.shape, dtype=default_dtype, device=work_device)
+                                    eps_yt_      = torch.zeros(RK.rows+2, *x.shape, dtype=default_dtype, device=work_device)
+                                    eps_y_       = torch.zeros(RK.rows+2, *x.shape, dtype=default_dtype, device=work_device)
                                     eps_prev_y_  = torch.zeros(RK.rows+2, *x.shape, dtype=default_dtype, device=work_device)
-                                    data_y_ = torch.zeros(RK.rows+2, *x.shape, dtype=default_dtype, device=work_device)
-                                    yt_     = torch.zeros(RK.rows+2, *x.shape, dtype=default_dtype, device=work_device)
+                                    data_y_      = torch.zeros(RK.rows+2, *x.shape, dtype=default_dtype, device=work_device)
+                                    yt_          = torch.zeros(RK.rows+2, *x.shape, dtype=default_dtype, device=work_device)
                                     
                                     RUN_X_0_COPY = False
                                     if noise_bongflow is None:
@@ -1062,6 +1063,15 @@ def sample_rk_beta(
                                         x_0 = yt_0.clone()
                                         x_tmp = x_[row] = yt.clone()
                                 else:
+                                    if EO("sync_drift_x"):
+                                        y0_bongflow_orig = y0_bongflow.clone() if y0_bongflow_orig is None else y0_bongflow_orig
+                                        y0_bongflow = y0_bongflow + lgw_mask_lure_x_ * (data_x - y0_bongflow) + lgw_mask_lure_y_ * (data_y - y0_bongflow) + EO("sync_drift_orig_floor", 0.0) * (y0_bongflow_orig - y0_bongflow)
+                                        
+                                    if EO("sync_drift_data"):
+                                        y0_bongflow_orig = y0_bongflow.clone() if y0_bongflow_orig is None else y0_bongflow_orig
+                                        y0_bongflow = y0_bongflow + lgw_mask_lure_x_ * (data_barf - y0_bongflow) + lgw_mask_lure_y_ * (data_barf_y - y0_bongflow) + EO("sync_drift_orig_floor", 0.0) * (y0_bongflow_orig - y0_bongflow)
+                                    if EO("sync_drift_y"):
+                                        y0_bongflow = y0_bongflow + EO("sync_drift_y", 0.0) * (data_y - y0_bongflow)
                                     if not EO("skip_yt"):
                                         if VE_MODEL:
                                             yt_0 = y0_bongflow + sigma * noise_bongflow
@@ -1091,17 +1101,25 @@ def sample_rk_beta(
                                         if lure_x_mask.abs().sum() > 0:
                                             if VE_MODEL:
                                                 x_tmp = x_tmp + lure_x_mask * (data_y - data_x) 
+                                                #x_tmp = x_tmp + (data_y - data_x) 
                                             else:
                                                 x_tmp = x_tmp + lure_x_mask * (NS.sigma_max - s_tmp) * (data_y - data_x) 
-                                            eps_x, data_x = RK(x_tmp, s_tmp, x_0, sigma, transformer_options={'latent_type': 'xt'})
+                                                #x_tmp = x_tmp + (NS.sigma_max - s_tmp) * (data_y - data_x) 
+                                            eps_x_lure, data_x_lure = RK(x_tmp, s_tmp, x_0, sigma, transformer_options={'latent_type': 'xt'})
+                                            eps_x  = eps_x  + lure_x_mask * (eps_x_lure  - eps_x)
+                                            data_x = data_x + lure_x_mask * (data_x_lure - data_x)
                                             
                                         if lure_y_mask.abs().sum() > 0:                      
                                             y_tmp = yt_[row].clone()
                                             if VE_MODEL:
                                                 y_tmp = y_tmp + lure_y_mask * (data_x - data_y) 
+                                                #y_tmp = y_tmp + (data_x - data_y) 
                                             else:
                                                 y_tmp = y_tmp + lure_y_mask * (NS.sigma_max - s_tmp) * (data_x - data_y) 
-                                            eps_y, data_y = RK(y_tmp, s_tmp, yt_0, sigma, transformer_options={'latent_type': 'yt'})
+                                                #y_tmp = y_tmp + (NS.sigma_max - s_tmp) * (data_x - data_y) 
+                                            eps_y_lure, data_y_lure = RK(y_tmp, s_tmp, yt_0, sigma, transformer_options={'latent_type': 'yt'})
+                                            eps_y  = eps_y  + lure_y_mask * (eps_y_lure  - eps_y)
+                                            data_y = data_y + lure_y_mask * (data_y_lure - data_y)
                                         
                                     elif LG.sync_lure_sequence == "y -> x":
                                             
@@ -1109,16 +1127,24 @@ def sample_rk_beta(
                                             y_tmp = yt_[row].clone()
                                             if VE_MODEL:
                                                 y_tmp = y_tmp + lure_y_mask * (data_x - data_y) 
+                                                #y_tmp = y_tmp + (data_x - data_y) 
                                             else:
                                                 y_tmp = y_tmp + lure_y_mask * (NS.sigma_max - s_tmp) * (data_x - data_y) 
-                                            eps_y, data_y = RK(y_tmp, s_tmp, yt_0, sigma, transformer_options={'latent_type': 'yt'})
+                                                #y_tmp = y_tmp + (NS.sigma_max - s_tmp) * (data_x - data_y) 
+                                            eps_y_lure, data_y_lure = RK(y_tmp, s_tmp, yt_0, sigma, transformer_options={'latent_type': 'yt'})
+                                            eps_y  = eps_y  + lure_y_mask * (eps_y_lure  - eps_y)
+                                            data_y = data_y + lure_y_mask * (data_y_lure - data_y)
                                         
                                         if lure_x_mask.abs().sum() > 0:
                                             if VE_MODEL:
                                                 x_tmp = x_tmp + lure_x_mask * (data_y - data_x) 
+                                                #x_tmp = x_tmp + (data_y - data_x) 
                                             else:
                                                 x_tmp = x_tmp + lure_x_mask * (NS.sigma_max - s_tmp) * (data_y - data_x) 
-                                            eps_x, data_x = RK(x_tmp, s_tmp, x_0, sigma, transformer_options={'latent_type': 'xt'})
+                                                #x_tmp = x_tmp + (NS.sigma_max - s_tmp) * (data_y - data_x) 
+                                            eps_x_lure, data_x_lure = RK(x_tmp, s_tmp, x_0, sigma, transformer_options={'latent_type': 'xt'})
+                                            eps_x  = eps_x  + lure_x_mask * (eps_x_lure  - eps_x)
+                                            data_x = data_x + lure_x_mask * (data_x_lure - data_x)
 
                                     elif LG.sync_lure_sequence == "xy -> xy":
                                         data_x_orig, data_y_orig = data_x.clone(), data_y.clone()
@@ -1126,17 +1152,25 @@ def sample_rk_beta(
                                         if lure_x_mask.abs().sum() > 0:
                                             if VE_MODEL:
                                                 x_tmp = x_tmp + lure_x_mask * (data_y_orig - data_x_orig) 
+                                                #x_tmp = x_tmp + (data_y_orig - data_x_orig) 
                                             else:
                                                 x_tmp = x_tmp + lure_x_mask * (NS.sigma_max - s_tmp) * (data_y_orig - data_x_orig) 
-                                            eps_x, data_x = RK(x_tmp, s_tmp, x_0, sigma, transformer_options={'latent_type': 'xt'})
+                                                #x_tmp = x_tmp + (NS.sigma_max - s_tmp) * (data_y_orig - data_x_orig) 
+                                            eps_x_lure, data_x_lure = RK(x_tmp, s_tmp, x_0, sigma, transformer_options={'latent_type': 'xt'})
+                                            eps_x  = eps_x  + lure_x_mask * (eps_x_lure  - eps_x)
+                                            data_x = data_x + lure_x_mask * (data_x_lure - data_x)
                                         
                                         if lure_y_mask.abs().sum() > 0:                      
                                             y_tmp = yt_[row].clone()
                                             if VE_MODEL:
                                                 y_tmp = y_tmp + lure_y_mask * (data_x_orig - data_y_orig) 
+                                                #y_tmp = y_tmp + (data_x_orig - data_y_orig) 
                                             else:
                                                 y_tmp = y_tmp + lure_y_mask * (NS.sigma_max - s_tmp) * (data_x_orig - data_y_orig) 
-                                            eps_y, data_y = RK(y_tmp, s_tmp, yt_0, sigma, transformer_options={'latent_type': 'yt'})
+                                                #y_tmp = y_tmp + (NS.sigma_max - s_tmp) * (data_x_orig - data_y_orig) 
+                                            eps_y_lure, data_y_lure = RK(y_tmp, s_tmp, yt_0, sigma, transformer_options={'latent_type': 'yt'})
+                                            eps_y  = eps_y  + lure_y_mask * (eps_y_lure  - eps_y)
+                                            data_y = data_y + lure_y_mask * (data_y_lure - data_y)
                                         
                                         
                                 
@@ -1185,13 +1219,18 @@ def sample_rk_beta(
                                     eps_x2y = RK.get_guide_epsilon(x_0,   x_[row], data_y, sigma, NS.s_[row], NS.sigma_down, None)
                                     eps_y   = RK.get_guide_epsilon(yt_0, yt_[row], data_y, sigma, NS.s_[row], NS.sigma_down, None)
 
+                                eps_x *= EO("eps_x_mult", 1.0)
+                                eps_y *= EO("eps_y_mult", 1.0)
+                                eps_x2y *= EO("eps_x2y_mult", 1.0)
+                                eps_y2x *= EO("eps_y2x_mult", 1.0)
+                                
                                 if RK.EXPONENTIAL:
-                                    if VE_MODEL:
+                                    if VE_MODEL:         # ZERO IS THIS                      # ONE IS THIS 
                                         eps_[row]  = sync_mask * eps_x   +   (1-sync_mask) * eps_x2y   +   weight_mask * (-eps_y + sigma*(-noise_bongflow)) 
                                         if EO("sync_x2y"):
                                             eps_[row]  = sync_mask * eps_x   +   (1-sync_mask) * eps_x2y   +   weight_mask * (-eps_x2y + sigma*(-noise_bongflow)) 
                                     else:
-                                        eps_[row]  = sync_mask * eps_x   +   (1-sync_mask) * eps_x2y   +   weight_mask * (-eps_y + sigma*(y0_bongflow-noise_bongflow)) 
+                                        eps_[row]  = sync_mask * eps_x   +   (1-sync_mask) * eps_x2y   +   weight_mask * (-eps_y + sigma*(y0_bongflow-noise_bongflow))   #+   lure_x_mask * sigma*(data_y - data_x) 
                                         if EO("sync_x2y"):
                                             eps_[row]  = sync_mask * eps_x   -   (1-sync_mask) * eps_x2y   +   weight_mask * (-eps_x2y + sigma*(y0_bongflow-noise_bongflow)) 
                                         eps_yt_[row]  = sync_mask * eps_y   +   (1-sync_mask) * eps_y2x   +   weight_mask * (-eps_x + sigma*(y0_bongflow-noise_bongflow))         # differentiate guide as well toward the x pred?
@@ -1207,16 +1246,27 @@ def sample_rk_beta(
                                         eps_yt_[row]  = sync_mask * eps_y   +   (1-sync_mask) * eps_y2x   +   weight_mask * (noise_bongflow - eps_x - y0_bongflow)         # differentiate guide as well toward the x pred?
 
                                 if VE_MODEL:
-                                    data_[row] = x_0   +   sync_mask * NS.h * eps_x   +   (1-sync_mask) * NS.h * eps_x2y   -   weight_mask * (sigma*(eps_y + noise_bongflow)) 
+                                    data_[row] = x_0   +   sync_mask * NS.h * eps_x   +   (1-sync_mask) * NS.h * eps_x2y   -   weight_mask * (sigma*(eps_y + noise_bongflow))   # -   lure_x_mask * (sigma*(eps_y + eps_x)) 
+                                    data_barf_y = yt_0   +   sync_mask * NS.h * eps_y   +   (1-sync_mask) * NS.h * eps_y2x   -   weight_mask * (sigma*(eps_x + noise_bongflow))
                                     if EO("sync_x2y"):
                                         data_[row] = x_0   +   sync_mask * NS.h * eps_x   +   (1-sync_mask) * NS.h * eps_x2y   -   weight_mask * (sigma*(eps_x2y + noise_bongflow)) 
 
                                 else:
 
                                     data_[row] = x_0   +   sync_mask * NS.h * eps_x   +   (1-sync_mask) * NS.h * eps_x2y   -   weight_mask * (NS.h * eps_y + sigma*(noise_bongflow-y0_bongflow)) 
+                                    data_barf_y = yt_0   +   sync_mask * NS.h * eps_y   +   (1-sync_mask) * NS.h * eps_y2x   -   weight_mask * (NS.h * eps_x + sigma*(noise_bongflow-y0_bongflow)) 
                                     if EO("sync_x2y"):
                                         data_[row] = x_0   +   sync_mask * NS.h * eps_x   +   (1-sync_mask) * NS.h * eps_x2y   -   weight_mask * (NS.h * eps_x2y + sigma*(noise_bongflow-y0_bongflow)) 
 
+                                if EO("data_is_y0_with_lure_x_mask"):
+                                    data_[row] = data_[row] + lure_x_mask * (y0_bongflow - data_[row])
+
+                                if EO("eps_is_y0_with_lure_x_mask"):
+                                    if RK.EXPONENTIAL:
+                                        eps_[row] = eps_[row] + lure_x_mask * ((y0_bongflow - x_0) - eps_[row])
+                                    else:
+                                        eps_[row] = eps_[row] + lure_x_mask * (((x_0 - y0_bongflow) / sigma) - eps_[row])
+                                data_barf   = data_[row]
                                 data_cached = data_x
                                 
                                 eps_x_ [row] = eps_x
@@ -1238,6 +1288,8 @@ def sample_rk_beta(
                                             eps_y_ [row] = noise_bongflow - y0_bongflow
                                 if EO("sync_use_fake_data_y"):
                                     data_y_[row] = y0_bongflow
+                                    
+
                                 
                             
                             elif LG.guide_mode.startswith("flow") and (LG.lgw[step] > 0 or LG.lgw_inv[step] > 0) and not FLOW_STOPPED and not EO("flow_sync") :
@@ -1599,7 +1651,7 @@ def sample_rk_beta(
                         if (full_iter == 0 and diag_iter == 0)   or   EO("newton_iter_post_use_on_implicit_steps"):
                             x_, eps_ = RK.newton_iter(x_0, x_, eps_, eps_prev_, data_, NS.s_, row, NS.h, sigmas, step, "post", SYNC_GUIDE_ACTIVE)
 
-                    # UPDATE
+                    # UPDATE   #for row in range(RK.rows - RK.multistep_stages - RK.row_offset + 1):
                     x_ = RK.update_substep(x_0, x_, eps_, eps_prev_, row, RK.row_offset, NS.h_new, NS.h_new_orig, lying_eps_row_factor=lying_eps_row_factor)   #modifies eps_[row] if lying_eps_row_factor != 1.0
                     
                     x_[row+RK.row_offset] = NS.rebound_overshoot_substep(x_0, x_[row+RK.row_offset])
@@ -1910,6 +1962,7 @@ def sample_rk_beta(
         state_info_out['FLOW_STOPPED']      = FLOW_STOPPED
         state_info_out['noise_bongflow']    = noise_bongflow
         state_info_out['y0_bongflow']       = y0_bongflow
+        state_info_out['y0_bongflow_orig']  = y0_bongflow_orig
         state_info_out['data_prev_y_']      = data_prev_y_
         state_info_out['data_prev_x_']      = data_prev_x_
 

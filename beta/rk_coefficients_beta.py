@@ -2745,7 +2745,7 @@ def get_rk_methods_beta(rk_type       : str,
             a, b = gen_first_col_exp(a,b,ci,φ)
 
             
-        case "res_6s": #4th order
+        case "res_6s": #non-monotonic #4th order
                 
             c1, c2, c3, c4, c5, c6 = 0, 1/2, 1/2, 1/3, 1/3, 5/6
             ci = [c1, c2, c3, c4, c5, c6]
@@ -2793,7 +2793,7 @@ def get_rk_methods_beta(rk_type       : str,
             
             a, b = gen_first_col_exp(a,b,ci,φ)
 
-        case "res_8s": # this is not EXPRK5S8 https://ora.ox.ac.uk/objects/uuid:cc001282-4285-4ca2-ad06-31787b540c61/files/m611df1a355ca243beb09824b70e5e774
+        case "res_8s": #non-monotonic # this is not EXPRK5S8 https://ora.ox.ac.uk/objects/uuid:cc001282-4285-4ca2-ad06-31787b540c61/files/m611df1a355ca243beb09824b70e5e774
                 
             c1, c2, c3, c4, c5, c6, c7, c8 = 0, 1/2, 1/2, 1/4,    1/2, 1/5, 2/3, 1
             ci = [c1, c2, c3, c4, c5, c6, c7, c8]
