@@ -202,6 +202,7 @@ class ReFlux(Flux):
 
         total_layers = len(self.double_blocks) + len(self.single_blocks)
         
+        ca_idx = 0
         for i, block in enumerate(self.double_blocks):
             #if mask is not None and mask_type_bool and weight < (i / (total_layers-1)):
             #    mask = mask.to(img.dtype)
@@ -235,6 +236,16 @@ class ReFlux(Flux):
                     add = control_i[i]
                     if add is not None:
                         img[:1] += add
+                        
+            if hasattr(self, "pulid_data"):
+                # PuLID attention
+                if self.pulid_data:
+                    if i % self.pulid_double_interval == 0:
+                        # Will calculate influence of all pulid nodes at once
+                        for _, node_data in self.pulid_data.items():
+                            if torch.any((node_data['sigma_start'] >= timesteps) & (timesteps >= node_data['sigma_end'])):
+                                img = img + node_data['weight'] * self.pulid_ca[ca_idx](node_data['embedding'], img)
+                        ca_idx += 1
 
         img = torch.cat((txt, img), 1)   #first 256 is txt embed
         for i, block in enumerate(self.single_blocks):
@@ -269,6 +280,18 @@ class ReFlux(Flux):
                     add = control_o[i]
                     if add is not None:
                         img[:1, txt.shape[1] :, ...] += add
+                        
+            if hasattr(self, "pulid_data"):
+                # PuLID attention
+                if self.pulid_data:
+                    real_img, txt = img[:, txt.shape[1]:, ...], img[:, :txt.shape[1], ...]
+                    if i % self.pulid_single_interval == 0:
+                        # Will calculate influence of all nodes at once
+                        for _, node_data in self.pulid_data.items():
+                            if torch.any((node_data['sigma_start'] >= timesteps) & (timesteps >= node_data['sigma_end'])):
+                                real_img = real_img + node_data['weight'] * self.pulid_ca[ca_idx](node_data['embedding'], real_img)
+                        ca_idx += 1
+                    img = torch.cat((txt, real_img), 1)
 
         img = img[:, txt.shape[1] :, ...]
         img = self.final_layer(img, vec)  # (N, T, patch_size ** 2 * out_channels)     1,8192,3072 -> 1,8192,64 
@@ -509,6 +532,79 @@ class ReFlux(Flux):
                     f_cs         = f_c_whitened @ self.y0_color.T + self.mu_s
                     
                     denoised_embed[wct_i] = f_cs
+
+
+
+
+                if transformer_options.get('y0_standard_guide') is not None:
+                    y0_standard_guide = transformer_options.get('y0_standard_guide')
+                    
+                    img_y0_standard_guide = comfy.ldm.common_dit.pad_to_patch_size(y0_standard_guide, (self.patch_size, self.patch_size))
+                    #img_sizes_y0_standard_guide = None
+                    #img_y0_standard_guide, img_masks_y0_standard_guide, img_sizes_y0_standard_guide = self.patchify(img_y0_standard_guide, self.max_seq, img_sizes_y0_standard_guide) 
+                    h_len = ((h + (patch_size // 2)) // patch_size) # h_len 96
+                    w_len = ((w + (patch_size // 2)) // patch_size) # w_len 96
+                    img_y0_standard_guide = rearrange(img_y0_standard_guide, "b c (h ph) (w pw) -> b (h w) (c ph pw)", ph=patch_size, pw=patch_size) # img 1,9216,64     1,16,128,128 -> 1,4096,64
+                    y0_standard_guide_embed = F.linear(img_y0_standard_guide.to(W), W, b).to(img_y0_standard_guide)
+                    
+                    f_c          = y0_standard_guide_embed[0].clone()
+                    mu_c         = f_c.mean(dim=0, keepdim=True)
+                    f_c_centered = f_c - mu_c
+                    
+                    cov = (f_c_centered.T.double() @ f_c_centered.double()) / (f_c_centered.size(0) - 1)
+
+                    S_eig, U_eig  = torch.linalg.eigh(cov + 1e-5 * torch.eye(cov.size(0), dtype=cov.dtype, device=cov.device))
+                    inv_sqrt_eig  = S_eig.clamp(min=0).rsqrt() 
+                    
+                    whiten = U_eig @ torch.diag(inv_sqrt_eig) @ U_eig.T
+                    whiten = whiten.to(f_c_centered)
+
+                    f_c_whitened = f_c_centered @ whiten.T
+                    f_cs         = f_c_whitened @ self.y0_color.T.to(y0_standard_guide) + self.mu_s.to(y0_standard_guide)
+                    
+                    f_cs = (f_cs - b) @ torch.linalg.pinv(W.to(f_cs)).T.to(f_cs)
+                    #y0_standard_guide = self.unpatchify (f_cs.unsqueeze(0), img_sizes_y0_standard_guide)
+                    f_cs = f_cs.to(eps)
+                    y0_standard_guide = rearrange(f_cs.unsqueeze(0), "b (h w) (c ph pw) -> b c (h ph) (w pw)", h=h_len, w=w_len, ph=2, pw=2)[:,:,:h,:w]
+                    self.y0_standard_guide = y0_standard_guide
+                    
+                if transformer_options.get('y0_inv_standard_guide') is not None:
+                    y0_inv_standard_guide = transformer_options.get('y0_inv_standard_guide')
+                    
+                    img_y0_standard_guide = comfy.ldm.common_dit.pad_to_patch_size(y0_inv_standard_guide, (self.patch_size, self.patch_size))
+                    #img_sizes_y0_standard_guide = None
+                    #img_y0_standard_guide, img_masks_y0_standard_guide, img_sizes_y0_standard_guide = self.patchify(img_y0_standard_guide, self.max_seq, img_sizes_y0_standard_guide) 
+                    h_len = ((h + (patch_size // 2)) // patch_size) # h_len 96
+                    w_len = ((w + (patch_size // 2)) // patch_size) # w_len 96
+                    img_y0_standard_guide = rearrange(img_y0_standard_guide, "b c (h ph) (w pw) -> b (h w) (c ph pw)", ph=patch_size, pw=patch_size) # img 1,9216,64     1,16,128,128 -> 1,4096,64
+                    y0_standard_guide_embed = F.linear(img_y0_standard_guide.to(W), W, b).to(img_y0_standard_guide)
+                    
+                    f_c          = y0_standard_guide_embed[0].clone()
+                    
+                    #f_c          = y0_inv_standard_guide[0].clone()
+                    mu_c         = f_c.mean(dim=0, keepdim=True)
+                    f_c_centered = f_c - mu_c
+                    
+                    cov = (f_c_centered.T.double() @ f_c_centered.double()) / (f_c_centered.size(0) - 1)
+
+                    S_eig, U_eig  = torch.linalg.eigh(cov + 1e-5 * torch.eye(cov.size(0), dtype=cov.dtype, device=cov.device))
+                    inv_sqrt_eig  = S_eig.clamp(min=0).rsqrt() 
+                    
+                    whiten = U_eig @ torch.diag(inv_sqrt_eig) @ U_eig.T
+                    whiten = whiten.to(f_c_centered)
+
+                    f_c_whitened = f_c_centered @ whiten.T
+                    f_cs         = f_c_whitened @ self.y0_color.T.to(y0_inv_standard_guide) + self.mu_s.to(y0_inv_standard_guide)
+                    
+                    f_cs = (f_cs - b) @ torch.linalg.pinv(W.to(f_cs)).T.to(f_cs)
+                    #y0_inv_standard_guide = self.unpatchify (f_cs.unsqueeze(0), img_sizes_y0_standard_guide)
+                    f_cs = f_cs.to(eps)
+                    y0_inv_standard_guide = rearrange(f_cs.unsqueeze(0), "b (h w) (c ph pw) -> b c (h ph) (w pw)", h=h_len, w=w_len, ph=2, pw=2)[:,:,:h,:w]
+                    self.y0_inv_standard_guide = y0_inv_standard_guide
+
+
+
+
 
             
             denoised_approx = (denoised_embed - b.to(denoised_embed)) @ torch.linalg.pinv(W).T.to(denoised_embed)
