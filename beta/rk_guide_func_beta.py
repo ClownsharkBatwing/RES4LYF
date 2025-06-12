@@ -411,128 +411,128 @@ class LatentGuide:
                 steps_lure_y_                   = steps_
                 steps_lure_y_inv_               = steps_inv_
 
-            if self.mask     is not None and self.mask.shape    [0] > 1 and self.VIDEO is False:
-                self.mask     = self.mask    [batch_num].unsqueeze(0)
-            if self.mask_inv is not None and self.mask_inv.shape[0] > 1 and self.VIDEO is False:
-                self.mask_inv = self.mask_inv[batch_num].unsqueeze(0)
-            if self.mask_sync is not None and self.mask_sync.shape[0] > 1 and self.VIDEO is False:
-                self.mask_sync = self.mask_sync[batch_num].unsqueeze(0)
+            if self.mask         is not None and self.mask.shape    [0] > 1 and self.VIDEO     is False:
+                self.mask         = self.mask    [batch_num].unsqueeze(0)
+            if self.mask_inv     is not None and self.mask_inv.shape[0] > 1 and self.VIDEO     is False:
+                self.mask_inv     = self.mask_inv[batch_num].unsqueeze(0)
+            if self.mask_sync    is not None and self.mask_sync.shape[0] > 1 and self.VIDEO    is False:
+                self.mask_sync    = self.mask_sync[batch_num].unsqueeze(0)
             if self.mask_drift_x is not None and self.mask_drift_x.shape[0] > 1 and self.VIDEO is False:
                 self.mask_drift_x = self.mask_drift_x[batch_num].unsqueeze(0)
             if self.mask_drift_y is not None and self.mask_drift_y.shape[0] > 1 and self.VIDEO is False:
                 self.mask_drift_y = self.mask_drift_y[batch_num].unsqueeze(0)
-            if self.mask_lure_x is not None and self.mask_lure_x.shape[0] > 1 and self.VIDEO is False:
-                self.mask_lure_x = self.mask_lure_x[batch_num].unsqueeze(0)
-            if self.mask_lure_y is not None and self.mask_lure_y.shape[0] > 1 and self.VIDEO is False:
-                self.mask_lure_y = self.mask_lure_y[batch_num].unsqueeze(0)
+            if self.mask_lure_x  is not None and self.mask_lure_x.shape[0] > 1 and self.VIDEO  is False:
+                self.mask_lure_x  = self.mask_lure_x[batch_num].unsqueeze(0)
+            if self.mask_lure_y  is not None and self.mask_lure_y.shape[0] > 1 and self.VIDEO  is False:
+                self.mask_lure_y  = self.mask_lure_y[batch_num].unsqueeze(0)
                 
             if self.guide_mode.startswith("fully_") and not RK_IMPLICIT:
                 self.guide_mode = self.guide_mode[6:]   # fully_pseudoimplicit is only supported for implicit samplers, default back to pseudoimplicit
 
             guide_sigma_shift = self.EO("guide_sigma_shift", 0.0)                                                                         # effectively hardcoding shift to 0 !!!!!!
             
-            if latent_guide_weights is None and scheduler_ is not None:# and self.guide_mode != "none":
-                total_steps          = steps_ - start_steps_
-                latent_guide_weights = get_sigmas(self.model, scheduler_, total_steps, 1.0, shift=guide_sigma_shift).to(dtype=self.dtype, device=self.device) / self.sigma_max
-                prepend              = torch.zeros(start_steps_,                               dtype=self.dtype, device=self.device)
-                latent_guide_weights = torch.cat((prepend, latent_guide_weights.to(self.device)), dim=0)
+            if latent_guide_weights is None and scheduler_ is not None:
+                total_steps                     = steps_ - start_steps_
+                latent_guide_weights            = get_sigmas(self.model, scheduler_, total_steps, 1.0, shift=guide_sigma_shift).to(dtype=self.dtype, device=self.device) / self.sigma_max
+                prepend                         = torch.zeros(start_steps_,                               dtype=self.dtype, device=self.device)
+                latent_guide_weights            = torch.cat((prepend, latent_guide_weights.to(self.device)), dim=0)
                 
-            if latent_guide_weights_inv is None and scheduler_inv_ is not None:# and self.guide_mode != "none":
-                total_steps              = steps_inv_ - start_steps_inv_
-                latent_guide_weights_inv = get_sigmas(self.model, scheduler_inv_, total_steps, 1.0, shift=guide_sigma_shift).to(dtype=self.dtype, device=self.device) / self.sigma_max
-                prepend                  = torch.zeros(start_steps_inv_,                               dtype=self.dtype, device=self.device) 
-                latent_guide_weights_inv = torch.cat((prepend, latent_guide_weights_inv.to(self.device)), dim=0)
+            if latent_guide_weights_inv is None and scheduler_inv_ is not None:
+                total_steps                     = steps_inv_ - start_steps_inv_
+                latent_guide_weights_inv        = get_sigmas(self.model, scheduler_inv_, total_steps, 1.0, shift=guide_sigma_shift).to(dtype=self.dtype, device=self.device) / self.sigma_max
+                prepend                         = torch.zeros(start_steps_inv_,                               dtype=self.dtype, device=self.device) 
+                latent_guide_weights_inv        = torch.cat((prepend, latent_guide_weights_inv.to(self.device)), dim=0)
 
-            if latent_guide_weights_sync is None and scheduler_sync_ is not None:# and self.guide_mode != "none":
-                total_steps          = steps_sync_ - start_steps_sync_
-                latent_guide_weights_sync = get_sigmas(self.model, scheduler_sync_, total_steps, 1.0, shift=guide_sigma_shift).to(dtype=self.dtype, device=self.device) / self.sigma_max
-                prepend              = torch.zeros(start_steps_sync_,                               dtype=self.dtype, device=self.device)
-                latent_guide_weights_sync = torch.cat((prepend, latent_guide_weights_sync.to(self.device)), dim=0)
+            if latent_guide_weights_sync is None and scheduler_sync_ is not None:
+                total_steps                     = steps_sync_ - start_steps_sync_
+                latent_guide_weights_sync       = get_sigmas(self.model, scheduler_sync_, total_steps, 1.0, shift=guide_sigma_shift).to(dtype=self.dtype, device=self.device) / self.sigma_max
+                prepend                         = torch.zeros(start_steps_sync_,                               dtype=self.dtype, device=self.device)
+                latent_guide_weights_sync       = torch.cat((prepend, latent_guide_weights_sync.to(self.device)), dim=0)
                 
-            if latent_guide_weights_sync_inv is None and scheduler_sync_inv_ is not None:# and self.guide_mode != "none":
-                total_steps              = steps_sync_inv_ - start_steps_sync_inv_
-                latent_guide_weights_sync_inv = get_sigmas(self.model, scheduler_sync_inv_, total_steps, 1.0, shift=guide_sigma_shift).to(dtype=self.dtype, device=self.device) / self.sigma_max
-                prepend                  = torch.zeros(start_steps_sync_inv_,                               dtype=self.dtype, device=self.device) 
-                latent_guide_weights_sync_inv = torch.cat((prepend, latent_guide_weights_sync_inv.to(self.device)), dim=0)
+            if latent_guide_weights_sync_inv is None and scheduler_sync_inv_ is not None:
+                total_steps                     = steps_sync_inv_ - start_steps_sync_inv_
+                latent_guide_weights_sync_inv   = get_sigmas(self.model, scheduler_sync_inv_, total_steps, 1.0, shift=guide_sigma_shift).to(dtype=self.dtype, device=self.device) / self.sigma_max
+                prepend                         = torch.zeros(start_steps_sync_inv_,                               dtype=self.dtype, device=self.device) 
+                latent_guide_weights_sync_inv   = torch.cat((prepend, latent_guide_weights_sync_inv.to(self.device)), dim=0)
                 
-            if latent_guide_weights_drift_x is None and scheduler_drift_x_ is not None:# and self.guide_mode != "none":
-                total_steps          = steps_drift_x_ - start_steps_drift_x_
-                latent_guide_weights_drift_x = get_sigmas(self.model, scheduler_drift_x_, total_steps, 1.0, shift=guide_sigma_shift).to(dtype=self.dtype, device=self.device) / self.sigma_max
-                prepend              = torch.zeros(start_steps_drift_x_,                               dtype=self.dtype, device=self.device)
-                latent_guide_weights_drift_x = torch.cat((prepend, latent_guide_weights_drift_x.to(self.device)), dim=0)
+            if latent_guide_weights_drift_x is None and scheduler_drift_x_ is not None:
+                total_steps                     = steps_drift_x_ - start_steps_drift_x_
+                latent_guide_weights_drift_x    = get_sigmas(self.model, scheduler_drift_x_, total_steps, 1.0, shift=guide_sigma_shift).to(dtype=self.dtype, device=self.device) / self.sigma_max
+                prepend                         = torch.zeros(start_steps_drift_x_,                               dtype=self.dtype, device=self.device)
+                latent_guide_weights_drift_x    = torch.cat((prepend, latent_guide_weights_drift_x.to(self.device)), dim=0)
                 
-            if latent_guide_weights_drift_x_inv is None and scheduler_drift_x_inv_ is not None:# and self.guide_mode != "none":
-                total_steps              = steps_drift_x_inv_ - start_steps_drift_x_inv_
+            if latent_guide_weights_drift_x_inv is None and scheduler_drift_x_inv_ is not None:
+                total_steps                      = steps_drift_x_inv_ - start_steps_drift_x_inv_
                 latent_guide_weights_drift_x_inv = get_sigmas(self.model, scheduler_drift_x_inv_, total_steps, 1.0, shift=guide_sigma_shift).to(dtype=self.dtype, device=self.device) / self.sigma_max
-                prepend                  = torch.zeros(start_steps_drift_x_inv_,                               dtype=self.dtype, device=self.device) 
+                prepend                          = torch.zeros(start_steps_drift_x_inv_,                               dtype=self.dtype, device=self.device) 
                 latent_guide_weights_drift_x_inv = torch.cat((prepend, latent_guide_weights_drift_x_inv.to(self.device)), dim=0)
                 
-            if latent_guide_weights_drift_y is None and scheduler_drift_y_ is not None:# and self.guide_mode != "none":
-                total_steps          = steps_drift_y_ - start_steps_drift_y_
-                latent_guide_weights_drift_y = get_sigmas(self.model, scheduler_drift_y_, total_steps, 1.0, shift=guide_sigma_shift).to(dtype=self.dtype, device=self.device) / self.sigma_max
-                prepend              = torch.zeros(start_steps_drift_y_,                               dtype=self.dtype, device=self.device)
-                latent_guide_weights_drift_y = torch.cat((prepend, latent_guide_weights_drift_y.to(self.device)), dim=0)
+            if latent_guide_weights_drift_y is None and scheduler_drift_y_ is not None:
+                total_steps                     = steps_drift_y_ - start_steps_drift_y_
+                latent_guide_weights_drift_y    = get_sigmas(self.model, scheduler_drift_y_, total_steps, 1.0, shift=guide_sigma_shift).to(dtype=self.dtype, device=self.device) / self.sigma_max
+                prepend                         = torch.zeros(start_steps_drift_y_,                               dtype=self.dtype, device=self.device)
+                latent_guide_weights_drift_y    = torch.cat((prepend, latent_guide_weights_drift_y.to(self.device)), dim=0)
                 
-            if latent_guide_weights_drift_y_inv is None and scheduler_drift_y_inv_ is not None:# and self.guide_mode != "none":
-                total_steps              = steps_drift_y_inv_ - start_steps_drift_y_inv_
+            if latent_guide_weights_drift_y_inv is None and scheduler_drift_y_inv_ is not None:
+                total_steps                      = steps_drift_y_inv_ - start_steps_drift_y_inv_
                 latent_guide_weights_drift_y_inv = get_sigmas(self.model, scheduler_drift_y_inv_, total_steps, 1.0, shift=guide_sigma_shift).to(dtype=self.dtype, device=self.device) / self.sigma_max
-                prepend                  = torch.zeros(start_steps_drift_y_inv_,                               dtype=self.dtype, device=self.device) 
+                prepend                          = torch.zeros(start_steps_drift_y_inv_,                               dtype=self.dtype, device=self.device) 
                 latent_guide_weights_drift_y_inv = torch.cat((prepend, latent_guide_weights_drift_y_inv.to(self.device)), dim=0)
                 
-            if latent_guide_weights_lure_x is None and scheduler_lure_x_ is not None:# and self.guide_mode != "none":
-                total_steps          = steps_lure_x_ - start_steps_lure_x_
-                latent_guide_weights_lure_x = get_sigmas(self.model, scheduler_lure_x_, total_steps, 1.0, shift=guide_sigma_shift).to(dtype=self.dtype, device=self.device) / self.sigma_max
-                prepend              = torch.zeros(start_steps_lure_x_,                               dtype=self.dtype, device=self.device)
-                latent_guide_weights_lure_x = torch.cat((prepend, latent_guide_weights_lure_x.to(self.device)), dim=0)
+            if latent_guide_weights_lure_x is None and scheduler_lure_x_ is not None:
+                total_steps                     = steps_lure_x_ - start_steps_lure_x_
+                latent_guide_weights_lure_x     = get_sigmas(self.model, scheduler_lure_x_, total_steps, 1.0, shift=guide_sigma_shift).to(dtype=self.dtype, device=self.device) / self.sigma_max
+                prepend                         = torch.zeros(start_steps_lure_x_,                               dtype=self.dtype, device=self.device)
+                latent_guide_weights_lure_x     = torch.cat((prepend, latent_guide_weights_lure_x.to(self.device)), dim=0)
                 
-            if latent_guide_weights_lure_x_inv is None and scheduler_lure_x_inv_ is not None:# and self.guide_mode != "none":
-                total_steps              = steps_lure_x_inv_ - start_steps_lure_x_inv_
+            if latent_guide_weights_lure_x_inv is None and scheduler_lure_x_inv_ is not None:
+                total_steps                     = steps_lure_x_inv_ - start_steps_lure_x_inv_
                 latent_guide_weights_lure_x_inv = get_sigmas(self.model, scheduler_lure_x_inv_, total_steps, 1.0, shift=guide_sigma_shift).to(dtype=self.dtype, device=self.device) / self.sigma_max
-                prepend                  = torch.zeros(start_steps_lure_x_inv_,                               dtype=self.dtype, device=self.device) 
+                prepend                         = torch.zeros(start_steps_lure_x_inv_,                               dtype=self.dtype, device=self.device) 
                 latent_guide_weights_lure_x_inv = torch.cat((prepend, latent_guide_weights_lure_x_inv.to(self.device)), dim=0)
                 
-            if latent_guide_weights_lure_y is None and scheduler_lure_y_ is not None:# and self.guide_mode != "none":
-                total_steps          = steps_lure_y_ - start_steps_lure_y_
-                latent_guide_weights_lure_y = get_sigmas(self.model, scheduler_lure_y_, total_steps, 1.0, shift=guide_sigma_shift).to(dtype=self.dtype, device=self.device) / self.sigma_max
-                prepend              = torch.zeros(start_steps_lure_y_,                               dtype=self.dtype, device=self.device)
-                latent_guide_weights_lure_y = torch.cat((prepend, latent_guide_weights_lure_y.to(self.device)), dim=0)
+            if latent_guide_weights_lure_y is None and scheduler_lure_y_ is not None:
+                total_steps                     = steps_lure_y_ - start_steps_lure_y_
+                latent_guide_weights_lure_y     = get_sigmas(self.model, scheduler_lure_y_, total_steps, 1.0, shift=guide_sigma_shift).to(dtype=self.dtype, device=self.device) / self.sigma_max
+                prepend                         = torch.zeros(start_steps_lure_y_,                               dtype=self.dtype, device=self.device)
+                latent_guide_weights_lure_y     = torch.cat((prepend, latent_guide_weights_lure_y.to(self.device)), dim=0)
                 
-            if latent_guide_weights_lure_y_inv is None and scheduler_lure_y_inv_ is not None:# and self.guide_mode != "none":
-                total_steps              = steps_lure_y_inv_ - start_steps_lure_y_inv_
+            if latent_guide_weights_lure_y_inv is None and scheduler_lure_y_inv_ is not None:
+                total_steps                     = steps_lure_y_inv_ - start_steps_lure_y_inv_
                 latent_guide_weights_lure_y_inv = get_sigmas(self.model, scheduler_lure_y_inv_, total_steps, 1.0, shift=guide_sigma_shift).to(dtype=self.dtype, device=self.device) / self.sigma_max
-                prepend                  = torch.zeros(start_steps_lure_y_inv_,                               dtype=self.dtype, device=self.device) 
+                prepend                         = torch.zeros(start_steps_lure_y_inv_,                               dtype=self.dtype, device=self.device) 
                 latent_guide_weights_lure_y_inv = torch.cat((prepend, latent_guide_weights_lure_y_inv.to(self.device)), dim=0)
                 
 
             if latent_guide_weights_mean is None and scheduler_mean_ is not None:
-                total_steps               = steps_mean_ - start_steps_mean_
-                latent_guide_weights_mean = get_sigmas(self.model, scheduler_mean_, total_steps, 1.0, shift=guide_sigma_shift).to(dtype=self.dtype, device=self.device) / self.sigma_max
-                prepend                   = torch.zeros(start_steps_mean_,                                                        dtype=self.dtype, device=self.device) 
-                latent_guide_weights_mean = torch.cat((prepend, latent_guide_weights_mean.to(self.device)), dim=0)
+                total_steps                     = steps_mean_ - start_steps_mean_
+                latent_guide_weights_mean       = get_sigmas(self.model, scheduler_mean_, total_steps, 1.0, shift=guide_sigma_shift).to(dtype=self.dtype, device=self.device) / self.sigma_max
+                prepend                         = torch.zeros(start_steps_mean_,                                                        dtype=self.dtype, device=self.device) 
+                latent_guide_weights_mean       = torch.cat((prepend, latent_guide_weights_mean.to(self.device)), dim=0)
             
             if latent_guide_weights_adain is None and scheduler_adain_ is not None:
-                total_steps                = steps_adain_ - start_steps_adain_
-                latent_guide_weights_adain = get_sigmas(self.model, scheduler_adain_, total_steps, 1.0, shift=guide_sigma_shift).to(dtype=self.dtype, device=self.device) / self.sigma_max
-                prepend                    = torch.zeros(start_steps_adain_,                                                         dtype=self.dtype, device=self.device) 
-                latent_guide_weights_adain = torch.cat((prepend, latent_guide_weights_adain.to(self.device)), dim=0)
+                total_steps                     = steps_adain_ - start_steps_adain_
+                latent_guide_weights_adain      = get_sigmas(self.model, scheduler_adain_, total_steps, 1.0, shift=guide_sigma_shift).to(dtype=self.dtype, device=self.device) / self.sigma_max
+                prepend                         = torch.zeros(start_steps_adain_,                                                         dtype=self.dtype, device=self.device) 
+                latent_guide_weights_adain      = torch.cat((prepend, latent_guide_weights_adain.to(self.device)), dim=0)
             
             if latent_guide_weights_attninj is None and scheduler_attninj_ is not None:
-                total_steps                  = steps_attninj_ - start_steps_attninj_
-                latent_guide_weights_attninj = get_sigmas(self.model, scheduler_attninj_, total_steps, 1.0, shift=guide_sigma_shift).to(dtype=self.dtype, device=self.device) / self.sigma_max
-                prepend                      = torch.zeros(start_steps_attninj_,                                                         dtype=self.dtype, device=self.device) 
-                latent_guide_weights_attninj = torch.cat((prepend, latent_guide_weights_attninj.to(self.device)), dim=0)
+                total_steps                     = steps_attninj_ - start_steps_attninj_
+                latent_guide_weights_attninj    = get_sigmas(self.model, scheduler_attninj_, total_steps, 1.0, shift=guide_sigma_shift).to(dtype=self.dtype, device=self.device) / self.sigma_max
+                prepend                         = torch.zeros(start_steps_attninj_,                                                         dtype=self.dtype, device=self.device) 
+                latent_guide_weights_attninj    = torch.cat((prepend, latent_guide_weights_attninj.to(self.device)), dim=0)
             
             if latent_guide_weights_style_pos is None and scheduler_style_pos_ is not None:
-                total_steps                    = steps_style_pos_ - start_steps_style_pos_
-                latent_guide_weights_style_pos = get_sigmas(self.model, scheduler_style_pos_, total_steps, 1.0, shift=guide_sigma_shift).to(dtype=self.dtype, device=self.device) / self.sigma_max
-                prepend                        = torch.zeros(start_steps_style_pos_,                                                         dtype=self.dtype, device=self.device) 
-                latent_guide_weights_style_pos = torch.cat((prepend, latent_guide_weights_style_pos.to(self.device)), dim=0)
+                total_steps                     = steps_style_pos_ - start_steps_style_pos_
+                latent_guide_weights_style_pos  = get_sigmas(self.model, scheduler_style_pos_, total_steps, 1.0, shift=guide_sigma_shift).to(dtype=self.dtype, device=self.device) / self.sigma_max
+                prepend                         = torch.zeros(start_steps_style_pos_,                                                         dtype=self.dtype, device=self.device) 
+                latent_guide_weights_style_pos  = torch.cat((prepend, latent_guide_weights_style_pos.to(self.device)), dim=0)
             
             if latent_guide_weights_style_neg is None and scheduler_style_neg_ is not None:
-                total_steps                    = steps_style_neg_ - start_steps_style_neg_
-                latent_guide_weights_style_neg = get_sigmas(self.model, scheduler_style_neg_, total_steps, 1.0, shift=guide_sigma_shift).to(dtype=self.dtype, device=self.device) / self.sigma_max
-                prepend                        = torch.zeros(start_steps_style_neg_,                                                         dtype=self.dtype, device=self.device) 
-                latent_guide_weights_style_neg = torch.cat((prepend, latent_guide_weights_style_neg.to(self.device)), dim=0)
+                total_steps                     = steps_style_neg_ - start_steps_style_neg_
+                latent_guide_weights_style_neg  = get_sigmas(self.model, scheduler_style_neg_, total_steps, 1.0, shift=guide_sigma_shift).to(dtype=self.dtype, device=self.device) / self.sigma_max
+                prepend                         = torch.zeros(start_steps_style_neg_,                                                         dtype=self.dtype, device=self.device) 
+                latent_guide_weights_style_neg  = torch.cat((prepend, latent_guide_weights_style_neg.to(self.device)), dim=0)
             
             if scheduler_ != "constant":
                 latent_guide_weights            = initialize_or_scale(latent_guide_weights,      latent_guide_weight,      self.max_steps)
