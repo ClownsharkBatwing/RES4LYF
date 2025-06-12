@@ -264,8 +264,8 @@ class ImageRepeatTileToSize:
         return {
             "required": {
                 "image":  ("IMAGE",),
-                "width":  ("INT",     {"default": 1024, "min": 1, "step": 1,}),
-                "height": ("INT",     {"default": 1024, "min": 1, "step": 1,}),
+                "width":  ("INT",     {"default": 1024, "min": 1, "max": 1048576, "step": 1,}),
+                "height": ("INT",     {"default": 1024, "min": 1, "max": 1048576, "step": 1,}),
                 "crop":   ("BOOLEAN", {"default": True}),
             },
         }
