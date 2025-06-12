@@ -738,7 +738,7 @@ def tile_latent(latent: torch.Tensor,
             if has_time:
                 tile = latent[:, :, :, y:y+t_h, x:x+t_w]
             else:
-                tile = latent[:, :, y:y+t_h, x:x+t_w]
+                tile = latent[:, :,    y:y+t_h, x:x+t_w]
             tiles.append(tile)
 
     tiles = torch.cat(tiles, dim=0)

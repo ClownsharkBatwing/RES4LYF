@@ -8,6 +8,7 @@ import comfy.latent_formats
 import comfy.sd
 import comfy.clip_vision
 import comfy.supported_models
+from comfy.utils import load_torch_file
 
 # Documentation: Self-documenting code
 # Instructions for use: Obvious
@@ -214,6 +215,12 @@ class BaseModelLoader:
             sd = comfy.utils.load_torch_file(vae_path)
             return comfy.sd.VAE(sd=sd)
 
+
+def load_clipvision(ckpt_path):
+    sd = load_torch_file(ckpt_path)
+    clip_vision = comfy.clip_vision.load(ckpt_path)
+    return clip_vision
+        
 class FluxLoader(BaseModelLoader):
     @classmethod
     def INPUT_TYPES(s):
@@ -258,11 +265,11 @@ class FluxLoader(BaseModelLoader):
                                     clip_type=comfy.sd.CLIPType.FLUX)
 
         clip_vision = None if clip_vision_name == ".none" else \
-            comfy.clip_vision.load(folder_paths.get_full_path_or_raise("clip_vision", clip_vision_name))
+            load_clipvision(folder_paths.get_full_path_or_raise("clip_vision", clip_vision_name))
 
         style_model = None if style_model_name == ".none" else \
             comfy.sd.load_style_model(folder_paths.get_full_path_or_raise("style_models", style_model_name))
-
+            
         vae = self.load_vae(vae_name, ckpt_out)
         
         return (ckpt_out[0], clip, vae, clip_vision, style_model)
