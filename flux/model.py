@@ -27,6 +27,8 @@ from comfy.ldm.flux.model import Flux as Flux
 from einops import rearrange, repeat
 import comfy.ldm.common_dit
 
+from ..latents import tile_latent, untile_latent
+
 #from ..latents import interpolate_spd
 
 @dataclass
@@ -322,6 +324,12 @@ class ReFlux(Flux):
         if EO is not None:
             EO.mute = True
             
+        if EO("adain_tile"):
+            self.adain_tile = (EO("adain_tile", 4), EO("adain_tile", 4))
+        else:
+            if hasattr(self, "adain_tile"):
+                del self.adain_tile
+        
         lamb_t_factor = EO("lamb_t_factor", 0.1)
 
         y0_style_pos        = transformer_options.get("y0_style_pos")
@@ -492,7 +500,46 @@ class ReFlux(Flux):
             y0_adain_embed = F.linear(img_y0_adain.to(W), W, b).to(img_y0_adain)
 
             if transformer_options['y0_style_method'] == "AdaIN":
-                denoised_embed = adain_seq_inplace(denoised_embed, y0_adain_embed)
+                if hasattr(self, "guide_mask"):
+                    
+
+                    # Step 1: Resize mask to patch space
+                    patch_mask = F.interpolate(self.guide_mask.float(), size=(64, 64), mode='nearest-exact')
+
+                    # Step 2: Flatten spatial dims to match sequence length
+                    patch_mask_flat = patch_mask.view(1, -1)  # Shape: [1, 4096]
+
+                    # (Optional) Convert to same dtype/device as denoised_embed
+                    self.mask_adain = patch_mask_flat.to(dtype=denoised_embed.dtype, device=denoised_embed.device)
+
+                if hasattr(self, "mask_adain"):
+                    
+                    denoised_embed = adain_seq_dual_region_inplace(denoised_embed, y0_adain_embed, self.mask_adain)
+                elif hasattr(self, "adain_tile"):
+                    tile_h, tile_w = self.adain_tile
+                    denoised_pretile = rearrange(denoised_embed, "b (h w) c -> b c h w", h=h_len, w=w_len)
+                    y0_adain_pretile = rearrange(y0_adain_embed, "b (h w) c -> b c h w", h=h_len, w=w_len)
+                    tiles,    orig_shape, grid, strides = tile_latent(denoised_pretile, tile_size=(tile_h,tile_w))
+                    y0_tiles, orig_shape, grid, strides = tile_latent(y0_adain_pretile, tile_size=(tile_h,tile_w))
+                    
+                    tiles_out = []
+                    for i in range(tiles.shape[0]):
+                        tile = tiles[i].unsqueeze(0)
+                        y0_tile = y0_tiles[i].unsqueeze(0)
+                        
+                        tile    = rearrange(tile,    "b c h w -> b (h w) c", h=tile_h, w=tile_w)
+                        y0_tile = rearrange(y0_tile, "b c h w -> b (h w) c", h=tile_h, w=tile_w)
+                        
+                        tile = adain_seq_inplace(tile, y0_tile)
+                        tiles_out.append(rearrange(tile, "b (h w) c -> b c h w", h=tile_h, w=tile_w))
+                        
+                    tiles_out_tensor = torch.cat(tiles_out, dim=0)
+                    denoised_embed = untile_latent(tiles_out_tensor, orig_shape, grid, strides)
+                    denoised_embed = rearrange(denoised_embed, "b c h w -> b (h w) c", h=h_len, w=w_len)
+                
+                
+                else:
+                    denoised_embed = adain_seq_inplace(denoised_embed, y0_adain_embed)
                 for adain_iter in range(EO("style_iter", 0)):
                     denoised_embed = adain_seq_inplace(denoised_embed, y0_adain_embed)
                     denoised_embed = (denoised_embed - b) @ torch.linalg.pinv(W.to(pinv_dtype)).T.to(dtype)
@@ -740,4 +787,64 @@ def adain_seq_inplace(content: torch.Tensor, style: torch.Tensor, eps: float = 1
     content.sub_(mean_c).div_(std_c).mul_(std_s).add_(mean_s)  # in-place chain
     return content
 
+
+
+def adain_seq_masked_inplace(content: torch.Tensor, style: torch.Tensor, mask: torch.Tensor, eps: float = 1e-7) -> torch.Tensor:
+    """
+    In-place AdaIN on masked positions only.
+
+    content: (B, T, C)
+    style:   (B, T, C)
+    mask:    (B, T) binary mask (1=use, 0=skip)
+    """
+    B, T, C = content.shape
+
+    mask = mask.unsqueeze(-1)  # (B, T, 1)
+    mask_sum = mask.sum(dim=1, keepdim=True).clamp(min=1.0)  # Avoid division by zero
+
+    # Masked mean and std over time dim
+    mean_c = (content * mask).sum(1, keepdim=True) / mask_sum
+    var_c  = ((content - mean_c)**2 * mask).sum(1, keepdim=True) / mask_sum
+    std_c  = (var_c + eps).sqrt()
+
+    mean_s = (style * mask).sum(1, keepdim=True) / mask_sum
+    var_s  = ((style - mean_s)**2 * mask).sum(1, keepdim=True) / mask_sum
+    std_s  = (var_s + eps).sqrt()
+
+    # Only normalize and rescale masked tokens
+    content.sub_(mean_c).div_(std_c).mul_(std_s).add_(mean_s)
+    content *= mask  # keep only masked updates
+    return content
+
+def adain_seq_dual_region_inplace(content: torch.Tensor, style: torch.Tensor, mask: torch.Tensor, eps: float = 1e-7) -> torch.Tensor:
+    """
+    Apply AdaIN separately to masked and unmasked regions, then combine.
+    Args:
+        content: Tensor of shape [B, T, C]
+        style:   Tensor of shape [B, T, C]
+        mask:    Tensor of shape [B, T] where 1.0 = masked, 0.0 = unmasked
+    Returns:
+        Modified content (in-place)
+    """
+    B, T, C = content.shape
+
+    for region_value in [1.0, 0.0]:
+        region_mask = (mask == region_value)                      # [B, T]
+        if region_mask.any():
+            idx_expand = region_mask.unsqueeze(-1).expand(-1, -1, C)  # [B, T, C]
+
+            c_sub = content[idx_expand].view(-1, C)  # selected content: [N, C]
+            s_sub = style  [idx_expand].view(-1, C)  # selected style:   [N, C]
+
+            mean_c = c_sub.mean(0, keepdim=True)
+            std_c  = c_sub.std (0, keepdim=True).add_(eps)
+            mean_s = s_sub.mean(0, keepdim=True)
+            std_s  = s_sub.std (0, keepdim=True).add_(eps)
+
+            c_norm = (c_sub - mean_c) / std_c * std_s + mean_s  # [N, C]
+
+            # Safely assign using masked_scatter_ — no shape mismatch
+            content.masked_scatter_(idx_expand, c_norm)
+
+    return content
 
