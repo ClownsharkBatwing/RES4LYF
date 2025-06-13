@@ -417,7 +417,7 @@ class RK_NoiseSampler:
         alpha_ratio = 1 - dt * (eta**2/4) * (1 + sigma)
         sigma_down  = sigma_next - (eta/4)*sigma*(1-sigma)*(sigma - sigma_next)
         return sigma_up, sigma_down, alpha_ratio
-        
+    
     def linear_noise_init(self, y:Tensor, sigma_curr:Tensor, x_base:Optional[Tensor]=None, x_curr:Optional[Tensor]=None, mask:Optional[Tensor]=None) -> Tensor: 
 
         y_noised = (self.sigma_max - sigma_curr) * y + sigma_curr * self.init_noise

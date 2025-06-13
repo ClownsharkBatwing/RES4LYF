@@ -1,5 +1,6 @@
 import torch
 from torch import Tensor
+import torch.nn.functional as F
 from tqdm.auto import trange
 import gc
 from typing import Optional, Callable, Tuple, List, Dict, Any, Union
@@ -1666,7 +1667,14 @@ def sample_rk_beta(
                             eps_prev_, x_ = LG.process_guides_substep(x_0, x_, eps_prev_, data_, row, step_sched, NS.sigma, NS.sigma_next, NS.sigma_down, NS.s_, epsilon_scale, RK)
                         
                         if LG.y0_mean is not None and LG.y0_mean.sum() != 0.0:
-                            eps_row_mean = eps_[row] - eps_[row].mean(dim=(-2,-1), keepdim=True) + (LG.y0_mean - x_0).mean(dim=(-2,-1), keepdim=True)
+                            if EO("guide_mean_pw"):
+                                data_row_new = adain_patchwise_row_batch(data_[row].clone(), LG.y0_mean.clone(), sigma=EO("guide_mean_pw_sigma", 1.0), kernel_size=EO("guide_mean_pw_kernel_size", 7))
+                                if RK.EXPONENTIAL:
+                                    eps_row_mean = data_row_new - x_0
+                                else:
+                                    eps_row_mean = (x_0 - data_row_new) / s_tmp
+                            else:
+                                eps_row_mean = eps_[row] - eps_[row].mean(dim=(-2,-1), keepdim=True) + (LG.y0_mean - x_0).mean(dim=(-2,-1), keepdim=True)
                             
                             if LG.mask_mean is not None:
                                 eps_row_mean = LG.mask_mean * eps_row_mean + (1 - LG.mask_mean) * eps_[row]
@@ -2064,4 +2072,54 @@ def preview_callback(
     return
 
 
+
+
+def adain_patchwise_row_batch(content: torch.Tensor, style: torch.Tensor, sigma: float = 1.0, kernel_size: int = None, eps: float = 1e-5) -> torch.Tensor:
+
+    B, C, H, W = content.shape
+    device, dtype = content.device, content.dtype
+
+    if kernel_size is None:
+        kernel_size = int(2 * math.ceil(3 * sigma) + 1)
+    if kernel_size % 2 == 0:
+        kernel_size += 1
+
+    pad = kernel_size // 2
+    coords = torch.arange(kernel_size, dtype=torch.float64, device=device) - pad
+    gauss = torch.exp(-0.5 * (coords / sigma) ** 2)
+    gauss = (gauss / gauss.sum()).to(dtype)
+    kernel_2d = (gauss[:, None] * gauss[None, :])
+
+    weight = kernel_2d.view(1, 1, kernel_size, kernel_size)
+
+    content_padded = F.pad(content, (pad, pad, pad, pad), mode='reflect')
+    style_padded = F.pad(style, (pad, pad, pad, pad), mode='reflect')
+    result = torch.zeros_like(content)
+
+    for i in range(H):
+        c_row_patches = torch.stack([
+            content_padded[:, :, i:i+kernel_size, j:j+kernel_size]
+            for j in range(W)
+        ], dim=0)  # [W, B, C, k, k]
+
+        s_row_patches = torch.stack([
+            style_padded[:, :, i:i+kernel_size, j:j+kernel_size]
+            for j in range(W)
+        ], dim=0)
+
+        w = weight.expand_as(c_row_patches[0])
+
+        c_mean = (c_row_patches * w).sum(dim=(-1, -2), keepdim=True)
+        c_std  = ((c_row_patches - c_mean) ** 2 * w).sum(dim=(-1, -2), keepdim=True).sqrt() + eps
+        s_mean = (s_row_patches * w).sum(dim=(-1, -2), keepdim=True)
+        s_std  = ((s_row_patches - s_mean) ** 2 * w).sum(dim=(-1, -2), keepdim=True).sqrt() + eps
+
+        center = kernel_size // 2
+        central = c_row_patches[:, :, :, center:center+1, center:center+1]
+        normed = (central - c_mean) / c_std
+        stylized = normed * s_std + s_mean
+
+        result[:, :, i, :] = stylized.squeeze(-1).squeeze(-1).permute(1, 2, 0)  # [B,C,W]
+
+    return result
 
