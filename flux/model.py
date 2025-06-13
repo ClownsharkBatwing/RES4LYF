@@ -24,6 +24,7 @@ from . import layers
 #from comfy.ldm.flux.layers import timestep_embedding
 from comfy.ldm.flux.model import Flux as Flux
 
+import math
 from einops import rearrange, repeat
 import comfy.ldm.common_dit
 
@@ -326,6 +327,7 @@ class ReFlux(Flux):
             
         if EO("adain_tile"):
             self.adain_tile = (EO("adain_tile", 4), EO("adain_tile", 4))
+            self.adain_flag = False
         else:
             if hasattr(self, "adain_tile"):
                 del self.adain_tile
@@ -501,24 +503,30 @@ class ReFlux(Flux):
 
             if transformer_options['y0_style_method'] == "AdaIN":
                 if hasattr(self, "guide_mask"):
-                    
-
-                    # Step 1: Resize mask to patch space
                     patch_mask = F.interpolate(self.guide_mask.float(), size=(64, 64), mode='nearest-exact')
-
-                    # Step 2: Flatten spatial dims to match sequence length
                     patch_mask_flat = patch_mask.view(1, -1)  # Shape: [1, 4096]
+                    self.mask_adain = patch_mask_flat.to(denoised_embed)
 
-                    # (Optional) Convert to same dtype/device as denoised_embed
-                    self.mask_adain = patch_mask_flat.to(dtype=denoised_embed.dtype, device=denoised_embed.device)
-
-                if hasattr(self, "mask_adain"):
+                #if hasattr(self, "mask_adain"):
                     
-                    denoised_embed = adain_seq_dual_region_inplace(denoised_embed, y0_adain_embed, self.mask_adain)
-                elif hasattr(self, "adain_tile"):
+                #    denoised_embed = adain_seq_dual_region_inplace(denoised_embed, y0_adain_embed, self.mask_adain)
+                if hasattr(self, "adain_tile"):
                     tile_h, tile_w = self.adain_tile
+
+                    
                     denoised_pretile = rearrange(denoised_embed, "b (h w) c -> b c h w", h=h_len, w=w_len)
                     y0_adain_pretile = rearrange(y0_adain_embed, "b (h w) c -> b c h w", h=h_len, w=w_len)
+                    
+                    if self.adain_flag:
+                        h_off = tile_h // 2
+                        w_off = tile_w // 2
+                        denoised_pretile = denoised_pretile[:,:,h_off:-h_off, w_off:-w_off]
+                        self.adain_flag = False
+                    else:
+                        h_off = 0
+                        w_off = 0
+                        self.adain_flag = True
+                    
                     tiles,    orig_shape, grid, strides = tile_latent(denoised_pretile, tile_size=(tile_h,tile_w))
                     y0_tiles, orig_shape, grid, strides = tile_latent(y0_adain_pretile, tile_size=(tile_h,tile_w))
                     
@@ -532,10 +540,68 @@ class ReFlux(Flux):
                         
                         tile = adain_seq_inplace(tile, y0_tile)
                         tiles_out.append(rearrange(tile, "b (h w) c -> b c h w", h=tile_h, w=tile_w))
-                        
+                    
                     tiles_out_tensor = torch.cat(tiles_out, dim=0)
-                    denoised_embed = untile_latent(tiles_out_tensor, orig_shape, grid, strides)
-                    denoised_embed = rearrange(denoised_embed, "b c h w -> b (h w) c", h=h_len, w=w_len)
+                    tiles_out_tensor = untile_latent(tiles_out_tensor, orig_shape, grid, strides)
+                    
+                    #tiles_out_tensor[:,:,h_off:-h_off, w_off:-w_off] = tiles_out_tensor
+                    #tiles_out_tensor = rearrange(tiles_out_tensor, "b c h w -> b (h w) c", h=h_len, w=w_len)
+                    if h_off == 0:
+                        denoised_pretile = tiles_out_tensor
+                    else:
+                        denoised_pretile[:,:,h_off:-h_off, w_off:-w_off] = tiles_out_tensor
+                    denoised_embed = rearrange(denoised_pretile, "b c h w -> b (h w) c", h=h_len, w=w_len)
+                    
+                elif EO("adain_pw"):
+                    
+                    #denoised_spatial_new = adain_patchwise_row_batch(denoised_spatial.clone(), y0_adain_spatial.clone(), sigma=EO("adain_pw_sigma", 1.0), kernel_size=EO("adain_pw_kernel_size", 7))
+                    if self.y0_adain_embed is None or self.y0_adain_embed.shape != y0_adain_embed.shape or torch.norm(self.y0_adain_embed - y0_adain_embed) > 0:
+                        self.y0_adain_embed = y0_adain_embed
+                        self.adain_pw_cache = None
+                        
+                    denoised_spatial = rearrange(denoised_embed, "b (h w) c -> b c h w", h=h_len, w=w_len)
+                    y0_adain_spatial = rearrange(y0_adain_embed, "b (h w) c -> b c h w", h=h_len, w=w_len)
+                    
+                    if hasattr(self, "guide_mask"):
+                        denoised_spatial_new = adain_patchwise_row_batch_mask(denoised_spatial.clone(), y0_adain_spatial.clone(), sigma=EO("adain_pw_sigma", 1.0), kernel_size=EO("adain_pw_kernel_size", 3), mask=patch_mask.to(denoised_spatial))
+                    elif EO("adain_pw_adapt"):
+                        
+                        denoised_spatial_new = adain_patchwise_row_batch_adaptive_sigma(denoised_spatial.clone(), y0_adain_spatial.clone(), sigma=EO("adain_pw_sigma", 1.0), kernel_size=EO("adain_pw_kernel_size", 7))
+                    elif EO("adain_pw_median"):
+                        denoised_spatial_new = adain_patchwise_row_batch_median(denoised_spatial.clone(), y0_adain_spatial.clone(), kernel_size=EO("adain_pw_kernel_size", 7))
+                        
+                    else:
+                        denoised_spatial_new = adain_patchwise_row_batch(denoised_spatial.clone(), y0_adain_spatial.clone(), sigma=EO("adain_pw_sigma", 1.0), kernel_size=EO("adain_pw_kernel_size", 7))
+                    #denoised_spatial_new, self.adain_pw_cache = adain_patchwise_cached_rowwise(denoised_spatial.clone(), y0_adain_spatial.clone(), sigma=EO("adain_pw_sigma", 1.0), kernel_size=EO("adain_pw_kernel_size", 7), cache=self.adain_pw_cache)
+                    
+                    denoised_embed = rearrange(denoised_spatial_new, "b c h w -> b (h w) c", h=h_len, w=w_len)
+                    
+                    
+                elif EO("adain_fs"):
+                    denoised_spatial = rearrange(denoised_embed, "b (h w) c -> b c h w", h=h_len, w=w_len)
+                    y0_adain_spatial = rearrange(y0_adain_embed, "b (h w) c -> b c h w", h=h_len, w=w_len)
+                    
+                    denoised_spatial_LP = gaussian_blur_2d(denoised_spatial, sigma=EO("adain_fs_sigma", 1.0), kernel_size=EO("adain_fs_kernel_size", 7))
+                    y0_adain_spatial_LP = gaussian_blur_2d(y0_adain_spatial, sigma=EO("adain_fs_sigma", 1.0), kernel_size=EO("adain_fs_kernel_size", 7))
+                    
+                    denoised_spatial_HP = denoised_spatial - denoised_spatial_LP
+                    
+                    if EO("adain_fs_uhp"):
+                        y0_adain_spatial_HP = y0_adain_spatial - y0_adain_spatial_LP
+                        
+                        denoised_spatial_ULP = gaussian_blur_2d(denoised_spatial, sigma=EO("adain_fs_uhp_sigma", 1.0), kernel_size=EO("adain_fs_uhp_kernel_size", 3))
+                        y0_adain_spatial_ULP = gaussian_blur_2d(y0_adain_spatial, sigma=EO("adain_fs_uhp_sigma", 1.0), kernel_size=EO("adain_fs_uhp_kernel_size", 3))
+                        
+                        denoised_spatial_UHP = denoised_spatial_HP  - denoised_spatial_ULP
+                        y0_adain_spatial_UHP = y0_adain_spatial_HP  - y0_adain_spatial_ULP
+                        
+                        #denoised_spatial_HP  = y0_adain_spatial_ULP + denoised_spatial_UHP
+                        denoised_spatial_HP  = denoised_spatial_ULP + y0_adain_spatial_UHP
+                    
+                    denoised_spatial_new = y0_adain_spatial_LP + denoised_spatial_HP
+                    denoised_embed = rearrange(denoised_spatial_new, "b c h w -> b (h w) c", h=h_len, w=w_len)
+                    
+                
                 
                 
                 else:
@@ -800,9 +866,9 @@ def adain_seq_masked_inplace(content: torch.Tensor, style: torch.Tensor, mask: t
     B, T, C = content.shape
 
     mask = mask.unsqueeze(-1)  # (B, T, 1)
-    mask_sum = mask.sum(dim=1, keepdim=True).clamp(min=1.0)  # Avoid division by zero
+    mask_sum = mask.sum(dim=1, keepdim=True).clamp(min=1.0)  # no div by zero
 
-    # Masked mean and std over time dim
+    # masked mean and std over temporal dim
     mean_c = (content * mask).sum(1, keepdim=True) / mask_sum
     var_c  = ((content - mean_c)**2 * mask).sum(1, keepdim=True) / mask_sum
     std_c  = (var_c + eps).sqrt()
@@ -811,7 +877,7 @@ def adain_seq_masked_inplace(content: torch.Tensor, style: torch.Tensor, mask: t
     var_s  = ((style - mean_s)**2 * mask).sum(1, keepdim=True) / mask_sum
     std_s  = (var_s + eps).sqrt()
 
-    # Only normalize and rescale masked tokens
+    # normalize and rescale masked tokens
     content.sub_(mean_c).div_(std_c).mul_(std_s).add_(mean_s)
     content *= mask  # keep only masked updates
     return content
@@ -843,8 +909,546 @@ def adain_seq_dual_region_inplace(content: torch.Tensor, style: torch.Tensor, ma
 
             c_norm = (c_sub - mean_c) / std_c * std_s + mean_s  # [N, C]
 
-            # Safely assign using masked_scatter_ — no shape mismatch
             content.masked_scatter_(idx_expand, c_norm)
 
     return content
+
+
+
+
+def gaussian_blur_2d(img: torch.Tensor, sigma: float, kernel_size: int = None) -> torch.Tensor:
+    B, C, H, W = img.shape
+    dtype = img.dtype
+    device = img.device
+
+    if kernel_size is None:
+        kernel_size = int(2 * math.ceil(3 * sigma) + 1)
+
+    if kernel_size % 2 == 0:
+        kernel_size += 1
+
+    coords = torch.arange(kernel_size, dtype=torch.float64) - kernel_size // 2
+    g = torch.exp(-0.5 * (coords / sigma) ** 2)
+    g = g / g.sum()
+
+    kernel_2d = g[:, None] * g[None, :]
+    kernel_2d = kernel_2d.to(dtype=dtype, device=device)
+
+    kernel = kernel_2d.expand(C, 1, kernel_size, kernel_size)
+
+    pad = kernel_size // 2
+    img_padded = F.pad(img, (pad, pad, pad, pad), mode='reflect')
+
+    return F.conv2d(img_padded, kernel, groups=C)
+
+
+def adain_patchwise(content: torch.Tensor, style: torch.Tensor, sigma: float = 1.0, kernel_size: int = None, eps: float = 1e-5) -> torch.Tensor:
+
+    B, C, H, W = content.shape
+    device     = content.device
+    dtype      = content.dtype
+
+    if kernel_size is None:
+        kernel_size = int(2 * math.ceil(3 * sigma) + 1)
+    if kernel_size % 2 == 0:
+        kernel_size += 1
+
+    pad    = kernel_size // 2
+    coords = torch.arange(kernel_size, dtype=torch.float64, device=device) - pad
+    gauss  = torch.exp(-0.5 * (coords / sigma) ** 2)
+    gauss /= gauss.sum()
+    kernel_2d = (gauss[:, None] * gauss[None, :]).to(dtype=dtype)
+
+    weight = kernel_2d.view(1, 1, kernel_size, kernel_size)
+
+    content_padded = F.pad(content, (pad, pad, pad, pad), mode='reflect')
+    style_padded   = F.pad(style,   (pad, pad, pad, pad), mode='reflect')
+    result = torch.zeros_like(content)
+
+    for i in range(H):
+        for j in range(W):
+            c_patch = content_padded[:, :, i:i + kernel_size, j:j + kernel_size]
+            s_patch =   style_padded[:, :, i:i + kernel_size, j:j + kernel_size]
+            w = weight.expand_as(c_patch)
+
+            c_mean =  (c_patch              * w).sum(dim=(-1, -2), keepdim=True)
+            c_std  = ((c_patch - c_mean)**2 * w).sum(dim=(-1, -2), keepdim=True).sqrt() + eps
+            s_mean =  (s_patch              * w).sum(dim=(-1, -2), keepdim=True)
+            s_std  = ((s_patch - s_mean)**2 * w).sum(dim=(-1, -2), keepdim=True).sqrt() + eps
+
+            normed =  (c_patch[:, :, pad:pad+1, pad:pad+1] - c_mean) / c_std
+            stylized = normed * s_std + s_mean
+            result[:, :, i, j] = stylized.squeeze(-1).squeeze(-1)
+
+    return result
+
+
+
+
+def adain_patchwise_row_batch(content: torch.Tensor, style: torch.Tensor, sigma: float = 1.0, kernel_size: int = None, eps: float = 1e-5) -> torch.Tensor:
+
+    B, C, H, W = content.shape
+    device, dtype = content.device, content.dtype
+
+    if kernel_size is None:
+        kernel_size = int(2 * math.ceil(3 * sigma) + 1)
+    if kernel_size % 2 == 0:
+        kernel_size += 1
+
+    pad = kernel_size // 2
+    coords = torch.arange(kernel_size, dtype=torch.float64, device=device) - pad
+    gauss = torch.exp(-0.5 * (coords / sigma) ** 2)
+    gauss = (gauss / gauss.sum()).to(dtype)
+    kernel_2d = (gauss[:, None] * gauss[None, :])
+
+    weight = kernel_2d.view(1, 1, kernel_size, kernel_size)
+
+    content_padded = F.pad(content, (pad, pad, pad, pad), mode='reflect')
+    style_padded = F.pad(style, (pad, pad, pad, pad), mode='reflect')
+    result = torch.zeros_like(content)
+
+    for i in range(H):
+        c_row_patches = torch.stack([
+            content_padded[:, :, i:i+kernel_size, j:j+kernel_size]
+            for j in range(W)
+        ], dim=0)  # [W, B, C, k, k]
+
+        s_row_patches = torch.stack([
+            style_padded[:, :, i:i+kernel_size, j:j+kernel_size]
+            for j in range(W)
+        ], dim=0)
+
+        w = weight.expand_as(c_row_patches[0])
+
+        c_mean = (c_row_patches * w).sum(dim=(-1, -2), keepdim=True)
+        c_std  = ((c_row_patches - c_mean) ** 2 * w).sum(dim=(-1, -2), keepdim=True).sqrt() + eps
+        s_mean = (s_row_patches * w).sum(dim=(-1, -2), keepdim=True)
+        s_std  = ((s_row_patches - s_mean) ** 2 * w).sum(dim=(-1, -2), keepdim=True).sqrt() + eps
+
+        center = kernel_size // 2
+        central = c_row_patches[:, :, :, center:center+1, center:center+1]
+        normed = (central - c_mean) / c_std
+        stylized = normed * s_std + s_mean
+
+        result[:, :, i, :] = stylized.squeeze(-1).squeeze(-1).permute(1, 2, 0)  # [B,C,W]
+
+    return result
+
+
+def adain_patchwise_row_batch_median(content: torch.Tensor, style: torch.Tensor, kernel_size: int = 3, eps: float = 1e-5) -> torch.Tensor:
+    import torch.nn.functional as F
+
+    B, C, H, W = content.shape
+    device, dtype = content.device, content.dtype
+
+    if kernel_size % 2 == 0:
+        kernel_size += 1
+    pad = kernel_size // 2
+
+    content_padded = F.pad(content, (pad, pad, pad, pad), mode='reflect')
+    style_padded   = F.pad(style,   (pad, pad, pad, pad), mode='reflect')
+    result = torch.zeros_like(content)
+
+    for i in range(H):
+        c_row_patches = torch.stack([
+            content_padded[:, :, i:i+kernel_size, j:j+kernel_size]
+            for j in range(W)
+        ], dim=0)  # [W, B, C, k, k]
+
+        s_row_patches = torch.stack([
+            style_padded[:, :, i:i+kernel_size, j:j+kernel_size]
+            for j in range(W)
+        ], dim=0)
+
+        c_flat = c_row_patches.view(W, B, C, -1)  # [W, B, C, k*k]
+        s_flat = s_row_patches.view(W, B, C, -1)
+
+        c_median = c_flat.median(dim=-1, keepdim=True).values  # [W, B, C, 1]
+        s_median = s_flat.median(dim=-1, keepdim=True).values
+
+        c_std = (c_flat - c_median).abs().mean(dim=-1, keepdim=True) + eps 
+        s_std = (s_flat - s_median).abs().mean(dim=-1, keepdim=True) + eps
+
+        center = kernel_size // 2
+        central = c_row_patches[:, :, :, center, center].unsqueeze(-1)  # [W, B, C, 1]
+
+        normed = (central - c_median) / c_std
+        stylized = normed * s_std + s_median
+
+        result[:, :, i, :] = stylized.squeeze(-1).permute(1, 2, 0)  # [B,C,W]
+
+    return result
+
+def adain_patchwise_cached_rowwise(
+    content: torch.Tensor,
+    style: torch.Tensor,
+    sigma: float = 1.0,
+    kernel_size: int = None,
+    eps: float = 1e-5,
+    cache: dict = None,
+) -> torch.Tensor:
+
+    B, C, H, W = content.shape
+    device, dtype = content.device, content.dtype
+
+    if kernel_size is None:
+        kernel_size = int(2 * math.ceil(3 * sigma) + 1)
+    if kernel_size % 2 == 0:
+        kernel_size += 1
+    pad = kernel_size // 2
+
+    coords = torch.arange(kernel_size, dtype=torch.float64, device=device) - pad
+    gauss = torch.exp(-0.5 * (coords / sigma) ** 2)
+    gauss /= gauss.sum()
+    weight = (gauss[:, None] * gauss[None, :]).to(dtype).view(1, 1, kernel_size, kernel_size)
+
+    content_pad = F.pad(content, (pad, pad, pad, pad), mode='reflect')
+    style_pad   = F.pad(style,   (pad, pad, pad, pad), mode='reflect')
+
+    result = torch.zeros_like(content)
+
+    if cache is None:
+        cache = {}
+
+    style_key = (id(style), kernel_size, sigma)
+    if style_key not in cache:
+        style_means, style_stds = [], []
+        for i in range(H):
+            patches = torch.stack([
+                style_pad[:, :, i:i+kernel_size, j:j+kernel_size] for j in range(W)
+            ])
+            w = weight.expand_as(patches)
+            s_mean = (patches * w).sum(dim=(-1, -2), keepdim=True)
+            s_std  = ((patches - s_mean)**2 * w).sum(dim=(-1, -2), keepdim=True).sqrt() + eps
+            style_means.append(s_mean)
+            style_stds.append(s_std)
+        cache[style_key] = (style_means, style_stds)
+    else:
+        style_means, style_stds = cache[style_key]
+
+    for i in range(H):
+        c_patches = torch.stack([
+            content_pad[:, :, i:i+kernel_size, j:j+kernel_size] for j in range(W)
+        ])
+        w = weight.expand_as(c_patches)
+
+        c_mean = (c_patches * w).sum(dim=(-1, -2), keepdim=True)
+        c_std  = ((c_patches - c_mean)**2 * w).sum(dim=(-1, -2), keepdim=True).sqrt() + eps
+
+        s_mean = style_means[i]
+        s_std  = style_stds[i]
+
+        center = kernel_size // 2
+        normed = (c_patches[:, :, :, center:center+1, center:center+1] - c_mean) / c_std
+        stylized = normed * s_std + s_mean
+        result[:, :, i, :] = stylized.squeeze(-1).squeeze(-1).permute(1, 2, 0)
+
+    return result, cache
+
+
+"""
+def adain_patchwise_row_batch_adaptive_sigma(content: torch.Tensor, style: torch.Tensor, min_sigma: float = 0.5, max_sigma: float = 2.0, kernel_size: int = None, eps: float = 1e-5) -> torch.Tensor:
+    import torch.nn.functional as F
+    import math
+
+    B, C, H, W = content.shape
+    device, dtype = content.device, content.dtype
+
+    patch_std = content.std(dim=1, keepdim=True)  # [B, 1, H, W]
+    max_std = patch_std.max()
+    adaptive_sigma_map = min_sigma + (max_sigma - min_sigma) * (1.0 - patch_std / (max_std + eps))  # [B, 1, H, W]
+
+    result = torch.zeros_like(content)
+    pad_max = int(2 * math.ceil(3 * max_sigma) + 1) // 2
+    content_padded = F.pad(content, (pad_max, pad_max, pad_max, pad_max), mode='reflect')
+    style_padded = F.pad(style, (pad_max, pad_max, pad_max, pad_max), mode='reflect')
+
+    for i in range(H):
+        for j in range(W):
+            sigma_ij = adaptive_sigma_map[0, 0, i, j].item()
+            kernel_size = int(2 * math.ceil(3 * sigma_ij) + 1)
+            if kernel_size % 2 == 0:
+                kernel_size += 1
+            pad = kernel_size // 2
+
+            coords = torch.arange(kernel_size, dtype=torch.float64, device=device) - pad
+            gauss = torch.exp(-0.5 * (coords / sigma_ij) ** 2)
+            gauss = (gauss / gauss.sum()).to(dtype)
+            kernel_2d = (gauss[:, None] * gauss[None, :])
+            weight = kernel_2d.view(1, 1, kernel_size, kernel_size)
+
+            c_patch = content_padded[:, :, i:i+kernel_size, j:j+kernel_size]
+            s_patch = style_padded[:, :, i:i+kernel_size, j:j+kernel_size]
+            w = weight.expand_as(c_patch)
+
+            c_mean = (c_patch * w).sum(dim=(-1, -2), keepdim=True)
+            c_std  = ((c_patch - c_mean)**2 * w).sum(dim=(-1, -2), keepdim=True).sqrt() + eps
+            s_mean = (s_patch * w).sum(dim=(-1, -2), keepdim=True)
+            s_std  = ((s_patch - s_mean)**2 * w).sum(dim=(-1, -2), keepdim=True).sqrt() + eps
+
+            central = c_patch[:, :, pad:pad+1, pad:pad+1]
+            normed = (central - c_mean) / c_std
+            stylized = normed * s_std + s_mean
+
+            result[:, :, i, j] = stylized.squeeze(-1).squeeze(-1)
+
+    return result
+"""
+
+
+def adain_patchwise_row_batch_adaptive_sigma(content: torch.Tensor, style: torch.Tensor, sigma: float = 1.0, kernel_size: int = None, eps: float = 1e-5) -> torch.Tensor:
+
+    base_sigma = sigma
+
+    B, C, H, W = content.shape
+    device, dtype = content.device, content.dtype
+
+    if kernel_size is None:
+        kernel_size = int(2 * math.ceil(3 * base_sigma) + 1)
+    if kernel_size % 2 == 0:
+        kernel_size += 1
+
+    pad = kernel_size // 2
+
+    # gaussian weights for computing local std
+    coords = torch.arange(kernel_size, dtype=torch.float64, device=device) - pad
+    gauss = torch.exp(-0.5 * (coords / base_sigma) ** 2)
+    gauss /= gauss.sum()
+    kernel_2d = (gauss[:, None] * gauss[None, :]).to(dtype=dtype)
+    weight = kernel_2d.view(1, 1, kernel_size, kernel_size).expand(C, 1, kernel_size, kernel_size)
+
+    # local std map from content
+    content_padded = F.pad(content, (pad, pad, pad, pad), mode='reflect')
+    mean = F.conv2d(content_padded, weight, groups=C)
+    mean_sq = F.conv2d(content_padded ** 2, weight, groups=C)
+    var = mean_sq - mean ** 2
+    std_map = torch.sqrt(var.clamp(min=eps))  # [B, C, H, W]
+
+    sigma_map = base_sigma * (std_map.mean(dim=1, keepdim=True) / std_map.max())  # [B, 1, H, W]
+
+    # ceuse static kernel for now for convolution ... w ill use pixelwise sigma to scale AdaIN effect
+    kernel_2d = (gauss[:, None] * gauss[None, :]).to(dtype=dtype)
+    weight = kernel_2d.view(1, 1, kernel_size, kernel_size)
+
+    style_padded = F.pad(style, (pad, pad, pad, pad), mode='reflect')
+    result = torch.zeros_like(content)
+
+    for i in range(H):
+        c_row_patches = torch.stack([
+            content_padded[:, :, i:i+kernel_size, j:j+kernel_size]
+            for j in range(W)
+        ], dim=0)  # [W, B, C, k, k]
+
+        s_row_patches = torch.stack([
+            style_padded[:, :, i:i+kernel_size, j:j+kernel_size]
+            for j in range(W)
+        ], dim=0)
+
+        w = weight.expand_as(c_row_patches[0])
+
+        c_mean = (c_row_patches * w).sum(dim=(-1, -2), keepdim=True)
+        c_std = ((c_row_patches - c_mean) ** 2 * w).sum(dim=(-1, -2), keepdim=True).sqrt() + eps
+        s_mean = (s_row_patches * w).sum(dim=(-1, -2), keepdim=True)
+        s_std = ((s_row_patches - s_mean) ** 2 * w).sum(dim=(-1, -2), keepdim=True).sqrt() + eps
+
+        center = kernel_size // 2
+        central = c_row_patches[:, :, :, center:center+1, center:center+1]
+        normed = (central - c_mean) / c_std
+        stylized = normed * s_std + s_mean
+
+        # adaptive strength blending based on local sigma
+        local_sigma = sigma_map[:, :, i, :].permute(2, 0, 1).unsqueeze(-1).unsqueeze(-1)  # [W, B, 1, 1, 1]
+        stylized = central * (1 - local_sigma) + stylized * local_sigma
+
+        result[:, :, i, :] = stylized.squeeze(-1).squeeze(-1).permute(1, 2, 0)  # [B,C,W]
+
+    return result
+
+
+
+def adain_patchwise_row_batch_median(content: torch.Tensor, style: torch.Tensor, kernel_size: int = 3, eps: float = 1e-5) -> torch.Tensor:
+    import torch.nn.functional as F
+
+    B, C, H, W = content.shape
+    device, dtype = content.device, content.dtype
+
+    if kernel_size % 2 == 0:
+        kernel_size += 1
+    pad = kernel_size // 2
+
+    content_padded = F.pad(content, (pad, pad, pad, pad), mode='reflect')
+    style_padded   = F.pad(style,   (pad, pad, pad, pad), mode='reflect')
+    result = torch.zeros_like(content)
+
+    for i in range(H):
+        c_row_patches = torch.stack([
+            content_padded[:, :, i:i+kernel_size, j:j+kernel_size]
+            for j in range(W)
+        ], dim=0)  # [W, B, C, k, k]
+
+        s_row_patches = torch.stack([
+            style_padded[:, :, i:i+kernel_size, j:j+kernel_size]
+            for j in range(W)
+        ], dim=0)
+
+        c_flat = c_row_patches.view(W, B, C, -1)  # [W, B, C, k*k]
+        s_flat = s_row_patches.view(W, B, C, -1)
+
+        c_median = c_flat.median(dim=-1, keepdim=True).values  # [W, B, C, 1]
+        s_median = s_flat.median(dim=-1, keepdim=True).values
+
+        c_std = (c_flat - c_median).abs().mean(dim=-1, keepdim=True) + eps  
+        s_std = (s_flat - s_median).abs().mean(dim=-1, keepdim=True) + eps
+
+        center = kernel_size // 2
+        central = c_row_patches[:, :, :, center, center].unsqueeze(-1)  # [W, B, C, 1]
+
+        normed = (central - c_median) / c_std
+        stylized = normed * s_std + s_median
+
+        result[:, :, i, :] = stylized.squeeze(-1).permute(1, 2, 0)  # [B,C,W]
+
+    return result
+
+
+
+
+"""
+def adain_patchwise_row_batch(content: torch.Tensor, style: torch.Tensor, sigma: float = 1.0, kernel_size: int = None, eps: float = 1e-5, mask: torch.Tensor = None) -> torch.Tensor:
+    B, C, H, W = content.shape
+    device, dtype = content.device, content.dtype
+
+    if kernel_size is None:
+        kernel_size = int(2 * math.ceil(3 * sigma) + 1)
+    if kernel_size % 2 == 0:
+        kernel_size += 1
+
+    pad = kernel_size // 2
+    coords = torch.arange(kernel_size, dtype=torch.float64, device=device) - pad
+    base_gauss = torch.exp(-0.5 * (coords / sigma) ** 2)
+    base_gauss = (base_gauss / base_gauss.sum()).to(dtype)
+    base_kernel_2d = (base_gauss[:, None] * base_gauss[None, :])
+    base_weight = base_kernel_2d.view(1, 1, kernel_size, kernel_size)
+
+    content_padded = F.pad(content, (pad, pad, pad, pad), mode='reflect')
+    style_padded = F.pad(style, (pad, pad, pad, pad), mode='reflect')
+    result = torch.zeros_like(content)
+
+    scaling = torch.ones((B, 1, H, W), device=device, dtype=dtype)
+    sigma_scale = torch.ones((H, W), device=device, dtype=torch.float32)
+    if mask is not None:
+        padded_mask = F.pad(mask.float(), (1, 1, 1, 1), mode="reflect")
+        blurred_mask = F.avg_pool2d(padded_mask, kernel_size=3, stride=1, padding=1)
+        blurred_mask = blurred_mask[..., 1:-1, 1:-1]
+        edge_proximity = blurred_mask * (1.0 - blurred_mask)
+        scaling = 1.0 - (edge_proximity / 0.25).clamp(0.0, 1.0)
+        sigma_scale = scaling[0, 0]  # assuming single-channel mask broadcasted across B, C
+
+    for i in range(H):
+        c_row_patches = torch.stack([
+            content_padded[:, :, i:i+kernel_size, j:j+kernel_size]
+            for j in range(W)
+        ], dim=0)
+
+        s_row_patches = torch.stack([
+            style_padded[:, :, i:i+kernel_size, j:j+kernel_size]
+            for j in range(W)
+        ], dim=0)
+
+        local_sigma = sigma * sigma_scale[i]  # [W]
+        local_weight = []
+        for w_sigma in local_sigma:
+            coords_local = torch.arange(kernel_size, dtype=torch.float64, device=device) - pad
+            gauss_local = torch.exp(-0.5 * (coords_local / (w_sigma + eps)) ** 2)
+            gauss_local = (gauss_local / gauss_local.sum()).to(dtype)
+            kernel_2d = gauss_local[:, None] * gauss_local[None, :]
+            local_weight.append(kernel_2d.view(1, 1, kernel_size, kernel_size))
+        local_weight = torch.stack(local_weight, dim=0).expand(W, C, kernel_size, kernel_size)
+
+        c_mean = (c_row_patches * local_weight).sum(dim=(-1, -2), keepdim=True)
+        c_std  = ((c_row_patches - c_mean) ** 2 * local_weight).sum(dim=(-1, -2), keepdim=True).sqrt() + eps
+        s_mean = (s_row_patches * local_weight).sum(dim=(-1, -2), keepdim=True)
+        s_std  = ((s_row_patches - s_mean) ** 2 * local_weight).sum(dim=(-1, -2), keepdim=True).sqrt() + eps
+
+        center = kernel_size // 2
+        central = c_row_patches[:, :, :, center:center+1, center:center+1]
+        normed = (central - c_mean) / c_std
+        stylized = normed * s_std + s_mean
+
+        local_scaling = scaling[:, :, i, :].permute(2, 0, 1).unsqueeze(-1).unsqueeze(-1)
+        stylized = central * (1 - local_scaling) + stylized * local_scaling
+
+        result[:, :, i, :] = stylized.squeeze(-1).squeeze(-1).permute(1, 2, 0)
+
+    return result
+
+"""
+
+
+
+def adain_patchwise_row_batch_mask(content: torch.Tensor, style: torch.Tensor, sigma: float = 1.0, kernel_size: int = None, eps: float = 1e-5, mask: torch.Tensor = None) -> torch.Tensor:
+    B, C, H, W = content.shape
+    device, dtype = content.device, content.dtype
+
+    if kernel_size is None:
+        kernel_size = int(2 * math.ceil(3 * sigma) + 1)
+    if kernel_size % 2 == 0:
+        kernel_size += 1
+
+    pad = kernel_size // 2
+    coords = torch.arange(kernel_size, dtype=torch.float64, device=device) - pad
+    base_gauss = torch.exp(-0.5 * (coords / sigma) ** 2)
+    base_gauss = (base_gauss / base_gauss.sum()).to(dtype)
+    base_kernel_2d = (base_gauss[:, None] * base_gauss[None, :])
+    base_weight = base_kernel_2d.view(1, 1, kernel_size, kernel_size)
+
+    content_padded = F.pad(content, (pad, pad, pad, pad), mode='reflect')
+    style_padded = F.pad(style, (pad, pad, pad, pad), mode='reflect')
+    result = torch.zeros_like(content)
+
+    scaling = torch.ones((B, 1, H, W), device=device, dtype=dtype)
+    sigma_scale = torch.ones((H, W), device=device, dtype=torch.float32)
+    if mask is not None:
+        with torch.no_grad():
+            padded_mask = F.pad(mask.float(), (pad, pad, pad, pad), mode="reflect")
+            blurred_mask = F.avg_pool2d(padded_mask, kernel_size=kernel_size, stride=1, padding=pad)
+            blurred_mask = blurred_mask[..., pad:-pad, pad:-pad]
+            edge_proximity = blurred_mask * (1.0 - blurred_mask)
+            scaling = 1.0 - (edge_proximity / 0.25).clamp(0.0, 1.0)
+            sigma_scale = scaling[0, 0]  # assuming single-channel mask broadcasted across B, C
+
+    coords_local = torch.arange(kernel_size, dtype=torch.float64, device=device) - pad
+    gaussian_table = {}
+    for s in sigma_scale.unique():
+        sig = float((sigma * s + eps).clamp(min=1e-3))
+        gauss_local = torch.exp(-0.5 * (coords_local / sig) ** 2)
+        gauss_local = (gauss_local / gauss_local.sum()).to(dtype)
+        kernel_2d = gauss_local[:, None] * gauss_local[None, :]
+        gaussian_table[s.item()] = kernel_2d
+
+    for i in range(H):
+        row_result = torch.zeros(B, C, W, dtype=dtype, device=device)
+        for j in range(W):
+            c_patch = content_padded[:, :, i:i+kernel_size, j:j+kernel_size]
+            s_patch = style_padded[:, :, i:i+kernel_size, j:j+kernel_size]
+            k = gaussian_table[float(sigma_scale[i, j].item())]
+            local_weight = k.view(1, 1, kernel_size, kernel_size).expand(B, C, kernel_size, kernel_size)
+
+            c_mean = (c_patch * local_weight).sum(dim=(-1, -2), keepdim=True)
+            c_std = ((c_patch - c_mean) ** 2 * local_weight).sum(dim=(-1, -2), keepdim=True).sqrt() + eps
+            s_mean = (s_patch * local_weight).sum(dim=(-1, -2), keepdim=True)
+            s_std = ((s_patch - s_mean) ** 2 * local_weight).sum(dim=(-1, -2), keepdim=True).sqrt() + eps
+
+            center = kernel_size // 2
+            central = c_patch[:, :, center:center+1, center:center+1]
+            normed = (central - c_mean) / c_std
+            stylized = normed * s_std + s_mean
+
+            local_scaling = scaling[:, :, i, j].view(B, 1, 1, 1)
+            stylized = central * (1 - local_scaling) + stylized * local_scaling
+
+            row_result[:, :, j] = stylized.squeeze(-1).squeeze(-1)
+        result[:, :, i, :] = row_result
+
+    return result
 
