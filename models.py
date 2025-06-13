@@ -323,6 +323,7 @@ class ReFluxPatcherAdvanced:
         model.model.diffusion_model.style_dtype = getattr(torch, style_dtype) if style_dtype != "default" else None
         model.model.diffusion_model.proj_weights = None
         model.model.diffusion_model.y0_adain_embed = None
+        model.model.diffusion_model.adain_pw_cache = None
         
         if (enable or force) and model.model.diffusion_model.__class__ == Flux:
             m = model.clone()
