@@ -581,8 +581,12 @@ class ReFlux(Flux):
                     denoised_spatial = rearrange(denoised_embed, "b (h w) c -> b c h w", h=h_len, w=w_len)
                     y0_adain_spatial = rearrange(y0_adain_embed, "b (h w) c -> b c h w", h=h_len, w=w_len)
                     
-                    denoised_spatial_LP = gaussian_blur_2d(denoised_spatial, sigma=EO("adain_fs_sigma", 1.0), kernel_size=EO("adain_fs_kernel_size", 7))
-                    y0_adain_spatial_LP = gaussian_blur_2d(y0_adain_spatial, sigma=EO("adain_fs_sigma", 1.0), kernel_size=EO("adain_fs_kernel_size", 7))
+                    if EO("adain_fs_median"):
+                        denoised_spatial_LP = median_blur_2d(denoised_spatial, kernel_size=EO("adain_fs_kernel_size", 7))
+                        y0_adain_spatial_LP = median_blur_2d(y0_adain_spatial, kernel_size=EO("adain_fs_kernel_size", 7))
+                    else:
+                        denoised_spatial_LP = gaussian_blur_2d(denoised_spatial, sigma=EO("adain_fs_sigma", 1.0), kernel_size=EO("adain_fs_kernel_size", 7))
+                        y0_adain_spatial_LP = gaussian_blur_2d(y0_adain_spatial, sigma=EO("adain_fs_sigma", 1.0), kernel_size=EO("adain_fs_kernel_size", 7))
                     
                     denoised_spatial_HP = denoised_spatial - denoised_spatial_LP
                     
@@ -940,6 +944,21 @@ def gaussian_blur_2d(img: torch.Tensor, sigma: float, kernel_size: int = None) -
     img_padded = F.pad(img, (pad, pad, pad, pad), mode='reflect')
 
     return F.conv2d(img_padded, kernel, groups=C)
+
+
+def median_blur_2d(img: torch.Tensor, kernel_size: int = 3) -> torch.Tensor:
+    if kernel_size % 2 == 0:
+        kernel_size += 1
+    pad = kernel_size // 2
+
+    B, C, H, W = img.shape
+    img_padded = F.pad(img, (pad, pad, pad, pad), mode='reflect')
+
+    unfolded = img_padded.unfold(2, kernel_size, 1).unfold(3, kernel_size, 1)
+    # unfolded: [B, C, H, W, kH, kW] → flatten to patches
+    patches = unfolded.contiguous().view(B, C, H, W, -1)
+    median = patches.median(dim=-1).values
+    return median
 
 
 def adain_patchwise(content: torch.Tensor, style: torch.Tensor, sigma: float = 1.0, kernel_size: int = None, eps: float = 1e-5) -> torch.Tensor:
