@@ -538,6 +538,13 @@ def sample_rk_beta(
         else:
             x = (1 - sigmas[step]) * x + sigmas[step] * NS.noise_sampler(sigma=sigmas[step], sigma_next=sigmas[step+1])
                 
+    if guides is not None:
+        RK.update_transformer_options({"freqsep_lowpass_method": guides.get("freqsep_lowpass_method")})
+        RK.update_transformer_options({"freqsep_sigma":          guides.get("freqsep_sigma")})
+        RK.update_transformer_options({"freqsep_kernel_size":    guides.get("freqsep_kernel_size")})
+        RK.update_transformer_options({"freqsep_lowpass_weight": guides.get("freqsep_lowpass_weight")})
+        RK.update_transformer_options({"freqsep_highpass_weight":guides.get("freqsep_highpass_weight")})
+
     # BEGIN SAMPLING LOOP
                 
     while step < num_steps:

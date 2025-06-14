@@ -111,6 +111,10 @@ class LatentGuide:
         self.frame_weights            = None
         self.frame_weights_inv        = None
         
+        #self.freqsep_lowpass_method   = "none"
+        #self.freqsep_sigma            = 0.
+        #self.freqsep_kernel_size      = 0 
+        
         self.extra_options            = extra_options
         self.EO                       = ExtraOptions(extra_options)
 

@@ -19,6 +19,7 @@ def add_beta(NODE_CLASS_MAPPINGS, NODE_DISPLAY_NAME_MAPPINGS, extra_samplers):
         
         "ClownGuides_Sync"                : samplers_extensions.ClownGuides_Sync,
         "ClownGuides_Sync_Advanced"       : samplers_extensions.ClownGuides_Sync_Advanced,
+        "ClownGuide_FrequencySeparation"  : samplers_extensions.ClownGuide_FrequencySeparation,
 
         
         "SharkOptions_GuiderInput"        : samplers_extensions.SharkOptions_GuiderInput,
