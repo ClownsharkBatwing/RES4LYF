@@ -1044,7 +1044,7 @@ class ClownGuide_FrequencySeparation:
         return {"required":
                     {
                     "apply_to"         : (["AdaIN"], {"default": "AdaIN"}),
-                    "lowpass_method"   : (["gaussian", "gaussian_pw", "median", "median_pw"], {"default": "median_pw"}),
+                    "lowpass_method"   : (["gaussian", "gaussian_pw", "median", "median_pw", "median_alt"], {"default": "median_pw"}),
                     "sigma":             ("FLOAT",                {"default": 3.0, "min":  -10000.0, "max": 10000.0, "step":0.01, "round": False, "tooltip": "Low values produce results closer to the guide image. No effect with median."}),
                     "kernel_size":       ("INT",                  {"default": 9,    "min":  1,      "max": 11111, "step": 2, "tooltip": "Primary control with median. Set the Re___Patcher node to float32 or lower precision if you have OOMs. You may have them regardless at higher kernel sizes with median."}),
                     "lowpass_weight":    ("FLOAT",                {"default": 1.0, "min":  -10000.0, "max": 10000.0, "step":0.01, "round": False, "tooltip": "Typically should be set to 1.0. Lower values may sharpen the image, higher values may blur the image."}),
