@@ -988,10 +988,16 @@ class ReUNetModel(nn.Module):
                     elif EO("adain_pw_adapt"):
                         
                         denoised_spatial_new = adain_patchwise_row_batch_adaptive_sigma(denoised_spatial.clone(), y0_adain_spatial.clone(), sigma=EO("adain_pw_sigma", 1.0), kernel_size=EO("adain_pw_kernel_size", 7))
-                    elif freqsep_lowpass_method == "median_pw": #EO("adain_pw_median"):
-                        denoised_spatial_new = adain_patchwise_row_batch_medblur(denoised_spatial.clone(), y0_adain_spatial.clone(), sigma=freqsep_sigma, kernel_size=freqsep_kernel_size, use_median_blur=True)
+                        #elif freqsep_lowpass_method == "median_pw": #EO("adain_pw_median"):
+                        #denoised_spatial_new = adain_patchwise_row_batch_medblur(denoised_spatial.clone(), y0_adain_spatial.clone(), sigma=freqsep_sigma, kernel_size=freqsep_kernel_size, use_median_blur=True)
                         #denoised_spatial_new = adain_patchwise_row_batch_median(denoised_spatial.clone(), y0_adain_spatial.clone(), kernel_size=EO("adain_pw_kernel_size", 7))
                         
+                    elif freqsep_lowpass_method == "median_alt": #EO("adain_pw_median"):
+                        denoised_spatial_new = adain_patchwise_row_batch_medblur(denoised_spatial.clone(), y0_adain_spatial.clone(), sigma=freqsep_sigma, kernel_size=freqsep_kernel_size, use_median_blur=True)
+                        #denoised_spatial_new = adain_patchwise_row_batch_median(denoised_spatial.clone(), y0_adain_spatial.clone(), kernel_size=EO("adain_pw_kernel_size", 7))
+                    elif freqsep_lowpass_method == "median_pw": # EO("real_median_pw"):
+                        denoised_spatial_new = adain_patchwise_row_batch_realmedblur(denoised_spatial.clone(), y0_adain_spatial.clone(), sigma=freqsep_sigma, kernel_size=freqsep_kernel_size, use_median_blur=True)
+                    
                     elif freqsep_lowpass_method == "gaussian_pw": 
                         denoised_spatial_new = adain_patchwise_row_batch(denoised_spatial.clone(), y0_adain_spatial.clone(), sigma=freqsep_sigma, kernel_size=freqsep_kernel_size)
                     #denoised_spatial_new, self.adain_pw_cache = adain_patchwise_cached_rowwise(denoised_spatial.clone(), y0_adain_spatial.clone(), sigma=EO("adain_pw_sigma", 1.0), kernel_size=EO("adain_pw_kernel_size", 7), cache=self.adain_pw_cache)
@@ -1517,3 +1523,81 @@ def adain_patchwise_row_batch_medblur(content: torch.Tensor, style: torch.Tensor
 
 
 
+
+def adain_patchwise_row_batch_realmedblur(content: torch.Tensor, style: torch.Tensor, sigma: float = 1.0, kernel_size: int = None, eps: float = 1e-5, mask: torch.Tensor = None, use_median_blur: bool = False) -> torch.Tensor:
+    B, C, H, W = content.shape
+    device, dtype = content.device, content.dtype
+
+    if kernel_size is None:
+        kernel_size = int(2 * math.ceil(3 * abs(sigma)) + 1)
+    if kernel_size % 2 == 0:
+        kernel_size += 1
+
+    pad = kernel_size // 2
+
+    content_padded = F.pad(content, (pad, pad, pad, pad), mode='reflect')
+    style_padded = F.pad(style, (pad, pad, pad, pad), mode='reflect')
+    result = torch.zeros_like(content)
+
+    scaling = torch.ones((B, 1, H, W), device=device, dtype=dtype)
+    sigma_scale = torch.ones((H, W), device=device, dtype=torch.float32)
+    if mask is not None:
+        with torch.no_grad():
+            padded_mask = F.pad(mask.float(), (pad, pad, pad, pad), mode="reflect")
+            blurred_mask = F.avg_pool2d(padded_mask, kernel_size=kernel_size, stride=1, padding=pad)
+            blurred_mask = blurred_mask[..., pad:-pad, pad:-pad]
+            edge_proximity = blurred_mask * (1.0 - blurred_mask)
+            scaling = 1.0 - (edge_proximity / 0.25).clamp(0.0, 1.0)
+            sigma_scale = scaling[0, 0]  # assuming single-channel mask broadcasted across B, C
+
+    if not use_median_blur:
+        coords = torch.arange(kernel_size, dtype=torch.float64, device=device) - pad
+        base_gauss = torch.exp(-0.5 * (coords / sigma) ** 2)
+        base_gauss = (base_gauss / base_gauss.sum()).to(dtype)
+        gaussian_table = {}
+        for s in sigma_scale.unique():
+            sig = float((sigma * s + eps).clamp(min=1e-3))
+            gauss_local = torch.exp(-0.5 * (coords / sig) ** 2)
+            gauss_local = (gauss_local / gauss_local.sum()).to(dtype)
+            kernel_2d = gauss_local[:, None] * gauss_local[None, :]
+            gaussian_table[s.item()] = kernel_2d
+
+    for i in range(H):
+        row_result = torch.zeros(B, C, W, dtype=dtype, device=device)
+        for j in range(W):
+            c_patch = content_padded[:, :, i:i+kernel_size, j:j+kernel_size]
+            s_patch = style_padded[:, :, i:i+kernel_size, j:j+kernel_size]
+
+            if use_median_blur:
+                # Median blur with residual restoration
+                unfolded_c = c_patch.reshape(B, C, -1)
+                unfolded_s = s_patch.reshape(B, C, -1)
+
+                c_median = unfolded_c.median(dim=-1, keepdim=True).values
+                s_median = unfolded_s.median(dim=-1, keepdim=True).values
+
+                center = kernel_size // 2
+                central = c_patch[:, :, center, center].view(B, C, 1)
+                residual = central - c_median
+                stylized = s_median + residual
+            else:
+                k = gaussian_table[float(sigma_scale[i, j].item())]
+                local_weight = k.view(1, 1, kernel_size, kernel_size).expand(B, C, kernel_size, kernel_size)
+
+                c_mean = (c_patch * local_weight).sum(dim=(-1, -2), keepdim=True)
+                c_std = ((c_patch - c_mean) ** 2 * local_weight).sum(dim=(-1, -2), keepdim=True).sqrt() + eps
+                s_mean = (s_patch * local_weight).sum(dim=(-1, -2), keepdim=True)
+                s_std = ((s_patch - s_mean) ** 2 * local_weight).sum(dim=(-1, -2), keepdim=True).sqrt() + eps
+
+                center = kernel_size // 2
+                central = c_patch[:, :, center:center+1, center:center+1]
+                normed = (central - c_mean) / c_std
+                stylized = normed * s_std + s_mean
+
+            local_scaling = scaling[:, :, i, j].view(B, 1, 1)
+            stylized = central * (1 - local_scaling) + stylized * local_scaling
+
+            row_result[:, :, j] = stylized.squeeze(-1)
+        result[:, :, i, :] = row_result
+
+    return result
