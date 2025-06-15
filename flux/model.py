@@ -415,6 +415,19 @@ class ReFlux(Flux):
             y0_style_pos_weight    = transformer_options.get("y0_style_pos_weight")
             y0_style_pos_synweight = transformer_options.get("y0_style_pos_synweight")
             y0_style_pos_synweight *= y0_style_pos_weight
+            y0_style_pos_mask = transformer_options.get("y0_style_pos_mask")
+            
+            mask_flat = None
+            if y0_style_pos_mask is not None:
+                if y0_style_pos_mask.ndim == 3:
+                    y0_style_pos_mask = y0_style_pos_mask.unsqueeze(1)
+                mask_down = F.interpolate(
+                    y0_style_pos_mask.to(dtype=torch.float32),
+                    size=(h_len, w_len),
+                    mode='nearest'
+                )
+                mask_flat = mask_down.view(-1)  # shape: (4096,)
+                mask_flat = mask_flat > 0.5     # boolify
             
             y0_style_pos = y0_style_pos.to(dtype)
             x   = x.to(dtype)
@@ -441,8 +454,28 @@ class ReFlux(Flux):
             
             denoised_embed = F.linear(img         .to(W), W, b).to(img)
             y0_adain_embed = F.linear(img_y0_adain.to(W), W, b).to(img_y0_adain)
+            
+            if transformer_options['y0_style_method'] == "scattersort":
+                flatmask = F.interpolate(y0_style_pos_mask, size=(h_len, w_len)).bool().flatten()
+                
+                denoised_masked = denoised_embed[:, flatmask, :].clone()
+                y0_adain_masked = y0_adain_embed[:, flatmask, :].clone()
+                
+                src_sorted, src_idx = denoised_masked.sort(dim=-2)
+                ref_sorted, ref_idx = y0_adain_masked.sort(dim=-2)
+                
+                denoised_embed[:, flatmask, :] = src_sorted.scatter(dim=-2, index=src_idx, src=ref_sorted)
+                
+                denoised_unmasked = denoised_embed[:, ~flatmask, :].clone()
+                y0_adain_unmasked = y0_adain_embed[:, ~flatmask, :].clone()
+                
+                src_sorted, src_idx = denoised_unmasked.sort(dim=-2)
+                ref_sorted, ref_idx = y0_adain_unmasked.sort(dim=-2)
+                
+                denoised_embed[:, ~flatmask, :] = src_sorted.scatter(dim=-2, index=src_idx, src=ref_sorted)
 
-            if transformer_options['y0_style_method'] == "AdaIN":
+
+            elif transformer_options['y0_style_method'] == "AdaIN":
                 if freqsep_mask is not None:
                     #if freqsep_mask.dim() == 3:  # [C, H, W]
                     #    freqsep_mask = freqsep_mask.unsqueeze(0)
@@ -501,12 +534,50 @@ class ReFlux(Flux):
                     else:
                         denoised_pretile[:,:,h_off:-h_off, w_off:-w_off] = tiles_out_tensor
                     denoised_embed = rearrange(denoised_pretile, "b c h w -> b (h w) c", h=h_len, w=w_len)
+                
+                elif EO("adain_tile_SOT"):
+                    denoised_embed = apply_tile_sot(denoised_embed, y0_adain_embed, tile_sz=EO("adain_tile_SOT_tile_sz", 1), num_proj=EO("adain_tile_SOT_num_proj", 16))
+                
+                elif EO("adain_tile_sort"):
+
+                    tile_h, tile_w = (EO("adain_tile_sort", 4), EO("adain_tile_sort", 4))
+                    sort_dim = EO("adain_tile_sort_dim", -2) # channel dim
+
+                    tiles    = rearrange(denoised_embed, 'b (h th w tw) c -> (b h w) (th tw) c', h=h_len//tile_h, w=w_len//tile_w, th=tile_h, tw=tile_w)
+                    y0_tiles = rearrange(y0_adain_embed, 'b (h th w tw) c -> (b h w) (th tw) c', h=h_len//tile_h, w=w_len//tile_w, th=tile_h, tw=tile_w)
+                    
+                    tiles_out = []
+                    for i, (tile, y0_tile) in enumerate(zip(tiles, y0_tiles)):
+                        src_sorted, src_idx =    tile.sort(dim=sort_dim)
+                        ref_sorted, ref_idx = y0_tile.sort(dim=sort_dim)
+                    
+                        tiles[i] = tile.scatter(dim=sort_dim, index=src_idx, src=ref_sorted)
+
+                    denoised_embed = rearrange(tiles, '(b h w) (th tw) c -> b (h th w tw) c', h=h_len//tile_h, w=w_len//tile_w, th=tile_h, tw=tile_w)
+                    
+                elif EO("adain_mask_sort"):
+                    freqsep_mask = F.interpolate(freqsep_mask, size=(h_len, w_len))
+                    flatmask = freqsep_mask.bool().flatten()
+                    
+                    denoised_masked = denoised_embed[:, flatmask, :].clone()
+                    y0_adain_masked = y0_adain_embed[:, flatmask, :].clone()
+                    
+                    src_sorted, src_idx = denoised_masked.sort(dim=-2)
+                    ref_sorted, ref_idx = y0_adain_masked.sort(dim=-2)
+                    
+                    denoised_embed[:, flatmask, :] = src_sorted.scatter(dim=-2, index=src_idx, src=ref_sorted)
+                    
+                    denoised_unmasked = denoised_embed[:, ~flatmask, :].clone()
+                    y0_adain_unmasked = y0_adain_embed[:, ~flatmask, :].clone()
+                    
+                    src_sorted, src_idx = denoised_unmasked.sort(dim=-2)
+                    ref_sorted, ref_idx = y0_adain_unmasked.sort(dim=-2)
+                    
+                    denoised_embed[:, ~flatmask, :] = src_sorted.scatter(dim=-2, index=src_idx, src=ref_sorted)
+
                     
                 elif freqsep_lowpass_method is not None and freqsep_lowpass_method.endswith("pw"): #EO("adain_pw"):
-                    
-                    #if self.y0_adain_embed is None or self.y0_adain_embed.shape != y0_adain_embed.shape or torch.norm(self.y0_adain_embed - y0_adain_embed) > 0:
-                    #    self.y0_adain_embed = y0_adain_embed
-                    #    self.adain_pw_cache = None
+
                         
                     denoised_spatial = rearrange(denoised_embed, "b (h w) c -> b c h w", h=h_len, w=w_len)
                     y0_adain_spatial = rearrange(y0_adain_embed, "b (h w) c -> b c h w", h=h_len, w=w_len)
@@ -524,10 +595,11 @@ class ReFlux(Flux):
                     denoised_spatial = rearrange(denoised_embed, "b (h w) c -> b c h w", h=h_len, w=w_len)
                     y0_adain_spatial = rearrange(y0_adain_embed, "b (h w) c -> b c h w", h=h_len, w=w_len)
 
+                    denoised_spatial_new = adain_patchwise_row_batch_sortmatch(denoised_spatial.clone(), y0_adain_spatial.clone().repeat(denoised_spatial.shape[0],1,1,1), kernel_size=freqsep_kernel_size, inner_kernel_size=freqsep_inner_kernel_size, mask=freqsep_mask, use_sort_match=True)
+
                     #denoised_spatial_new = adain_patchwise_strict_sortmatch_fixed(denoised_spatial.clone(), y0_adain_spatial.clone().repeat(denoised_spatial.shape[0],1,1,1), kernel_size=freqsep_kernel_size, inner_kernel_size=freqsep_inner_kernel_size, mask=freqsep_mask, stride=freqsep_stride)
 
-                    denoised_spatial_new = patchwise_sortmatch_nonoverlap(denoised_spatial.clone(), y0_adain_spatial.clone().repeat(denoised_spatial.shape[0],1,1,1), patch_size=freqsep_kernel_size, mask=freqsep_mask)
-
+                    #denoised_spatial_new = patchwise_sortmatch_nonoverlap(denoised_spatial.clone(), y0_adain_spatial.clone().repeat(denoised_spatial.shape[0],1,1,1), patch_size=freqsep_kernel_size, mask=freqsep_mask)
 
                     denoised_embed = rearrange(denoised_spatial_new, "b c h w -> b (h w) c", h=h_len, w=w_len)
                 
@@ -573,12 +645,20 @@ class ReFlux(Flux):
                     self.y0_adain_embed = y0_adain_embed
                     
                     f_s          = y0_adain_embed[0].clone()
+                    if mask_flat is not None and (mask_flat == False).any():
+                        f_s = f_s[mask_flat]
+                    
                     self.mu_s    = f_s.mean(dim=0, keepdim=True)
                     f_s_centered = f_s - self.mu_s
                     
                     cov = (f_s_centered.T.double() @ f_s_centered.double()) / (f_s_centered.size(0) - 1)
 
-                    S_eig, U_eig = torch.linalg.eigh(cov + 1e-5 * torch.eye(cov.size(0), dtype=cov.dtype, device=cov.device))
+                    if EO("WCT_SVD"):
+                        U_svd, S_svd, Vh_svd = torch.linalg.svd(cov + 1e-5 * torch.eye(cov.size(0), dtype=cov.dtype, device=cov.device))
+                        S_eig = S_svd
+                        U_eig = U_svd
+                    else:
+                        S_eig, U_eig = torch.linalg.eigh(cov + 1e-5 * torch.eye(cov.size(0), dtype=cov.dtype, device=cov.device))
                     S_eig_sqrt    = S_eig.clamp(min=0).sqrt() # eigenvalues -> singular values
                     
                     whiten = U_eig @ torch.diag(S_eig_sqrt) @ U_eig.T
@@ -586,12 +666,20 @@ class ReFlux(Flux):
 
                 for wct_i in range(eps.shape[0]):
                     f_c          = denoised_embed[wct_i].clone()
+                    if mask_flat is not None and (mask_flat == False).any():
+                        f_c_orig = f_c.clone()
+                        f_c = f_c[mask_flat]
+                    
                     mu_c         = f_c.mean(dim=0, keepdim=True)
                     f_c_centered = f_c - mu_c
                     
                     cov = (f_c_centered.T.double() @ f_c_centered.double()) / (f_c_centered.size(0) - 1)
-
-                    S_eig, U_eig  = torch.linalg.eigh(cov + 1e-5 * torch.eye(cov.size(0), dtype=cov.dtype, device=cov.device))
+                    if EO("WCT_SVD"):
+                        U_svd, S_svd, Vh_svd = torch.linalg.svd(cov + 1e-5 * torch.eye(cov.size(0), dtype=cov.dtype, device=cov.device))
+                        S_eig = S_svd
+                        U_eig = U_svd
+                    else:
+                        S_eig, U_eig  = torch.linalg.eigh(cov + 1e-5 * torch.eye(cov.size(0), dtype=cov.dtype, device=cov.device))
                     inv_sqrt_eig  = S_eig.clamp(min=0).rsqrt() 
                     
                     whiten = U_eig @ torch.diag(inv_sqrt_eig) @ U_eig.T
@@ -599,6 +687,17 @@ class ReFlux(Flux):
 
                     f_c_whitened = f_c_centered @ whiten.T
                     f_cs         = f_c_whitened @ self.y0_color.T + self.mu_s
+                    
+                    if mask_flat is not None and (mask_flat == False).any():
+                        std_c  = f_c.std(dim=0, keepdim=True) + 1e-6
+                        std_cs = f_cs.std(dim=0, keepdim=True) + 1e-6
+                        mu_cs  = f_cs.mean(dim=0, keepdim=True)
+                        f_cs   = (f_cs - mu_cs) * (std_c / std_cs) + mu_c
+                    
+                    if mask_flat is not None and (mask_flat == False).any():
+                        #f_cs_new = denoised_embed[wct_i].clone()
+                        f_c_orig[mask_flat] = f_cs
+                        f_cs = f_c_orig
                     
                     denoised_embed[wct_i] = f_cs
 
@@ -704,6 +803,7 @@ class ReFlux(Flux):
             y0_style_neg_weight    = transformer_options.get("y0_style_neg_weight")
             y0_style_neg_synweight = transformer_options.get("y0_style_neg_synweight")
             y0_style_neg_synweight *= y0_style_neg_weight
+            y0_style_neg_mask = transformer_options.get("y0_style_neg_mask")
             
             y0_style_neg = y0_style_neg.to(dtype)
             x   = x.to(dtype)
@@ -1444,3 +1544,505 @@ def patchwise_sortmatch_nonoverlap(
             out[:, :, i:i+patch_size, j:j+patch_size] = matched.view(B, C, patch_size, patch_size)
 
     return out
+
+
+
+
+
+
+def adain_patchwise_row_batch_sortmatch_works(content: torch.Tensor, style: torch.Tensor, sigma: float = 1.0, kernel_size: int = None, inner_kernel_size: int=1, eps: float = 1e-5, mask: torch.Tensor = None, use_median_blur: bool = False, use_sort_match: bool = False, highpass_strength: float = 0.25, highpass_clip: float = 2.0) -> torch.Tensor:
+    B, C, H, W = content.shape
+    device, dtype = content.device, content.dtype
+
+    if kernel_size is None:
+        kernel_size = int(2 * math.ceil(3 * abs(sigma)) + 1)
+    if kernel_size % 2 == 0 and use_sort_match == False:
+        kernel_size += 1
+        pad = kernel_size // 2
+    else:
+        pad = 0
+    
+
+    content_padded = F.pad(content, (pad, pad, pad, pad), mode='reflect')
+    style_padded   = F.pad(style, (pad, pad, pad, pad), mode='reflect')
+    result = torch.zeros_like(content)
+
+    scaling = torch.ones((B, 1, H, W), device=device, dtype=dtype)
+    sigma_scale = torch.ones((H, W), device=device, dtype=torch.float32)
+    if mask is not None:
+        with torch.no_grad():
+            padded_mask = F.pad(mask.float(), (pad, pad, pad, pad), mode="reflect")
+            blurred_mask = F.avg_pool2d(padded_mask, kernel_size=kernel_size, stride=1, padding=pad)
+            blurred_mask = blurred_mask[..., pad:-pad, pad:-pad]
+            edge_proximity = blurred_mask * (1.0 - blurred_mask)
+            scaling = 1.0 - (edge_proximity / 0.25).clamp(0.0, 1.0)
+            sigma_scale = scaling[0, 0]  # assuming single-channel mask broadcasted across B, C
+
+    if not use_median_blur and not use_sort_match:
+        coords = torch.arange(kernel_size, dtype=torch.float64, device=device) - pad
+        base_gauss = torch.exp(-0.5 * (coords / sigma) ** 2)
+        base_gauss = (base_gauss / base_gauss.sum()).to(dtype)
+        gaussian_table = {}
+        for s in sigma_scale.unique():
+            sig = float((sigma * s + eps).clamp(min=1e-3))
+            gauss_local = torch.exp(-0.5 * (coords / sig) ** 2)
+            gauss_local = (gauss_local / gauss_local.sum()).to(dtype)
+            kernel_2d = gauss_local[:, None] * gauss_local[None, :]
+            gaussian_table[s.item()] = kernel_2d
+
+    def patchwise_sort_transfer(source: torch.Tensor, reference: torch.Tensor) -> torch.Tensor:
+        source_sorted, source_indices = source.sort(dim=-1)
+        reference_sorted, _ = reference.sort(dim=-1)
+        result = torch.zeros_like(source)
+        result.scatter_(dim=-1, index=source_indices, src=reference_sorted)
+        return result
+
+    for i in range(H):
+        row_result = torch.zeros(B, C, W, dtype=dtype, device=device)
+        for j in range(W):
+            c_patch = content_padded[:, :, i:i+kernel_size, j:j+kernel_size]
+            s_patch = style_padded[:, :, i:i+kernel_size, j:j+kernel_size]
+
+            if use_median_blur:
+                unfolded_c = c_patch.reshape(B, C, -1)
+                unfolded_s = s_patch.reshape(B, C, -1)
+
+                c_median = unfolded_c.median(dim=-1, keepdim=True).values
+                s_median = unfolded_s.median(dim=-1, keepdim=True).values
+
+                center = kernel_size // 2
+                central = c_patch[:, :, center, center].view(B, C, 1)
+                residual = central - c_median
+                #residual_clipped = residual.clamp(-highpass_clip, highpass_clip)
+                #stylized = s_median + residual_clipped * (1.0 + highpass_strength)
+                stylized = s_median + residual
+            elif use_sort_match:
+                unfolded_c = c_patch.reshape(B, C, -1)
+                unfolded_s = s_patch.reshape(B, C, -1)
+                sorted_transfer = patchwise_sort_transfer(unfolded_c, unfolded_s)
+                center = kernel_size // 2
+                idx = center * kernel_size + center
+                stylized = sorted_transfer[:, :, idx].view(B, C, 1)
+                central = c_patch[:, :, center, center].view(B, C, 1)
+            else:
+                k = gaussian_table[float(sigma_scale[i, j].item())]
+                local_weight = k.view(1, 1, kernel_size, kernel_size).expand(B, C, kernel_size, kernel_size)
+
+                c_mean = (c_patch * local_weight).sum(dim=(-1, -2), keepdim=True)
+                c_std = ((c_patch - c_mean) ** 2 * local_weight).sum(dim=(-1, -2), keepdim=True).sqrt() + eps
+                s_mean = (s_patch * local_weight).sum(dim=(-1, -2), keepdim=True)
+                s_std = ((s_patch - s_mean) ** 2 * local_weight).sum(dim=(-1, -2), keepdim=True).sqrt() + eps
+
+                center = kernel_size // 2
+                central = c_patch[:, :, center:center+1, center:center+1]
+                normed = (central - c_mean) / c_std
+                stylized = normed * s_std + s_mean
+
+            local_scaling = scaling[:, :, i, j].view(B, 1, 1)
+            stylized = central * (1 - local_scaling) + stylized * local_scaling
+
+            row_result[:, :, j] = stylized.squeeze(-1)
+        result[:, :, i, :] = row_result
+
+    return result
+
+
+
+
+
+
+
+def adain_patchwise_row_batch_sortmatch(content: torch.Tensor, style: torch.Tensor, sigma: float = 1.0, kernel_size: int = None, inner_kernel_size: int = 1, eps: float = 1e-5, mask: torch.Tensor = None, use_median_blur: bool = False, use_sort_match: bool = False, lowpass_weight: float=1.0, highpass_weight: float=1.0, stride: int = 1) -> torch.Tensor:
+    B, C, H, W = content.shape
+    device, dtype = content.device, content.dtype
+
+    if kernel_size is None:
+        kernel_size = int(2 * math.ceil(3 * abs(sigma)) + 1)
+    if kernel_size % 2 == 0 and use_sort_match == False:
+        kernel_size += 1
+        pad = kernel_size // 2
+    else:
+        pad = 0
+        
+    if inner_kernel_size == -1:
+        inner_kernel_size = kernel_size
+
+    content_padded = F.pad(content, (pad, pad, pad, pad), mode='reflect')
+    style_padded   = F.pad(style,   (pad, pad, pad, pad), mode='reflect')
+    result = torch.zeros_like(content)
+
+    scaling = torch.ones((B, 1, H, W), device=device, dtype=dtype)
+    sigma_scale = torch.ones((H, W), device=device, dtype=torch.float32)
+    #if mask is not None:
+    #    with torch.no_grad():
+    #        padded_mask = F.pad(mask.float(), (pad, pad, pad, pad), mode="reflect")
+    #        blurred_mask = F.avg_pool2d(padded_mask, kernel_size=kernel_size, stride=1, padding=pad)
+    #        blurred_mask = blurred_mask[..., pad:-pad, pad:-pad]
+    #        edge_proximity = blurred_mask * (1.0 - blurred_mask)
+    #        scaling = 1.0 - (edge_proximity / 0.25).clamp(0.0, 1.0)
+    #        sigma_scale = scaling[0, 0]  # assuming single-channel mask broadcasted across B, C
+
+    if not use_median_blur and not use_sort_match:
+        coords = torch.arange(kernel_size, dtype=torch.float64, device=device) - pad
+        base_gauss = torch.exp(-0.5 * (coords / sigma) ** 2)
+        base_gauss = (base_gauss / base_gauss.sum()).to(dtype)
+        gaussian_table = {}
+        for s in sigma_scale.unique():
+            sig = float((sigma * s + eps).clamp(min=1e-3))
+            gauss_local = torch.exp(-0.5 * (coords / sig) ** 2)
+            gauss_local = (gauss_local / gauss_local.sum()).to(dtype)
+            kernel_2d = gauss_local[:, None] * gauss_local[None, :]
+            gaussian_table[s.item()] = kernel_2d
+
+    def patchwise_sort_transfer(source: torch.Tensor, reference: torch.Tensor) -> torch.Tensor:
+        source_sorted, source_indices = source.sort(dim=-1)
+        reference_sorted, _ = reference.sort(dim=-1)
+        result = torch.zeros_like(source)
+        result.scatter_(dim=-1, index=source_indices, src=reference_sorted)
+        return result
+
+    for i in range(0, H - kernel_size + 1, stride):
+        for j in range(0, W - kernel_size + 1, stride):
+            c_patch = content_padded[:, :, i:i+kernel_size, j:j+kernel_size]
+            s_patch =   style_padded[:, :, i:i+kernel_size, j:j+kernel_size]
+
+            if use_median_blur:
+                unfolded_c = c_patch.reshape(B, C, -1)
+                unfolded_s = s_patch.reshape(B, C, -1)
+
+                c_median = unfolded_c.median(dim=-1, keepdim=True).values
+                s_median = unfolded_s.median(dim=-1, keepdim=True).values
+
+                residual = unfolded_c - c_median
+                #residual_clipped = residual.clamp(-highpass_clip, highpass_clip)
+                #stylized = s_median + residual_clipped * (1.0 + highpass_strength)
+                stylized = lowpass_weight * s_median + highpass_weight * residual
+                stylized = stylized.view(B, C, kernel_size, kernel_size)
+                
+            elif use_sort_match and inner_kernel_size == kernel_size:
+                unfolded_c = c_patch.reshape(B, C, -1)
+                unfolded_s = s_patch.reshape(B, C, -1)
+                
+                
+                if mask is not None:
+                    mask_patch = mask[..., i:i+kernel_size, j:j+kernel_size]
+                    mask_patch_flat = mask_patch.reshape(B, 1, -1).to(dtype=torch.bool)
+                    sorted_transfer = masked_patchwise_sort_transfer(unfolded_c, unfolded_s, mask_patch_flat)
+                else:
+                    sorted_transfer = patchwise_sort_transfer(unfolded_c, unfolded_s)
+                
+                stylized = sorted_transfer.view(B, C, kernel_size, kernel_size)
+                
+            elif use_sort_match and inner_kernel_size < kernel_size:
+                unfolded_c = c_patch.reshape(B, C, -1)
+                unfolded_s = s_patch.reshape(B, C, -1)
+                sorted_transfer = patchwise_sort_transfer(unfolded_c, unfolded_s)
+                center = kernel_size // 2
+                idx = center * kernel_size + center
+                stylized = sorted_transfer[:, :, idx].view(B, C, 1)
+                central = c_patch[:, :, center, center].view(B, C, 1)
+                
+                """ elif use_sort_match:
+                        unfolded_c = c_patch.reshape(B, C, -1)
+                        unfolded_s = s_patch.reshape(B, C, -1)
+
+                        if mask is not None:
+                            # Extract matching region of the mask
+                            patch_mask = mask[:, :, i:i+kernel_size, j:j+kernel_size]  # [B, 1, k, k]
+                            patch_mask = patch_mask.reshape(B, 1, -1).expand(-1, C, -1)  # [B, C, k*k]
+
+                            result_flat = unfolded_c.clone()
+
+                            for b in range(B):
+                                # Get indices of valid pixels (same across channels)
+                                valid = patch_mask[b, 0] > 0  # [k*k]
+                                if valid.sum() == 0:
+                                    continue
+
+                                # Extract vectorized pixels at valid locations
+                                c_valid = unfolded_c[b, :, valid].T  # [N_valid, C]
+                                s_valid = unfolded_s[b, :, valid].T  # [N_valid, C]
+
+                                # L2 match each pixel in c to its nearest in s
+                                dists = (c_valid[:, None, :] - s_valid[None, :, :]).pow(2).sum(-1)  # [N_valid, N_valid]
+                                nearest = dists.argmin(dim=1)  # [N_valid]
+                                result_valid = s_valid[nearest]  # [N_valid, C]
+
+                                result_flat[b, :, valid] = result_valid.T  # Replace
+
+                            stylized = result_flat.view(B, C, kernel_size, kernel_size)
+
+                        else:
+                            sorted_transfer = patchwise_sort_transfer(unfolded_c, unfolded_s)
+                            stylized = sorted_transfer.view(B, C, kernel_size, kernel_size)
+
+                        if inner_kernel_size < kernel_size:
+                            center = kernel_size // 2
+                            idx = center * kernel_size + center
+                            stylized = stylized[:, :, center:center+1, center:center+1]"""
+                
+            else:
+                k = gaussian_table[float(sigma_scale[i, j].item())]
+                local_weight = k.view(1, 1, kernel_size, kernel_size).expand(B, C, kernel_size, kernel_size)
+
+                c_mean = (c_patch * local_weight).sum(dim=(-1, -2), keepdim=True)
+                c_std = ((c_patch - c_mean) ** 2 * local_weight).sum(dim=(-1, -2), keepdim=True).sqrt() + eps
+                s_mean = (s_patch * local_weight).sum(dim=(-1, -2), keepdim=True)
+                s_std = ((s_patch - s_mean) ** 2 * local_weight).sum(dim=(-1, -2), keepdim=True).sqrt() + eps
+
+                normed = (c_patch - c_mean) / c_std
+                stylized = normed * s_std + s_mean
+
+            #local_scaling = scaling[:, :, i:i+kernel_size, j:j+kernel_size]
+            #blended = c_patch * (1 - local_scaling) + stylized * local_scaling
+            #result[:, :, i:i+kernel_size, j:j+kernel_size] = blended
+            result[:, :, i:i+kernel_size, j:j+kernel_size] = stylized
+
+    return result
+
+
+
+def sliced_ot(source, target, n_dirs=32):
+    squeeze_source = False
+    squeeze_target = False
+    if source.ndim == 2:
+        source.unsqueeze_(0)
+    if target.ndim == 2:
+        target.unsqueeze_(0)
+
+    B, N, C = source.shape  # (batch, tokens, channels)
+    out = torch.zeros_like(source)
+
+    for _ in range(n_dirs):
+        v = torch.randn(C, 1).to(source)
+        v = v / v.norm()
+
+        # Project
+        src_proj = source @ v        # (B, N, 1)
+        tgt_proj = target @ v        # (B, N, 1)
+
+        # Sort both
+        src_sorted, src_idx = src_proj.sort(dim=1)
+        tgt_sorted, _ = tgt_proj.sort(dim=1)
+
+        # Replace sorted projections
+        new_proj = torch.zeros_like(src_proj)
+        new_proj.scatter_(dim=1, index=src_idx, src=tgt_sorted)
+
+        # Back-project to high dim
+        out += new_proj @ v.T
+        
+    if squeeze_source or squeeze_target:
+        out.squeeze_(0)
+        
+    return out / n_dirs
+
+
+
+def sliced_optimal_transport22(
+    source: torch.Tensor,  # [B, N, C]
+    target: torch.Tensor,  # [B, N, C]
+    num_projections: int = 64,
+    preserve_mean: bool = False,
+    seed: int = None
+) -> torch.Tensor:
+    """
+    Approximate optimal transport between source and target point clouds along random 1-D projections.
+
+    Args:
+        source: Tensor of shape (B, N, C)
+        target: Tensor of shape (B, N, C)
+        num_projections: Number of random directions to average over.
+        preserve_mean: If True, re-centers each slice to match means.
+        seed: Optional random seed for reproducibility.
+
+    Returns:
+        transported: Tensor of shape (B, N, C), the approximated transported source points.
+    """
+    squeeze_source = False
+    squeeze_target = False
+    if source.ndim == 2:
+        source.unsqueeze_(0)
+    if target.ndim == 2:
+        target.unsqueeze_(0)
+
+    
+    B, N, C = source.shape
+    device = source.device
+    if seed is not None:
+        torch.manual_seed(seed)
+
+    # Optional centering
+    if preserve_mean:
+        src_mean = source.mean(dim=1, keepdim=True)  # [B,1,C]
+        tgt_mean = target.mean(dim=1, keepdim=True)
+        source_centered = source - src_mean
+        target_centered = target - tgt_mean
+    else:
+        source_centered = source
+        target_centered = target
+        src_mean = tgt_mean = None
+
+    # Prepare random directions
+    directions = torch.randn(num_projections, C, device=device, dtype=source.dtype)
+    directions = directions / directions.norm(dim=1, keepdim=True)  # [L, C]
+
+    # Accumulate transport
+    transported = torch.zeros_like(source_centered)
+
+    for v in directions:  # loop over L
+        # project onto v: [B, N]
+        src_proj = source_centered.matmul(v)  # [B, N]
+        tgt_proj = target_centered.matmul(v)  # [B, N]
+
+        # sort and rank
+        src_sorted_vals, src_indices = src_proj.sort(dim=-1)      # [B, N]
+        tgt_sorted_vals, _ = tgt_proj.sort(dim=-1)
+
+        # scatter to match ranks
+        replaced_proj = torch.zeros_like(src_proj)
+        replaced_proj.scatter_(dim=-1, index=src_indices, src=tgt_sorted_vals)
+
+        # lift back to C-D: replaced_proj.unsqueeze(-1) * v
+        transported += replaced_proj.unsqueeze(-1) * v.view(1, 1, C)
+
+    # average over projections
+    transported = transported / float(num_projections)
+
+    # restore mean if centered
+    if preserve_mean:
+        transported = transported + tgt_mean
+
+    if squeeze_source or squeeze_target:
+        transported.squeeze_(0)
+        
+    return transported
+
+# Example usage:
+# B, H, W, C = 1, 8, 8, 3
+# source = torch.randn(B, H*W, C)
+# target = torch.randn(B, H*W, C)
+# out = sliced_optimal_transport(source, target, num_projections=128, preserve_mean=True)
+# out has shape (B, H*W, C) and can be rearranged back to (B, C, H, W) with einops.
+
+
+
+
+def sliced_optimal_transport(
+    source : torch.Tensor,   # [B, N, C]
+    target : torch.Tensor,   # [B, N, C]
+    num_projections: int = 64,
+    preserve_mean: bool = True,
+    eps: float = 1e-6,
+    device=None
+) -> torch.Tensor:
+    """
+    Performs Sliced Optimal Transport (rank matching) between two point clouds
+    in C-dimensional feature space, per batch.
+
+    Args:
+        source:          [B, N, C]
+        target:          [B, N, C]
+        num_projections: how many random directions to average over
+        preserve_mean:   if True, subtract source mean before and add it back after
+    Returns:
+        transported:     [B, N, C]
+    """
+    squeeze_source = False
+    squeeze_target = False
+    if source.ndim == 2:
+        source.unsqueeze_(0)
+    if target.ndim == 2:
+        target.unsqueeze_(0)
+
+    
+    B, N, C = source.shape
+    device = device or source.device
+
+    # 1) Center
+    if preserve_mean:
+        src_mean = source.mean(dim=1, keepdim=True)  # [B,1,C]
+        source_centered = source - src_mean
+    else:
+        src_mean = torch.zeros_like(source[:, :1, :])
+        source_centered = source
+
+    # always center target the same way
+    tgt_mean = target.mean(dim=1, keepdim=True)
+    target_centered = target - tgt_mean
+
+    out = torch.zeros_like(source_centered, device=device).to(source)
+
+    for _ in range(num_projections):
+        # 2) random directions
+        v = torch.randn(C, device=device).to(source)
+        v = v / (v.norm() + eps)               # unit length
+
+        # 3) project
+        # proj shape: [B, N]
+        src_proj = source_centered.matmul(v)   # (B,N,C) @ (C,) -> (B,N)
+        tgt_proj = target_centered.matmul(v)
+
+        # 4) sort+replace
+        src_vals, src_idx = src_proj.sort(dim=1)        # [B,N]
+        tgt_sorted, _    = tgt_proj.sort(dim=1)         # [B,N]
+
+        proj_replaced = torch.zeros_like(src_proj)      # [B,N]
+        proj_replaced.scatter_(1, src_idx, tgt_sorted)
+
+        # 5) lift back: each scalar * direction vector
+        # (B,N) -> (B,N,1) broadcast to (B,N,C)
+        out += proj_replaced.unsqueeze(-1) * v.view(1,1,C)
+
+    # average projections
+    out = out / float(num_projections)
+
+    # 6) restore mean
+    out = out + src_mean
+
+    if squeeze_source or squeeze_target:
+        out.squeeze_(0)
+
+    return out
+
+
+
+
+
+def apply_tile_sot(denoised_embed, y0_adain_embed, tile_sz=64, num_proj=32):
+    B, T, C = denoised_embed.shape
+    H = W = int(T**0.5)
+    th = tw = tile_sz
+    h = w = H//th
+
+    # break into [B*h*w, N, C]
+    tiles    = rearrange(denoised_embed, 'b (h th w tw) c -> (b h w) (th tw) c', 
+                        h=h, w=w, th=th, tw=tw)
+    refs     = rearrange(y0_adain_embed,    'b (h th w tw) c -> (b h w) (th tw) c', 
+                        h=h, w=w, th=th, tw=tw)
+
+    outs = []
+    for src, ref in zip(tiles, refs):
+        # 1) SOT with mean preservation
+        out = sliced_optimal_transport(
+            src.unsqueeze(0), ref.unsqueeze(0),
+            num_projections=num_proj,
+            preserve_mean=True
+        ).squeeze(0)  # [N, C]
+
+        # 2) global std match
+        std_out = out.std()
+        std_ref = ref.std()
+        out = out * (std_ref / (std_out + 1e-6))
+
+        outs.append(out)
+
+    outs = torch.stack(outs, dim=0)  # [B*h*w, N, C]
+    return rearrange(outs, '(b h w) (th tw) c -> b (h th w tw) c',
+                     b=B, h=h, w=w, th=th, tw=tw)
+
+# usage:
+#denoised_embed = apply_tile_sot(denoised_embed, y0_adain_embed, tile_sz=8, num_proj=16)
+
+
+
