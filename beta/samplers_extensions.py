@@ -2530,16 +2530,16 @@ class ClownOptions_Frameweights:
     def INPUT_TYPES(s):
         return {
             "required": {
-                "config_name": (FRAME_WEIGHTS_CONFIG_NAMES, {"default": "frame_weights", "tooltip": "Apply to specific type of per-frame weights."}),
-                "dynamics": (FRAME_WEIGHTS_DYNAMICS_NAMES, {"default": "ease_out", "tooltip": "The function type used for the dynamic period. constant: no change, linear: steady change, ease_out: starts fast, ease_in: starts slow"}),
-                "schedule": (FRAME_WEIGHTS_SCHEDULE_NAMES, {"default": "moderate_early", "tooltip": "fast_early: fast change starts immediately, slow_late: slow change starts later"}),
-                "scale": ("FLOAT", {"default": 0.5, "min": 0.0, "max": 1.0, "step": 0.01, "tooltip": "The amount of change over the course of the frame weights. 1.0 means that the guides have no influence by the end."}),
-                "reverse": ("BOOLEAN", {"default": False, "tooltip": "Reverse the frame weights"}),
+                "config_name":  (FRAME_WEIGHTS_CONFIG_NAMES,    {"default": "frame_weights",                           "tooltip": "Apply to specific type of per-frame weights."}),
+                "dynamics":     (FRAME_WEIGHTS_DYNAMICS_NAMES,  {"default": "ease_out",                                "tooltip": "The function type used for the dynamic period. constant: no change, linear: steady change, ease_out: starts fast, ease_in: starts slow"}),
+                "schedule":     (FRAME_WEIGHTS_SCHEDULE_NAMES,  {"default": "moderate_early",                          "tooltip": "fast_early: fast change starts immediately, slow_late: slow change starts later"}),
+                "scale"   :     ("FLOAT",                       {"default": 0.5, "min": 0.0, "max": 1.0, "step": 0.01, "tooltip": "The amount of change over the course of the frame weights. 1.0 means that the guides have no influence by the end."}),
+                "reverse" :     ("BOOLEAN",                     {"default": False,                                     "tooltip": "Reverse the frame weights"}),
             },
             "optional": {
-                "frame_weights": ("SIGMAS", {"tooltip": "Overrides all other settings EXCEPT reverse."}),
-                "custom_string": ("STRING", {"tooltip": "Overrides all other settings EXCEPT reverse.", "multiline": True}),
-                "options": ("OPTIONS",),
+                "frame_weights": ("SIGMAS",   {"tooltip": "Overrides all other settings EXCEPT reverse."}),
+                "custom_string": ("STRING",   {"tooltip": "Overrides all other settings EXCEPT reverse.", "multiline": True}),
+                "options":       ("OPTIONS",),
             },
         }
 
