@@ -416,6 +416,7 @@ class ReFlux(Flux):
             y0_style_pos_synweight = transformer_options.get("y0_style_pos_synweight")
             y0_style_pos_synweight *= y0_style_pos_weight
             y0_style_pos_mask = transformer_options.get("y0_style_pos_mask")
+            y0_style_pos_mask_edge = transformer_options.get("y0_style_pos_mask_edge")
             
             mask_flat = None
             if y0_style_pos_mask is not None:
@@ -456,7 +457,14 @@ class ReFlux(Flux):
             y0_adain_embed = F.linear(img_y0_adain.to(W), W, b).to(img_y0_adain)
             
             if transformer_options['y0_style_method'] == "scattersort":
-                flatmask = F.interpolate(y0_style_pos_mask, size=(h_len, w_len)).bool().flatten()
+                flatmask = F.interpolate(y0_style_pos_mask, size=(h_len, w_len)).bool().flatten().cpu()
+                flatunmask = ~flatmask
+                
+                if y0_style_pos_mask_edge is not None:
+                    edgemask = F.interpolate(y0_style_pos_mask_edge.unsqueeze(0), size=(h_len, w_len)).bool().flatten()
+                    denoised_embed_orig = denoised_embed.clone()
+                    flatmask   = flatmask   & (~edgemask)
+                    flatunmask = flatunmask & (~edgemask)
                 
                 denoised_masked = denoised_embed[:, flatmask, :].clone()
                 y0_adain_masked = y0_adain_embed[:, flatmask, :].clone()
@@ -466,13 +474,26 @@ class ReFlux(Flux):
                 
                 denoised_embed[:, flatmask, :] = src_sorted.scatter(dim=-2, index=src_idx, src=ref_sorted)
                 
-                denoised_unmasked = denoised_embed[:, ~flatmask, :].clone()
-                y0_adain_unmasked = y0_adain_embed[:, ~flatmask, :].clone()
+                denoised_unmasked = denoised_embed[:, flatunmask, :].clone()
+                y0_adain_unmasked = y0_adain_embed[:, flatunmask, :].clone()
                 
                 src_sorted, src_idx = denoised_unmasked.sort(dim=-2)
                 ref_sorted, ref_idx = y0_adain_unmasked.sort(dim=-2)
                 
-                denoised_embed[:, ~flatmask, :] = src_sorted.scatter(dim=-2, index=src_idx, src=ref_sorted)
+                denoised_embed[:, flatunmask, :] = src_sorted.scatter(dim=-2, index=src_idx, src=ref_sorted)
+                
+                if y0_style_pos_mask_edge is not None:
+                    #denoised_embed[:, edgemask, :] = denoised_embed_orig[:, edgemask, :]
+                    
+                    denoised_edgemasked = denoised_embed[:, edgemask, :].clone()
+                    y0_adain_edgemasked = y0_adain_embed[:, edgemask, :].clone()
+                    
+                    src_sorted, src_idx = denoised_edgemasked.sort(dim=-2)
+                    ref_sorted, ref_idx = y0_adain_edgemasked.sort(dim=-2)
+                    
+                    denoised_embed[:, edgemask, :] = src_sorted.scatter(dim=-2, index=src_idx, src=ref_sorted)
+                
+
 
 
             elif transformer_options['y0_style_method'] == "AdaIN":
