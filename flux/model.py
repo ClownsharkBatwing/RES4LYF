@@ -504,9 +504,9 @@ class ReFlux(Flux):
                     
                 elif freqsep_lowpass_method is not None and freqsep_lowpass_method.endswith("pw"): #EO("adain_pw"):
                     
-                    if self.y0_adain_embed is None or self.y0_adain_embed.shape != y0_adain_embed.shape or torch.norm(self.y0_adain_embed - y0_adain_embed) > 0:
-                        self.y0_adain_embed = y0_adain_embed
-                        self.adain_pw_cache = None
+                    #if self.y0_adain_embed is None or self.y0_adain_embed.shape != y0_adain_embed.shape or torch.norm(self.y0_adain_embed - y0_adain_embed) > 0:
+                    #    self.y0_adain_embed = y0_adain_embed
+                    #    self.adain_pw_cache = None
                         
                     denoised_spatial = rearrange(denoised_embed, "b (h w) c -> b c h w", h=h_len, w=w_len)
                     y0_adain_spatial = rearrange(y0_adain_embed, "b (h w) c -> b c h w", h=h_len, w=w_len)
@@ -524,7 +524,10 @@ class ReFlux(Flux):
                     denoised_spatial = rearrange(denoised_embed, "b (h w) c -> b c h w", h=h_len, w=w_len)
                     y0_adain_spatial = rearrange(y0_adain_embed, "b (h w) c -> b c h w", h=h_len, w=w_len)
 
-                    denoised_spatial_new = adain_patchwise_strict_sortmatch9(denoised_spatial.clone(), y0_adain_spatial.clone().repeat(denoised_spatial.shape[0],1,1,1), kernel_size=freqsep_kernel_size, inner_kernel_size=freqsep_inner_kernel_size, mask=freqsep_mask, stride=freqsep_stride)
+                    #denoised_spatial_new = adain_patchwise_strict_sortmatch_fixed(denoised_spatial.clone(), y0_adain_spatial.clone().repeat(denoised_spatial.shape[0],1,1,1), kernel_size=freqsep_kernel_size, inner_kernel_size=freqsep_inner_kernel_size, mask=freqsep_mask, stride=freqsep_stride)
+
+                    denoised_spatial_new = patchwise_sortmatch_nonoverlap(denoised_spatial.clone(), y0_adain_spatial.clone().repeat(denoised_spatial.shape[0],1,1,1), patch_size=freqsep_kernel_size, mask=freqsep_mask)
+
 
                     denoised_embed = rearrange(denoised_spatial_new, "b c h w -> b (h w) c", h=h_len, w=w_len)
                 
@@ -1276,3 +1279,168 @@ def adain_patchwise_strict_sortmatch9(
                         out[b:b+1, :, oy0:oy1, ox0:ox1][:, :,sel]   =   inner[b:b+1, :, iy0:iy1, ix0:ix1][:, :, sel]
     return out
 
+
+
+def adain_patchwise_strict_sortmatch_fixed(
+    content:  torch.Tensor,   # [B,C,H,W]
+    style:    torch.Tensor,   # [B,C,H,W]
+    kernel_size:       int,   # can be even or odd
+    inner_kernel_size: int = 1,
+    stride:            int = 1,
+    mask:      torch.Tensor = None  # [B,1,H,W] or None
+) -> torch.Tensor:
+    B,C,H,W = content.shape
+    assert inner_kernel_size <= kernel_size
+
+    # we’ll reflect-pad by the “nominal” half-kernel
+    pad = kernel_size // 2
+
+    # pad so that every center (i,j) can grab a full patch
+    cp = F.pad(content, (pad,)*4, mode='reflect')
+    sp = F.pad(style,   (pad,)*4, mode='reflect')
+    out = content.clone()
+
+    # squeeze mask if provided
+    if mask is not None:
+        mask = mask[:,0].bool()       # [B,H,W]
+
+    def sort_transfer(src, ref):
+        # src,ref = [B,C,N] → sort along N axis
+        S, idx = src.sort(dim=-1)
+        R,_   = ref.sort(dim=-1)
+        outf = torch.zeros_like(src)
+        outf.scatter_(dim=-1, index=idx, src=R)
+        return outf
+
+    # for every pixel center
+    for i in range(0, H, stride):
+        for j in range(0, W, stride):
+            # grab the patch out of the padded volume
+            patch_c = cp[:,:, i:i+2*pad+1, j:j+2*pad+1]   # [B,C,Kh,Kw]
+            patch_s = sp[:,:, i:i+2*pad+1, j:j+2*pad+1]
+
+            Bc = patch_c.reshape(B, C, -1)  # [B,C,Kh*Kw]
+            Bs = patch_s.reshape(B, C, -1)
+
+            matched = sort_transfer(Bc, Bs)
+            Kh,Kw = patch_c.shape[-2:]
+            matched = matched.view(B, C, Kh, Kw)
+
+            # compute inner block offsets in those actual Kh×Kw dims
+            off_h = (Kh - inner_kernel_size) // 2
+            off_w = (Kw - inner_kernel_size) // 2
+            inner = matched[:, :, off_h:off_h+inner_kernel_size,
+                                  off_w:off_w+inner_kernel_size]  # [B,C,ih,iw]
+
+            # where to write it in the *unpadded* output
+            y0 = i - pad + off_h
+            x0 = j - pad + off_w
+            y1 = y0 + inner_kernel_size
+            x1 = x0 + inner_kernel_size
+
+            # clamp to image bounds
+            oy0, oy1 = max(y0,0), min(y1,H)
+            ox0, ox1 = max(x0,0), min(x1,W)
+
+            # corresponding slice in the inner block
+            iy0, iy1 = oy0 - y0, oy0 - y0 + (oy1-oy0)
+            ix0, ix1 = ox0 - x0, ox0 - x0 + (ox1-ox0)
+
+            if mask is None:
+                out[:, :, oy0:oy1, ox0:ox1] = inner[:, :, iy0:iy1, ix0:ix1]
+            else:
+                # only write centers where mask[b,i,j] is true
+                for b in range(B):
+                    if not mask[b,i,j]:
+                        continue
+                    out[b, :, oy0:oy1, ox0:ox1] = inner[b, :, iy0:iy1, ix0:ix1]
+
+    return out
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+def patchwise_sort_transfer(src: torch.Tensor, ref: torch.Tensor) -> torch.Tensor:
+    """
+    src, ref: [B, C, N]  (N = patch_h * patch_w)
+    returns: [B, C, N] where ref’s values have been permuted
+             to match the sort-order of src along dim=-1.
+    """
+    src_sorted, src_idx = src.sort(dim=-1)
+    ref_sorted, _       = ref.sort(dim=-1)
+    out = torch.zeros_like(src)
+    out.scatter_(dim=-1, index=src_idx, src=ref_sorted)
+    return out
+
+def masked_patchwise_sort_transfer(
+    src:       torch.Tensor,  # [B, C, N]
+    ref:       torch.Tensor,  # [B, C, N]
+    mask_flat: torch.Tensor   # [B, N] bool
+) -> torch.Tensor:
+    """
+    Only rearrange the N positions where mask_flat[b] is True.
+    """
+    B, C, N = src.shape
+    out = src.clone()
+    for b in range(B):
+        valid = mask_flat[b]        # [N]
+        if not valid.any():
+            continue
+        sc = src[b,:,valid]         # [C, M]
+        rs = ref[b,:,valid]         # [C, M]
+        sc_s, idx = sc.sort(dim=-1)
+        rs_s, _   = rs.sort(dim=-1)
+        tmp = torch.zeros_like(sc)
+        tmp.scatter_(dim=-1, index=idx, src=rs_s)
+        out[b,:,valid] = tmp
+    return out
+
+def patchwise_sortmatch_nonoverlap(
+    content: torch.Tensor,        # [B, C, H, W]
+    style:   torch.Tensor,        # [B, C, H, W]
+    patch_size: int,
+    mask:    torch.Tensor = None  # [B,1,H,W] or None
+) -> torch.Tensor:
+    B, C, H, W = content.shape
+    assert H % patch_size == 0 and W % patch_size == 0, "H and W must be divisible by patch_size"
+    out = content.clone()
+
+    if mask is not None:
+        m = mask[:,0].bool()       # [B,H,W]
+
+    # slide over non-overlapping patches
+    for i in range(0, H, patch_size):
+        for j in range(0, W, patch_size):
+            c_patch = content[:, :, i:i+patch_size, j:j+patch_size]  # [B,C,K,K]
+            s_patch = style  [:, :, i:i+patch_size, j:j+patch_size]
+
+            # flatten spatial → N = K*K
+            Bc = c_patch.reshape(B, C, -1)
+            Bs = s_patch.reshape(B, C, -1)
+
+            # choose masked or unmasked sort-transfer
+            if mask is None:
+                matched = patchwise_sort_transfer(Bc, Bs)
+            else:
+                mask_flat = m[:, i:i+patch_size, j:j+patch_size].reshape(B, -1)
+                matched   = masked_patchwise_sort_transfer(Bc, Bs, mask_flat)
+
+            # write back
+            out[:, :, i:i+patch_size, j:j+patch_size] = matched.view(B, C, patch_size, patch_size)
+
+    return out
