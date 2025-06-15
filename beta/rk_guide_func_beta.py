@@ -1615,7 +1615,7 @@ class LatentGuide:
                         lgw_mask_clamp     = torch.clamp(lgw_mask,     max=lgw_tmp)
                         lgw_mask_clamp_inv = torch.clamp(lgw_mask_inv, max=lgw_tmp_inv)
 
-                        eps_[row][b][c]    = eps_[row][b][c] + lgw_mask_clamp[b][c] * (eps_substep_guide[b][c] - eps_[row][b][c]) + lgw_mask_clamp_inv[b][c] * (eps_substep_guide_inv[b][c] - eps_[row][b][c])
+                        eps_[row][b][c]    = eps_[row][b][c] + lgw_mask_clamp[b][0] * (eps_substep_guide[b][c] - eps_[row][b][c]) + lgw_mask_clamp_inv[b][0] * (eps_substep_guide_inv[b][c] - eps_[row][b][c])
                 
                 elif self.guide_mode in {"epsilon"}: 
                     #eps_[row] = slerp(lgw_mask.mean().item(), eps_[row], eps_substep_guide)
@@ -1708,36 +1708,36 @@ class LatentGuide:
         
         avg, avg_inv = 0, 0
         for b, c in itertools.product(range(x_0.shape[0]), range(x_0.shape[1])):
-            avg     += torch.norm(lgw_mask    [b][c] * data_[row][b][c]   -   lgw_mask    [b][c] * y0    [b][c])
-            avg_inv += torch.norm(lgw_mask_inv[b][c] * data_[row][b][c]   -   lgw_mask_inv[b][c] * y0_inv[b][c])
+            avg     += torch.norm(lgw_mask    [b][0] * data_[row][b][c]   -   lgw_mask    [b][0] * y0    [b][c])
+            avg_inv += torch.norm(lgw_mask_inv[b][0] * data_[row][b][c]   -   lgw_mask_inv[b][0] * y0_inv[b][c])
             
         avg     /= x_0.shape[1]
         avg_inv /= x_0.shape[1]
         
         for b, c in itertools.product(range(x_0.shape[0]), range(x_0.shape[1])):
             if channelwise:
-                ratio     = torch.nan_to_num(torch.norm(lgw_mask    [b][c] * data_[row][b][c] - lgw_mask    [b][c] * y0    [b][c])   /   avg,     0)
-                ratio_inv = torch.nan_to_num(torch.norm(lgw_mask_inv[b][c] * data_[row][b][c] - lgw_mask_inv[b][c] * y0_inv[b][c])   /   avg_inv, 0)
+                ratio     = torch.nan_to_num(torch.norm(lgw_mask    [b][0] * data_[row][b][c] - lgw_mask    [b][0] * y0    [b][c])   /   avg,     0)
+                ratio_inv = torch.nan_to_num(torch.norm(lgw_mask_inv[b][0] * data_[row][b][c] - lgw_mask_inv[b][0] * y0_inv[b][c])   /   avg_inv, 0)
             else:
                 ratio     = 1.
                 ratio_inv = 1.
                     
             if self.EO("slerp_epsilon_guide"):
                 if eps_substep_guide[b][c].sum() != 0:
-                    eps_[row][b][c] = slerp_tensor(ratio * lgw_mask[b][c], eps_[row][b][c], eps_substep_guide[b][c])
+                    eps_[row][b][c] = slerp_tensor(ratio * lgw_mask[b][0], eps_[row][b][c], eps_substep_guide[b][c])
                 if eps_substep_guide_inv[b][c].sum() != 0:
-                    eps_[row][b][c] = slerp_tensor(ratio_inv * lgw_mask_inv[b][c], eps_[row][b][c], eps_substep_guide_inv[b][c])
+                    eps_[row][b][c] = slerp_tensor(ratio_inv * lgw_mask_inv[b][0], eps_[row][b][c], eps_substep_guide_inv[b][c])
             else:
-                eps_[row][b][c]            = eps_[row][b][c]   +   ratio * lgw_mask[b][c] * (eps_substep_guide[b][c] - eps_[row][b][c])   +   ratio_inv * lgw_mask_inv[b][c] * (eps_substep_guide_inv[b][c] - eps_[row][b][c])
+                eps_[row][b][c]            = eps_[row][b][c]   +   ratio * lgw_mask[b][0] * (eps_substep_guide[b][c] - eps_[row][b][c])   +   ratio_inv * lgw_mask_inv[b][0] * (eps_substep_guide_inv[b][c] - eps_[row][b][c])
             
             if use_projection:
                 if self.EO("slerp_epsilon_guide"):
                     if eps_substep_guide[b][c].sum() != 0:
-                        eps_row_lerp = slerp_tensor(self.mask[b][c], eps_[row][b][c], eps_substep_guide[b][c])
+                        eps_row_lerp = slerp_tensor(self.mask[b][0], eps_[row][b][c], eps_substep_guide[b][c])
                     if eps_substep_guide_inv[b][c].sum() != 0:
-                        eps_row_lerp = slerp_tensor((1-self.mask[b][c]), eps_[row][b][c], eps_substep_guide_inv[b][c])
+                        eps_row_lerp = slerp_tensor((1-self.mask[b][0]), eps_[row][b][c], eps_substep_guide_inv[b][c])
                 else:
-                    eps_row_lerp           = eps_[row][b][c]   +          self.mask[b][c] * (eps_substep_guide[b][c] - eps_[row][b][c])   +              (1-self.mask[b][c]) * (eps_substep_guide_inv[b][c] - eps_[row][b][c]) # should this ever be self.mask_inv?
+                    eps_row_lerp           = eps_[row][b][c]   +          self.mask[b][0] * (eps_substep_guide[b][c] - eps_[row][b][c])   +              (1-self.mask[b][0]) * (eps_substep_guide_inv[b][c] - eps_[row][b][c]) # should this ever be self.mask_inv?
 
                 eps_collinear_eps_lerp = get_collinear (eps_[row][b][c], eps_row_lerp)
                 eps_lerp_ortho_eps     = get_orthogonal(eps_row_lerp   , eps_[row][b][c])
@@ -1747,19 +1747,19 @@ class LatentGuide:
 
                 if self.EO("slerp_epsilon_guide"):
                     if eps_substep_guide[b][c].sum() != 0:
-                        eps_[row][b][c] = slerp_tensor(ratio * lgw_mask[b][c], eps_[row][b][c], eps_sum)
+                        eps_[row][b][c] = slerp_tensor(ratio * lgw_mask[b][0], eps_[row][b][c], eps_sum)
                     if eps_substep_guide_inv[b][c].sum() != 0:
-                        eps_[row][b][c] = slerp_tensor(ratio_inv * lgw_mask_inv[b][c], eps_[row][b][c], eps_sum)
+                        eps_[row][b][c] = slerp_tensor(ratio_inv * lgw_mask_inv[b][0], eps_[row][b][c], eps_sum)
                 else:
-                    eps_[row][b][c]        = eps_[row][b][c]   +   ratio * lgw_mask[b][c] * (eps_sum                 - eps_[row][b][c])   +   ratio_inv * lgw_mask_inv[b][c] * (eps_sum                     - eps_[row][b][c])
+                    eps_[row][b][c]        = eps_[row][b][c]   +   ratio * lgw_mask[b][0] * (eps_sum                 - eps_[row][b][c])   +   ratio_inv * lgw_mask_inv[b][0] * (eps_sum                     - eps_[row][b][c])
             else:
                 if self.EO("slerp_epsilon_guide"):
                     if eps_substep_guide[b][c].sum() != 0:
-                        eps_[row][b][c] = slerp_tensor(ratio * lgw_mask[b][c], eps_[row][b][c], eps_substep_guide[b][c])
+                        eps_[row][b][c] = slerp_tensor(ratio * lgw_mask[b][0], eps_[row][b][c], eps_substep_guide[b][c])
                     if eps_substep_guide_inv[b][c].sum() != 0:
-                        eps_[row][b][c] = slerp_tensor(ratio_inv * lgw_mask_inv[b][c], eps_[row][b][c], eps_substep_guide_inv[b][c])
+                        eps_[row][b][c] = slerp_tensor(ratio_inv * lgw_mask_inv[b][0], eps_[row][b][c], eps_substep_guide_inv[b][c])
                 else:
-                    eps_[row][b][c]        = eps_[row][b][c]   +   ratio * lgw_mask[b][c] * (eps_substep_guide[b][c] - eps_[row][b][c])   +   ratio_inv * lgw_mask_inv[b][c] * (eps_substep_guide_inv[b][c] - eps_[row][b][c])
+                    eps_[row][b][c]        = eps_[row][b][c]   +   ratio * lgw_mask[b][0] * (eps_substep_guide[b][c] - eps_[row][b][c])   +   ratio_inv * lgw_mask_inv[b][0] * (eps_substep_guide_inv[b][c] - eps_[row][b][c])
                 
         return eps_
 
