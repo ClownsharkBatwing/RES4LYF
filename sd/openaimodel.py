@@ -619,8 +619,12 @@ class ReUNetModel(nn.Module):
         freqsep_lowpass_method = transformer_options.get("freqsep_lowpass_method")
         freqsep_sigma          = transformer_options.get("freqsep_sigma")
         freqsep_kernel_size    = transformer_options.get("freqsep_kernel_size")
+        freqsep_inner_kernel_size    = transformer_options.get("freqsep_inner_kernel_size")
+        freqsep_stride    = transformer_options.get("freqsep_stride")
+        
         freqsep_lowpass_weight = transformer_options.get("freqsep_lowpass_weight")
         freqsep_highpass_weight= transformer_options.get("freqsep_highpass_weight")
+        freqsep_mask           = transformer_options.get("freqsep_mask")
         
         #floor     = min(floor, weight)
         mask_zero, mask_up_zero, mask_down_zero, mask_down2_zero = None, None, None, None
@@ -964,49 +968,41 @@ class ReUNetModel(nn.Module):
 
             denoised_embed = rearrange(denoised_embed, "B C H W -> B (H W) C")
             y0_adain_embed = rearrange(y0_adain_embed, "B C H W -> B (H W) C")
+            
+            h_len, w_len = eps.shape[-2], eps.shape[-1]
 
             if transformer_options['y0_style_method'] == "AdaIN":
-                if freqsep_lowpass_method is not None and freqsep_lowpass_method.endswith("pw"): # EO("adain_pw"):
+                if freqsep_mask is not None:
+                    freqsep_mask = freqsep_mask.view(1, 1, *freqsep_mask.shape[-2:]).float()
+                    freqsep_mask = F.interpolate(freqsep_mask.float(), size=(h_len, w_len), mode='nearest-exact')
+                
+                if freqsep_lowpass_method is not None and freqsep_lowpass_method.endswith("pw"): #EO("adain_pw"):
                     
-                    #denoised_spatial_new = adain_patchwise_row_batch(denoised_spatial.clone(), y0_adain_spatial.clone(), sigma=EO("adain_pw_sigma", 1.0), kernel_size=EO("adain_pw_kernel_size", 7))
                     if self.y0_adain_embed is None or self.y0_adain_embed.shape != y0_adain_embed.shape or torch.norm(self.y0_adain_embed - y0_adain_embed) > 0:
                         self.y0_adain_embed = y0_adain_embed
                         self.adain_pw_cache = None
-                    
-                    h_len, w_len = eps.shape[-2], eps.shape[-1]
-                    
+                        
                     denoised_spatial = rearrange(denoised_embed, "b (h w) c -> b c h w", h=h_len, w=w_len)
                     y0_adain_spatial = rearrange(y0_adain_embed, "b (h w) c -> b c h w", h=h_len, w=w_len)
 
-                    #denoised_spatial_new = adain_patchwise_row_batch(denoised_spatial.clone(), y0_adain_spatial.clone(), sigma=EO("adain_pw_sigma", 1.0), kernel_size=EO("adain_pw_kernel_size", 7))
-                    #denoised_spatial_new, self.adain_pw_cache = adain_patchwise_cached_rowwise(denoised_spatial.clone(), y0_adain_spatial.clone(), sigma=EO("adain_pw_sigma", 1.0), kernel_size=EO("adain_pw_kernel_size", 7), cache=self.adain_pw_cache)
-                    
-                    #denoised_embed = rearrange(denoised_spatial_new, "b c h w -> b (h w) c", h=h_len, w=w_len)
-                    
-                    if hasattr(self, "guide_mask"):
-                        denoised_spatial_new = adain_patchwise_row_batch_mask(denoised_spatial.clone(), y0_adain_spatial.clone(), sigma=EO("adain_pw_sigma", 1.0), kernel_size=EO("adain_pw_kernel_size", 3), mask=patch_mask.to(denoised_spatial))
-                    elif EO("adain_pw_adapt"):
-                        
-                        denoised_spatial_new = adain_patchwise_row_batch_adaptive_sigma(denoised_spatial.clone(), y0_adain_spatial.clone(), sigma=EO("adain_pw_sigma", 1.0), kernel_size=EO("adain_pw_kernel_size", 7))
-                        #elif freqsep_lowpass_method == "median_pw": #EO("adain_pw_median"):
-                        #denoised_spatial_new = adain_patchwise_row_batch_medblur(denoised_spatial.clone(), y0_adain_spatial.clone(), sigma=freqsep_sigma, kernel_size=freqsep_kernel_size, use_median_blur=True)
-                        #denoised_spatial_new = adain_patchwise_row_batch_median(denoised_spatial.clone(), y0_adain_spatial.clone(), kernel_size=EO("adain_pw_kernel_size", 7))
-                        
-                    elif freqsep_lowpass_method == "median_alt": #EO("adain_pw_median"):
-                        denoised_spatial_new = adain_patchwise_row_batch_medblur(denoised_spatial.clone(), y0_adain_spatial.clone(), sigma=freqsep_sigma, kernel_size=freqsep_kernel_size, use_median_blur=True)
-                        #denoised_spatial_new = adain_patchwise_row_batch_median(denoised_spatial.clone(), y0_adain_spatial.clone(), kernel_size=EO("adain_pw_kernel_size", 7))
-                    elif freqsep_lowpass_method == "median_pw": # EO("real_median_pw"):
-                        denoised_spatial_new = adain_patchwise_row_batch_realmedblur(denoised_spatial.clone(), y0_adain_spatial.clone(), sigma=freqsep_sigma, kernel_size=freqsep_kernel_size, use_median_blur=True)
-                    
+                    if freqsep_lowpass_method == "median_alt": 
+                        denoised_spatial_new = adain_patchwise_row_batch_medblur(denoised_spatial.clone(), y0_adain_spatial.clone().repeat(denoised_spatial.shape[0],1,1,1), sigma=freqsep_sigma, kernel_size=freqsep_kernel_size, use_median_blur=True)
+                    elif freqsep_lowpass_method == "median_pw":
+                        denoised_spatial_new = adain_patchwise_row_batch_realmedblur(denoised_spatial.clone(), y0_adain_spatial.clone().repeat(denoised_spatial.shape[0],1,1,1), sigma=freqsep_sigma, kernel_size=freqsep_kernel_size, use_median_blur=True, lowpass_weight=freqsep_lowpass_weight, highpass_weight=freqsep_highpass_weight)
                     elif freqsep_lowpass_method == "gaussian_pw": 
-                        denoised_spatial_new = adain_patchwise_row_batch(denoised_spatial.clone(), y0_adain_spatial.clone(), sigma=freqsep_sigma, kernel_size=freqsep_kernel_size)
-                    #denoised_spatial_new, self.adain_pw_cache = adain_patchwise_cached_rowwise(denoised_spatial.clone(), y0_adain_spatial.clone(), sigma=EO("adain_pw_sigma", 1.0), kernel_size=EO("adain_pw_kernel_size", 7), cache=self.adain_pw_cache)
+                        denoised_spatial_new = adain_patchwise_row_batch(denoised_spatial.clone(), y0_adain_spatial.clone().repeat(denoised_spatial.shape[0],1,1,1), sigma=freqsep_sigma, kernel_size=freqsep_kernel_size)
                     
                     denoised_embed = rearrange(denoised_spatial_new, "b c h w -> b (h w) c", h=h_len, w=w_len)
 
-                elif freqsep_lowpass_method is not None: #EO("adain_fs"):
-                    h_len, w_len = eps.shape[-2], eps.shape[-1]
-                    
+                elif freqsep_lowpass_method is not None and freqsep_lowpass_method == "distribution": 
+                    denoised_spatial = rearrange(denoised_embed, "b (h w) c -> b c h w", h=h_len, w=w_len)
+                    y0_adain_spatial = rearrange(y0_adain_embed, "b (h w) c -> b c h w", h=h_len, w=w_len)
+
+                    denoised_spatial_new = adain_patchwise_strict_sortmatch9(denoised_spatial.clone(), y0_adain_spatial.clone().repeat(denoised_spatial.shape[0],1,1,1), kernel_size=freqsep_kernel_size, inner_kernel_size=freqsep_inner_kernel_size, mask=freqsep_mask, stride=freqsep_stride)
+
+                    denoised_embed = rearrange(denoised_spatial_new, "b c h w -> b (h w) c", h=h_len, w=w_len)
+                
+                elif freqsep_lowpass_method is not None: 
                     denoised_spatial = rearrange(denoised_embed, "b (h w) c -> b c h w", h=h_len, w=w_len)
                     y0_adain_spatial = rearrange(y0_adain_embed, "b (h w) c -> b c h w", h=h_len, w=w_len)
                     
@@ -1031,17 +1027,11 @@ class ReUNetModel(nn.Module):
                         #denoised_spatial_HP  = y0_adain_spatial_ULP + denoised_spatial_UHP
                         denoised_spatial_HP  = denoised_spatial_ULP + y0_adain_spatial_UHP
                     
-                    #denoised_spatial_new = y0_adain_spatial_LP + denoised_spatial_HP
                     denoised_spatial_new = freqsep_lowpass_weight * y0_adain_spatial_LP + freqsep_highpass_weight * denoised_spatial_HP
                     denoised_embed = rearrange(denoised_spatial_new, "b c h w -> b (h w) c", h=h_len, w=w_len)
-                
+
                 else:
                     denoised_embed = adain_seq_inplace(denoised_embed, y0_adain_embed)
-                    """for adain_iter in range(EO("style_iter", 0)):
-                    denoised_embed = adain_seq_inplace(denoised_embed, y0_adain_embed)
-                    denoised_embed = (denoised_embed - b) @ torch.linalg.pinv(W.to(pinv_dtype)).T.to(dtype)
-                    denoised_embed = F.linear(denoised_embed.to(W), W, b).to(img)
-                    denoised_embed = adain_seq_inplace(denoised_embed, y0_adain_embed)"""
                     
             elif transformer_options['y0_style_method'] == "WCT":
                 if self.y0_adain_embed is None or self.y0_adain_embed.shape != y0_adain_embed.shape or torch.norm(self.y0_adain_embed - y0_adain_embed) > 0:
@@ -1191,32 +1181,67 @@ class ReUNetModel(nn.Module):
             y0_adain_embed = rearrange(y0_adain_embed, "B C H W -> B (H W) C")
 
             if transformer_options['y0_style_method'] == "AdaIN":
-                if EO("adain_pw_neg"):
+                if freqsep_mask is not None:
+                    freqsep_mask = freqsep_mask.view(1, 1, *freqsep_mask.shape[-2:]).float()
+                    freqsep_mask = F.interpolate(freqsep_mask.float(), size=(h_len, w_len), mode='nearest-exact')
+                
+                if freqsep_lowpass_method is not None and freqsep_lowpass_method.endswith("pw"): #EO("adain_pw"):
                     
-                    #denoised_spatial_new = adain_patchwise_row_batch(denoised_spatial.clone(), y0_adain_spatial.clone(), sigma=EO("adain_pw_sigma", 1.0), kernel_size=EO("adain_pw_kernel_size", 7))
                     if self.y0_adain_embed is None or self.y0_adain_embed.shape != y0_adain_embed.shape or torch.norm(self.y0_adain_embed - y0_adain_embed) > 0:
                         self.y0_adain_embed = y0_adain_embed
                         self.adain_pw_cache = None
-                    
-                    h_len, w_len = eps.shape[-2], eps.shape[-1]
-                    
+                        
                     denoised_spatial = rearrange(denoised_embed, "b (h w) c -> b c h w", h=h_len, w=w_len)
                     y0_adain_spatial = rearrange(y0_adain_embed, "b (h w) c -> b c h w", h=h_len, w=w_len)
 
-                    denoised_spatial_new = adain_patchwise_row_batch(denoised_spatial.clone(), y0_adain_spatial.clone(), sigma=EO("adain_pw_neg_sigma", 1.0), kernel_size=EO("adain_pw_neg_kernel_size", 7))
-                    #denoised_spatial_new, self.adain_pw_cache = adain_patchwise_cached_rowwise(denoised_spatial.clone(), y0_adain_spatial.clone(), sigma=EO("adain_pw_sigma", 1.0), kernel_size=EO("adain_pw_kernel_size", 7), cache=self.adain_pw_cache)
+                    if freqsep_lowpass_method == "median_alt": 
+                        denoised_spatial_new = adain_patchwise_row_batch_medblur(denoised_spatial.clone(), y0_adain_spatial.clone().repeat(denoised_spatial.shape[0],1,1,1), sigma=freqsep_sigma, kernel_size=freqsep_kernel_size, use_median_blur=True)
+                    elif freqsep_lowpass_method == "median_pw":
+                        denoised_spatial_new = adain_patchwise_row_batch_realmedblur(denoised_spatial.clone(), y0_adain_spatial.clone().repeat(denoised_spatial.shape[0],1,1,1), sigma=freqsep_sigma, kernel_size=freqsep_kernel_size, use_median_blur=True, lowpass_weight=freqsep_lowpass_weight, highpass_weight=freqsep_highpass_weight)
+                    elif freqsep_lowpass_method == "gaussian_pw": 
+                        denoised_spatial_new = adain_patchwise_row_batch(denoised_spatial.clone(), y0_adain_spatial.clone().repeat(denoised_spatial.shape[0],1,1,1), sigma=freqsep_sigma, kernel_size=freqsep_kernel_size)
                     
                     denoised_embed = rearrange(denoised_spatial_new, "b c h w -> b (h w) c", h=h_len, w=w_len)
+
+                elif freqsep_lowpass_method is not None and freqsep_lowpass_method == "distribution": 
+                    denoised_spatial = rearrange(denoised_embed, "b (h w) c -> b c h w", h=h_len, w=w_len)
+                    y0_adain_spatial = rearrange(y0_adain_embed, "b (h w) c -> b c h w", h=h_len, w=w_len)
+
+                    denoised_spatial_new = adain_patchwise_strict_sortmatch9(denoised_spatial.clone(), y0_adain_spatial.clone().repeat(denoised_spatial.shape[0],1,1,1), kernel_size=freqsep_kernel_size, inner_kernel_size=freqsep_inner_kernel_size, mask=freqsep_mask, stride=freqsep_stride)
+
+                    denoised_embed = rearrange(denoised_spatial_new, "b c h w -> b (h w) c", h=h_len, w=w_len)
+                
+                elif freqsep_lowpass_method is not None: 
+                    denoised_spatial = rearrange(denoised_embed, "b (h w) c -> b c h w", h=h_len, w=w_len)
+                    y0_adain_spatial = rearrange(y0_adain_embed, "b (h w) c -> b c h w", h=h_len, w=w_len)
                     
+                    if   freqsep_lowpass_method == "median":
+                        denoised_spatial_LP = median_blur_2d(denoised_spatial, kernel_size=freqsep_kernel_size)
+                        y0_adain_spatial_LP = median_blur_2d(y0_adain_spatial, kernel_size=freqsep_kernel_size)
+                    elif freqsep_lowpass_method == "gaussian":
+                        denoised_spatial_LP = gaussian_blur_2d(denoised_spatial, sigma=freqsep_sigma, kernel_size=freqsep_kernel_size)
+                        y0_adain_spatial_LP = gaussian_blur_2d(y0_adain_spatial, sigma=freqsep_sigma, kernel_size=freqsep_kernel_size)
+                    
+                    denoised_spatial_HP = denoised_spatial - denoised_spatial_LP
+                    
+                    if EO("adain_fs_uhp"):
+                        y0_adain_spatial_HP = y0_adain_spatial - y0_adain_spatial_LP
+                        
+                        denoised_spatial_ULP = gaussian_blur_2d(denoised_spatial, sigma=EO("adain_fs_uhp_sigma", 1.0), kernel_size=EO("adain_fs_uhp_kernel_size", 3))
+                        y0_adain_spatial_ULP = gaussian_blur_2d(y0_adain_spatial, sigma=EO("adain_fs_uhp_sigma", 1.0), kernel_size=EO("adain_fs_uhp_kernel_size", 3))
+                        
+                        denoised_spatial_UHP = denoised_spatial_HP  - denoised_spatial_ULP
+                        y0_adain_spatial_UHP = y0_adain_spatial_HP  - y0_adain_spatial_ULP
+                        
+                        #denoised_spatial_HP  = y0_adain_spatial_ULP + denoised_spatial_UHP
+                        denoised_spatial_HP  = denoised_spatial_ULP + y0_adain_spatial_UHP
+                    
+                    denoised_spatial_new = freqsep_lowpass_weight * y0_adain_spatial_LP + freqsep_highpass_weight * denoised_spatial_HP
+                    denoised_embed = rearrange(denoised_spatial_new, "b c h w -> b (h w) c", h=h_len, w=w_len)
+
                 else:
                     denoised_embed = adain_seq_inplace(denoised_embed, y0_adain_embed)
-                
-                #denoised_embed = adain_seq_inplace(denoised_embed, y0_adain_embed)
-                """for adain_iter in range(EO("style_iter", 0)):
-                    denoised_embed = adain_seq_inplace(denoised_embed, y0_adain_embed)
-                    denoised_embed = (denoised_embed - b) @ torch.linalg.pinv(W.to(pinv_dtype)).T.to(dtype)
-                    denoised_embed = F.linear(denoised_embed.to(W), W, b).to(img)
-                    denoised_embed = adain_seq_inplace(denoised_embed, y0_adain_embed)"""
+
                     
             elif transformer_options['y0_style_method'] == "WCT":
                 if self.y0_adain_embed is None or self.y0_adain_embed.shape != y0_adain_embed.shape or torch.norm(self.y0_adain_embed - y0_adain_embed) > 0:
@@ -1303,6 +1328,92 @@ def clone_inputs(*args, index: int = None):
     
     
 
+
+
+def gaussian_blur_2d(img: torch.Tensor, sigma: float, kernel_size: int = None) -> torch.Tensor:
+    B, C, H, W = img.shape
+    dtype = img.dtype
+    device = img.device
+
+    if kernel_size is None:
+        kernel_size = int(2 * math.ceil(3 * sigma) + 1)
+
+    if kernel_size % 2 == 0:
+        kernel_size += 1
+
+    coords = torch.arange(kernel_size, dtype=torch.float64) - kernel_size // 2
+    g = torch.exp(-0.5 * (coords / sigma) ** 2)
+    g = g / g.sum()
+
+    kernel_2d = g[:, None] * g[None, :]
+    kernel_2d = kernel_2d.to(dtype=dtype, device=device)
+
+    kernel = kernel_2d.expand(C, 1, kernel_size, kernel_size)
+
+    pad = kernel_size // 2
+    img_padded = F.pad(img, (pad, pad, pad, pad), mode='reflect')
+
+    return F.conv2d(img_padded, kernel, groups=C)
+
+
+def median_blur_2d(img: torch.Tensor, kernel_size: int = 3) -> torch.Tensor:
+    if kernel_size % 2 == 0:
+        kernel_size += 1
+    pad = kernel_size // 2
+
+    B, C, H, W = img.shape
+    img_padded = F.pad(img, (pad, pad, pad, pad), mode='reflect')
+
+    unfolded = img_padded.unfold(2, kernel_size, 1).unfold(3, kernel_size, 1)
+    # unfolded: [B, C, H, W, kH, kW] → flatten to patches
+    patches = unfolded.contiguous().view(B, C, H, W, -1)
+    median = patches.median(dim=-1).values
+    return median
+
+
+def adain_patchwise(content: torch.Tensor, style: torch.Tensor, sigma: float = 1.0, kernel_size: int = None, eps: float = 1e-5) -> torch.Tensor:
+
+    B, C, H, W = content.shape
+    device     = content.device
+    dtype      = content.dtype
+
+    if kernel_size is None:
+        kernel_size = int(2 * math.ceil(3 * sigma) + 1)
+    if kernel_size % 2 == 0:
+        kernel_size += 1
+
+    pad    = kernel_size // 2
+    coords = torch.arange(kernel_size, dtype=torch.float64, device=device) - pad
+    gauss  = torch.exp(-0.5 * (coords / sigma) ** 2)
+    gauss /= gauss.sum()
+    kernel_2d = (gauss[:, None] * gauss[None, :]).to(dtype=dtype)
+
+    weight = kernel_2d.view(1, 1, kernel_size, kernel_size)
+
+    content_padded = F.pad(content, (pad, pad, pad, pad), mode='reflect')
+    style_padded   = F.pad(style,   (pad, pad, pad, pad), mode='reflect')
+    result = torch.zeros_like(content)
+
+    for i in range(H):
+        for j in range(W):
+            c_patch = content_padded[:, :, i:i + kernel_size, j:j + kernel_size]
+            s_patch =   style_padded[:, :, i:i + kernel_size, j:j + kernel_size]
+            w = weight.expand_as(c_patch)
+
+            c_mean =  (c_patch              * w).sum(dim=(-1, -2), keepdim=True)
+            c_std  = ((c_patch - c_mean)**2 * w).sum(dim=(-1, -2), keepdim=True).sqrt() + eps
+            s_mean =  (s_patch              * w).sum(dim=(-1, -2), keepdim=True)
+            s_std  = ((s_patch - s_mean)**2 * w).sum(dim=(-1, -2), keepdim=True).sqrt() + eps
+
+            normed =  (c_patch[:, :, pad:pad+1, pad:pad+1] - c_mean) / c_std
+            stylized = normed * s_std + s_mean
+            result[:, :, i, j] = stylized.squeeze(-1).squeeze(-1)
+
+    return result
+
+
+
+
 def adain_patchwise_row_batch(content: torch.Tensor, style: torch.Tensor, sigma: float = 1.0, kernel_size: int = None, eps: float = 1e-5) -> torch.Tensor:
 
     B, C, H, W = content.shape
@@ -1353,90 +1464,8 @@ def adain_patchwise_row_batch(content: torch.Tensor, style: torch.Tensor, sigma:
     return result
 
 
-def adain_patchwise_row_batch_median(content: torch.Tensor, style: torch.Tensor, kernel_size: int = 3, eps: float = 1e-5) -> torch.Tensor:
-    import torch.nn.functional as F
-
-    B, C, H, W = content.shape
-    device, dtype = content.device, content.dtype
-
-    if kernel_size % 2 == 0:
-        kernel_size += 1
-    pad = kernel_size // 2
-
-    content_padded = F.pad(content, (pad, pad, pad, pad), mode='reflect')
-    style_padded   = F.pad(style,   (pad, pad, pad, pad), mode='reflect')
-    result = torch.zeros_like(content)
-
-    for i in range(H):
-        c_row_patches = torch.stack([
-            content_padded[:, :, i:i+kernel_size, j:j+kernel_size]
-            for j in range(W)
-        ], dim=0)  # [W, B, C, k, k]
-
-        s_row_patches = torch.stack([
-            style_padded[:, :, i:i+kernel_size, j:j+kernel_size]
-            for j in range(W)
-        ], dim=0)
-
-        c_flat = c_row_patches.view(W, B, C, -1)  # [W, B, C, k*k]
-        s_flat = s_row_patches.view(W, B, C, -1)
-
-        c_median = c_flat.median(dim=-1, keepdim=True).values  # [W, B, C, 1]
-        s_median = s_flat.median(dim=-1, keepdim=True).values
-
-        c_std = (c_flat - c_median).abs().mean(dim=-1, keepdim=True) + eps 
-        s_std = (s_flat - s_median).abs().mean(dim=-1, keepdim=True) + eps
-
-        center = kernel_size // 2
-        central = c_row_patches[:, :, :, center, center].unsqueeze(-1)  # [W, B, C, 1]
-
-        normed = (central - c_median) / c_std
-        stylized = normed * s_std + s_median
-
-        result[:, :, i, :] = stylized.squeeze(-1).permute(1, 2, 0)  # [B,C,W]
-
-    return result
 
 
-def gaussian_blur_2d(img: torch.Tensor, sigma: float, kernel_size: int = None) -> torch.Tensor:
-    B, C, H, W = img.shape
-    dtype = img.dtype
-    device = img.device
-
-    if kernel_size is None:
-        kernel_size = int(2 * math.ceil(3 * sigma) + 1)
-
-    if kernel_size % 2 == 0:
-        kernel_size += 1
-
-    coords = torch.arange(kernel_size, dtype=torch.float64) - kernel_size // 2
-    g = torch.exp(-0.5 * (coords / sigma) ** 2)
-    g = g / g.sum()
-
-    kernel_2d = g[:, None] * g[None, :]
-    kernel_2d = kernel_2d.to(dtype=dtype, device=device)
-
-    kernel = kernel_2d.expand(C, 1, kernel_size, kernel_size)
-
-    pad = kernel_size // 2
-    img_padded = F.pad(img, (pad, pad, pad, pad), mode='reflect')
-
-    return F.conv2d(img_padded, kernel, groups=C)
-
-
-def median_blur_2d(img: torch.Tensor, kernel_size: int = 3) -> torch.Tensor:
-    if kernel_size % 2 == 0:
-        kernel_size += 1
-    pad = kernel_size // 2
-
-    B, C, H, W = img.shape
-    img_padded = F.pad(img, (pad, pad, pad, pad), mode='reflect')
-
-    unfolded = img_padded.unfold(2, kernel_size, 1).unfold(3, kernel_size, 1)
-    # unfolded: [B, C, H, W, kH, kW] → flatten to patches
-    patches = unfolded.contiguous().view(B, C, H, W, -1)
-    median = patches.median(dim=-1).values
-    return median
 
 
 
@@ -1524,7 +1553,10 @@ def adain_patchwise_row_batch_medblur(content: torch.Tensor, style: torch.Tensor
 
 
 
-def adain_patchwise_row_batch_realmedblur(content: torch.Tensor, style: torch.Tensor, sigma: float = 1.0, kernel_size: int = None, eps: float = 1e-5, mask: torch.Tensor = None, use_median_blur: bool = False) -> torch.Tensor:
+
+
+
+def adain_patchwise_row_batch_realmedblur(content: torch.Tensor, style: torch.Tensor, sigma: float = 1.0, kernel_size: int = None, eps: float = 1e-5, mask: torch.Tensor = None, use_median_blur: bool = False, lowpass_weight=1.0, highpass_weight=1.0) -> torch.Tensor:
     B, C, H, W = content.shape
     device, dtype = content.device, content.dtype
 
@@ -1579,7 +1611,7 @@ def adain_patchwise_row_batch_realmedblur(content: torch.Tensor, style: torch.Te
                 center = kernel_size // 2
                 central = c_patch[:, :, center, center].view(B, C, 1)
                 residual = central - c_median
-                stylized = s_median + residual
+                stylized = lowpass_weight * s_median + residual * highpass_weight
             else:
                 k = gaussian_table[float(sigma_scale[i, j].item())]
                 local_weight = k.view(1, 1, kernel_size, kernel_size).expand(B, C, kernel_size, kernel_size)
@@ -1601,3 +1633,107 @@ def adain_patchwise_row_batch_realmedblur(content: torch.Tensor, style: torch.Te
         result[:, :, i, :] = row_result
 
     return result
+
+
+
+
+
+
+
+
+
+
+
+
+
+def patchwise_sort_transfer9(src: torch.Tensor, ref: torch.Tensor) -> torch.Tensor:
+    """
+    src, ref: [B, C, N] where N = K*K
+    Returns: [B, C, N] with values from ref permuted to match the sort-order of src.
+    """
+    src_sorted, src_idx  = src.sort(dim=-1)
+    ref_sorted, _        = ref.sort(dim=-1)
+    out = torch.zeros_like(src)
+    out.scatter_(dim=-1, index=src_idx, src=ref_sorted)
+    return out
+
+def masked_patchwise_sort_transfer9(
+    src       : torch.Tensor,         # [B, C, N]
+    ref       : torch.Tensor,         # [B, C, N]
+    mask_flat : torch.Tensor          # [B, N]  bool
+) -> torch.Tensor:
+    """
+    Only rearrange N positions where mask_flat[b] is True... to be implemented fully later. 
+    """
+    B,C,N = src.shape
+    out = src.clone()
+    for b in range(B):
+        valid = mask_flat[b]             # [N] boolean
+        if valid.sum() == 0:
+            continue
+        sc = src[b,:,valid]              # [C, M]
+        ss = ref[b,:,valid]              # [C, M]
+        sc_s, idx = sc.sort(dim=-1)      # sort the channelz
+        ss_s, _   = ss.sort(dim=-1)
+        res = torch.zeros_like(sc)
+        res.scatter_(dim=-1, index=idx, src=ss_s)
+        out[b,:,valid] = res
+    return out
+
+def adain_patchwise_strict_sortmatch9(
+    content           : torch.Tensor,        # [B,C,H,W]
+    style             : torch.Tensor,        # [B,C,H,W]
+    kernel_size       : int,
+    inner_kernel_size : int = 1,
+    stride            : int = 1,
+    mask              : torch.Tensor = None  # [B,1,H,W]
+) -> torch.Tensor:
+    B,C,H,W = content.shape
+    assert inner_kernel_size <= kernel_size
+    pad       = kernel_size//2
+    inner_off = (kernel_size - inner_kernel_size)//2
+
+    # reflect-pad
+    cp = F.pad(content, (pad,)*4, mode='reflect')
+    sp = F.pad(style,   (pad,)*4, mode='reflect')
+    out = content.clone()
+
+    if mask is not None:
+        mask = mask[:,0].bool()  # [B,H,W]
+
+    for i in range(0, H, stride):
+        for j in range(0, W, stride):
+            pc = cp[:, :, i:i+kernel_size, j:j+kernel_size]   # [B,C,K,K]
+            ps = sp[:, :, i:i+kernel_size, j:j+kernel_size]
+
+            Bc = pc.reshape(B, C, -1)
+            Bs = ps.reshape(B, C, -1)
+
+            matched_flat = patchwise_sort_transfer9(Bc, Bs)
+            matched = matched_flat.view(B, C, kernel_size, kernel_size)
+
+            y0, x0 = inner_off, inner_off
+            y1, x1 = y0 + inner_kernel_size, x0 + inner_kernel_size
+            inner = matched[:, :, y0:y1, x0:x1]  # [B,C,inner,inner]
+
+            dst_y0 = i + y0 - pad
+            dst_x0 = j + x0 - pad
+            dst_y1 = dst_y0 + inner_kernel_size
+            dst_x1 = dst_x0 + inner_kernel_size
+
+            oy0 = max(dst_y0, 0); ox0 = max(dst_x0, 0)
+            oy1 = min(dst_y1, H); ox1 = min(dst_x1, W)
+
+            iy0 = oy0 - dst_y0; ix0 = ox0 - dst_x0
+            iy1 = iy0 + (oy1 - oy0); ix1 = ix0 + (ox1 - ox0)
+
+            if mask is None:
+                out[:, :, oy0:oy1, ox0:ox1] = inner[:, :, iy0:iy1, ix0:ix1]
+            else:
+                ibm = mask[:, oy0:oy1, ox0:ox1]  # [B,inner,inner]
+                for b in range(B):
+                    sel = ibm[b]  # [inner,inner]   # w/ regard to kernel
+                    if sel.any():
+                        out[b:b+1, :, oy0:oy1, ox0:ox1][:, :,sel]   =   inner[b:b+1, :, iy0:iy1, ix0:ix1][:, :, sel]
+    return out
+
