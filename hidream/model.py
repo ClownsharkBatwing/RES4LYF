@@ -1118,9 +1118,9 @@ class HDModel(nn.Module):
                 
                 if freqsep_lowpass_method is not None and freqsep_lowpass_method.endswith("pw"): #EO("adain_pw"):
                     
-                    if self.y0_adain_embed is None or self.y0_adain_embed.shape != y0_adain_embed.shape or torch.norm(self.y0_adain_embed - y0_adain_embed) > 0:
-                        self.y0_adain_embed = y0_adain_embed
-                        self.adain_pw_cache = None
+                    #if self.y0_adain_embed is None or self.y0_adain_embed.shape != y0_adain_embed.shape or torch.norm(self.y0_adain_embed - y0_adain_embed) > 0:
+                    #    self.y0_adain_embed = y0_adain_embed
+                    #    self.adain_pw_cache = None
                         
                     denoised_spatial = rearrange(denoised_embed, "b (h w) c -> b c h w", h=h_len, w=w_len)
                     y0_adain_spatial = rearrange(y0_adain_embed, "b (h w) c -> b c h w", h=h_len, w=w_len)
@@ -1334,9 +1334,9 @@ class HDModel(nn.Module):
                     
                     if freqsep_lowpass_method is not None and freqsep_lowpass_method.endswith("pw"): #EO("adain_pw"):
                         
-                        if self.y0_adain_embed is None or self.y0_adain_embed.shape != y0_adain_embed.shape or torch.norm(self.y0_adain_embed - y0_adain_embed) > 0:
-                            self.y0_adain_embed = y0_adain_embed
-                            self.adain_pw_cache = None
+                        #if self.y0_adain_embed is None or self.y0_adain_embed.shape != y0_adain_embed.shape or torch.norm(self.y0_adain_embed - y0_adain_embed) > 0:
+                        #    self.y0_adain_embed = y0_adain_embed
+                        #    self.adain_pw_cache = None
                             
                         denoised_spatial = rearrange(denoised_embed, "b (h w) c -> b c h w", h=h_len, w=w_len)
                         y0_adain_spatial = rearrange(y0_adain_embed, "b (h w) c -> b c h w", h=h_len, w=w_len)
