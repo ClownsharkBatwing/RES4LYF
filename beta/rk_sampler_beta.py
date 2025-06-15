@@ -542,8 +542,13 @@ def sample_rk_beta(
         RK.update_transformer_options({"freqsep_lowpass_method": guides.get("freqsep_lowpass_method")})
         RK.update_transformer_options({"freqsep_sigma":          guides.get("freqsep_sigma")})
         RK.update_transformer_options({"freqsep_kernel_size":    guides.get("freqsep_kernel_size")})
+        RK.update_transformer_options({"freqsep_inner_kernel_size":    guides.get("freqsep_inner_kernel_size")})
+        RK.update_transformer_options({"freqsep_stride":    guides.get("freqsep_stride")})
+
+        
         RK.update_transformer_options({"freqsep_lowpass_weight": guides.get("freqsep_lowpass_weight")})
         RK.update_transformer_options({"freqsep_highpass_weight":guides.get("freqsep_highpass_weight")})
+        RK.update_transformer_options({"freqsep_mask":           guides.get("freqsep_mask")})
 
     # BEGIN SAMPLING LOOP
                 

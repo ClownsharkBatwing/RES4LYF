@@ -1043,10 +1043,14 @@ class ClownGuide_FrequencySeparation:
     def INPUT_TYPES(cls):
         return {"required":
                     {
-                    "apply_to"         : (["AdaIN"], {"default": "AdaIN"}),
-                    "lowpass_method"   : (["gaussian", "gaussian_pw", "median", "median_pw", "median_alt"], {"default": "median_pw"}),
+                    "apply_to"       : (["AdaIN"], {"default": "AdaIN"}),
+                    "method"         : (["gaussian", "gaussian_pw", "median", "median_pw", "median_alt", "distribution"], {"default": "distribution"}),
                     "sigma":             ("FLOAT",                {"default": 3.0, "min":  -10000.0, "max": 10000.0, "step":0.01, "round": False, "tooltip": "Low values produce results closer to the guide image. No effect with median."}),
-                    "kernel_size":       ("INT",                  {"default": 9,    "min":  1,      "max": 11111, "step": 2, "tooltip": "Primary control with median. Set the Re___Patcher node to float32 or lower precision if you have OOMs. You may have them regardless at higher kernel sizes with median."}),
+                    "kernel_size":       ("INT",                  {"default": 8,    "min":  1,      "max": 11111, "step": 1, "tooltip": "Primary control with median. Set the Re___Patcher node to float32 or lower precision if you have OOMs. You may have them regardless at higher kernel sizes with median."}),
+                    "inner_kernel_size":       ("INT",                  {"default": 2,    "min":  1,      "max": 11111, "step": 1, "tooltip": "Primary control with median. Set the Re___Patcher node to float32 or lower precision if you have OOMs. You may have them regardless at higher kernel sizes with median."}),
+                    "stride":       ("INT",                  {"default": 2,    "min":  1,      "max": 11111, "step": 1, "tooltip": "Primary control with median. Set the Re___Patcher node to float32 or lower precision if you have OOMs. You may have them regardless at higher kernel sizes with median."}),
+
+
                     "lowpass_weight":    ("FLOAT",                {"default": 1.0, "min":  -10000.0, "max": 10000.0, "step":0.01, "round": False, "tooltip": "Typically should be set to 1.0. Lower values may sharpen the image, higher values may blur the image."}),
                     "highpass_weight":   ("FLOAT",                {"default": 1.0, "min":  -10000.0, "max": 10000.0, "step":0.01, "round": False, "tooltip": "Typically should be set to 1.0. Higher values may sharpen the image, lower values may blur the image."}),
 
@@ -1054,6 +1058,7 @@ class ClownGuide_FrequencySeparation:
                     },
                 "optional": 
                     {
+                    "mask"           : ("MASK",),
                     }  
                 }
     
@@ -1064,22 +1069,29 @@ class ClownGuide_FrequencySeparation:
 
     def main(self,
             apply_to       = "AdaIN",
-            lowpass_method = "median",
+            method         = "median",
             sigma          = 3.0,
             kernel_size    = 9,
+            inner_kernel_size = 2,
+            stride = 2,
             lowpass_weight = 1.0,
             highpass_weight= 1.0,
             guides           = None,
+            mask             = None,
             ):
         
         guides = copy.deepcopy(guides) if guides is not None else {}
         
         guides['freqsep_apply_to']       = apply_to
-        guides['freqsep_lowpass_method'] = lowpass_method
+        guides['freqsep_lowpass_method'] = method
         guides['freqsep_sigma']          = sigma
         guides['freqsep_kernel_size']    = kernel_size
+        guides['freqsep_inner_kernel_size']    = inner_kernel_size
+        guides['freqsep_stride']         = stride
+
         guides['freqsep_lowpass_weight'] = lowpass_weight
         guides['freqsep_highpass_weight']= highpass_weight
+        guides['freqsep_mask']           = mask
 
         return (guides, )
 
