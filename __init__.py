@@ -159,6 +159,9 @@ NODE_CLASS_MAPPINGS = {
     "MaskFloatToBoolean"                  : nodes_latents.MaskFloatToBoolean,
     
     "MaskToggle"                          : nodes_latents.MaskToggle,
+    "MaskEdge"                            : nodes_latents.MaskEdge,
+    #"MaskEdgeRatio"                       : nodes_latents.MaskEdgeRatio,
+
     "Frames Masks Uninterpolate"          : nodes_latents.Frames_Masks_Uninterpolate,
     "Frames Masks ZeroOut"                : nodes_latents.Frames_Masks_ZeroOut,
     "Frames Latent ReverseOrder"          : nodes_latents.Frames_Latent_ReverseOrder,

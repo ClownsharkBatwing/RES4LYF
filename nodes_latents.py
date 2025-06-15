@@ -16,9 +16,14 @@ from nodes import MAX_RESOLUTION
 #MAX_RESOLUTION=8192
 
 from .helper             import ExtraOptions, initialize_or_scale, extra_options_flag, get_extra_options_list
-from .latents            import latent_meancenter_channels, latent_stdize_channels
+from .latents            import latent_meancenter_channels, latent_stdize_channels, get_edge_mask
 from .beta.noise_classes import NOISE_GENERATOR_NAMES, NOISE_GENERATOR_CLASSES, prepare_noise
 
+def fp_or(tensor1, tensor2):
+    return torch.maximum(tensor1, tensor2)
+
+def fp_and(tensor1, tensor2):
+    return torch.minimum(tensor1, tensor2)
 
 
 class AdvancedNoise:
@@ -517,6 +522,61 @@ class MaskFloatToBoolean:
         return (mask.bool().to(mask.dtype),)
     
 
+
+
+
+class MaskEdge:
+    def __init__(self):
+        pass
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+
+            "required": {
+                "dilation": ("INT", {"default": 20, "min": -10000, "max": 10000}),
+                "mode": [["percent", "absolute"], {"default": "percent"}],
+                "internal": ("FLOAT", {"default": 1.0, "min": -1.0, "max": 10000.0, "step": 0.01}),
+                "external": ("FLOAT", {"default": 1.0, "min": -1.0, "max": 10000.0, "step": 0.01}),
+                #"blur": ("BOOLEAN", {"default": False}),
+                "mask": ("MASK",),
+            },
+            "optional": {
+            },
+        }
+    
+    RETURN_TYPES = ("MASK",)
+    RETURN_NAMES = ("edge_mask",)
+    FUNCTION     = "main"
+    CATEGORY     = "RES4LYF/masks"
+
+    def main(self, dilation=20, mode="percent", internal=1.0, external=1.0, blur=False, mask=None,):
+        
+        mask_dtype = mask.dtype
+        mask = mask.float()
+        
+        if mode == "percent":
+            dilation = (dilation/100) * int(mask.sum() ** 0.5)
+        
+        #if not blur:
+        if int(internal * dilation) > 0:
+            edge_mask_internal = get_edge_mask(mask, int(internal * dilation))
+            edge_mask_internal = fp_and(edge_mask_internal,   mask)
+        else:
+            edge_mask_internal = mask
+        
+        if int(external * dilation) > 0:
+            edge_mask_external = get_edge_mask(mask, int(external * dilation))
+            edge_mask_external = fp_and(edge_mask_external, 1-mask)
+        else:
+            edge_mask_external = 1-mask
+        
+        edge_mask = fp_or(edge_mask_internal, edge_mask_external)
+
+        return (edge_mask.to(mask_dtype),)
+    
+    
+    
 
 
 class Frame_Select_Latent_Raw:
