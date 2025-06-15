@@ -8,6 +8,7 @@ import copy
 
 from nodes import MAX_RESOLUTION
 
+from ..latents               import get_edge_mask
 from ..helper                import OptionsManager, FrameWeightsManager, initialize_or_scale, get_res4lyf_scheduler_list, parse_range_string, parse_tile_sizes
 
 from .rk_coefficients_beta   import RK_SAMPLER_NAMES_BETA_FOLDERS, get_default_sampler_name, get_sampler_name_list, process_sampler_name
@@ -1197,6 +1198,47 @@ class ClownGuide_Style_Beta:
             guides['end_step_style_neg']         = end_step
         
         return (guides, )
+
+
+
+
+
+
+class ClownGuide_Style_EdgeWidth:
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {"required":
+                    {
+                    "edge_width":       ("INT",     {"default": 20,  "min":  1,   "max": 10000}),
+                    },
+                "optional": 
+                    {
+                    "guides":           ("GUIDES", ),
+                    }  
+                }
+    
+    RETURN_TYPES = ("GUIDES",)
+    RETURN_NAMES = ("guides",)
+    FUNCTION     = "main"
+    CATEGORY     = "RES4LYF/sampler_extensions"
+    DESCRIPTION  = "Set an edge mask for some style guide types such as scattersort. Can help mitigate seams."
+
+    def main(self,
+            edge_width = 20,
+            guides     = None,
+            ):
+        
+        guides = copy.deepcopy(guides) if guides is not None else {}
+        
+        if guides.get('mask_style_pos') is not None:
+            guides['mask_edge_style_pos'] = get_edge_mask(guides.get('mask_style_pos'), edge_width)
+            
+        if guides.get('mask_style_neg') is not None:
+            guides['mask_edge_style_neg'] = get_edge_mask(guides.get('mask_style_neg'), edge_width)
+        
+        return (guides, )
+
+
 
 
 

@@ -16,7 +16,7 @@ from einops          import rearrange
 from ..sigmas        import get_sigmas
 from ..helper        import ExtraOptions, FrameWeightsManager, initialize_or_scale, is_video_model
 from ..latents       import normalize_zscore, get_collinear, get_orthogonal, get_cosine_similarity, get_pearson_similarity, \
-                            get_slerp_weight_for_cossim, normalize_latent, hard_light_blend, slerp_tensor, get_orthogonal_noise_from_channelwise
+                            get_slerp_weight_for_cossim, normalize_latent, hard_light_blend, slerp_tensor, get_orthogonal_noise_from_channelwise, get_edge_mask
 
 from .rk_method_beta import RK_Method_Beta
 from .constants      import MAX_STEPS
@@ -657,6 +657,7 @@ class LatentGuide:
             
         mask_style_pos, self.LGW_MASK_RESCALE_MIN = prepare_mask(x, self.mask_style_pos, self.LGW_MASK_RESCALE_MIN)
         self.mask_style_pos = mask_style_pos.to(dtype=self.dtype, device=self.device)
+
         
         mask_style_neg, self.LGW_MASK_RESCALE_MIN = prepare_mask(x, self.mask_style_neg, self.LGW_MASK_RESCALE_MIN)
         self.mask_style_neg = mask_style_neg.to(dtype=self.dtype, device=self.device)

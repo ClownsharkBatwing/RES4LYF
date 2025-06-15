@@ -12,7 +12,7 @@ import comfy
 
 from ..res4lyf              import RESplain
 from ..helper               import ExtraOptions, FrameWeightsManager
-from ..latents              import lagrange_interpolation, get_collinear, get_orthogonal, get_cosine_similarity, get_pearson_similarity, get_slerp_weight_for_cossim, get_slerp_ratio, slerp_tensor, normalize_zscore, compute_slerp_ratio_for_target, find_slerp_ratio_grid
+from ..latents              import lagrange_interpolation, get_collinear, get_orthogonal, get_cosine_similarity, get_pearson_similarity, get_slerp_weight_for_cossim, get_slerp_ratio, slerp_tensor, get_edge_mask, normalize_zscore, compute_slerp_ratio_for_target, find_slerp_ratio_grid
 
 from .rk_method_beta        import RK_Method_Beta
 from .rk_noise_sampler_beta import RK_NoiseSampler
@@ -604,7 +604,11 @@ def sample_rk_beta(
                 RK.update_transformer_options({'y0_style_pos_weight': LG.lgw_style_pos[step_sched]})
                 RK.update_transformer_options({'y0_style_pos_synweight': guides['synweight_style_pos']})
                 RK.update_transformer_options({'y0_style_pos_mask': LG.mask_style_pos})
+                RK.update_transformer_options({'y0_style_pos_mask_edge': guides.get('mask_edge_style_pos')})
                 RK.update_transformer_options({'y0_style_method': guides['style_method']})
+                
+                if EO("style_edge_width"):
+                    RK.update_transformer
                 
                 #if LG.HAS_LATENT_GUIDE:
                 #    y0_cache = LG.y0.clone().cpu()
@@ -626,6 +630,7 @@ def sample_rk_beta(
                 RK.update_transformer_options({'y0_style_neg_weight': LG.lgw_style_neg[step_sched]})
                 RK.update_transformer_options({'y0_style_neg_synweight': guides['synweight_style_neg']})
                 RK.update_transformer_options({'y0_style_neg_mask': LG.mask_style_neg})
+                RK.update_transformer_options({'y0_style_neg_mask_edge': guides.get('mask_edge_style_neg')})
                 RK.update_transformer_options({'y0_style_method': guides['style_method']})
 
         if AttnMask_neg is not None:
