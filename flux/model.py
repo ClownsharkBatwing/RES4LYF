@@ -457,42 +457,58 @@ class ReFlux(Flux):
             y0_adain_embed = F.linear(img_y0_adain.to(W), W, b).to(img_y0_adain)
             
             if transformer_options['y0_style_method'] == "scattersort":
-                flatmask = F.interpolate(y0_style_pos_mask, size=(h_len, w_len)).bool().flatten().cpu()
-                flatunmask = ~flatmask
-                
-                if y0_style_pos_mask_edge is not None:
-                    edgemask = F.interpolate(y0_style_pos_mask_edge.unsqueeze(0), size=(h_len, w_len)).bool().flatten()
-                    denoised_embed_orig = denoised_embed.clone()
-                    flatmask   = flatmask   & (~edgemask)
-                    flatunmask = flatunmask & (~edgemask)
-                
-                denoised_masked = denoised_embed[:, flatmask, :].clone()
-                y0_adain_masked = y0_adain_embed[:, flatmask, :].clone()
-                
-                src_sorted, src_idx = denoised_masked.sort(dim=-2)
-                ref_sorted, ref_idx = y0_adain_masked.sort(dim=-2)
-                
-                denoised_embed[:, flatmask, :] = src_sorted.scatter(dim=-2, index=src_idx, src=ref_sorted)
-                
-                denoised_unmasked = denoised_embed[:, flatunmask, :].clone()
-                y0_adain_unmasked = y0_adain_embed[:, flatunmask, :].clone()
-                
-                src_sorted, src_idx = denoised_unmasked.sort(dim=-2)
-                ref_sorted, ref_idx = y0_adain_unmasked.sort(dim=-2)
-                
-                denoised_embed[:, flatunmask, :] = src_sorted.scatter(dim=-2, index=src_idx, src=ref_sorted)
-                
-                if y0_style_pos_mask_edge is not None:
-                    #denoised_embed[:, edgemask, :] = denoised_embed_orig[:, edgemask, :]
+                tile_h, tile_w = transformer_options.get('y0_style_tile_height'), transformer_options.get('y0_style_tile_width')
+                if tile_h is not None and tile_w is not None:
+
+                    tiles    = rearrange(denoised_embed, 'b (h th w tw) c -> (b h w) (th tw) c', h=h_len//tile_h, w=w_len//tile_w, th=tile_h, tw=tile_w)
+                    y0_tiles = rearrange(y0_adain_embed, 'b (h th w tw) c -> (b h w) (th tw) c', h=h_len//tile_h, w=w_len//tile_w, th=tile_h, tw=tile_w)
                     
-                    denoised_edgemasked = denoised_embed[:, edgemask, :].clone()
-                    y0_adain_edgemasked = y0_adain_embed[:, edgemask, :].clone()
+                    tiles_out = []
+                    for i, (tile, y0_tile) in enumerate(zip(tiles, y0_tiles)):
+                        src_sorted, src_idx =    tile.sort(dim=-2)
+                        ref_sorted, ref_idx = y0_tile.sort(dim=-2)
                     
-                    src_sorted, src_idx = denoised_edgemasked.sort(dim=-2)
-                    ref_sorted, ref_idx = y0_adain_edgemasked.sort(dim=-2)
-                    
-                    denoised_embed[:, edgemask, :] = src_sorted.scatter(dim=-2, index=src_idx, src=ref_sorted)
+                        tiles[i] = tile.scatter(dim=-2, index=src_idx, src=ref_sorted)
+
+                    denoised_embed = rearrange(tiles, '(b h w) (th tw) c -> b (h th w tw) c', h=h_len//tile_h, w=w_len//tile_w, th=tile_h, tw=tile_w)
                 
+                else:
+                    flatmask = F.interpolate(y0_style_pos_mask, size=(h_len, w_len)).bool().flatten().cpu()
+                    flatunmask = ~flatmask
+                    
+                    if y0_style_pos_mask_edge is not None:
+                        edgemask = F.interpolate(y0_style_pos_mask_edge.unsqueeze(0), size=(h_len, w_len)).bool().flatten()
+                        denoised_embed_orig = denoised_embed.clone()
+                        flatmask   = flatmask   & (~edgemask)
+                        flatunmask = flatunmask & (~edgemask)
+                    
+                    denoised_masked = denoised_embed[:, flatmask, :].clone()
+                    y0_adain_masked = y0_adain_embed[:, flatmask, :].clone()
+                    
+                    src_sorted, src_idx = denoised_masked.sort(dim=-2)
+                    ref_sorted, ref_idx = y0_adain_masked.sort(dim=-2)
+                    
+                    denoised_embed[:, flatmask, :] = src_sorted.scatter(dim=-2, index=src_idx, src=ref_sorted)
+                    
+                    denoised_unmasked = denoised_embed[:, flatunmask, :].clone()
+                    y0_adain_unmasked = y0_adain_embed[:, flatunmask, :].clone()
+                    
+                    src_sorted, src_idx = denoised_unmasked.sort(dim=-2)
+                    ref_sorted, ref_idx = y0_adain_unmasked.sort(dim=-2)
+                    
+                    denoised_embed[:, flatunmask, :] = src_sorted.scatter(dim=-2, index=src_idx, src=ref_sorted)
+                    
+                    if y0_style_pos_mask_edge is not None:
+                        #denoised_embed[:, edgemask, :] = denoised_embed_orig[:, edgemask, :]
+                        
+                        denoised_edgemasked = denoised_embed[:, edgemask, :].clone()
+                        y0_adain_edgemasked = y0_adain_embed[:, edgemask, :].clone()
+                        
+                        src_sorted, src_idx = denoised_edgemasked.sort(dim=-2)
+                        ref_sorted, ref_idx = y0_adain_edgemasked.sort(dim=-2)
+                        
+                        denoised_embed[:, edgemask, :] = src_sorted.scatter(dim=-2, index=src_idx, src=ref_sorted)
+                    
 
 
 
