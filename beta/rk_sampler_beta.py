@@ -608,6 +608,7 @@ def sample_rk_beta(
                 RK.update_transformer_options({'y0_style_method': guides['style_method']})
                 RK.update_transformer_options({'y0_style_tile_height': guides.get('style_tile_height')})
                 RK.update_transformer_options({'y0_style_tile_width': guides.get('style_tile_width')})
+                RK.update_transformer_options({'y0_style_tile_padding': guides.get('style_tile_padding')})
                 
                 if EO("style_edge_width"):
                     RK.update_transformer
@@ -636,6 +637,7 @@ def sample_rk_beta(
                 RK.update_transformer_options({'y0_style_method': guides['style_method']})
                 RK.update_transformer_options({'y0_style_tile_height': guides.get('style_tile_height')})
                 RK.update_transformer_options({'y0_style_tile_width': guides.get('style_tile_width')})
+                RK.update_transformer_options({'y0_style_tile_padding': guides.get('style_tile_padding')})
 
         if AttnMask_neg is not None:
             RK.update_transformer_options({'regional_conditioning_weight_neg': RegParam_neg.weights[step_sched]})

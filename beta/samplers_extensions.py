@@ -1250,6 +1250,7 @@ class ClownGuide_Style_TileSize:
                     {
                     "height": ("INT",     {"default": 128,  "min":  16,   "max": 10000, "step": 16}),
                     "width" : ("INT",     {"default": 128,  "min":  16,   "max": 10000, "step": 16}),
+                    "padding" : ("INT",     {"default": 64,  "min":  0,   "max": 10000, "step": 16}),
                     },
                 "optional": 
                     {
@@ -1266,13 +1267,15 @@ class ClownGuide_Style_TileSize:
     def main(self,
             height = 128,
             width  = 128,
+            padding = 64,
             guides = None,
             ):
         
         guides = copy.deepcopy(guides) if guides is not None else {}
         
-        guides['style_tile_height'] = height // 16
-        guides['style_tile_width']  = width  // 16
+        guides['style_tile_height']  = height  // 16
+        guides['style_tile_width']   = width   // 16
+        guides['style_tile_padding'] = padding // 16
 
         return (guides, )
 
