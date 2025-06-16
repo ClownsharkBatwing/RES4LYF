@@ -456,9 +456,59 @@ class ReFlux(Flux):
             denoised_embed = F.linear(img         .to(W), W, b).to(img)
             y0_adain_embed = F.linear(img_y0_adain.to(W), W, b).to(img_y0_adain)
             
+            bsz = denoised_embed.shape[0]
+            
             if transformer_options['y0_style_method'] == "scattersort":
                 tile_h, tile_w = transformer_options.get('y0_style_tile_height'), transformer_options.get('y0_style_tile_width')
-                if tile_h is not None and tile_w is not None:
+                pad = transformer_options.get('y0_style_tile_padding')
+                if pad is not None and tile_h is not None and tile_w is not None:
+                    
+                    pad = EO("style_pad", 1)
+                    denoised_pretile = rearrange(denoised_embed, "b (h w) c -> b c h w", h=h_len, w=w_len)
+                    y0_pretile       = rearrange(y0_adain_embed, "b (h w) c -> b c h w", h=h_len, w=w_len)
+                    denoised_padded  = F.pad(denoised_pretile, (pad, pad, pad, pad), mode='reflect')
+                    y0_padded        = F.pad(y0_pretile,       (pad, pad, pad, pad), mode='reflect')
+                    
+                    denoised_padded_out = denoised_padded.clone()
+                    
+                    for ix in range(pad, h_len, tile_h):
+                        for jx in range(pad, w_len, tile_w):
+                            
+                            tile    = denoised_padded[:,:,  ix-pad:ix+tile_h+pad,  jx-pad:jx+tile_w+pad]
+                            y0_tile =       y0_padded[:,:,  ix-pad:ix+tile_h+pad,  jx-pad:jx+tile_w+pad]
+                            
+                            tile    = rearrange(tile,    "b c h w -> b c (h w)", h=tile_h+pad*2, w=tile_w+pad*2)
+                            y0_tile = rearrange(y0_tile, "b c h w -> b c (h w)", h=tile_h+pad*2, w=tile_w+pad*2)
+                            
+                            src_sorted, src_idx =    tile.sort(dim=-1)
+                            ref_sorted, ref_idx = y0_tile.sort(dim=-1)
+                            
+                            new_tile = tile.scatter(dim=-1, index=src_idx, src=ref_sorted)
+                            
+                            new_tile = rearrange(new_tile, "b c (h w) -> b c h w", h=tile_h+pad*2, w=tile_w+pad*2)
+                            
+                            
+                            denoised_padded_out[:,:,  ix:ix+tile_h, jx:jx+tile_w] = new_tile[:,:,pad:-pad,pad:-pad]
+                            
+                    denoised_embed = rearrange(denoised_padded_out[:,:, pad:-pad, pad:-pad], "b c h w -> b (h w) c")
+                    
+
+                    #tiles    = rearrange(denoised_embed, 'b (h th w tw) c -> (b h w) (th tw) c', h=h_len//tile_h, w=w_len//tile_w, th=tile_h, tw=tile_w)
+                    #y0_tiles = rearrange(y0_adain_embed, 'b (h th w tw) c -> (b h w) (th tw) c', h=h_len//tile_h, w=w_len//tile_w, th=tile_h, tw=tile_w)
+                    #
+                    #tiles_out = []
+                    #for i, (tile, y0_tile) in enumerate(zip(tiles, y0_tiles)):
+                    #    src_sorted, src_idx =    tile.sort(dim=-2)
+                    #    ref_sorted, ref_idx = y0_tile.sort(dim=-2)
+                    #
+                    #    tiles[i] = tile.scatter(dim=-2, index=src_idx, src=ref_sorted)
+
+                    #denoised_embed = rearrange(tiles, '(b h w) (th tw) c -> b (h th w tw) c', h=h_len//tile_h, w=w_len//tile_w, th=tile_h, tw=tile_w)
+                
+                
+                
+                
+                elif tile_h is not None and tile_w is not None:
 
                     tiles    = rearrange(denoised_embed, 'b (h th w tw) c -> (b h w) (th tw) c', h=h_len//tile_h, w=w_len//tile_w, th=tile_h, tw=tile_w)
                     y0_tiles = rearrange(y0_adain_embed, 'b (h th w tw) c -> (b h w) (th tw) c', h=h_len//tile_h, w=w_len//tile_w, th=tile_h, tw=tile_w)
