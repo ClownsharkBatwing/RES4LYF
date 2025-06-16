@@ -14,6 +14,8 @@ def add_beta(NODE_CLASS_MAPPINGS, NODE_DISPLAY_NAME_MAPPINGS, extra_samplers):
         "ClownOptions_DetailBoost_Beta"   : samplers_extensions.ClownOptions_DetailBoost_Beta,
         "ClownGuide_Style_Beta"           : samplers_extensions.ClownGuide_Style_Beta,
         "ClownGuide_Style_EdgeWidth"      : samplers_extensions.ClownGuide_Style_EdgeWidth,
+        "ClownGuide_Style_TileSize"       : samplers_extensions.ClownGuide_Style_TileSize,
+
         "ClownGuide_Beta"                 : samplers_extensions.ClownGuide_Beta,
         "ClownGuides_Beta"                : samplers_extensions.ClownGuides_Beta,
         "ClownGuidesAB_Beta"              : samplers_extensions.ClownGuidesAB_Beta,
