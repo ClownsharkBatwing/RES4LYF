@@ -463,7 +463,7 @@ class ReFlux(Flux):
                 pad = transformer_options.get('y0_style_tile_padding')
                 if pad is not None and tile_h is not None and tile_w is not None:
                     
-                    pad = EO("style_pad", 1)
+                    #pad = EO("style_pad", 1)
                     denoised_pretile = rearrange(denoised_embed, "b (h w) c -> b c h w", h=h_len, w=w_len)
                     y0_pretile       = rearrange(y0_adain_embed, "b (h w) c -> b c h w", h=h_len, w=w_len)
                     denoised_padded  = F.pad(denoised_pretile, (pad, pad, pad, pad), mode='reflect')
