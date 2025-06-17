@@ -819,3 +819,45 @@ def upscale_to_match_spatial(tensor_5d, ref_4d, mode='bicubic'):
 
 
 
+
+
+def gaussian_blur_2d(img: torch.Tensor, sigma: float, kernel_size: int = None) -> torch.Tensor:
+    B, C, H, W = img.shape
+    dtype = img.dtype
+    device = img.device
+
+    if kernel_size is None:
+        kernel_size = int(2 * math.ceil(3 * sigma) + 1)
+
+    if kernel_size % 2 == 0:
+        kernel_size += 1
+
+    coords = torch.arange(kernel_size, dtype=torch.float64) - kernel_size // 2
+    g = torch.exp(-0.5 * (coords / sigma) ** 2)
+    g = g / g.sum()
+
+    kernel_2d = g[:, None] * g[None, :]
+    kernel_2d = kernel_2d.to(dtype=dtype, device=device)
+
+    kernel = kernel_2d.expand(C, 1, kernel_size, kernel_size)
+
+    pad = kernel_size // 2
+    img_padded = F.pad(img, (pad, pad, pad, pad), mode='reflect')
+
+    return F.conv2d(img_padded, kernel, groups=C)
+
+
+def median_blur_2d(img: torch.Tensor, kernel_size: int = 3) -> torch.Tensor:
+    if kernel_size % 2 == 0:
+        kernel_size += 1
+    pad = kernel_size // 2
+
+    B, C, H, W = img.shape
+    img_padded = F.pad(img, (pad, pad, pad, pad), mode='reflect')
+
+    unfolded = img_padded.unfold(2, kernel_size, 1).unfold(3, kernel_size, 1)
+    # unfolded: [B, C, H, W, kH, kW] → flatten to patches
+    patches = unfolded.contiguous().view(B, C, H, W, -1)
+    median = patches.median(dim=-1).values
+    return median
+

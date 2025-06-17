@@ -61,6 +61,7 @@ from .sd.openaimodel import ReUNetModel
 from .sd.attention import ReBasicTransformerBlock, ReCrossAttention
 
 from .latents import get_orthogonal, get_cosine_similarity
+from .style_transfer import StyleWCT, Retrojector
 from .res4lyf import RESplain
 
 from .helper import parse_range_string
@@ -204,7 +205,8 @@ class ReWanPatcherAdvanced:
 
     def main(self, model, self_attn_blocks, cross_attn_blocks, sliding_window_self_attn="false", sliding_window_frames=60, style_dtype="float32", enable=True, force=False):
         
-        model.model.diffusion_model.style_dtype = getattr(torch, style_dtype) if style_dtype != "default" else None
+        style_dtype = getattr(torch, style_dtype) if style_dtype != "default" else None
+        model.model.diffusion_model.style_dtype = style_dtype
         model.model.diffusion_model.proj_weights = None
         model.model.diffusion_model.y0_adain_embed = None
         
@@ -320,10 +322,15 @@ class ReFluxPatcherAdvanced:
         doublestream_blocks = parse_range_string(doublestream_blocks)
         singlestream_blocks = parse_range_string(singlestream_blocks)
         
-        model.model.diffusion_model.style_dtype = getattr(torch, style_dtype) if style_dtype != "default" else None
+        style_dtype = getattr(torch, style_dtype) if style_dtype != "default" else None
+        
+        model.model.diffusion_model.style_dtype = style_dtype
         model.model.diffusion_model.proj_weights = None
         model.model.diffusion_model.y0_adain_embed = None
         model.model.diffusion_model.adain_pw_cache = None
+        
+        model.model.diffusion_model.StyleWCT = StyleWCT()
+        model.model.diffusion_model.Retrojector = Retrojector(model.model.diffusion_model.img_in, pinv_dtype=style_dtype, dtype=style_dtype)
         
         if (enable or force) and model.model.diffusion_model.__class__ == Flux:
             m = model.clone()
@@ -412,7 +419,7 @@ class ReReduxPatcher:
         style_model.model.style_dtype = getattr(torch, style_dtype) if style_dtype != "default" else None
         style_model.model.proj_weights = None
         style_model.model.y0_adain_embed = None
-        
+                
         if (enable or force) and style_model.model.__class__ == ReduxImageEncoder:
             m = style_model#.clone()
             m.model.__class__     = ReReduxImageEncoder
@@ -461,9 +468,13 @@ class ReChromaPatcherAdvanced:
         doublestream_blocks = parse_range_string(doublestream_blocks)
         singlestream_blocks = parse_range_string(singlestream_blocks)
         
-        model.model.diffusion_model.style_dtype = getattr(torch, style_dtype) if style_dtype != "default" else None
+        style_dtype = getattr(torch, style_dtype) if style_dtype != "default" else None
+        model.model.diffusion_model.style_dtype = style_dtype
         model.model.diffusion_model.proj_weights = None
         model.model.diffusion_model.y0_adain_embed = None
+        
+        model.model.diffusion_model.StyleWCT = StyleWCT()
+        model.model.diffusion_model.Retrojector = Retrojector(model.model.diffusion_model.img_in, pinv_dtype=style_dtype, dtype=style_dtype)
         
         if (enable or force) and model.model.diffusion_model.__class__ == Chroma:
             m = model.clone()
@@ -562,7 +573,8 @@ class ReLTXVPatcherAdvanced:
         doublestream_blocks = parse_range_string(doublestream_blocks)
         singlestream_blocks = parse_range_string(singlestream_blocks)
         
-        model.model.diffusion_model.style_dtype = getattr(torch, style_dtype) if style_dtype != "default" else None
+        style_dtype = getattr(torch, style_dtype) if style_dtype != "default" else None
+        model.model.diffusion_model.style_dtype = style_dtype
         model.model.diffusion_model.proj_weights = None
         model.model.diffusion_model.y0_adain_embed = None
         
@@ -654,9 +666,13 @@ class ReSDPatcherAdvanced:
         doublestream_blocks = parse_range_string(doublestream_blocks)
         singlestream_blocks = parse_range_string(singlestream_blocks)
         
-        model.model.diffusion_model.style_dtype = getattr(torch, style_dtype) if style_dtype != "default" else None
+        style_dtype = getattr(torch, style_dtype) if style_dtype != "default" else None
+        model.model.diffusion_model.style_dtype = style_dtype
         model.model.diffusion_model.proj_weights = None
         model.model.diffusion_model.y0_adain_embed = None
+        
+        model.model.diffusion_model.StyleWCT    = StyleWCT()
+        model.model.diffusion_model.Retrojector = Retrojector(model.model.diffusion_model.input_blocks[0][0], pinv_dtype=style_dtype, dtype=style_dtype, patch_size=1)
         
         if (enable or force) and model.model.diffusion_model.__class__ == UNetModel:
             m = model.clone()
@@ -782,9 +798,13 @@ class ReHiDreamPatcherAdvanced:
         double_stream_blocks = parse_range_string(double_stream_blocks)
         single_stream_blocks = parse_range_string(single_stream_blocks)
         
-        model.model.diffusion_model.style_dtype = getattr(torch, style_dtype) if style_dtype != "default" else None
+        style_dtype = getattr(torch, style_dtype) if style_dtype != "default" else None
+        model.model.diffusion_model.style_dtype = style_dtype
         model.model.diffusion_model.proj_weights = None
         model.model.diffusion_model.y0_adain_embed = None
+        
+        model.model.diffusion_model.StyleWCT    = StyleWCT()
+        model.model.diffusion_model.Retrojector = Retrojector(model.model.diffusion_model.x_embedder.proj, pinv_dtype=style_dtype, dtype=style_dtype)
         
         if (enable or force) and model.model.diffusion_model.__class__ == HiDreamImageTransformer2DModel:
             m = model.clone()
@@ -897,9 +917,13 @@ class ReSD35PatcherAdvanced:
 
     def main(self, model, joint_blocks, style_dtype, enable=True, force=False):
         
-        model.model.diffusion_model.style_dtype = getattr(torch, style_dtype) if style_dtype != "default" else None
+        style_dtype = getattr(torch, style_dtype) if style_dtype != "default" else None
+        model.model.diffusion_model.style_dtype = style_dtype
         model.model.diffusion_model.proj_weights = None
         model.model.diffusion_model.y0_adain_embed = None
+        
+        model.model.diffusion_model.StyleWCT    = StyleWCT()
+        model.model.diffusion_model.Retrojector = Retrojector(model.model.diffusion_model.x_embedder.proj, pinv_dtype=style_dtype, dtype=style_dtype)
         
         joint_blocks = parse_range_string(joint_blocks)
         
@@ -979,9 +1003,13 @@ class ReAuraPatcherAdvanced:
         doublelayer_blocks = parse_range_string(doublelayer_blocks)
         singlelayer_blocks = parse_range_string(singlelayer_blocks)
         
-        model.model.diffusion_model.style_dtype = getattr(torch, style_dtype) if style_dtype != "default" else None
+        style_dtype = getattr(torch, style_dtype) if style_dtype != "default" else None
+        model.model.diffusion_model.style_dtype = style_dtype
         model.model.diffusion_model.proj_weights = None
         model.model.diffusion_model.y0_adain_embed = None
+        
+        model.model.diffusion_model.StyleWCT    = StyleWCT()
+        model.model.diffusion_model.Retrojector = Retrojector(model.model.diffusion_model.init_x_linear, pinv_dtype=style_dtype, dtype=style_dtype)
         
         if (enable or force) and model.model.diffusion_model.__class__ == MMDiT:
             m = model.clone()
