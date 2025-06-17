@@ -199,6 +199,7 @@ def sample_rk_beta(
         sde_noise                     : list    [Tensor]   = [],
 
         noise_seed                    : int                = -1,
+        noise_initial                 : Optional[Tensor]   = None,
 
         cfgpp                         : float              = 0.0,
         cfg_cw                        : float              = 1.0,
@@ -460,13 +461,14 @@ def sample_rk_beta(
         y0 = state_info['y0'].to(work_device) 
         data_cached = state_info['data_cached'].to(work_device) 
         data_x_prev_ = state_info['data_x_prev_'].to(work_device) 
-    if EO("flow_use_init_noise") or EO("flow_use_smart_noise"):
-        x_init = x.clone()
+    #if EO("flow_use_init_noise") or EO("flow_use_smart_noise"):
+    #    x_init = x.clone()
+    x_init = noise_initial.to(x)
 
     #progress_bar = trange(len(sigmas)-1-start_step, disable=disable)
     
     if EO("eps_adain") or EO("x_init_to_model"):
-        x_init = x.clone()
+        #x_init = x.clone()
         RK.update_transformer_options({'x_init' : x_init.clone()})
     if AttnMask is not None:
         RK.update_transformer_options({'AttnMask'  : AttnMask})
