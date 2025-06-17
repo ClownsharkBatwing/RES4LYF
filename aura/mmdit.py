@@ -16,7 +16,9 @@ import comfy.ldm.common_dit
 from ..helper import ExtraOptions
 
 from typing import Dict, Optional, Tuple, List
-
+from ..latents import slerp_tensor, interpolate_spd, tile_latent, untile_latent, gaussian_blur_2d, median_blur_2d
+from ..style_transfer import apply_scattersort_masked, apply_scattersort_tiled, adain_seq_inplace, adain_patchwise_row_batch_med, adain_patchwise_row_batch
+from einops import rearrange
 def modulate(x, shift, scale):
     return x * (1 + scale.unsqueeze(1)) + shift.unsqueeze(1)
 
@@ -477,29 +479,18 @@ class ReMMDiT(nn.Module):
             patches_replace = transformer_options.get("patches_replace", {})
             # patchify x, add PE
             b, c, h, w = x.shape
+            
+            h_len = ((h + (self.patch_size // 2)) // self.patch_size) # h_len 96
+            w_len = ((w + (self.patch_size // 2)) // self.patch_size) # w_len 96
 
-            # pe_indexes = self.pe_selection_index_based_on_dim(h, w)
-            # print(pe_indexes, pe_indexes.shape)
 
             x = self.init_x_linear(self.patchify(x))  # B, T_x, D
             x = self.apply_pos_embeds(x, h, w)
-            # x = x + self.positional_encoding[:, : x.size(1)].to(device=x.device, dtype=x.dtype)
-            # x = x + self.positional_encoding[:, pe_indexes].to(device=x.device, dtype=x.dtype)
 
-
-
-
-
-
-            """if UNCOND:
-                transformer_options['reg_cond_weight'] = 0.0 # -1
-                context_tmp = context[i][None,...].clone()"""
             if UNCOND:
-                #transformer_options['reg_cond_weight'] = -1
-                #context_tmp = context[i][None,...].clone()
-                
-                transformer_options['reg_cond_weight'] = transformer_options.get("regional_conditioning_weight", 0.0) #transformer_options['regional_conditioning_weight']
-                transformer_options['reg_cond_floor']  = transformer_options.get("regional_conditioning_floor",  0.0) #transformer_options['regional_conditioning_floor'] #if "regional_conditioning_floor" in transformer_options else 0.0
+
+                transformer_options['reg_cond_weight'] = transformer_options.get("regional_conditioning_weight", 0.0) 
+                transformer_options['reg_cond_floor']  = transformer_options.get("regional_conditioning_floor",  0.0) 
                 transformer_options['reg_cond_mask_orig'] = transformer_options.get('regional_conditioning_mask_orig')
                 
                 AttnMask   = transformer_options.get('AttnMask',   None)                    
@@ -519,8 +510,8 @@ class ReMMDiT(nn.Module):
                     context_tmp = context[i][None,...].clone()
                     
             elif UNCOND == False:
-                transformer_options['reg_cond_weight'] = transformer_options.get("regional_conditioning_weight", 0.0) #transformer_options['regional_conditioning_weight']
-                transformer_options['reg_cond_floor']  = transformer_options.get("regional_conditioning_floor", 0.0) #transformer_options['regional_conditioning_floor'] #if "regional_conditioning_floor" in transformer_options else 0.0
+                transformer_options['reg_cond_weight'] = transformer_options.get("regional_conditioning_weight", 0.0) 
+                transformer_options['reg_cond_floor']  = transformer_options.get("regional_conditioning_floor", 0.0) 
                 transformer_options['reg_cond_mask_orig'] = transformer_options.get('regional_conditioning_mask_orig')
                 
                 AttnMask   = transformer_options.get('AttnMask',   None)                    
@@ -538,9 +529,6 @@ class ReMMDiT(nn.Module):
 
 
 
-
-
-
             # process conditions for MMDiT Blocks
             #c_seq = context  # B, T_c, D_c
             c_seq = context_tmp  # B, T_c, D_c
@@ -553,9 +541,6 @@ class ReMMDiT(nn.Module):
             global_cond = self.t_embedder(t, x.dtype)  # B, D
 
             global_cond = global_cond[i][None]
-
-
-
 
             
 
@@ -648,87 +633,180 @@ class ReMMDiT(nn.Module):
         
         
         
+        freqsep_lowpass_method = transformer_options.get("freqsep_lowpass_method")
+        freqsep_sigma          = transformer_options.get("freqsep_sigma")
+        freqsep_kernel_size    = transformer_options.get("freqsep_kernel_size")
+        freqsep_inner_kernel_size    = transformer_options.get("freqsep_inner_kernel_size")
+        freqsep_stride    = transformer_options.get("freqsep_stride")
+        
+        freqsep_lowpass_weight = transformer_options.get("freqsep_lowpass_weight")
+        freqsep_highpass_weight= transformer_options.get("freqsep_highpass_weight")
+        freqsep_mask           = transformer_options.get("freqsep_mask")
         
         dtype = eps.dtype if self.style_dtype is None else self.style_dtype
-        pinv_dtype = torch.float32 if dtype != torch.float64 else dtype
-        W_inv = None
         
-        
-        if y0_style_pos is not None and y0_style_pos_weight != 0.0:
+        if y0_style_pos is not None:
+            y0_style_pos_weight    = transformer_options.get("y0_style_pos_weight")
+            y0_style_pos_synweight = transformer_options.get("y0_style_pos_synweight")
+            y0_style_pos_synweight *= y0_style_pos_weight
+            y0_style_pos_mask = transformer_options.get("y0_style_pos_mask")
+            y0_style_pos_mask_edge = transformer_options.get("y0_style_pos_mask_edge")
+
             y0_style_pos = y0_style_pos.to(dtype)
             x   = x_orig.clone().to(dtype)
+            #x   = x.to(dtype)
             eps = eps.to(dtype)
             eps_orig = eps.clone()
             
             sigma = SIGMA #t_orig[0].to(torch.float32) / 1000
             denoised = x - sigma * eps
             
-            img          = self.patchify(denoised)
-            img_y0_adain = self.patchify(y0_style_pos)
-
-            W = self.init_x_linear.weight.data.to(dtype)   # shape [2560, 64]
-            b = self.init_x_linear.bias  .data.to(dtype)     # shape [2560]
+            denoised_embed = self.Retrojector.embed(denoised)
+            y0_adain_embed = self.Retrojector.embed(y0_style_pos)
             
-            denoised_embed = F.linear(img         .to(W), W, b).to(img)
-            y0_adain_embed = F.linear(img_y0_adain.to(W), W, b).to(img_y0_adain)
+            if transformer_options['y0_style_method'] == "scattersort":
+                tile_h, tile_w = transformer_options.get('y0_style_tile_height'), transformer_options.get('y0_style_tile_width')
+                pad = transformer_options.get('y0_style_tile_padding')
+                if pad is not None and tile_h is not None and tile_w is not None:
+                    
+                    denoised_spatial = rearrange(denoised_embed, "b (h w) c -> b c h w", h=h_len, w=w_len)
+                    y0_adain_spatial = rearrange(y0_adain_embed, "b (h w) c -> b c h w", h=h_len, w=w_len)
+                    
+                    if EO("scattersort_median_LP"):
+                        denoised_spatial_LP = median_blur_2d(denoised_spatial, kernel_size=EO("scattersort_median_LP",7))
+                        y0_adain_spatial_LP = median_blur_2d(y0_adain_spatial, kernel_size=EO("scattersort_median_LP",7))
+                        
+                        denoised_spatial_HP = denoised_spatial - denoised_spatial_LP
+                        y0_adain_spatial_HP = y0_adain_spatial - y0_adain_spatial_LP
+                        
+                        denoised_spatial_LP = apply_scattersort_tiled(denoised_spatial_LP, y0_adain_spatial_LP, tile_h, tile_w, pad)
+                        
+                        denoised_spatial = denoised_spatial_LP + denoised_spatial_HP
+                        denoised_embed = rearrange(denoised_spatial, "b c h w -> b (h w) c")
+                    else:
+                        denoised_spatial = apply_scattersort_tiled(denoised_spatial, y0_adain_spatial, tile_h, tile_w, pad)
+                    
+                    denoised_embed = rearrange(denoised_spatial, "b c h w -> b (h w) c")
+                    
+                else:
+                    denoised_embed = apply_scattersort_masked(denoised_embed, y0_adain_embed, y0_style_pos_mask, y0_style_pos_mask_edge, h_len, w_len)
 
-            if transformer_options['y0_style_method'] == "AdaIN":
-                denoised_embed = adain_seq_inplace(denoised_embed, y0_adain_embed)
+
+
+            elif transformer_options['y0_style_method'] == "AdaIN":
+                if freqsep_mask is not None:
+                    freqsep_mask = freqsep_mask.view(1, 1, *freqsep_mask.shape[-2:]).float()
+                    freqsep_mask = F.interpolate(freqsep_mask.float(), size=(h_len, w_len), mode='nearest-exact')
+                
+                if hasattr(self, "adain_tile"):
+                    tile_h, tile_w = self.adain_tile
+                    
+                    denoised_pretile = rearrange(denoised_embed, "b (h w) c -> b c h w", h=h_len, w=w_len)
+                    y0_adain_pretile = rearrange(y0_adain_embed, "b (h w) c -> b c h w", h=h_len, w=w_len)
+                    
+                    if self.adain_flag:
+                        h_off = tile_h // 2
+                        w_off = tile_w // 2
+                        denoised_pretile = denoised_pretile[:,:,h_off:-h_off, w_off:-w_off]
+                        self.adain_flag = False
+                    else:
+                        h_off = 0
+                        w_off = 0
+                        self.adain_flag = True
+                    
+                    tiles,    orig_shape, grid, strides = tile_latent(denoised_pretile, tile_size=(tile_h,tile_w))
+                    y0_tiles, orig_shape, grid, strides = tile_latent(y0_adain_pretile, tile_size=(tile_h,tile_w))
+                    
+                    tiles_out = []
+                    for i in range(tiles.shape[0]):
+                        tile = tiles[i].unsqueeze(0)
+                        y0_tile = y0_tiles[i].unsqueeze(0)
+                        
+                        tile    = rearrange(tile,    "b c h w -> b (h w) c", h=tile_h, w=tile_w)
+                        y0_tile = rearrange(y0_tile, "b c h w -> b (h w) c", h=tile_h, w=tile_w)
+                        
+                        tile = adain_seq_inplace(tile, y0_tile)
+                        tiles_out.append(rearrange(tile, "b (h w) c -> b c h w", h=tile_h, w=tile_w))
+                    
+                    tiles_out_tensor = torch.cat(tiles_out, dim=0)
+                    tiles_out_tensor = untile_latent(tiles_out_tensor, orig_shape, grid, strides)
+
+                    if h_off == 0:
+                        denoised_pretile = tiles_out_tensor
+                    else:
+                        denoised_pretile[:,:,h_off:-h_off, w_off:-w_off] = tiles_out_tensor
+                    denoised_embed = rearrange(denoised_pretile, "b c h w -> b (h w) c", h=h_len, w=w_len)
+
+                elif freqsep_lowpass_method is not None and freqsep_lowpass_method.endswith("pw"): #EO("adain_pw"):
+
+                    denoised_spatial = rearrange(denoised_embed, "b (h w) c -> b c h w", h=h_len, w=w_len)
+                    y0_adain_spatial = rearrange(y0_adain_embed, "b (h w) c -> b c h w", h=h_len, w=w_len)
+
+                    if   freqsep_lowpass_method == "median_pw":
+                        denoised_spatial_new = adain_patchwise_row_batch_med(denoised_spatial.clone(), y0_adain_spatial.clone().repeat(denoised_spatial.shape[0],1,1,1), sigma=freqsep_sigma, kernel_size=freqsep_kernel_size, use_median_blur=True, lowpass_weight=freqsep_lowpass_weight, highpass_weight=freqsep_highpass_weight)
+                    elif freqsep_lowpass_method == "gaussian_pw": 
+                        denoised_spatial_new = adain_patchwise_row_batch(denoised_spatial.clone(), y0_adain_spatial.clone().repeat(denoised_spatial.shape[0],1,1,1), sigma=freqsep_sigma, kernel_size=freqsep_kernel_size)
+                    
+                    denoised_embed = rearrange(denoised_spatial_new, "b c h w -> b (h w) c", h=h_len, w=w_len)
+
+                elif freqsep_lowpass_method is not None: 
+                    denoised_spatial = rearrange(denoised_embed, "b (h w) c -> b c h w", h=h_len, w=w_len)
+                    y0_adain_spatial = rearrange(y0_adain_embed, "b (h w) c -> b c h w", h=h_len, w=w_len)
+                    
+                    if   freqsep_lowpass_method == "median":
+                        denoised_spatial_LP = median_blur_2d(denoised_spatial, kernel_size=freqsep_kernel_size)
+                        y0_adain_spatial_LP = median_blur_2d(y0_adain_spatial, kernel_size=freqsep_kernel_size)
+                    elif freqsep_lowpass_method == "gaussian":
+                        denoised_spatial_LP = gaussian_blur_2d(denoised_spatial, sigma=freqsep_sigma, kernel_size=freqsep_kernel_size)
+                        y0_adain_spatial_LP = gaussian_blur_2d(y0_adain_spatial, sigma=freqsep_sigma, kernel_size=freqsep_kernel_size)
+                    
+                    denoised_spatial_HP = denoised_spatial - denoised_spatial_LP
+                    
+                    if EO("adain_fs_uhp"):
+                        y0_adain_spatial_HP = y0_adain_spatial - y0_adain_spatial_LP
+                        
+                        denoised_spatial_ULP = gaussian_blur_2d(denoised_spatial, sigma=EO("adain_fs_uhp_sigma", 1.0), kernel_size=EO("adain_fs_uhp_kernel_size", 3))
+                        y0_adain_spatial_ULP = gaussian_blur_2d(y0_adain_spatial, sigma=EO("adain_fs_uhp_sigma", 1.0), kernel_size=EO("adain_fs_uhp_kernel_size", 3))
+                        
+                        denoised_spatial_UHP = denoised_spatial_HP  - denoised_spatial_ULP
+                        y0_adain_spatial_UHP = y0_adain_spatial_HP  - y0_adain_spatial_ULP
+                        
+                        #denoised_spatial_HP  = y0_adain_spatial_ULP + denoised_spatial_UHP
+                        denoised_spatial_HP  = denoised_spatial_ULP + y0_adain_spatial_UHP
+                    
+                    denoised_spatial_new = freqsep_lowpass_weight * y0_adain_spatial_LP + freqsep_highpass_weight * denoised_spatial_HP
+                    denoised_embed = rearrange(denoised_spatial_new, "b c h w -> b (h w) c", h=h_len, w=w_len)
+
+                else:
+                    denoised_embed = adain_seq_inplace(denoised_embed, y0_adain_embed)
+                    
                 for adain_iter in range(EO("style_iter", 0)):
                     denoised_embed = adain_seq_inplace(denoised_embed, y0_adain_embed)
-                    denoised_embed = (denoised_embed - b) @ torch.linalg.pinv(W.to(pinv_dtype)).T.to(dtype)
-                    denoised_embed = F.linear(denoised_embed.to(W), W, b).to(img)
+                    denoised_embed = self.Retrojector.embed(self.Retrojector.unembed(denoised_embed))
                     denoised_embed = adain_seq_inplace(denoised_embed, y0_adain_embed)
-                    
+            
             elif transformer_options['y0_style_method'] == "WCT":
-                if self.y0_adain_embed is None or self.y0_adain_embed.shape != y0_adain_embed.shape or torch.norm(self.y0_adain_embed - y0_adain_embed) > 0:
-                    self.y0_adain_embed = y0_adain_embed
+                self.StyleWCT.set(y0_adain_embed)
+                denoised_embed = self.StyleWCT.get(denoised_embed)
+                
+                if transformer_options.get('y0_standard_guide') is not None:
+                    y0_standard_guide = transformer_options.get('y0_standard_guide')
                     
-                    f_s          = y0_adain_embed[0].clone()
-                    self.mu_s    = f_s.mean(dim=0, keepdim=True)
-                    f_s_centered = f_s - self.mu_s
-                    
-                    cov = (f_s_centered.T.double() @ f_s_centered.double()) / (f_s_centered.size(0) - 1)
+                    y0_standard_guide_embed = self.Retrojector.embed(y0_standard_guide)
+                    f_cs = self.StyleWCT.get(y0_standard_guide_embed)
+                    self.y0_standard_guide = self.Retrojector.unembed(f_cs)
 
-                    S_eig, U_eig = torch.linalg.eigh(cov + 1e-5 * torch.eye(cov.size(0), dtype=cov.dtype, device=cov.device))
-                    S_eig_sqrt    = S_eig.clamp(min=0).sqrt() # eigenvalues -> singular values
-                    
-                    whiten = U_eig @ torch.diag(S_eig_sqrt) @ U_eig.T
-                    self.y0_color  = whiten.to(f_s_centered)
+                if transformer_options.get('y0_inv_standard_guide') is not None:
+                    y0_inv_standard_guide = transformer_options.get('y0_inv_standard_guide')
 
-                for wct_i in range(eps.shape[0]):
-                    f_c          = denoised_embed[wct_i].clone()
-                    mu_c         = f_c.mean(dim=0, keepdim=True)
-                    f_c_centered = f_c - mu_c
-                    
-                    cov = (f_c_centered.T.double() @ f_c_centered.double()) / (f_c_centered.size(0) - 1)
+                    y0_inv_standard_guide_embed = self.Retrojector.embed(y0_inv_standard_guide)
+                    f_cs = self.StyleWCT.get(y0_inv_standard_guide_embed)
+                    self.y0_inv_standard_guide = self.Retrojector.unembed(f_cs)
 
-                    S_eig, U_eig  = torch.linalg.eigh(cov + 1e-5 * torch.eye(cov.size(0), dtype=cov.dtype, device=cov.device))
-                    inv_sqrt_eig  = S_eig.clamp(min=0).rsqrt() 
-                    
-                    whiten = U_eig @ torch.diag(inv_sqrt_eig) @ U_eig.T
-                    whiten = whiten.to(f_c_centered)
-
-                    f_c_whitened = f_c_centered @ whiten.T
-                    f_cs         = f_c_whitened @ self.y0_color.T + self.mu_s
-                    
-                    denoised_embed[wct_i] = f_cs
-
-            
-            denoised_approx = (denoised_embed - b.to(denoised_embed)) @ torch.linalg.pinv(W).T.to(denoised_embed)
-            denoised_approx = denoised_approx.to(eps)
-            
-
-
-            denoised_approx = unpatchify2(
-                denoised_approx,
-                H=denoised.shape[-2],
-                W=denoised.shape[-1],
-                patch_size=self.patch_size
-            )
+            denoised_approx = self.Retrojector.unembed(denoised_embed)
             
             eps = (x - denoised_approx) / sigma
-            
+
             if not UNCOND:
                 if eps.shape[0] == 2:
                     eps[1] = eps_orig[1] + y0_style_pos_weight * (eps[1] - eps_orig[1])
@@ -737,79 +815,56 @@ class ReMMDiT(nn.Module):
                     eps[0] = eps_orig[0] + y0_style_pos_weight * (eps[0] - eps_orig[0])
             elif eps.shape[0] == 1 and UNCOND:
                 eps[0] = eps_orig[0] + y0_style_pos_synweight * (eps[0] - eps_orig[0])
-
+            
             eps = eps.float()
         
-        if y0_style_neg is not None and y0_style_neg_weight != 0.0:
+        if y0_style_neg is not None:
+            y0_style_neg_weight    = transformer_options.get("y0_style_neg_weight")
+            y0_style_neg_synweight = transformer_options.get("y0_style_neg_synweight")
+            y0_style_neg_synweight *= y0_style_neg_weight
+            y0_style_neg_mask = transformer_options.get("y0_style_neg_mask")
+            y0_style_neg_mask_edge = transformer_options.get("y0_style_neg_mask_edge")
+            
             y0_style_neg = y0_style_neg.to(dtype)
-            x   = x_orig.clone().to(dtype)
+            x   = x.to(dtype)
             eps = eps.to(dtype)
             eps_orig = eps.clone()
             
             sigma = SIGMA #t_orig[0].to(torch.float32) / 1000
             denoised = x - sigma * eps
 
-            img          = self.patchify(denoised)
-            img_y0_adain = self.patchify(y0_style_neg)
+            denoised_embed = self.Retrojector.embed(denoised)
+            y0_adain_embed = self.Retrojector.embed(y0_style_neg)
+            
+            if transformer_options['y0_style_method'] == "scattersort":
+                tile_h, tile_w = transformer_options.get('y0_style_tile_height'), transformer_options.get('y0_style_tile_width')
+                pad = transformer_options.get('y0_style_tile_padding')
+                if pad is not None and tile_h is not None and tile_w is not None:
+                    
+                    denoised_spatial = rearrange(denoised_embed, "b (h w) c -> b c h w", h=h_len, w=w_len)
+                    y0_adain_spatial = rearrange(y0_adain_embed, "b (h w) c -> b c h w", h=h_len, w=w_len)
+                    
+                    denoised_spatial = apply_scattersort_tiled(denoised_spatial, y0_adain_spatial, tile_h, tile_w, pad)
+                    
+                    denoised_embed = rearrange(denoised_spatial, "b c h w -> b (h w) c")
 
-            W = self.init_x_linear.weight.data.to(dtype)   # shape [2560, 64]
-            b = self.init_x_linear.bias  .data.to(dtype)     # shape [2560]
+                else:
+                    denoised_embed = apply_scattersort_masked(denoised_embed, y0_adain_embed, y0_style_neg_mask, y0_style_neg_mask_edge, h_len, w_len)
             
-            denoised_embed = F.linear(img         .to(W), W, b).to(img)
-            y0_adain_embed = F.linear(img_y0_adain.to(W), W, b).to(img_y0_adain)
             
-            if transformer_options['y0_style_method'] == "AdaIN":
+            elif transformer_options['y0_style_method'] == "AdaIN":
                 denoised_embed = adain_seq_inplace(denoised_embed, y0_adain_embed)
                 for adain_iter in range(EO("style_iter", 0)):
                     denoised_embed = adain_seq_inplace(denoised_embed, y0_adain_embed)
-                    denoised_embed = (denoised_embed - b) @ torch.linalg.pinv(W.to(pinv_dtype)).T.to(dtype)
-                    denoised_embed = F.linear(denoised_embed.to(W), W, b).to(img)
+                    denoised_embed = self.Retrojector.embed(self.Retrojector.unembed(denoised_embed))
                     denoised_embed = adain_seq_inplace(denoised_embed, y0_adain_embed)
                     
             elif transformer_options['y0_style_method'] == "WCT":
-                if self.y0_adain_embed is None or self.y0_adain_embed.shape != y0_adain_embed.shape or torch.norm(self.y0_adain_embed - y0_adain_embed) > 0:
-                    self.y0_adain_embed = y0_adain_embed
-                    
-                    f_s          = y0_adain_embed[0].clone()
-                    self.mu_s    = f_s.mean(dim=0, keepdim=True)
-                    f_s_centered = f_s - self.mu_s
-                    
-                    cov = (f_s_centered.T.double() @ f_s_centered.double()) / (f_s_centered.size(0) - 1)
+                self.StyleWCT.set(y0_adain_embed)
+                denoised_embed = self.StyleWCT.get(denoised_embed)
 
-                    S_eig, U_eig = torch.linalg.eigh(cov + 1e-5 * torch.eye(cov.size(0), dtype=cov.dtype, device=cov.device))
-                    S_eig_sqrt    = S_eig.clamp(min=0).sqrt() # eigenvalues -> singular values
-                    
-                    whiten = U_eig @ torch.diag(S_eig_sqrt) @ U_eig.T
-                    self.y0_color  = whiten.to(f_s_centered)
+            denoised_approx = self.Retrojector.unembed(denoised_embed)
 
-                for wct_i in range(eps.shape[0]):
-                    f_c          = denoised_embed[wct_i].clone()
-                    mu_c         = f_c.mean(dim=0, keepdim=True)
-                    f_c_centered = f_c - mu_c
-                    
-                    cov = (f_c_centered.T.double() @ f_c_centered.double()) / (f_c_centered.size(0) - 1)
-
-                    S_eig, U_eig  = torch.linalg.eigh(cov + 1e-5 * torch.eye(cov.size(0), dtype=cov.dtype, device=cov.device))
-                    inv_sqrt_eig  = S_eig.clamp(min=0).rsqrt() 
-                    
-                    whiten = U_eig @ torch.diag(inv_sqrt_eig) @ U_eig.T
-                    whiten = whiten.to(f_c_centered)
-
-                    f_c_whitened = f_c_centered @ whiten.T
-                    f_cs         = f_c_whitened @ self.y0_color.T + self.mu_s
-                    
-                    denoised_embed[wct_i] = f_cs
-
-            denoised_approx = (denoised_embed - b.to(denoised_embed)) @ torch.linalg.pinv(W).T.to(denoised_embed)
-            denoised_approx = denoised_approx.to(eps)
-            
-            denoised_approx = unpatchify2(
-                denoised_approx,
-                H=denoised.shape[-2],
-                W=denoised.shape[-1],
-                patch_size=self.patch_size
-            )
-            
             if UNCOND:
                 eps = (x - denoised_approx) / sigma
                 eps[0] = eps_orig[0] + y0_style_neg_weight * (eps[0] - eps_orig[0])
@@ -819,27 +874,8 @@ class ReMMDiT(nn.Module):
                 eps[0] = eps_orig[0] + y0_style_neg_synweight * (eps[0] - eps_orig[0])
             
             eps = eps.float()
-        
+            
         return eps
-    
-    
-
-
-
-
-def adain_seq_inplace(content: torch.Tensor, style: torch.Tensor, eps: float = 1e-7) -> torch.Tensor:
-    mean_c = content.mean(1, keepdim=True)
-    std_c  = content.std (1, keepdim=True).add_(eps)  # in-place add
-    mean_s = style.mean  (1, keepdim=True)
-    std_s  = style.std   (1, keepdim=True).add_(eps)
-
-    content.sub_(mean_c).div_(std_c).mul_(std_s).add_(mean_s)  # in-place chain
-    return content
-
-
-def adain_seq(content: torch.Tensor, style: torch.Tensor, eps: float = 1e-7) -> torch.Tensor:
-    return ((content - content.mean(1, keepdim=True)) / (content.std(1, keepdim=True) + eps)) * (style.std(1, keepdim=True) + eps) + style.mean(1, keepdim=True)
-
 
 
 
