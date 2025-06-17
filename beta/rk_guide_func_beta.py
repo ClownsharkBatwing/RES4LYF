@@ -1811,7 +1811,7 @@ def apply_frame_weights(mask, frame_weights, normalize=False):
 
 def prepare_mask(x, mask, LGW_MASK_RESCALE_MIN) -> tuple[torch.Tensor, bool]:
     if mask is None:
-        mask = torch.ones_like(x)
+        mask = torch.ones_like(x[:,0:1,...])
         LGW_MASK_RESCALE_MIN = False
         return mask, LGW_MASK_RESCALE_MIN
     

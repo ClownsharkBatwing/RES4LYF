@@ -1119,6 +1119,9 @@ def sample_rk_beta(
                                                               + LG.drift_y_sync  * drift_y_mask * (data_barf_y      - y0_bongflow) \
                                                               + LG.drift_y_guide * drift_y_mask * (y0_bongflow_orig - y0_bongflow)
                                     
+                                    if torch.norm(y0_bongflow_orig - y0_bongflow) != 0 and EO("enable_y0_bongflow_update"):
+                                        RK.update_transformer_options({'y0_style_pos': y0_bongflow.clone()})
+                                    
                                     if not EO("skip_yt"):
                                         if VE_MODEL:
                                             yt_0 = y0_bongflow + sigma * noise_bongflow
