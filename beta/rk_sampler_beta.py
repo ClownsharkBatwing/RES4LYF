@@ -464,7 +464,10 @@ def sample_rk_beta(
         x_init = x.clone()
 
     #progress_bar = trange(len(sigmas)-1-start_step, disable=disable)
-        
+    
+    if EO("eps_adain") or EO("x_init_to_model"):
+        x_init = x.clone()
+        RK.update_transformer_options({'x_init' : x_init.clone()})
     if AttnMask is not None:
         RK.update_transformer_options({'AttnMask'  : AttnMask})
         RK.update_transformer_options({'RegContext': RegContext})
@@ -750,8 +753,8 @@ def sample_rk_beta(
                 else:
                     yt_0 = (1-sigma) * y0_bongflow  + sigma * noise_bongflow
                 for ms in range(min(len(data_prev_), len(eps_))):
-                    eps_x = RK.get_epsilon_anchored(x_0,  data_prev_x_[ms], sigma)
-                    eps_y = RK.get_epsilon_anchored(yt_0, data_prev_y_[ms], sigma)
+                    eps_x   = RK.get_epsilon_anchored(x_0,  data_prev_x_[ms], sigma)
+                    eps_y   = RK.get_epsilon_anchored(yt_0, data_prev_y_[ms], sigma)
                     eps_x2y = RK.get_epsilon_anchored(yt_0, data_prev_y_[ms], sigma)
 
                     if RK.EXPONENTIAL:
@@ -1731,6 +1734,12 @@ def sample_rk_beta(
                             #x_[row+RK.row_offset] = NS.swap_noise_substep(x_0, x_[row+RK.row_offset], mask=sde_mask, guide=LG.y0)
                             x_row_tmp = NS.swap_noise_substep(x_0, x_[row+RK.row_offset], mask=sde_mask, guide=LG.y0)
                             
+                            if EO("eps_adain"):
+                                x_init_new = (x_row_tmp - x_[row+RK.row_offset]) / s_tmp + x_init
+                                x_0 += sigma * (x_init_new - x_init)
+                                x_init = x_init_new
+                                RK.update_transformer_options({'x_init' : x_init.clone()})
+                            
                             if SYNC_GUIDE_ACTIVE:
                                 noise_bongflow_new = (x_row_tmp - x_[row+RK.row_offset]) / s_tmp + noise_bongflow
                                 yt_[row+RK.row_offset] += s_tmp * (noise_bongflow_new - noise_bongflow)
@@ -1835,6 +1844,13 @@ def sample_rk_beta(
                 #    noise_bongflow += eta * (noise_sync_new - noise_bongflow)
             elif not LG.guide_mode.startswith("flow") or (LG.lgw[step_sched] == 0 and LG.lgw[step+1] == 0   and   LG.lgw_inv[step_sched] == 0 and LG.lgw_inv[step+1] == 0):
                 x = NS.swap_noise_step(x_0, x_next, mask=sde_mask)
+                
+                if EO("eps_adain"):
+                    x_init_new = (x - x_next) / sigma_next + x_init
+                    x_0 += sigma * (x_init_new - x_init)
+                    x_init = x_init_new
+                    RK.update_transformer_options({'x_init' : x_init.clone()})
+                
                 if SYNC_GUIDE_ACTIVE:
                     noise_bongflow_new = (x - x_next) / sigma_next + noise_bongflow
                     yt_next += sigma_next * (noise_bongflow_new - noise_bongflow)

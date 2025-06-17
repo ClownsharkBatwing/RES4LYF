@@ -1106,7 +1106,7 @@ class ClownGuide_Style_Beta:
         return {"required":
                     {
                     "apply_to":         (["positive", "negative"],                    {"default": "positive", "tooltip": "When using CFG, decides whether to apply the guide to the positive or negative conditioning."}),
-                    "method":           (["AdaIN", "WCT", "scattersort"],             {"default": "WCT"}),
+                    "method":           (["AdaIN", "WCT", "scattersort","none"],      {"default": "WCT"}),
                     "weight":           ("FLOAT",                                     {"default": 1.0, "min":  -100.0, "max": 100.0, "step":0.01, "round": False, "tooltip": "Set the strength of the guide by multiplying all other weights by this value."}),
                     "synweight":        ("FLOAT",                                     {"default": 1.0, "min":  -100.0, "max": 100.0, "step":0.01, "round": False, "tooltip": "Set the relative strength of the guide on the opposite conditioning to what was selected: i.e., negative if positive in apply_to. Recommended to avoid CFG burn."}),
                     "weight_scheduler": (["constant"] + get_res4lyf_scheduler_list(), {"default": "constant", "tooltip": "Selecting any scheduler except constant will cause the strength to gradually decay to zero. Try beta57 vs. linear quadratic."},),
