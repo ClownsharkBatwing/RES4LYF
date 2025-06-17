@@ -959,7 +959,8 @@ class ReUNetModel(nn.Module):
             y0_style_pos_mask_edge = transformer_options.get("y0_style_pos_mask_edge")
 
             y0_style_pos = y0_style_pos.to(dtype)
-            x   = x.to(dtype)
+            #x   = x.to(dtype)
+            x   = x_orig.clone().to(torch.float64) * ((SIGMA ** 2 + 1) ** 0.5)
             eps = eps.to(dtype)
             eps_orig = eps.clone()
             
@@ -1131,7 +1132,8 @@ class ReUNetModel(nn.Module):
             y0_style_neg_mask_edge = transformer_options.get("y0_style_neg_mask_edge")
             
             y0_style_neg = y0_style_neg.to(dtype)
-            x   = x.to(dtype)
+            #x   = x.to(dtype)
+            x   = x_orig.clone().to(torch.float64) * ((SIGMA ** 2 + 1) ** 0.5)
             eps = eps.to(dtype)
             eps_orig = eps.clone()
             
