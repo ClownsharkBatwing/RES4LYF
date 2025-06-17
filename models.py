@@ -578,6 +578,9 @@ class ReLTXVPatcherAdvanced:
         model.model.diffusion_model.proj_weights = None
         model.model.diffusion_model.y0_adain_embed = None
         
+        model.model.diffusion_model.StyleWCT = StyleWCT()
+        model.model.diffusion_model.Retrojector = Retrojector(model.model.diffusion_model.patchify_proj, pinv_dtype=style_dtype, dtype=style_dtype)
+        
         if (enable or force) and model.model.diffusion_model.__class__ == LTXVModel:
             m = model.clone()
             m.model.diffusion_model.__class__     = ReLTXVModel

@@ -352,7 +352,7 @@ class Retrojector:
         elif self.LINEAR:
             img = rearrange(img, "b c (h ph) (w pw) -> b (h w) (c ph pw)", ph=self.patch_size, pw=self.patch_size) 
             img_embed = F.linear(img.to(self.W), self.W, self.b)
-            
+        
         return img_embed.to(img)
     
     def unembed(self, img_embed: torch.Tensor):
@@ -407,6 +407,60 @@ class Retrojector:
             x_recon = x_recon[..., pad_h:pad_h+H, pad_w:pad_w+W]
 
         return x_recon.to(z_dtype)
+    
+    def invert_patch_embedding(self, z: torch.Tensor, original_shape: torch.Size, grid_sizes: Optional[Tuple[int,int,int]] = None) -> torch.Tensor:
+
+        B, C_in, D, H, W = original_shape
+        pD, pH, pW = self.patch_size
+        sD, sH, sW = pD, pH, pW
+
+        if z.ndim == 3:
+            # [B, S, C_out] -> reshape to [B, C_out, D', H', W']
+            S = z.shape[1]
+            if grid_sizes is None:
+                Dp = D // pD
+                Hp = H // pH
+                Wp = W // pW
+            else:
+                Dp, Hp, Wp = grid_sizes
+            C_out = z.shape[2]
+            z = z.transpose(1, 2).reshape(B, C_out, Dp, Hp, Wp)
+        else:
+            B2, C_out, Dp, Hp, Wp = z.shape
+            assert B2 == B, "Batch size mismatch... ya sharked it."
+
+        # kncokout bias
+        b = self.patch_embedding.bias.view(1, C_out, 1, 1, 1)
+        z_nobias = z - b
+
+        # 2D filter -> pinv
+        w3 = self.patch_embedding.weight         # [C_out, C_in, 1, pH, pW]
+        w2 = w3.squeeze(2)                       # [C_out, C_in, pH, pW]
+        out_ch, in_ch, kH, kW = w2.shape
+        W_flat = w2.view(out_ch, -1)            # [C_out, in_ch*pH*pW]
+        W_pinv = torch.linalg.pinv(W_flat)      # [in_ch*pH*pW, C_out]
+
+        # merge depth for 2D unfold wackiness
+        z2 = z_nobias.permute(0,2,1,3,4).reshape(B*Dp, C_out, Hp, Wp)
+
+        # apply pinv ... get patch vectors
+        z_flat    = z2.reshape(B*Dp, C_out, -1)  # [B*Dp, C_out, L]
+        x_patches = W_pinv @ z_flat              # [B*Dp, in_ch*pH*pW, L]
+
+        # fold -> spatial frames
+        x2 = F.fold(
+            x_patches,
+            output_size=(H, W),
+            kernel_size=(pH, pW),
+            stride=(sH, sW)
+        )  # → [B*Dp, C_in, H, W]
+
+        # un-merge depth
+        x2 = x2.reshape(B, Dp, in_ch, H, W)           # [B, Dp,  C_in, H, W]
+        x_recon = x2.permute(0,2,1,3,4).contiguous()  # [B, C_in,   D, H, W]
+        return x_recon
+
+
 
 
 
@@ -532,12 +586,15 @@ def apply_scattersort_tiled(
 def apply_scattersort_masked(
     denoised_embed         : torch.Tensor,
     y0_adain_embed         : torch.Tensor,
-    y0_style_pos_mask      : torch.Tensor,
+    y0_style_pos_mask      : torch.Tensor | None,
     y0_style_pos_mask_edge : torch.Tensor | None,
     h_len                  : int,
     w_len                  : int
 ):
-    flatmask   = F.interpolate(y0_style_pos_mask, size=(h_len, w_len)).bool().flatten().cpu()
+    if y0_style_pos_mask is None:
+        flatmask = torch.ones((1,1,h_len,w_len)).bool().flatten().bool()
+    else:
+        flatmask   = F.interpolate(y0_style_pos_mask, size=(h_len, w_len)).bool().flatten().cpu()
     flatunmask = ~flatmask
 
     if y0_style_pos_mask_edge is not None:
@@ -573,6 +630,19 @@ def apply_scattersort_masked(
 
         denoised_embed[:, edgemask, :] = src_sorted.scatter(dim=-2, index=src_idx, src=ref_sorted.expand(src_sorted.shape))
 
+    return denoised_embed
+
+
+
+
+def apply_scattersort(
+    denoised_embed         : torch.Tensor,
+    y0_adain_embed         : torch.Tensor,
+):
+    src_sorted, src_idx = denoised_embed.sort(dim=-2)
+    ref_sorted, ref_idx = y0_adain_embed.sort(dim=-2)
+
+    denoised_embed = src_sorted.scatter(dim=-2, index=src_idx, src=ref_sorted.expand(src_sorted.shape))
     return denoised_embed
 
 
