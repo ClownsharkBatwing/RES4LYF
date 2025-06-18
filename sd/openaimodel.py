@@ -24,7 +24,7 @@ ops = comfy.ops.disable_weight_init
 from comfy.ldm.modules.diffusionmodules.openaimodel import TimestepBlock, TimestepEmbedSequential, Upsample, Downsample, ResBlock, VideoResBlock
 from ..latents import slerp_tensor, interpolate_spd, tile_latent, untile_latent, gaussian_blur_2d, median_blur_2d
 
-from ..style_transfer import apply_scattersort_masked, apply_scattersort_tiled, adain_seq_inplace, adain_patchwise_row_batch_med, adain_patchwise_row_batch
+from ..style_transfer import apply_scattersort_masked, apply_scattersort_tiled, adain_seq_inplace, adain_patchwise_row_batch_med, adain_patchwise_row_batch, apply_scattersort, apply_scattersort_spatial
 
 #This is needed because accelerate makes a copy of transformer_options which breaks "transformer_index"
 def forward_timestep_embed(ts, x, emb, context=None, transformer_options={}, output_shape=None, time_context=None, num_video_frames=None, image_only_indicator=None):
@@ -600,7 +600,7 @@ class ReUNetModel(nn.Module):
         if EO is not None:
             EO.mute = True
 
-        SIGMA = transformer_options['sigmas'] # timestep[0].unsqueeze(0) #/ 1000
+        SIGMA = transformer_options['sigmas'].to(x) # timestep[0].unsqueeze(0) #/ 1000
         
         y0_style_pos        = transformer_options.get("y0_style_pos")
         y0_style_neg        = transformer_options.get("y0_style_neg")
@@ -633,6 +633,22 @@ class ReUNetModel(nn.Module):
         #floor     = min(floor, weight)
         mask_zero, mask_up_zero, mask_down_zero, mask_down2_zero = None, None, None, None
         txt_len = context.shape[1] # mask_obj[0].text_len
+        
+        y0_adain = transformer_options.get("y0_adain")
+        if EO("eps_adain") and y0_adain is not None:
+            x_init   = transformer_options.get("x_init").to(x)   # initial noise and/or image+noise from start of rk_sampler_beta() 
+            y0_adain = y0_adain.to(x)
+            #h_adain  = y0_adain + ((SIGMA ** 2 + 1) ** 0.5) * x_init
+            #h_adain = (y0_adain + SIGMA * x_init) / 14.6172 #/ 14.58802395209580838323353293413173653
+            #siggy = SIGMA / 14.6172
+            #h_adain = ((0.13025*y0_adain + SIGMA * x_init) / ((SIGMA ** 2 + 1) ** 0.5))
+            #if SIGMA > 14.61:
+            #    h_adain = x_init.clone()
+            h_adain = ((y0_adain + SIGMA * x_init) / ((SIGMA ** 2 + 1) ** 0.5))
+            #h_adain = (1-siggy) * y0_adain + siggy * x_init
+            h_adain = h_adain.expand(x.shape)
+            h_adain_orig = h_adain.clone()
+            #h = h_adain
 
         out_list = []
         for cond_iter in range(len(transformer_options['cond_or_uncond'])):
@@ -640,6 +656,8 @@ class ReUNetModel(nn.Module):
             
             x, timesteps, context = clone_inputs(x_orig[cond_iter].unsqueeze(0), timesteps_orig[cond_iter].unsqueeze(0), context_orig[cond_iter].unsqueeze(0))
             y = y_orig[cond_iter].unsqueeze(0).clone() if y_orig is not None else None
+            if EO("eps_adain") and y0_adain is not None:
+                h_adain = h_adain_orig.clone()[cond_iter].unsqueeze(0)
             
             mask, mask_up, mask_down, mask_down2 = None, None, None, None
             if not UNCOND and 'AttnMask' in transformer_options: # and weight != 0:
@@ -763,7 +781,7 @@ class ReUNetModel(nn.Module):
             assert (y is not None) == (
                 self.num_classes is not None
             ), "must specify y if and only if the model is class-conditional"
-            hs = []
+            hs, hs_adain = [], []
             t_emb = timestep_embedding(timesteps, self.model_channels, repeat_only=False).to(x.dtype)
             emb = self.time_embed(t_emb)
 
@@ -825,8 +843,19 @@ class ReUNetModel(nn.Module):
                     patch = transformer_patches["input_block_patch"]
                     for p in patch:
                         h = p(h, transformer_options)
-
+                
+                if EO("eps_adain") and y0_adain is not None:
+                    h_adain = forward_timestep_embed(module, h_adain, emb, context, transformer_options, time_context=time_context, num_video_frames=num_video_frames, image_only_indicator=image_only_indicator)
+                    h_adain = apply_control(h_adain, control, 'input')
+                    if "input_block_patch" in transformer_patches:
+                        patch = transformer_patches["input_block_patch"]
+                        for p in patch:
+                            h_adain = p(h_adain, transformer_options)
+                    hs_adain.append(h_adain)
+                    h = apply_scattersort_spatial(h, h_adain)
+                
                 hs.append(h)
+                
                 if "input_block_patch_after_skip" in transformer_patches:
                     patch = transformer_patches["input_block_patch_after_skip"]
                     for p in patch:
@@ -874,8 +903,14 @@ class ReUNetModel(nn.Module):
                     transformer_options['self_mask_down2']  = mask_down2_zero[:,txt_len:] if mask_down2_zero is not None else None
 
                 h = forward_timestep_embed(self.middle_block, h, emb, context, transformer_options, time_context=time_context, num_video_frames=num_video_frames, image_only_indicator=image_only_indicator)
-            h = apply_control(h, control, 'middle')
-
+                if EO("eps_adain") and y0_adain is not None:
+                    h_adain = forward_timestep_embed(self.middle_block, h_adain, emb, context, transformer_options, time_context=time_context, num_video_frames=num_video_frames, image_only_indicator=image_only_indicator)
+                    #h = apply_scattersort_spatial(h, h_adain)
+            
+            h       = apply_control(h,       control, 'middle')
+            if EO("eps_adain") and y0_adain is not None:
+                h_adain = apply_control(h_adain, control, 'middle')
+                h = apply_scattersort_spatial(h, h_adain)
 
             for id, module in enumerate(self.output_blocks):
                 transformer_options["block"] = ("output", id)
@@ -894,8 +929,19 @@ class ReUNetModel(nn.Module):
                 else:
                     output_shape = None
                     
-                    
-                    
+                if EO("eps_adain_out") and y0_adain is not None:
+                    hsp_adain = hs_adain.pop()
+                    hsp_adain = apply_control(hsp_adain, control, 'output')
+
+                    if "output_block_patch" in transformer_patches:
+                        patch = transformer_patches["output_block_patch"]
+                        for p in patch:
+                            h_adain, hsp_adain = p(h_adain, hsp_adain, transformer_options)
+
+                    h_adain = th.cat([h_adain, hsp_adain], dim=1)
+                    del hsp_adain
+                    h = apply_scattersort_spatial(h, h_adain)
+                
                 if mask is not None:
                     transformer_options['cross_mask'] = mask[:,:txt_len]
                     transformer_options['self_mask']  = mask[:,txt_len:]
@@ -936,7 +982,13 @@ class ReUNetModel(nn.Module):
 
                     
                 h = forward_timestep_embed(module, h, emb, context, transformer_options, output_shape, time_context=time_context, num_video_frames=num_video_frames, image_only_indicator=image_only_indicator)
+                if EO("eps_adain_out") and y0_adain is not None:
+                    h_adain = forward_timestep_embed(module, h_adain, emb, context, transformer_options, output_shape, time_context=time_context, num_video_frames=num_video_frames, image_only_indicator=image_only_indicator)
+                    h = apply_scattersort_spatial(h, h_adain)
+            
             h = h.type(x.dtype)
+            #if EO("eps_adain_out") and y0_adain is not None:
+            #    h_adain = h_adain.type(x.dtype)
             
             if self.predict_codebook_ids:
                 eps = self.id_predictor(h)
@@ -950,6 +1002,8 @@ class ReUNetModel(nn.Module):
 
 
         dtype = eps.dtype if self.style_dtype is None else self.style_dtype
+        h_len //= self.Retrojector.patch_size
+        w_len //= self.Retrojector.patch_size
         
         if y0_style_pos is not None:
             y0_style_pos_weight    = transformer_options.get("y0_style_pos_weight")
@@ -967,7 +1021,7 @@ class ReUNetModel(nn.Module):
             sigma = SIGMA #t_orig[0].to(torch.float32) / 1000
             denoised = x - sigma * eps
             
-            denoised_embed = self.Retrojector.embed(denoised)
+            denoised_embed = self.Retrojector.embed(denoised)     # 2,4,96,168 -> 2,16128,320
             y0_adain_embed = self.Retrojector.embed(y0_style_pos)
             
             if transformer_options['y0_style_method'] == "scattersort":
