@@ -415,7 +415,7 @@ class ReFlux(Flux):
             y0_style_pos_mask_edge = transformer_options.get("y0_style_pos_mask_edge")
 
             y0_style_pos = y0_style_pos.to(dtype)
-            x   = x.to(dtype)
+            x   = x_orig.to(dtype)
             eps = eps.to(dtype)
             eps_orig = eps.clone()
             
@@ -587,7 +587,7 @@ class ReFlux(Flux):
             y0_style_neg_mask_edge = transformer_options.get("y0_style_neg_mask_edge")
             
             y0_style_neg = y0_style_neg.to(dtype)
-            x   = x.to(dtype)
+            x   = x_orig.to(dtype)
             eps = eps.to(dtype)
             eps_orig = eps.clone()
             
