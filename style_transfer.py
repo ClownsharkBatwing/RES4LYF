@@ -261,7 +261,7 @@ class StyleWCT:
 
     def set(self, y0_adain_embed: torch.Tensor):
         if self.y0_adain_embed is None or self.y0_adain_embed.shape != y0_adain_embed.shape or torch.norm(self.y0_adain_embed - y0_adain_embed) > 0:
-            f_s          = y0_adain_embed[0]
+            f_s          = y0_adain_embed[0] # if y0_adain_embed.ndim > 4 else y0_adain_embed
             self.mu_s    = f_s.mean(dim=0, keepdim=True)
             f_s_centered = f_s - self.mu_s
             
@@ -645,6 +645,18 @@ def apply_scattersort(
     denoised_embed = src_sorted.scatter(dim=-2, index=src_idx, src=ref_sorted.expand(src_sorted.shape))
     return denoised_embed
 
+def apply_scattersort_spatial(
+    denoised_spatial         : torch.Tensor,
+    y0_adain_spatial         : torch.Tensor,
+):
+    denoised_embed = rearrange(denoised_spatial, "b c h w -> b (h w) c")
+    y0_adain_embed = rearrange(y0_adain_spatial, "b c h w -> b (h w) c")
+    src_sorted, src_idx = denoised_embed.sort(dim=-2)
+    ref_sorted, ref_idx = y0_adain_embed.sort(dim=-2)
+
+    denoised_embed = src_sorted.scatter(dim=-2, index=src_idx, src=ref_sorted.expand(src_sorted.shape))
+    
+    return rearrange(denoised_embed, "b (h w) c -> b c h w", h=denoised_spatial.shape[-2], w=denoised_spatial.shape[-1])
 
 
 
