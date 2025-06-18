@@ -463,7 +463,7 @@ def sample_rk_beta(
         data_x_prev_ = state_info['data_x_prev_'].to(work_device) 
     #if EO("flow_use_init_noise") or EO("flow_use_smart_noise"):
     #    x_init = x.clone()
-    x_init = noise_initial.to(x)
+    x_init = noise_initial.to(x) if noise_initial is not None else None
 
     #progress_bar = trange(len(sigmas)-1-start_step, disable=disable)
     
