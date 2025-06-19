@@ -209,7 +209,31 @@ class MOEFeedForwardSwiGLU(nn.Module):
         
         return y.view_as(y_shared) + y_shared
 
+def apply_scattersort_buffer(
+    denoised_embed : torch.Tensor,
+    y0_adain_embed : torch.Tensor,
+    sort_buffer, #    : Dict[str, Tensor],
+):
+    sort_buffer['src_idx']    = denoised_embed.argsort(dim=-2)
+    sort_buffer['ref_sorted'], sort_buffer['ref_idx'] = y0_adain_embed.sort(dim=-2)
 
+    denoised_embed.scatter_(dim=-2, index=sort_buffer['src_idx'], src=sort_buffer['ref_sorted'].expand(sort_buffer['ref_sorted'].shape))
+    return denoised_embed
+
+class ScatterSort:
+    buffer = {}
+
+    @staticmethod
+    def apply(denoised_embed, y0_adain_embed):
+        buf = ScatterSort.buffer
+        buf['src_idx']    = denoised_embed.argsort(dim=-2)
+        buf['ref_sorted'], buf['ref_idx'] = y0_adain_embed.sort(dim=-2)
+
+        return denoised_embed.scatter_(
+            dim=-2, 
+            index=buf['src_idx'], 
+            src=buf['ref_sorted'].expand_as(buf['ref_sorted'])
+        )
 
 def attention(q: Tensor, k: Tensor, v: Tensor, rope: Tensor, mask: Optional[Tensor] = None):
     q, k = apply_rope(q, k, rope)
@@ -277,6 +301,15 @@ class HDAttention(nn.Module):
         cache_v : bool = False,
         attninj_opts : Optional[Dict] = {},
     ) -> Tensor:
+        
+        attn_cache = {}
+        for name in ["img_q_cache", "img_k_cache", "img_v_cache", "txt_q_cache", "txt_k_cache", "txt_v_cache"]:
+            if hasattr(self, name):
+                attn_cache[name] = getattr(self, name).to("cuda", non_blocking=True)
+                
+        norm_seq = adain_seq
+        if self.EO("attninj_scattersort"):
+            norm_seq = ScatterSort.apply
 
         bsz = img.shape[0]
 
@@ -294,31 +327,35 @@ class HDAttention(nn.Module):
 
         if cache_v:
             if weight_img_q != 0 or weight_img_q_norm != 0:
-                self.img_q_cache = img_q
+                self.img_q_cache = img_q.to("cpu", non_blocking=True).pin_memory()
             if weight_img_k != 0 or weight_img_k_norm != 0:
-                self.img_k_cache = img_k
+                self.img_k_cache = img_k.to("cpu", non_blocking=True).pin_memory()
             if weight_img_v != 0 or weight_img_v_norm != 0:
-                self.img_v_cache = img_v
+                self.img_v_cache = img_v.to("cpu", non_blocking=True).pin_memory()
         else: 
             if self.EO("slerp"):
                 interp_fn = slerp_tensor
             else:
                 interp_fn = lambda weight, A, B: (1-weight) * A + weight * B
 
-            if weight_img_q != 0 and hasattr(self, "img_q_cache"):
-                img_q = interp_fn(weight_img_q, img_q, self.img_q_cache)
-            if weight_img_k != 0 and hasattr(self, "img_k_cache"):
-                img_k = interp_fn(weight_img_k, img_k, self.img_k_cache)
-            if weight_img_v != 0 and hasattr(self, "img_v_cache"):
-                img_v = interp_fn(weight_img_v, img_v, self.img_v_cache)
+            if weight_img_q != 0 and "img_q_cache" in attn_cache:
+                img_q = interp_fn(weight_img_q, img_q, attn_cache["img_q_cache"])
+            if weight_img_k != 0 and "img_k_cache" in attn_cache:
+                img_k = interp_fn(weight_img_k, img_k, attn_cache["img_k_cache"])
+            if weight_img_v != 0 and "img_v_cache" in attn_cache:
+                img_v = interp_fn(weight_img_v, img_v, attn_cache["img_v_cache"])
+
+            if weight_img_q_norm != 0 and "img_q_cache" in attn_cache:
+                img_q = interp_fn(weight_img_q_norm, img_q, norm_seq(img_q, attn_cache["img_q_cache"]))
+            if weight_img_k_norm != 0 and "img_k_cache" in attn_cache:
+                img_k = interp_fn(weight_img_k_norm, img_k, norm_seq(img_k, attn_cache["img_k_cache"]))
+            if weight_img_v_norm != 0 and "img_v_cache" in attn_cache:
+                img_v = interp_fn(weight_img_v_norm, img_v, norm_seq(img_v, attn_cache["img_v_cache"]))
                 
-            if weight_img_q_norm != 0 and hasattr(self, "img_q_cache"):
-                img_q = interp_fn(weight_img_q_norm, img_q, adain_seq(img_q, self.img_q_cache))
-            if weight_img_k_norm != 0 and hasattr(self, "img_k_cache"):
-                img_k = interp_fn(weight_img_k_norm, img_k, adain_seq(img_k, self.img_k_cache))
-            if weight_img_v_norm != 0 and hasattr(self, "img_v_cache"):
-                img_v = interp_fn(weight_img_v_norm, img_v, adain_seq(img_v, self.img_v_cache))
-                
+            for name in ["img_q_cache", "img_k_cache", "img_v_cache"]:
+                if hasattr(self, name):
+                    delattr(self, name)
+                attn_cache.pop(name, None)
 
 
         inner_dim = img_k.shape[-1]
@@ -333,7 +370,7 @@ class HDAttention(nn.Module):
 
 
         if self.single:
-            attn = attention(img_q, img_k, img_v, rope=rope, mask=mask)
+            attn = attention(img_q, img_k, img_v, rope=rope, mask=mask)                 # TODO: scattersort here!
             return self.to_out(attn)
         else:
             
@@ -351,30 +388,35 @@ class HDAttention(nn.Module):
 
             if cache_v:
                 if weight_txt_q != 0 or weight_txt_q_norm != 0:
-                    self.txt_q_cache = txt_q
+                    self.txt_q_cache = txt_q.to("cpu", non_blocking=True).pin_memory()
                 if weight_txt_k != 0 or weight_txt_k_norm != 0:
-                    self.txt_k_cache = txt_k
+                    self.txt_k_cache = txt_k.to("cpu", non_blocking=True).pin_memory()
                 if weight_txt_v != 0 or weight_txt_v_norm != 0:
-                    self.txt_v_cache = txt_v
+                    self.txt_v_cache = txt_v.to("cpu", non_blocking=True).pin_memory()
             else: 
                 if self.EO("slerp"):
                     interp_fn = slerp_tensor
                 else:
                     interp_fn = lambda weight, A, B: (1-weight) * A + weight * B
 
-                if weight_txt_q != 0 and hasattr(self, "txt_q_cache"):
-                    txt_q = interp_fn(weight_txt_q, txt_q, self.txt_q_cache)
-                if weight_txt_k != 0 and hasattr(self, "txt_k_cache"):
-                    txt_k = interp_fn(weight_txt_k, txt_k, self.txt_k_cache)
-                if weight_txt_v != 0 and hasattr(self, "txt_v_cache"):
-                    txt_v = interp_fn(weight_txt_v, txt_v, self.txt_v_cache)
+                if weight_txt_q != 0 and "txt_q_cache" in attn_cache:
+                    txt_q = interp_fn(weight_txt_q, txt_q, attn_cache["txt_q_cache"])
+                if weight_txt_k != 0 and "txt_k_cache" in attn_cache:
+                    txt_k = interp_fn(weight_txt_k, txt_k, attn_cache["txt_k_cache"])
+                if weight_txt_v != 0 and "txt_v_cache" in attn_cache:
+                    txt_v = interp_fn(weight_txt_v, txt_v, attn_cache["txt_v_cache"])
+
+                if weight_txt_q_norm != 0 and "txt_q_cache" in attn_cache:
+                    txt_q = interp_fn(weight_txt_q_norm, txt_q, norm_seq(txt_q, attn_cache["txt_q_cache"]))
+                if weight_txt_k_norm != 0 and "txt_k_cache" in attn_cache:
+                    txt_k = interp_fn(weight_txt_k_norm, txt_k, norm_seq(txt_k, attn_cache["txt_k_cache"]))
+                if weight_txt_v_norm != 0 and "txt_v_cache" in attn_cache:
+                    txt_v = interp_fn(weight_txt_v_norm, txt_v, norm_seq(txt_v, attn_cache["txt_v_cache"]))
                     
-                if weight_txt_q_norm != 0 and hasattr(self, "txt_q_cache"):
-                    txt_q = interp_fn(weight_txt_q_norm, txt_q, adain_seq(txt_q, self.txt_q_cache))
-                if weight_txt_k_norm != 0 and hasattr(self, "txt_k_cache"):
-                    txt_k = interp_fn(weight_txt_k_norm, txt_k, adain_seq(txt_k, self.txt_k_cache))
-                if weight_txt_v_norm != 0 and hasattr(self, "txt_v_cache"):
-                    txt_v = interp_fn(weight_txt_v_norm, txt_v, adain_seq(txt_v, self.txt_v_cache))
+                for name in ["txt_q_cache", "txt_k_cache", "txt_v_cache"]:
+                    if hasattr(self, name):
+                        delattr(self, name)
+                    attn_cache.pop(name, None)
 
             txt_q   = txt_q.view(bsz, -1, self.heads, head_dim)
             txt_k   = txt_k.view(bsz, -1, self.heads, head_dim)
@@ -400,7 +442,7 @@ class HDAttention(nn.Module):
                 self.img_attn_cache = img_attn.clone()
             elif hasattr(self, "img_attn_cache") and self.EO("img_attn_scattersort"):
                 attn_adain_weight = self.EO("img_attn_scattersort_weight", 0.99)
-                img_attn = attn_adain_weight * img_attn + (1 - attn_adain_weight) * apply_scattersort(img_attn, self.img_attn_cache)
+                img_attn = attn_adain_weight * img_attn + (1 - attn_adain_weight) * ScatterSort.apply(img_attn, self.img_attn_cache)
                 del self.img_attn_cache
             
             #if anticond == "uncond":
@@ -1053,8 +1095,8 @@ class HDModel(nn.Module):
                         
                         if EO("eps_adain_scattersort"):
                             if not EO("eps_adain_skip_txt"):
-                                txt_init = (1-adaweight) * img_txt + adaweight * apply_scattersort(img_txt, img_y0_adain_txt)
-                            img      = (1-adaweight) * img_img + adaweight * apply_scattersort(img_img, img_y0_adain_img)
+                                txt_init = (1-adaweight) * img_txt + adaweight * ScatterSort.apply(img_txt, img_y0_adain_txt)
+                            img      = (1-adaweight) * img_img + adaweight * ScatterSort.apply(img_img, img_y0_adain_img)
                         elif EO("eps_adain_WCT"):
                             if not EO("eps_adain_skip_txt"):
                                 self.StyleWCT.set(img_y0_adain_txt)
@@ -1138,8 +1180,8 @@ class HDModel(nn.Module):
                             
                             if EO("eps_adain_scattersort"):
                                 if not EO("eps_adain_skip_txt"):
-                                    txt_init = (1-adaweight) * img_txt + adaweight * apply_scattersort(img_txt, img_y0_adain_txt)
-                                img      = (1-adaweight) * img_img + adaweight * apply_scattersort(img_img, img_y0_adain_img)
+                                    txt_init = (1-adaweight) * img_txt + adaweight * ScatterSort.apply(img_txt, img_y0_adain_txt)
+                                img      = (1-adaweight) * img_img + adaweight * ScatterSort.apply(img_img, img_y0_adain_img)
                             elif EO("eps_adain_WCT"):
                                 if not EO("eps_adain_skip_txt"):
                                     self.StyleWCT.set(img_y0_adain_txt)
@@ -1200,11 +1242,11 @@ class HDModel(nn.Module):
                         
                         if EO("eps_adain_scattersort"):
                             if EO("eps_adain_joint"):
-                                img = (1-adaweight) * img + adaweight * apply_scattersort(img, img_y0_adain)
+                                img = (1-adaweight) * img + adaweight * ScatterSort.apply(img, img_y0_adain)
                             else:
                                 if not EO("eps_adain_skip_txt"):
-                                    img_txt = (1-adaweight) * img_txt + adaweight * apply_scattersort(img_txt, img_y0_adain_txt)
-                                img_img = (1-adaweight) * img_img + adaweight * apply_scattersort(img_img, img_y0_adain_img)
+                                    img_txt = (1-adaweight) * img_txt + adaweight * ScatterSort.apply(img_txt, img_y0_adain_txt)
+                                img_img = (1-adaweight) * img_img + adaweight * ScatterSort.apply(img_img, img_y0_adain_img)
                         elif EO("eps_adain_WCT"):
                             if EO("eps_adain_joint"):
                                 self.StyleWCT.set(img_y0_adain)
@@ -1287,11 +1329,11 @@ class HDModel(nn.Module):
                         
                         if EO("eps_adain_scattersort"):
                             if EO("eps_adain_joint"):
-                                img = (1-adaweight) * img + adaweight * apply_scattersort(img, img_y0_adain)
+                                img = (1-adaweight) * img + adaweight * ScatterSort.apply(img, img_y0_adain)
                             else:
                                 if not EO("eps_adain_skip_txt"):
-                                    img_txt = (1-adaweight) * img_txt + adaweight * apply_scattersort(img_txt, img_y0_adain_txt)
-                                img_img = (1-adaweight) * img_img + adaweight * apply_scattersort(img_img, img_y0_adain_img)
+                                    img_txt = (1-adaweight) * img_txt + adaweight * ScatterSort.apply(img_txt, img_y0_adain_txt)
+                                img_img = (1-adaweight) * img_img + adaweight * ScatterSort.apply(img_img, img_y0_adain_img)
                         elif EO("eps_adain_WCT"):
                             if EO("eps_adain_joint"):
                                 self.StyleWCT.set(img_y0_adain)
