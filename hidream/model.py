@@ -69,8 +69,9 @@ class HDBlock(nn.Module):
         update_cross_attn : Optional[Dict] = None,
         cache_v   :                  bool  = False,
         attninj_opts :      Optional[Dict] = {},
+        CACHE_ATTN: bool=False,
     ) -> FloatTensor:
-        return self.block(img, img_masks, txt, clip, rope, mask, update_cross_attn, cache_v, attninj_opts)
+        return self.block(img, img_masks, txt, clip, rope, mask, update_cross_attn, cache_v, attninj_opts, CACHE_ATTN=CACHE_ATTN)
 
 
 
@@ -394,6 +395,13 @@ class HDAttention(nn.Module):
                 attn_adain_weight = self.EO("img_attn_adain_weight", 0.99)
                 img_attn = attn_adain_weight * img_attn + (1 - attn_adain_weight) * adain_seq(img_attn, self.img_attn_cache)
                 del self.img_attn_cache
+                
+            if cache_v == True and self.EO("img_attn_scattersort"):
+                self.img_attn_cache = img_attn.clone()
+            elif hasattr(self, "img_attn_cache") and self.EO("img_attn_scattersort"):
+                attn_adain_weight = self.EO("img_attn_scattersort_weight", 0.99)
+                img_attn = attn_adain_weight * img_attn + (1 - attn_adain_weight) * apply_scattersort(img_attn, self.img_attn_cache)
+                del self.img_attn_cache
             
             #if anticond == "uncond":
             #    txt_src    = torch.cat([txt[:,1:3,:], txt[:,129:131,:], txt[:,257:259],], dim=-2).float()
@@ -492,6 +500,8 @@ class HDBlockDouble(nn.Module):
         update_cross_attn : Optional[Dict]= None,
         cache_v   :                  bool = True,
         attninj_opts :     Optional[Dict] = {},
+        CACHE_ATTN: bool = False,
+        CACHE_TXT: bool = False
     ) -> FloatTensor:
         
         img_msa_shift, img_msa_scale, img_msa_gate, img_mlp_shift, img_mlp_scale, img_mlp_gate, \
@@ -499,15 +509,47 @@ class HDBlockDouble(nn.Module):
 
         img_norm = self.norm1_i(img) * (1+img_msa_scale) + img_msa_shift
         txt_norm = self.norm1_t(txt) * (1+txt_msa_scale) + txt_msa_shift
-
+        
+        #if hasattr(self, "img_norm"):
+        #    img_norm = apply_scattersort(img_norm, self.img_norm)
+        #    del self.img_norm
+        #    txt_norm = apply_scattersort(txt_norm, self.txt_norm)
+        #    del self.txt_norm
+        #if CACHE_ATTN:
+        #    self.img_norm = img_norm
+        #    self.txt_norm = txt_norm
+        
         img_attn, txt_attn = self.attn1(img_norm, img_masks, txt_norm, rope=rope, mask=mask, update_cross_attn=update_cross_attn, cache_v=cache_v, attninj_opts=attninj_opts)
+        
+        #if hasattr(self, "img_attn"):
+        #    img_attn = apply_scattersort(img_attn, self.img_attn)
+        #    del self.img_attn
+        #    txt_attn = apply_scattersort(txt_attn, self.txt_attn)
+        #    del self.txt_attn
+        #if CACHE_ATTN:
+        #    self.img_attn = img_attn
+        #    self.txt_attn = txt_attn
         
         img     += img_attn            *    img_msa_gate
         img_norm = self.norm3_i(img) * (1+img_mlp_scale) + img_mlp_shift
+        
+        #if hasattr(self, "img_norm"):
+        #    img_norm = apply_scattersort(img_norm, self.img_norm)
+        #    del self.img_norm
+        #if CACHE_ATTN:
+        #    self.img_norm = img_norm
+        
         img     += self.ff_i(img_norm) *    img_mlp_gate
         
         txt     += txt_attn            *    txt_msa_gate
         txt_norm = self.norm3_t(txt) * (1+txt_mlp_scale) + txt_mlp_shift
+        
+        #if hasattr(self, "txt_norm"):
+        #    txt_norm = apply_scattersort(txt_norm, self.txt_norm)
+        #    del self.txt_norm
+        #if CACHE_ATTN:
+        #    self.txt_norm = txt_norm
+        
         txt     += self.ff_t(txt_norm) *    txt_mlp_gate 
         
         return img, txt
@@ -547,6 +589,7 @@ class HDBlockSingle(nn.Module):
         update_cross_attn : Optional[Dict] = None,
         cache_v   :                  bool  = True,
         attninj_opts :      Optional[Dict]  = None,
+        CACHE_ATTN: bool = False,
 
     ) -> FloatTensor:
         
@@ -554,10 +597,29 @@ class HDBlockSingle(nn.Module):
 
         img_norm = self.norm1_i(img) * (1+img_msa_scale) + img_msa_shift
         
+        #if hasattr(self, "img_norm"):
+        #    img_norm = apply_scattersort(img_norm, self.img_norm)
+        #    del self.img_norm
+        #if CACHE_ATTN:
+        #    self.img_norm = img_norm
+        
         img_attn = self.attn1(img_norm, img_masks, rope=rope, mask=mask, cache_v=cache_v, attninj_opts=attninj_opts)
+        
+        #if hasattr(self, "img_attn"):
+        #    img_attn = apply_scattersort(img_attn, self.img_attn)
+        #    del self.img_attn
+        #if CACHE_ATTN:
+        #    self.img_attn = img_attn
         
         img     += img_attn            *    img_msa_gate
         img_norm = self.norm3_i(img) * (1+img_mlp_scale) + img_mlp_shift
+        
+        #if hasattr(self, "img_norm"):
+        #    img_norm = apply_scattersort(img_norm, self.img_norm)
+        #    del self.img_norm
+        #if CACHE_ATTN:
+        #    self.img_norm = img_norm
+        
         img     += self.ff_i(img_norm) *    img_mlp_gate
         
         return img
@@ -728,9 +790,11 @@ class HDModel(nn.Module):
         
         y0_attninj = transformer_options.get("y0_attninj")
         if y0_attninj is not None:
+            x_init                = transformer_options.get("x_init").to(x)   # initial noise and/or image+noise from start of rk_sampler_beta() 
             y0_attninj            = y0_attninj.to(x)
+            y0_attninj            = (1-SIGMA) * y0_attninj + SIGMA * x_init
             img_y0_attninj        = comfy.ldm.common_dit.pad_to_patch_size(y0_attninj, (self.patch_size, self.patch_size))
-            t_y0_attninj          = torch.full_like(t, 0.0)[0].unsqueeze(0)
+            t_y0_attninj          = t[0].unsqueeze(0).clone() #torch.full_like(t, 0.0)[0].unsqueeze(0)
             blocks_attninj        = transformer_options.get("blocks_attninj")
             blocks_attninj_qkv    = transformer_options.get("blocks_attninj_qkv")
             ATTNINJ_SINGLE_BLOCKS = blocks_attninj['single_blocks']
@@ -747,6 +811,8 @@ class HDModel(nn.Module):
         img_orig, t_orig, y_orig, context_orig, llama3_orig = clone_inputs(img, t, y, context, encoder_hidden_states_llama3)
         if y0_adain is not None:
             img_y0_adain_orig, t_y0_adain_orig = clone_inputs(img_y0_adain, t_y0_adain)
+        if y0_attninj is not None:
+            img_y0_attninj_orig, t_y0_attninj_orig = clone_inputs(img_y0_attninj, t_y0_attninj)
         
         weight    = -1 * transformer_options.get("regional_conditioning_weight", 0.0)
         floor     = -1 * transformer_options.get("regional_conditioning_floor",  0.0)
@@ -778,6 +844,9 @@ class HDModel(nn.Module):
             if y0_adain is not None:
                 img_y0_adain, t_y0_adain = clone_inputs(img_y0_adain_orig, t_y0_adain_orig)
                 img_sizes_y0_adain = None
+            if y0_attninj is not None:
+                img_y0_attninj, t_y0_attninj = clone_inputs(img_y0_attninj_orig, t_y0_attninj_orig)
+                img_sizes_y0_attninj = None
             
             mask = None
             if not UNCOND and 'AttnMask' in transformer_options: # and weight != 0:
@@ -959,7 +1028,8 @@ class HDModel(nn.Module):
                 #txt_orig       = torch.cat([txt_init_orig, txt_llama_orig], dim=1)        # 1,384,2560       # cur_contexts = T5, LLAMA3 (last block), LLAMA3 (current block)
 
                 
-                if (bid == 0 or EO("eps_adain_first")) and img_y0_adain is not None:
+                #if (bid == 0 or EO("eps_adain_first")) and img_y0_adain is not None:
+                if EO("eps_adain_first") and img_y0_adain is not None:
                     if IDENTICAL_ADAIN_ATTNINJ:
                         img_y0_adain      = img_y0_attninj
                         txt_init_y0_adain = txt_init_y0_attninj
@@ -996,7 +1066,10 @@ class HDModel(nn.Module):
                             if not EO("eps_adain_skip_txt"):
                                 txt_init = (1-adaweight) * img_txt + adaweight * adain_seq(img_txt, img_y0_adain_txt)
                             img      = (1-adaweight) * img_img + adaweight * adain_seq(img_img, img_y0_adain_img)
-                        
+                            
+                    img_y0_adain, txt_init_y0_adain = block(img_y0_adain, img_masks, txt_y0_adain, clip_y0_adain, rope, mask, CACHE_ATTN=EO("eps_adain_cache_attn"))
+                    txt_init_y0_adain               = txt_init_y0_adain[:, :txt_init_len]
+                    
                         #img = img + (1-SIGMA) * adaweight * (adain_seq(img, img_y0_adain) - img)
 
                 if   weight > 0 and mask is not None and     weight  <      bid/48:
@@ -1034,11 +1107,11 @@ class HDModel(nn.Module):
                         txt_y0_attninj                      = torch.cat([txt_init_y0_attninj, txt_llama], dim=1)
                         img_y0_attninj, txt_init_y0_attninj = block(img_y0_attninj, img_masks, txt_y0_attninj, clip_y0_attninj, rope, mask, cache_v=cache_v, attninj_opts=blocks_attninj_qkv_scaled)
                         txt_init_y0_attninj                 = txt_init_y0_attninj[:, :txt_init_len]
-                        
+                    
                     img, txt_init = block(img, img_masks, txt, clip, rope, mask, update_cross_attn=update_cross_attn, attninj_opts=blocks_attninj_qkv_scaled)
 
                     #if STYLE_UNCOND == UNCOND and img_y0_adain is not None:
-                    if EO("eps_adain_first") and img_y0_adain is not None:
+                    if False: #EO("eps_adain_first") and img_y0_adain is not None:
                         img_y0_adain, txt_init_y0_adain = block(img_y0_adain, img_masks, txt_y0_adain, clip_y0_adain, rope, mask)
                         txt_init_y0_adain               = txt_init_y0_adain[:, :txt_init_len]
                     if not EO("eps_adain_first") and img_y0_adain is not None:
@@ -1047,7 +1120,7 @@ class HDModel(nn.Module):
                             txt_init_y0_adain = txt_init_y0_attninj
                         else:
                             txt_y0_adain                    = torch.cat([txt_init_y0_adain, txt_llama], dim=1)
-                            img_y0_adain, txt_init_y0_adain = block(img_y0_adain, img_masks, txt_y0_adain, clip_y0_adain, rope, mask)
+                            img_y0_adain, txt_init_y0_adain = block(img_y0_adain, img_masks, txt_y0_adain, clip_y0_adain, rope, mask, CACHE_ATTN=EO("eps_adain_cache_attn"))
                             txt_init_y0_adain               = txt_init_y0_adain[:, :txt_init_len]
                         
                         if bid in ADAIN_DOUBLE_BLOCKS:
@@ -1153,6 +1226,9 @@ class HDModel(nn.Module):
                         
                         if not EO("eps_adain_joint"):
                             img = torch.cat([img_img, img_txt], dim=-2)
+                            
+                    img_y0_adain = block(img_y0_adain, img_masks, None, clip_y0_adain, rope, mask, CACHE_ATTN=EO("eps_adain_cache_attn"))
+                    img_y0_adain = img_y0_adain[:, :joint_len]
 
                         
                 if   weight > 0 and mask is not None and     weight  <      (bid+16)/48:
@@ -1189,7 +1265,7 @@ class HDModel(nn.Module):
                 img = img[:, :joint_len]   # slice off txt_llama
                 
                 #if STYLE_UNCOND == UNCOND and img_y0_adain is not None:
-                if EO("eps_adain_first") and img_y0_adain is not None:
+                if False: #EO("eps_adain_first") and img_y0_adain is not None:
                     img_y0_adain = block(img_y0_adain, img_masks, None, clip_y0_adain, rope, mask)
                     img_y0_adain = img_y0_adain[:, :joint_len]
                 if not EO("eps_adain_first") and img_y0_adain is not None:
@@ -1197,7 +1273,7 @@ class HDModel(nn.Module):
                         img_y0_adain = img_y0_attninj
                     else:
                         img_y0_adain = torch.cat([img_y0_adain, txt_llama], dim=1)   
-                        img_y0_adain = block(img_y0_adain, img_masks, None, clip_y0_adain, rope, mask)
+                        img_y0_adain = block(img_y0_adain, img_masks, None, clip_y0_adain, rope, mask, CACHE_ATTN=EO("eps_adain_cache_attn"))
                         img_y0_adain = img_y0_adain[:, :joint_len]
                     
                     if bid in ADAIN_SINGLE_BLOCKS:
@@ -1239,7 +1315,7 @@ class HDModel(nn.Module):
                             img = torch.cat([img_img, img_txt], dim=-2)
 
                         #img = img + (1-SIGMA) * adaweight * (adain_seq(img, img_y0_adain) - img)
-                
+            
             img = img[:, :img_len, ...]
             
             img_pre_final.append(img)
