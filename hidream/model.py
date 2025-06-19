@@ -235,10 +235,14 @@ class ScatterSort:
             src=buf['ref_sorted'].expand_as(buf['ref_sorted'])
         )
 
+class AttentionBuffer:
+    buffer = {}
+
+
 def attention(q: Tensor, k: Tensor, v: Tensor, rope: Tensor, mask: Optional[Tensor] = None):
     q, k = apply_rope(q, k, rope)
     if mask is not None:
-        return attention_pytorch(
+        AttentionBuffer.buffer = attention_pytorch(
             q.view(q.shape[0], -1, q.shape[-1] * q.shape[-2]), 
             k.view(k.shape[0], -1, k.shape[-1] * k.shape[-2]), 
             v.view(v.shape[0], -1, v.shape[-1] * v.shape[-2]), 
@@ -246,13 +250,14 @@ def attention(q: Tensor, k: Tensor, v: Tensor, rope: Tensor, mask: Optional[Tens
             mask=mask,
             )
     else:
-        return optimized_attention(
+        AttentionBuffer.buffer = optimized_attention(
             q.view(q.shape[0], -1, q.shape[-1] * q.shape[-2]), 
             k.view(k.shape[0], -1, k.shape[-1] * k.shape[-2]), 
             v.view(v.shape[0], -1, v.shape[-1] * v.shape[-2]), 
             q.shape[2],
             mask=mask,
             )
+    return AttentionBuffer.buffer
 
 class HDAttention(nn.Module):
     def __init__(
@@ -371,6 +376,21 @@ class HDAttention(nn.Module):
 
         if self.single:
             attn = attention(img_q, img_k, img_v, rope=rope, mask=mask)                 # TODO: scattersort here!
+            
+            if cache_v == True and self.EO("single_attn_adain"):
+                self.single_attn_cache = img_attn.to("cpu", non_blocking=True).pin_memory()
+            elif hasattr(self, "single_attn_cache") and self.EO("single_attn_adain"):
+                attn_adain_weight = self.EO("single_attn_adain_weight", 1.0)
+                img_attn = (1-attn_adain_weight) * img_attn + attn_adain_weight * adain_seq(img_attn, self.single_attn_cache.to("cuda", non_blocking=True))
+                del self.single_attn_cache
+                
+            if cache_v == True and self.EO("single_attn_scattersort"):
+                self.single_attn_cache = img_attn.to("cpu", non_blocking=True).pin_memory()
+            elif hasattr(self, "single_attn_cache") and self.EO("single_attn_scattersort"):
+                attn_adain_weight = self.EO("single_attn_scattersort_weight", 1.0)
+                img_attn = (1-attn_adain_weight) * img_attn + attn_adain_weight * ScatterSort.apply(img_attn, self.single_attn_cache.to("cuda", non_blocking=True))
+                del self.single_attn_cache
+            
             return self.to_out(attn)
         else:
             
@@ -432,18 +452,32 @@ class HDAttention(nn.Module):
             img_attn, txt_attn = torch.split(attn, [img_len, txt_len], dim=1)   #1, 4480, 2560
             
             if cache_v == True and self.EO("img_attn_adain"):
-                self.img_attn_cache = img_attn.clone()
+                self.img_attn_cache = img_attn.to("cpu", non_blocking=True).pin_memory()
             elif hasattr(self, "img_attn_cache") and self.EO("img_attn_adain"):
-                attn_adain_weight = self.EO("img_attn_adain_weight", 0.99)
-                img_attn = attn_adain_weight * img_attn + (1 - attn_adain_weight) * adain_seq(img_attn, self.img_attn_cache)
+                attn_adain_weight = self.EO("img_attn_adain_weight", 1.0)
+                img_attn = (1-attn_adain_weight) * img_attn + attn_adain_weight * adain_seq(img_attn, self.img_attn_cache.to("cuda", non_blocking=True))
                 del self.img_attn_cache
                 
             if cache_v == True and self.EO("img_attn_scattersort"):
-                self.img_attn_cache = img_attn.clone()
+                self.img_attn_cache = img_attn.to("cpu", non_blocking=True).pin_memory()
             elif hasattr(self, "img_attn_cache") and self.EO("img_attn_scattersort"):
-                attn_adain_weight = self.EO("img_attn_scattersort_weight", 0.99)
-                img_attn = attn_adain_weight * img_attn + (1 - attn_adain_weight) * ScatterSort.apply(img_attn, self.img_attn_cache)
+                attn_adain_weight = self.EO("img_attn_scattersort_weight", 1.0)
+                img_attn = (1-attn_adain_weight) * img_attn + attn_adain_weight * ScatterSort.apply(img_attn, self.img_attn_cache.to("cuda", non_blocking=True))
                 del self.img_attn_cache
+                
+            if cache_v == True and self.EO("txt_attn_adain"):
+                self.txt_attn_cache = txt_attn.to("cpu", non_blocking=True).pin_memory()
+            elif hasattr(self, "txt_attn_cache") and self.EO("txt_attn_adain"):
+                attn_adain_weight = self.EO("txt_attn_adain_weight", 1.0)
+                txt_attn = (1-attn_adain_weight) * txt_attn + attn_adain_weight * adain_seq(txt_attn, self.txt_attn_cache.to("cuda", non_blocking=True))
+                del self.txt_attn_cache
+                
+            if cache_v == True and self.EO("txt_attn_scattersort"):
+                self.txt_attn_cache = txt_attn.to("cpu", non_blocking=True).pin_memory()
+            elif hasattr(self, "txt_attn_cache") and self.EO("txt_attn_scattersort"):
+                attn_adain_weight = self.EO("txt_attn_scattersort_weight", 1.0)
+                txt_attn = (1-attn_adain_weight) * txt_attn + attn_adain_weight * ScatterSort.apply(txt_attn, self.txt_attn_cache.to("cuda", non_blocking=True))
+                del self.txt_attn_cache
             
             #if anticond == "uncond":
             #    txt_src    = torch.cat([txt[:,1:3,:], txt[:,129:131,:], txt[:,257:259],], dim=-2).float()
@@ -505,6 +539,8 @@ class HDAttention(nn.Module):
     
 #########################################################################################################################################################################
 class HDBlockDouble(nn.Module):
+    buffer = {}
+    
     def __init__(
         self,
         dim                   : int,
@@ -527,7 +563,7 @@ class HDBlockDouble(nn.Module):
 
         self.norm3_i = operations.LayerNorm(dim, eps = 1e-06, elementwise_affine = False,           dtype=dtype, device=device)
         self.ff_i    = MOEFeedForwardSwiGLU(dim, 4*dim, num_routed_experts, num_activated_experts,  dtype=dtype, device=device, operations=operations)
-                
+        
         self.norm3_t = operations.LayerNorm(dim, eps = 1e-06, elementwise_affine = False,           dtype=dtype, device=device)                                 
         self.ff_t    =    FeedForwardSwiGLU(dim, 4*dim,                                             dtype=dtype, device=device, operations=operations)
 
@@ -546,51 +582,66 @@ class HDBlockDouble(nn.Module):
         CACHE_TXT: bool = False
     ) -> FloatTensor:
         
+        buf = HDBlockDouble.buffer
+        
         img_msa_shift, img_msa_scale, img_msa_gate, img_mlp_shift, img_mlp_scale, img_mlp_gate, \
         txt_msa_shift, txt_msa_scale, txt_msa_gate, txt_mlp_shift, txt_mlp_scale, txt_mlp_gate = self.adaLN_modulation(clip)[:,None].chunk(12, dim=-1)      # 1,1,2560           
 
         img_norm = self.norm1_i(img) * (1+img_msa_scale) + img_msa_shift
         txt_norm = self.norm1_t(txt) * (1+txt_msa_scale) + txt_msa_shift
         
-        #if hasattr(self, "img_norm"):
-        #    img_norm = apply_scattersort(img_norm, self.img_norm)
-        #    del self.img_norm
-        #    txt_norm = apply_scattersort(txt_norm, self.txt_norm)
-        #    del self.txt_norm
-        #if CACHE_ATTN:
-        #    self.img_norm = img_norm
-        #    self.txt_norm = txt_norm
+        if hasattr(self, "img_norm"):
+            img_norm = apply_scattersort(img_norm, self.img_norm.to("cuda", non_blocking=True))
+            del self.img_norm
+            txt_norm = apply_scattersort(txt_norm, self.txt_norm.to("cuda", non_blocking=True))
+            del self.txt_norm
+        elif cache_v:
+            self.img_norm = img_norm.to("cpu", non_blocking=True).pin_memory()
+            self.txt_norm = txt_norm.to("cpu", non_blocking=True).pin_memory()
         
         img_attn, txt_attn = self.attn1(img_norm, img_masks, txt_norm, rope=rope, mask=mask, update_cross_attn=update_cross_attn, cache_v=cache_v, attninj_opts=attninj_opts)
         
         #if hasattr(self, "img_attn"):
-        #    img_attn = apply_scattersort(img_attn, self.img_attn)
+        #    img_attn = apply_scattersort(img_attn, self.img_attn.to("cuda", non_blocking=True))
         #    del self.img_attn
-        #    txt_attn = apply_scattersort(txt_attn, self.txt_attn)
+        #    txt_attn = apply_scattersort(txt_attn, self.txt_attn.to("cuda", non_blocking=True))
         #    del self.txt_attn
-        #if CACHE_ATTN:
-        #    self.img_attn = img_attn
-        #    self.txt_attn = txt_attn
+        #elif cache_v:
+        #    self.img_attn = img_attn.to("cpu", non_blocking=True).pin_memory()
+        #    self.txt_attn = txt_attn.to("cpu", non_blocking=True).pin_memory()
         
         img     += img_attn            *    img_msa_gate
+        
+        if hasattr(self, "img"):
+            img = apply_scattersort(img, self.img.to("cuda", non_blocking=True))
+            del self.img
+        elif cache_v:
+            self.img = img.to("cpu", non_blocking=True).pin_memory()
+        
         img_norm = self.norm3_i(img) * (1+img_mlp_scale) + img_mlp_shift
         
         #if hasattr(self, "img_norm"):
-        #    img_norm = apply_scattersort(img_norm, self.img_norm)
+        #    img_norm = apply_scattersort(img_norm, self.img_norm.to("cuda", non_blocking=True))
         #    del self.img_norm
-        #if CACHE_ATTN:
-        #    self.img_norm = img_norm
+        #elif cache_v:
+        #    self.img_norm = img_norm.to("cpu", non_blocking=True).pin_memory()
         
         img     += self.ff_i(img_norm) *    img_mlp_gate
         
         txt     += txt_attn            *    txt_msa_gate
+        if hasattr(self, "txt"):
+            txt = apply_scattersort(txt, self.txt.to("cuda", non_blocking=True))
+            del self.txt
+        elif cache_v:
+            self.txt = txt.to("cpu", non_blocking=True).pin_memory()
+        
         txt_norm = self.norm3_t(txt) * (1+txt_mlp_scale) + txt_mlp_shift
         
         #if hasattr(self, "txt_norm"):
-        #    txt_norm = apply_scattersort(txt_norm, self.txt_norm)
+        #    txt_norm = apply_scattersort(txt_norm, self.txt_norm.to("cuda", non_blocking=True))
         #    del self.txt_norm
-        #if CACHE_ATTN:
-        #    self.txt_norm = txt_norm
+        #elif cache_v:
+        #    self.txt_norm = txt_norm.to("cpu", non_blocking=True).pin_memory()
         
         txt     += self.ff_t(txt_norm) *    txt_mlp_gate 
         
@@ -599,6 +650,8 @@ class HDBlockDouble(nn.Module):
 
 #########################################################################################################################################################################
 class HDBlockSingle(nn.Module):
+    buffer = {}
+    
     def __init__(
         self,
         dim                   : int,
@@ -635,32 +688,44 @@ class HDBlockSingle(nn.Module):
 
     ) -> FloatTensor:
         
+        buf = HDBlockSingle.buffer
+        
         img_msa_shift, img_msa_scale, img_msa_gate, img_mlp_shift, img_mlp_scale, img_mlp_gate = self.adaLN_modulation(clip)[:,None].chunk(6, dim=-1)
 
         img_norm = self.norm1_i(img) * (1+img_msa_scale) + img_msa_shift
         
-        #if hasattr(self, "img_norm"):
-        #    img_norm = apply_scattersort(img_norm, self.img_norm)
-        #    del self.img_norm
-        #if CACHE_ATTN:
-        #    self.img_norm = img_norm
+        if hasattr(self, "img_norm"):
+            img_norm = apply_scattersort(img_norm, self.img_norm.to("cuda", non_blocking=True))
+            del self.img_norm
+        elif cache_v:
+            self.img_norm = img_norm.to("cpu", non_blocking=True).pin_memory()
         
         img_attn = self.attn1(img_norm, img_masks, rope=rope, mask=mask, cache_v=cache_v, attninj_opts=attninj_opts)
         
         #if hasattr(self, "img_attn"):
-        #    img_attn = apply_scattersort(img_attn, self.img_attn)
+        #    img_attn = apply_scattersort(img_attn, self.img_attn.to("cuda", non_blocking=True))
         #    del self.img_attn
-        #if CACHE_ATTN:
-        #    self.img_attn = img_attn
+        #elif cache_v:
+        #    self.img_attn = img_attn.to("cpu", non_blocking=True).pin_memory()
         
         img     += img_attn            *    img_msa_gate
+        
+        
+        if hasattr(self, "img"):
+            img = apply_scattersort(img, self.img.to("cuda", non_blocking=True))
+            del self.img
+        elif cache_v:
+            self.img = img.to("cpu", non_blocking=True).pin_memory()
+        
+        
+        
         img_norm = self.norm3_i(img) * (1+img_mlp_scale) + img_mlp_shift
         
         #if hasattr(self, "img_norm"):
-        #    img_norm = apply_scattersort(img_norm, self.img_norm)
+        #    img_norm = apply_scattersort(img_norm, self.img_norm.to("cuda", non_blocking=True))
         #    del self.img_norm
-        #if CACHE_ATTN:
-        #    self.img_norm = img_norm
+        #elif cache_v:
+        #    self.img_norm = img_norm.to("cpu", non_blocking=True).pin_memory()
         
         img     += self.ff_i(img_norm) *    img_mlp_gate
         
@@ -1082,11 +1147,7 @@ class HDModel(nn.Module):
                     
                     if bid in ADAIN_DOUBLE_BLOCKS:
                         adaweight = blocks_adain['double_weights'][bid]
-                        #if EO("eps_adain_scattersort"):
-                        #    img = (1-adaweight) * img + adaweight * apply_scattersort(img, img_y0_adain, h_len, w_len)
-                        #else:
-                        #    img = (1-adaweight) * img + adaweight * adain_seq(img, img_y0_adain)
-                        
+
                         img_y0_adain_txt = txt_init_y0_adain[:, :txt_init_len]
                         img_y0_adain_img = img_y0_adain[:,:img_len]
                         
@@ -1167,11 +1228,7 @@ class HDModel(nn.Module):
                         
                         if bid in ADAIN_DOUBLE_BLOCKS:
                             adaweight = blocks_adain['double_weights'][bid]
-                            #if EO("eps_adain_scattersort"):
-                            #    img = (1-adaweight) * img + adaweight * apply_scattersort(img, img_y0_adain, h_len, w_len)
-                            #else:
-                            #    img = (1-adaweight) * img + adaweight * adain_seq(img, img_y0_adain)
-                            
+
                             img_y0_adain_txt = txt_init_y0_adain[:, :txt_init_len]
                             img_y0_adain_img = img_y0_adain[:,:img_len]
                             
