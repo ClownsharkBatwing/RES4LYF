@@ -93,7 +93,7 @@ class StyleTransfer:
     def embedder(self, x):
         if isinstance(self.embedder_method, nn.Linear):
             x = self.patchify(x)
-            
+        
         self.orig_shape = x.shape
         x = self.embedder_method(x)
         self.grid_sizes = x.shape[2:]
@@ -107,7 +107,7 @@ class StyleTransfer:
     def unembedder(self, x):
         #if self.x_embed_ndim > 3:
         #    x = einops.rearrange(x, "B (H W) C -> B C H W", W=self.orig_shape[-1])
-            
+        
         x = self.unembedder_method(x)
         return x
         
@@ -662,6 +662,42 @@ def apply_scattersort_spatial(
 
 
 
+def apply_scattersort_spatial(
+    x_spatial : torch.Tensor,
+    y_spatial : torch.Tensor,
+):
+    x_emb = rearrange(x_spatial, "b c h w -> b (h w) c")
+    y_emb = rearrange(y_spatial, "b c h w -> b (h w) c")
+    
+    x_sorted, x_idx = x_emb.sort(dim=-2)
+    y_sorted, y_idx = y_emb.sort(dim=-2)
+
+    x_emb = x_sorted.scatter(dim=-2, index=x_idx, src=y_sorted.expand(x_sorted.shape))
+    
+    return rearrange(x_emb, "b (h w) c -> b c h w", h=x_spatial.shape[-2], w=x_spatial.shape[-1])
+
+
+
+
+def apply_adain_spatial(
+    x_spatial : torch.Tensor,
+    y_spatial : torch.Tensor,
+):
+    x_emb = rearrange(x_spatial, "b c h w -> b (h w) c")
+    y_emb = rearrange(y_spatial, "b c h w -> b (h w) c")
+    
+    x_mean = x_emb.mean(-2, keepdim=True)
+    x_std  = x_emb.std (-2, keepdim=True)
+    y_mean = y_emb.mean(-2, keepdim=True)
+    y_std  = y_emb.std (-2, keepdim=True)
+
+    assert (x_std == 0).any() == 0, "Target tensor has no variance!"
+    assert (y_std == 0).any() == 0, "Reference tensor has no variance!"
+    
+    x_emb_adain = (x_emb - x_mean) / x_std
+    x_emb_adain = (x_emb_adain * y_std) + y_mean
+    
+    return x_emb_adain.reshape_as(x_spatial)
 
 
 

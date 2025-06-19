@@ -66,6 +66,22 @@ from .res4lyf import RESplain
 
 from .helper import parse_range_string
 
+from comfy.model_sampling import *
+
+class PRED:
+    TYPE_VP    = {CONST}
+    TYPE_VE    = {EPS}
+    TYPE_VPRED = {V_PREDICTION, EDM}
+    TYPE_X0    = {X0, IMG_TO_IMG}
+    
+    TYPE_ALL   = TYPE_VP | TYPE_VE | TYPE_VPRED | TYPE_X0
+    
+    @classmethod
+    def get_type(cls, model_sampling):
+        bases = type(model_sampling).__mro__
+        return next((v_type for v_type in bases if v_type in cls.TYPE_ALL), None)
+
+
 def time_snr_shift_exponential(alpha, t):
     return math.exp(alpha) / (math.exp(alpha) + (1 / t - 1) ** 1.0)
 

@@ -472,7 +472,7 @@ class FrameWeightsManager:
         """Set custom weights for a specific configuration"""
         if config_name not in self._weight_configs:
             self._weight_configs[config_name] = self._default_config.copy()
-        
+
         self._weight_configs[config_name]["frame_weights"] = weights
         return self
     
@@ -830,3 +830,19 @@ def check_projection_consistency(x, W, b):
     error = torch.norm(x - x_recon)
     in_subspace = error < 1e-3
     return error, in_subspace
+
+
+
+
+def get_max_dtype(device='cpu'):
+    if torch.backends.mps.is_available():
+        MAX_DTYPE = torch.float32
+    else:
+        try:
+            torch.tensor([0.0], dtype=torch.float64, device=device)
+            MAX_DTYPE = torch.float64
+        except (RuntimeError, TypeError):
+            MAX_DTYPE = torch.float32
+    return MAX_DTYPE
+
+
