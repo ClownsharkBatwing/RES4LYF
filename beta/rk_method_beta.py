@@ -333,6 +333,7 @@ class RK_Method_Beta:
                         h_new      : Tensor,
                         h_new_orig : Tensor,
                         lying_eps_row_factor : float = 1.0,
+                        sigma      : Optional[Tensor] = None,
                         ) -> Tensor:
         
         if row < self.rows - row_offset   and   self.multistep_stages == 0:
@@ -341,7 +342,7 @@ class RK_Method_Beta:
         else:
             row_tmp_offset = row + 1
                 
-        zr_base   = self.zum(row+row_offset+self.multistep_stages, eps_, eps_prev_)
+        #zr_base   = self.zum(row+row_offset+self.multistep_stages, eps_, eps_prev_)  # TODO: why unused?
         
         if self.SYNC_SUBSTEP_MEAN_CW and lying_eps_row_factor != 1.0:
             zr_orig = self.zum(row+row_offset+self.multistep_stages, eps_, eps_prev_)
@@ -352,9 +353,14 @@ class RK_Method_Beta:
         
         eps_     [row] *= lying_eps_row_factor
         eps_prev_[row] *= lying_eps_row_factor
-        zr = self.zum(row+row_offset+self.multistep_stages, eps_, eps_prev_)
         
-        x_[row_tmp_offset] = x_0 + h_new * zr
+        if self.EO("exp2lin_override"):
+            zr = self.zum2(row+row_offset+self.multistep_stages, eps_, eps_prev_, h_new, sigma)
+            x_[row_tmp_offset] = x_0 + zr
+        else:
+            zr = self.zum(row+row_offset+self.multistep_stages, eps_, eps_prev_)
+
+            x_[row_tmp_offset] = x_0 + h_new * zr
         
         if self.SYNC_SUBSTEP_MEAN_CW and lying_eps_row_factor != 1.0:
             x_[row_tmp_offset] = x_[row_tmp_offset] - x_[row_tmp_offset].mean(dim=(-2,-1), keepdim=True) + x_orig_row.mean(dim=(-2,-1), keepdim=True)
@@ -369,6 +375,20 @@ class RK_Method_Beta:
         
         return x_
 
+
+
+    def zum2(self, row:int, k:Tensor, k_prev:Tensor=None, h_new:Tensor=None, sigma:Tensor=None) -> Tensor:
+        if row < self.rows:
+            return self.a_k_einsum2(row, k, h_new, sigma)
+        else:
+            row = row - self.rows
+            return self.b_k_einsum2(row, k, h_new, sigma)
+
+    def a_k_einsum2(self, row:int, k:Tensor, h:Tensor, sigma:Tensor) -> Tensor:
+        return torch.einsum('i,j,k,i... -> ...', self.A[row], h.unsqueeze(0), -sigma.unsqueeze(0), k[:self.cols])
+    
+    def b_k_einsum2(self, row:int, k:Tensor, h:Tensor, sigma:Tensor) -> Tensor:
+        return torch.einsum('i,j,k,i... -> ...', self.B[row], h.unsqueeze(0), -sigma.unsqueeze(0), k[:self.cols])
 
     
     def a_k_einsum(self, row:int, k     :Tensor) -> Tensor:
@@ -397,7 +417,11 @@ class RK_Method_Beta:
         u_k_sum = torch.einsum('ij, j... -> i...', self.U, k_prev[:self.cols]) if (self.U is not None and k_prev is not None) else 0
         return a_k_sum + u_k_sum
         
-
+    def get_x(self, data:Tensor, noise:Tensor, sigma:Tensor):
+        if self.VE_MODEL:
+            return data + sigma * noise
+        else:
+            return (self.sigma_max - sigma) * data + sigma * noise
 
     def init_cfg_channelwise(self, x:Tensor, cfg_cw:float=1.0, **extra_args) -> Dict[str, Any]:
         self.uncond = [torch.full_like(x, 0.0)]
@@ -882,9 +906,28 @@ class RK_Method_Exponential(RK_Method_Beta):
         
         epsilon  = denoised - x_0
         
+        if self.EO("exp2lin_override"):
+            epsilon = (x_0 - denoised) / sigma
+        
         return epsilon, denoised
     
-    
+    def get_eps(self, *args):
+        if   len(args) == 3:
+            x, denoised, sigma = args
+            return denoised - x
+        elif len(args) == 5:
+            x_0, x, denoised, sigma, sub_sigma = args
+            eps_anchored = (x_0 - denoised) / sigma
+            eps_unmoored = (x   - denoised) / sub_sigma
+            eps      = eps_unmoored + self.LINEAR_ANCHOR_X_0 * (eps_anchored - eps_unmoored)
+            denoised = x_0 - sigma * eps
+            eps_out = denoised - x_0
+            if self.EO("exp2lin_override"):
+                eps_out = (x_0 - denoised) / sigma
+            return eps_out
+            
+        else:
+            raise ValueError(f"get_eps expected 3 or 5 arguments, got {len(args)}")
     
     def get_epsilon(self,
                     x_0       : Tensor,
@@ -900,8 +943,10 @@ class RK_Method_Exponential(RK_Method_Beta):
         eps      = eps_unmoored + self.LINEAR_ANCHOR_X_0 * (eps_anchored - eps_unmoored)
         
         denoised = x_0 - sigma * eps
-        
-        return denoised - x_0
+        if self.EO("exp2lin_override"):
+            return (x_0 - denoised) / sigma
+        else:
+            return denoised - x_0
     
     
     
@@ -937,7 +982,6 @@ class RK_Method_Exponential(RK_Method_Beta):
             eps_guide = eps_unmoored
         
         return eps_guide
-
 
 
 
@@ -1004,7 +1048,17 @@ class RK_Method_Linear(RK_Method_Beta):
 
         return epsilon, denoised
 
-
+    def get_eps(self, *args):
+        if   len(args) == 3:
+            x, denoised, sigma = args
+            return (x - denoised) / sigma
+        elif len(args == 5):
+            x_0, x, denoised, sigma, sub_sigma = args
+            eps_anchor   = (x_0 - denoised) / sigma
+            eps_unmoored =   (x - denoised) / sub_sigma
+            return eps_unmoored + self.LINEAR_ANCHOR_X_0 * (eps_anchor - eps_unmoored)
+        else:
+            raise ValueError(f"get_eps expected 3 or 5 arguments, got {len(args)}")
 
     def get_epsilon(self,
                     x_0       : Tensor,

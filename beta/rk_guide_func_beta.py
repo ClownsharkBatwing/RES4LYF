@@ -21,6 +21,9 @@ from ..latents       import normalize_zscore, get_collinear, get_orthogonal, get
 from .rk_method_beta import RK_Method_Beta
 from .constants      import MAX_STEPS
 
+from ..models import PRED
+
+
 #from ..latents import hard_light_blend, normalize_latent
 
 
@@ -1394,7 +1397,19 @@ class LatentGuide:
                     
         return x_row
 
-
+    @torch.no_grad
+    def swap_data(self,
+        x     : Tensor,
+        data  : Tensor,
+        y     : Tensor,
+        sigma : Tensor,
+        mask  : Optional[Tensor] = None,
+    ):
+        mask = 1.0 if mask is None else mask
+        if self.VE_MODEL:
+            return x + mask * (y - data)
+        else:
+            return x + mask * (self.sigma_max - sigma) * (y - data)
 
     @torch.no_grad
     def process_guides_eps_substep(self,
@@ -2332,3 +2347,6 @@ def get_masked_epsilon_projection(x_0, x_, eps_, y0, y0_inv, s_, row, row_offset
     lgw_mask, lgw_mask_inv = LG.get_masks_for_step(step)
     eps_substep_guide = eps_[row] + lgw_mask * (eps_sum - eps_[row]) + lgw_mask_inv * (eps_sum - eps_[row])
     return eps_substep_guide
+
+
+

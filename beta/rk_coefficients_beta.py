@@ -15,7 +15,7 @@ from ..helper import ExtraOptions, get_extra_options_kv, extra_options_flag
 from itertools import permutations, combinations
 import random
 
-
+from einops import rearrange, einsum
 from ..res4lyf import get_display_sampler_category
 
 # Samplers with free parameters (c1, c2, c3)
@@ -27,6 +27,19 @@ from ..res4lyf import get_display_sampler_category
 #   X   dpmpp_2s                  (dpmpp_sde_2s has c2=1.0)
 #   X X dpmpp_3s
 # X X   irk_exp_diag_2s
+
+RK_EXPONENTIAL_PREFIXES = (
+    "res", 
+    "dpmpp", 
+    "ddim", 
+    "pec", 
+    "etdrk", 
+    "lawson", 
+    "abnorsett",
+    )
+
+def is_exponential(rk_type:str) -> bool:
+    return rk_type.startswith(RK_EXPONENTIAL_PREFIXES)
 
 RK_SAMPLER_NAMES_BETA_FOLDERS = ["none",
                     "multistep/res_2m",
@@ -3132,8 +3145,22 @@ def get_rk_methods_beta(rk_type       : str,
     #if rk_type.startswith("lob") == False:
     ci.append(1)
     
+    if EO("exp2lin_override_coeff") and is_exponential(rk_type):
+        a = scale_all(a, -sigma.item())
+        b = scale_all(b, -sigma.item())
+    
     return a, b, u, v, ci, multistep_stages, hybrid_stages, FSAL
 
+
+def scale_all(data, scalar):
+    if isinstance(data, torch.Tensor):
+        return data * scalar
+    elif isinstance(data, list):
+        return [scale_all(x, scalar) for x in data]
+    elif isinstance(data, (float, int)):
+        return data * scalar
+    else:
+        return data  # passthrough unscaled if unknown type... or None, etc
 
 
 def gen_first_col_exp(a, b, c, φ):

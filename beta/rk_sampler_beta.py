@@ -13,6 +13,7 @@ import comfy
 from ..res4lyf              import RESplain
 from ..helper               import ExtraOptions, FrameWeightsManager
 from ..latents              import lagrange_interpolation, get_collinear, get_orthogonal, get_cosine_similarity, get_pearson_similarity, get_slerp_weight_for_cossim, get_slerp_ratio, slerp_tensor, get_edge_mask, normalize_zscore, compute_slerp_ratio_for_target, find_slerp_ratio_grid
+from ..style_transfer       import apply_scattersort_spatial, apply_adain_spatial
 
 from .rk_method_beta        import RK_Method_Beta
 from .rk_noise_sampler_beta import RK_NoiseSampler
@@ -262,6 +263,7 @@ def sample_rk_beta(
         RESplain("Continuing from raw latent from previous sampler.", debug=False)
     
     
+    
     start_step = 0
     if 'end_step' in state_info and (sampler_mode == "resample" or sampler_mode == "unsample"):
 
@@ -281,6 +283,8 @@ def sample_rk_beta(
             start_step = state_info['end_step'] if state_info['end_step'] != -1 else 0
             if start_step > 0:
                 sigmas = state_info['sigmas'].clone()
+
+            
             
     if sde_mask is not None:
         from .rk_guide_func_beta import prepare_mask
@@ -288,10 +292,10 @@ def sample_rk_beta(
         sde_mask = sde_mask.to(x.device).to(x.dtype)
     
 
+
     x      = x     .to(dtype=default_dtype, device=work_device)
     sigmas = sigmas.to(dtype=default_dtype, device=work_device)
     
-
     c1                          = EO("c1"                         , c1)
     c2                          = EO("c2"                         , c2)
     c3                          = EO("c3"                         , c3)
@@ -461,15 +465,13 @@ def sample_rk_beta(
         y0 = state_info['y0'].to(work_device) 
         data_cached = state_info['data_cached'].to(work_device) 
         data_x_prev_ = state_info['data_x_prev_'].to(work_device) 
-    #if EO("flow_use_init_noise") or EO("flow_use_smart_noise"):
-    #    x_init = x.clone()
+
     x_init = noise_initial.to(x) if noise_initial is not None else None
 
     #progress_bar = trange(len(sigmas)-1-start_step, disable=disable)
     
-    if EO("eps_adain") or EO("x_init_to_model"):
-        #x_init = x.clone()
-        RK.update_transformer_options({'x_init' : x_init.clone()})
+    #if EO("eps_adain") or EO("x_init_to_model"):
+    RK.update_transformer_options({'x_init': x_init.clone()})
     if AttnMask is not None:
         RK.update_transformer_options({'AttnMask'  : AttnMask})
         RK.update_transformer_options({'RegContext': RegContext})
@@ -556,7 +558,7 @@ def sample_rk_beta(
         RK.update_transformer_options({"freqsep_mask":           guides.get("freqsep_mask")})
 
     # BEGIN SAMPLING LOOP
-                
+    
     while step < num_steps:
         sigma, sigma_next = sigmas[step], sigmas[step+1]
         if sigma_next > sigma:
@@ -741,9 +743,7 @@ def sample_rk_beta(
             if SYNC_GUIDE_ACTIVE:
                 lgw_mask_, lgw_mask_inv_ = LG.get_masks_for_step(step)
                 lgw_mask_sync_, lgw_mask_sync_inv_ = LG.get_masks_for_step(step, lgw_type="sync")
-                #weight_mask     = (1-(lgw_mask_+lgw_mask_inv_)) * torch.ones_like(lgw_mask_)   +   (lgw_mask_+lgw_mask_inv_) * (lgw_mask_+lgw_mask_inv_)
-                #weight_mask_inv = (1-(lgw_mask_+lgw_mask_inv_)) * torch.ones_like(lgw_mask_)   +   (lgw_mask_+lgw_mask_inv_) * (1-(lgw_mask_+lgw_mask_inv_))
-                
+
                 weight_mask = lgw_mask_+lgw_mask_inv_
                 if LG.SYNC_SEPARATE:
                     sync_mask = lgw_mask_sync_+lgw_mask_sync_inv_
@@ -903,7 +903,9 @@ def sample_rk_beta(
                             else:
                                 x_tmp = x
                                 s_tmp = sigma_next
-                        
+
+
+
                         # All others
                         else:
                             # three potential toggle options: force rebound/model call, force PC style, force pogostick style
@@ -944,6 +946,8 @@ def sample_rk_beta(
                                 x_tmp = x_[row]
                                 s_tmp = NS.sub_sigma 
 
+
+
                             if RK.IMPLICIT: 
                                 if not EO("disable_implicit_guide_preproc"):
                                     eps_, x_      = LG.process_guides_substep(x_0, x_, eps_,      data_, row, step_sched, sigma, sigma_next, NS.sigma_down, NS.s_, epsilon_scale, RK)
@@ -955,8 +959,6 @@ def sample_rk_beta(
                                     x_[row+RK.row_offset] = NS.rebound_overshoot_substep(x_0, x_[row+RK.row_offset])
                                     if row > 0:
                                         if not LG.guide_mode.startswith("flow") or (LG.lgw[step_sched] == 0 and LG.lgw[step+1] == 0   and   LG.lgw_inv[step_sched] == 0 and LG.lgw_inv[step+1] == 0):
-                                            #x_[row+RK.row_offset] = NS.swap_noise_substep(x_0, x_[row+RK.row_offset])
-                                            
                                             x_row_tmp = NS.swap_noise_substep(x_0, x_[row+RK.row_offset], mask=sde_mask, guide=LG.y0)
                                             
                                             if SYNC_GUIDE_ACTIVE:
@@ -971,8 +973,6 @@ def sample_rk_beta(
                                             x_[row+RK.row_offset] = x_row_tmp
                                         
                                         if SYNC_GUIDE_ACTIVE:
-                                            #yt_[:NS.s_.shape[0], 0] = y0_bongflow + NS.s_.view(-1, 1, 1, 1) * (noise_bongflow - y0_bongflow)
-                                            #yt_0   = y0_bongflow + sigma * (noise_bongflow - y0_bongflow)
                                             if VE_MODEL:
                                                 yt_[:NS.s_.shape[0], 0] = y0_bongflow + NS.s_.view(-1, 1, 1, 1) * (noise_bongflow)
                                                 yt_0   = y0_bongflow + sigma * (noise_bongflow)
@@ -985,7 +985,6 @@ def sample_rk_beta(
                                             else:
                                                 if BONGMATH:
                                                     eps_y_[:NS.s_.shape[0]] = (yt_[:NS.s_.shape[0]] - data_y_[:NS.s_.shape[0]]) / NS.s_.view(-1,1,1,1,1) 
-                                                    #eps_y_[:NS.s_.shape[0]] = (yt_0.repeat(NS.s_.shape[0], 1,1,1,1) - data_y_[:NS.s_.shape[0]]) / sigma 
                                                 else:
                                                     eps_y_[:NS.s_.shape[0]] = (yt_0.repeat(NS.s_.shape[0], 1,1,1,1) - data_y_[:NS.s_.shape[0]]) / sigma    # calc exact to c0 node
                                             if not BONGMATH:
@@ -999,7 +998,6 @@ def sample_rk_beta(
                                                 sync_mask = lgw_mask_sync_+lgw_mask_sync_inv_
                                             else:
                                                 sync_mask = 1.
-                                            
                                             
                                             for ms in range(len(eps_)):
                                                 if RK.EXPONENTIAL:
@@ -1115,8 +1113,6 @@ def sample_rk_beta(
                                         x_0 = yt_0.clone()
                                         x_tmp = x_[row] = yt.clone()
                                 else:
-
-                                        
                                     y0_bongflow_orig = y0_bongflow.clone() if y0_bongflow_orig is None else y0_bongflow_orig
                                     y0_bongflow = y0_bongflow + LG.drift_x_data  * drift_x_mask * (data_x           - y0_bongflow) \
                                                               + LG.drift_x_sync  * drift_x_mask * (data_barf        - y0_bongflow) \
@@ -1128,23 +1124,15 @@ def sample_rk_beta(
                                         RK.update_transformer_options({'y0_style_pos': y0_bongflow.clone()})
                                     
                                     if not EO("skip_yt"):
-                                        if VE_MODEL:
-                                            yt_0 = y0_bongflow + sigma * noise_bongflow
-                                            yt   = y0_bongflow + s_tmp * noise_bongflow
-                                        else:
-                                            yt_0 = (1-sigma) * y0_bongflow  + sigma * noise_bongflow
-                                            yt   = (1-s_tmp) * y0_bongflow  + s_tmp * noise_bongflow
-
+                                        yt_0 = RK.get_x(y0_bongflow, noise_bongflow, sigma)
+                                        yt   = RK.get_x(y0_bongflow, noise_bongflow, s_tmp)
+                                        
                                         yt_[row] = yt
 
                                 if ((LG.lgw[step_sched].item() in {1,0} and LG.lgw_inv[step_sched].item() in {1,0} and LG.lgw[step_sched] == 1-LG.lgw_sync[step_sched] and LG.lgw_inv[step_sched] == 1-LG.lgw_sync_inv[step_sched]) or EO("sync_speed_mode")) and not EO("disable_sync_speed_mode"):
                                     data_y = y0_bongflow.clone()
-                                    if RK.EXPONENTIAL:
-                                        eps_y = data_y - yt_0
-                                    elif BONGMATH:
-                                        eps_y = (yt_[row] - data_y) / s_tmp
-                                    else:
-                                        eps_y = (yt_0 - data_y) / sigma
+                                    eps_y  = RK.get_eps(yt_0, yt_[row], data_y, sigma, s_tmp)
+
                                 else:
                                     eps_y, data_y = RK(yt_[row], s_tmp, yt_0,  sigma, transformer_options={'latent_type': 'yt'})
                                     
@@ -1155,24 +1143,14 @@ def sample_rk_beta(
                                     if LG.sync_lure_sequence == "x -> y":
 
                                         if lure_x_mask.abs().sum() > 0:
-                                            if VE_MODEL:
-                                                x_tmp = x_tmp + lure_x_mask * (data_y - data_x) 
-                                                #x_tmp = x_tmp + (data_y - data_x) 
-                                            else:
-                                                x_tmp = x_tmp + lure_x_mask * (NS.sigma_max - s_tmp) * (data_y - data_x) 
-                                                #x_tmp = x_tmp + (NS.sigma_max - s_tmp) * (data_y - data_x) 
+                                            x_tmp = LG.swap_data(x_tmp, data_x, data_y, s_tmp, lure_x_mask)
                                             eps_x_lure, data_x_lure = RK(x_tmp, s_tmp, x_0, sigma, transformer_options={'latent_type': 'xt'})
                                             eps_x  = eps_x  + lure_x_mask * (eps_x_lure  - eps_x)
                                             data_x = data_x + lure_x_mask * (data_x_lure - data_x)
-                                            
+                                        
                                         if lure_y_mask.abs().sum() > 0:                      
                                             y_tmp = yt_[row].clone()
-                                            if VE_MODEL:
-                                                y_tmp = y_tmp + lure_y_mask * (data_x - data_y) 
-                                                #y_tmp = y_tmp + (data_x - data_y) 
-                                            else:
-                                                y_tmp = y_tmp + lure_y_mask * (NS.sigma_max - s_tmp) * (data_x - data_y) 
-                                                #y_tmp = y_tmp + (NS.sigma_max - s_tmp) * (data_x - data_y) 
+                                            y_tmp = LG.swap_data(y_tmp, data_y, data_x, s_tmp, lure_y_mask) 
                                             eps_y_lure, data_y_lure = RK(y_tmp, s_tmp, yt_0, sigma, transformer_options={'latent_type': 'yt'})
                                             eps_y  = eps_y  + lure_y_mask * (eps_y_lure  - eps_y)
                                             data_y = data_y + lure_y_mask * (data_y_lure - data_y)
@@ -1181,23 +1159,13 @@ def sample_rk_beta(
                                             
                                         if lure_y_mask.abs().sum() > 0:                      
                                             y_tmp = yt_[row].clone()
-                                            if VE_MODEL:
-                                                y_tmp = y_tmp + lure_y_mask * (data_x - data_y) 
-                                                #y_tmp = y_tmp + (data_x - data_y) 
-                                            else:
-                                                y_tmp = y_tmp + lure_y_mask * (NS.sigma_max - s_tmp) * (data_x - data_y) 
-                                                #y_tmp = y_tmp + (NS.sigma_max - s_tmp) * (data_x - data_y) 
+                                            y_tmp = LG.swap_data(y_tmp, data_y, data_x, s_tmp, lure_y_mask) 
                                             eps_y_lure, data_y_lure = RK(y_tmp, s_tmp, yt_0, sigma, transformer_options={'latent_type': 'yt'})
                                             eps_y  = eps_y  + lure_y_mask * (eps_y_lure  - eps_y)
                                             data_y = data_y + lure_y_mask * (data_y_lure - data_y)
                                         
                                         if lure_x_mask.abs().sum() > 0:
-                                            if VE_MODEL:
-                                                x_tmp = x_tmp + lure_x_mask * (data_y - data_x) 
-                                                #x_tmp = x_tmp + (data_y - data_x) 
-                                            else:
-                                                x_tmp = x_tmp + lure_x_mask * (NS.sigma_max - s_tmp) * (data_y - data_x) 
-                                                #x_tmp = x_tmp + (NS.sigma_max - s_tmp) * (data_y - data_x) 
+                                            x_tmp = LG.swap_data(x_tmp, data_x, data_y, s_tmp, lure_x_mask)
                                             eps_x_lure, data_x_lure = RK(x_tmp, s_tmp, x_0, sigma, transformer_options={'latent_type': 'xt'})
                                             eps_x  = eps_x  + lure_x_mask * (eps_x_lure  - eps_x)
                                             data_x = data_x + lure_x_mask * (data_x_lure - data_x)
@@ -1206,29 +1174,17 @@ def sample_rk_beta(
                                         data_x_orig, data_y_orig = data_x.clone(), data_y.clone()
                                         
                                         if lure_x_mask.abs().sum() > 0:
-                                            if VE_MODEL:
-                                                x_tmp = x_tmp + lure_x_mask * (data_y_orig - data_x_orig) 
-                                                #x_tmp = x_tmp + (data_y_orig - data_x_orig) 
-                                            else:
-                                                x_tmp = x_tmp + lure_x_mask * (NS.sigma_max - s_tmp) * (data_y_orig - data_x_orig) 
-                                                #x_tmp = x_tmp + (NS.sigma_max - s_tmp) * (data_y_orig - data_x_orig) 
+                                            x_tmp = LG.swap_data(x_tmp, data_x_orig, data_y_orig, s_tmp, lure_x_mask)
                                             eps_x_lure, data_x_lure = RK(x_tmp, s_tmp, x_0, sigma, transformer_options={'latent_type': 'xt'})
                                             eps_x  = eps_x  + lure_x_mask * (eps_x_lure  - eps_x)
                                             data_x = data_x + lure_x_mask * (data_x_lure - data_x)
                                         
                                         if lure_y_mask.abs().sum() > 0:                      
                                             y_tmp = yt_[row].clone()
-                                            if VE_MODEL:
-                                                y_tmp = y_tmp + lure_y_mask * (data_x_orig - data_y_orig) 
-                                                #y_tmp = y_tmp + (data_x_orig - data_y_orig) 
-                                            else:
-                                                y_tmp = y_tmp + lure_y_mask * (NS.sigma_max - s_tmp) * (data_x_orig - data_y_orig) 
-                                                #y_tmp = y_tmp + (NS.sigma_max - s_tmp) * (data_x_orig - data_y_orig) 
+                                            y_tmp = LG.swap_data(y_tmp, data_y_orig, data_x_orig, s_tmp, lure_y_mask) 
                                             eps_y_lure, data_y_lure = RK(y_tmp, s_tmp, yt_0, sigma, transformer_options={'latent_type': 'yt'})
                                             eps_y  = eps_y  + lure_y_mask * (eps_y_lure  - eps_y)
                                             data_y = data_y + lure_y_mask * (data_y_lure - data_y)
-                                        
-                                        
                                 
                                 if EO("sync_proj_y"):
                                     d_collinear_d_lerp = get_collinear(eps_x, eps_y)  
@@ -1250,35 +1206,11 @@ def sample_rk_beta(
                                     d_lerp_ortho_d     = get_orthogonal(eps_y, eps_x)  
                                     eps_x             = d_collinear_d_lerp + d_lerp_ortho_d
 
-                                if RK.EXPONENTIAL:
-                                    eps_x2y = data_y - x_0
-                                elif BONGMATH:
-                                    eps_x2y = (x_[row] - data_y) / s_tmp
-                                else:
-                                    eps_x2y = (x_0 - data_y) / sigma
+                                eps_x2y = RK.get_eps(x_0, x_[row], data_y, sigma, s_tmp)
                                 eps_x2y_[row] = eps_x2y
                                 
-                                if RK.EXPONENTIAL:
-                                    eps_y2x = data_y - x_0
-                                elif BONGMATH:
-                                    eps_y2x = (x_[row] - data_y) / s_tmp
-                                else:
-                                    eps_y2x = (x_0 - data_y) / sigma
+                                eps_y2x = RK.get_eps(x_0, x_[row], data_y, sigma, s_tmp)
                                 eps_y2x_[row] = eps_y2x
-                                
-                                if sigma_next > sigma and EO("sync_unsample"):
-                                    eps_x   = RK.get_guide_epsilon(x_0,   x_[row], data_x, sigma, NS.s_[row], NS.sigma_down, None)
-                                    eps_x2y = RK.get_guide_epsilon(x_0,   x_[row], data_y, sigma, NS.s_[row], NS.sigma_down, None)
-                                    eps_y   = RK.get_guide_epsilon(yt_0, yt_[row], data_y, sigma, NS.s_[row], NS.sigma_down, None)
-                                if sigma_next > sigma and EO("sync_unsample2"):
-                                    eps_x   = RK.get_guide_epsilon(x_0,   x_[row], data_y, sigma, NS.s_[row], NS.sigma_down, None)
-                                    eps_x2y = RK.get_guide_epsilon(x_0,   x_[row], data_y, sigma, NS.s_[row], NS.sigma_down, None)
-                                    eps_y   = RK.get_guide_epsilon(yt_0, yt_[row], data_y, sigma, NS.s_[row], NS.sigma_down, None)
-
-                                eps_x *= EO("eps_x_mult", 1.0)
-                                eps_y *= EO("eps_y_mult", 1.0)
-                                eps_x2y *= EO("eps_x2y_mult", 1.0)
-                                eps_y2x *= EO("eps_y2x_mult", 1.0)
                                 
                                 if RK.EXPONENTIAL:
                                     if VE_MODEL:         # ZERO IS THIS                      # ONE IS THIS 
@@ -1690,8 +1622,6 @@ def sample_rk_beta(
                                 
                                 lying_eps_row_factor = (1 - noise_scaling_weight*(substep_noise_scaling_ratio-1))
 
-
-
                         # GUIDE 
                         if not EO("disable_guides_eps_substep"):
                             eps_, x_      = LG.process_guides_substep(x_0, x_, eps_,      data_, row, step_sched, NS.sigma, NS.sigma_next, NS.sigma_down, NS.s_, epsilon_scale, RK)
@@ -1699,17 +1629,15 @@ def sample_rk_beta(
                             eps_prev_, x_ = LG.process_guides_substep(x_0, x_, eps_prev_, data_, row, step_sched, NS.sigma, NS.sigma_next, NS.sigma_down, NS.s_, epsilon_scale, RK)
                         
                         if LG.y0_mean is not None and LG.y0_mean.sum() != 0.0:
-                            if EO("guide_mean_pw"):
-                                data_row_new = adain_patchwise_row_batch(data_[row].clone(), LG.y0_mean.clone(), sigma=EO("guide_mean_pw_sigma", 1.0), kernel_size=EO("guide_mean_pw_kernel_size", 7))
-                                if RK.EXPONENTIAL:
-                                    eps_row_mean = data_row_new - x_0
-                                else:
-                                    eps_row_mean = (x_0 - data_row_new) / s_tmp
+
+                            if EO("guide_mean_scattersort"):
+                                data_row_mean = apply_scattersort_spatial(data_[row], LG.y0_mean)
+                                eps_row_mean  = RK.get_eps(x_0, data_row_mean, s_tmp)
                             else:
                                 eps_row_mean = eps_[row] - eps_[row].mean(dim=(-2,-1), keepdim=True) + (LG.y0_mean - x_0).mean(dim=(-2,-1), keepdim=True)
                             
                             if LG.mask_mean is not None:
-                                eps_row_mean = LG.mask_mean * eps_row_mean + (1 - LG.mask_mean) * eps_[row]
+                                eps_row_mean = LG.mask_mean * eps_row_mean + (1-LG.mask_mean) * eps_[row]
                             
                             eps_[row] = eps_[row] + LG.lgw_mean[step_sched] * (eps_row_mean - eps_[row])
                             
@@ -1717,13 +1645,17 @@ def sample_rk_beta(
                             x_, eps_ = RK.newton_iter(x_0, x_, eps_, eps_prev_, data_, NS.s_, row, NS.h, sigmas, step, "post", SYNC_GUIDE_ACTIVE)
 
                     # UPDATE   #for row in range(RK.rows - RK.multistep_stages - RK.row_offset + 1):
-                    x_ = RK.update_substep(x_0, x_, eps_, eps_prev_, row, RK.row_offset, NS.h_new, NS.h_new_orig, lying_eps_row_factor=lying_eps_row_factor)   #modifies eps_[row] if lying_eps_row_factor != 1.0
+                    if EO("exp2lin_override") and RK.EXPONENTIAL:
+                        x_ = RK.update_substep(x_0, x_, eps_, eps_prev_, row, RK.row_offset, NS.h_new, NS.h_new_orig, lying_eps_row_factor=lying_eps_row_factor, sigma=sigma)   #modifies eps_[row] if lying_eps_row_factor != 1.0
+                        #x_ = RK.update_substep(x_0, x_, eps_, eps_prev_, row, RK.row_offset, -sigma*NS.h_new, -sigma*NS.h_new_orig, lying_eps_row_factor=lying_eps_row_factor)   #modifies eps_[row] if lying_eps_row_factor != 1.0
+                    else:
+                        x_ = RK.update_substep(x_0, x_, eps_, eps_prev_, row, RK.row_offset, NS.h_new, NS.h_new_orig, lying_eps_row_factor=lying_eps_row_factor)   #modifies eps_[row] if lying_eps_row_factor != 1.0
                     
                     x_[row+RK.row_offset] = NS.rebound_overshoot_substep(x_0, x_[row+RK.row_offset])
                     
                     if SYNC_GUIDE_ACTIVE: #yt_ is not None:
                         #yt_ = RK.update_substep(yt_0, yt_, eps_y_, eps_prev_y_, row, RK.row_offset, NS.h_new, NS.h_new_orig, lying_eps_row_factor=lying_eps_row_factor)   #modifies eps_[row] if lying_eps_row_factor != 1.0
-                        yt_ = RK.update_substep(yt_0, yt_, eps_yt_, eps_prev_y_, row, RK.row_offset, NS.h_new, NS.h_new_orig, lying_eps_row_factor=lying_eps_row_factor)   #modifies eps_[row] if lying_eps_row_factor != 1.0
+                        yt_ = RK.update_substep(yt_0, yt_, eps_yt_, eps_prev_y_, row, RK.row_offset, NS.h_new, NS.h_new_orig, lying_eps_row_factor=lying_eps_row_factor, sigma=sigma)   #modifies eps_[row] if lying_eps_row_factor != 1.0
                         yt_[row+RK.row_offset] = NS.rebound_overshoot_substep(yt_0, yt_[row+RK.row_offset])
                     
                     if not RK.IMPLICIT and NS.noise_mode_sde_substep != "hard_sq":
@@ -1746,12 +1678,9 @@ def sample_rk_beta(
                             if SYNC_GUIDE_ACTIVE:
                                 noise_bongflow_new = (x_row_tmp - x_[row+RK.row_offset]) / s_tmp + noise_bongflow
                                 yt_[row+RK.row_offset] += s_tmp * (noise_bongflow_new - noise_bongflow)
-                                
                                 x_0 += sigma * (noise_bongflow_new - noise_bongflow)
-                                
-                                
                                 noise_bongflow = noise_bongflow_new
-                                
+                            
                             x_[row+RK.row_offset] = x_row_tmp
                             
                         elif LG.guide_mode.startswith("flow"):
@@ -1774,7 +1703,7 @@ def sample_rk_beta(
                             if VE_MODEL:
                                 x_[row+RK.row_offset] = x_[row+RK.row_offset] + (data_wct - data_[row])
                             else:
-                                x_[row+RK.row_offset] = x_[row+RK.row_offset] + (1 - NS.s_[row]) * (data_wct - data_[row])
+                                x_[row+RK.row_offset] = x_[row+RK.row_offset] + (NS.sigma_max-NS.s_[row]) * (data_wct - data_[row])
 
                     if SYNC_GUIDE_ACTIVE: # # # # ## # # ## # YIIIIKES ---------------------------------------------------------------------------------------------------------
                         if VE_MODEL:
@@ -2131,56 +2060,4 @@ def preview_callback(
     callback({'x': x, 'i': step, 'sigma': sigma, 'sigma_next': sigma_next, 'denoised': denoised_callback.to(torch.float32)}) if callback is not None else None
     
     return
-
-
-
-
-def adain_patchwise_row_batch(content: torch.Tensor, style: torch.Tensor, sigma: float = 1.0, kernel_size: int = None, eps: float = 1e-5) -> torch.Tensor:
-
-    B, C, H, W = content.shape
-    device, dtype = content.device, content.dtype
-
-    if kernel_size is None:
-        kernel_size = int(2 * math.ceil(3 * sigma) + 1)
-    if kernel_size % 2 == 0:
-        kernel_size += 1
-
-    pad = kernel_size // 2
-    coords = torch.arange(kernel_size, dtype=torch.float64, device=device) - pad
-    gauss = torch.exp(-0.5 * (coords / sigma) ** 2)
-    gauss = (gauss / gauss.sum()).to(dtype)
-    kernel_2d = (gauss[:, None] * gauss[None, :])
-
-    weight = kernel_2d.view(1, 1, kernel_size, kernel_size)
-
-    content_padded = F.pad(content, (pad, pad, pad, pad), mode='reflect')
-    style_padded = F.pad(style, (pad, pad, pad, pad), mode='reflect')
-    result = torch.zeros_like(content)
-
-    for i in range(H):
-        c_row_patches = torch.stack([
-            content_padded[:, :, i:i+kernel_size, j:j+kernel_size]
-            for j in range(W)
-        ], dim=0)  # [W, B, C, k, k]
-
-        s_row_patches = torch.stack([
-            style_padded[:, :, i:i+kernel_size, j:j+kernel_size]
-            for j in range(W)
-        ], dim=0)
-
-        w = weight.expand_as(c_row_patches[0])
-
-        c_mean = (c_row_patches * w).sum(dim=(-1, -2), keepdim=True)
-        c_std  = ((c_row_patches - c_mean) ** 2 * w).sum(dim=(-1, -2), keepdim=True).sqrt() + eps
-        s_mean = (s_row_patches * w).sum(dim=(-1, -2), keepdim=True)
-        s_std  = ((s_row_patches - s_mean) ** 2 * w).sum(dim=(-1, -2), keepdim=True).sqrt() + eps
-
-        center = kernel_size // 2
-        central = c_row_patches[:, :, :, center:center+1, center:center+1]
-        normed = (central - c_mean) / c_std
-        stylized = normed * s_std + s_mean
-
-        result[:, :, i, :] = stylized.squeeze(-1).squeeze(-1).permute(1, 2, 0)  # [B,C,W]
-
-    return result
 

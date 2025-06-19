@@ -559,7 +559,8 @@ class SharkSampler:
                     noise *= noise_stdev
                     noise = (noise - noise.mean()) + noise_mean
                     
-                    sampler.extra_options['noise_initial'] = noise
+                    if 'BONGMATH' in sampler.extra_options:
+                        sampler.extra_options['noise_initial'] = noise
 
                     noise_mask = latent_unbatch["noise_mask"] if "noise_mask" in latent_unbatch else None
 

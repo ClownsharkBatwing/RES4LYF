@@ -200,12 +200,12 @@ class RK_NoiseSampler:
                 sigma_residual = (sigma_next ** 2 - sigma_up ** 2) ** .5
                 alpha_ratio    = sigma_signal + sigma_residual
                 sigma_down     = sigma_residual / alpha_ratio     
-                
+        
         else:
             alpha_ratio = torch.ones_like(sigma_next)
             
             if sigma_down is not None:
-                sigma_up   = (sigma_next ** 2 - sigma_down ** 2) ** .5   # not sure this is correct
+                sigma_up   = (sigma_next ** 2 - sigma_down ** 2) ** .5   # not sure this is correct           #TODO: CHECK THIS
             elif sigma_up is not None:
                 sigma_down = (sigma_next ** 2 - sigma_up   ** 2) ** .5    
         
@@ -834,3 +834,16 @@ class RK_NoiseSampler:
         return sigmas, UNSAMPLE
     
     
+    
+
+
+
+def extract_latent_swap_noise(self, x:Tensor, x_noise_swapped:Tensor, sigma:Tensor, old_noise:Tensor) -> Tensor:
+    return (x - x_noise_swapped) / sigma + old_noise
+
+def update_latent_swap_noise(self, x:Tensor, sigma:Tensor, old_noise:Tensor, new_noise:Tensor) -> Tensor:
+    return x + sigma * (new_noise - old_noise)
+
+
+
+
