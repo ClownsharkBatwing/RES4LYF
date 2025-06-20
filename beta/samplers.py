@@ -304,6 +304,7 @@ class SharkSampler:
             # INIT SIGMAS
             if sigmas is not None:
                 sigmas = sigmas.clone().to(default_dtype) # does this type carry into clown after passing through comfy?
+                sigmas *= denoise   # ... otherwise we have to interpolate and that might not be ideal for tiny custom schedules...
             else: 
                 sigmas = get_sigmas(work_model, scheduler, steps, abs(denoise)).to(default_dtype)
             sigmas *= denoise_alt

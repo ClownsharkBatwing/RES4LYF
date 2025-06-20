@@ -652,8 +652,11 @@ class ClownOptions_ExtraOptions_Beta:
             ):
 
         options = options if options is not None else {}
-            
-        options['extra_options'] = extra_options
+        
+        if 'extra_options' in options:
+            options['extra_options'] += '\n' + extra_options
+        else:
+            options['extra_options']  = extra_options
 
         return (options, )
 

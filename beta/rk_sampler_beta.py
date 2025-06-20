@@ -1780,6 +1780,13 @@ def sample_rk_beta(
             eps = (x_0 - x_next) / (sigma - sigma_next)
             denoised = x_0 - sigma * eps
             
+            if EO("data_sampler") and step > EO("data_sampler_start_step", 0) and step < EO("data_sampler_end_step", 5):
+                data_sampler_weight = EO("data_sampler_weight", 1.0)
+                denoised_step = RK.zum(row+RK.row_offset+RK.multistep_stages, data_, data_prev_) 
+                x_next = LG.swap_data(x_next, denoised, denoised_step, data_sampler_weight * sigma_next)
+                eps = (x_0 - x_next) / (sigma - sigma_next)
+                denoised = x_0 - sigma * eps
+            
             x_0_prev = x_0.clone()
 
             x_means_per_step = x_next.mean(dim=(-2,-1), keepdim=True)
