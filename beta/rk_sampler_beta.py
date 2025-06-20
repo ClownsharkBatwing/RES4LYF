@@ -466,12 +466,14 @@ def sample_rk_beta(
         data_cached = state_info['data_cached'].to(work_device) 
         data_x_prev_ = state_info['data_x_prev_'].to(work_device) 
 
-    x_init = noise_initial.to(x) if noise_initial is not None else None
+    if noise_initial is not None:
+        x_init = noise_initial.to(x)
+        RK.update_transformer_options({'x_init': x_init.clone()})
 
     #progress_bar = trange(len(sigmas)-1-start_step, disable=disable)
     
     #if EO("eps_adain") or EO("x_init_to_model"):
-    RK.update_transformer_options({'x_init': x_init.clone()})
+    
     if AttnMask is not None:
         RK.update_transformer_options({'AttnMask'  : AttnMask})
         RK.update_transformer_options({'RegContext': RegContext})
