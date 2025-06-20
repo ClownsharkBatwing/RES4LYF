@@ -639,10 +639,12 @@ def apply_scattersort(
     denoised_embed         : torch.Tensor,
     y0_adain_embed         : torch.Tensor,
 ):
-    src_sorted, src_idx = denoised_embed.sort(dim=-2)
-    ref_sorted, ref_idx = y0_adain_embed.sort(dim=-2)
+    #src_sorted, src_idx = denoised_embed.cpu().sort(dim=-2)
+    src_idx    = denoised_embed.argsort(dim=-2)
+    ref_sorted = y0_adain_embed.sort(dim=-2)[0]
 
-    denoised_embed = src_sorted.scatter(dim=-2, index=src_idx, src=ref_sorted.expand(src_sorted.shape))
+    denoised_embed.scatter_(dim=-2, index=src_idx, src=ref_sorted.expand(ref_sorted.shape))
+
     return denoised_embed
 
 def apply_scattersort_spatial(

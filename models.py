@@ -32,7 +32,7 @@ from comfy.ldm.hidream.model import HiDreamImageTransformer2DModel
 from comfy.ldm.hidream.model import HiDreamImageBlock, HiDreamImageSingleTransformerBlock, HiDreamImageTransformerBlock, HiDreamAttention
 
 from .hidream.model import HDModel
-from .hidream.model import HDBlock, HDBlockDouble, HDBlockSingle, HDAttention
+from .hidream.model import HDBlock, HDBlockDouble, HDBlockSingle, HDAttention, HDMoEGate, HDMOEFeedForwardSwiGLU, HDFeedForwardSwiGLU
 
 from comfy.ldm.modules.diffusionmodules.mmdit import OpenAISignatureMMDITWrapper, JointBlock
 from .sd35.mmdit import ReOpenAISignatureMMDITWrapper, ReJointBlock
@@ -825,6 +825,8 @@ class ReHiDreamPatcherAdvanced:
         model.model.diffusion_model.StyleWCT    = StyleWCT()
         model.model.diffusion_model.Retrojector = Retrojector(model.model.diffusion_model.x_embedder.proj, pinv_dtype=style_dtype, dtype=style_dtype)
         
+        sort_buffer = {}
+        
         if (enable or force) and model.model.diffusion_model.__class__ == HiDreamImageTransformer2DModel:
             m = model.clone()
             m.model.diffusion_model.__class__     = HDModel
@@ -832,34 +834,49 @@ class ReHiDreamPatcherAdvanced:
             m.model.diffusion_model.manual_mask   = None
             
             for i, block in enumerate(m.model.diffusion_model.double_stream_blocks):
+                block.__class__             = HDBlock
+
                 if i in double_stream_blocks:
-                    block.__class__             = HDBlock
-                    block.block.__class__       = HDBlockDouble
-                    block.block.attn1.__class__ = HDAttention
+                    block.block.__class__   = HDBlockDouble
                 else:
-                    block.__class__             = HDBlock
-                    block.block.__class__       = HDBlockDoubleNoMask
-                    block.block.attn1.__class__ = HDAttention
+                    block.block.__class__   = HDBlockDoubleNoMask
+                    
+                block.block.attn1.__class__ = HDAttention
+                    
+                block.block.ff_i.__class__  = HDMOEFeedForwardSwiGLU
+                block.block.ff_i.shared_experts.__class__ = HDFeedForwardSwiGLU
+                for j in range(len(block.block.ff_i.experts)):
+                    block.block.ff_i.experts[j].__class__ = HDFeedForwardSwiGLU
+                block.block.ff_i.gate.__class__ = HDMoEGate
+                block.block.ff_t.__class__  = HDFeedForwardSwiGLU
                     
                 block.block.attn1.single_stream = False
                 block.block.attn1.double_stream = True
+                
+                block.block.sort_buffer       = sort_buffer
+                block.block.attn1.sort_buffer = sort_buffer
                 
                 block.idx             = i
                 block.block.idx       = i
                 block.block.attn1.idx = i
 
             for i, block in enumerate(m.model.diffusion_model.single_stream_blocks):
+                block.__class__             = HDBlock
+
                 if i in single_stream_blocks:
-                    block.__class__             = HDBlock
                     block.block.__class__       = HDBlockSingle
-                    block.block.attn1.__class__ = HDAttention
                 else:
-                    block.__class__             = HDBlock
                     block.block.__class__       = HDBlockSingleNoMask
-                    block.block.attn1.__class__ = HDAttention
-                    
+
+                block.block.attn1.__class__ = HDAttention
+                block.block.ff_i.__class__  = HDMOEFeedForwardSwiGLU
+                block.block.ff_i.gate.__class__ = HDMoEGate
+                
                 block.block.attn1.single_stream = True
                 block.block.attn1.double_stream = False
+                
+                block.block.sort_buffer       = sort_buffer
+                block.block.attn1.sort_buffer = sort_buffer
                 
                 block.idx             = i
                 block.block.idx       = i
