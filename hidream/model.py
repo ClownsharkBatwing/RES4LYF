@@ -137,7 +137,7 @@ class TextProjection(nn.Module):
 
 
 
-class FeedForwardSwiGLU(nn.Module):
+class HDFeedForwardSwiGLU(nn.Module):
     def __init__(
         self,
         dim                : int,
@@ -157,14 +157,44 @@ class FeedForwardSwiGLU(nn.Module):
         self.w2 = operations.Linear(hidden_dim, dim, bias=False, dtype=dtype, device=device)
         self.w3 = operations.Linear(dim, hidden_dim, bias=False, dtype=dtype, device=device)
 
-    def forward(self, x):
-        return self.w2(torch.nn.functional.silu(self.w1(x)) * self.w3(x))
+    def forward(self, x, cache_v=False): # 1,4096,2560 -> 
+        x1 = self.w1(x)
+        x3 = self.w3(x)
+        
+        if hasattr(self, "x1"):
+            x1 = ScatterSort.apply(x1, self.x1.to("cuda", non_blocking=True))
+            del self.x1
+        elif cache_v:
+            self.x1 = x1.to("cpu", non_blocking=True).pin_memory()
 
-
-
+        if hasattr(self, "x3"):
+            x3 = ScatterSort.apply(x3, self.x3.to("cuda", non_blocking=True))
+            del self.x3
+        elif cache_v:
+            self.x3 = x3.to("cpu", non_blocking=True).pin_memory()
+        
+        x1 = torch.nn.functional.silu(x1)
+        x13 = x1 * x3
+        
+        if hasattr(self, "x13"):
+            x13 = ScatterSort.apply(x13, self.x13.to("cuda", non_blocking=True))
+            del self.x13
+        elif cache_v:
+            self.x13 = x13.to("cpu", non_blocking=True).pin_memory()
+        
+        x2 = self.w2(x13)
+        
+        if hasattr(self, "x2"):
+            x2 = ScatterSort.apply(x2, self.x2.to("cuda", non_blocking=True))
+            del self.x2
+        elif cache_v:
+            self.x2 = x2.to("cpu", non_blocking=True).pin_memory()
+        
+        return x2
+        #return self.w2(torch.nn.functional.silu(self.w1(x)) * self.w3(x))
 
 # Modified from https://github.com/deepseek-ai/DeepSeek-V3/blob/main/inference/model.py
-class MoEGate(nn.Module):
+class HDMoEGate(nn.Module):
     def __init__(self, dim, num_routed_experts=4, num_activated_experts=2, dtype=None, device=None):
         super().__init__()
         self.top_k            = num_activated_experts # 2
@@ -178,7 +208,7 @@ class MoEGate(nn.Module):
         scores = logits.softmax(dim=-1)       # logits.shape == 4032,4   scores.shape == 4032,4
         return torch.topk(scores, k=self.top_k, dim=-1, sorted=False)
 
-class MOEFeedForwardSwiGLU(nn.Module):
+class HDMOEFeedForwardSwiGLU(nn.Module):
     def __init__(
         self,
         dim                   : int,
@@ -188,19 +218,19 @@ class MOEFeedForwardSwiGLU(nn.Module):
         dtype=None, device=None, operations=None
     ):
         super().__init__()
-        self.shared_experts =                FeedForwardSwiGLU(dim, hidden_dim // 2,  dtype=dtype, device=device, operations=operations)
-        self.experts        = nn.ModuleList([FeedForwardSwiGLU(dim, hidden_dim     ,  dtype=dtype, device=device, operations=operations) for i in range(num_routed_experts)])
-        self.gate           = MoEGate(dim, num_routed_experts, num_activated_experts, dtype=dtype, device=device)
+        self.shared_experts =                HDFeedForwardSwiGLU(dim, hidden_dim // 2,  dtype=dtype, device=device, operations=operations)
+        self.experts        = nn.ModuleList([HDFeedForwardSwiGLU(dim, hidden_dim     ,  dtype=dtype, device=device, operations=operations) for i in range(num_routed_experts)])
+        self.gate           = HDMoEGate(dim, num_routed_experts, num_activated_experts, dtype=dtype, device=device)
         self.num_activated_experts = num_activated_experts
 
-    def forward(self, x):
-        y_shared = self.shared_experts(x)
+    def forward(self, x, cache_v=False):
+        y_shared = self.shared_experts(x)   # 1,4096,2560 -> 1,4096,2560 
 
-        topk_weight, topk_idx = self.gate(x)
-        flat_topk_idx         = topk_idx.view(-1)
+        topk_weight, topk_idx = self.gate(x) # -> 4096,2   4096,2
+        flat_topk_idx         = topk_idx.view(-1) # -> 8192,
         
-        x = x.view(-1, x.shape[-1])
-        x = x.repeat_interleave(self.num_activated_experts, dim=0)
+        x = x.view(-1, x.shape[-1]) # -> 4096,2560
+        x = x.repeat_interleave(self.num_activated_experts, dim=0) # -> 8192,2560
         
         y = torch.empty_like(x)
         for i, expert in enumerate(self.experts):
@@ -209,16 +239,6 @@ class MOEFeedForwardSwiGLU(nn.Module):
         
         return y.view_as(y_shared) + y_shared
 
-def apply_scattersort_buffer(
-    denoised_embed : torch.Tensor,
-    y0_adain_embed : torch.Tensor,
-    sort_buffer, #    : Dict[str, Tensor],
-):
-    sort_buffer['src_idx']    = denoised_embed.argsort(dim=-2)
-    sort_buffer['ref_sorted'], sort_buffer['ref_idx'] = y0_adain_embed.sort(dim=-2)
-
-    denoised_embed.scatter_(dim=-2, index=sort_buffer['src_idx'], src=sort_buffer['ref_sorted'].expand(sort_buffer['ref_sorted'].shape))
-    return denoised_embed
 
 class ScatterSort:
     buffer = {}
@@ -562,10 +582,10 @@ class HDBlockDouble(nn.Module):
         self.attn1   = HDAttention         (dim, heads, head_dim, single=False,                     dtype=dtype, device=device, operations=operations)
 
         self.norm3_i = operations.LayerNorm(dim, eps = 1e-06, elementwise_affine = False,           dtype=dtype, device=device)
-        self.ff_i    = MOEFeedForwardSwiGLU(dim, 4*dim, num_routed_experts, num_activated_experts,  dtype=dtype, device=device, operations=operations)
+        self.ff_i    = HDMOEFeedForwardSwiGLU(dim, 4*dim, num_routed_experts, num_activated_experts,  dtype=dtype, device=device, operations=operations)
         
         self.norm3_t = operations.LayerNorm(dim, eps = 1e-06, elementwise_affine = False,           dtype=dtype, device=device)                                 
-        self.ff_t    =    FeedForwardSwiGLU(dim, 4*dim,                                             dtype=dtype, device=device, operations=operations)
+        self.ff_t    =  HDFeedForwardSwiGLU(dim, 4*dim,                                             dtype=dtype, device=device, operations=operations)
 
     def forward(
         self,
@@ -591,9 +611,9 @@ class HDBlockDouble(nn.Module):
         txt_norm = self.norm1_t(txt) * (1+txt_msa_scale) + txt_msa_shift
         
         if hasattr(self, "img_norm"):
-            img_norm = apply_scattersort(img_norm, self.img_norm.to("cuda", non_blocking=True))
+            img_norm = ScatterSort.apply(img_norm, self.img_norm.to("cuda", non_blocking=True))
             del self.img_norm
-            txt_norm = apply_scattersort(txt_norm, self.txt_norm.to("cuda", non_blocking=True))
+            txt_norm = ScatterSort.apply(txt_norm, self.txt_norm.to("cuda", non_blocking=True))
             del self.txt_norm
         elif cache_v:
             self.img_norm = img_norm.to("cpu", non_blocking=True).pin_memory()
@@ -613,7 +633,7 @@ class HDBlockDouble(nn.Module):
         img     += img_attn            *    img_msa_gate
         
         if hasattr(self, "img"):
-            img = apply_scattersort(img, self.img.to("cuda", non_blocking=True))
+            img = ScatterSort.apply(img, self.img.to("cuda", non_blocking=True))
             del self.img
         elif cache_v:
             self.img = img.to("cpu", non_blocking=True).pin_memory()
@@ -626,11 +646,11 @@ class HDBlockDouble(nn.Module):
         #elif cache_v:
         #    self.img_norm = img_norm.to("cpu", non_blocking=True).pin_memory()
         
-        img     += self.ff_i(img_norm) *    img_mlp_gate
+        img     += self.ff_i(img_norm, cache_v) *    img_mlp_gate
         
         txt     += txt_attn            *    txt_msa_gate
         if hasattr(self, "txt"):
-            txt = apply_scattersort(txt, self.txt.to("cuda", non_blocking=True))
+            txt = ScatterSort.apply(txt, self.txt.to("cuda", non_blocking=True))
             del self.txt
         elif cache_v:
             self.txt = txt.to("cpu", non_blocking=True).pin_memory()
@@ -643,7 +663,7 @@ class HDBlockDouble(nn.Module):
         #elif cache_v:
         #    self.txt_norm = txt_norm.to("cpu", non_blocking=True).pin_memory()
         
-        txt     += self.ff_t(txt_norm) *    txt_mlp_gate 
+        txt     += self.ff_t(txt_norm, cache_v) *    txt_mlp_gate 
         
         return img, txt
 
@@ -671,7 +691,7 @@ class HDBlockSingle(nn.Module):
         self.attn1   = HDAttention         (dim, heads, head_dim, single=True,                      dtype=dtype, device=device, operations=operations)
 
         self.norm3_i = operations.LayerNorm(dim, eps = 1e-06, elementwise_affine = False,           dtype=dtype, device=device)
-        self.ff_i    = MOEFeedForwardSwiGLU(dim, 4*dim, num_routed_experts, num_activated_experts,  dtype=dtype, device=device, operations=operations)
+        self.ff_i    = HDMOEFeedForwardSwiGLU(dim, 4*dim, num_routed_experts, num_activated_experts,  dtype=dtype, device=device, operations=operations)
 
     def forward(
         self,
@@ -695,7 +715,7 @@ class HDBlockSingle(nn.Module):
         img_norm = self.norm1_i(img) * (1+img_msa_scale) + img_msa_shift
         
         if hasattr(self, "img_norm"):
-            img_norm = apply_scattersort(img_norm, self.img_norm.to("cuda", non_blocking=True))
+            img_norm = ScatterSort.apply(img_norm, self.img_norm.to("cuda", non_blocking=True))
             del self.img_norm
         elif cache_v:
             self.img_norm = img_norm.to("cpu", non_blocking=True).pin_memory()
@@ -712,7 +732,7 @@ class HDBlockSingle(nn.Module):
         
         
         if hasattr(self, "img"):
-            img = apply_scattersort(img, self.img.to("cuda", non_blocking=True))
+            img = ScatterSort.apply(img, self.img.to("cuda", non_blocking=True))
             del self.img
         elif cache_v:
             self.img = img.to("cpu", non_blocking=True).pin_memory()
@@ -727,7 +747,7 @@ class HDBlockSingle(nn.Module):
         #elif cache_v:
         #    self.img_norm = img_norm.to("cpu", non_blocking=True).pin_memory()
         
-        img     += self.ff_i(img_norm) *    img_mlp_gate
+        img     += self.ff_i(img_norm, cache_v) *    img_mlp_gate
         
         return img
 
