@@ -662,6 +662,48 @@ class ClownOptions_ExtraOptions_Beta:
 
 
 
+
+class ClownOptions_DenoisedSampling_Beta:
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {"required":
+                    {
+                    "cycles"          : ("FLOAT", {"default": 0.0, "min":  0.0,   "max": 10000, "step":0.5,  "round": 0.5}),
+                    "eta_decay_scale" : ("FLOAT", {"default": 1.0, "min": -10000, "max": 10000, "step":0.01, "tooltip": "Multiplies etas by this number after every cycle. May help drive convergence." }),
+                    "unsample_eta"    : ("FLOAT", {"default": 0.5, "min": -10000, "max": 10000, "step":0.01}),
+                    "unsampler_override"  : (get_sampler_name_list(), {"default": "none"}),
+                    "unsample_steps_to_run"  : ("INT", {"default": -1, "min":  -1,   "max": 10000, "step":1,  "round": 1}),
+                    "unsample_cfg"    : ("FLOAT", {"default": 1.0, "min": -10000, "max": 10000, "step":0.01}),
+                    "unsample_bongmath" : ("BOOLEAN", {"default": False}),                    
+                    },
+                "optional": 
+                    {
+                    "options": ("OPTIONS", ),   
+                    }  
+            }
+        
+    RETURN_TYPES = ("OPTIONS",)
+    RETURN_NAMES = ("options",)
+    FUNCTION     = "main"
+    CATEGORY     = "RES4LYF/sampler_options"
+
+    def main(self,
+            extra_options = "",
+            options       = None
+            ):
+
+        options = options if options is not None else {}
+        
+        if 'extra_options' in options:
+            options['extra_options'] += '\n' + extra_options
+        else:
+            options['extra_options']  = extra_options
+
+        return (options, )
+
+
+
+
 class ClownOptions_Automation_Beta:
     @classmethod
     def INPUT_TYPES(cls):
@@ -1606,6 +1648,268 @@ class ClownGuide_AttnInj_MMDiT_Beta:
         
         return (guides, )
 
+
+
+
+
+
+class ClownGuide_StyleNorm_Advanced_HiDream:
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {"required":
+                    {
+                    "weight":           ("FLOAT",                                     {"default": 1.0, "min":  -100.0, "max": 100.0, "step":0.01, "round": False, "tooltip": "Set the strength of the guide by multiplying all other weights by this value."}),
+                    "weight_scheduler": (["constant"] + get_res4lyf_scheduler_list(), {"default": "constant"},),
+                    
+                    "double_blocks"   : ("STRING",                                    {"default": "", "multiline": True}),
+                    "double_weights"  : ("STRING",                                    {"default": "", "multiline": True}),
+                    "single_blocks"   : ("STRING",                                    {"default": "20", "multiline": True}),
+                    "single_weights"  : ("STRING",                                    {"default": "0.5", "multiline": True}),
+
+                    "mode": (["scattersort", "AdaIN"], {"default": "scattersort"},),
+
+                    "moe_gate"               : ("BOOLEAN", {"default": False}),
+                    "moe_ff"                 : ("BOOLEAN", {"default": False}),
+                    "ff":                      ("BOOLEAN", {"default": False}),
+                    "shared_experts":          ("BOOLEAN", {"default": False}),
+
+                    "double_img_io":           ("BOOLEAN", {"default": False}),
+                    "double_img_norm0":        ("BOOLEAN", {"default": False}),
+                    "double_img_attn":         ("BOOLEAN", {"default": False}),
+                    "double_img_attn_gated":   ("BOOLEAN", {"default": False}),
+                    "double_img":              ("BOOLEAN", {"default": False}),
+                    "double_img_norm1":        ("BOOLEAN", {"default": False}),
+                    "double_img_ff_i":         ("BOOLEAN", {"default": False}),
+
+                    "double_txt_io":           ("BOOLEAN", {"default": False}),
+                    "double_txt_norm0":        ("BOOLEAN", {"default": False}),
+                    "double_txt_attn":         ("BOOLEAN", {"default": False}),
+                    "double_txt_attn_gated":   ("BOOLEAN", {"default": False}),
+                    "double_txt":              ("BOOLEAN", {"default": False}),
+                    "double_txt_norm1":        ("BOOLEAN", {"default": False}),
+                    "double_txt_ff_t":         ("BOOLEAN", {"default": False}),
+
+                    "single_img_io":           ("BOOLEAN", {"default": False}),
+                    "single_img_norm0":        ("BOOLEAN", {"default": False}),
+                    "single_img_attn":         ("BOOLEAN", {"default": False}),
+                    "single_img_attn_gated":   ("BOOLEAN", {"default": False}),
+                    "single_img":              ("BOOLEAN", {"default": False}),
+                    "single_img_norm1":        ("BOOLEAN", {"default": False}),
+                    "single_img_ff_i":         ("BOOLEAN", {"default": False}),
+                    
+                    "attn_img_q_norm"       : ("BOOLEAN", {"default": False}),
+                    "attn_img_k_norm"       : ("BOOLEAN", {"default": False}),
+                    "attn_img_v_norm"       : ("BOOLEAN", {"default": False}),
+                    "attn_txt_q_norm"       : ("BOOLEAN", {"default": False}),
+                    "attn_txt_k_norm"       : ("BOOLEAN", {"default": False}),
+                    "attn_txt_v_norm"       : ("BOOLEAN", {"default": False}),
+                    "attn_img_double"       : ("BOOLEAN", {"default": False}),
+                    "attn_txt_double"       : ("BOOLEAN", {"default": False}),
+                    "attn_img_single"       : ("BOOLEAN", {"default": False}),
+                    
+                    "start_step":       ("INT",      {"default": 0,    "min":  0,      "max": 10000}),
+                    "end_step":         ("INT",      {"default": 15,   "min": -1,      "max": 10000}),
+                    "invert_mask":      ("BOOLEAN",  {"default": False}),
+                    },
+                "optional": 
+                    {
+                    "guide":            ("LATENT", ),
+                    "mask":             ("MASK", ),
+                    "weights":          ("SIGMAS", ),
+                    "guides":           ("GUIDES", ),
+                    }  
+                }
+    
+    RETURN_TYPES = ("GUIDES",)
+    RETURN_NAMES = ("guides",)
+    FUNCTION     = "main"
+    CATEGORY     = "RES4LYF/sampler_extensions"
+
+    def main(self,
+            weight           = 1.0,
+            weight_scheduler = "constant",
+            mode             = "scattersort",
+            double_weights   = "0.1",
+            single_weights   = "0.0", 
+            double_blocks    = "all",
+            single_blocks    = "all", 
+            start_step       = 0,
+            end_step         = 15,
+            invert_mask      = False,
+
+            moe_gate                = False,
+            moe_ff                  = False,
+            ff                      = False,
+            shared_experts          = False,
+
+            double_img_io           = False,
+            double_img_norm0        = False,
+            double_img_attn         = False,
+            double_img_norm1        = False,
+            double_img_attn_gated   = False,
+            double_img              = False,
+            double_img_ff_i         = False,
+
+            double_txt_io           = False,
+            double_txt_norm0        = False,
+            double_txt_attn         = False,
+            double_txt_attn_gated   = False,
+            double_txt              = False,
+            double_txt_norm1        = False,
+            double_txt_ff_t         = False,
+
+            single_img_io           = False,
+            single_img_norm0        = False,
+            single_img_attn         = False,
+            single_img_attn_gated   = False,
+            single_img              = False,
+            single_img_norm1        = False,
+            single_img_ff_i         = False,
+            
+            attn_img_q_norm         = False,
+            attn_img_k_norm         = False,
+            attn_img_v_norm         = False,
+            attn_txt_q_norm         = False,
+            attn_txt_k_norm         = False,
+            attn_txt_v_norm         = False,
+            attn_img_single         = False,
+            attn_img_double         = False,
+            attn_txt_double         = False,
+
+            guide            = None,
+            mask             = None,
+            weights          = None,
+            guides           = None,
+            ):
+        
+        default_dtype = torch.float64
+        
+        mask = 1-mask if mask is not None else None
+        
+        double_weights = parse_range_string(double_weights)
+        single_weights = parse_range_string(single_weights)
+        
+        if len(double_weights) == 0:
+            double_weights.append(0.0)
+        if len(single_weights) == 0:
+            single_weights.append(0.0)
+            
+        if len(double_weights) == 1:
+            double_weights = double_weights * 100
+        if len(single_weights) == 1:
+            single_weights = single_weights * 100
+            
+        if type(double_weights[0]) == int:
+            double_weights = [float(val) for val in double_weights]
+        if type(single_weights[0]) == int:
+            single_weights = [float(val) for val in single_weights]
+        
+        if double_blocks == "all":
+            double_blocks  = [val for val in range(100)]
+            if len(double_weights) == 1:
+                double_weights = [double_weights[0]] * 100
+        else:
+            double_blocks  = parse_range_string(double_blocks)
+            
+            weights_expanded = [0.0] * 100
+            for b, w in zip(double_blocks, double_weights):
+                weights_expanded[b] = w
+            double_weights = weights_expanded
+            
+        
+        if single_blocks == "all":
+            single_blocks = [val for val in range(100)]
+            if len(single_weights) == 1:
+                single_weights = [single_weights[0]] * 100
+        else:
+            single_blocks  = parse_range_string(single_blocks)
+            
+            weights_expanded = [0.0] * 100
+            for b, w in zip(single_blocks, single_weights):
+                weights_expanded[b] = w
+            single_weights = weights_expanded
+        
+        
+        
+        if end_step == -1:
+            end_step = MAX_STEPS
+        
+        if guide is not None:
+            raw_x = guide.get('state_info', {}).get('raw_x', None)
+            if raw_x is not None:
+                guide          = {'samples': guide['state_info']['raw_x'].clone()}
+            else:
+                guide          = {'samples': guide['samples'].clone()}
+        
+        if weight_scheduler == "constant": # and weights == None: 
+            weights = initialize_or_scale(None, weight, end_step).to(default_dtype)
+            prepend = torch.zeros(start_step).to(weights)
+            weights = torch.cat([prepend, weights])
+            weights = F.pad(weights, (0, MAX_STEPS), value=0.0)
+        
+        guides = copy.deepcopy(guides) if guides is not None else {}
+        
+        guides['weight_adain']           = weight
+        guides['weights_adain']          = weights
+        
+        guides['blocks_adain_mmdit'] = {
+            "double_weights": double_weights,
+            "single_weights": single_weights,
+            "double_blocks" : double_blocks,
+            "single_blocks" : single_blocks,
+        }
+        guides['sort_and_scatter'] = {
+            "mode"                  : mode,
+
+            "moe_gate"              : moe_gate,
+            "moe_ff"                : moe_ff,
+
+            "ff"                    : ff,
+            "shared_experts"        : shared_experts,
+
+            "double_img_io"         : double_img_io,
+            "double_img_norm0"      : double_img_norm0,
+            "double_img_attn"       : double_img_attn,
+            "double_img_norm1"      : double_img_norm1,
+            "double_img_attn_gated" : double_img_attn_gated,
+            "double_img"            : double_img,
+            "double_img_ff_i"       : double_img_ff_i,
+
+            "double_txt_io"         : double_txt_io,
+            "double_txt_norm0"      : double_txt_norm0,
+            "double_txt_attn"       : double_txt_attn,
+            "double_txt_attn_gated" : double_txt_attn_gated,
+            "double_txt"            : double_txt,
+            "double_txt_norm1"      : double_txt_norm1,
+            "double_txt_ff_t"       : double_txt_ff_t,
+
+            "single_img_io"         : single_img_io,
+            "single_img_norm0"      : single_img_norm0,
+            "single_img_attn"       : single_img_attn,
+            "single_img_attn_gated" : single_img_attn_gated,
+            "single_img"            : single_img,
+            "single_img_norm1"      : single_img_norm1,
+            "single_img_ff_i"       : single_img_ff_i,
+            
+            "attn_img_q_norm"       : attn_img_q_norm,
+            "attn_img_k_norm"       : attn_img_k_norm,
+            "attn_img_v_norm"       : attn_img_v_norm,
+            "attn_txt_q_norm"       : attn_txt_q_norm,
+            "attn_txt_k_norm"       : attn_txt_k_norm,
+            "attn_txt_v_norm"       : attn_txt_v_norm,
+            "attn_img_single"       : attn_img_single,
+            "attn_img_double"       : attn_img_double,
+        }
+        
+        guides['guide_adain']            = guide
+        guides['mask_adain']             = mask
+
+        guides['weight_scheduler_adain'] = weight_scheduler
+        guides['start_step_adain']       = start_step
+        guides['end_step_adain']         = end_step
+        
+        return (guides, )
 
 
 

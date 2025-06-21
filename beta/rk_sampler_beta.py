@@ -390,6 +390,7 @@ def sample_rk_beta(
     eps_x_              = None 
     data_y_             = None
     data_x_             = None
+    z_                  = None # for tracking residual noise for model scattersort/synchronized diffusion
     
     y0_bongflow         = state_info.get('y0_bongflow')
     y0_bongflow_orig    = state_info.get('y0_bongflow_orig')
@@ -567,13 +568,14 @@ def sample_rk_beta(
             step_sched = torch.where(torch.flip(sigmas, dims=[0]) == sigma)[0][0].item()
         else:
             step_sched = step
-            
+        
         SYNC_GUIDE_ACTIVE = LG.guide_mode.startswith("sync") and (LG.lgw[step_sched] != 0 or LG.lgw_inv[step_sched] != 0 or LG.lgw_sync[step_sched] != 0 or LG.lgw_sync_inv[step_sched] != 0)
         
         if LG.HAS_LATENT_GUIDE_ADAIN:
             if LG.lgw_adain[step_sched] == 0.0:
                 RK.update_transformer_options({'y0_adain': None})
                 RK.update_transformer_options({'blocks_adain': {}})
+                RK.update_transformer_options({'sort_and_scatter': {}})
             else:
                 RK.update_transformer_options({'y0_adain': LG.y0_adain.clone()})
                 if 'blocks_adain_mmdit' in guides:
@@ -584,6 +586,7 @@ def sample_rk_beta(
                         "single_blocks" : guides['blocks_adain_mmdit']['single_blocks'],
                     }
                 RK.update_transformer_options({'blocks_adain': blocks_adain})
+                RK.update_transformer_options({'sort_and_scatter': guides['sort_and_scatter']})
         
         if LG.HAS_LATENT_GUIDE_ATTNINJ:
             if LG.lgw_attninj[step_sched] == 0.0:
@@ -601,7 +604,7 @@ def sample_rk_beta(
                     }
                 RK.update_transformer_options({'blocks_attninj'    : blocks_attninj})
                 RK.update_transformer_options({'blocks_attninj_qkv': guides['blocks_attninj_qkv']})
-
+        
         if LG.HAS_LATENT_GUIDE_STYLE_POS:
             if LG.lgw_style_pos[step_sched] == 0.0:
                 RK.update_transformer_options({'y0_style_pos':        None})
@@ -683,7 +686,7 @@ def sample_rk_beta(
                 else:
                     sigma_divisor = 1.0
                 
-                if RK.multistep_stages > 0:
+                if RK.multistep_stages > 0:                                              # hardcoded s_[1] for multistep samplers, which are never multistage
                     lying_su, lying_sigma, lying_sd, lying_alpha_ratio = NS.get_sde_step(NS.s_[1]/sigma_divisor, NS.s_[0]/sigma_divisor, noise_scaling_eta, noise_scaling_mode, VP_OVERRIDE=VP_OVERRIDE)
                     
                 else:
@@ -703,6 +706,10 @@ def sample_rk_beta(
         if INIT_SAMPLE_LOOP:
             INIT_SAMPLE_LOOP = False
             x_, data_, eps_, eps_prev_ = (torch.zeros(RK.rows+2, *x.shape, dtype=default_dtype, device=work_device) for _ in range(4))
+            if EO("smartnoise"):
+                z_ = torch.zeros(RK.rows+2, *x.shape, dtype=default_dtype, device=work_device)
+                z_[0] = noise_initial.clone()
+                RK.update_transformer_options({'z_' : z_})
             
             if sampler_mode in {"unsample", "resample"}:
                 data_prev_ = state_info.get('data_prev_')
@@ -726,6 +733,10 @@ def sample_rk_beta(
             data_     = torch.cat((data_    ,data_gap_)    , dim=0)
             eps_      = torch.cat((eps_     ,eps_gap_)     , dim=0)
             eps_prev_ = torch.cat((eps_prev_,eps_prev_gap_), dim=0)
+            if EO("smartnoise"):
+                z_gap_ = torch.zeros(row_gap, *x.shape, dtype=default_dtype, device=work_device)
+                z_    = torch.cat((z_       ,z_gap_)       , dim=0)
+                RK.update_transformer_options({'z_' : z_})
 
         sde_noise_t = None
         if SDE_NOISE_EXTERNAL:
@@ -963,6 +974,14 @@ def sample_rk_beta(
                                         if not LG.guide_mode.startswith("flow") or (LG.lgw[step_sched] == 0 and LG.lgw[step+1] == 0   and   LG.lgw_inv[step_sched] == 0 and LG.lgw_inv[step+1] == 0):
                                             x_row_tmp = NS.swap_noise_substep(x_0, x_[row+RK.row_offset], mask=sde_mask, guide=LG.y0)
                                             
+                                            if EO("eps_adain_smartnoise_implicit"):
+                                                data_next = denoised + NS.h_new * RK.zum(row+RK.row_offset+RK.multistep_stages, data_, data_prev_) 
+                                                if VE_MODEL:
+                                                    z_[row+RK.row_offset] = (x_row_tmp - data_next) / s_tmp
+                                                else:
+                                                    z_[row+RK.row_offset] = (x_row_tmp - (NS.sigma_max-s_tmp)*data_next) / s_tmp
+                                                RK.update_transformer_options({'z_' : z_})
+                                            
                                             if SYNC_GUIDE_ACTIVE:
                                                 noise_bongflow_new = (x_row_tmp - x_[row+RK.row_offset]) / s_tmp + noise_bongflow
                                                 yt_[row+RK.row_offset] += s_tmp * (noise_bongflow_new - noise_bongflow)
@@ -976,19 +995,19 @@ def sample_rk_beta(
                                         
                                         if SYNC_GUIDE_ACTIVE:
                                             if VE_MODEL:
-                                                yt_[:NS.s_.shape[0], 0] = y0_bongflow + NS.s_.view(-1, 1, 1, 1) * (noise_bongflow)
+                                                yt_[:NS.s_.shape[0], 0] = y0_bongflow + NS.s_.view(-1, *[1]*(x.ndim-1)) * (noise_bongflow)
                                                 yt_0   = y0_bongflow + sigma * (noise_bongflow)
                                             else:
-                                                yt_[:NS.s_.shape[0], 0] = y0_bongflow + NS.s_.view(-1, 1, 1, 1) * (noise_bongflow - y0_bongflow)
+                                                yt_[:NS.s_.shape[0], 0] = y0_bongflow + NS.s_.view(-1, *[1]*(x.ndim-1)) * (noise_bongflow - y0_bongflow)
                                                 yt_0   = y0_bongflow + sigma * (noise_bongflow - y0_bongflow)
                                             
                                             if RK.EXPONENTIAL:
                                                 eps_y_ = data_y_ - yt_0 # yt_        # watch out for fuckery with size of tableau being smaller later in a chained sampler
                                             else:
                                                 if BONGMATH:
-                                                    eps_y_[:NS.s_.shape[0]] = (yt_[:NS.s_.shape[0]] - data_y_[:NS.s_.shape[0]]) / NS.s_.view(-1,1,1,1,1) 
+                                                    eps_y_[:NS.s_.shape[0]] = (yt_[:NS.s_.shape[0]] - data_y_[:NS.s_.shape[0]]) / NS.s_.view(-1,*[1]*(x_.ndim-1)) 
                                                 else:
-                                                    eps_y_[:NS.s_.shape[0]] = (yt_0.repeat(NS.s_.shape[0], 1,1,1,1) - data_y_[:NS.s_.shape[0]]) / sigma    # calc exact to c0 node
+                                                    eps_y_[:NS.s_.shape[0]] = (yt_0.repeat(NS.s_.shape[0], *[1]*(x_.ndim-1)) - data_y_[:NS.s_.shape[0]]) / sigma    # calc exact to c0 node
                                             if not BONGMATH:
                                                 if RK.EXPONENTIAL:
                                                     eps_x_ = data_x_ - x_0 
@@ -1028,6 +1047,14 @@ def sample_rk_beta(
                                             x_0, x_, eps_ = RK.bong_iter(x_0, x_, eps_, eps_prev_, data_, sigma, NS.s_, row, RK.row_offset, NS.h, step, step_sched,
                                                                         BONGMATH_Y, y0_bongflow, noise_bongflow, eps_x_, eps_y_, data_x_, data_y_, LG)     # TRY WITH h_new ??
                                             #                            BONGMATH_Y, y0_bongflow, noise_bongflow, eps_x_, eps_y_, eps_x2y_, data_x_, LG)     # TRY WITH h_new ??
+                                            
+                                            if EO("eps_adain_smartnoise_bongmath"):
+                                                if VE_MODEL:
+                                                    z_[:NS.s_.shape[0], ...] = (x_ - data_)[:NS.s_.shape[0], ...] / NS.s_.view(-1,*[1]*(x_.ndim-1))
+                                                else:
+                                                    z_[:NS.s_.shape[0], ...] = (x_[:NS.s_.shape[0], ...] - (NS.sigma_max - NS.s_.view(-1,*[1]*(x_.ndim-1)))*data_[:NS.s_.shape[0], ...])[:NS.s_.shape[0], ...] / NS.s_.view(-1,*[1]*(x_.ndim-1))
+                                                RK.update_transformer_options({'z_' : z_})
+                                            
                                     x_tmp = x_[row+RK.row_offset]
 
                         lying_eps_row_factor = 1.0
@@ -1138,7 +1165,7 @@ def sample_rk_beta(
                                 else:
                                     eps_y, data_y = RK(yt_[row], s_tmp, yt_0,  sigma, transformer_options={'latent_type': 'yt'})
                                     
-                                eps_x, data_x = RK(x_tmp, s_tmp, x_0, sigma, transformer_options={'latent_type': 'xt'})
+                                eps_x, data_x = RK(x_tmp, s_tmp, x_0, sigma, transformer_options={'latent_type': 'xt', 'row': row,})
                                 
                                 
                                 for sync_lure_iter in range(LG.sync_lure_iter):
@@ -1589,7 +1616,7 @@ def sample_rk_beta(
                                 eps_[row], data_[row] = RK(x_tmp, s_tmp, x_0, sigma, transformer_options={'latent_type': 'yt'})
                                 
                             else:
-                                eps_[row], data_[row] = RK(x_tmp, s_tmp, x_0, sigma)
+                                eps_[row], data_[row] = RK(x_tmp, s_tmp, x_0, sigma, transformer_options={'row': row})
                                 
 
                             if RK.extra_args['model_options']['transformer_options'].get('y0_standard_guide') is not None:
@@ -1671,7 +1698,23 @@ def sample_rk_beta(
                             #x_[row+RK.row_offset] = NS.swap_noise_substep(x_0, x_[row+RK.row_offset], mask=sde_mask, guide=LG.y0)
                             x_row_tmp = NS.swap_noise_substep(x_0, x_[row+RK.row_offset], mask=sde_mask, guide=LG.y0)
                             
-                            if EO("eps_adain"):
+                            if EO("eps_adain_smartnoise_substep"):
+                                #eps_row_next = (x_0 - x_[row+RK.row_offset]) / (sigma - NS.s_[row+RK.row_offset])
+                                #denoised_row_next = x_0 - sigma * eps_row_next
+                                #
+                                #eps_swapped = (x_row_tmp - denoised_row_next) / NS.s_[row+RK.row_offset]
+                                #
+                                #noise_row_next = eps_swapped + denoised_row_next
+                                #z_[row+RK.row_offset] = noise_row_next
+                                #RK.update_transformer_options({'z_' : z_})
+                                data_next = denoised + NS.h_new * RK.zum(row+RK.row_offset+RK.multistep_stages, data_, data_prev_) 
+                                if VE_MODEL:
+                                    z_[row+RK.row_offset] = (x_row_tmp - data_next) / NS.s_[row+RK.row_offset]
+                                else:
+                                    z_[row+RK.row_offset] = (x_row_tmp - (NS.sigma_max-NS.s_[row+RK.row_offset])*data_next) / NS.s_[row+RK.row_offset]
+                                RK.update_transformer_options({'z_' : z_})
+                            
+                            elif EO("eps_adain"):
                                 x_init_new = (x_row_tmp - x_[row+RK.row_offset]) / s_tmp + x_init
                                 x_0 += sigma * (x_init_new - x_init)
                                 x_init = x_init_new
@@ -1709,18 +1752,18 @@ def sample_rk_beta(
 
                     if SYNC_GUIDE_ACTIVE: # # # # ## # # ## # YIIIIKES ---------------------------------------------------------------------------------------------------------
                         if VE_MODEL:
-                            yt_[:NS.s_.shape[0], 0] = y0_bongflow + NS.s_.view(-1, 1, 1, 1) * (noise_bongflow)
+                            yt_[:NS.s_.shape[0], 0] = y0_bongflow + NS.s_.view(-1, *[1]*(x.ndim-1)) * (noise_bongflow)
                             yt_0   = y0_bongflow + sigma * (noise_bongflow)
                         else:
-                            yt_[:NS.s_.shape[0], 0] = y0_bongflow + NS.s_.view(-1, 1, 1, 1) * (noise_bongflow - y0_bongflow)
+                            yt_[:NS.s_.shape[0], 0] = y0_bongflow + NS.s_.view(-1, *[1]*(x.ndim-1)) * (noise_bongflow - y0_bongflow)
                             yt_0   = y0_bongflow + sigma * (noise_bongflow - y0_bongflow)
                         if RK.EXPONENTIAL:
                             eps_y_ = data_y_ - yt_0 # yt_        # watch out for fuckery with size of tableau being smaller later in a chained sampler
                         else:
                             if BONGMATH:
-                                eps_y_[:NS.s_.shape[0]] = (yt_[:NS.s_.shape[0]] - data_y_[:NS.s_.shape[0]]) / NS.s_.view(-1,1,1,1,1) 
+                                eps_y_[:NS.s_.shape[0]] = (yt_[:NS.s_.shape[0]] - data_y_[:NS.s_.shape[0]]) / NS.s_.view(-1,*[1]*(x_.ndim-1)) 
                             else:
-                                eps_y_[:NS.s_.shape[0]] = (yt_0.repeat(NS.s_.shape[0], 1,1,1,1) - data_y_[:NS.s_.shape[0]]) / sigma    # calc exact to c0 node
+                                eps_y_[:NS.s_.shape[0]] = (yt_0.repeat(NS.s_.shape[0], *[1]*(x_.ndim-1)) - data_y_[:NS.s_.shape[0]]) / sigma    # calc exact to c0 node
                         if not BONGMATH and (eta != 0 or eta_substep != 0):
                             if RK.EXPONENTIAL:
                                 eps_x_ = data_x_ - x_0 
@@ -1762,7 +1805,12 @@ def sample_rk_beta(
                                 x_0, x_, eps_ = RK.bong_iter(x_0, x_, eps_, eps_prev_, data_, sigma, NS.s_, row, RK.row_offset, NS.h, step, step_sched,
                                                             BONGMATH_Y, y0_bongflow, noise_bongflow, eps_x_, eps_y_, data_x_, data_y_, LG)
                                 #                            BONGMATH_Y, y0_bongflow, noise_bongflow, eps_x_, eps_y_, eps_x2y_, data_x_, LG)
-
+                                if EO("eps_adain_smartnoise_bongmath"):
+                                    if VE_MODEL:
+                                        z_[:NS.s_.shape[0], ...] = (x_ - data_)[:NS.s_.shape[0], ...] / NS.s_.view(-1,*[1]*(x_.ndim-1))
+                                    else:
+                                        z_[:NS.s_.shape[0], ...] = (x_[:NS.s_.shape[0], ...] - (NS.sigma_max - NS.s_.view(-1,*[1]*(x_.ndim-1)))*data_[:NS.s_.shape[0], ...])[:NS.s_.shape[0], ...] / NS.s_.view(-1,*[1]*(x_.ndim-1))
+                                    RK.update_transformer_options({'z_' : z_})
                     diag_iter += 1
 
                     #progress_bar.update( round(1 / implicit_steps_total, 2) )
@@ -1802,7 +1850,30 @@ def sample_rk_beta(
             elif not LG.guide_mode.startswith("flow") or (LG.lgw[step_sched] == 0 and LG.lgw[step+1] == 0   and   LG.lgw_inv[step_sched] == 0 and LG.lgw_inv[step+1] == 0):
                 x = NS.swap_noise_step(x_0, x_next, mask=sde_mask)
                 
-                if EO("eps_adain"):
+                if EO("eps_adain_smartnoise"):
+                    #noise_next = eps + denoised
+                    #eps_swapped = (x - denoised) / sigma_next
+                    #
+                    #noise_next = eps_swapped + denoised
+                    #z_[0] = noise_next
+                    #RK.update_transformer_options({'z_' : z_})
+                    if full_iter+1 < implicit_steps_full+1: # are we to loop for full iter after this?
+                        if VE_MODEL:
+                            #z_[row+RK.row_offset] = (x - denoised) / sigma_next
+                            z_[0] = (x_0 - denoised) / sigma
+                        else:
+                            #z_[row+RK.row_offset] = (x - (NS.sigma_max-sigma_next) * denoised) / sigma_next
+                            z_[0] = (x_0 - (NS.sigma_max-sigma) * denoised) / sigma
+                    else: #we're advancing to next step, x is x_next
+                        if VE_MODEL:
+                            #z_[row+RK.row_offset] = (x - denoised) / sigma_next
+                            z_[0] = (x - denoised) / sigma_next
+                        else:
+                            #z_[row+RK.row_offset] = (x - (NS.sigma_max-sigma_next) * denoised) / sigma_next
+                            z_[0] = (x - (NS.sigma_max-sigma_next) * denoised) / sigma_next
+                    RK.update_transformer_options({'z_' : z_})
+
+                elif EO("eps_adain"):
                     x_init_new = (x - x_next) / sigma_next + x_init
                     x_0 += sigma * (x_init_new - x_init)
                     x_init = x_init_new
@@ -1853,6 +1924,9 @@ def sample_rk_beta(
                     else:
                         LG.lgw *= EO("guide_min_factor", 1.1)
                     full_iter -= 1
+        
+        #if EO("smartnoise"):
+        #    z_[0] = z_next
         
         if FLOW_STARTED and FLOW_STOPPED:
             data_prev_ = data_x_prev_

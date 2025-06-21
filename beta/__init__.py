@@ -39,6 +39,7 @@ def add_beta(NODE_CLASS_MAPPINGS, NODE_DISPLAY_NAME_MAPPINGS, extra_samplers):
         "ClownGuide_Mean_Beta"            : samplers_extensions.ClownGuide_Mean_Beta,
         "ClownGuide_AdaIN_MMDiT_Beta"     : samplers_extensions.ClownGuide_AdaIN_MMDiT_Beta,
         "ClownGuide_AttnInj_MMDiT_Beta"   : samplers_extensions.ClownGuide_AttnInj_MMDiT_Beta,
+        "ClownGuide_StyleNorm_Advanced_HiDream" : samplers_extensions.ClownGuide_StyleNorm_Advanced_HiDream,
 
         "ClownOptions_SDE_Mask_Beta"      : samplers_extensions.ClownOptions_SDE_Mask_Beta,
         
@@ -108,6 +109,7 @@ def add_beta(NODE_CLASS_MAPPINGS, NODE_DISPLAY_NAME_MAPPINGS, extra_samplers):
             "ClownGuide_Mean_Beta"                  : "ClownGuide Mean",
             "ClownGuide_AdaIN_MMDiT_Beta"           : "ClownGuide AdaIN (HiDream)",
             "ClownGuide_AttnInj_MMDiT_Beta"         : "ClownGuide AttnInj (HiDream)",
+            "ClownGuide_StyleNorm_Advanced_HiDream" : "ClownGuide_StyleNorm_Advanced_HiDream",
             "ClownGuide_Style_Beta"                 : "ClownGuide Style",
             "ClownGuide_Beta"                       : "ClownGuide",
             "ClownGuides_Beta"                      : "ClownGuides",
