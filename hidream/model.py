@@ -69,9 +69,8 @@ class HDBlock(nn.Module):
         update_cross_attn : Optional[Dict] = None,
         cache_v   :                  bool  = False,
         attninj_opts :      Optional[Dict] = {},
-        CACHE_ATTN: bool=False,
     ) -> FloatTensor:
-        return self.block(img, img_masks, txt, clip, rope, mask, update_cross_attn, cache_v, attninj_opts, CACHE_ATTN=CACHE_ATTN)
+        return self.block(img, img_masks, txt, clip, rope, mask, update_cross_attn, cache_v, attninj_opts)
 
 
 
@@ -157,41 +156,25 @@ class HDFeedForwardSwiGLU(nn.Module):
         self.w2 = operations.Linear(hidden_dim, dim, bias=False, dtype=dtype, device=device)
         self.w3 = operations.Linear(dim, hidden_dim, bias=False, dtype=dtype, device=device)
 
-    def forward(self, x, cache_v=False): # 1,4096,2560 -> 
-        x1 = self.w1(x)
-        x3 = self.w3(x)
-        
-        if hasattr(self, "x1"):
-            x1 = ScatterSort.apply(x1, self.x1.to("cuda", non_blocking=True))
-            del self.x1
-        elif cache_v:
-            self.x1 = x1.to("cpu", non_blocking=True).pin_memory()
+    def forward(self, x): # 1,4096,2560 -> 
+        #if HDModel.sort_ff:
+        if x.shape[0] > 1:
+            x1 = self.w1(x)
+            x1 = HDModel.ff(x1)
+            x1 = torch.nn.functional.silu(x1)
+            x1 = HDModel.ff(x1)
+            
+            x3 = self.w3(x)
+            x3 = HDModel.ff(self.w3(x))
+            
+            x13 = x1 * x3
+            x13 = HDModel.ff(x13)
 
-        if hasattr(self, "x3"):
-            x3 = ScatterSort.apply(x3, self.x3.to("cuda", non_blocking=True))
-            del self.x3
-        elif cache_v:
-            self.x3 = x3.to("cpu", non_blocking=True).pin_memory()
-        
-        x1 = torch.nn.functional.silu(x1)
-        x13 = x1 * x3
-        
-        if hasattr(self, "x13"):
-            x13 = ScatterSort.apply(x13, self.x13.to("cuda", non_blocking=True))
-            del self.x13
-        elif cache_v:
-            self.x13 = x13.to("cpu", non_blocking=True).pin_memory()
-        
-        x2 = self.w2(x13)
-        
-        if hasattr(self, "x2"):
-            x2 = ScatterSort.apply(x2, self.x2.to("cuda", non_blocking=True))
-            del self.x2
-        elif cache_v:
-            self.x2 = x2.to("cpu", non_blocking=True).pin_memory()
-        
-        return x2
-        #return self.w2(torch.nn.functional.silu(self.w1(x)) * self.w3(x))
+            x2 = self.w2(x13)
+            x2 = HDModel.ff(x2)
+            return x2
+        else:
+            return self.w2(torch.nn.functional.silu(self.w1(x)) * self.w3(x))
 
 # Modified from https://github.com/deepseek-ai/DeepSeek-V3/blob/main/inference/model.py
 class HDMoEGate(nn.Module):
@@ -223,28 +206,43 @@ class HDMOEFeedForwardSwiGLU(nn.Module):
         self.gate           = HDMoEGate(dim, num_routed_experts, num_activated_experts, dtype=dtype, device=device)
         self.num_activated_experts = num_activated_experts
 
-    def forward(self, x, cache_v=False):
+    def forward(self, x):
         y_shared = self.shared_experts(x)   # 1,4096,2560 -> 1,4096,2560 
 
+        y_shared = HDModel.shared_experts(y_shared)
+
         topk_weight, topk_idx = self.gate(x) # -> 4096,2   4096,2
-        flat_topk_idx         = topk_idx.view(-1) # -> 8192,
+        
+        if y_shared.shape[0] > 1 and HDModel.moe_gate:
+            topk_weight[:,0] = topk_weight[:,1]
+            flat_topk_idx = topk_idx[:,1].repeat(x.shape[0])
+        else:
+            flat_topk_idx = topk_idx.view(-1) # -> 8192,
+        
+        x = x.repeat_interleave(self.num_activated_experts, dim=-2)
         
         x = x.view(-1, x.shape[-1]) # -> 4096,2560
-        x = x.repeat_interleave(self.num_activated_experts, dim=0) # -> 8192,2560
+        #x = x.repeat_interleave(self.num_activated_experts, dim=0) # -> 8192,2560
         
         y = torch.empty_like(x)
         for i, expert in enumerate(self.experts):
-            y[flat_topk_idx == i] = expert(x[flat_topk_idx == i]).to(x.dtype)
+            
+            y[flat_topk_idx==i]  = expert(x[flat_topk_idx==i]).to(x.dtype)
+
         y = torch.einsum('bk,bkd->bd', topk_weight, y.view(*topk_weight.shape, -1))
         
-        return y.view_as(y_shared) + y_shared
+        y = y.view_as(y_shared) + y_shared
+
+        y = HDModel.moe_ff(y)
+        
+        return y
 
 
 class ScatterSort:
     buffer = {}
 
     @staticmethod
-    def apply(denoised_embed, y0_adain_embed):
+    def apply(denoised_embed, y0_adain_embed=None):
         buf = ScatterSort.buffer
         buf['src_idx']    = denoised_embed.argsort(dim=-2)
         buf['ref_sorted'], buf['ref_idx'] = y0_adain_embed.sort(dim=-2)
@@ -252,8 +250,46 @@ class ScatterSort:
         return denoised_embed.scatter_(
             dim=-2, 
             index=buf['src_idx'], 
-            src=buf['ref_sorted'].expand_as(buf['ref_sorted'])
+            src=buf['ref_sorted'].expand_as(buf['ref_sorted'])       # expand_as itself??
         )
+        
+
+    @staticmethod
+    def batch_apply(denoised_embed):
+        if denoised_embed.shape[0] == 1:
+            return denoised_embed
+        else:
+            y0_adain_embed = denoised_embed[1].unsqueeze(0)
+            denoised_embed = denoised_embed[0].unsqueeze(0)
+
+        buf = ScatterSort.buffer
+        buf['src_idx']    = denoised_embed.argsort(dim=-2)
+        buf['ref_sorted'], buf['ref_idx'] = y0_adain_embed.sort(dim=-2)
+
+        denoised_embed = denoised_embed.scatter_(
+            dim=-2, 
+            index=buf['src_idx'], 
+            src=buf['ref_sorted'].expand_as(buf['ref_sorted'])       # expand_as itself??
+        )
+        
+        return torch.cat([denoised_embed, y0_adain_embed], dim=0)
+
+def apply_adain_embed(content, eps: float = 1e-7) -> torch.Tensor:
+    if content.shape[0] == 1:
+        return content
+    else:
+        style   = content[1].unsqueeze(0)
+        content = content[0].unsqueeze(0)
+    mean_c = content.mean(-2, keepdim=True)
+    std_c  = content.std (-2, keepdim=True).add_(eps)  # in-place add
+    mean_s = style.mean  (-2, keepdim=True)
+    std_s  = style.std   (-2, keepdim=True).add_(eps)
+
+    content.sub_(mean_c).div_(std_c).mul_(std_s).add_(mean_s)  # in-place chain
+    return torch.cat([content, style], dim=0)
+
+def apply_passthrough(denoised_embed, *args, **kwargs):
+    return denoised_embed
 
 class AttentionBuffer:
     buffer = {}
@@ -327,15 +363,10 @@ class HDAttention(nn.Module):
         attninj_opts : Optional[Dict] = {},
     ) -> Tensor:
         
-        attn_cache = {}
-        for name in ["img_q_cache", "img_k_cache", "img_v_cache", "txt_q_cache", "txt_k_cache", "txt_v_cache"]:
-            if hasattr(self, name):
-                attn_cache[name] = getattr(self, name).to("cuda", non_blocking=True)
-                
-        norm_seq = adain_seq
-        if self.EO("attninj_scattersort"):
-            norm_seq = ScatterSort.apply
-
+        norm_seq = ScatterSort.apply
+        if self.EO("attninj_adain"):
+            norm_seq = adain_seq
+            
         bsz = img.shape[0]
 
         img_q = self.q_rms_norm(self.to_q(img))
@@ -350,38 +381,28 @@ class HDAttention(nn.Module):
         weight_img_k_norm = attninj_opts.get("img_k_norm", 0.0)
         weight_img_v_norm = attninj_opts.get("img_v_norm", 0.0)
 
-        if cache_v:
-            if weight_img_q != 0 or weight_img_q_norm != 0:
-                self.img_q_cache = img_q.to("cpu", non_blocking=True).pin_memory()
-            if weight_img_k != 0 or weight_img_k_norm != 0:
-                self.img_k_cache = img_k.to("cpu", non_blocking=True).pin_memory()
-            if weight_img_v != 0 or weight_img_v_norm != 0:
-                self.img_v_cache = img_v.to("cpu", non_blocking=True).pin_memory()
-        else: 
-            if self.EO("slerp"):
-                interp_fn = slerp_tensor
-            else:
-                interp_fn = lambda weight, A, B: (1-weight) * A + weight * B
+        if self.EO("attn_slerp"):
+            interp_fn = slerp_tensor
+        else:
+            interp_fn = lambda weight, A, B: (1-weight) * A + weight * B
 
-            if weight_img_q != 0 and "img_q_cache" in attn_cache:
-                img_q = interp_fn(weight_img_q, img_q, attn_cache["img_q_cache"])
-            if weight_img_k != 0 and "img_k_cache" in attn_cache:
-                img_k = interp_fn(weight_img_k, img_k, attn_cache["img_k_cache"])
-            if weight_img_v != 0 and "img_v_cache" in attn_cache:
-                img_v = interp_fn(weight_img_v, img_v, attn_cache["img_v_cache"])
+        #if weight_img_q_norm != 0:
+        #    img_q[0] = interp_fn(weight_img_q_norm, img_q[0], norm_seq(img_q[0], img_q[-1]))
+        #if weight_img_k_norm != 0:
+        #    img_k[0] = interp_fn(weight_img_k_norm, img_k[0], norm_seq(img_k[0], img_k[-1]))
+        #if weight_img_v_norm != 0:
+        #    img_v[0] = interp_fn(weight_img_v_norm, img_v[0], norm_seq(img_v[0], img_v[-1]))
 
-            if weight_img_q_norm != 0 and "img_q_cache" in attn_cache:
-                img_q = interp_fn(weight_img_q_norm, img_q, norm_seq(img_q, attn_cache["img_q_cache"]))
-            if weight_img_k_norm != 0 and "img_k_cache" in attn_cache:
-                img_k = interp_fn(weight_img_k_norm, img_k, norm_seq(img_k, attn_cache["img_k_cache"]))
-            if weight_img_v_norm != 0 and "img_v_cache" in attn_cache:
-                img_v = interp_fn(weight_img_v_norm, img_v, norm_seq(img_v, attn_cache["img_v_cache"]))
-                
-            for name in ["img_q_cache", "img_k_cache", "img_v_cache"]:
-                if hasattr(self, name):
-                    delattr(self, name)
-                attn_cache.pop(name, None)
+        if weight_img_q != 0:
+            img_q[0] = interp_fn(weight_img_q, img_q[0], img_q[-1])
+        if weight_img_k != 0:
+            img_k[0] = interp_fn(weight_img_k, img_k[0], img_k[-1])
+        if weight_img_v != 0:
+            img_v[0] = interp_fn(weight_img_v, img_v[0], img_v[-1])
 
+        img_q = HDModel.attn_img_q_norm(img_q)
+        img_k = HDModel.attn_img_k_norm(img_k)
+        img_v = HDModel.attn_img_v_norm(img_v)        
 
         inner_dim = img_k.shape[-1]
         head_dim  = inner_dim // self.heads
@@ -395,21 +416,9 @@ class HDAttention(nn.Module):
 
 
         if self.single:
-            attn = attention(img_q, img_k, img_v, rope=rope, mask=mask)                 # TODO: scattersort here!
+            attn = attention(img_q, img_k, img_v, rope=rope, mask=mask)
             
-            if cache_v == True and self.EO("single_attn_adain"):
-                self.single_attn_cache = img_attn.to("cpu", non_blocking=True).pin_memory()
-            elif hasattr(self, "single_attn_cache") and self.EO("single_attn_adain"):
-                attn_adain_weight = self.EO("single_attn_adain_weight", 1.0)
-                img_attn = (1-attn_adain_weight) * img_attn + attn_adain_weight * adain_seq(img_attn, self.single_attn_cache.to("cuda", non_blocking=True))
-                del self.single_attn_cache
-                
-            if cache_v == True and self.EO("single_attn_scattersort"):
-                self.single_attn_cache = img_attn.to("cpu", non_blocking=True).pin_memory()
-            elif hasattr(self, "single_attn_cache") and self.EO("single_attn_scattersort"):
-                attn_adain_weight = self.EO("single_attn_scattersort_weight", 1.0)
-                img_attn = (1-attn_adain_weight) * img_attn + attn_adain_weight * ScatterSort.apply(img_attn, self.single_attn_cache.to("cuda", non_blocking=True))
-                del self.single_attn_cache
+            attn = HDModel.attn_img_single(attn)
             
             return self.to_out(attn)
         else:
@@ -426,37 +435,29 @@ class HDAttention(nn.Module):
             weight_txt_k_norm = attninj_opts.get("txt_k_norm", 0.0)
             weight_txt_v_norm = attninj_opts.get("txt_v_norm", 0.0)
 
-            if cache_v:
-                if weight_txt_q != 0 or weight_txt_q_norm != 0:
-                    self.txt_q_cache = txt_q.to("cpu", non_blocking=True).pin_memory()
-                if weight_txt_k != 0 or weight_txt_k_norm != 0:
-                    self.txt_k_cache = txt_k.to("cpu", non_blocking=True).pin_memory()
-                if weight_txt_v != 0 or weight_txt_v_norm != 0:
-                    self.txt_v_cache = txt_v.to("cpu", non_blocking=True).pin_memory()
-            else: 
-                if self.EO("slerp"):
-                    interp_fn = slerp_tensor
-                else:
-                    interp_fn = lambda weight, A, B: (1-weight) * A + weight * B
+            if self.EO("attn_slerp"):
+                interp_fn = slerp_tensor
+            else:
+                interp_fn = lambda weight, A, B: (1-weight) * A + weight * B
 
-                if weight_txt_q != 0 and "txt_q_cache" in attn_cache:
-                    txt_q = interp_fn(weight_txt_q, txt_q, attn_cache["txt_q_cache"])
-                if weight_txt_k != 0 and "txt_k_cache" in attn_cache:
-                    txt_k = interp_fn(weight_txt_k, txt_k, attn_cache["txt_k_cache"])
-                if weight_txt_v != 0 and "txt_v_cache" in attn_cache:
-                    txt_v = interp_fn(weight_txt_v, txt_v, attn_cache["txt_v_cache"])
+            #if weight_txt_q_norm != 0:
+            #    txt_q[0] = interp_fn(weight_txt_q_norm, txt_q[0], norm_seq(txt_q[0], txt_q[-1]))
+            #if weight_txt_k_norm != 0:
+            #    txt_k[0] = interp_fn(weight_txt_k_norm, txt_k[0], norm_seq(txt_k[0], txt_k[-1]))
+            #if weight_txt_v_norm != 0:
+            #    txt_v[0] = interp_fn(weight_txt_v_norm, txt_v[0], norm_seq(txt_v[0], txt_v[-1]))
+            
+            
+            if weight_txt_q != 0:
+                txt_q[0] = interp_fn(weight_txt_q, txt_q[0], txt_q[-1])
+            if weight_txt_k != 0:
+                txt_k[0] = interp_fn(weight_txt_k, txt_k[0], txt_k[-1])
+            if weight_txt_v != 0:
+                txt_v[0] = interp_fn(weight_txt_v, txt_v[0], txt_v[-1])
 
-                if weight_txt_q_norm != 0 and "txt_q_cache" in attn_cache:
-                    txt_q = interp_fn(weight_txt_q_norm, txt_q, norm_seq(txt_q, attn_cache["txt_q_cache"]))
-                if weight_txt_k_norm != 0 and "txt_k_cache" in attn_cache:
-                    txt_k = interp_fn(weight_txt_k_norm, txt_k, norm_seq(txt_k, attn_cache["txt_k_cache"]))
-                if weight_txt_v_norm != 0 and "txt_v_cache" in attn_cache:
-                    txt_v = interp_fn(weight_txt_v_norm, txt_v, norm_seq(txt_v, attn_cache["txt_v_cache"]))
-                    
-                for name in ["txt_q_cache", "txt_k_cache", "txt_v_cache"]:
-                    if hasattr(self, name):
-                        delattr(self, name)
-                    attn_cache.pop(name, None)
+            txt_q = HDModel.attn_txt_q_norm(txt_q)
+            txt_k = HDModel.attn_txt_k_norm(txt_k)
+            txt_v = HDModel.attn_txt_v_norm(txt_v)
 
             txt_q   = txt_q.view(bsz, -1, self.heads, head_dim)
             txt_k   = txt_k.view(bsz, -1, self.heads, head_dim)
@@ -471,38 +472,9 @@ class HDAttention(nn.Module):
             
             img_attn, txt_attn = torch.split(attn, [img_len, txt_len], dim=1)   #1, 4480, 2560
             
-            if cache_v == True and self.EO("img_attn_adain"):
-                self.img_attn_cache = img_attn.to("cpu", non_blocking=True).pin_memory()
-            elif hasattr(self, "img_attn_cache") and self.EO("img_attn_adain"):
-                attn_adain_weight = self.EO("img_attn_adain_weight", 1.0)
-                img_attn = (1-attn_adain_weight) * img_attn + attn_adain_weight * adain_seq(img_attn, self.img_attn_cache.to("cuda", non_blocking=True))
-                del self.img_attn_cache
-                
-            if cache_v == True and self.EO("img_attn_scattersort"):
-                self.img_attn_cache = img_attn.to("cpu", non_blocking=True).pin_memory()
-            elif hasattr(self, "img_attn_cache") and self.EO("img_attn_scattersort"):
-                attn_adain_weight = self.EO("img_attn_scattersort_weight", 1.0)
-                img_attn = (1-attn_adain_weight) * img_attn + attn_adain_weight * ScatterSort.apply(img_attn, self.img_attn_cache.to("cuda", non_blocking=True))
-                del self.img_attn_cache
-                
-            if cache_v == True and self.EO("txt_attn_adain"):
-                self.txt_attn_cache = txt_attn.to("cpu", non_blocking=True).pin_memory()
-            elif hasattr(self, "txt_attn_cache") and self.EO("txt_attn_adain"):
-                attn_adain_weight = self.EO("txt_attn_adain_weight", 1.0)
-                txt_attn = (1-attn_adain_weight) * txt_attn + attn_adain_weight * adain_seq(txt_attn, self.txt_attn_cache.to("cuda", non_blocking=True))
-                del self.txt_attn_cache
-                
-            if cache_v == True and self.EO("txt_attn_scattersort"):
-                self.txt_attn_cache = txt_attn.to("cpu", non_blocking=True).pin_memory()
-            elif hasattr(self, "txt_attn_cache") and self.EO("txt_attn_scattersort"):
-                attn_adain_weight = self.EO("txt_attn_scattersort_weight", 1.0)
-                txt_attn = (1-attn_adain_weight) * txt_attn + attn_adain_weight * ScatterSort.apply(txt_attn, self.txt_attn_cache.to("cuda", non_blocking=True))
-                del self.txt_attn_cache
+            img_attn = HDModel.attn_img_double(img_attn)
+            txt_attn = HDModel.attn_txt_double(txt_attn)
             
-            #if anticond == "uncond":
-            #    txt_src    = torch.cat([txt[:,1:3,:], txt[:,129:131,:], txt[:,257:259],], dim=-2).float()
-            #    self.c_src = txt_src.transpose(-2,-1).squeeze(0)    # shape [C,1]
-
             if update_cross_attn is not None:
                 if not update_cross_attn['skip_cross_attn']:
                     UNCOND      = update_cross_attn['UNCOND']
@@ -598,72 +570,55 @@ class HDBlockDouble(nn.Module):
         update_cross_attn : Optional[Dict]= None,
         cache_v   :                  bool = True,
         attninj_opts :     Optional[Dict] = {},
-        CACHE_ATTN: bool = False,
-        CACHE_TXT: bool = False
     ) -> FloatTensor:
-        
-        buf = HDBlockDouble.buffer
-        
+                
         img_msa_shift, img_msa_scale, img_msa_gate, img_mlp_shift, img_mlp_scale, img_mlp_gate, \
         txt_msa_shift, txt_msa_scale, txt_msa_gate, txt_mlp_shift, txt_mlp_scale, txt_mlp_gate = self.adaLN_modulation(clip)[:,None].chunk(12, dim=-1)      # 1,1,2560           
+
+        if self.idx == 0:
+            img = HDModel.double_img_io(img)
+            txt = HDModel.double_txt_io(txt)
 
         img_norm = self.norm1_i(img) * (1+img_msa_scale) + img_msa_shift
         txt_norm = self.norm1_t(txt) * (1+txt_msa_scale) + txt_msa_shift
         
-        if hasattr(self, "img_norm"):
-            img_norm = ScatterSort.apply(img_norm, self.img_norm.to("cuda", non_blocking=True))
-            del self.img_norm
-            txt_norm = ScatterSort.apply(txt_norm, self.txt_norm.to("cuda", non_blocking=True))
-            del self.txt_norm
-        elif cache_v:
-            self.img_norm = img_norm.to("cpu", non_blocking=True).pin_memory()
-            self.txt_norm = txt_norm.to("cpu", non_blocking=True).pin_memory()
+        img_norm = HDModel.double_img_norm0(img_norm)
+        txt_norm = HDModel.double_txt_norm0(txt_norm)
         
         img_attn, txt_attn = self.attn1(img_norm, img_masks, txt_norm, rope=rope, mask=mask, update_cross_attn=update_cross_attn, cache_v=cache_v, attninj_opts=attninj_opts)
         
-        #if hasattr(self, "img_attn"):
-        #    img_attn = apply_scattersort(img_attn, self.img_attn.to("cuda", non_blocking=True))
-        #    del self.img_attn
-        #    txt_attn = apply_scattersort(txt_attn, self.txt_attn.to("cuda", non_blocking=True))
-        #    del self.txt_attn
-        #elif cache_v:
-        #    self.img_attn = img_attn.to("cpu", non_blocking=True).pin_memory()
-        #    self.txt_attn = txt_attn.to("cpu", non_blocking=True).pin_memory()
+        img_attn = HDModel.double_img_attn(img_attn)
+        txt_attn = HDModel.double_txt_attn(txt_attn)
+
+        img_attn_gated = img_attn * img_msa_gate
+        txt_attn_gated = txt_attn * txt_msa_gate
         
-        img     += img_attn            *    img_msa_gate
+        img_attn_gated = HDModel.double_img_attn_gated(img_attn_gated)
+        txt_attn_gated = HDModel.double_txt_attn_gated(txt_attn_gated)
         
-        if hasattr(self, "img"):
-            img = ScatterSort.apply(img, self.img.to("cuda", non_blocking=True))
-            del self.img
-        elif cache_v:
-            self.img = img.to("cpu", non_blocking=True).pin_memory()
+        img += img_attn_gated
+        txt += txt_attn_gated
+        
+        img = HDModel.double_img_norm1(img)
+        txt = HDModel.double_txt_norm1(txt)
         
         img_norm = self.norm3_i(img) * (1+img_mlp_scale) + img_mlp_shift
-        
-        #if hasattr(self, "img_norm"):
-        #    img_norm = apply_scattersort(img_norm, self.img_norm.to("cuda", non_blocking=True))
-        #    del self.img_norm
-        #elif cache_v:
-        #    self.img_norm = img_norm.to("cpu", non_blocking=True).pin_memory()
-        
-        img     += self.ff_i(img_norm, cache_v) *    img_mlp_gate
-        
-        txt     += txt_attn            *    txt_msa_gate
-        if hasattr(self, "txt"):
-            txt = ScatterSort.apply(txt, self.txt.to("cuda", non_blocking=True))
-            del self.txt
-        elif cache_v:
-            self.txt = txt.to("cpu", non_blocking=True).pin_memory()
-        
         txt_norm = self.norm3_t(txt) * (1+txt_mlp_scale) + txt_mlp_shift
+
+        img_norm = HDModel.double_img_norm1(img_norm)
+        txt_norm = HDModel.double_txt_norm1(txt_norm)
+
+        img_ff_i = self.ff_i(img_norm) * img_mlp_gate
+        txt_ff_t = self.ff_t(txt_norm) * txt_mlp_gate 
         
-        #if hasattr(self, "txt_norm"):
-        #    txt_norm = apply_scattersort(txt_norm, self.txt_norm.to("cuda", non_blocking=True))
-        #    del self.txt_norm
-        #elif cache_v:
-        #    self.txt_norm = txt_norm.to("cpu", non_blocking=True).pin_memory()
+        img_ff_i = HDModel.double_img_ff_i(img_ff_i)
+        txt_ff_t = HDModel.double_txt_ff_t(txt_ff_t)
         
-        txt     += self.ff_t(txt_norm, cache_v) *    txt_mlp_gate 
+        img += img_ff_i
+        txt += txt_ff_t
+        
+        img = HDModel.double_img_io(img)
+        txt = HDModel.double_txt_io(txt)
         
         return img, txt
 
@@ -704,56 +659,87 @@ class HDBlockSingle(nn.Module):
         update_cross_attn : Optional[Dict] = None,
         cache_v   :                  bool  = True,
         attninj_opts :      Optional[Dict]  = None,
-        CACHE_ATTN: bool = False,
-
     ) -> FloatTensor:
-        
-        buf = HDBlockSingle.buffer
         
         img_msa_shift, img_msa_scale, img_msa_gate, img_mlp_shift, img_mlp_scale, img_mlp_gate = self.adaLN_modulation(clip)[:,None].chunk(6, dim=-1)
 
+        img = HDModel.single_img_io(img)
+
         img_norm = self.norm1_i(img) * (1+img_msa_scale) + img_msa_shift
         
-        if hasattr(self, "img_norm"):
-            img_norm = ScatterSort.apply(img_norm, self.img_norm.to("cuda", non_blocking=True))
-            del self.img_norm
-        elif cache_v:
-            self.img_norm = img_norm.to("cpu", non_blocking=True).pin_memory()
-        
+        img_norm = HDModel.single_img_norm0(img_norm)
+
         img_attn = self.attn1(img_norm, img_masks, rope=rope, mask=mask, cache_v=cache_v, attninj_opts=attninj_opts)
         
-        #if hasattr(self, "img_attn"):
-        #    img_attn = apply_scattersort(img_attn, self.img_attn.to("cuda", non_blocking=True))
-        #    del self.img_attn
-        #elif cache_v:
-        #    self.img_attn = img_attn.to("cpu", non_blocking=True).pin_memory()
+        img_attn = HDModel.single_img_attn(img_attn)
+
+        img_attn_gated = img_attn * img_msa_gate
         
-        img     += img_attn            *    img_msa_gate
+        img_attn_gated = HDModel.single_img_attn_gated(img_attn_gated)
+
+        img += img_attn_gated
         
-        
-        if hasattr(self, "img"):
-            img = ScatterSort.apply(img, self.img.to("cuda", non_blocking=True))
-            del self.img
-        elif cache_v:
-            self.img = img.to("cpu", non_blocking=True).pin_memory()
-        
-        
-        
+        img = HDModel.single_img(img)
+
         img_norm = self.norm3_i(img) * (1+img_mlp_scale) + img_mlp_shift
         
-        #if hasattr(self, "img_norm"):
-        #    img_norm = apply_scattersort(img_norm, self.img_norm.to("cuda", non_blocking=True))
-        #    del self.img_norm
-        #elif cache_v:
-        #    self.img_norm = img_norm.to("cpu", non_blocking=True).pin_memory()
+        img_norm = HDModel.single_img_norm1(img_norm)
+
+        img_ff_i = self.ff_i(img_norm) * img_mlp_gate
         
-        img     += self.ff_i(img_norm, cache_v) *    img_mlp_gate
+        img_ff_i = HDModel.single_img_ff_i(img_ff_i)
+
+        img += img_ff_i
         
+        img = HDModel.single_img_io(img)
+
         return img
 
 
 #########################################################################################################################################################################
 class HDModel(nn.Module):
+    moe_gate              = False
+    moe_ff                = apply_passthrough
+    ff                    = apply_passthrough
+    
+    shared_experts        = apply_passthrough
+
+    double_img_io         = apply_passthrough
+    double_img_norm0      = apply_passthrough
+    double_img_attn       = apply_passthrough
+    double_img_norm1      = apply_passthrough
+    double_img_attn_gated = apply_passthrough
+    double_img            = apply_passthrough
+    double_img_ff_i       = apply_passthrough
+    
+    double_txt_io         = apply_passthrough
+    double_txt_norm0      = apply_passthrough
+    double_txt_attn       = apply_passthrough
+    double_txt_attn_gated = apply_passthrough
+    double_txt            = apply_passthrough
+    double_txt_norm1      = apply_passthrough
+    double_txt_ff_t       = apply_passthrough
+    
+    single_img_io         = apply_passthrough
+    single_img_norm0      = apply_passthrough
+    single_img_attn       = apply_passthrough 
+    single_img_attn_gated = apply_passthrough
+    single_img            = apply_passthrough 
+    single_img_norm1      = apply_passthrough
+    single_img_ff_i       = apply_passthrough
+    
+    attn_img_q_norm       = apply_passthrough
+    attn_img_k_norm       = apply_passthrough
+    attn_img_v_norm       = apply_passthrough 
+    attn_txt_q_norm       = apply_passthrough
+    attn_txt_k_norm       = apply_passthrough
+    attn_txt_v_norm       = apply_passthrough 
+    attn_img_single       = apply_passthrough
+    attn_img_double       = apply_passthrough
+    attn_txt_double       = apply_passthrough
+
+
+
     def __init__(
         self,
         patch_size            : Optional[int]   = None,
@@ -875,10 +861,31 @@ class HDModel(nn.Module):
         update_cross_attn = transformer_options.get("update_cross_attn")
         SIGMA = t[0].clone() / 1000
         EO = transformer_options.get("ExtraOptions", ExtraOptions(""))
-        img_pre_final = []
         if EO is not None:
             EO.mute = True
-            
+        
+        HDModel.sort_moe_gate              = EO("sort_moe_gate")
+        HDModel.sort_moe_ff                = EO("sort_moe_ff")
+        HDModel.sort_ff                    = EO("sort_ff")
+        HDModel.sort_double_img_norm0      = EO("sort_double_img_norm0")
+        HDModel.sort_double_img_attn       = EO("sort_double_img_attn")
+        HDModel.sort_double_img_norm1      = EO("sort_double_img_norm1")
+        HDModel.sort_double_img_attn_gated = EO("sort_double_img_attn_gated")
+        HDModel.sort_double_img            = EO("sort_double_img")
+        HDModel.sort_double_img_ff_i       = EO("sort_double_img_ff_i")
+        HDModel.sort_double_txt_norm0      = EO("sort_double_txt_norm0")
+        HDModel.sort_double_txt_attn       = EO("sort_double_txt_attn")
+        HDModel.sort_double_txt_attn_gated = EO("sort_double_txt_attn_gated")
+        HDModel.sort_double_txt            = EO("sort_double_txt")
+        HDModel.sort_double_txt_norm1      = EO("sort_double_txt_norm1")
+        HDModel.sort_double_txt_ff_t       = EO("sort_double_txt_ff_t")
+        HDModel.sort_single_img_norm0      = EO("sort_single_img_norm0")
+        HDModel.sort_single_img_attn       = EO("sort_single_img_attn") 
+        HDModel.sort_single_img_attn_gated = EO("sort_single_img_attn_gated")
+        HDModel.sort_single_img            = EO("sort_single_img") 
+        HDModel.sort_single_img_norm1      = EO("sort_single_img_norm1")
+        HDModel.sort_single_img_ff_i       = EO("sort_single_img_ff_i")
+        
         for block in self.double_stream_blocks:
             block.block.attn1.EO = EO
         for block in self.single_stream_blocks:
@@ -892,21 +899,125 @@ class HDModel(nn.Module):
         y0_style_pos, img_y0_style_pos, img_sizes_y0_style_pos = None, None, None
         y0_style_neg, img_y0_style_neg, img_sizes_y0_style_neg = None, None, None
         blocks_attninj_qkv_scaled = {}
+        blocks_attninj_qkv = {}
         STYLE_UNCOND = EO("STYLE_UNCOND", False)
         
         y0_style_pos        = transformer_options.get("y0_style_pos")
         y0_style_neg        = transformer_options.get("y0_style_neg")
+        
+        z_ = transformer_options.get("z_")   # initial noise and/or image+noise from start of rk_sampler_beta() 
+        rk_row = transformer_options.get("row")
+        
+        if z_ is not None:
+            x_init = z_[rk_row].to(x)
+        elif 'x_init' in transformer_options:
+            x_init = transformer_options.get('x_init').to(x)
 
         y0_adain = transformer_options.get("y0_adain")
         if EO("eps_adain") and y0_adain is not None:
-            x_init              = transformer_options.get("x_init").to(x)   # initial noise and/or image+noise from start of rk_sampler_beta() 
+            #x_init              = transformer_options.get("x_init").to(x)   # initial noise and/or image+noise from start of rk_sampler_beta() 
             y0_adain            = y0_adain.to(x)
-            y0_adain            = (1-SIGMA) * y0_adain + SIGMA * x_init
+            SIGMA_ADAIN         = SIGMA * EO("eps_adain_sigma_factor", 1.0)
+            y0_adain            = (1-SIGMA_ADAIN) * y0_adain + SIGMA_ADAIN * x_init
             img_y0_adain        = comfy.ldm.common_dit.pad_to_patch_size(y0_adain, (self.patch_size, self.patch_size))
             t_y0_adain          = t[0].unsqueeze(0).clone() #torch.full_like(t, 0.0)[0].unsqueeze(0)
+            t_y0_adain         *= EO("eps_adain_sigma_factor", 1.0)
             blocks_adain        = transformer_options.get("blocks_adain")
             ADAIN_SINGLE_BLOCKS = blocks_adain['single_blocks']
             ADAIN_DOUBLE_BLOCKS = blocks_adain['double_blocks']
+            sort_and_scatter    = transformer_options.get("sort_and_scatter")
+            
+            scatter_defaults = {
+                "moe_gate"             : False,
+                "moe_ff"               : apply_passthrough,
+                "ff"                   : apply_passthrough,
+                "shared_experts"       : apply_passthrough,
+
+                "double_img_io"        : apply_passthrough,
+                "double_img_norm0"     : apply_passthrough,
+                "double_img_attn"      : apply_passthrough,
+                "double_img_norm1"     : apply_passthrough,
+                "double_img_attn_gated": apply_passthrough,
+                "double_img"           : apply_passthrough,
+                "double_img_ff_i"      : apply_passthrough,
+
+                "double_txt_io"        : apply_passthrough,
+                "double_txt_norm0"     : apply_passthrough,
+                "double_txt_attn"      : apply_passthrough,
+                "double_txt_attn_gated": apply_passthrough,
+                "double_txt"           : apply_passthrough,
+                "double_txt_norm1"     : apply_passthrough,
+                "double_txt_ff_t"      : apply_passthrough,
+
+                "single_img_io"        : apply_passthrough,
+                "single_img_norm0"     : apply_passthrough,
+                "single_img_attn"      : apply_passthrough,
+                "single_img_attn_gated": apply_passthrough,
+                "single_img"           : apply_passthrough,
+                "single_img_norm1"     : apply_passthrough,
+                "single_img_ff_i"      : apply_passthrough,
+                
+                "attn_img_q_norm"      : apply_passthrough,
+                "attn_img_k_norm"      : apply_passthrough,
+                "attn_img_v_norm"      : apply_passthrough,
+                "attn_txt_q_norm"      : apply_passthrough,
+                "attn_txt_k_norm"      : apply_passthrough,
+                "attn_txt_v_norm"      : apply_passthrough,
+                "attn_img_single"      : apply_passthrough,
+                "attn_img_double"      : apply_passthrough,
+                "attn_txt_double"      : apply_passthrough,
+            }
+            
+            if sort_and_scatter['mode'] == "AdaIN":
+                scattersort_method = apply_adain_embed
+            else:
+                scattersort_method = ScatterSort.batch_apply
+            
+            for key in sort_and_scatter:
+                if sort_and_scatter.get(key, False):
+                    scatter_defaults[key] = scattersort_method
+            
+            HDModel.moe_gate              = scatter_defaults["moe_gate"] != apply_passthrough
+            HDModel.moe_ff                = scatter_defaults["moe_ff"]
+            HDModel.ff                    = scatter_defaults["ff"]
+            HDModel.shared_experts        = scatter_defaults["shared_experts"]
+
+            HDModel.double_img_io         = scatter_defaults["double_img_io"]
+            HDModel.double_img_norm0      = scatter_defaults["double_img_norm0"]
+            HDModel.double_img_attn       = scatter_defaults["double_img_attn"]
+            HDModel.double_img_norm1      = scatter_defaults["double_img_norm1"]
+            HDModel.double_img_attn_gated = scatter_defaults["double_img_attn_gated"]
+            HDModel.double_img            = scatter_defaults["double_img"]
+            HDModel.double_img_ff_i       = scatter_defaults["double_img_ff_i"]
+
+            HDModel.double_txt_io         = scatter_defaults["double_txt_io"]
+            HDModel.double_txt_norm0      = scatter_defaults["double_txt_norm0"]
+            HDModel.double_txt_attn       = scatter_defaults["double_txt_attn"]
+            HDModel.double_txt_attn_gated = scatter_defaults["double_txt_attn_gated"]
+            HDModel.double_txt            = scatter_defaults["double_txt"]
+            HDModel.double_txt_norm1      = scatter_defaults["double_txt_norm1"]
+            HDModel.double_txt_ff_t       = scatter_defaults["double_txt_ff_t"]
+
+            HDModel.single_img_io         = scatter_defaults["single_img_io"]
+            HDModel.single_img_norm0      = scatter_defaults["single_img_norm0"]
+            HDModel.single_img_attn       = scatter_defaults["single_img_attn"]
+            HDModel.single_img_attn_gated = scatter_defaults["single_img_attn_gated"]
+            HDModel.single_img            = scatter_defaults["single_img"]
+            HDModel.single_img_norm1      = scatter_defaults["single_img_norm1"]
+            HDModel.single_img_ff_i       = scatter_defaults["single_img_ff_i"]
+            
+            HDModel.attn_img_q_norm       = scatter_defaults["attn_img_q_norm"]
+            HDModel.attn_img_k_norm       = scatter_defaults["attn_img_k_norm"]
+            HDModel.attn_img_v_norm       = scatter_defaults["attn_img_v_norm"]
+            HDModel.attn_txt_q_norm       = scatter_defaults["attn_txt_q_norm"]
+            HDModel.attn_txt_k_norm       = scatter_defaults["attn_txt_k_norm"]
+            HDModel.attn_txt_v_norm       = scatter_defaults["attn_txt_v_norm"]
+            HDModel.attn_img_single       = scatter_defaults["attn_img_single"]
+            HDModel.attn_img_double       = scatter_defaults["attn_img_double"]
+            HDModel.attn_txt_double       = scatter_defaults["attn_txt_double"]
+
+            
+            
         elif y0_adain is not None:
             y0_adain            = y0_adain.to(x)
             img_y0_adain        = comfy.ldm.common_dit.pad_to_patch_size(y0_adain, (self.patch_size, self.patch_size))
@@ -917,11 +1028,15 @@ class HDModel(nn.Module):
         
         y0_attninj = transformer_options.get("y0_attninj")
         if y0_attninj is not None:
-            x_init                = transformer_options.get("x_init").to(x)   # initial noise and/or image+noise from start of rk_sampler_beta() 
+            #x_init                = transformer_options.get("x_init").to(x)   # initial noise and/or image+noise from start of rk_sampler_beta() 
             y0_attninj            = y0_attninj.to(x)
-            y0_attninj            = (1-SIGMA) * y0_attninj + SIGMA * x_init
+            #y0_attninj            = (1-SIGMA) * y0_attninj + SIGMA * x_init
+            
+            SIGMA_ATTNINJ         = SIGMA * EO("eps_attninj_sigma_factor", 1.0)
+            y0_attninj            = (1-SIGMA_ATTNINJ) * y0_attninj + SIGMA_ATTNINJ * x_init
             img_y0_attninj        = comfy.ldm.common_dit.pad_to_patch_size(y0_attninj, (self.patch_size, self.patch_size))
             t_y0_attninj          = t[0].unsqueeze(0).clone() #torch.full_like(t, 0.0)[0].unsqueeze(0)
+            t_y0_attninj         *= EO("eps_attninj_sigma_factor", 1.0)
             blocks_attninj        = transformer_options.get("blocks_attninj")
             blocks_attninj_qkv    = transformer_options.get("blocks_attninj_qkv")
             ATTNINJ_SINGLE_BLOCKS = blocks_attninj['single_blocks']
@@ -932,9 +1047,6 @@ class HDModel(nn.Module):
         else:
             IDENTICAL_ADAIN_ATTNINJ = False
 
-            
-            
-            
         img_orig, t_orig, y_orig, context_orig, llama3_orig = clone_inputs(img, t, y, context, encoder_hidden_states_llama3)
         if y0_adain is not None:
             img_y0_adain_orig, t_y0_adain_orig = clone_inputs(img_y0_adain, t_y0_adain)
@@ -953,7 +1065,6 @@ class HDModel(nn.Module):
         freqsep_lowpass_weight = transformer_options.get("freqsep_lowpass_weight")
         freqsep_highpass_weight= transformer_options.get("freqsep_highpass_weight")
         freqsep_mask           = transformer_options.get("freqsep_mask")
-        
         
         #floor     = min(floor, weight)
         mask_zero = None
@@ -1048,28 +1159,7 @@ class HDModel(nn.Module):
             t    = self.t_embedder      (t,      img.dtype)
             clip = t + self.p_embedder(y)
             
-            if y0_adain is not None and img_sizes_y0_adain is None:
-                #t_y0_adain = t_orig[0].unsqueeze(0).clone() # torch.full_like(t_orig, 10.0)[0].unsqueeze(0)
-                
-                t_y0_adain    = self.expand_timesteps(t_y0_adain, bsz, img.device)
-                t_y0_adain    = self.t_embedder      (t_y0_adain,      img.dtype)
-                y = y_orig.clone()[0].unsqueeze(0)
-                clip_y0_adain = t_y0_adain + self.p_embedder(y)   
-
-            if y0_attninj is not None and img_sizes_y0_attninj is None:
-                #t_y0_attninj = t_orig[0].unsqueeze(0).clone() # torch.full_like(t_orig, 10.0)[0].unsqueeze(0)
-                
-                t_y0_attninj    = self.expand_timesteps(t_y0_attninj, bsz, img.device)
-                t_y0_attninj    = self.t_embedder      (t_y0_attninj,      img.dtype)
-                y = y_orig.clone()[0].unsqueeze(0)
-                clip_y0_attninj = t_y0_attninj + self.p_embedder(y)   
-
-            if EO("adain_swap_clip"):
-                clip_y0_adain = clip.clone()
-                clip_y0_attninj = clip.clone()
-
             img_sizes = None
-            #img_prepatchify = img.clone()
             img, img_masks, img_sizes = self.patchify(img, self.max_seq, img_sizes)   # for 1024x1024: output is   1,4096,64   None   [[64,64]]     hidden_states rearranged not shrunk, patch_size 1x1???
             if img_masks is None:
                 pH, pW          = img_sizes[0]
@@ -1078,8 +1168,6 @@ class HDModel(nn.Module):
                 img_ids[..., 2] = img_ids[..., 2] + torch.arange(pW, device=img.device)[None, :]
                 img_ids         = repeat(img_ids, "h w c -> b (h w) c", b=bsz)
             img = self.x_embedder(img)
-                
-
 
             if y0_adain is not None and img_sizes_y0_adain is None: #and not UNCOND 
                 img_sizes_y0_adain = None
@@ -1103,21 +1191,15 @@ class HDModel(nn.Module):
                     img_ids_y0_attninj         = repeat(img_ids_y0_attninj, "h w c -> b (h w) c", b=bsz)
                 img_y0_attninj = self.x_embedder(img_y0_attninj)  # hidden_states 1,4032,2560         for 1024x1024: -> 1,4096,2560      ,64 -> ,2560 (x40)
             
-            
-            #contexts_orig = self.prepare_contexts(llama3_orig, context_orig, bsz, img.shape[-1])
             contexts = self.prepare_contexts(llama3, context, bsz, img.shape[-1])
 
             # txt_ids -> 1,414,3
             txt_ids = torch.zeros(bsz,   contexts[-1].shape[1] + contexts[-2].shape[1] + contexts[0].shape[1],     3,    device=img_ids.device, dtype=img_ids.dtype)
-            ids     = torch.cat((img_ids, txt_ids), dim=1)   # ids -> 1,4446,3
+            ids     = torch.cat((img_ids, txt_ids), dim=-2)   # ids -> 1,4446,3
             rope    = self.pe_embedder(ids)                  # rope -> 1, 4446, 1, 64, 2, 2
 
-            # 2. Blocks
-            #txt_init_orig     = torch.cat([contexts_orig[-1], contexts_orig[-2]], dim=1)     # shape[1] == 128, 143       then on another step/call it's 128, 128...??? cuz the contexts is now 1,128,2560
-            #txt_init_len_orig = txt_init_orig.shape[1]                                       # 271
-            
-            txt_init     = torch.cat([contexts[-1], contexts[-2]], dim=1)     # shape[1] == 128, 143       then on another step/call it's 128, 128...??? cuz the contexts is now 1,128,2560
-            txt_init_len = txt_init.shape[1]                                       # 271
+            txt_init     = torch.cat([contexts[-1], contexts[-2]], dim=-2)     # shape[1] == 128, 143       then on another step/call it's 128, 128...??? cuz the contexts is now 1,128,2560
+            txt_init_len = txt_init.shape[-2]                                       # 271
 
             if mask is not None and self.manual_mask is None:
                 #txt_offset = transformer_options['AttnMask'].text_len // 3 // transformer_options['AttnMask'].num_regions
@@ -1135,65 +1217,20 @@ class HDModel(nn.Module):
                     txt_init_list.append(contexts[-2][:,offset_llama_start:offset_llama_end,:])
                     offset_llama_start = offset_llama_end
                 
-                txt_init = torch.cat(txt_init_list, dim=1)  #T5,LLAMA3 (last block)
-                txt_init_len = txt_init.shape[1]     
+                txt_init = torch.cat(txt_init_list, dim=-2)  #T5,LLAMA3 (last block)
+                txt_init_len = txt_init.shape[-2]
 
-            img_len = img.shape[1]
+            img_len = img.shape[-2]
             
-            #if STYLE_UNCOND == UNCOND and img_y0_adain is not None:
-            if img_y0_adain is not None:
-                txt_init_y0_adain = txt_init.clone()
-            #if STYLE_UNCOND == UNCOND and img_y0_attninj is not None:
-            if img_y0_attninj is not None:
-                txt_init_y0_attninj = txt_init.clone()
+            if y0_adain is not None:
+                img      = torch.cat([img,      img_y0_adain], dim=0)
+                txt_init = torch.cat([txt_init, txt_init], dim=0)
             
             for bid, block in enumerate(self.double_stream_blocks):                                                              # len == 16
                 txt_llama = contexts[bid]
-                txt       = torch.cat([txt_init, txt_llama], dim=1)        # 1,384,2560       # cur_contexts = T5, LLAMA3 (last block), LLAMA3 (current block)
-
-                #txt_llama_orig = contexts_orig[bid]
-                #txt_orig       = torch.cat([txt_init_orig, txt_llama_orig], dim=1)        # 1,384,2560       # cur_contexts = T5, LLAMA3 (last block), LLAMA3 (current block)
-
-                
-                #if (bid == 0 or EO("eps_adain_first")) and img_y0_adain is not None:
-                if EO("eps_adain_first") and img_y0_adain is not None:
-                    if IDENTICAL_ADAIN_ATTNINJ:
-                        img_y0_adain      = img_y0_attninj
-                        txt_init_y0_adain = txt_init_y0_attninj
-                    else:
-                        txt_y0_adain                    = torch.cat([txt_init_y0_adain, txt_llama], dim=1)
-                        #img_y0_adain, txt_init_y0_adain = block(img_y0_adain, img_masks, txt_y0_adain, clip_y0_adain, rope, mask)
-                        #txt_init_y0_adain               = txt_init_y0_adain[:, :txt_init_len]
-                    
-                    if bid in ADAIN_DOUBLE_BLOCKS:
-                        adaweight = blocks_adain['double_weights'][bid]
-
-                        img_y0_adain_txt = txt_init_y0_adain[:, :txt_init_len]
-                        img_y0_adain_img = img_y0_adain[:,:img_len]
-                        
-                        img_txt = txt_init[:, :txt_init_len]
-                        img_img = img[:,:img_len]
-                        
-                        if EO("eps_adain_scattersort"):
-                            if not EO("eps_adain_skip_txt"):
-                                txt_init = (1-adaweight) * img_txt + adaweight * ScatterSort.apply(img_txt, img_y0_adain_txt)
-                            img      = (1-adaweight) * img_img + adaweight * ScatterSort.apply(img_img, img_y0_adain_img)
-                        elif EO("eps_adain_WCT"):
-                            if not EO("eps_adain_skip_txt"):
-                                self.StyleWCT.set(img_y0_adain_txt)
-                                txt_init = (1-adaweight) * img_txt + adaweight * self.StyleWCT.get(img_txt)
-                            
-                            self.StyleWCT.set(img_y0_adain_img)
-                            img = (1-adaweight) * img_img + adaweight * self.StyleWCT.get(img_img)
-                        else:
-                            if not EO("eps_adain_skip_txt"):
-                                txt_init = (1-adaweight) * img_txt + adaweight * adain_seq(img_txt, img_y0_adain_txt)
-                            img      = (1-adaweight) * img_img + adaweight * adain_seq(img_img, img_y0_adain_img)
-                            
-                    img_y0_adain, txt_init_y0_adain = block(img_y0_adain, img_masks, txt_y0_adain, clip_y0_adain, rope, mask, CACHE_ATTN=EO("eps_adain_cache_attn"))
-                    txt_init_y0_adain               = txt_init_y0_adain[:, :txt_init_len]
-                    
-                        #img = img + (1-SIGMA) * adaweight * (adain_seq(img, img_y0_adain) - img)
+                if y0_adain is not None:
+                    txt_llama = torch.cat([txt_llama, txt_llama], dim=0)
+                txt = torch.cat([txt_init, txt_llama], dim=-2)        # 1,384,2560       # cur_contexts = T5, LLAMA3 (last block), LLAMA3 (current block)
 
                 if   weight > 0 and mask is not None and     weight  <      bid/48:
                     img, txt_init = block(img, img_masks, txt, clip, rope, mask_zero)
@@ -1219,137 +1256,26 @@ class HDModel(nn.Module):
                     img, txt_init = block(img, img_masks, txt, clip, rope, mask, update_cross_attn=update_cross_attn)
                     
                 else:
-                    #if STYLE_UNCOND == UNCOND and img_y0_attninj is not None:
-                    if img_y0_attninj is not None:
-                        cache_v = False
-                        if bid in ATTNINJ_DOUBLE_BLOCKS:
-                            cache_v = True
-                        
-                        scale = blocks_attninj['double_weights'][bid]
-                        blocks_attninj_qkv_scaled = {k: v * scale for k, v in blocks_attninj_qkv.items()}
-                        txt_y0_attninj                      = torch.cat([txt_init_y0_attninj, txt_llama], dim=1)
-                        img_y0_attninj, txt_init_y0_attninj = block(img_y0_attninj, img_masks, txt_y0_attninj, clip_y0_attninj, rope, mask, cache_v=cache_v, attninj_opts=blocks_attninj_qkv_scaled)
-                        txt_init_y0_attninj                 = txt_init_y0_attninj[:, :txt_init_len]
-                    
-                    img, txt_init = block(img, img_masks, txt, clip, rope, mask, update_cross_attn=update_cross_attn, attninj_opts=blocks_attninj_qkv_scaled)
+                    img, txt_init = block(img, img_masks, txt, clip, rope, mask, update_cross_attn=update_cross_attn, attninj_opts=blocks_attninj_qkv)
 
-                    #if STYLE_UNCOND == UNCOND and img_y0_adain is not None:
-                    if False: #EO("eps_adain_first") and img_y0_adain is not None:
-                        img_y0_adain, txt_init_y0_adain = block(img_y0_adain, img_masks, txt_y0_adain, clip_y0_adain, rope, mask)
-                        txt_init_y0_adain               = txt_init_y0_adain[:, :txt_init_len]
-                    if not EO("eps_adain_first") and img_y0_adain is not None:
-                        if IDENTICAL_ADAIN_ATTNINJ:
-                            img_y0_adain      = img_y0_attninj
-                            txt_init_y0_adain = txt_init_y0_attninj
-                        else:
-                            txt_y0_adain                    = torch.cat([txt_init_y0_adain, txt_llama], dim=1)
-                            img_y0_adain, txt_init_y0_adain = block(img_y0_adain, img_masks, txt_y0_adain, clip_y0_adain, rope, mask, CACHE_ATTN=EO("eps_adain_cache_attn"))
-                            txt_init_y0_adain               = txt_init_y0_adain[:, :txt_init_len]
-                        
-                        if bid in ADAIN_DOUBLE_BLOCKS:
-                            adaweight = blocks_adain['double_weights'][bid]
+                txt_init = txt_init[..., :txt_init_len, :]
 
-                            img_y0_adain_txt = txt_init_y0_adain[:, :txt_init_len]
-                            img_y0_adain_img = img_y0_adain[:,:img_len]
-                            
-                            img_txt = txt_init[:, :txt_init_len]
-                            img_img = img[:,:img_len]
-                            
-                            if EO("eps_adain_scattersort"):
-                                if not EO("eps_adain_skip_txt"):
-                                    txt_init = (1-adaweight) * img_txt + adaweight * ScatterSort.apply(img_txt, img_y0_adain_txt)
-                                img      = (1-adaweight) * img_img + adaweight * ScatterSort.apply(img_img, img_y0_adain_img)
-                            elif EO("eps_adain_WCT"):
-                                if not EO("eps_adain_skip_txt"):
-                                    self.StyleWCT.set(img_y0_adain_txt)
-                                    txt_init = (1-adaweight) * img_txt + adaweight * self.StyleWCT.get(img_txt)
-                                
-                                self.StyleWCT.set(img_y0_adain_img)
-                                img = (1-adaweight) * img_img + adaweight * self.StyleWCT.get(img_img)
-                            else:
-                                if not EO("eps_adain_skip_txt"):
-                                    txt_init = (1-adaweight) * img_txt + adaweight * adain_seq(img_txt, img_y0_adain_txt)
-                                img      = (1-adaweight) * img_img + adaweight * adain_seq(img_img, img_y0_adain_img)
-                            
-                            #img = img + (1-SIGMA) * adaweight * (adain_seq(img, img_y0_adain) - img)
+            img_len = img.shape[-2]
+            img     = torch.cat([img, txt_init], dim=-2)   # 4032 + 271 -> 4303     # txt embed from double stream block
 
-                txt_init = txt_init[:, :txt_init_len]
-
-            img_len = img.shape[1]
-            img     = torch.cat([img, txt_init], dim=1)   # 4032 + 271 -> 4303     # txt embed from double stream block
-            
-            #if STYLE_UNCOND == UNCOND and y0_adain is not None:
-            if y0_adain is not None:
-                img_y0_adain = torch.cat([img_y0_adain, txt_init_y0_adain], dim=1)
-            #if STYLE_UNCOND == UNCOND and y0_attninj is not None:
-            if y0_attninj is not None:
-                img_y0_attninj = torch.cat([img_y0_attninj, txt_init_y0_attninj], dim=1)
-            
-            joint_len = img.shape[1]
+            joint_len = img.shape[-2]
             
             if img_masks is not None:
-                img_masks_ones = torch.ones( (bsz, txt_init.shape[1] + txt_llama.shape[1]), device=img_masks.device, dtype=img_masks.dtype)   # encoder_attention_mask_ones=   padding for txt embed concatted onto end of img
-                img_masks      = torch.cat([img_masks, img_masks_ones], dim=1)
+                img_masks_ones = torch.ones( (bsz, txt_init.shape[-2] + txt_llama.shape[-2]), device=img_masks.device, dtype=img_masks.dtype)   # encoder_attention_mask_ones=   padding for txt embed concatted onto end of img
+                img_masks      = torch.cat([img_masks, img_masks_ones], dim=-2)
             
             # SINGLE STREAM
             for bid, block in enumerate(self.single_stream_blocks): # len == 32
                 txt_llama = contexts[bid+16]                        # T5 pre-embedded for single stream blocks
+                if y0_adain is not None:
+                    txt_llama = torch.cat([txt_llama, txt_llama], dim=0)
                 img = torch.cat([img, txt_llama], dim=1)            # cat img,txt     opposite of flux which is txt,img       4303 + 143 -> 4446
-                
-                if False: #eight != 0:
-                    mask = AttnMask.gen_edge_mask(bid+16)
-                    
-                #if STYLE_UNCOND == UNCOND and img_y0_adain is not None:
-                if EO("eps_adain_first") and img_y0_adain is not None:
-                    if IDENTICAL_ADAIN_ATTNINJ:
-                        img_y0_adain = img_y0_attninj
-                    else:
-                        img_y0_adain = torch.cat([img_y0_adain, txt_llama], dim=1)   
-                        #img_y0_adain = block(img_y0_adain, img_masks, None, clip_y0_adain, rope, mask)
-                        #img_y0_adain = img_y0_adain[:, :joint_len]
-                    
-                    if bid in ADAIN_SINGLE_BLOCKS:
-                        adaweight = blocks_adain['single_weights'][bid]
-                        
-                        img_y0_adain_txt = img_y0_adain[:,img_len:]
-                        img_y0_adain_img = img_y0_adain[:,:img_len]
-                        
-                        img_txt = img[:,img_len:]
-                        img_img = img[:,:img_len]
-                        
-                        if EO("eps_adain_scattersort"):
-                            if EO("eps_adain_joint"):
-                                img = (1-adaweight) * img + adaweight * ScatterSort.apply(img, img_y0_adain)
-                            else:
-                                if not EO("eps_adain_skip_txt"):
-                                    img_txt = (1-adaweight) * img_txt + adaweight * ScatterSort.apply(img_txt, img_y0_adain_txt)
-                                img_img = (1-adaweight) * img_img + adaweight * ScatterSort.apply(img_img, img_y0_adain_img)
-                        elif EO("eps_adain_WCT"):
-                            if EO("eps_adain_joint"):
-                                self.StyleWCT.set(img_y0_adain)
-                                img = (1-adaweight) * img + adaweight * self.StyleWCT.get(img)
-                            else:
-                                if not EO("eps_adain_skip_txt"):
-                                    self.StyleWCT.set(img_y0_adain_txt)
-                                    img_txt = (1-adaweight) * img_txt + adaweight * self.StyleWCT.get(img_txt)
-                                
-                                self.StyleWCT.set(img_y0_adain_img)
-                                img_img = (1-adaweight) * img_img + adaweight * self.StyleWCT.get(img_img)
-                        else:
-                            if EO("eps_adain_joint"):
-                                img = (1-adaweight) * img + adaweight * adain_seq(img, img_y0_adain)
-                            else:
-                                if not EO("eps_adain_skip_txt"):
-                                    img_txt = (1-adaweight) * img_txt + adaweight * adain_seq(img_txt, img_y0_adain_txt)
-                                img_img = (1-adaweight) * img_img + adaweight * adain_seq(img_img, img_y0_adain_img)
-                        
-                        if not EO("eps_adain_joint"):
-                            img = torch.cat([img_img, img_txt], dim=-2)
-                            
-                    img_y0_adain = block(img_y0_adain, img_masks, None, clip_y0_adain, rope, mask, CACHE_ATTN=EO("eps_adain_cache_attn"))
-                    img_y0_adain = img_y0_adain[:, :joint_len]
 
-                        
                 if   weight > 0 and mask is not None and     weight  <      (bid+16)/48:
                     img = block(img, img_masks, None, clip, rope, mask_zero)
                     
@@ -1367,87 +1293,22 @@ class HDModel(nn.Module):
                     img = block(img, img_masks, None, clip, rope, mask_tmp)
                     
                 else:
-                    #if STYLE_UNCOND == UNCOND and img_y0_attninj is not None:
-                    if img_y0_attninj is not None:
-                        cache_v = False
-                        if bid in ATTNINJ_SINGLE_BLOCKS:
-                            cache_v = True
-                        
-                        scale = blocks_attninj['single_weights'][bid]
-                        blocks_attninj_qkv_scaled = {k: v * scale for k, v in blocks_attninj_qkv.items()}
-                        img_y0_attninj = torch.cat([img_y0_attninj, txt_llama], dim=1)   
-                        img_y0_attninj = block(img_y0_attninj, img_masks, None, clip_y0_attninj, rope, mask, cache_v=cache_v, attninj_opts=blocks_attninj_qkv_scaled)
-                        img_y0_attninj = img_y0_attninj[:, :joint_len]
+                    img = block(img, img_masks, None, clip, rope, mask, attninj_opts=blocks_attninj_qkv)
 
-                    img = block(img, img_masks, None, clip, rope, mask, attninj_opts=blocks_attninj_qkv_scaled)
-
-                img = img[:, :joint_len]   # slice off txt_llama
+                img = img[..., :joint_len, :]   # slice off txt_llama
                 
-                #if STYLE_UNCOND == UNCOND and img_y0_adain is not None:
-                if False: #EO("eps_adain_first") and img_y0_adain is not None:
-                    img_y0_adain = block(img_y0_adain, img_masks, None, clip_y0_adain, rope, mask)
-                    img_y0_adain = img_y0_adain[:, :joint_len]
-                if not EO("eps_adain_first") and img_y0_adain is not None:
-                    if IDENTICAL_ADAIN_ATTNINJ:
-                        img_y0_adain = img_y0_attninj
-                    else:
-                        img_y0_adain = torch.cat([img_y0_adain, txt_llama], dim=1)   
-                        img_y0_adain = block(img_y0_adain, img_masks, None, clip_y0_adain, rope, mask, CACHE_ATTN=EO("eps_adain_cache_attn"))
-                        img_y0_adain = img_y0_adain[:, :joint_len]
-                    
-                    if bid in ADAIN_SINGLE_BLOCKS:
-                        adaweight = blocks_adain['single_weights'][bid]
-                        
-                        img_y0_adain_txt = img_y0_adain[:,img_len:]
-                        img_y0_adain_img = img_y0_adain[:,:img_len]
-                        
-                        img_txt = img[:,img_len:]
-                        img_img = img[:,:img_len]
-                        
-                        if EO("eps_adain_scattersort"):
-                            if EO("eps_adain_joint"):
-                                img = (1-adaweight) * img + adaweight * ScatterSort.apply(img, img_y0_adain)
-                            else:
-                                if not EO("eps_adain_skip_txt"):
-                                    img_txt = (1-adaweight) * img_txt + adaweight * ScatterSort.apply(img_txt, img_y0_adain_txt)
-                                img_img = (1-adaweight) * img_img + adaweight * ScatterSort.apply(img_img, img_y0_adain_img)
-                        elif EO("eps_adain_WCT"):
-                            if EO("eps_adain_joint"):
-                                self.StyleWCT.set(img_y0_adain)
-                                img = (1-adaweight) * img + adaweight * self.StyleWCT.get(img)
-                            else:
-                                if not EO("eps_adain_skip_txt"):
-                                    self.StyleWCT.set(img_y0_adain_txt)
-                                    img_txt = (1-adaweight) * img_txt + adaweight * self.StyleWCT.get(img_txt)
-                                
-                                self.StyleWCT.set(img_y0_adain_img)
-                                img_img = (1-adaweight) * img_img + adaweight * self.StyleWCT.get(img_img)
-                        else:
-                            if EO("eps_adain_joint"):
-                                img = (1-adaweight) * img + adaweight * adain_seq(img, img_y0_adain)
-                            else:
-                                if not EO("eps_adain_skip_txt"):
-                                    img_txt = (1-adaweight) * img_txt + adaweight * adain_seq(img_txt, img_y0_adain_txt)
-                                img_img = (1-adaweight) * img_img + adaweight * adain_seq(img_img, img_y0_adain_img)
-                        
-                        if not EO("eps_adain_joint"):
-                            img = torch.cat([img_img, img_txt], dim=-2)
-
-                        #img = img + (1-SIGMA) * adaweight * (adain_seq(img, img_y0_adain) - img)
+            img = img[..., :img_len, :]
             
-            img = img[:, :img_len, ...]
-            
-            img_pre_final.append(img)
+            if y0_adain is not None:
+                img = img[0].unsqueeze(0)
             
             img = self.final_layer(img, clip)   # 4096,2560 -> 4096,64
             img = self.unpatchify (img, img_sizes)
             
             out_list.append(img)
             
-            
         output = torch.stack(out_list, dim=0).squeeze(dim=1)
 
-        
         eps = -output[:, :, :h, :w]
         
         
