@@ -870,6 +870,9 @@ class ReHiDreamPatcherAdvanced:
 
                 block.block.attn1.__class__ = HDAttention
                 block.block.ff_i.__class__  = HDMOEFeedForwardSwiGLU
+                block.block.ff_i.shared_experts.__class__ = HDFeedForwardSwiGLU
+                for j in range(len(block.block.ff_i.experts)):
+                    block.block.ff_i.experts[j].__class__ = HDFeedForwardSwiGLU
                 block.block.ff_i.gate.__class__ = HDMoEGate
                 
                 block.block.attn1.single_stream = True

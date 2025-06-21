@@ -513,11 +513,11 @@ def invert_conv2d(
 
 
 
-def adain_seq_inplace(content: torch.Tensor, style: torch.Tensor, eps: float = 1e-7) -> torch.Tensor:
-    mean_c = content.mean(1, keepdim=True)
-    std_c  = content.std (1, keepdim=True).add_(eps)  # in-place add
-    mean_s = style.mean  (1, keepdim=True)
-    std_s  = style.std   (1, keepdim=True).add_(eps)
+def adain_seq_inplace(content: torch.Tensor, style: torch.Tensor, dim=1, eps: float = 1e-7) -> torch.Tensor:
+    mean_c = content.mean(dim, keepdim=True)
+    std_c  = content.std (dim, keepdim=True).add_(eps)  # in-place add
+    mean_s = style.mean  (dim, keepdim=True)
+    std_s  = style.std   (dim, keepdim=True).add_(eps)
 
     content.sub_(mean_c).div_(std_c).mul_(std_s).add_(mean_s)  # in-place chain
     return content
