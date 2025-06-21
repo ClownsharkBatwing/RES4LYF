@@ -960,8 +960,7 @@ class HDModel(nn.Module):
                 x_init = noise_prediction
             elif noise_mode_adain == "bonanza":
                 x_init = torch.randn_like(x_init)
-                
-            noise_mode_adain = ""
+            
             y0_adain = transformer_options.get("y0_adain")
             if y0_adain is not None:
                 
