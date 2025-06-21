@@ -186,7 +186,7 @@ class HDMoEGate(nn.Module):
         self.weight           = nn.Parameter(torch.empty((self.n_routed_experts, self.gating_dim), dtype=dtype, device=device))
 
     def forward(self, x):
-        x      = x.view(-1, x.shape[-1]) # 4032,2560    # below is just matmul... hidden_states @ self.weight.T
+        #x      = x.view(-1, x.shape[-1]) # 4032,2560    # below is just matmul... hidden_states @ self.weight.T
         logits = F.linear(x, comfy.model_management.cast_to(self.weight, dtype=x.dtype, device=x.device), None)
         scores = logits.softmax(dim=-1)       # logits.shape == 4032,4   scores.shape == 4032,4
         return torch.topk(scores, k=self.top_k, dim=-1, sorted=False)
@@ -214,28 +214,22 @@ class HDMOEFeedForwardSwiGLU(nn.Module):
         topk_weight, topk_idx = self.gate(x) # -> 4096,2   4096,2
         
         if y_shared.shape[0] > 1 and HDModel.moe_gate:
-            topk_weight[:,0] = topk_weight[:,1]
-            flat_topk_idx = topk_idx[:,1].repeat(x.shape[0])
-        else:
-            flat_topk_idx = topk_idx.view(-1) # -> 8192,
+            topk_weight[0] = topk_weight[1]
+            topk_idx   [0] = topk_idx   [1]
+        tk_idx_flat = topk_idx.view(topk_idx.shape[0], -1) 
+        x_rep = x.repeat_interleave(self.num_activated_experts, dim=-2)
         
-        x = x.repeat_interleave(self.num_activated_experts, dim=-2)
-        
-        x = x.view(-1, x.shape[-1]) # -> 4096,2560
-        #x = x.repeat_interleave(self.num_activated_experts, dim=0) # -> 8192,2560
-        
-        y = torch.empty_like(x)
+        y = torch.empty_like(x_rep)
         for i, expert in enumerate(self.experts):
-            
-            y[flat_topk_idx==i]  = expert(x[flat_topk_idx==i]).to(x.dtype)
+            y[tk_idx_flat==i,:] = expert(x_rep[tk_idx_flat==i,:]).to(x.dtype)
 
-        y = torch.einsum('bk,bkd->bd', topk_weight, y.view(*topk_weight.shape, -1))
+        y_sum = torch.einsum('abk,abkd->abd', topk_weight, y.view(*topk_weight.shape, -1))
         
-        y = y.view_as(y_shared) + y_shared
+        y_sum = y_sum.view_as(y_shared) + y_shared
 
-        y = HDModel.moe_ff(y)
+        y_sum = HDModel.moe_ff(y_sum)
         
-        return y
+        return y_sum
 
 
 class ScatterSort:
@@ -864,32 +858,11 @@ class HDModel(nn.Module):
         if EO is not None:
             EO.mute = True
         
-        HDModel.sort_moe_gate              = EO("sort_moe_gate")
-        HDModel.sort_moe_ff                = EO("sort_moe_ff")
-        HDModel.sort_ff                    = EO("sort_ff")
-        HDModel.sort_double_img_norm0      = EO("sort_double_img_norm0")
-        HDModel.sort_double_img_attn       = EO("sort_double_img_attn")
-        HDModel.sort_double_img_norm1      = EO("sort_double_img_norm1")
-        HDModel.sort_double_img_attn_gated = EO("sort_double_img_attn_gated")
-        HDModel.sort_double_img            = EO("sort_double_img")
-        HDModel.sort_double_img_ff_i       = EO("sort_double_img_ff_i")
-        HDModel.sort_double_txt_norm0      = EO("sort_double_txt_norm0")
-        HDModel.sort_double_txt_attn       = EO("sort_double_txt_attn")
-        HDModel.sort_double_txt_attn_gated = EO("sort_double_txt_attn_gated")
-        HDModel.sort_double_txt            = EO("sort_double_txt")
-        HDModel.sort_double_txt_norm1      = EO("sort_double_txt_norm1")
-        HDModel.sort_double_txt_ff_t       = EO("sort_double_txt_ff_t")
-        HDModel.sort_single_img_norm0      = EO("sort_single_img_norm0")
-        HDModel.sort_single_img_attn       = EO("sort_single_img_attn") 
-        HDModel.sort_single_img_attn_gated = EO("sort_single_img_attn_gated")
-        HDModel.sort_single_img            = EO("sort_single_img") 
-        HDModel.sort_single_img_norm1      = EO("sort_single_img_norm1")
-        HDModel.sort_single_img_ff_i       = EO("sort_single_img_ff_i")
-        
         for block in self.double_stream_blocks:
             block.block.attn1.EO = EO
         for block in self.single_stream_blocks:
             block.block.attn1.EO = EO
+            
         self.style_dtype = torch.float32 if self.style_dtype is None else self.style_dtype
         ADAIN_SINGLE_BLOCKS,   ADAIN_DOUBLE_BLOCKS   = [-1], [-1]
         ATTNINJ_SINGLE_BLOCKS, ATTNINJ_DOUBLE_BLOCKS = [-1], [-1]
@@ -914,7 +887,7 @@ class HDModel(nn.Module):
             x_init = transformer_options.get('x_init').to(x)
 
         y0_adain = transformer_options.get("y0_adain")
-        if EO("eps_adain") and y0_adain is not None:
+        if y0_adain is not None:
             #x_init              = transformer_options.get("x_init").to(x)   # initial noise and/or image+noise from start of rk_sampler_beta() 
             y0_adain            = y0_adain.to(x)
             SIGMA_ADAIN         = SIGMA * EO("eps_adain_sigma_factor", 1.0)
@@ -977,7 +950,7 @@ class HDModel(nn.Module):
                 if sort_and_scatter.get(key, False):
                     scatter_defaults[key] = scattersort_method
             
-            HDModel.moe_gate              = scatter_defaults["moe_gate"] != apply_passthrough
+            HDModel.moe_gate              = scatter_defaults["moe_gate"]
             HDModel.moe_ff                = scatter_defaults["moe_ff"]
             HDModel.ff                    = scatter_defaults["ff"]
             HDModel.shared_experts        = scatter_defaults["shared_experts"]
@@ -1016,16 +989,6 @@ class HDModel(nn.Module):
             HDModel.attn_img_double       = scatter_defaults["attn_img_double"]
             HDModel.attn_txt_double       = scatter_defaults["attn_txt_double"]
 
-            
-            
-        elif y0_adain is not None:
-            y0_adain            = y0_adain.to(x)
-            img_y0_adain        = comfy.ldm.common_dit.pad_to_patch_size(y0_adain, (self.patch_size, self.patch_size))
-            t_y0_adain          = torch.full_like(t, 0.0)[0].unsqueeze(0)
-            blocks_adain        = transformer_options.get("blocks_adain")
-            ADAIN_SINGLE_BLOCKS = blocks_adain['single_blocks']
-            ADAIN_DOUBLE_BLOCKS = blocks_adain['double_blocks']
-        
         y0_attninj = transformer_options.get("y0_attninj")
         if y0_attninj is not None:
             #x_init                = transformer_options.get("x_init").to(x)   # initial noise and/or image+noise from start of rk_sampler_beta() 
@@ -1221,10 +1184,15 @@ class HDModel(nn.Module):
                 txt_init_len = txt_init.shape[-2]
 
             img_len = img.shape[-2]
-            
+            txt_init_orig = txt_init.clone()
             if y0_adain is not None:
                 img      = torch.cat([img,      img_y0_adain], dim=0)
-                txt_init = torch.cat([txt_init, txt_init], dim=0)
+                txt_init = torch.cat([txt_init, txt_init_orig], dim=0)
+                
+            if y0_attninj is not None and not IDENTICAL_ADAIN_ATTNINJ:
+                img      = torch.cat([img,      img_y0_attninj], dim=0)
+                txt_init = torch.cat([txt_init, txt_init_orig], dim=0)
+            del txt_init_orig
             
             for bid, block in enumerate(self.double_stream_blocks):                                                              # len == 16
                 txt_llama = contexts[bid]
@@ -1274,7 +1242,7 @@ class HDModel(nn.Module):
                 txt_llama = contexts[bid+16]                        # T5 pre-embedded for single stream blocks
                 if y0_adain is not None:
                     txt_llama = torch.cat([txt_llama, txt_llama], dim=0)
-                img = torch.cat([img, txt_llama], dim=1)            # cat img,txt     opposite of flux which is txt,img       4303 + 143 -> 4446
+                img = torch.cat([img, txt_llama], dim=-2)            # cat img,txt     opposite of flux which is txt,img       4303 + 143 -> 4446
 
                 if   weight > 0 and mask is not None and     weight  <      (bid+16)/48:
                     img = block(img, img_masks, None, clip, rope, mask_zero)
@@ -1307,7 +1275,8 @@ class HDModel(nn.Module):
             
             out_list.append(img)
             
-        output = torch.stack(out_list, dim=0).squeeze(dim=1)
+        #output = torch.stack(out_list, dim=0).squeeze(dim=-2)
+        output = torch.cat(out_list, dim=0)
 
         eps = -output[:, :, :h, :w]
         
