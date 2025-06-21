@@ -288,20 +288,24 @@ class ScatterSort:
         if denoised_embed.shape[0] == 1:
             return denoised_embed
         else:
-            y0_adain_embed = denoised_embed[1].unsqueeze(0)
-            denoised_embed = denoised_embed[0].unsqueeze(0)
+            style   = denoised_embed[1].unsqueeze(0)
+            content = denoised_embed[0].unsqueeze(0)
 
         buf = ScatterSort.buffer
-        buf['src_idx']    = denoised_embed.argsort(dim=-2)
-        buf['ref_sorted'], buf['ref_idx'] = y0_adain_embed.sort(dim=-2)
+        buf['src_idx']    = content.argsort(dim=-2)
+        buf['ref_sorted'], buf['ref_idx'] = style.sort(dim=-2)
 
-        denoised_embed = denoised_embed.scatter_(
+        content = content.scatter_(
             dim=-2, 
             index=buf['src_idx'], 
-            src=buf['ref_sorted'].expand_as(buf['ref_sorted'])       # expand_as itself??
+            src=buf['ref_sorted'], #.expand_as(buf['ref_sorted'])       # expand_as itself??
         )
         
-        return torch.cat([denoised_embed, y0_adain_embed], dim=0)
+        denoised_embed[0] = content
+        return denoised_embed
+        
+        
+        #return torch.cat([denoised_embed, y0_adain_embed], dim=0)
 
     @staticmethod
     def apply_adain_embed(content, eps: float = 1e-7) -> torch.Tensor:
@@ -1307,7 +1311,9 @@ class HDModel(nn.Module):
                 for bid, block in enumerate(self.double_stream_blocks):                                                              # len == 16
                     txt_llama = contexts[bid]
                     if y0_adain is not None and not HDModel.RECON_MODE:
-                        txt_llama = torch.cat([txt_llama, txt_llama], dim=0)
+                        txt_llama = torch.cat([txt_llama, contexts[bid]], dim=0)
+                    if y0_attninj is not None and not HDModel.RECON_MODE and not IDENTICAL_ADAIN_ATTNINJ:
+                        txt_llama = torch.cat([txt_llama, contexts[bid]], dim=0)
                     txt = torch.cat([txt_init, txt_llama], dim=-2)        # 1,384,2560       # cur_contexts = T5, LLAMA3 (last block), LLAMA3 (current block)
 
                     if   weight > 0 and mask is not None and     weight  <      bid/48:
@@ -1351,7 +1357,9 @@ class HDModel(nn.Module):
                 for bid, block in enumerate(self.single_stream_blocks): # len == 32
                     txt_llama = contexts[bid+16]                        # T5 pre-embedded for single stream blocks
                     if y0_adain is not None and not HDModel.RECON_MODE:
-                        txt_llama = torch.cat([txt_llama, txt_llama], dim=0)
+                        txt_llama = torch.cat([txt_llama, contexts[bid+16]], dim=0)
+                    if y0_attninj is not None and not HDModel.RECON_MODE and not IDENTICAL_ADAIN_ATTNINJ:
+                        txt_llama = torch.cat([txt_llama, contexts[bid+16]], dim=0)
                     img = torch.cat([img, txt_llama], dim=-2)            # cat img,txt     opposite of flux which is txt,img       4303 + 143 -> 4446
 
                     if   weight > 0 and mask is not None and     weight  <      (bid+16)/48:
@@ -1359,7 +1367,7 @@ class HDModel(nn.Module):
                         
                     elif weight < 0 and mask is not None and abs(weight) < (1 - (bid+16)/48):
                         img = block(img, img_masks, None, clip, rope, mask_zero)
-                        
+                    
                     elif floor > 0 and mask is not None and     floor  >      (bid+16)/48:
                         mask_tmp = mask.clone()
                         mask_tmp[:img_len,:img_len] = 1.0
