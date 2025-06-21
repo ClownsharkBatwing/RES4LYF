@@ -1662,18 +1662,31 @@ class ClownGuide_StyleNorm_Advanced_HiDream:
                     "weight":           ("FLOAT",                                     {"default": 1.0, "min":  -100.0, "max": 100.0, "step":0.01, "round": False, "tooltip": "Set the strength of the guide by multiplying all other weights by this value."}),
                     "weight_scheduler": (["constant"] + get_res4lyf_scheduler_list(), {"default": "constant"},),
                     
-                    "double_blocks"   : ("STRING",                                    {"default": "", "multiline": True}),
-                    "double_weights"  : ("STRING",                                    {"default": "", "multiline": True}),
-                    "single_blocks"   : ("STRING",                                    {"default": "20", "multiline": True}),
-                    "single_weights"  : ("STRING",                                    {"default": "0.5", "multiline": True}),
+                    "double_blocks"   : ("STRING",                                    {"default": "all", "multiline": True}),
+                    "double_weights"  : ("STRING",                                    {"default": "1.0", "multiline": True}),
+                    "single_blocks"   : ("STRING",                                    {"default": "all", "multiline": True}),
+                    "single_weights"  : ("STRING",                                    {"default": "1.0", "multiline": True}),
 
                     "mode": (["scattersort", "AdaIN"], {"default": "scattersort"},),
-                    #"noise_mode": (["direct", "update", "smart", "bonanza"], {"default": "smart"},),
+                    "noise_mode": (["direct", "update", "smart", "recon", "bonanza"], {"default": "smart"},),
 
+                    #"shared_experts":          ("BOOLEAN", {"default": False}),
+                    
+                    "ff_1"                   : ("BOOLEAN", {"default": False}),
+                    "ff_1_silu"              : ("BOOLEAN", {"default": False}),
+                    "ff_3"                   : ("BOOLEAN", {"default": False}),
+                    "ff_13"                  : ("BOOLEAN", {"default": False}),
+                    "ff_2"                   : ("BOOLEAN", {"default": False}),
+                    
                     "moe_gate"               : ("BOOLEAN", {"default": False}),
-                    "moe_ff"                 : ("BOOLEAN", {"default": False}),
-                    "ff":                      ("BOOLEAN", {"default": False}),
-                    "shared_experts":          ("BOOLEAN", {"default": False}),
+                    "topk_weight"            : ("BOOLEAN", {"default": False}),
+                    "moe_ff_1"               : ("BOOLEAN", {"default": False}),
+                    "moe_ff_1_silu"          : ("BOOLEAN", {"default": False}),
+                    "moe_ff_3"               : ("BOOLEAN", {"default": False}),
+                    "moe_ff_13"              : ("BOOLEAN", {"default": False}),
+                    "moe_ff_2"               : ("BOOLEAN", {"default": False}),
+                    "moe_sum"                : ("BOOLEAN", {"default": False}),
+                    "moe_out"                : ("BOOLEAN", {"default": False}),
 
                     "double_img_io":           ("BOOLEAN", {"default": False}),
                     "double_img_norm0":        ("BOOLEAN", {"default": False}),
@@ -1731,7 +1744,7 @@ class ClownGuide_StyleNorm_Advanced_HiDream:
             weight           = 1.0,
             weight_scheduler = "constant",
             mode             = "scattersort",
-            #noise_mode       = "smart",
+            noise_mode       = "smart",
             double_weights   = "0.1",
             single_weights   = "0.0", 
             double_blocks    = "all",
@@ -1741,9 +1754,21 @@ class ClownGuide_StyleNorm_Advanced_HiDream:
             invert_mask      = False,
 
             moe_gate                = False,
-            moe_ff                  = False,
-            ff                      = False,
+            topk_weight             = False,
+            moe_out                 = False,
+            moe_sum                 = False,
+            ff_1                    = False,
+            ff_1_silu               = False,
+            ff_3                    = False,
+            ff_13                   = False,
+            ff_2                    = False,
             shared_experts          = False,
+            
+            moe_ff_1                = False,
+            moe_ff_1_silu           = False,
+            moe_ff_3                = False,
+            moe_ff_13               = False,
+            moe_ff_2                = False,
 
             double_img_io           = False,
             double_img_norm0        = False,
@@ -1863,11 +1888,25 @@ class ClownGuide_StyleNorm_Advanced_HiDream:
         }
         guides['sort_and_scatter'] = {
             "mode"                  : mode,
+            "noise_mode"            : noise_mode,
 
             "moe_gate"              : moe_gate,
-            "moe_ff"                : moe_ff,
+            "topk_weight"           : topk_weight,
+            "moe_sum"               : moe_sum,
+            "moe_out"               : moe_out,
 
-            "ff"                    : ff,
+            "ff_1"                  : ff_1,
+            "ff_1_silu"             : ff_1_silu,
+            "ff_3"                  : ff_3,
+            "ff_13"                 : ff_13,
+            "ff_2"                  : ff_2,
+            
+            "moe_ff_1"              : moe_ff_1,
+            "moe_ff_1_silu"         : moe_ff_1_silu,
+            "moe_ff_3"              : moe_ff_3,
+            "moe_ff_13"             : moe_ff_13,
+            "moe_ff_2"              : moe_ff_2,
+            
             "shared_experts"        : shared_experts,
 
             "double_img_io"         : double_img_io,
