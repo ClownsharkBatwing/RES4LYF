@@ -971,7 +971,7 @@ class HDModel(nn.Module):
                 #x_init              = transformer_options.get("x_init").to(x)   # initial noise and/or image+noise from start of rk_sampler_beta() 
                 y0_adain            = y0_adain.to(x)
                 SIGMA_ADAIN         = SIGMA * EO("eps_adain_sigma_factor", 1.0)
-                y0_adain            = (1-SIGMA_ADAIN) * y0_adain + SIGMA_ADAIN * x_init
+                y0_adain            = (1-SIGMA_ADAIN) * y0_adain + SIGMA_ADAIN * x_init[0].unsqueeze(0)   #always only use first batch of noise to avoid broadcasting
                 img_y0_adain        = comfy.ldm.common_dit.pad_to_patch_size(y0_adain, (self.patch_size, self.patch_size))
                 t_y0_adain          = t[0].unsqueeze(0).clone() #torch.full_like(t, 0.0)[0].unsqueeze(0)
                 t_y0_adain         *= EO("eps_adain_sigma_factor", 1.0)
@@ -1104,7 +1104,7 @@ class HDModel(nn.Module):
                 #y0_attninj            = (1-SIGMA) * y0_attninj + SIGMA * x_init
                 
                 SIGMA_ATTNINJ         = SIGMA * EO("eps_attninj_sigma_factor", 1.0)
-                y0_attninj            = (1-SIGMA_ATTNINJ) * y0_attninj + SIGMA_ATTNINJ * x_init
+                y0_attninj            = (1-SIGMA_ATTNINJ) * y0_attninj + SIGMA_ATTNINJ * x_init[0].unsqueeze(0) # always use only first batch of noise to avoid unintentional broadcasting
                 img_y0_attninj        = comfy.ldm.common_dit.pad_to_patch_size(y0_attninj, (self.patch_size, self.patch_size))
                 t_y0_attninj          = t[0].unsqueeze(0).clone() #torch.full_like(t, 0.0)[0].unsqueeze(0)
                 t_y0_attninj         *= EO("eps_attninj_sigma_factor", 1.0)
