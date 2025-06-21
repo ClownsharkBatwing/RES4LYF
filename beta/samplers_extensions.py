@@ -1668,6 +1668,7 @@ class ClownGuide_StyleNorm_Advanced_HiDream:
                     "single_weights"  : ("STRING",                                    {"default": "0.5", "multiline": True}),
 
                     "mode": (["scattersort", "AdaIN"], {"default": "scattersort"},),
+                    #"noise_mode": (["direct", "update", "smart", "bonanza"], {"default": "smart"},),
 
                     "moe_gate"               : ("BOOLEAN", {"default": False}),
                     "moe_ff"                 : ("BOOLEAN", {"default": False}),
@@ -1730,6 +1731,7 @@ class ClownGuide_StyleNorm_Advanced_HiDream:
             weight           = 1.0,
             weight_scheduler = "constant",
             mode             = "scattersort",
+            #noise_mode       = "smart",
             double_weights   = "0.1",
             single_weights   = "0.0", 
             double_blocks    = "all",
