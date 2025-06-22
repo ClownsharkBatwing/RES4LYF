@@ -920,7 +920,18 @@ class HDModel(nn.Module):
         b, c, h, w  = x.shape
         h_len = ((h + (self.patch_size // 2)) // self.patch_size) # h_len 96
         w_len = ((w + (self.patch_size // 2)) // self.patch_size) # w_len 96
-        img          = comfy.ldm.common_dit.pad_to_patch_size(x, (self.patch_size, self.patch_size))
+        
+        x_embedder_dtype = self.x_embedder.proj.weight.data.dtype
+        if x_embedder_dtype not in {torch.bfloat16, torch.float16, torch.float32, torch.float64}:
+            x_embedder_dtype = x.dtype
+        
+        x_tmp = transformer_options.get("x_tmp")
+        if x_tmp is not None:
+            x_tmp = x_tmp.expand(x.shape[0], -1, -1, -1).clone()
+            img = comfy.ldm.common_dit.pad_to_patch_size(x_tmp, (self.patch_size, self.patch_size))
+            
+        else:
+            img = comfy.ldm.common_dit.pad_to_patch_size(x, (self.patch_size, self.patch_size))
         update_cross_attn = transformer_options.get("update_cross_attn")
         SIGMA = t[0].clone() / 1000
         EO = transformer_options.get("ExtraOptions", ExtraOptions(""))
@@ -968,11 +979,14 @@ class HDModel(nn.Module):
                 HDModel.RECON_MODE = True
             elif noise_mode_adain == "recon" and recon_iter == 1:
                 
-                denoised = x_orig - SIGMA * eps
+                #denoised = x_orig - SIGMA * eps
                 
                 #noise_prediction = eps + denoised
                 #noise_prediction = x_orig - SIGMA * eps + eps
-                noise_prediction = x_orig + (1-SIGMA) * eps
+                if x_tmp is not None:
+                    noise_prediction = x_tmp + ((1-SIGMA.to(x_tmp)) * eps.to(x_tmp))
+                else:
+                    noise_prediction = x_orig + (1-SIGMA.to(x_orig)) * eps.to(x_orig)
                 
                 x_init = noise_prediction
             elif noise_mode_adain == "bonanza":
@@ -982,12 +996,12 @@ class HDModel(nn.Module):
             if y0_adain is not None:
                 
                 #x_init              = transformer_options.get("x_init").to(x)   # initial noise and/or image+noise from start of rk_sampler_beta() 
-                y0_adain            = y0_adain.to(x)
-                SIGMA_ADAIN         = SIGMA * EO("eps_adain_sigma_factor", 1.0)
-                y0_adain            = (1-SIGMA_ADAIN) * y0_adain + SIGMA_ADAIN * x_init[0].unsqueeze(0)   #always only use first batch of noise to avoid broadcasting
+                #y0_adain            = y0_adain.to(x)
+                SIGMA_ADAIN         = (SIGMA * EO("eps_adain_sigma_factor", 1.0)).to(y0_adain)
+                y0_adain            = (1-SIGMA_ADAIN) * y0_adain + SIGMA_ADAIN * x_init[0].unsqueeze(0).to(y0_adain)   #always only use first batch of noise to avoid broadcasting
                 img_y0_adain        = comfy.ldm.common_dit.pad_to_patch_size(y0_adain, (self.patch_size, self.patch_size))
-                t_y0_adain          = t[0].unsqueeze(0).clone() #torch.full_like(t, 0.0)[0].unsqueeze(0)
-                t_y0_adain         *= EO("eps_adain_sigma_factor", 1.0)
+                #t_y0_adain          = t[0].unsqueeze(0).clone() #torch.full_like(t, 0.0)[0].unsqueeze(0)
+                #t_y0_adain         *= EO("eps_adain_sigma_factor", 1.0)
                 blocks_adain        = transformer_options.get("blocks_adain")
                 ADAIN_SINGLE_BLOCKS = blocks_adain['single_blocks']
                 ADAIN_DOUBLE_BLOCKS = blocks_adain['double_blocks']
@@ -1113,14 +1127,14 @@ class HDModel(nn.Module):
             y0_attninj = transformer_options.get("y0_attninj")
             if y0_attninj is not None:
                 #x_init                = transformer_options.get("x_init").to(x)   # initial noise and/or image+noise from start of rk_sampler_beta() 
-                y0_attninj            = y0_attninj.to(x)
+                #y0_attninj            = y0_attninj.to(x)
                 #y0_attninj            = (1-SIGMA) * y0_attninj + SIGMA * x_init
                 
-                SIGMA_ATTNINJ         = SIGMA * EO("eps_attninj_sigma_factor", 1.0)
-                y0_attninj            = (1-SIGMA_ATTNINJ) * y0_attninj + SIGMA_ATTNINJ * x_init[0].unsqueeze(0) # always use only first batch of noise to avoid unintentional broadcasting
+                SIGMA_ATTNINJ         = (SIGMA * EO("eps_attninj_sigma_factor", 1.0)).to(y0_attninj)
+                y0_attninj            = (1-SIGMA_ATTNINJ) * y0_attninj + SIGMA_ATTNINJ * x_init[0].unsqueeze(0).to(y0_attninj) # always use only first batch of noise to avoid unintentional broadcasting
                 img_y0_attninj        = comfy.ldm.common_dit.pad_to_patch_size(y0_attninj, (self.patch_size, self.patch_size))
-                t_y0_attninj          = t[0].unsqueeze(0).clone() #torch.full_like(t, 0.0)[0].unsqueeze(0)
-                t_y0_attninj         *= EO("eps_attninj_sigma_factor", 1.0)
+                #t_y0_attninj          = t[0].unsqueeze(0).clone() #torch.full_like(t, 0.0)[0].unsqueeze(0)
+                #t_y0_attninj         *= EO("eps_attninj_sigma_factor", 1.0)
                 blocks_attninj        = transformer_options.get("blocks_attninj")
                 blocks_attninj_qkv    = transformer_options.get("blocks_attninj_qkv")
                 ATTNINJ_SINGLE_BLOCKS = blocks_attninj['single_blocks']
@@ -1132,9 +1146,11 @@ class HDModel(nn.Module):
                 IDENTICAL_ADAIN_ATTNINJ = False
 
             if y0_adain is not None:
-                img_y0_adain_orig, t_y0_adain_orig = clone_inputs(img_y0_adain, t_y0_adain)
+                #img_y0_adain_orig, t_y0_adain_orig = clone_inputs(img_y0_adain, t_y0_adain)
+                img_y0_adain_orig = img_y0_adain.clone()
             if y0_attninj is not None:
-                img_y0_attninj_orig, t_y0_attninj_orig = clone_inputs(img_y0_attninj, t_y0_attninj)
+                #img_y0_attninj_orig, t_y0_attninj_orig = clone_inputs(img_y0_attninj, t_y0_attninj)
+                img_y0_attninj_orig = img_y0_attninj.clone()
             
             weight    = -1 * transformer_options.get("regional_conditioning_weight", 0.0)
             floor     = -1 * transformer_options.get("regional_conditioning_floor",  0.0)
@@ -1154,9 +1170,9 @@ class HDModel(nn.Module):
 
 
 
-                
-                
-                
+            
+            
+            
             
             
             out_list = []
@@ -1170,10 +1186,12 @@ class HDModel(nn.Module):
 
                 img, t, y, context, llama3 = clone_inputs(img_orig, t_orig, y_orig, context_orig, llama3_orig, index=cond_iter)
                 if y0_adain is not None and not HDModel.RECON_MODE:
-                    img_y0_adain, t_y0_adain = clone_inputs(img_y0_adain_orig, t_y0_adain_orig)
+                    #img_y0_adain, t_y0_adain = clone_inputs(img_y0_adain_orig, t_y0_adain_orig)
+                    img_y0_adain = img_y0_adain_orig.clone()
                     img_sizes_y0_adain = None
                 if y0_attninj is not None and not HDModel.RECON_MODE:
-                    img_y0_attninj, t_y0_attninj = clone_inputs(img_y0_attninj_orig, t_y0_attninj_orig)
+                    #img_y0_attninj, t_y0_attninj = clone_inputs(img_y0_attninj_orig, t_y0_attninj_orig)
+                    img_y0_attninj = img_y0_attninj_orig.clone()
                     img_sizes_y0_attninj = None
                 
                 mask = None
@@ -1240,13 +1258,13 @@ class HDModel(nn.Module):
                     mask = self.manual_mask
 
                 if mask is not None and not type(mask[0][0].item()) == bool:
-                    mask = mask.to(img.dtype)
+                    mask = mask.to(x.dtype)
                 if mask_zero is not None and not type(mask_zero[0][0].item()) == bool:
-                    mask_zero = mask_zero.to(img.dtype)
+                    mask_zero = mask_zero.to(x.dtype)
 
                 # prep embeds
-                t    = self.expand_timesteps(t, bsz, img.device)
-                t    = self.t_embedder      (t,      img.dtype)
+                t    = self.expand_timesteps(t, bsz, x.device)
+                t    = self.t_embedder      (t,      x.dtype)
                 clip = t + self.p_embedder(y)
                 
                 img_sizes = None
@@ -1257,13 +1275,7 @@ class HDModel(nn.Module):
                     img_ids[..., 1] = img_ids[..., 1] + torch.arange(pH, device=img.device)[:, None]
                     img_ids[..., 2] = img_ids[..., 2] + torch.arange(pW, device=img.device)[None, :]
                     img_ids         = repeat(img_ids, "h w c -> b (h w) c", b=bsz)
-                
-                
-                #if EO("proj_in_fp64"):
-                #    img = F.linear(img.to(torch.float64), self.x_embedder.proj.weight.data.to(torch.float64), self.x_embedder.proj.bias.data.to(torch.float64)).to(x.dtype)
-                #else:
-                img = self.x_embedder(img.to(self.x_embedder.proj.weight.dtype)).to(img)
-
+                img = self.x_embedder(img.to(x_embedder_dtype)).to(x)
 
                 if y0_adain is not None and img_sizes_y0_adain is None and not HDModel.RECON_MODE: #and not UNCOND 
                     img_sizes_y0_adain = None
@@ -1274,10 +1286,7 @@ class HDModel(nn.Module):
                         img_ids_y0_adain[..., 1] = img_ids_y0_adain[..., 1] + torch.arange(pH, device=img_y0_adain.device)[:, None]
                         img_ids_y0_adain[..., 2] = img_ids_y0_adain[..., 2] + torch.arange(pW, device=img_y0_adain.device)[None, :]
                         img_ids_y0_adain         = repeat(img_ids_y0_adain, "h w c -> b (h w) c", b=bsz)
-                    #if EO("proj_in_fp64"):
-                    #    img_y0_adain = F.linear(img_y0_adain.to(torch.float64), self.x_embedder.proj.weight.data.to(torch.float64), self.x_embedder.proj.bias.data.to(torch.float64)).to(x.dtype)
-                    #else:
-                    img_y0_adain = self.x_embedder(img_y0_adain.to(self.x_embedder.proj.weight.dtype)).to(img_y0_adain)  # hidden_states 1,4032,2560         for 1024x1024: -> 1,4096,2560      ,64 -> ,2560 (x40)
+                    img_y0_adain = self.x_embedder(img_y0_adain.to(x_embedder_dtype)).to(x)  # hidden_states 1,4032,2560         for 1024x1024: -> 1,4096,2560      ,64 -> ,2560 (x40)
                 
                 if y0_attninj is not None and img_sizes_y0_attninj is None and not HDModel.RECON_MODE: #and not UNCOND 
                     img_sizes_y0_attninj = None
@@ -1287,11 +1296,7 @@ class HDModel(nn.Module):
                         img_ids_y0_attninj         = torch.zeros(pH, pW, 3, device=img_y0_attninj.device)
                         img_ids_y0_attninj[..., 1] = img_ids_y0_attninj[..., 1] + torch.arange(pH, device=img_y0_attninj.device)[:, None]
                         img_ids_y0_attninj[..., 2] = img_ids_y0_attninj[..., 2] + torch.arange(pW, device=img_y0_attninj.device)[None, :]
-                    #    img_ids_y0_attninj         = repeat(img_ids_y0_attninj, "h w c -> b (h w) c", b=bsz)
-                    #if EO("proj_in_fp64"):
-                    #    img_y0_attninj = F.linear(img_y0_attninj.to(torch.float64), self.x_embedder.proj.weight.data.to(torch.float64), self.x_embedder.proj.bias.data.to(torch.float64)).to(x.dtype)
-                    #else:
-                    img_y0_attninj = self.x_embedder(img_y0_attninj.to(self.x_embedder.proj.weight.dtype)).to(img_y0_attninj)   # hidden_states 1,4032,2560         for 1024x1024: -> 1,4096,2560      ,64 -> ,2560 (x40)
+                    img_y0_attninj = self.x_embedder(img_y0_attninj.to(x_embedder_dtype)).to(x)   # hidden_states 1,4032,2560         for 1024x1024: -> 1,4096,2560      ,64 -> ,2560 (x40)
                 
                 contexts = self.prepare_contexts(llama3, context, bsz, img.shape[-1])
 
@@ -1422,6 +1427,8 @@ class HDModel(nn.Module):
             output = torch.cat(out_list, dim=0)
 
             eps = -output[:, :, :h, :w]
+            
+
 
 
         
@@ -1600,7 +1607,7 @@ class HDModel(nn.Module):
             elif eps.shape[0] == 1 and UNCOND:
                 eps[0] = eps_orig[0] + y0_style_pos_synweight * (eps[0] - eps_orig[0])
             
-            eps = eps.float()
+            #eps = eps.float()
         
         if y0_style_neg is not None:
             y0_style_neg_weight    = transformer_options.get("y0_style_neg_weight")
@@ -1657,9 +1664,11 @@ class HDModel(nn.Module):
             elif eps.shape[0] == 1 and not UNCOND:
                 eps[0] = eps_orig[0] + y0_style_neg_synweight * (eps[0] - eps_orig[0])
             
-            eps = eps.float()
+            #eps = eps.float()
         
+        self.eps_out = eps.clone()
         return eps
+    
 
 
 
@@ -1774,7 +1783,7 @@ class HDLastLayer(nn.Module):
         shift, scale = self.adaLN_modulation(vec).chunk(2, dim=-1)
         x = apply_mod(self.norm_final(x), (1 + scale), shift, modulation_dims)
         x = self.linear(x)
-        return x.to(x_dtype)
+        return x #.to(x_dtype)
 
 def apply_mod(tensor, m_mult, m_add=None, modulation_dims=None):
     if modulation_dims is None:
