@@ -213,6 +213,8 @@ NODE_CLASS_MAPPINGS = {
     
     "ReHiDreamPatcherAdvanced"            : models.ReHiDreamPatcherAdvanced,
     
+    "LayerPatcher"                        : loaders.LayerPatcher,
+    
     "FluxOrthoCFGPatcher"                 : models.FluxOrthoCFGPatcher,
 
     

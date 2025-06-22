@@ -220,7 +220,7 @@ def load_clipvision(ckpt_path):
     sd = load_torch_file(ckpt_path)
     clip_vision = comfy.clip_vision.load(ckpt_path)
     return clip_vision
-        
+    
 class FluxLoader(BaseModelLoader):
     @classmethod
     def INPUT_TYPES(s):
@@ -375,3 +375,84 @@ class RES4LYFModelLoader(BaseModelLoader):
         vae = self.load_vae(vae_name, ckpt_out)
 
         return (ckpt_out[0], clip, vae)
+
+from .style_transfer import Retrojector
+import torch.nn as nn
+
+class LayerPatcher:
+    @classmethod
+    def INPUT_TYPES(s):
+        return {"required": {
+            "model":       ("MODEL",),
+            "embedder":    (s.get_model_patches(),),
+            "gates":       (s.get_model_patches(),),
+            "last_layer":  (s.get_model_patches(),),
+            "dtype":       (["bfloat16", "float16", "float32", "float64"],  {"default": "float64"}),
+            #"retrojector": (s.get_model_patches(),),
+        }}
+
+    RETURN_TYPES = ("MODEL",)
+    RETURN_NAMES = ("model",)
+    FUNCTION = "main"
+    CATEGORY = "RES4LYF/patchers"
+    
+    @staticmethod
+    def get_model_patches():
+        return [f for f in folder_paths.get_filename_list("diffusion_models") if f.endswith((".safetensors", ".sft"))]
+    
+    def main(self, model, embedder, gates, last_layer, retrojector=None, dtype="float64"):
+        
+        dtype = getattr(torch, dtype)
+        
+        embedder    = comfy.utils.load_torch_file(folder_paths.get_full_path_or_raise("diffusion_models", embedder))
+        last_layer  = comfy.utils.load_torch_file(folder_paths.get_full_path_or_raise("diffusion_models", last_layer))
+        #retrojector = comfy.utils.load_torch_file(folder_paths.get_full_path_or_raise("diffusion_models", retrojector))
+        
+        gates  = comfy.utils.load_torch_file(folder_paths.get_full_path_or_raise("diffusion_models", gates))
+        m = model.model.diffusion_model
+        
+        if embedder:
+            m.x_embedder.proj = nn.Linear(
+                m.x_embedder.proj.in_features, 
+                m.x_embedder.proj.out_features, 
+                bias=True,
+                device=m.x_embedder.proj.weight.data.device,
+                dtype=dtype
+                )
+            m.x_embedder.proj.weight.data = embedder['x_embedder.proj.weight'].to(dtype)
+            m.x_embedder.proj.bias.data   = embedder['x_embedder.proj.bias'].to(dtype)
+        
+        if gates:
+            for key, tensor in gates.items():
+                #print(f"Patching {key} with shape {tensor.shape}")
+                set_nested_attr(model=m, key=key, value=tensor, dtype=dtype)
+        
+        if last_layer:
+            m.final_layer.linear.weight.data = last_layer['final_layer.linear.weight'].to(dtype)
+            m.final_layer.linear.bias.data   = last_layer['final_layer.linear.bias'].to(dtype)
+            m.final_layer.adaLN_modulation[1].weight.data = last_layer['final_layer.adaLN_modulation.1.weight'].to(dtype)
+            m.final_layer.adaLN_modulation[1].bias.data = last_layer['final_layer.adaLN_modulation.1.bias'].to(dtype)
+
+        #if retrojector:
+        #    m.Retrojector = Retrojector(model.model.diffusion_model.img_in, pinv_dtype=style_dtype, dtype=style_dtype)
+        #    m.final_layer.linear.weight.data = last_layer['final_layer.linear.weight']
+        #    m.final_layer.linear.bias.data   = last_layer['final_layer.linear.bias']
+        #    m.final_layer.adaLN_modulation[1].weight.data = last_layer['final_layer.adaLN_modulation.1.weight']
+        #    m.final_layer.adaLN_modulation[1].bias.data = last_layer['final_layer.adaLN_modulation.1.bias']
+
+        return (model,)
+
+
+
+def set_nested_attr(model, key, value, dtype):
+    parts = key.split(".")
+    attr = model
+    for p in parts[:-1]:
+        if p.isdigit():
+            attr = attr[int(p)]
+        else:
+            attr = getattr(attr, p)
+    getattr(attr, parts[-1]).data.copy_(value.to(getattr(attr, parts[-1]).device, dtype=dtype))
+
+
+

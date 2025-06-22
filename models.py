@@ -32,7 +32,7 @@ from comfy.ldm.hidream.model import HiDreamImageTransformer2DModel
 from comfy.ldm.hidream.model import HiDreamImageBlock, HiDreamImageSingleTransformerBlock, HiDreamImageTransformerBlock, HiDreamAttention
 
 from .hidream.model import HDModel
-from .hidream.model import HDBlock, HDBlockDouble, HDBlockSingle, HDAttention, HDMoEGate, HDMOEFeedForwardSwiGLU, HDFeedForwardSwiGLU
+from .hidream.model import HDBlock, HDBlockDouble, HDBlockSingle, HDAttention, HDMoEGate, HDMOEFeedForwardSwiGLU, HDFeedForwardSwiGLU, HDLastLayer
 
 from comfy.ldm.modules.diffusionmodules.mmdit import OpenAISignatureMMDITWrapper, JointBlock
 from .sd35.mmdit import ReOpenAISignatureMMDITWrapper, ReJointBlock
@@ -832,6 +832,7 @@ class ReHiDreamPatcherAdvanced:
             m.model.diffusion_model.__class__     = HDModel
             m.model.diffusion_model.threshold_inv = False
             m.model.diffusion_model.manual_mask   = None
+            m.model.diffusion_model.final_layer.__class__ = HDLastLayer
             
             for i, block in enumerate(m.model.diffusion_model.double_stream_blocks):
                 block.__class__             = HDBlock
