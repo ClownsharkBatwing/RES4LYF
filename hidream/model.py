@@ -15,7 +15,7 @@ import torch.nn.functional as F
 
 from comfy.ldm.flux.math import apply_rope, rope
 #from comfy.ldm.flux.layers import LastLayer
-from ..flux.layers import LastLayer
+#from ..flux.layers import LastLayer
 
 from comfy.ldm.modules.attention import optimized_attention, attention_pytorch
 import comfy.model_management
@@ -202,9 +202,21 @@ class HDMoEGate(nn.Module):
 
     def forward(self, x):
         #x      = x.view(-1, x.shape[-1]) # 4032,2560    # below is just matmul... hidden_states @ self.weight.T
-        logits = F.linear(x, comfy.model_management.cast_to(self.weight, dtype=x.dtype, device=x.device), None)
-        scores = logits.softmax(dim=-1)       # logits.shape == 4032,4   scores.shape == 4032,4
+        #logits = F.linear(x, comfy.model_management.cast_to(self.weight, dtype=x.dtype, device=x.device), None)
+        dtype = self.weight.dtype
+        if dtype not in {torch.bfloat16, torch.float16, torch.float32, torch.float64}:
+            dtype = torch.float32
+            self.weight.data = self.weight.data.to(dtype)
+        
+        logits = F.linear(x.to(dtype), self.weight.to(x.device), None)
+        scores = logits.softmax(dim=-1).to(x)       # logits.shape == 4032,4   scores.shape == 4032,4
         return torch.topk(scores, k=self.top_k, dim=-1, sorted=False)
+    
+    
+        
+        #logits = F.linear(x.to(torch.float64), self.weight.to(x.device).to(torch.float64), None)
+        #scores = logits.softmax(dim=-1).to(x)       # logits.shape == 4032,4   scores.shape == 4032,4
+        #return torch.topk(scores, k=self.top_k, dim=-1, sorted=False)
 
 class HDMOEFeedForwardSwiGLU(nn.Module):
     def __init__(
@@ -864,7 +876,7 @@ class HDModel(nn.Module):
             ]
         )
 
-        self.final_layer = LastLayer(self.inner_dim, patch_size, self.out_channels, dtype=dtype, device=device, operations=operations)
+        self.final_layer = HDLastLayer(self.inner_dim, patch_size, self.out_channels, dtype=dtype, device=device, operations=operations)
 
         caption_channels   = [caption_channels[1], ] * (num_layers + num_single_layers) + [caption_channels[0], ]
         caption_projection = []
@@ -914,6 +926,7 @@ class HDModel(nn.Module):
         EO = transformer_options.get("ExtraOptions", ExtraOptions(""))
         if EO is not None:
             EO.mute = True
+        io_precision = EO("io_precision", torch.bfloat16)
         
         for block in self.double_stream_blocks:
             block.block.attn1.EO = EO
@@ -957,8 +970,8 @@ class HDModel(nn.Module):
                 
                 denoised = x_orig - SIGMA * eps
                 
-                noise_prediction = eps + denoised
-                noise_prediction = x_orig - SIGMA * eps + eps
+                #noise_prediction = eps + denoised
+                #noise_prediction = x_orig - SIGMA * eps + eps
                 noise_prediction = x_orig + (1-SIGMA) * eps
                 
                 x_init = noise_prediction
@@ -1244,7 +1257,13 @@ class HDModel(nn.Module):
                     img_ids[..., 1] = img_ids[..., 1] + torch.arange(pH, device=img.device)[:, None]
                     img_ids[..., 2] = img_ids[..., 2] + torch.arange(pW, device=img.device)[None, :]
                     img_ids         = repeat(img_ids, "h w c -> b (h w) c", b=bsz)
-                img = self.x_embedder(img)
+                
+                
+                #if EO("proj_in_fp64"):
+                #    img = F.linear(img.to(torch.float64), self.x_embedder.proj.weight.data.to(torch.float64), self.x_embedder.proj.bias.data.to(torch.float64)).to(x.dtype)
+                #else:
+                img = self.x_embedder(img.to(self.x_embedder.proj.weight.dtype)).to(img)
+
 
                 if y0_adain is not None and img_sizes_y0_adain is None and not HDModel.RECON_MODE: #and not UNCOND 
                     img_sizes_y0_adain = None
@@ -1255,7 +1274,10 @@ class HDModel(nn.Module):
                         img_ids_y0_adain[..., 1] = img_ids_y0_adain[..., 1] + torch.arange(pH, device=img_y0_adain.device)[:, None]
                         img_ids_y0_adain[..., 2] = img_ids_y0_adain[..., 2] + torch.arange(pW, device=img_y0_adain.device)[None, :]
                         img_ids_y0_adain         = repeat(img_ids_y0_adain, "h w c -> b (h w) c", b=bsz)
-                    img_y0_adain = self.x_embedder(img_y0_adain)  # hidden_states 1,4032,2560         for 1024x1024: -> 1,4096,2560      ,64 -> ,2560 (x40)
+                    #if EO("proj_in_fp64"):
+                    #    img_y0_adain = F.linear(img_y0_adain.to(torch.float64), self.x_embedder.proj.weight.data.to(torch.float64), self.x_embedder.proj.bias.data.to(torch.float64)).to(x.dtype)
+                    #else:
+                    img_y0_adain = self.x_embedder(img_y0_adain.to(self.x_embedder.proj.weight.dtype)).to(img_y0_adain)  # hidden_states 1,4032,2560         for 1024x1024: -> 1,4096,2560      ,64 -> ,2560 (x40)
                 
                 if y0_attninj is not None and img_sizes_y0_attninj is None and not HDModel.RECON_MODE: #and not UNCOND 
                     img_sizes_y0_attninj = None
@@ -1265,8 +1287,11 @@ class HDModel(nn.Module):
                         img_ids_y0_attninj         = torch.zeros(pH, pW, 3, device=img_y0_attninj.device)
                         img_ids_y0_attninj[..., 1] = img_ids_y0_attninj[..., 1] + torch.arange(pH, device=img_y0_attninj.device)[:, None]
                         img_ids_y0_attninj[..., 2] = img_ids_y0_attninj[..., 2] + torch.arange(pW, device=img_y0_attninj.device)[None, :]
-                        img_ids_y0_attninj         = repeat(img_ids_y0_attninj, "h w c -> b (h w) c", b=bsz)
-                    img_y0_attninj = self.x_embedder(img_y0_attninj)  # hidden_states 1,4032,2560         for 1024x1024: -> 1,4096,2560      ,64 -> ,2560 (x40)
+                    #    img_ids_y0_attninj         = repeat(img_ids_y0_attninj, "h w c -> b (h w) c", b=bsz)
+                    #if EO("proj_in_fp64"):
+                    #    img_y0_attninj = F.linear(img_y0_attninj.to(torch.float64), self.x_embedder.proj.weight.data.to(torch.float64), self.x_embedder.proj.bias.data.to(torch.float64)).to(x.dtype)
+                    #else:
+                    img_y0_attninj = self.x_embedder(img_y0_attninj.to(self.x_embedder.proj.weight.dtype)).to(img_y0_attninj)   # hidden_states 1,4032,2560         for 1024x1024: -> 1,4096,2560      ,64 -> ,2560 (x40)
                 
                 contexts = self.prepare_contexts(llama3, context, bsz, img.shape[-1])
 
@@ -1397,8 +1422,8 @@ class HDModel(nn.Module):
             output = torch.cat(out_list, dim=0)
 
             eps = -output[:, :, :h, :w]
-            
-        
+
+
         
         
         # end recon loop
@@ -1720,5 +1745,48 @@ def attention_rescale(
     attn_weight = torch.softmax(attn_weight, dim=-1)
 
     return attn_weight @ value
+
+
+
+class HDLastLayer(nn.Module):
+    def __init__(self, hidden_size: int, patch_size: int, out_channels: int, dtype=None, device=None, operations=None):
+        super().__init__()
+        self.norm_final       = nn.LayerNorm(hidden_size, elementwise_affine=False, eps=1e-6, dtype=dtype, device=device)
+        self.linear           = nn.Linear(hidden_size, patch_size * patch_size * out_channels, bias=True, dtype=dtype, device=device)
+        self.adaLN_modulation = nn.Sequential(nn.SiLU(), nn.Linear(hidden_size, 2 * hidden_size, bias=True, dtype=dtype, device=device))
+
+    def forward(self, x: Tensor, vec: Tensor, modulation_dims=None) -> Tensor:
+        x_dtype = x.dtype
+        
+        dtype = self.linear.weight.dtype
+        if dtype not in {torch.bfloat16, torch.float16, torch.float32, torch.float64}:
+            dtype = torch.float32
+            self.linear.weight.data = self.linear.weight.data.to(dtype)
+            self.linear.bias.data = self.linear.bias.data.to(dtype)
+            self.adaLN_modulation[1].weight.data = self.adaLN_modulation[1].weight.data.to(dtype)
+            self.adaLN_modulation[1].bias.data = self.adaLN_modulation[1].bias.data.to(dtype)
+        
+        x = x.to(dtype)
+        vec = vec.to(dtype)
+        if vec.ndim == 2:
+            vec = vec[:, None, :]
+
+        shift, scale = self.adaLN_modulation(vec).chunk(2, dim=-1)
+        x = apply_mod(self.norm_final(x), (1 + scale), shift, modulation_dims)
+        x = self.linear(x)
+        return x.to(x_dtype)
+
+def apply_mod(tensor, m_mult, m_add=None, modulation_dims=None):
+    if modulation_dims is None:
+        if m_add is not None:
+            return tensor * m_mult + m_add
+        else:
+            return tensor * m_mult
+    else:
+        for d in modulation_dims:
+            tensor[:, d[0]:d[1]] *= m_mult[:, d[2]]
+            if m_add is not None:
+                tensor[:, d[0]:d[1]] += m_add[:, d[2]]
+        return tensor
 
 
