@@ -564,8 +564,7 @@ def sample_rk_beta(
         StyleMMDiT = guides.get('StyleMMDiT')
         if StyleMMDiT is not None:
             StyleMMDiT.init_guides(model)
-            
-        LG.ADAIN_NOISE_MODE = StyleMMDiT.noise_mode
+            LG.ADAIN_NOISE_MODE = StyleMMDiT.noise_mode
 
 
     # BEGIN SAMPLING LOOP
