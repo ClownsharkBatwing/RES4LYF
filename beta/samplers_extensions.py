@@ -1151,7 +1151,7 @@ class ClownGuide_Style_Beta:
         return {"required":
                     {
                     "apply_to":         (["positive", "negative"],                    {"default": "positive", "tooltip": "When using CFG, decides whether to apply the guide to the positive or negative conditioning."}),
-                    "method":           (["AdaIN", "WCT", "scattersort","none"],      {"default": "WCT"}),
+                    "method":           (["AdaIN", "WCT", "WCT2", "scattersort","none"],      {"default": "WCT"}),
                     "weight":           ("FLOAT",                                     {"default": 1.0, "min":  -100.0, "max": 100.0, "step":0.01, "round": False, "tooltip": "Set the strength of the guide by multiplying all other weights by this value."}),
                     "synweight":        ("FLOAT",                                     {"default": 1.0, "min":  -100.0, "max": 100.0, "step":0.01, "round": False, "tooltip": "Set the relative strength of the guide on the opposite conditioning to what was selected: i.e., negative if positive in apply_to. Recommended to avoid CFG burn."}),
                     "weight_scheduler": (["constant"] + get_res4lyf_scheduler_list(), {"default": "constant", "tooltip": "Selecting any scheduler except constant will cause the strength to gradually decay to zero. Try beta57 vs. linear quadratic."},),
@@ -1326,631 +1326,6 @@ class ClownGuide_Style_TileSize:
 
 
 
-
-
-class ClownGuide_AdaIN_MMDiT_Beta:
-    @classmethod
-    def INPUT_TYPES(cls):
-        return {"required":
-                    {
-                    "weight":           ("FLOAT",                                     {"default": 1.0, "min":  -100.0, "max": 100.0, "step":0.01, "round": False, "tooltip": "Set the strength of the guide by multiplying all other weights by this value."}),
-                    "weight_scheduler": (["constant"] + get_res4lyf_scheduler_list(), {"default": "constant"},),
-                    "double_blocks"   : ("STRING",                                    {"default": "", "multiline": True}),
-                    "double_weights"  : ("STRING",                                    {"default": "", "multiline": True}),
-                    "single_blocks"   : ("STRING",                                    {"default": "20", "multiline": True}),
-                    "single_weights"  : ("STRING",                                    {"default": "0.5", "multiline": True}),
-                    "start_step":       ("INT",                                       {"default": 0,    "min":  0,      "max": 10000}),
-                    "end_step":         ("INT",                                       {"default": 15,   "min": -1,      "max": 10000}),
-                    "invert_mask":      ("BOOLEAN",                                   {"default": False}),
-                    },
-                "optional": 
-                    {
-                    "guide":            ("LATENT", ),
-                    "mask":             ("MASK", ),
-                    "weights":          ("SIGMAS", ),
-                    "guides":           ("GUIDES", ),
-                    }  
-                }
-    
-    RETURN_TYPES = ("GUIDES",)
-    RETURN_NAMES = ("guides",)
-    FUNCTION     = "main"
-    CATEGORY     = "RES4LYF/sampler_extensions"
-
-    def main(self,
-            weight           = 1.0,
-            weight_scheduler = "constant",
-            double_weights   = "0.1",
-            single_weights   = "0.0", 
-            double_blocks    = "all",
-            single_blocks    = "all", 
-            start_step       = 0,
-            end_step         = 15,
-            invert_mask      = False,
-            
-            guide            = None,
-            mask             = None,
-            weights          = None,
-            guides           = None,
-            ):
-        
-        default_dtype = torch.float64
-        
-        mask = 1-mask if mask is not None else None
-        
-        double_weights = parse_range_string(double_weights)
-        single_weights = parse_range_string(single_weights)
-        
-        if len(double_weights) == 0:
-            double_weights.append(0.0)
-        if len(single_weights) == 0:
-            single_weights.append(0.0)
-            
-        if len(double_weights) == 1:
-            double_weights = double_weights * 100
-        if len(single_weights) == 1:
-            single_weights = single_weights * 100
-            
-        if type(double_weights[0]) == int:
-            double_weights = [float(val) for val in double_weights]
-        if type(single_weights[0]) == int:
-            single_weights = [float(val) for val in single_weights]
-        
-        if double_blocks == "all":
-            double_blocks  = [val for val in range(100)]
-            if len(double_weights) == 1:
-                double_weights = [double_weights[0]] * 100
-        else:
-            double_blocks  = parse_range_string(double_blocks)
-            
-            weights_expanded = [0.0] * 100
-            for b, w in zip(double_blocks, double_weights):
-                weights_expanded[b] = w
-            double_weights = weights_expanded
-            
-        
-        if single_blocks == "all":
-            single_blocks = [val for val in range(100)]
-            if len(single_weights) == 1:
-                single_weights = [single_weights[0]] * 100
-        else:
-            single_blocks  = parse_range_string(single_blocks)
-            
-            weights_expanded = [0.0] * 100
-            for b, w in zip(single_blocks, single_weights):
-                weights_expanded[b] = w
-            single_weights = weights_expanded
-        
-        
-        
-        if end_step == -1:
-            end_step = MAX_STEPS
-        
-        if guide is not None:
-            raw_x = guide.get('state_info', {}).get('raw_x', None)
-            if raw_x is not None:
-                guide          = {'samples': guide['state_info']['raw_x'].clone()}
-            else:
-                guide          = {'samples': guide['samples'].clone()}
-        
-        if weight_scheduler == "constant": # and weights == None: 
-            weights = initialize_or_scale(None, weight, end_step).to(default_dtype)
-            prepend = torch.zeros(start_step).to(weights)
-            weights = torch.cat([prepend, weights])
-            weights = F.pad(weights, (0, MAX_STEPS), value=0.0)
-        
-        guides = copy.deepcopy(guides) if guides is not None else {}
-        
-        guides['weight_adain']           = weight
-        guides['weights_adain']          = weights
-        
-        guides['blocks_adain_mmdit'] = {
-            "double_weights": double_weights,
-            "single_weights": single_weights,
-            "double_blocks" : double_blocks,
-            "single_blocks" : single_blocks,
-        }
-        
-        guides['guide_adain']            = guide
-        guides['mask_adain']             = mask
-
-        guides['weight_scheduler_adain'] = weight_scheduler
-        guides['start_step_adain']       = start_step
-        guides['end_step_adain']         = end_step
-        
-        return (guides, )
-
-
-
-
-
-
-
-class ClownGuide_AttnInj_MMDiT_Beta:
-    @classmethod
-    def INPUT_TYPES(cls):
-        return {"required":
-                    {
-                    "weight":           ("FLOAT",                                     {"default": 1.0, "min":  -100.0, "max": 100.0, "step":0.01, "round": False, "tooltip": "Set the strength of the guide by multiplying all other weights by this value."}),
-                    "weight_scheduler": (["constant"] + get_res4lyf_scheduler_list(), {"default": "constant"},),
-                    "double_blocks"   : ("STRING",                                    {"default": "0,1,3", "multiline": True}),
-                    "double_weights"  : ("STRING",                                    {"default": "1.0", "multiline": True}),
-                    "single_blocks"   : ("STRING",                                    {"default": "20", "multiline": True}),
-                    "single_weights"  : ("STRING",                                    {"default": "0.5", "multiline": True}),
-                    
-                    "img_q":            ("FLOAT",                                     {"default": 0.0, "min":  -100.0, "max": 100.0, "step":0.01, "round": False, "tooltip": "Set relative injection strength."}),
-                    "img_k":            ("FLOAT",                                     {"default": 0.0, "min":  -100.0, "max": 100.0, "step":0.01, "round": False, "tooltip": "Set relative injection strength."}),
-                    "img_v":            ("FLOAT",                                     {"default": 1.0, "min":  -100.0, "max": 100.0, "step":0.01, "round": False, "tooltip": "Set relative injection strength."}),
-
-                    "txt_q":            ("FLOAT",                                     {"default": 0.0, "min":  -100.0, "max": 100.0, "step":0.01, "round": False, "tooltip": "Set relative injection strength."}),
-                    "txt_k":            ("FLOAT",                                     {"default": 0.0, "min":  -100.0, "max": 100.0, "step":0.01, "round": False, "tooltip": "Set relative injection strength."}),
-                    "txt_v":            ("FLOAT",                                     {"default": 0.0, "min":  -100.0, "max": 100.0, "step":0.01, "round": False, "tooltip": "Set relative injection strength."}),
-
-                    "img_q_norm":       ("FLOAT",                                     {"default": 0.0, "min":  -100.0, "max": 100.0, "step":0.01, "round": False, "tooltip": "Set relative injection strength."}),
-                    "img_k_norm":       ("FLOAT",                                     {"default": 0.0, "min":  -100.0, "max": 100.0, "step":0.01, "round": False, "tooltip": "Set relative injection strength."}),
-                    "img_v_norm":       ("FLOAT",                                     {"default": 0.0, "min":  -100.0, "max": 100.0, "step":0.01, "round": False, "tooltip": "Set relative injection strength."}),
-
-                    "txt_q_norm":       ("FLOAT",                                     {"default": 0.0, "min":  -100.0, "max": 100.0, "step":0.01, "round": False, "tooltip": "Set relative injection strength."}),
-                    "txt_k_norm":       ("FLOAT",                                     {"default": 0.0, "min":  -100.0, "max": 100.0, "step":0.01, "round": False, "tooltip": "Set relative injection strength."}),
-                    "txt_v_norm":       ("FLOAT",                                     {"default": 0.0, "min":  -100.0, "max": 100.0, "step":0.01, "round": False, "tooltip": "Set relative injection strength."}),
-
-                    "start_step":       ("INT",                                       {"default": 0,    "min":  0,      "max": 10000}),
-                    "end_step":         ("INT",                                       {"default": 15,   "min": -1,      "max": 10000}),
-                    "invert_mask":      ("BOOLEAN",                                   {"default": False}),
-                    },
-                "optional": 
-                    {
-                    "guide":            ("LATENT", ),
-                    "mask":             ("MASK", ),
-                    "weights":          ("SIGMAS", ),
-                    "guides":           ("GUIDES", ),
-                    }  
-                }
-    
-    RETURN_TYPES = ("GUIDES",)
-    RETURN_NAMES = ("guides",)
-    FUNCTION     = "main"
-    CATEGORY     = "RES4LYF/sampler_extensions"
-
-    def main(self,
-            weight           = 1.0,
-            weight_scheduler = "constant",
-            double_weights   = "0.1",
-            single_weights   = "0.0", 
-            double_blocks    = "all",
-            single_blocks    = "all", 
-            
-            img_q            = 0.0,
-            img_k            = 0.0,
-            img_v            = 0.0,
-            
-            txt_q            = 0.0,
-            txt_k            = 0.0,
-            txt_v            = 0.0,
-            
-            img_q_norm       = 0.0,
-            img_k_norm       = 0.0,
-            img_v_norm       = 0.0,
-            
-            txt_q_norm       = 0.0,
-            txt_k_norm       = 0.0,
-            txt_v_norm       = 0.0,
-            
-            start_step       = 0,
-            end_step         = 15,
-            invert_mask      = False,
-            
-            guide            = None,
-            mask             = None,
-            weights          = None,
-            guides           = None,
-            ):
-        
-        default_dtype = torch.float64
-        
-        mask = 1-mask if mask is not None else None
-        
-        double_weights = parse_range_string(double_weights)
-        single_weights = parse_range_string(single_weights)
-        
-        if len(double_weights) == 0:
-            double_weights.append(0.0)
-        if len(single_weights) == 0:
-            single_weights.append(0.0)
-        
-        if len(double_weights) == 1:
-            double_weights = double_weights * 100
-        if len(single_weights) == 1:
-            single_weights = single_weights * 100
-        
-        if type(double_weights[0]) == int:
-            double_weights = [float(val) for val in double_weights]
-        if type(single_weights[0]) == int:
-            single_weights = [float(val) for val in single_weights]
-        
-        if double_blocks == "all":
-            double_blocks  = [val for val in range(100)]
-            if len(double_weights) == 1:
-                double_weights = [double_weights[0]] * 100
-        else:
-            double_blocks  = parse_range_string(double_blocks)
-            
-            weights_expanded = [0.0] * 100
-            for b, w in zip(double_blocks, double_weights):
-                weights_expanded[b] = w
-            double_weights = weights_expanded
-            
-        
-        if single_blocks == "all":
-            single_blocks = [val for val in range(100)]
-            if len(single_weights) == 1:
-                single_weights = [single_weights[0]] * 100
-        else:
-            single_blocks  = parse_range_string(single_blocks)
-            
-            weights_expanded = [0.0] * 100
-            for b, w in zip(single_blocks, single_weights):
-                weights_expanded[b] = w
-            single_weights = weights_expanded
-        
-        
-        
-        if end_step == -1:
-            end_step = MAX_STEPS
-        
-        if guide is not None:
-            raw_x = guide.get('state_info', {}).get('raw_x', None)
-            if raw_x is not None:
-                guide          = {'samples': guide['state_info']['raw_x'].clone()}
-            else:
-                guide          = {'samples': guide['samples'].clone()}
-        
-        if weight_scheduler == "constant": # and weights == None: 
-            weights = initialize_or_scale(None, weight, end_step).to(default_dtype)
-            prepend = torch.zeros(start_step).to(weights)
-            weights = torch.cat([prepend, weights])
-            weights = F.pad(weights, (0, MAX_STEPS), value=0.0)
-        
-        guides = copy.deepcopy(guides) if guides is not None else {}
-        
-        guides['weight_attninj']           = weight
-        guides['weights_attninj']          = weights
-        
-        guides['blocks_attninj_mmdit'] = {
-            "double_weights": double_weights,
-            "single_weights": single_weights,
-            "double_blocks" : double_blocks,
-            "single_blocks" : single_blocks,
-        }
-        
-        guides['blocks_attninj_qkv'] = {
-            "img_q": img_q,
-            "img_k": img_k,
-            "img_v": img_v,
-            "txt_q": txt_q,
-            "txt_k": txt_k,
-            "txt_v": txt_v,
-            
-            "img_q_norm": img_q_norm,
-            "img_k_norm": img_k_norm,
-            "img_v_norm": img_v_norm,
-            "txt_q_norm": txt_q_norm,
-            "txt_k_norm": txt_k_norm,
-            "txt_v_norm": txt_v_norm,
-        }
-        
-        guides['guide_attninj']            = guide
-        guides['mask_attninj']             = mask
-
-        guides['weight_scheduler_attninj'] = weight_scheduler
-        guides['start_step_attninj']       = start_step
-        guides['end_step_attninj']         = end_step
-        
-        return (guides, )
-
-
-
-
-
-
-class ClownGuide_StyleNorm_Advanced_HiDream:
-
-    @classmethod
-    def INPUT_TYPES(cls):
-        return {"required":
-                    {
-                    "weight":           ("FLOAT",                                     {"default": 1.0, "min":  -100.0, "max": 100.0, "step":0.01, "round": False, "tooltip": "Set the strength of the guide by multiplying all other weights by this value."}),
-                    "weight_scheduler": (["constant"] + get_res4lyf_scheduler_list(), {"default": "constant"},),
-                    
-                    "double_blocks"   : ("STRING",                                    {"default": "all", "multiline": True}),
-                    "double_weights"  : ("STRING",                                    {"default": "1.0", "multiline": True}),
-                    "single_blocks"   : ("STRING",                                    {"default": "all", "multiline": True}),
-                    "single_weights"  : ("STRING",                                    {"default": "1.0", "multiline": True}),
-
-                    "mode": (["scattersort", "AdaIN"], {"default": "scattersort"},),
-                    "noise_mode": (["direct", "update", "smart", "recon", "bonanza"], {"default": "smart"},),
-
-                    #"shared_experts":          ("BOOLEAN", {"default": False}),
-                    
-                    "ff_1"                   : ("BOOLEAN", {"default": False}),
-                    "ff_1_silu"              : ("BOOLEAN", {"default": False}),
-                    "ff_3"                   : ("BOOLEAN", {"default": False}),
-                    "ff_13"                  : ("BOOLEAN", {"default": False}),
-                    "ff_2"                   : ("BOOLEAN", {"default": False}),
-                    
-                    "moe_gate"               : ("BOOLEAN", {"default": False}),
-                    "topk_weight"            : ("BOOLEAN", {"default": False}),
-                    "moe_ff_1"               : ("BOOLEAN", {"default": False}),
-                    "moe_ff_1_silu"          : ("BOOLEAN", {"default": False}),
-                    "moe_ff_3"               : ("BOOLEAN", {"default": False}),
-                    "moe_ff_13"              : ("BOOLEAN", {"default": False}),
-                    "moe_ff_2"               : ("BOOLEAN", {"default": False}),
-                    "moe_sum"                : ("BOOLEAN", {"default": False}),
-                    "moe_out"                : ("BOOLEAN", {"default": False}),
-
-                    "double_img_io":           ("BOOLEAN", {"default": False}),
-                    "double_img_norm0":        ("BOOLEAN", {"default": False}),
-                    "double_img_attn":         ("BOOLEAN", {"default": False}),
-                    "double_img_attn_gated":   ("BOOLEAN", {"default": False}),
-                    "double_img":              ("BOOLEAN", {"default": False}),
-                    "double_img_norm1":        ("BOOLEAN", {"default": False}),
-                    "double_img_ff_i":         ("BOOLEAN", {"default": False}),
-
-                    "double_txt_io":           ("BOOLEAN", {"default": False}),
-                    "double_txt_norm0":        ("BOOLEAN", {"default": False}),
-                    "double_txt_attn":         ("BOOLEAN", {"default": False}),
-                    "double_txt_attn_gated":   ("BOOLEAN", {"default": False}),
-                    "double_txt":              ("BOOLEAN", {"default": False}),
-                    "double_txt_norm1":        ("BOOLEAN", {"default": False}),
-                    "double_txt_ff_t":         ("BOOLEAN", {"default": False}),
-
-                    "single_img_io":           ("BOOLEAN", {"default": False}),
-                    "single_img_norm0":        ("BOOLEAN", {"default": False}),
-                    "single_img_attn":         ("BOOLEAN", {"default": False}),
-                    "single_img_attn_gated":   ("BOOLEAN", {"default": False}),
-                    "single_img":              ("BOOLEAN", {"default": False}),
-                    "single_img_norm1":        ("BOOLEAN", {"default": False}),
-                    "single_img_ff_i":         ("BOOLEAN", {"default": False}),
-                    
-                    "attn_img_q_norm"       : ("BOOLEAN", {"default": False}),
-                    "attn_img_k_norm"       : ("BOOLEAN", {"default": False}),
-                    "attn_img_v_norm"       : ("BOOLEAN", {"default": False}),
-                    "attn_txt_q_norm"       : ("BOOLEAN", {"default": False}),
-                    "attn_txt_k_norm"       : ("BOOLEAN", {"default": False}),
-                    "attn_txt_v_norm"       : ("BOOLEAN", {"default": False}),
-                    "attn_img_double"       : ("BOOLEAN", {"default": False}),
-                    "attn_txt_double"       : ("BOOLEAN", {"default": False}),
-                    "attn_img_single"       : ("BOOLEAN", {"default": False}),
-                    
-                    "start_step":       ("INT",      {"default": 0,    "min":  0,      "max": 10000}),
-                    "end_step":         ("INT",      {"default": 15,   "min": -1,      "max": 10000}),
-                    "invert_mask":      ("BOOLEAN",  {"default": False}),
-                    },
-                "optional": 
-                    {
-                    "guide":            ("LATENT", ),
-                    "mask":             ("MASK", ),
-                    "weights":          ("SIGMAS", ),
-                    "guides":           ("GUIDES", ),
-                    }  
-                }
-    
-    RETURN_TYPES = ("GUIDES",)
-    RETURN_NAMES = ("guides",)
-    FUNCTION     = "main"
-    CATEGORY     = "RES4LYF/sampler_extensions"
-
-    def main(self,
-            weight           = 1.0,
-            weight_scheduler = "constant",
-            mode             = "scattersort",
-            noise_mode       = "smart",
-            double_weights   = "0.1",
-            single_weights   = "0.0", 
-            double_blocks    = "all",
-            single_blocks    = "all", 
-            start_step       = 0,
-            end_step         = 15,
-            invert_mask      = False,
-
-            moe_gate                = False,
-            topk_weight             = False,
-            moe_out                 = False,
-            moe_sum                 = False,
-            ff_1                    = False,
-            ff_1_silu               = False,
-            ff_3                    = False,
-            ff_13                   = False,
-            ff_2                    = False,
-            shared_experts          = False,
-            
-            moe_ff_1                = False,
-            moe_ff_1_silu           = False,
-            moe_ff_3                = False,
-            moe_ff_13               = False,
-            moe_ff_2                = False,
-
-            double_img_io           = False,
-            double_img_norm0        = False,
-            double_img_attn         = False,
-            double_img_norm1        = False,
-            double_img_attn_gated   = False,
-            double_img              = False,
-            double_img_ff_i         = False,
-
-            double_txt_io           = False,
-            double_txt_norm0        = False,
-            double_txt_attn         = False,
-            double_txt_attn_gated   = False,
-            double_txt              = False,
-            double_txt_norm1        = False,
-            double_txt_ff_t         = False,
-
-            single_img_io           = False,
-            single_img_norm0        = False,
-            single_img_attn         = False,
-            single_img_attn_gated   = False,
-            single_img              = False,
-            single_img_norm1        = False,
-            single_img_ff_i         = False,
-            
-            attn_img_q_norm         = False,
-            attn_img_k_norm         = False,
-            attn_img_v_norm         = False,
-            attn_txt_q_norm         = False,
-            attn_txt_k_norm         = False,
-            attn_txt_v_norm         = False,
-            attn_img_single         = False,
-            attn_img_double         = False,
-            attn_txt_double         = False,
-
-            guide            = None,
-            mask             = None,
-            weights          = None,
-            guides           = None,
-            ):
-        
-        default_dtype = torch.float64
-        
-        mask = 1-mask if mask is not None else None
-        
-        double_weights = parse_range_string(double_weights)
-        single_weights = parse_range_string(single_weights)
-        
-        if len(double_weights) == 0:
-            double_weights.append(0.0)
-        if len(single_weights) == 0:
-            single_weights.append(0.0)
-            
-        if len(double_weights) == 1:
-            double_weights = double_weights * 100
-        if len(single_weights) == 1:
-            single_weights = single_weights * 100
-            
-        if type(double_weights[0]) == int:
-            double_weights = [float(val) for val in double_weights]
-        if type(single_weights[0]) == int:
-            single_weights = [float(val) for val in single_weights]
-        
-        if double_blocks == "all":
-            double_blocks  = [val for val in range(100)]
-            if len(double_weights) == 1:
-                double_weights = [double_weights[0]] * 100
-        else:
-            double_blocks  = parse_range_string(double_blocks)
-            
-            weights_expanded = [0.0] * 100
-            for b, w in zip(double_blocks, double_weights):
-                weights_expanded[b] = w
-            double_weights = weights_expanded
-            
-        
-        if single_blocks == "all":
-            single_blocks = [val for val in range(100)]
-            if len(single_weights) == 1:
-                single_weights = [single_weights[0]] * 100
-        else:
-            single_blocks  = parse_range_string(single_blocks)
-            
-            weights_expanded = [0.0] * 100
-            for b, w in zip(single_blocks, single_weights):
-                weights_expanded[b] = w
-            single_weights = weights_expanded
-        
-        
-        
-        if end_step == -1:
-            end_step = MAX_STEPS
-        
-        if guide is not None:
-            raw_x = guide.get('state_info', {}).get('raw_x', None)
-            if raw_x is not None:
-                guide          = {'samples': guide['state_info']['raw_x'].clone()}
-            else:
-                guide          = {'samples': guide['samples'].clone()}
-        
-        if weight_scheduler == "constant": # and weights == None: 
-            weights = initialize_or_scale(None, weight, end_step).to(default_dtype)
-            prepend = torch.zeros(start_step).to(weights)
-            weights = torch.cat([prepend, weights])
-            weights = F.pad(weights, (0, MAX_STEPS), value=0.0)
-        
-        guides = copy.deepcopy(guides) if guides is not None else {}
-        
-        guides['weight_adain']           = weight
-        guides['weights_adain']          = weights
-        
-        guides['blocks_adain_mmdit'] = {
-            "double_weights": double_weights,
-            "single_weights": single_weights,
-            "double_blocks" : double_blocks,
-            "single_blocks" : single_blocks,
-        }
-        guides['sort_and_scatter'] = {
-            "mode"                  : mode,
-            "noise_mode"            : noise_mode,
-
-            "moe_gate"              : moe_gate,
-            "topk_weight"           : topk_weight,
-            "moe_sum"               : moe_sum,
-            "moe_out"               : moe_out,
-
-            "ff_1"                  : ff_1,
-            "ff_1_silu"             : ff_1_silu,
-            "ff_3"                  : ff_3,
-            "ff_13"                 : ff_13,
-            "ff_2"                  : ff_2,
-            
-            "moe_ff_1"              : moe_ff_1,
-            "moe_ff_1_silu"         : moe_ff_1_silu,
-            "moe_ff_3"              : moe_ff_3,
-            "moe_ff_13"             : moe_ff_13,
-            "moe_ff_2"              : moe_ff_2,
-            
-            "shared_experts"        : shared_experts,
-
-            "double_img_io"         : double_img_io,
-            "double_img_norm0"      : double_img_norm0,
-            "double_img_attn"       : double_img_attn,
-            "double_img_norm1"      : double_img_norm1,
-            "double_img_attn_gated" : double_img_attn_gated,
-            "double_img"            : double_img,
-            "double_img_ff_i"       : double_img_ff_i,
-
-            "double_txt_io"         : double_txt_io,
-            "double_txt_norm0"      : double_txt_norm0,
-            "double_txt_attn"       : double_txt_attn,
-            "double_txt_attn_gated" : double_txt_attn_gated,
-            "double_txt"            : double_txt,
-            "double_txt_norm1"      : double_txt_norm1,
-            "double_txt_ff_t"       : double_txt_ff_t,
-
-            "single_img_io"         : single_img_io,
-            "single_img_norm0"      : single_img_norm0,
-            "single_img_attn"       : single_img_attn,
-            "single_img_attn_gated" : single_img_attn_gated,
-            "single_img"            : single_img,
-            "single_img_norm1"      : single_img_norm1,
-            "single_img_ff_i"       : single_img_ff_i,
-            
-            "attn_img_q_norm"       : attn_img_q_norm,
-            "attn_img_k_norm"       : attn_img_k_norm,
-            "attn_img_v_norm"       : attn_img_v_norm,
-            "attn_txt_q_norm"       : attn_txt_q_norm,
-            "attn_txt_k_norm"       : attn_txt_k_norm,
-            "attn_txt_v_norm"       : attn_txt_v_norm,
-            "attn_img_single"       : attn_img_single,
-            "attn_img_double"       : attn_img_double,
-        }
-        
-        guides['guide_adain']            = guide
-        guides['mask_adain']             = mask
-
-        guides['weight_scheduler_adain'] = weight_scheduler
-        guides['start_step_adain']       = start_step
-        guides['end_step_adain']         = end_step
-        
-        return (guides, )
 
 
 
@@ -3224,3 +2599,1080 @@ class SharkOptions_GuiderInput:
         options_mgr.update("guider", guider)
         
         return (options_mgr.as_dict(), )
+
+
+
+
+
+class ClownGuide_AdaIN_MMDiT_Beta:
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {"required":
+                    {
+                    "weight":           ("FLOAT",                                     {"default": 1.0, "min":  -100.0, "max": 100.0, "step":0.01, "round": False, "tooltip": "Set the strength of the guide by multiplying all other weights by this value."}),
+                    "weight_scheduler": (["constant"] + get_res4lyf_scheduler_list(), {"default": "constant"},),
+                    "double_blocks"   : ("STRING",                                    {"default": "", "multiline": True}),
+                    "double_weights"  : ("STRING",                                    {"default": "", "multiline": True}),
+                    "single_blocks"   : ("STRING",                                    {"default": "20", "multiline": True}),
+                    "single_weights"  : ("STRING",                                    {"default": "0.5", "multiline": True}),
+                    "start_step":       ("INT",                                       {"default": 0,    "min":  0,      "max": 10000}),
+                    "end_step":         ("INT",                                       {"default": 15,   "min": -1,      "max": 10000}),
+                    "invert_mask":      ("BOOLEAN",                                   {"default": False}),
+                    },
+                "optional": 
+                    {
+                    "guide":            ("LATENT", ),
+                    "mask":             ("MASK", ),
+                    "weights":          ("SIGMAS", ),
+                    "guides":           ("GUIDES", ),
+                    }  
+                }
+    
+    RETURN_TYPES = ("GUIDES",)
+    RETURN_NAMES = ("guides",)
+    FUNCTION     = "main"
+    CATEGORY     = "RES4LYF/sampler_extensions"
+
+    def main(self,
+            weight           = 1.0,
+            weight_scheduler = "constant",
+            double_weights   = "0.1",
+            single_weights   = "0.0", 
+            double_blocks    = "all",
+            single_blocks    = "all", 
+            start_step       = 0,
+            end_step         = 15,
+            invert_mask      = False,
+            
+            guide            = None,
+            mask             = None,
+            weights          = None,
+            guides           = None,
+            ):
+        
+        default_dtype = torch.float64
+        
+        mask = 1-mask if mask is not None else None
+        
+        double_weights = parse_range_string(double_weights)
+        single_weights = parse_range_string(single_weights)
+        
+        if len(double_weights) == 0:
+            double_weights.append(0.0)
+        if len(single_weights) == 0:
+            single_weights.append(0.0)
+            
+        if len(double_weights) == 1:
+            double_weights = double_weights * 100
+        if len(single_weights) == 1:
+            single_weights = single_weights * 100
+            
+        if type(double_weights[0]) == int:
+            double_weights = [float(val) for val in double_weights]
+        if type(single_weights[0]) == int:
+            single_weights = [float(val) for val in single_weights]
+        
+        if double_blocks == "all":
+            double_blocks  = [val for val in range(100)]
+            if len(double_weights) == 1:
+                double_weights = [double_weights[0]] * 100
+        else:
+            double_blocks  = parse_range_string(double_blocks)
+            
+            weights_expanded = [0.0] * 100
+            for b, w in zip(double_blocks, double_weights):
+                weights_expanded[b] = w
+            double_weights = weights_expanded
+            
+        
+        if single_blocks == "all":
+            single_blocks = [val for val in range(100)]
+            if len(single_weights) == 1:
+                single_weights = [single_weights[0]] * 100
+        else:
+            single_blocks  = parse_range_string(single_blocks)
+            
+            weights_expanded = [0.0] * 100
+            for b, w in zip(single_blocks, single_weights):
+                weights_expanded[b] = w
+            single_weights = weights_expanded
+        
+        
+        
+        if end_step == -1:
+            end_step = MAX_STEPS
+        
+        if guide is not None:
+            raw_x = guide.get('state_info', {}).get('raw_x', None)
+            if raw_x is not None:
+                guide          = {'samples': guide['state_info']['raw_x'].clone()}
+            else:
+                guide          = {'samples': guide['samples'].clone()}
+        
+        if weight_scheduler == "constant": # and weights == None: 
+            weights = initialize_or_scale(None, weight, end_step).to(default_dtype)
+            prepend = torch.zeros(start_step).to(weights)
+            weights = torch.cat([prepend, weights])
+            weights = F.pad(weights, (0, MAX_STEPS), value=0.0)
+        
+        guides = copy.deepcopy(guides) if guides is not None else {}
+        
+        guides['weight_adain']           = weight
+        guides['weights_adain']          = weights
+        
+        guides['blocks_adain_mmdit'] = {
+            "double_weights": double_weights,
+            "single_weights": single_weights,
+            "double_blocks" : double_blocks,
+            "single_blocks" : single_blocks,
+        }
+        
+        guides['guide_adain']            = guide
+        guides['mask_adain']             = mask
+
+        guides['weight_scheduler_adain'] = weight_scheduler
+        guides['start_step_adain']       = start_step
+        guides['end_step_adain']         = end_step
+        
+        return (guides, )
+
+
+
+
+
+class ClownGuide_AttnInj_MMDiT_Beta:
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {"required":
+                    {
+                    "weight":           ("FLOAT",                                     {"default": 1.0, "min":  -100.0, "max": 100.0, "step":0.01, "round": False, "tooltip": "Set the strength of the guide by multiplying all other weights by this value."}),
+                    "weight_scheduler": (["constant"] + get_res4lyf_scheduler_list(), {"default": "constant"},),
+                    "double_blocks"   : ("STRING",                                    {"default": "0,1,3", "multiline": True}),
+                    "double_weights"  : ("STRING",                                    {"default": "1.0", "multiline": True}),
+                    "single_blocks"   : ("STRING",                                    {"default": "20", "multiline": True}),
+                    "single_weights"  : ("STRING",                                    {"default": "0.5", "multiline": True}),
+                    
+                    "img_q":            ("FLOAT",                                     {"default": 0.0, "min":  -100.0, "max": 100.0, "step":0.01, "round": False, "tooltip": "Set relative injection strength."}),
+                    "img_k":            ("FLOAT",                                     {"default": 0.0, "min":  -100.0, "max": 100.0, "step":0.01, "round": False, "tooltip": "Set relative injection strength."}),
+                    "img_v":            ("FLOAT",                                     {"default": 1.0, "min":  -100.0, "max": 100.0, "step":0.01, "round": False, "tooltip": "Set relative injection strength."}),
+
+                    "txt_q":            ("FLOAT",                                     {"default": 0.0, "min":  -100.0, "max": 100.0, "step":0.01, "round": False, "tooltip": "Set relative injection strength."}),
+                    "txt_k":            ("FLOAT",                                     {"default": 0.0, "min":  -100.0, "max": 100.0, "step":0.01, "round": False, "tooltip": "Set relative injection strength."}),
+                    "txt_v":            ("FLOAT",                                     {"default": 0.0, "min":  -100.0, "max": 100.0, "step":0.01, "round": False, "tooltip": "Set relative injection strength."}),
+
+                    "img_q_norm":       ("FLOAT",                                     {"default": 0.0, "min":  -100.0, "max": 100.0, "step":0.01, "round": False, "tooltip": "Set relative injection strength."}),
+                    "img_k_norm":       ("FLOAT",                                     {"default": 0.0, "min":  -100.0, "max": 100.0, "step":0.01, "round": False, "tooltip": "Set relative injection strength."}),
+                    "img_v_norm":       ("FLOAT",                                     {"default": 0.0, "min":  -100.0, "max": 100.0, "step":0.01, "round": False, "tooltip": "Set relative injection strength."}),
+
+                    "txt_q_norm":       ("FLOAT",                                     {"default": 0.0, "min":  -100.0, "max": 100.0, "step":0.01, "round": False, "tooltip": "Set relative injection strength."}),
+                    "txt_k_norm":       ("FLOAT",                                     {"default": 0.0, "min":  -100.0, "max": 100.0, "step":0.01, "round": False, "tooltip": "Set relative injection strength."}),
+                    "txt_v_norm":       ("FLOAT",                                     {"default": 0.0, "min":  -100.0, "max": 100.0, "step":0.01, "round": False, "tooltip": "Set relative injection strength."}),
+
+                    "start_step":       ("INT",                                       {"default": 0,    "min":  0,      "max": 10000}),
+                    "end_step":         ("INT",                                       {"default": 15,   "min": -1,      "max": 10000}),
+                    "invert_mask":      ("BOOLEAN",                                   {"default": False}),
+                    },
+                "optional": 
+                    {
+                    "guide":            ("LATENT", ),
+                    "mask":             ("MASK", ),
+                    "weights":          ("SIGMAS", ),
+                    "guides":           ("GUIDES", ),
+                    }  
+                }
+    
+    RETURN_TYPES = ("GUIDES",)
+    RETURN_NAMES = ("guides",)
+    FUNCTION     = "main"
+    CATEGORY     = "RES4LYF/sampler_extensions"
+
+    def main(self,
+            weight           = 1.0,
+            weight_scheduler = "constant",
+            double_weights   = "0.1",
+            single_weights   = "0.0", 
+            double_blocks    = "all",
+            single_blocks    = "all", 
+            
+            img_q            = 0.0,
+            img_k            = 0.0,
+            img_v            = 0.0,
+            
+            txt_q            = 0.0,
+            txt_k            = 0.0,
+            txt_v            = 0.0,
+            
+            img_q_norm       = 0.0,
+            img_k_norm       = 0.0,
+            img_v_norm       = 0.0,
+            
+            txt_q_norm       = 0.0,
+            txt_k_norm       = 0.0,
+            txt_v_norm       = 0.0,
+            
+            start_step       = 0,
+            end_step         = 15,
+            invert_mask      = False,
+            
+            guide            = None,
+            mask             = None,
+            weights          = None,
+            guides           = None,
+            ):
+        
+        default_dtype = torch.float64
+        
+        mask = 1-mask if mask is not None else None
+        
+        double_weights = parse_range_string(double_weights)
+        single_weights = parse_range_string(single_weights)
+        
+        if len(double_weights) == 0:
+            double_weights.append(0.0)
+        if len(single_weights) == 0:
+            single_weights.append(0.0)
+        
+        if len(double_weights) == 1:
+            double_weights = double_weights * 100
+        if len(single_weights) == 1:
+            single_weights = single_weights * 100
+        
+        if type(double_weights[0]) == int:
+            double_weights = [float(val) for val in double_weights]
+        if type(single_weights[0]) == int:
+            single_weights = [float(val) for val in single_weights]
+        
+        if double_blocks == "all":
+            double_blocks  = [val for val in range(100)]
+            if len(double_weights) == 1:
+                double_weights = [double_weights[0]] * 100
+        else:
+            double_blocks  = parse_range_string(double_blocks)
+            
+            weights_expanded = [0.0] * 100
+            for b, w in zip(double_blocks, double_weights):
+                weights_expanded[b] = w
+            double_weights = weights_expanded
+            
+        
+        if single_blocks == "all":
+            single_blocks = [val for val in range(100)]
+            if len(single_weights) == 1:
+                single_weights = [single_weights[0]] * 100
+        else:
+            single_blocks  = parse_range_string(single_blocks)
+            
+            weights_expanded = [0.0] * 100
+            for b, w in zip(single_blocks, single_weights):
+                weights_expanded[b] = w
+            single_weights = weights_expanded
+        
+        
+        
+        if end_step == -1:
+            end_step = MAX_STEPS
+        
+        if guide is not None:
+            raw_x = guide.get('state_info', {}).get('raw_x', None)
+            if raw_x is not None:
+                guide          = {'samples': guide['state_info']['raw_x'].clone()}
+            else:
+                guide          = {'samples': guide['samples'].clone()}
+        
+        if weight_scheduler == "constant": # and weights == None: 
+            weights = initialize_or_scale(None, weight, end_step).to(default_dtype)
+            prepend = torch.zeros(start_step).to(weights)
+            weights = torch.cat([prepend, weights])
+            weights = F.pad(weights, (0, MAX_STEPS), value=0.0)
+        
+        guides = copy.deepcopy(guides) if guides is not None else {}
+        
+        guides['weight_attninj']           = weight
+        guides['weights_attninj']          = weights
+        
+        guides['blocks_attninj_mmdit'] = {
+            "double_weights": double_weights,
+            "single_weights": single_weights,
+            "double_blocks" : double_blocks,
+            "single_blocks" : single_blocks,
+        }
+        
+        guides['blocks_attninj_qkv'] = {
+            "img_q": img_q,
+            "img_k": img_k,
+            "img_v": img_v,
+            "txt_q": txt_q,
+            "txt_k": txt_k,
+            "txt_v": txt_v,
+            
+            "img_q_norm": img_q_norm,
+            "img_k_norm": img_k_norm,
+            "img_v_norm": img_v_norm,
+            "txt_q_norm": txt_q_norm,
+            "txt_k_norm": txt_k_norm,
+            "txt_v_norm": txt_v_norm,
+        }
+        
+        guides['guide_attninj']            = guide
+        guides['mask_attninj']             = mask
+
+        guides['weight_scheduler_attninj'] = weight_scheduler
+        guides['start_step_attninj']       = start_step
+        guides['end_step_attninj']         = end_step
+        
+        return (guides, )
+
+
+
+
+
+
+class ClownGuide_StyleNorm_Advanced_HiDream:
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {"required":
+                    {
+                    "weight":           ("FLOAT",                                     {"default": 1.0, "min":  -100.0, "max": 100.0, "step":0.01, "round": False, "tooltip": "Set the strength of the guide by multiplying all other weights by this value."}),
+                    "weight_scheduler": (["constant"] + get_res4lyf_scheduler_list(), {"default": "constant"},),
+                    
+                    "double_blocks"   : ("STRING",                                    {"default": "all", "multiline": True}),
+                    "double_weights"  : ("STRING",                                    {"default": "1.0", "multiline": True}),
+                    "single_blocks"   : ("STRING",                                    {"default": "all", "multiline": True}),
+                    "single_weights"  : ("STRING",                                    {"default": "1.0", "multiline": True}),
+
+                    "mode": (["scattersort", "AdaIN"], {"default": "scattersort"},),
+                    "noise_mode": (["direct", "update", "smart", "recon", "bonanza"], {"default": "smart"},),
+
+                    #"shared_experts":          ("BOOLEAN", {"default": False}),
+                    
+                    "ff_1"                   : ("BOOLEAN", {"default": False}),
+                    "ff_1_silu"              : ("BOOLEAN", {"default": False}),
+                    "ff_3"                   : ("BOOLEAN", {"default": False}),
+                    "ff_13"                  : ("BOOLEAN", {"default": False}),
+                    "ff_2"                   : ("BOOLEAN", {"default": False}),
+                    
+                    "moe_gate"               : ("BOOLEAN", {"default": False}),
+                    "topk_weight"            : ("BOOLEAN", {"default": False}),
+                    "moe_ff_1"               : ("BOOLEAN", {"default": False}),
+                    "moe_ff_1_silu"          : ("BOOLEAN", {"default": False}),
+                    "moe_ff_3"               : ("BOOLEAN", {"default": False}),
+                    "moe_ff_13"              : ("BOOLEAN", {"default": False}),
+                    "moe_ff_2"               : ("BOOLEAN", {"default": False}),
+                    "moe_sum"                : ("BOOLEAN", {"default": False}),
+                    "moe_out"                : ("BOOLEAN", {"default": False}),
+
+                    "double_img_io":           ("BOOLEAN", {"default": False}),
+                    "double_img_norm0":        ("BOOLEAN", {"default": False}),
+                    "double_img_attn":         ("BOOLEAN", {"default": False}),
+                    "double_img_attn_gated":   ("BOOLEAN", {"default": False}),
+                    "double_img":              ("BOOLEAN", {"default": False}),
+                    "double_img_norm1":        ("BOOLEAN", {"default": False}),
+                    "double_img_ff_i":         ("BOOLEAN", {"default": False}),
+
+                    "double_txt_io":           ("BOOLEAN", {"default": False}),
+                    "double_txt_norm0":        ("BOOLEAN", {"default": False}),
+                    "double_txt_attn":         ("BOOLEAN", {"default": False}),
+                    "double_txt_attn_gated":   ("BOOLEAN", {"default": False}),
+                    "double_txt":              ("BOOLEAN", {"default": False}),
+                    "double_txt_norm1":        ("BOOLEAN", {"default": False}),
+                    "double_txt_ff_t":         ("BOOLEAN", {"default": False}),
+
+                    "single_img_io":           ("BOOLEAN", {"default": False}),
+                    "single_img_norm0":        ("BOOLEAN", {"default": False}),
+                    "single_img_attn":         ("BOOLEAN", {"default": False}),
+                    "single_img_attn_gated":   ("BOOLEAN", {"default": False}),
+                    "single_img":              ("BOOLEAN", {"default": False}),
+                    "single_img_norm1":        ("BOOLEAN", {"default": False}),
+                    "single_img_ff_i":         ("BOOLEAN", {"default": False}),
+                    
+                    "attn_img_q_norm"       : ("BOOLEAN", {"default": False}),
+                    "attn_img_k_norm"       : ("BOOLEAN", {"default": False}),
+                    "attn_img_v_norm"       : ("BOOLEAN", {"default": False}),
+                    "attn_txt_q_norm"       : ("BOOLEAN", {"default": False}),
+                    "attn_txt_k_norm"       : ("BOOLEAN", {"default": False}),
+                    "attn_txt_v_norm"       : ("BOOLEAN", {"default": False}),
+                    "attn_img_double"       : ("BOOLEAN", {"default": False}),
+                    "attn_txt_double"       : ("BOOLEAN", {"default": False}),
+                    "attn_img_single"       : ("BOOLEAN", {"default": False}),
+                    
+                    "proj_out"           : ("BOOLEAN", {"default": False}),
+                    
+                    "start_step":       ("INT",      {"default": 0,    "min":  0,      "max": 10000}),
+                    "end_step":         ("INT",      {"default": 15,   "min": -1,      "max": 10000}),
+                    "invert_mask":      ("BOOLEAN",  {"default": False}),
+                    },
+                "optional": 
+                    {
+                    "guide":            ("LATENT", ),
+                    "mask":             ("MASK", ),
+                    "weights":          ("SIGMAS", ),
+                    "guides":           ("GUIDES", ),
+                    }  
+                }
+    
+    RETURN_TYPES = ("GUIDES",)
+    RETURN_NAMES = ("guides",)
+    FUNCTION     = "main"
+    CATEGORY     = "RES4LYF/sampler_extensions"
+    EXPERIMENTAL = True
+
+    def main(self,
+            weight           = 1.0,
+            weight_scheduler = "constant",
+            mode             = "scattersort",
+            noise_mode       = "smart",
+            double_weights   = "0.1",
+            single_weights   = "0.0", 
+            double_blocks    = "all",
+            single_blocks    = "all", 
+            start_step       = 0,
+            end_step         = 15,
+            invert_mask      = False,
+
+            moe_gate                = False,
+            topk_weight             = False,
+            moe_out                 = False,
+            moe_sum                 = False,
+            ff_1                    = False,
+            ff_1_silu               = False,
+            ff_3                    = False,
+            ff_13                   = False,
+            ff_2                    = False,
+            shared_experts          = False,
+            
+            moe_ff_1                = False,
+            moe_ff_1_silu           = False,
+            moe_ff_3                = False,
+            moe_ff_13               = False,
+            moe_ff_2                = False,
+
+            double_img_io           = False,
+            double_img_norm0        = False,
+            double_img_attn         = False,
+            double_img_norm1        = False,
+            double_img_attn_gated   = False,
+            double_img              = False,
+            double_img_ff_i         = False,
+
+            double_txt_io           = False,
+            double_txt_norm0        = False,
+            double_txt_attn         = False,
+            double_txt_attn_gated   = False,
+            double_txt              = False,
+            double_txt_norm1        = False,
+            double_txt_ff_t         = False,
+
+            single_img_io           = False,
+            single_img_norm0        = False,
+            single_img_attn         = False,
+            single_img_attn_gated   = False,
+            single_img              = False,
+            single_img_norm1        = False,
+            single_img_ff_i         = False,
+            
+            attn_img_q_norm         = False,
+            attn_img_k_norm         = False,
+            attn_img_v_norm         = False,
+            attn_txt_q_norm         = False,
+            attn_txt_k_norm         = False,
+            attn_txt_v_norm         = False,
+            attn_img_single         = False,
+            attn_img_double         = False,
+            attn_txt_double         = False,
+            
+            proj_out             = False,
+
+            guide            = None,
+            mask             = None,
+            weights          = None,
+            guides           = None,
+            ):
+        
+        default_dtype = torch.float64
+        
+        mask = 1-mask if mask is not None else None
+        
+        double_weights = parse_range_string(double_weights)
+        single_weights = parse_range_string(single_weights)
+        
+        if len(double_weights) == 0:
+            double_weights.append(0.0)
+        if len(single_weights) == 0:
+            single_weights.append(0.0)
+            
+        if len(double_weights) == 1:
+            double_weights = double_weights * 100
+        if len(single_weights) == 1:
+            single_weights = single_weights * 100
+            
+        if type(double_weights[0]) == int:
+            double_weights = [float(val) for val in double_weights]
+        if type(single_weights[0]) == int:
+            single_weights = [float(val) for val in single_weights]
+        
+        if double_blocks == "all":
+            double_blocks  = [val for val in range(100)]
+            if len(double_weights) == 1:
+                double_weights = [double_weights[0]] * 100
+        else:
+            double_blocks  = parse_range_string(double_blocks)
+            
+            weights_expanded = [0.0] * 100
+            for b, w in zip(double_blocks, double_weights):
+                weights_expanded[b] = w
+            double_weights = weights_expanded
+            
+        
+        if single_blocks == "all":
+            single_blocks = [val for val in range(100)]
+            if len(single_weights) == 1:
+                single_weights = [single_weights[0]] * 100
+        else:
+            single_blocks  = parse_range_string(single_blocks)
+            
+            weights_expanded = [0.0] * 100
+            for b, w in zip(single_blocks, single_weights):
+                weights_expanded[b] = w
+            single_weights = weights_expanded
+        
+        
+        
+        if end_step == -1:
+            end_step = MAX_STEPS
+        
+        if guide is not None:
+            raw_x = guide.get('state_info', {}).get('raw_x', None)
+            if raw_x is not None:
+                guide          = {'samples': guide['state_info']['raw_x'].clone()}
+            else:
+                guide          = {'samples': guide['samples'].clone()}
+        
+        if weight_scheduler == "constant": # and weights == None: 
+            weights = initialize_or_scale(None, weight, end_step).to(default_dtype)
+            prepend = torch.zeros(start_step).to(weights)
+            weights = torch.cat([prepend, weights])
+            weights = F.pad(weights, (0, MAX_STEPS), value=0.0)
+        
+        guides = copy.deepcopy(guides) if guides is not None else {}
+        
+        guides['weight_adain']           = weight
+        guides['weights_adain']          = weights
+        
+        guides['blocks_adain_mmdit'] = {
+            "double_weights": double_weights,
+            "single_weights": single_weights,
+            "double_blocks" : double_blocks,
+            "single_blocks" : single_blocks,
+        }
+        guides['sort_and_scatter'] = {
+            "mode"                  : mode,
+            "noise_mode"            : noise_mode,
+
+            "moe_gate"              : moe_gate,
+            "topk_weight"           : topk_weight,
+            "moe_sum"               : moe_sum,
+            "moe_out"               : moe_out,
+
+            "ff_1"                  : ff_1,
+            "ff_1_silu"             : ff_1_silu,
+            "ff_3"                  : ff_3,
+            "ff_13"                 : ff_13,
+            "ff_2"                  : ff_2,
+            
+            "moe_ff_1"              : moe_ff_1,
+            "moe_ff_1_silu"         : moe_ff_1_silu,
+            "moe_ff_3"              : moe_ff_3,
+            "moe_ff_13"             : moe_ff_13,
+            "moe_ff_2"              : moe_ff_2,
+            
+            "shared_experts"        : shared_experts,
+
+            "double_img_io"         : double_img_io,
+            "double_img_norm0"      : double_img_norm0,
+            "double_img_attn"       : double_img_attn,
+            "double_img_norm1"      : double_img_norm1,
+            "double_img_attn_gated" : double_img_attn_gated,
+            "double_img"            : double_img,
+            "double_img_ff_i"       : double_img_ff_i,
+
+            "double_txt_io"         : double_txt_io,
+            "double_txt_norm0"      : double_txt_norm0,
+            "double_txt_attn"       : double_txt_attn,
+            "double_txt_attn_gated" : double_txt_attn_gated,
+            "double_txt"            : double_txt,
+            "double_txt_norm1"      : double_txt_norm1,
+            "double_txt_ff_t"       : double_txt_ff_t,
+
+            "single_img_io"         : single_img_io,
+            "single_img_norm0"      : single_img_norm0,
+            "single_img_attn"       : single_img_attn,
+            "single_img_attn_gated" : single_img_attn_gated,
+            "single_img"            : single_img,
+            "single_img_norm1"      : single_img_norm1,
+            "single_img_ff_i"       : single_img_ff_i,
+            
+            "attn_img_q_norm"       : attn_img_q_norm,
+            "attn_img_k_norm"       : attn_img_k_norm,
+            "attn_img_v_norm"       : attn_img_v_norm,
+            "attn_txt_q_norm"       : attn_txt_q_norm,
+            "attn_txt_k_norm"       : attn_txt_k_norm,
+            "attn_txt_v_norm"       : attn_txt_v_norm,
+            "attn_img_single"       : attn_img_single,
+            "attn_img_double"       : attn_img_double,
+            
+            "proj_out"           : proj_out,
+        }
+        
+        guides['guide_adain']            = guide
+        guides['mask_adain']             = mask
+
+        guides['weight_scheduler_adain'] = weight_scheduler
+        guides['start_step_adain']       = start_step
+        guides['end_step_adain']         = end_step
+        
+        return (guides, )
+
+
+
+
+from ..style_transfer import StyleMMDiT_HiDream
+
+
+
+class ClownGuide_Style_NoiseMode:
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {"required":
+                    {
+                    "noise_mode":  (["direct", "update", "smart", "recon", "bonanza"], {"default": "update"},),
+                    },
+                "optional": 
+                    {
+                    "guides":      ("GUIDES", ),
+                    }  
+                }
+    
+    RETURN_TYPES = ("GUIDES",)
+    RETURN_NAMES = ("guides",)
+    FUNCTION     = "main"
+    CATEGORY     = "RES4LYF/sampler_extensions"
+
+    def main(self,
+            noise_mode  = "update",
+            guides      = None,
+            ):
+        guides = copy.deepcopy(guides) if guides is not None else {}
+        guides['noise_mode_adain'] = noise_mode
+        return (guides, )
+
+
+
+class ClownGuide_Style_MMDiT:
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {"required":
+                    {
+                    "mode":        (["scattersort", "AdaIN", "WCT", "WCT2", "injection"], {"default": "scattersort"},),
+                    "noise_mode":  (["direct", "update", "smart", "recon", "bonanza"], {"default": "update"},),
+                    "proj_in":     ("FLOAT",   {"default": 0.0, "min": -100.0, "max": 100.0, "step":0.01, "round": False, "tooltip": "Strength of effect on layer; skips extra calculation if set to 0.0. Skips interpolation if set to 1.0."}),
+                    "proj_out":    ("FLOAT",   {"default": 0.0, "min": -100.0, "max": 100.0, "step":0.01, "round": False, "tooltip": "Strength of effect on layer; skips extra calculation if set to 0.0. Skips interpolation if set to 1.0."}),
+
+                    "tile_h" : ("INT", {"default": 128, "min": 16, "max": 10000, "step": 16, "tooltip": "Tile size for tiled modes. Lower values will transfer composition more effectively. Dimensions of image must be divisible by this value."}),
+                    "tile_w" : ("INT", {"default": 128, "min": 16, "max": 10000, "step": 16, "tooltip": "Tile size for tiled modes. Lower values will transfer composition more effectively. Dimensions of image must be divisible by this value."}),
+
+                    "invert_mask": ("BOOLEAN", {"default": False}),
+                    },
+                "optional": 
+                    {
+                    "positive" : ("CONDITIONING", ),
+                    "negative" : ("CONDITIONING", ),
+                    "guide":     ("LATENT", ),
+                    "mask":        ("MASK", ),
+                    "blocks":      ("BLOCKS", ),
+                    "guides":      ("GUIDES", ),
+                    }  
+                }
+    
+    RETURN_TYPES = ("GUIDES",)
+    RETURN_NAMES = ("guides",)
+    FUNCTION     = "main"
+    CATEGORY     = "RES4LYF/sampler_extensions"
+
+    def main(self,
+            mode        = "scattersort",
+            noise_mode  = "update",
+            proj_in     = 0.0,
+            proj_out    = 0.0,
+            tile_h      = 128,
+            tile_w      = 128,
+            invert_mask = False,
+            positive    = None,
+            negative    = None,
+            guide       = None,
+            mask        = None,
+            blocks      = None,
+            guides      = None,
+            ):
+        
+        mask = 1-mask if mask is not None else None
+
+        if guide is not None:
+            raw_x = guide.get('state_info', {}).get('raw_x', None)
+            if raw_x is not None:
+                guide = {'samples': guide['state_info']['raw_x'].clone()}
+            else:
+                guide = {'samples': guide['samples'].clone()}
+        
+        guides = copy.deepcopy(guides) if guides is not None else {}
+        blocks = copy.deepcopy(blocks) if blocks is not None else {}
+
+        StyleMMDiT = blocks.get('StyleMMDiT', StyleMMDiT_HiDream())
+        
+        weights = {
+            "proj_in" : proj_in,
+            "proj_out": proj_out,
+            
+            "h_tile"  : tile_h // 16,
+            "w_tile"  : tile_w // 16,
+        }
+
+        StyleMMDiT.set_mode(mode)
+        StyleMMDiT.set_weights(**weights)
+        StyleMMDiT.set_conditioning(positive, negative)
+        StyleMMDiT.mask = [mask]
+        StyleMMDiT.guides = [guide]
+        
+        StyleMMDiT_ = guides.get('StyleMMDiT')
+        if StyleMMDiT_ is not None:
+            StyleMMDiT_.merge_weights(StyleMMDiT)
+        else:
+            StyleMMDiT_ = StyleMMDiT
+            
+        StyleMMDiT_.noise_mode = noise_mode
+
+        guides['StyleMMDiT'] = StyleMMDiT_
+
+        return (guides, )
+
+
+
+
+
+class ClownGuide_Style_Block_MMDiT:
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {"required":
+                    {
+                    "mode":     (["scattersort", "tiled_scattersort", "AdaIN", "WCT", "WCT2", "injection"], {"default": "scattersort"},),
+                    "apply_to": (["img", "img+txt", "txt",], {"default": "img+txt"},),
+                    "block_type" : (["double", "single"], {"default": "single"},),
+                    "block_list"   : ("STRING", {"default": "all", "multiline": True}),
+                    "block_weights" :("STRING", {"default": "1.0", "multiline": True}),
+                    
+                    "attn_norm":     ("FLOAT", {"default": 0.0, "min": -100.0, "max": 100.0, "step":0.01, "round": False, "tooltip": "Strength of effect on layer; skips extra calculation if set to 0.0. Skips interpolation if set to 1.0."}),
+                    "attn_norm_mod": ("FLOAT", {"default": 0.0, "min": -100.0, "max": 100.0, "step":0.01, "round": False, "tooltip": "Strength of effect on layer; skips extra calculation if set to 0.0. Skips interpolation if set to 1.0."}),
+                    "attn":          ("FLOAT", {"default": 0.0, "min": -100.0, "max": 100.0, "step":0.01, "round": False, "tooltip": "Strength of effect on layer; skips extra calculation if set to 0.0. Skips interpolation if set to 1.0."}),
+                    "attn_gated":    ("FLOAT", {"default": 0.0, "min": -100.0, "max": 100.0, "step":0.01, "round": False, "tooltip": "Strength of effect on layer; skips extra calculation if set to 0.0. Skips interpolation if set to 1.0."}),
+                    "attn_res":      ("FLOAT", {"default": 0.0, "min": -100.0, "max": 100.0, "step":0.01, "round": False, "tooltip": "Strength of effect on layer; skips extra calculation if set to 0.0. Skips interpolation if set to 1.0."}),
+
+                    "ff_norm":       ("FLOAT", {"default": 0.0, "min": -100.0, "max": 100.0, "step":0.01, "round": False, "tooltip": "Strength of effect on layer; skips extra calculation if set to 0.0. Skips interpolation if set to 1.0."}),
+                    "ff_norm_mod":   ("FLOAT", {"default": 0.0, "min": -100.0, "max": 100.0, "step":0.01, "round": False, "tooltip": "Strength of effect on layer; skips extra calculation if set to 0.0. Skips interpolation if set to 1.0."}),
+                    "ff":            ("FLOAT", {"default": 0.0, "min": -100.0, "max": 100.0, "step":0.01, "round": False, "tooltip": "Strength of effect on layer; skips extra calculation if set to 0.0. Skips interpolation if set to 1.0."}),
+                    "ff_gated":      ("FLOAT", {"default": 0.0, "min": -100.0, "max": 100.0, "step":0.01, "round": False, "tooltip": "Strength of effect on layer; skips extra calculation if set to 0.0. Skips interpolation if set to 1.0."}),
+                    "ff_res":        ("FLOAT", {"default": 0.0, "min": -100.0, "max": 100.0, "step":0.01, "round": False, "tooltip": "Strength of effect on layer; skips extra calculation if set to 0.0. Skips interpolation if set to 1.0."}),
+
+                    "tile_h" : ("INT", {"default": 128, "min": 16, "max": 10000, "step": 16, "tooltip": "Tile size for tiled modes. Lower values will transfer composition more effectively. Dimensions of image must be divisible by this value."}),
+                    "tile_w" : ("INT", {"default": 128, "min": 16, "max": 10000, "step": 16, "tooltip": "Tile size for tiled modes. Lower values will transfer composition more effectively. Dimensions of image must be divisible by this value."}),
+
+                    "invert_mask":   ("BOOLEAN", {"default": False}),
+                    },
+                "optional": 
+                    {
+                    "mask":        ("MASK", ),
+                    "blocks":      ("BLOCKS", ),
+                    }  
+                }
+    
+    RETURN_TYPES = ("BLOCKS",)
+    RETURN_NAMES = ("blocks",)
+    FUNCTION     = "main"
+    CATEGORY     = "RES4LYF/sampler_extensions"
+
+    def main(self,
+            mode        = "scattersort",
+            noise_mode  = "update",
+            apply_to    = "joint",
+            block_type  = "double",
+            block_list    = "all",
+            block_weights = "1.0",
+            
+            attn_norm     = 0.0,
+            attn_norm_mod = 0.0,
+            attn          = 0.0,
+            attn_gated    = 0.0,
+            attn_res      = 0.0,
+            ff_norm       = 0.0,
+            ff_norm_mod   = 0.0,
+            ff            = 0.0,
+            ff_gated      = 0.0,
+            ff_res        = 0.0,
+
+            tile_h      = 128,
+            tile_w      = 128,
+
+            invert_mask = False,
+
+            Attn        = None,
+            MoE         = None,
+            FF          = None,
+
+            mask        = None,
+            blocks      = None,
+            ):
+        
+        mask = 1-mask if mask is not None else None
+
+        blocks = copy.deepcopy(blocks) if blocks is not None else {}
+        
+        block_weights = parse_range_string(block_weights)
+        
+        if len(block_weights) == 0:
+            block_weights.append(0.0)
+            
+        if len(block_weights) == 1:
+            block_weights = block_weights * 100
+            
+        if type(block_weights[0]) == int:
+            block_weights = [float(val) for val in block_weights]
+        
+        if "all" in block_list:
+            block_list = [val for val in range(100)]
+            if len(block_weights) == 1:
+                block_weights = [block_weights[0]] * 100
+        elif "even" in block_list:
+            block_list = [val for val in range(0, 100, 2)]
+            if len(block_weights) == 1:
+                block_weights = [block_weights[0]] * 100
+        elif "odd" in block_list:
+            block_list = [val for val in range(1, 100, 2)]
+            if len(block_weights) == 1:
+                block_weights = [block_weights[0]] * 100
+        else:
+            block_list  = parse_range_string(block_list)
+            
+            weights_expanded = [0.0] * 100
+            for b, w in zip(block_list, block_weights):
+                weights_expanded[b] = w
+            block_weights = weights_expanded
+        
+
+        StyleMMDiT = blocks.get('StyleMMDiT')
+        if StyleMMDiT is None:
+            StyleMMDiT = StyleMMDiT_HiDream()
+        
+        if   block_type == "double":
+            style_blocks = StyleMMDiT.double_blocks
+        elif block_type == "single":
+            style_blocks = StyleMMDiT.single_blocks
+            
+        weights = {
+            "attn_norm"    : attn_norm,
+            "attn_norm_mod": attn_norm_mod,
+            "attn"         : attn,
+            "attn_gated"   : attn_gated,
+            "attn_res"     : attn_res,
+            "ff_norm"      : ff_norm,
+            "ff_norm_mod"  : ff_norm_mod,
+            "ff"           : ff,
+            "ff_gated"     : ff_gated,
+            "ff_res"       : ff_res,
+            
+            "h_tile"       : tile_h // 16,
+            "w_tile"       : tile_w // 16,
+        }
+        
+        for bid in block_list:
+            block = style_blocks[bid]
+            scaled_weights = {
+                k: (v * block_weights[bid]) if isinstance(v, float) else v
+                for k, v in weights.items()
+            }
+            #scaled_weights = {k: v * block_weights[bid] for k, v in weights.items()}
+
+            if "img" in apply_to  or block_type == "single":
+                block.img.set_mode(mode)
+                block.img.set_weights(**scaled_weights)
+                block.img.apply_to = [apply_to]
+
+            if "txt" in apply_to and block_type == "double":
+                mode = "scattersort" if mode == "tiled_scattersort" else mode
+                block.txt.set_mode(mode)
+                block.txt.set_weights(**scaled_weights)
+                block.txt.apply_to = [apply_to]
+            
+            block.img.apply_to = [apply_to]
+            if hasattr(block, "txt"):
+                block.txt.apply_to = [apply_to]
+            
+            block.mask = mask
+
+        blocks['StyleMMDiT'] = StyleMMDiT
+
+        return (blocks, )
+
+
+
+
+
+
+
+class ClownGuide_Style_Attn_MMDiT:
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {"required":
+                    {
+                    "mode":     (["scattersort", "tiled_scattersort", "AdaIN", "WCT", "WCT2", "injection"], {"default": "scattersort"},),
+                    "apply_to": (["img","img+txt","txt"], {"default": "img+txt"},),
+                    "block_type" : (["double", "single", "double+single"], {"default": "single"},),
+                    "block_list"   : ("STRING", {"default": "all", "multiline": True}),
+                    "block_weights" :("STRING", {"default": "1.0", "multiline": True}),
+                    
+                    "q_proj": ("FLOAT", {"default": 0.0, "min": -100.0, "max": 100.0, "step":0.01, "round": False, "tooltip": "Strength of effect on layer; skips extra calculation if set to 0.0. Skips interpolation if set to 1.0."}),
+                    "k_proj": ("FLOAT", {"default": 0.0, "min": -100.0, "max": 100.0, "step":0.01, "round": False, "tooltip": "Strength of effect on layer; skips extra calculation if set to 0.0. Skips interpolation if set to 1.0."}),
+                    "v_proj": ("FLOAT", {"default": 0.0, "min": -100.0, "max": 100.0, "step":0.01, "round": False, "tooltip": "Strength of effect on layer; skips extra calculation if set to 0.0. Skips interpolation if set to 1.0."}),
+                    "q_norm": ("FLOAT", {"default": 0.0, "min": -100.0, "max": 100.0, "step":0.01, "round": False, "tooltip": "Strength of effect on layer; skips extra calculation if set to 0.0. Skips interpolation if set to 1.0."}),
+                    "k_norm": ("FLOAT", {"default": 0.0, "min": -100.0, "max": 100.0, "step":0.01, "round": False, "tooltip": "Strength of effect on layer; skips extra calculation if set to 0.0. Skips interpolation if set to 1.0."}),
+                    "out":    ("FLOAT", {"default": 0.0, "min": -100.0, "max": 100.0, "step":0.01, "round": False, "tooltip": "Strength of effect on layer; skips extra calculation if set to 0.0. Skips interpolation if set to 1.0."}),
+
+                    "tile_h" : ("INT", {"default": 128, "min": 16, "max": 10000, "step": 16, "tooltip": "Tile size for tiled modes. Lower values will transfer composition more effectively. Dimensions of image must be divisible by this value."}),
+                    "tile_w" : ("INT", {"default": 128, "min": 16, "max": 10000, "step": 16, "tooltip": "Tile size for tiled modes. Lower values will transfer composition more effectively. Dimensions of image must be divisible by this value."}),
+
+                    "invert_mask":   ("BOOLEAN", {"default": False}),
+                    },
+                "optional": 
+                    {
+                    "mask":        ("MASK", ),
+                    "blocks":      ("BLOCKS", ),
+                    }  
+                }
+    
+    RETURN_TYPES = ("BLOCKS",)
+    RETURN_NAMES = ("blocks",)
+    FUNCTION     = "main"
+    CATEGORY     = "RES4LYF/sampler_extensions"
+
+    def main(self,
+            mode        = "scattersort",
+            noise_mode  = "update",
+            apply_to    = "joint",
+            block_type  = "double",
+            block_list    = "all",
+            block_weights = "1.0",
+            
+            q_proj = 0.0,
+            k_proj = 0.0,
+            v_proj = 0.0,
+            q_norm = 0.0,
+            k_norm = 0.0,
+            out    = 0.0,
+            
+            tile_h = 128,
+            tile_w = 128,
+
+            invert_mask = False,
+
+            mask        = None,
+            blocks      = None,
+            ):
+        
+        mask = 1-mask if mask is not None else None
+
+        blocks = copy.deepcopy(blocks) if blocks is not None else {}
+        
+        block_weights = parse_range_string(block_weights)
+        
+        if len(block_weights) == 0:
+            block_weights.append(0.0)
+            
+        if len(block_weights) == 1:
+            block_weights = block_weights * 100
+            
+        if type(block_weights[0]) == int:
+            block_weights = [float(val) for val in block_weights]
+        
+        if "all" in block_list:
+            block_list = [val for val in range(100)]
+            if len(block_weights) == 1:
+                block_weights = [block_weights[0]] * 100
+        elif "even" in block_list:
+            block_list = [val for val in range(0, 100, 2)]
+            if len(block_weights) == 1:
+                block_weights = [block_weights[0]] * 100
+        elif "odd" in block_list:
+            block_list = [val for val in range(1, 100, 2)]
+            if len(block_weights) == 1:
+                block_weights = [block_weights[0]] * 100
+        else:
+            block_list  = parse_range_string(block_list)
+            
+            weights_expanded = [0.0] * 100
+            for b, w in zip(block_list, block_weights):
+                weights_expanded[b] = w
+            block_weights = weights_expanded
+        
+
+        StyleMMDiT = blocks.get('StyleMMDiT')
+        if StyleMMDiT is None:
+            StyleMMDiT = StyleMMDiT_HiDream()
+        
+        if   block_type == "double":
+            style_blocks = StyleMMDiT.double_blocks
+        elif block_type == "single":
+            style_blocks = StyleMMDiT.single_blocks
+        
+        weights = {
+            "q_proj": q_proj,
+            "k_proj": k_proj,
+            "v_proj": v_proj,
+            "q_norm": q_norm,
+            "k_norm": k_norm,
+            "out"   : out,
+            
+            "h_tile": tile_h // 16,
+            "w_tile": tile_w // 16,
+            
+        }
+                
+        for bid in block_list:
+            block = style_blocks[bid]
+            scaled_weights = {
+                k: (v * block_weights[bid]) if isinstance(v, float) else v
+                for k, v in weights.items()
+            }
+            #scaled_weights = {k: v * block_weights[bid] for k, v in weights.items()}
+
+            if "img" in apply_to  or block_type == "single":
+                block.img.ATTN.set_mode(mode)
+                block.img.ATTN.set_weights(**scaled_weights)
+                block.img.ATTN.apply_to = [apply_to]
+
+            if "txt" in apply_to and block_type == "double":
+                mode = "scattersort" if mode == "tiled_scattersort" else mode
+                block.txt.ATTN.set_mode(mode)
+                block.txt.ATTN.set_weights(**scaled_weights)
+                block.txt.ATTN.apply_to = [apply_to]
+            
+            block.img.ATTN.apply_to = [apply_to]
+            if hasattr(block, "txt"):
+                block.txt.ATTN.apply_to = [apply_to]
+            
+            block.mask = mask
+
+        blocks['StyleMMDiT'] = StyleMMDiT
+
+        return (blocks, )

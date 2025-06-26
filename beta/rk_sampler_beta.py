@@ -547,7 +547,8 @@ def sample_rk_beta(
             x = x + sigmas[step] * NS.noise_sampler(sigma=sigmas[step], sigma_next=sigmas[step+1])
         else:
             x = (1 - sigmas[step]) * x + sigmas[step] * NS.noise_sampler(sigma=sigmas[step], sigma_next=sigmas[step+1])
-    LG.ADAIN_NOISE_MODE = "recon"
+    LG.ADAIN_NOISE_MODE = ""
+    StyleMMDiT = None
     if guides is not None:
         RK.update_transformer_options({"freqsep_lowpass_method": guides.get("freqsep_lowpass_method")})
         RK.update_transformer_options({"freqsep_sigma":          guides.get("freqsep_sigma")})
@@ -559,9 +560,12 @@ def sample_rk_beta(
         RK.update_transformer_options({"freqsep_lowpass_weight": guides.get("freqsep_lowpass_weight")})
         RK.update_transformer_options({"freqsep_highpass_weight":guides.get("freqsep_highpass_weight")})
         RK.update_transformer_options({"freqsep_mask":           guides.get("freqsep_mask")})
-        
-        LG.ADAIN_NOISE_MODE = guides.get('sort_and_scatter', {}).get('noise_mode',{})
 
+        StyleMMDiT = guides.get('StyleMMDiT')
+        if StyleMMDiT is not None:
+            StyleMMDiT.init_guides(model)
+            
+        LG.ADAIN_NOISE_MODE = StyleMMDiT.noise_mode
 
 
     # BEGIN SAMPLING LOOP
@@ -575,41 +579,44 @@ def sample_rk_beta(
         
         SYNC_GUIDE_ACTIVE = LG.guide_mode.startswith("sync") and (LG.lgw[step_sched] != 0 or LG.lgw_inv[step_sched] != 0 or LG.lgw_sync[step_sched] != 0 or LG.lgw_sync_inv[step_sched] != 0)
         
-        if LG.HAS_LATENT_GUIDE_ADAIN:
-            if LG.lgw_adain[step_sched] == 0.0:
-                RK.update_transformer_options({'y0_adain': None})
-                RK.update_transformer_options({'blocks_adain': {}})
-                RK.update_transformer_options({'sort_and_scatter': {}})
-            else:
-                RK.update_transformer_options({'y0_adain': LG.y0_adain.clone()})
-                if 'blocks_adain_mmdit' in guides:
-                    blocks_adain = {
-                        "double_weights": [val * LG.lgw_adain[step_sched] for val in guides['blocks_adain_mmdit']['double_weights']],
-                        "single_weights": [val * LG.lgw_adain[step_sched] for val in guides['blocks_adain_mmdit']['single_weights']],
-                        "double_blocks" : guides['blocks_adain_mmdit']['double_blocks'],
-                        "single_blocks" : guides['blocks_adain_mmdit']['single_blocks'],
-                    }
-                RK.update_transformer_options({'blocks_adain': blocks_adain})
-                RK.update_transformer_options({'sort_and_scatter': guides['sort_and_scatter']})
-                RK.update_transformer_options({'noise_mode_adain': guides['sort_and_scatter']['noise_mode']})
-                    
-        
-        if LG.HAS_LATENT_GUIDE_ATTNINJ:
-            if LG.lgw_attninj[step_sched] == 0.0:
-                RK.update_transformer_options({'y0_attninj': None})
-                RK.update_transformer_options({'blocks_attninj'    : {}})
-                RK.update_transformer_options({'blocks_attninj_qkv': {}})
-            else:
-                RK.update_transformer_options({'y0_attninj': LG.y0_attninj.clone()})
-                if 'blocks_attninj_mmdit' in guides:
-                    blocks_attninj = {
-                        "double_weights": [val * LG.lgw_attninj[step_sched] for val in guides['blocks_attninj_mmdit']['double_weights']],
-                        "single_weights": [val * LG.lgw_attninj[step_sched] for val in guides['blocks_attninj_mmdit']['single_weights']],
-                        "double_blocks" : guides['blocks_attninj_mmdit']['double_blocks'],
-                        "single_blocks" : guides['blocks_attninj_mmdit']['single_blocks'],
-                    }
-                RK.update_transformer_options({'blocks_attninj'    : blocks_attninj})
-                RK.update_transformer_options({'blocks_attninj_qkv': guides['blocks_attninj_qkv']})
+        if StyleMMDiT is not None:
+            RK.update_transformer_options({'StyleMMDiT': StyleMMDiT})
+        else:
+            if LG.HAS_LATENT_GUIDE_ADAIN:
+                if LG.lgw_adain[step_sched] == 0.0:
+                    RK.update_transformer_options({'y0_adain': None})
+                    RK.update_transformer_options({'blocks_adain': {}})
+                    RK.update_transformer_options({'sort_and_scatter': {}})
+                else:
+                    RK.update_transformer_options({'y0_adain': LG.y0_adain.clone()})
+                    if 'blocks_adain_mmdit' in guides:
+                        blocks_adain = {
+                            "double_weights": [val * LG.lgw_adain[step_sched] for val in guides['blocks_adain_mmdit']['double_weights']],
+                            "single_weights": [val * LG.lgw_adain[step_sched] for val in guides['blocks_adain_mmdit']['single_weights']],
+                            "double_blocks" : guides['blocks_adain_mmdit']['double_blocks'],
+                            "single_blocks" : guides['blocks_adain_mmdit']['single_blocks'],
+                        }
+                    RK.update_transformer_options({'blocks_adain': blocks_adain})
+                    RK.update_transformer_options({'sort_and_scatter': guides['sort_and_scatter']})
+                    RK.update_transformer_options({'noise_mode_adain': guides['sort_and_scatter']['noise_mode']})
+                        
+            
+            if LG.HAS_LATENT_GUIDE_ATTNINJ:
+                if LG.lgw_attninj[step_sched] == 0.0:
+                    RK.update_transformer_options({'y0_attninj': None})
+                    RK.update_transformer_options({'blocks_attninj'    : {}})
+                    RK.update_transformer_options({'blocks_attninj_qkv': {}})
+                else:
+                    RK.update_transformer_options({'y0_attninj': LG.y0_attninj.clone()})
+                    if 'blocks_attninj_mmdit' in guides:
+                        blocks_attninj = {
+                            "double_weights": [val * LG.lgw_attninj[step_sched] for val in guides['blocks_attninj_mmdit']['double_weights']],
+                            "single_weights": [val * LG.lgw_attninj[step_sched] for val in guides['blocks_attninj_mmdit']['single_weights']],
+                            "double_blocks" : guides['blocks_attninj_mmdit']['double_blocks'],
+                            "single_blocks" : guides['blocks_attninj_mmdit']['single_blocks'],
+                        }
+                    RK.update_transformer_options({'blocks_attninj'    : blocks_attninj})
+                    RK.update_transformer_options({'blocks_attninj_qkv': guides['blocks_attninj_qkv']})
         
         if LG.HAS_LATENT_GUIDE_STYLE_POS:
             if LG.lgw_style_pos[step_sched] == 0.0:
@@ -712,7 +719,6 @@ def sample_rk_beta(
         if INIT_SAMPLE_LOOP:
             INIT_SAMPLE_LOOP = False
             x_, data_, eps_, eps_prev_ = (torch.zeros(RK.rows+2, *x.shape, dtype=default_dtype, device=work_device) for _ in range(4))
-            #if EO("smartnoise"):
             if LG.ADAIN_NOISE_MODE == "smart":
                 z_ = torch.zeros(RK.rows+2, *x.shape, dtype=default_dtype, device=work_device)
                 z_[0] = noise_initial.clone()
@@ -740,7 +746,7 @@ def sample_rk_beta(
             data_     = torch.cat((data_    ,data_gap_)    , dim=0)
             eps_      = torch.cat((eps_     ,eps_gap_)     , dim=0)
             eps_prev_ = torch.cat((eps_prev_,eps_prev_gap_), dim=0)
-            #if EO("smartnoise"):
+            
             if LG.ADAIN_NOISE_MODE == "smart":
                 z_gap_ = torch.zeros(row_gap, *x.shape, dtype=default_dtype, device=work_device)
                 z_    = torch.cat((z_       ,z_gap_)       , dim=0)
@@ -1174,8 +1180,9 @@ def sample_rk_beta(
                                 else:
                                     eps_y, data_y = RK(yt_[row], s_tmp, yt_0,  sigma, transformer_options={'latent_type': 'yt'})
                                     
-                                eps_x, data_x = RK(x_tmp, s_tmp, x_0, sigma, transformer_options={'latent_type': 'xt', 'row': row,})
-                                
+                                eps_x, data_x = RK(x_tmp, s_tmp, x_0, sigma, transformer_options={'latent_type': 'xt', 'row': row, "x_tmp": x_tmp})
+                                #if hasattr(model.inner_model.inner_model.diffusion_model, "eps_out"):
+                                    
                                 
                                 for sync_lure_iter in range(LG.sync_lure_iter):
                                     if LG.sync_lure_sequence == "x -> y":
@@ -1625,7 +1632,25 @@ def sample_rk_beta(
                                 eps_[row], data_[row] = RK(x_tmp, s_tmp, x_0, sigma, transformer_options={'latent_type': 'yt'})
                                 
                             else:
-                                eps_[row], data_[row] = RK(x_tmp, s_tmp, x_0, sigma, transformer_options={'row': row})
+                                eps_[row], data_[row] = RK(x_tmp, s_tmp, x_0, sigma, transformer_options={'row': row, 'x_tmp': x_tmp, 'sigma_next': sigma_next})
+                                
+                                if hasattr(model.inner_model.inner_model.diffusion_model, "eps_out"):  # fp64 model out override, for testing only
+                                    eps_out = model.inner_model.inner_model.diffusion_model.eps_out
+                                    del model.inner_model.inner_model.diffusion_model.eps_out
+                                    if eps_out.shape[0] == 2:
+                                        data_cond   = x_0 - sigma * eps_out[1]
+                                        data_uncond = x_0 - sigma * eps_out[0]
+                                        data_row = data_uncond + model.inner_model.cfg * (data_cond - data_uncond)
+                                        eps_row = (x_0 - data_row) / sigma
+                                    else:
+                                        data_row = x_0 - sigma * eps_out
+                                    if RK.EXPONENTIAL:
+                                        eps_row = data_row - x_0
+                                    else:
+                                        eps_row = eps_out
+                                    if torch.norm(eps_row - eps_[row]) < 0.01 and torch.norm(data_row - data_[row]) < 0.01:  # if some other cfg/post-cfg func was used, detect and ignore this
+                                        eps_[row] = eps_row
+                                        data_[row] = data_row  
                                 
 
                             if RK.extra_args['model_options']['transformer_options'].get('y0_standard_guide') is not None:
@@ -1937,7 +1962,7 @@ def sample_rk_beta(
                         LG.lgw *= EO("guide_min_factor", 1.1)
                     full_iter -= 1
         
-        #if EO("smartnoise"):
+        #if EO("smartnoise"): #TODO: determine if this was useful
         #    z_[0] = z_next
         
         if FLOW_STARTED and FLOW_STOPPED:

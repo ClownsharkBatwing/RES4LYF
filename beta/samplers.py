@@ -66,6 +66,7 @@ class SharkGuider(CFGGuider):
 
     def set_cfgs(self, **kwargs):
         self.cfgs = {**kwargs}
+        self.cfg  = self.cfgs.get('xt', self.cfg)
 
     def predict_noise(self, x, timestep, model_options={}, seed=None):
         latent_type = model_options['transformer_options'].get('latent_type', 'xt')
@@ -74,8 +75,11 @@ class SharkGuider(CFGGuider):
         positive = self.conds.get('xt_positive') if positive is None else positive
         negative = self.conds.get('xt_negative') if negative is None else negative
         cfg      = self.cfgs.get(latent_type, self.cfg)
+        
+        model_options['transformer_options']['yt_positive'] = self.conds.get('yt_positive')
+        model_options['transformer_options']['yt_negative'] = self.conds.get('yt_negative')
+        
         return sampling_function(self.inner_model, x, timestep, negative, positive, cfg, model_options=model_options, seed=seed)
-
 
 
 
