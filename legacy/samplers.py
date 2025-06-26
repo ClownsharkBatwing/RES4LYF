@@ -222,12 +222,25 @@ def process_sampler_name(selected_value):
     
     if selected_value.startswith("fully_implicit") or selected_value.startswith("diag_implicit"):
         implicit_sampler_name = processed_name
-        sampler_name = "euler"
+        sampler_name = "buehler"
     else:
         sampler_name = processed_name
         implicit_sampler_name = "use_explicit"
     
     return sampler_name, implicit_sampler_name
+
+
+def copy_cond(positive):
+    new_positive = []
+    for embedding, cond in positive:
+        cond_copy = {}
+        for k, v in cond.items():
+            if isinstance(v, torch.Tensor):
+                cond_copy[k] = v.clone()
+            else:
+                cond_copy[k] = v  # ensure we're not copying huge shit like controlnets
+        new_positive.append([embedding.clone(), cond_copy])
+    return new_positive
 
 
 
@@ -278,8 +291,8 @@ class SharkSamplerAlpha:
             raw_x = latent_image['raw_x'] if 'raw_x' in latent_image else None
             last_seed = latent_image['last_seed'] if 'last_seed' in latent_image else None
             
-            pos_cond = copy.deepcopy(positive)
-            neg_cond = copy.deepcopy(negative)
+            pos_cond = copy_cond(positive)
+            neg_cond = copy_cond(negative)
 
             if sampler is None:
                 raise ValueError("sampler is required")

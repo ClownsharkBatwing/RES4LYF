@@ -367,7 +367,7 @@ rk_coeff = {
         ],
         [0, 2/3],
     ),
-    "euler": (
+    "buehler": (
         [
             [1],
         ],
@@ -733,7 +733,7 @@ def legacy_sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=N
         sigma, sigma_next = sigmas[_], sigmas[_+1]
         
         if sigma_next == 0.0:
-            rk_type = "euler"
+            rk_type = "buehler"
             eta, eta_var = 0, 0
 
         order, model_call, alpha_fn, t_fn, sigma_fn, h_fn, FSAL, EPS_PRED = get_rk_methods_order_and_fn(rk_type)

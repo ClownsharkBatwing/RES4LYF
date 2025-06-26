@@ -69,7 +69,7 @@ RK_SAMPLER_NAMES = ["res_2m",
                     "bogacki-shampine_7s",
 
                     "ddim",
-                    "euler",
+                    "buehler",
                     ]
 
 

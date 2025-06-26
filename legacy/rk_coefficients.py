@@ -80,7 +80,7 @@ RK_SAMPLER_NAMES = ["none",
                     #"verner_robust_16s",
 
                     "ddim",
-                    "euler",
+                    "buehler",
                     ]
 
 
@@ -746,7 +746,7 @@ rk_coeff = {
         ],
         [0, 2/3],
     ),
-    "euler": (
+    "buehler": (
         [
             [],
         ],

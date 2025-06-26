@@ -33,7 +33,7 @@ def prepare_sigmas(model, sigmas):
 def prepare_step_to_sigma_zero(rk, irk, rk_type, irk_type, model, x, extra_options, alpha, k, noise_sampler_type, cfg_cw=1.0, **extra_args):
     rk_type_final_step = f"ralston_{rk_type[-2:]}" if rk_type[-2:] in {"2s", "3s"} else "ralston_3s"
     rk_type_final_step = f"deis_2m" if rk_type[-2:] in {"2m", "3m", "4m"} else rk_type_final_step
-    rk_type_final_step = f"euler" if rk_type in {"ddim"} else rk_type_final_step
+    rk_type_final_step = f"buehler" if rk_type in {"ddim"} else rk_type_final_step
     rk_type_final_step = get_extra_options_kv("rk_type_final_step", rk_type_final_step, extra_options)
     rk = RK_Method.create(model, rk_type_final_step, x.device)
     rk.init_noise_sampler(x, torch.initial_seed() + 1, noise_sampler_type, alpha=alpha, k=k)
@@ -121,7 +121,7 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
     if implicit_sampler_name in ("explicit_full", "explicit_diagonal", "none"):
         irk_type = rk_type
     
-    rk_type = "euler" if implicit_steps > 0 and implicit_sampler_name == "explicit_full" else rk_type
+    rk_type = "buehler" if implicit_steps > 0 and implicit_sampler_name == "explicit_full" else rk_type
     rk_type = get_extra_options_kv("rk_type", rk_type, extra_options)
     print("rk_type: ", rk_type)
 
@@ -318,7 +318,7 @@ def sample_rk(model, x, sigmas, extra_args=None, callback=None, disable=None, no
                             else:
                                 x_[row+1] = rk.add_noise_post(x_[row+1], sub_sigma_up, sub_sigma, sub_sigma_next, sub_alpha_ratio, s_noise, substep_noise_mode, SDE_NOISE_EXTERNAL, sde_noise_t)
                                 
-                            for inner_exim_iter in range(implicit_steps): # implicit euler update to find Yn+1
+                            for inner_exim_iter in range(implicit_steps): # implicit buehler update to find Yn+1
                                 #print("inner_exim: ", step, row, inner_exim_iter)
                                 eps_[row], data_[row] = rk(x_0, x_[row+1], s_[row+1], h, **extra_args)
                                 eps_, x_ = LG.process_guides_substep(x_0, x_, eps_, data_, row, step, sigma, sigma_next, sigma_down, s_, unsample_resample_scale, rk, rk_type, extra_options, frame_weights_grp)
