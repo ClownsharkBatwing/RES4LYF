@@ -419,8 +419,8 @@ class LayerPatcher:
                 device=m.x_embedder.proj.weight.data.device,
                 dtype=dtype
                 )
-            m.x_embedder.proj.weight.data = embedder['x_embedder.proj.weight'].to(dtype)
-            m.x_embedder.proj.bias.data   = embedder['x_embedder.proj.bias'].to(dtype)
+            m.x_embedder.proj.weight.data = embedder['x_embedder.proj.weight'].to(dtype).cuda()
+            m.x_embedder.proj.bias.data   = embedder['x_embedder.proj.bias'].to(dtype).cuda()
         
         if gates:
             for key, tensor in gates.items():
@@ -428,10 +428,10 @@ class LayerPatcher:
                 set_nested_attr(model=m, key=key, value=tensor, dtype=dtype)
         
         if last_layer:
-            m.final_layer.linear.weight.data = last_layer['final_layer.linear.weight'].to(dtype)
-            m.final_layer.linear.bias.data   = last_layer['final_layer.linear.bias'].to(dtype)
-            m.final_layer.adaLN_modulation[1].weight.data = last_layer['final_layer.adaLN_modulation.1.weight'].to(dtype)
-            m.final_layer.adaLN_modulation[1].bias.data = last_layer['final_layer.adaLN_modulation.1.bias'].to(dtype)
+            m.final_layer.linear.weight.data = last_layer['final_layer.linear.weight'].to(dtype).cuda()
+            m.final_layer.linear.bias.data   = last_layer['final_layer.linear.bias'].to(dtype).cuda()
+            m.final_layer.adaLN_modulation[1].weight.data = last_layer['final_layer.adaLN_modulation.1.weight'].to(dtype).cuda()
+            m.final_layer.adaLN_modulation[1].bias.data = last_layer['final_layer.adaLN_modulation.1.bias'].to(dtype).cuda()
 
         #if retrojector:
         #    m.Retrojector = Retrojector(model.model.diffusion_model.img_in, pinv_dtype=style_dtype, dtype=style_dtype)
