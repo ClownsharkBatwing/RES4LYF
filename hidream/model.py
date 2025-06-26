@@ -23,7 +23,7 @@ import comfy.ldm.common_dit
 
 from ..helper  import ExtraOptions
 from ..latents import slerp_tensor, interpolate_spd, tile_latent, untile_latent, gaussian_blur_2d, median_blur_2d
-from ..style_transfer import apply_scattersort_masked, apply_scattersort_tiled, adain_seq_inplace, adain_patchwise_row_batch_med, adain_patchwise_row_batch, adain_seq, apply_scattersort
+from ..style_transfer import StyleMMDiT_HiDream, apply_scattersort_masked, apply_scattersort_tiled, adain_seq_inplace, adain_patchwise_row_batch_med, adain_patchwise_row_batch, adain_seq, apply_scattersort
 
 @dataclass
 class ModulationOut:
@@ -67,10 +67,9 @@ class HDBlock(nn.Module):
         rope      :          FloatTensor   = None,
         mask      : Optional[FloatTensor]  = None,
         update_cross_attn : Optional[Dict] = None,
-        cache_v   :                  bool  = False,
-        attninj_opts :      Optional[Dict] = {},
+        style_block  = None,
     ) -> FloatTensor:
-        return self.block(img, img_masks, txt, clip, rope, mask, update_cross_attn, cache_v, attninj_opts)
+        return self.block(img, img_masks, txt, clip, rope, mask, update_cross_attn, style_block=style_block)
 
 
 
@@ -156,37 +155,23 @@ class HDFeedForwardSwiGLU(nn.Module):
         self.w2 = operations.Linear(hidden_dim, dim, bias=False, dtype=dtype, device=device)
         self.w3 = operations.Linear(dim, hidden_dim, bias=False, dtype=dtype, device=device)
 
-    def forward(self, x, shared=False): # 1,4096,2560 -> 
-        #if HDModel.sort_ff:
-        if   x.shape[0] > 1 and x.ndim == 3 and shared:
+    def forward(self, x, style_block=None): # 1,4096,2560 -> 
+        if style_block is not None and x.shape[0] > 1 and x.ndim == 3:
             x1 = self.w1(x)
-            x1 = HDModel.ff_1(x1)
+            x1 = style_block(x1, "ff_1")
+            
             x1 = torch.nn.functional.silu(x1)
-            x1 = HDModel.ff_1_silu(x1)
+            x1 = style_block(x1, "ff_1_silu")
             
             x3 = self.w3(x)
-            x3 = HDModel.ff_3(self.w3(x))
+            x3 = style_block(x3, "ff_3")
             
             x13 = x1 * x3
-            x13 = HDModel.ff_13(x13)
-
-            x2 = self.w2(x13)
-            x2 = HDModel.ff_2(x2)
-            return x2
-        elif x.shape[0] > 1 and x.ndim == 3 and HDModel.moe_gate:
-            x1 = self.w1(x)
-            x1 = HDModel.moe_ff_1(x1)
-            x1 = torch.nn.functional.silu(x1)
-            x1 = HDModel.moe_ff_1_silu(x1)
+            x13 = style_block(x13, "ff_13")
             
-            x3 = self.w3(x)
-            x3 = HDModel.moe_ff_3(self.w3(x))
-            
-            x13 = x1 * x3
-            x13 = HDModel.moe_ff_13(x13)
-
             x2 = self.w2(x13)
-            x2 = HDModel.moe_ff_2(x2)
+            x2 = style_block(x2, "ff_2")
+            
             return x2
         else:
             return self.w2(torch.nn.functional.silu(self.w1(x)) * self.w3(x))
@@ -201,8 +186,6 @@ class HDMoEGate(nn.Module):
         self.weight           = nn.Parameter(torch.empty((self.n_routed_experts, self.gating_dim), dtype=dtype, device=device))
 
     def forward(self, x):
-        #x      = x.view(-1, x.shape[-1]) # 4032,2560    # below is just matmul... hidden_states @ self.weight.T
-        #logits = F.linear(x, comfy.model_management.cast_to(self.weight, dtype=x.dtype, device=x.device), None)
         dtype = self.weight.dtype
         if dtype not in {torch.bfloat16, torch.float16, torch.float32, torch.float64}:
             dtype = torch.float32
@@ -211,12 +194,6 @@ class HDMoEGate(nn.Module):
         logits = F.linear(x.to(dtype), self.weight.to(x.device), None)
         scores = logits.softmax(dim=-1).to(x)       # logits.shape == 4032,4   scores.shape == 4032,4
         return torch.topk(scores, k=self.top_k, dim=-1, sorted=False)
-    
-    
-        
-        #logits = F.linear(x.to(torch.float64), self.weight.to(x.device).to(torch.float64), None)
-        #scores = logits.softmax(dim=-1).to(x)       # logits.shape == 4032,4   scores.shape == 4032,4
-        #return torch.topk(scores, k=self.top_k, dim=-1, sorted=False)
 
 class HDMOEFeedForwardSwiGLU(nn.Module):
     def __init__(
@@ -233,109 +210,49 @@ class HDMOEFeedForwardSwiGLU(nn.Module):
         self.gate           = HDMoEGate(dim, num_routed_experts, num_activated_experts, dtype=dtype, device=device)
         self.num_activated_experts = num_activated_experts
 
-    def forward(self, x):
-        y_shared = self.shared_experts(x, shared=True)   # 1,4096,2560 -> 1,4096,2560 
-
-        #y_shared = HDModel.shared_experts(y_shared)
+    def forward(self, x, style_block=None):
+        y_shared = self.shared_experts(x, style_block.FF_SHARED)   # 1,4096,2560 -> 1,4096,2560 
+        y_shared = style_block(y_shared, "shared")
 
         topk_weight, topk_idx = self.gate(x) # -> 4096,2   4096,2
-        topk_weight = HDModel.topk_weight(topk_weight)
-        if y_shared.shape[0] > 1 and HDModel.moe_gate and not HDModel.RECON_MODE:
-            topk_idx   [0] = topk_idx   [1]
-        
+        topk_weight = style_block(topk_weight, "topk_weight")
+                
+        if y_shared.shape[0] > 1 and style_block.gate[0] and not HDModel.RECON_MODE:
+            topk_idx[0] = topk_idx[1]
         tk_idx_flat = topk_idx.view(topk_idx.shape[0], -1) 
-        x_rep = x.repeat_interleave(self.num_activated_experts, dim=-2)
         
-        y = torch.empty_like(x_rep)
+        x = x.repeat_interleave(self.num_activated_experts, dim=-2)
+        y = torch.empty_like(x)
         
-        if y_shared.shape[0] > 1 and HDModel.moe_gate and not HDModel.RECON_MODE:
-            for i, expert in enumerate(self.experts):
+        if style_block.gate[0] and not HDModel.RECON_MODE and y_shared.shape[0] > 1:
+            for i, expert in enumerate(self.experts): # TODO: check for empty expert lists and continue if found to avoid CUBLAS errors
                 x_list = []
-                for b in range(x_rep.shape[0]):
-                    x_sel = x_rep[b][tk_idx_flat[b]==i]
+                for b in range(x.shape[0]):
+                    x_sel = x[b][tk_idx_flat[b]==i]
                     x_list.append(x_sel)
                 x_list = torch.stack(x_list, dim=0)
-                x_out = expert(x_list).to(x.dtype)
+                x_out = expert(x_list, style_block.FF_SEPARATE).to(x.dtype)
                 for b in range(y.shape[0]):
                     y[b][tk_idx_flat[b]==i] = x_out[b]
         else:
-            for i, expert in enumerate(self.experts):
-                y[tk_idx_flat==i,:] = expert(x_rep[tk_idx_flat==i,:]).to(x.dtype)
+            for i, expert in enumerate(self.experts): 
+                x_sel = x[tk_idx_flat == i, :]
+                if x_sel.shape[0] == 0:
+                    continue 
+                y[tk_idx_flat == i, :] = expert(x_sel).to(x.dtype)
+                
+        y = style_block(y, "separate")
 
         y_sum = torch.einsum('abk,abkd->abd', topk_weight, y.view(*topk_weight.shape, -1))
         
-        y_sum = HDModel.moe_sum(y_sum)
+        y_sum = style_block(y_sum, "sum")
         
         y_sum = y_sum.view_as(y_shared) + y_shared
 
-        y_sum = HDModel.moe_out(y_sum)
+        y_sum = style_block(y_sum, "out")
         
         return y_sum
 
-
-class ScatterSort:
-    buffer = {}
-
-    @staticmethod
-    def apply(denoised_embed, y0_adain_embed=None):
-        if HDModel.RECON_MODE:
-            return denoised_embed
-        
-        buf = ScatterSort.buffer
-        buf['src_idx']    = denoised_embed.argsort(dim=-2)
-        buf['ref_sorted'], buf['ref_idx'] = y0_adain_embed.sort(dim=-2)
-
-        return denoised_embed.scatter_(
-            dim=-2, 
-            index=buf['src_idx'], 
-            src=buf['ref_sorted'].expand_as(buf['ref_sorted'])       # expand_as itself??
-        )
-        
-
-    @staticmethod
-    def batch_apply(denoised_embed):
-        if HDModel.RECON_MODE:
-            return denoised_embed
-        
-        if denoised_embed.shape[0] == 1:
-            return denoised_embed
-        else:
-            style   = denoised_embed[1].unsqueeze(0)
-            content = denoised_embed[0].unsqueeze(0)
-
-        buf = ScatterSort.buffer
-        buf['src_idx']    = content.argsort(dim=-2)
-        buf['ref_sorted'], buf['ref_idx'] = style.sort(dim=-2)
-
-        content = content.scatter_(
-            dim=-2, 
-            index=buf['src_idx'], 
-            src=buf['ref_sorted'], #.expand_as(buf['ref_sorted'])       # expand_as itself??
-        )
-        
-        denoised_embed[0] = content
-        return denoised_embed
-        
-        
-        #return torch.cat([denoised_embed, y0_adain_embed], dim=0)
-
-    @staticmethod
-    def apply_adain_embed(content, eps: float = 1e-7) -> torch.Tensor:
-        if HDModel.RECON_MODE:
-            return content
-        
-        if content.shape[0] == 1:
-            return content
-        else:
-            style   = content[1].unsqueeze(0)
-            content = content[0].unsqueeze(0)
-        mean_c = content.mean(-2, keepdim=True)
-        std_c  = content.std (-2, keepdim=True).add_(eps)  # in-place add
-        mean_s = style.mean  (-2, keepdim=True)
-        std_s  = style.std   (-2, keepdim=True).add_(eps)
-
-        content.sub_(mean_c).div_(std_c).mul_(std_s).add_(mean_s)  # in-place chain
-        return torch.cat([content, style], dim=0)
 
 def apply_passthrough(denoised_embed, *args, **kwargs):
     return denoised_embed
@@ -408,50 +325,23 @@ class HDAttention(nn.Module):
         rope      :          FloatTensor  = None,
         mask      : Optional[FloatTensor] = None,
         update_cross_attn : Optional[Dict]= None,
-        cache_v : bool = False,
-        attninj_opts : Optional[Dict] = {},
+        style_block = None,
     ) -> Tensor:
-        
-        norm_seq = ScatterSort.apply
-        if self.EO("attninj_adain"):
-            norm_seq = adain_seq
-            
         bsz = img.shape[0]
-
-        img_q = self.q_rms_norm(self.to_q(img))
-        img_k = self.k_rms_norm(self.to_k(img))
-        img_v =                 self.to_v(img)
-
-        weight_img_q = attninj_opts.get("img_q", 0.0)
-        weight_img_k = attninj_opts.get("img_k", 0.0)
-        weight_img_v = attninj_opts.get("img_v", 0.0)
         
-        weight_img_q_norm = attninj_opts.get("img_q_norm", 0.0)
-        weight_img_k_norm = attninj_opts.get("img_k_norm", 0.0)
-        weight_img_v_norm = attninj_opts.get("img_v_norm", 0.0)
-
-        if self.EO("attn_slerp"):
-            interp_fn = slerp_tensor
-        else:
-            interp_fn = lambda weight, A, B: (1-weight) * A + weight * B
-
-        #if weight_img_q_norm != 0:
-        #    img_q[0] = interp_fn(weight_img_q_norm, img_q[0], norm_seq(img_q[0], img_q[-1]))
-        #if weight_img_k_norm != 0:
-        #    img_k[0] = interp_fn(weight_img_k_norm, img_k[0], norm_seq(img_k[0], img_k[-1]))
-        #if weight_img_v_norm != 0:
-        #    img_v[0] = interp_fn(weight_img_v_norm, img_v[0], norm_seq(img_v[0], img_v[-1]))
-
-        if weight_img_q != 0:
-            img_q[0] = interp_fn(weight_img_q, img_q[0], img_q[-1])
-        if weight_img_k != 0:
-            img_k[0] = interp_fn(weight_img_k, img_k[0], img_k[-1])
-        if weight_img_v != 0:
-            img_v[0] = interp_fn(weight_img_v, img_v[0], img_v[-1])
-
-        img_q = HDModel.attn_img_q_norm(img_q)
-        img_k = HDModel.attn_img_k_norm(img_k)
-        img_v = HDModel.attn_img_v_norm(img_v)        
+        img_q = self.to_q(img)
+        img_k = self.to_k(img)
+        img_v = self.to_v(img)
+        
+        img_q = style_block.img.ATTN(img_q, "q_proj")
+        img_k = style_block.img.ATTN(img_k, "k_proj")
+        img_v = style_block.img.ATTN(img_v, "v_proj")
+        
+        img_q = self.q_rms_norm(img_q)
+        img_k = self.k_rms_norm(img_k)
+        
+        img_q = style_block.img.ATTN(img_q, "q_norm")
+        img_k = style_block.img.ATTN(img_k, "k_norm")
 
         inner_dim = img_k.shape[-1]
         head_dim  = inner_dim // self.heads
@@ -463,50 +353,24 @@ class HDAttention(nn.Module):
         if img_masks is not None:
             img_k = img_k * img_masks.view(bsz, -1, 1, 1)
 
-
         if self.single:
             attn = attention(img_q, img_k, img_v, rope=rope, mask=mask)
-            
-            attn = HDModel.attn_img_single(attn)
-            
+            attn = style_block.img.ATTN(attn, "out")
             return self.to_out(attn)
         else:
+            txt_q = self.to_q_t(txt)
+            txt_k = self.to_k_t(txt)
+            txt_v = self.to_v_t(txt)
             
-            txt_q   = self.q_rms_norm_t(self.to_q_t(txt))
-            txt_k   = self.k_rms_norm_t(self.to_k_t(txt))
-            txt_v   =                   self.to_v_t(txt)
-
-            weight_txt_q = attninj_opts.get("txt_q", 0.0)
-            weight_txt_k = attninj_opts.get("txt_k", 0.0)
-            weight_txt_v = attninj_opts.get("txt_v", 0.0)
+            txt_q = style_block.txt.ATTN(txt_q, "q_proj")
+            txt_k = style_block.txt.ATTN(txt_k, "k_proj")
+            txt_v = style_block.txt.ATTN(txt_v, "v_proj")
             
-            weight_txt_q_norm = attninj_opts.get("txt_q_norm", 0.0)
-            weight_txt_k_norm = attninj_opts.get("txt_k_norm", 0.0)
-            weight_txt_v_norm = attninj_opts.get("txt_v_norm", 0.0)
-
-            if self.EO("attn_slerp"):
-                interp_fn = slerp_tensor
-            else:
-                interp_fn = lambda weight, A, B: (1-weight) * A + weight * B
-
-            #if weight_txt_q_norm != 0:
-            #    txt_q[0] = interp_fn(weight_txt_q_norm, txt_q[0], norm_seq(txt_q[0], txt_q[-1]))
-            #if weight_txt_k_norm != 0:
-            #    txt_k[0] = interp_fn(weight_txt_k_norm, txt_k[0], norm_seq(txt_k[0], txt_k[-1]))
-            #if weight_txt_v_norm != 0:
-            #    txt_v[0] = interp_fn(weight_txt_v_norm, txt_v[0], norm_seq(txt_v[0], txt_v[-1]))
+            txt_q = self.q_rms_norm_t(txt_q)
+            txt_k = self.k_rms_norm_t(txt_k)
             
-            
-            if weight_txt_q != 0:
-                txt_q[0] = interp_fn(weight_txt_q, txt_q[0], txt_q[-1])
-            if weight_txt_k != 0:
-                txt_k[0] = interp_fn(weight_txt_k, txt_k[0], txt_k[-1])
-            if weight_txt_v != 0:
-                txt_v[0] = interp_fn(weight_txt_v, txt_v[0], txt_v[-1])
-
-            txt_q = HDModel.attn_txt_q_norm(txt_q)
-            txt_k = HDModel.attn_txt_k_norm(txt_k)
-            txt_v = HDModel.attn_txt_v_norm(txt_v)
+            txt_q = style_block.txt.ATTN(txt_q, "q_norm")
+            txt_k = style_block.txt.ATTN(txt_k, "k_norm")
 
             txt_q   = txt_q.view(bsz, -1, self.heads, head_dim)
             txt_k   = txt_k.view(bsz, -1, self.heads, head_dim)
@@ -521,9 +385,9 @@ class HDAttention(nn.Module):
             
             img_attn, txt_attn = torch.split(attn, [img_len, txt_len], dim=1)   #1, 4480, 2560
             
-            img_attn = HDModel.attn_img_double(img_attn)
-            txt_attn = HDModel.attn_txt_double(txt_attn)
-            
+            img_attn = style_block.img.ATTN(img_attn, "out")
+            txt_attn = style_block.txt.ATTN(txt_attn, "out")
+
             if update_cross_attn is not None:
                 if not update_cross_attn['skip_cross_attn']:
                     UNCOND      = update_cross_attn['UNCOND']
@@ -617,58 +481,73 @@ class HDBlockDouble(nn.Module):
         rope      :          FloatTensor  = None,
         mask      : Optional[FloatTensor] = None,
         update_cross_attn : Optional[Dict]= None,
-        cache_v   :                  bool = True,
-        attninj_opts :     Optional[Dict] = {},
+        style_block = None,
     ) -> FloatTensor:
-                
+        
         img_msa_shift, img_msa_scale, img_msa_gate, img_mlp_shift, img_mlp_scale, img_mlp_gate, \
         txt_msa_shift, txt_msa_scale, txt_msa_gate, txt_mlp_shift, txt_mlp_scale, txt_mlp_gate = self.adaLN_modulation(clip)[:,None].chunk(12, dim=-1)      # 1,1,2560           
 
-        if self.idx == 0:
-            img = HDModel.double_img_io(img)
-            txt = HDModel.double_txt_io(txt)
+        img_norm = self.norm1_i(img)
+        txt_norm = self.norm1_t(txt)
+        
+        img_norm = style_block.img(img_norm, "attn_norm")
+        txt_norm = style_block.txt(txt_norm, "attn_norm")
+        
+        img_norm = img_norm * (1+img_msa_scale) + img_msa_shift
+        txt_norm = txt_norm * (1+txt_msa_scale) + txt_msa_shift
+        
+        img_norm = style_block.img(img_norm, "attn_norm_mod")
+        txt_norm = style_block.txt(txt_norm, "attn_norm_mod")
 
-        img_norm = self.norm1_i(img) * (1+img_msa_scale) + img_msa_shift
-        txt_norm = self.norm1_t(txt) * (1+txt_msa_scale) + txt_msa_shift
+        img_attn, txt_attn = self.attn1(img_norm, img_masks, txt_norm, rope=rope, mask=mask, update_cross_attn=update_cross_attn, style_block=style_block)
         
-        img_norm = HDModel.double_img_norm0(img_norm)
-        txt_norm = HDModel.double_txt_norm0(txt_norm)
-        
-        img_attn, txt_attn = self.attn1(img_norm, img_masks, txt_norm, rope=rope, mask=mask, update_cross_attn=update_cross_attn, cache_v=cache_v, attninj_opts=attninj_opts)
-        
-        img_attn = HDModel.double_img_attn(img_attn)
-        txt_attn = HDModel.double_txt_attn(txt_attn)
+        img_attn = style_block.img(img_attn, "attn")
+        txt_attn = style_block.txt(txt_attn, "attn")
 
-        img_attn_gated = img_attn * img_msa_gate
-        txt_attn_gated = txt_attn * txt_msa_gate
-        
-        img_attn_gated = HDModel.double_img_attn_gated(img_attn_gated)
-        txt_attn_gated = HDModel.double_txt_attn_gated(txt_attn_gated)
-        
-        img += img_attn_gated
-        txt += txt_attn_gated
-        
-        img = HDModel.double_img_norm1(img)
-        txt = HDModel.double_txt_norm1(txt)
-        
-        img_norm = self.norm3_i(img) * (1+img_mlp_scale) + img_mlp_shift
-        txt_norm = self.norm3_t(txt) * (1+txt_mlp_scale) + txt_mlp_shift
+        img_attn *= img_msa_gate
+        txt_attn *= txt_msa_gate
 
-        img_norm = HDModel.double_img_norm1(img_norm)
-        txt_norm = HDModel.double_txt_norm1(txt_norm)
+        img_attn = style_block.img(img_attn, "attn_gated")
+        txt_attn = style_block.txt(txt_attn, "attn_gated")
 
-        img_ff_i = self.ff_i(img_norm) * img_mlp_gate
-        txt_ff_t = self.ff_t(txt_norm) * txt_mlp_gate 
+        img += img_attn
+        txt += txt_attn
+
+        img = style_block.img(img, "attn_res")
+        txt = style_block.txt(txt, "attn_res")
+
+        # FEED FORWARD
+
+        img_norm = self.norm3_i(img)
+        txt_norm = self.norm3_t(txt)
+
+        img_norm = style_block.img(img_norm, "ff_norm")
+        txt_norm = style_block.txt(txt_norm, "ff_norm")
+
+        img_norm = img_norm * (1+img_mlp_scale) + img_mlp_shift
+        txt_norm = txt_norm * (1+txt_mlp_scale) + txt_mlp_shift
+
+        img_norm = style_block.img(img_norm, "ff_norm_mod")
+        txt_norm = style_block.txt(txt_norm, "ff_norm_mod")
+
+        img_ff_i = self.ff_i(img_norm, style_block.img.FF)
+        txt_ff_t = self.ff_t(txt_norm, style_block.txt.FF)
         
-        img_ff_i = HDModel.double_img_ff_i(img_ff_i)
-        txt_ff_t = HDModel.double_txt_ff_t(txt_ff_t)
+        img_ff_i = style_block.img(img_ff_i, "ff")
+        txt_ff_t = style_block.txt(txt_ff_t, "ff")
         
+        img_ff_i *= img_mlp_gate
+        txt_ff_t *= txt_mlp_gate
+
+        img_ff_i = style_block.img(img_ff_i, "ff_gated")
+        txt_ff_t = style_block.txt(txt_ff_t, "ff_gated")
+
         img += img_ff_i
         txt += txt_ff_t
         
-        img = HDModel.double_img_io(img)
-        txt = HDModel.double_txt_io(txt)
-        
+        img = style_block.img(img, "ff_res")
+        txt = style_block.txt(txt, "ff_res")
+
         return img, txt
 
 
@@ -706,102 +585,48 @@ class HDBlockSingle(nn.Module):
         rope       :          FloatTensor   = None,
         mask       : Optional[FloatTensor]  = None,
         update_cross_attn : Optional[Dict] = None,
-        cache_v   :                  bool  = True,
-        attninj_opts :      Optional[Dict]  = None,
+        style_block = None,
     ) -> FloatTensor:
         
         img_msa_shift, img_msa_scale, img_msa_gate, img_mlp_shift, img_mlp_scale, img_mlp_gate = self.adaLN_modulation(clip)[:,None].chunk(6, dim=-1)
 
-        img = HDModel.single_img_io(img)
-
-        img_norm = self.norm1_i(img) * (1+img_msa_scale) + img_msa_shift
+        img_norm = self.norm1_i(img)  
+        img_norm = style_block.img(img_norm, "attn_norm")
         
-        img_norm = HDModel.single_img_norm0(img_norm)
+        img_norm = img_norm * (1+img_msa_scale) + img_msa_shift
+        img_norm = style_block.img(img_norm, "attn_norm_mod")
 
-        img_attn = self.attn1(img_norm, img_masks, rope=rope, mask=mask, cache_v=cache_v, attninj_opts=attninj_opts)
-        
-        img_attn = HDModel.single_img_attn(img_attn)
+        img_attn = self.attn1(img_norm, img_masks, rope=rope, mask=mask, style_block=style_block)
+        img_attn = style_block.img(img_attn, "attn")
 
-        img_attn_gated = img_attn * img_msa_gate
-        
-        img_attn_gated = HDModel.single_img_attn_gated(img_attn_gated)
+        img_attn *= img_msa_gate
+        img_attn = style_block.img(img_attn, "attn_gated")
 
-        img += img_attn_gated
-        
-        img = HDModel.single_img(img)
+        img += img_attn
+        img = style_block.img(img, "attn_res")
 
-        img_norm = self.norm3_i(img) * (1+img_mlp_scale) + img_mlp_shift
+        img_norm = self.norm3_i(img)
+        img_norm = style_block.img(img_norm, "ff_norm")
         
-        img_norm = HDModel.single_img_norm1(img_norm)
+        img_norm = img_norm * (1+img_mlp_scale) + img_mlp_shift
+        img_norm = style_block.img(img_norm, "ff_norm_mod")
 
-        img_ff_i = self.ff_i(img_norm) * img_mlp_gate
+        img_ff_i = self.ff_i(img_norm, style_block.img.FF)
+        img_ff_i = style_block.img(img_ff_i, "ff")
         
-        img_ff_i = HDModel.single_img_ff_i(img_ff_i)
+        img_ff_i *= img_mlp_gate
+        img_ff_i = style_block.img(img_ff_i, "ff_gated")
 
         img += img_ff_i
-        
-        img = HDModel.single_img_io(img)
+        img = style_block.img(img, "ff_res")
 
         return img
 
 
 #########################################################################################################################################################################
 class HDModel(nn.Module):
-    moe_gate              = False
-    moe_sum               = apply_passthrough
-    moe_out               = apply_passthrough
-    topk_weight           = apply_passthrough
-    shared_experts        = apply_passthrough
-    
-    ff_1                  = apply_passthrough
-    ff_1_silu             = apply_passthrough
-    ff_3                  = apply_passthrough
-    ff_13                 = apply_passthrough
-    ff_2                  = apply_passthrough
-
-    moe_ff_1              = apply_passthrough
-    moe_ff_1_silu         = apply_passthrough
-    moe_ff_3              = apply_passthrough
-    moe_ff_13             = apply_passthrough
-    moe_ff_2              = apply_passthrough
-
-    double_img_io         = apply_passthrough
-    double_img_norm0      = apply_passthrough
-    double_img_attn       = apply_passthrough
-    double_img_norm1      = apply_passthrough
-    double_img_attn_gated = apply_passthrough
-    double_img            = apply_passthrough
-    double_img_ff_i       = apply_passthrough
-    
-    double_txt_io         = apply_passthrough
-    double_txt_norm0      = apply_passthrough
-    double_txt_attn       = apply_passthrough
-    double_txt_attn_gated = apply_passthrough
-    double_txt            = apply_passthrough
-    double_txt_norm1      = apply_passthrough
-    double_txt_ff_t       = apply_passthrough
-    
-    single_img_io         = apply_passthrough
-    single_img_norm0      = apply_passthrough
-    single_img_attn       = apply_passthrough 
-    single_img_attn_gated = apply_passthrough
-    single_img            = apply_passthrough 
-    single_img_norm1      = apply_passthrough
-    single_img_ff_i       = apply_passthrough
-    
-    attn_img_q_norm       = apply_passthrough
-    attn_img_k_norm       = apply_passthrough
-    attn_img_v_norm       = apply_passthrough 
-    attn_txt_q_norm       = apply_passthrough
-    attn_txt_k_norm       = apply_passthrough
-    attn_txt_v_norm       = apply_passthrough 
-    attn_img_single       = apply_passthrough
-    attn_img_double       = apply_passthrough
-    attn_txt_double       = apply_passthrough
-    
-    RECON_MODE            = False
-
-
+    CHANNELS   = 2560
+    RECON_MODE = False
 
     def __init__(
         self,
@@ -884,7 +709,6 @@ class HDModel(nn.Module):
             caption_projection.append(TextProjection(in_features=caption_channel, hidden_size=self.inner_dim, dtype=dtype, device=device, operations=operations))
         self.caption_projection = nn.ModuleList(caption_projection)
         self.max_seq            = max_resolution[0] * max_resolution[1] // (patch_size * patch_size)
-        self.manual_mask        = None
 
     def prepare_contexts(self, llama3, context, bsz, img_num_fea):
         contexts = llama3.movedim(1, 0)
@@ -916,264 +740,91 @@ class HDModel(nn.Module):
         transformer_options          = {},
         mask    : Optional[Tensor]   = None,
     ) -> Tensor:
-        x_orig       = x.clone()
+        x_orig      = x.clone()
         b, c, h, w  = x.shape
         h_len = ((h + (self.patch_size // 2)) // self.patch_size) # h_len 96
         w_len = ((w + (self.patch_size // 2)) // self.patch_size) # w_len 96
         
-        x_embedder_dtype = self.x_embedder.proj.weight.data.dtype
-        if x_embedder_dtype not in {torch.bfloat16, torch.float16, torch.float32, torch.float64}:
-            x_embedder_dtype = x.dtype
+        SIGMA = t[0].clone() / 1000
+        EO = transformer_options.get("ExtraOptions", ExtraOptions(""))
+        if EO is not None:
+            EO.mute = True
+
+        StyleMMDiT = transformer_options.get('StyleMMDiT', StyleMMDiT_HiDream())
+        transformer_options['StyleMMDiT'] = None
+        
+        StyleMMDiT.set_len(h_len, w_len)
         
         x_tmp = transformer_options.get("x_tmp")
         if x_tmp is not None:
             x_tmp = x_tmp.expand(x.shape[0], -1, -1, -1).clone()
             img = comfy.ldm.common_dit.pad_to_patch_size(x_tmp, (self.patch_size, self.patch_size))
-            
         else:
             img = comfy.ldm.common_dit.pad_to_patch_size(x, (self.patch_size, self.patch_size))
-        update_cross_attn = transformer_options.get("update_cross_attn")
-        SIGMA = t[0].clone() / 1000
-        EO = transformer_options.get("ExtraOptions", ExtraOptions(""))
-        if EO is not None:
-            EO.mute = True
-        io_precision = EO("io_precision", torch.bfloat16)
         
-        for block in self.double_stream_blocks:
-            block.block.attn1.EO = EO
-        for block in self.single_stream_blocks:
-            block.block.attn1.EO = EO
-            
-        self.style_dtype = torch.float32 if self.style_dtype is None else self.style_dtype
-        ADAIN_SINGLE_BLOCKS,   ADAIN_DOUBLE_BLOCKS   = [-1], [-1]
-        ATTNINJ_SINGLE_BLOCKS, ATTNINJ_DOUBLE_BLOCKS = [-1], [-1]
-        
-        y0_adain,     img_y0_adain,     img_sizes_y0_adain     = None, None, None
-        y0_attninj,   img_y0_attninj,   img_sizes_y0_attninj   = None, None, None
-        y0_style_pos, img_y0_style_pos, img_sizes_y0_style_pos = None, None, None
-        y0_style_neg, img_y0_style_neg, img_sizes_y0_style_neg = None, None, None
-        blocks_attninj_qkv_scaled = {}
-        blocks_attninj_qkv = {}
-        STYLE_UNCOND = EO("STYLE_UNCOND", False)
-        
-        y0_style_pos        = transformer_options.get("y0_style_pos")
-        y0_style_neg        = transformer_options.get("y0_style_neg")
-        
+        y0_style, img_y0_style = None, None
+
         img_orig, t_orig, y_orig, context_orig, llama3_orig = clone_inputs(img, t, y, context, encoder_hidden_states_llama3)
         
         z_ = transformer_options.get("z_")   # initial noise and/or image+noise from start of rk_sampler_beta() 
-        rk_row = transformer_options.get("row")
-        
+        rk_row = transformer_options.get("row") # for "smart noise"
         if z_ is not None:
             x_init = z_[rk_row].to(x)
         elif 'x_init' in transformer_options:
             x_init = transformer_options.get('x_init').to(x)
 
         # recon loop to extract exact noise pred for scattersort guide assembly
-        noise_mode_adain = transformer_options.get("noise_mode_adain", "")
-        HDModel.RECON_MODE = noise_mode_adain == "recon"
-        recon_iterations = 2 if noise_mode_adain == "recon" else 1
+        HDModel.RECON_MODE = StyleMMDiT.noise_mode == "recon"
+        recon_iterations = 2 if StyleMMDiT.noise_mode == "recon" else 1
         for recon_iter in range(recon_iterations):
+            y0_style = StyleMMDiT.guides
+            y0_style_active = True if type(y0_style) == torch.Tensor else False
             HDModel.RECON_MODE = False
-            if noise_mode_adain == "recon" and recon_iter == 0:
+            if StyleMMDiT.noise_mode == "recon" and recon_iter == 0:
                 HDModel.RECON_MODE = True
-            elif noise_mode_adain == "recon" and recon_iter == 1:
+            elif StyleMMDiT.noise_mode == "recon" and recon_iter == 1:
+                x_recon = x_tmp if x_tmp is not None else x_orig
+                noise_prediction = x_recon + (1-SIGMA.to(x_recon)) * eps.to(x_recon)
+                denoised = x_recon - SIGMA.to(x_recon) * eps.to(x_recon)
                 
-                #denoised = x_orig - SIGMA * eps
+                if EO("recon_WCT2"):
+                    y0_style_embed = self.Retrojector.embed(y0_style)
+                    denoised_embed = self.Retrojector.embed(denoised)
+                    self.WaveletStyleWCT.set(y0_style_embed.to(denoised_embed), h_len, w_len)
+                    denoised_embed = self.WaveletStyleWCT.get(denoised_embed, h_len, w_len)
+                    y0_style = self.Retrojector.unembed(y0_style_embed)
+                    denoised = self.Retrojector.unembed(denoised_embed)
+                elif EO("recon_WCT"):
+                    y0_style_embed = self.Retrojector.embed(y0_style)
+                    denoised_embed = self.Retrojector.embed(denoised)
+                    self.StyleWCT.set(y0_style_embed.to(denoised_embed))
+                    denoised_embed = self.StyleWCT.get(denoised_embed)
+                    y0_style = self.Retrojector.unembed(y0_style_embed)
+                    denoised = self.Retrojector.unembed(denoised_embed)
+                elif EO("recon_scattersort"):
+                    y0_style_embed = self.Retrojector.embed(y0_style)
+                    denoised_embed = self.Retrojector.embed(denoised)
+                    denoised_embed = ScatterSort.apply(denoised_embed, y0_style_embed)
+                    y0_style = self.Retrojector.unembed(y0_style_embed)
+                    denoised = self.Retrojector.unembed(denoised_embed)
                 
-                #noise_prediction = eps + denoised
-                #noise_prediction = x_orig - SIGMA * eps + eps
-                if x_tmp is not None:
-                    noise_prediction = x_tmp + ((1-SIGMA.to(x_tmp)) * eps.to(x_tmp))
-                else:
-                    noise_prediction = x_orig + (1-SIGMA.to(x_orig)) * eps.to(x_orig)
+                new_x = (1-SIGMA.to(denoised)) * denoised + SIGMA.to(denoised) * noise_prediction
+                img_orig = img = comfy.ldm.common_dit.pad_to_patch_size(new_x, (self.patch_size, self.patch_size))
                 
                 x_init = noise_prediction
-            elif noise_mode_adain == "bonanza":
+            elif StyleMMDiT.noise_mode == "bonanza":
                 x_init = torch.randn_like(x_init)
-            
-            y0_adain = transformer_options.get("y0_adain")
-            if y0_adain is not None:
-                
-                #x_init              = transformer_options.get("x_init").to(x)   # initial noise and/or image+noise from start of rk_sampler_beta() 
-                #y0_adain            = y0_adain.to(x)
-                SIGMA_ADAIN         = (SIGMA * EO("eps_adain_sigma_factor", 1.0)).to(y0_adain)
-                y0_adain            = (1-SIGMA_ADAIN) * y0_adain + SIGMA_ADAIN * x_init[0].unsqueeze(0).to(y0_adain)   #always only use first batch of noise to avoid broadcasting
-                img_y0_adain        = comfy.ldm.common_dit.pad_to_patch_size(y0_adain, (self.patch_size, self.patch_size))
-                #t_y0_adain          = t[0].unsqueeze(0).clone() #torch.full_like(t, 0.0)[0].unsqueeze(0)
-                #t_y0_adain         *= EO("eps_adain_sigma_factor", 1.0)
-                blocks_adain        = transformer_options.get("blocks_adain")
-                ADAIN_SINGLE_BLOCKS = blocks_adain['single_blocks']
-                ADAIN_DOUBLE_BLOCKS = blocks_adain['double_blocks']
-                sort_and_scatter    = transformer_options.get("sort_and_scatter")
-                
-                
-                
-                scatter_defaults = {
-                    "moe_gate"             : False,
-                    "moe_out"              : apply_passthrough,
-                    "moe_sum"              : apply_passthrough,
-                    "shared_experts"       : apply_passthrough,
-                    "topk_weight"          : apply_passthrough,
-                    
-                    "ff_1"                 : apply_passthrough,
-                    "ff_1_silu"            : apply_passthrough,
-                    "ff_3"                 : apply_passthrough,
-                    "ff_13"                : apply_passthrough,
-                    "ff_2"                 : apply_passthrough,
-                    
-                    "moe_ff_1"             : apply_passthrough,
-                    "moe_ff_1_silu"        : apply_passthrough,
-                    "moe_ff_3"             : apply_passthrough,
-                    "moe_ff_13"            : apply_passthrough,
-                    "moe_ff_2"             : apply_passthrough,
 
-                    "double_img_io"        : apply_passthrough,
-                    "double_img_norm0"     : apply_passthrough,
-                    "double_img_attn"      : apply_passthrough,
-                    "double_img_norm1"     : apply_passthrough,
-                    "double_img_attn_gated": apply_passthrough,
-                    "double_img"           : apply_passthrough,
-                    "double_img_ff_i"      : apply_passthrough,
+            if y0_style_active:
+                SIGMA_ADAIN         = (SIGMA * EO("eps_adain_sigma_factor", 1.0)).to(y0_style)
+                y0_style            = (1-SIGMA_ADAIN) * y0_style + SIGMA_ADAIN * x_init[0].unsqueeze(0).to(y0_style)   #always only use first batch of noise to avoid broadcasting
+                img_y0_style_orig   = comfy.ldm.common_dit.pad_to_patch_size(y0_style, (self.patch_size, self.patch_size))
 
-                    "double_txt_io"        : apply_passthrough,
-                    "double_txt_norm0"     : apply_passthrough,
-                    "double_txt_attn"      : apply_passthrough,
-                    "double_txt_attn_gated": apply_passthrough,
-                    "double_txt"           : apply_passthrough,
-                    "double_txt_norm1"     : apply_passthrough,
-                    "double_txt_ff_t"      : apply_passthrough,
-
-                    "single_img_io"        : apply_passthrough,
-                    "single_img_norm0"     : apply_passthrough,
-                    "single_img_attn"      : apply_passthrough,
-                    "single_img_attn_gated": apply_passthrough,
-                    "single_img"           : apply_passthrough,
-                    "single_img_norm1"     : apply_passthrough,
-                    "single_img_ff_i"      : apply_passthrough,
-                    
-                    "attn_img_q_norm"      : apply_passthrough,
-                    "attn_img_k_norm"      : apply_passthrough,
-                    "attn_img_v_norm"      : apply_passthrough,
-                    "attn_txt_q_norm"      : apply_passthrough,
-                    "attn_txt_k_norm"      : apply_passthrough,
-                    "attn_txt_v_norm"      : apply_passthrough,
-                    "attn_img_single"      : apply_passthrough,
-                    "attn_img_double"      : apply_passthrough,
-                    "attn_txt_double"      : apply_passthrough,
-                }
-                
-                if sort_and_scatter['mode'] == "AdaIN":
-                    scattersort_method = ScatterSort.apply_adain_embed
-                else:
-                    scattersort_method = ScatterSort.batch_apply
-                
-                for key in sort_and_scatter:
-                    if sort_and_scatter.get(key, False):
-                        scatter_defaults[key] = scattersort_method
-                
-                HDModel.moe_gate              = scatter_defaults["moe_gate"]
-                HDModel.moe_out               = scatter_defaults["moe_out"]
-                HDModel.moe_sum               = scatter_defaults["moe_sum"]
-                HDModel.shared_experts        = scatter_defaults["shared_experts"]
-                HDModel.topk_weight           = scatter_defaults["topk_weight"]
-                
-                HDModel.ff_1                  = scatter_defaults["ff_1"]
-                HDModel.ff_1_silu             = scatter_defaults["ff_1_silu"]
-                HDModel.ff_3                  = scatter_defaults["ff_3"]
-                HDModel.ff_13                 = scatter_defaults["ff_13"]
-                HDModel.ff_2                  = scatter_defaults["ff_2"]
-
-                HDModel.moe_ff_1              = scatter_defaults["moe_ff_1"]
-                HDModel.moe_ff_1_silu         = scatter_defaults["moe_ff_1_silu"]
-                HDModel.moe_ff_3              = scatter_defaults["moe_ff_3"]
-                HDModel.moe_ff_13             = scatter_defaults["moe_ff_13"]
-                HDModel.moe_ff_2              = scatter_defaults["moe_ff_2"]
-
-                HDModel.double_img_io         = scatter_defaults["double_img_io"]
-                HDModel.double_img_norm0      = scatter_defaults["double_img_norm0"]
-                HDModel.double_img_attn       = scatter_defaults["double_img_attn"]
-                HDModel.double_img_norm1      = scatter_defaults["double_img_norm1"]
-                HDModel.double_img_attn_gated = scatter_defaults["double_img_attn_gated"]
-                HDModel.double_img            = scatter_defaults["double_img"]
-                HDModel.double_img_ff_i       = scatter_defaults["double_img_ff_i"]
-
-                HDModel.double_txt_io         = scatter_defaults["double_txt_io"]
-                HDModel.double_txt_norm0      = scatter_defaults["double_txt_norm0"]
-                HDModel.double_txt_attn       = scatter_defaults["double_txt_attn"]
-                HDModel.double_txt_attn_gated = scatter_defaults["double_txt_attn_gated"]
-                HDModel.double_txt            = scatter_defaults["double_txt"]
-                HDModel.double_txt_norm1      = scatter_defaults["double_txt_norm1"]
-                HDModel.double_txt_ff_t       = scatter_defaults["double_txt_ff_t"]
-
-                HDModel.single_img_io         = scatter_defaults["single_img_io"]
-                HDModel.single_img_norm0      = scatter_defaults["single_img_norm0"]
-                HDModel.single_img_attn       = scatter_defaults["single_img_attn"]
-                HDModel.single_img_attn_gated = scatter_defaults["single_img_attn_gated"]
-                HDModel.single_img            = scatter_defaults["single_img"]
-                HDModel.single_img_norm1      = scatter_defaults["single_img_norm1"]
-                HDModel.single_img_ff_i       = scatter_defaults["single_img_ff_i"]
-                
-                HDModel.attn_img_q_norm       = scatter_defaults["attn_img_q_norm"]
-                HDModel.attn_img_k_norm       = scatter_defaults["attn_img_k_norm"]
-                HDModel.attn_img_v_norm       = scatter_defaults["attn_img_v_norm"]
-                HDModel.attn_txt_q_norm       = scatter_defaults["attn_txt_q_norm"]
-                HDModel.attn_txt_k_norm       = scatter_defaults["attn_txt_k_norm"]
-                HDModel.attn_txt_v_norm       = scatter_defaults["attn_txt_v_norm"]
-                HDModel.attn_img_single       = scatter_defaults["attn_img_single"]
-                HDModel.attn_img_double       = scatter_defaults["attn_img_double"]
-                HDModel.attn_txt_double       = scatter_defaults["attn_txt_double"]
-
-            y0_attninj = transformer_options.get("y0_attninj")
-            if y0_attninj is not None:
-                #x_init                = transformer_options.get("x_init").to(x)   # initial noise and/or image+noise from start of rk_sampler_beta() 
-                #y0_attninj            = y0_attninj.to(x)
-                #y0_attninj            = (1-SIGMA) * y0_attninj + SIGMA * x_init
-                
-                SIGMA_ATTNINJ         = (SIGMA * EO("eps_attninj_sigma_factor", 1.0)).to(y0_attninj)
-                y0_attninj            = (1-SIGMA_ATTNINJ) * y0_attninj + SIGMA_ATTNINJ * x_init[0].unsqueeze(0).to(y0_attninj) # always use only first batch of noise to avoid unintentional broadcasting
-                img_y0_attninj        = comfy.ldm.common_dit.pad_to_patch_size(y0_attninj, (self.patch_size, self.patch_size))
-                #t_y0_attninj          = t[0].unsqueeze(0).clone() #torch.full_like(t, 0.0)[0].unsqueeze(0)
-                #t_y0_attninj         *= EO("eps_attninj_sigma_factor", 1.0)
-                blocks_attninj        = transformer_options.get("blocks_attninj")
-                blocks_attninj_qkv    = transformer_options.get("blocks_attninj_qkv")
-                ATTNINJ_SINGLE_BLOCKS = blocks_attninj['single_blocks']
-                ATTNINJ_DOUBLE_BLOCKS = blocks_attninj['double_blocks']
-            
-            if y0_adain is not None and y0_attninj is not None and torch.norm(y0_adain - y0_attninj) == 0.0:
-                IDENTICAL_ADAIN_ATTNINJ = True
-            else:
-                IDENTICAL_ADAIN_ATTNINJ = False
-
-            if y0_adain is not None:
-                #img_y0_adain_orig, t_y0_adain_orig = clone_inputs(img_y0_adain, t_y0_adain)
-                img_y0_adain_orig = img_y0_adain.clone()
-            if y0_attninj is not None:
-                #img_y0_attninj_orig, t_y0_attninj_orig = clone_inputs(img_y0_attninj, t_y0_attninj)
-                img_y0_attninj_orig = img_y0_attninj.clone()
-            
             weight    = -1 * transformer_options.get("regional_conditioning_weight", 0.0)
             floor     = -1 * transformer_options.get("regional_conditioning_floor",  0.0)
-            
-            freqsep_lowpass_method = transformer_options.get("freqsep_lowpass_method")
-            freqsep_sigma          = transformer_options.get("freqsep_sigma")
-            freqsep_kernel_size    = transformer_options.get("freqsep_kernel_size")
-            freqsep_inner_kernel_size    = transformer_options.get("freqsep_inner_kernel_size")
-            freqsep_stride    = transformer_options.get("freqsep_stride")
-            
-            freqsep_lowpass_weight = transformer_options.get("freqsep_lowpass_weight")
-            freqsep_highpass_weight= transformer_options.get("freqsep_highpass_weight")
-            freqsep_mask           = transformer_options.get("freqsep_mask")
-            
-            #floor     = min(floor, weight)
+            update_cross_attn = transformer_options.get("update_cross_attn")
+
             mask_zero = None
-
-
-
-            
-            
-            
-            
             
             out_list = []
             for cond_iter in range(len(transformer_options['cond_or_uncond'])):
@@ -1181,18 +832,20 @@ class HDModel(nn.Module):
                 
                 if update_cross_attn is not None:
                     update_cross_attn['UNCOND'] = UNCOND
-                
-                bsz = 1
+
+                bsz_style = y0_style.shape[0] if y0_style_active else 0
+                bsz       = 1 if HDModel.RECON_MODE else bsz_style + 1
 
                 img, t, y, context, llama3 = clone_inputs(img_orig, t_orig, y_orig, context_orig, llama3_orig, index=cond_iter)
-                if y0_adain is not None and not HDModel.RECON_MODE:
-                    #img_y0_adain, t_y0_adain = clone_inputs(img_y0_adain_orig, t_y0_adain_orig)
-                    img_y0_adain = img_y0_adain_orig.clone()
-                    img_sizes_y0_adain = None
-                if y0_attninj is not None and not HDModel.RECON_MODE:
-                    #img_y0_attninj, t_y0_attninj = clone_inputs(img_y0_attninj_orig, t_y0_attninj_orig)
-                    img_y0_attninj = img_y0_attninj_orig.clone()
-                    img_sizes_y0_attninj = None
+
+                if y0_style_active and not HDModel.RECON_MODE:
+                    context, y, llama3 = StyleMMDiT.apply_style_conditioning(
+                        UNCOND = UNCOND,
+                        base_context       = context,
+                        base_y             = y,
+                        base_llama3        = llama3,
+                    )
+                    img_y0_style = img_y0_style_orig.clone()
                 
                 mask = None
                 if not UNCOND and 'AttnMask' in transformer_options: # and weight != 0:
@@ -1211,8 +864,6 @@ class HDModel(nn.Module):
                     else:
                         context = transformer_options['RegContext'].context.to(context.dtype).to(context.device)
                         llama3  = transformer_options['RegContext'].llama3 .to(llama3 .dtype).to(llama3 .device)
-                    
-
 
                 if UNCOND and 'AttnMask_neg' in transformer_options: # and weight != 0:
                     AttnMask = transformer_options['AttnMask_neg']
@@ -1254,9 +905,6 @@ class HDModel(nn.Module):
                         B       = transformer_options['RegContext'].llama3
                         llama3  = A.repeat(1, 1, (B.shape[2] // A.shape[2]) + 1, 1)[:,:, :B.shape[2], :]
 
-                if self.manual_mask is not None:
-                    mask = self.manual_mask
-
                 if mask is not None and not type(mask[0][0].item()) == bool:
                     mask = mask.to(x.dtype)
                 if mask_zero is not None and not type(mask_zero[0][0].item()) == bool:
@@ -1267,6 +915,11 @@ class HDModel(nn.Module):
                 t    = self.t_embedder      (t,      x.dtype)
                 clip = t + self.p_embedder(y)
                 
+        
+                x_embedder_dtype = self.x_embedder.proj.weight.data.dtype
+                if x_embedder_dtype not in {torch.bfloat16, torch.float16, torch.float32, torch.float64}:
+                    x_embedder_dtype = x.dtype
+                
                 img_sizes = None
                 img, img_masks, img_sizes = self.patchify(img, self.max_seq, img_sizes)   # for 1024x1024: output is   1,4096,64   None   [[64,64]]     hidden_states rearranged not shrunk, patch_size 1x1???
                 if img_masks is None:
@@ -1275,29 +928,14 @@ class HDModel(nn.Module):
                     img_ids[..., 1] = img_ids[..., 1] + torch.arange(pH, device=img.device)[:, None]
                     img_ids[..., 2] = img_ids[..., 2] + torch.arange(pW, device=img.device)[None, :]
                     img_ids         = repeat(img_ids, "h w c -> b (h w) c", b=bsz)
-                img = self.x_embedder(img.to(x_embedder_dtype)).to(x)
+                img = self.x_embedder(img.to(x_embedder_dtype))
+                img_len = img.shape[-2]
 
-                if y0_adain is not None and img_sizes_y0_adain is None and not HDModel.RECON_MODE: #and not UNCOND 
-                    img_sizes_y0_adain = None
-                    img_y0_adain, img_masks_y0_adain, img_sizes_y0_adain = self.patchify(img_y0_adain, self.max_seq, img_sizes_y0_adain)   # for 1024x1024: output is   1,4096,64   None   [[64,64]]     hidden_states rearranged not shrunk, patch_size 1x1???
-                    if img_masks_y0_adain is None:
-                        pH, pW          = img_sizes_y0_adain[0]
-                        img_ids_y0_adain         = torch.zeros(pH, pW, 3, device=img_y0_adain.device)
-                        img_ids_y0_adain[..., 1] = img_ids_y0_adain[..., 1] + torch.arange(pH, device=img_y0_adain.device)[:, None]
-                        img_ids_y0_adain[..., 2] = img_ids_y0_adain[..., 2] + torch.arange(pW, device=img_y0_adain.device)[None, :]
-                        img_ids_y0_adain         = repeat(img_ids_y0_adain, "h w c -> b (h w) c", b=bsz)
-                    img_y0_adain = self.x_embedder(img_y0_adain.to(x_embedder_dtype)).to(x)  # hidden_states 1,4032,2560         for 1024x1024: -> 1,4096,2560      ,64 -> ,2560 (x40)
-                
-                if y0_attninj is not None and img_sizes_y0_attninj is None and not HDModel.RECON_MODE: #and not UNCOND 
-                    img_sizes_y0_attninj = None
-                    img_y0_attninj, img_masks_y0_attninj, img_sizes_y0_attninj = self.patchify(img_y0_attninj, self.max_seq, img_sizes_y0_attninj)   # for 1024x1024: output is   1,4096,64   None   [[64,64]]     hidden_states rearranged not shrunk, patch_size 1x1???
-                    if img_masks_y0_attninj is None:
-                        pH, pW          = img_sizes_y0_attninj[0]
-                        img_ids_y0_attninj         = torch.zeros(pH, pW, 3, device=img_y0_attninj.device)
-                        img_ids_y0_attninj[..., 1] = img_ids_y0_attninj[..., 1] + torch.arange(pH, device=img_y0_attninj.device)[:, None]
-                        img_ids_y0_attninj[..., 2] = img_ids_y0_attninj[..., 2] + torch.arange(pW, device=img_y0_attninj.device)[None, :]
-                    img_y0_attninj = self.x_embedder(img_y0_attninj.to(x_embedder_dtype)).to(x)   # hidden_states 1,4032,2560         for 1024x1024: -> 1,4096,2560      ,64 -> ,2560 (x40)
-                
+                if y0_style_active and not HDModel.RECON_MODE:
+                    img_y0_style, _, _ = self.patchify(img_y0_style_orig.clone(), self.max_seq, None)   # for 1024x1024: output is   1,4096,64   None   [[64,64]]     hidden_states rearranged not shrunk, patch_size 1x1???
+                    img_y0_style = self.x_embedder(img_y0_style.to(x_embedder_dtype))  # hidden_states 1,4032,2560         for 1024x1024: -> 1,4096,2560      ,64 -> ,2560 (x40)
+                    img = torch.cat([img, img_y0_style], dim=0)
+
                 contexts = self.prepare_contexts(llama3, context, bsz, img.shape[-1])
 
                 # txt_ids -> 1,414,3
@@ -1308,8 +946,7 @@ class HDModel(nn.Module):
                 txt_init     = torch.cat([contexts[-1], contexts[-2]], dim=-2)     # shape[1] == 128, 143       then on another step/call it's 128, 128...??? cuz the contexts is now 1,128,2560
                 txt_init_len = txt_init.shape[-2]                                       # 271
 
-                if mask is not None and self.manual_mask is None:
-                    #txt_offset = transformer_options['AttnMask'].text_len // 3 // transformer_options['AttnMask'].num_regions
+                if mask is not None:
                     txt_init_list = []
                     
                     offset_t5_start    = 0
@@ -1326,24 +963,14 @@ class HDModel(nn.Module):
                     
                     txt_init = torch.cat(txt_init_list, dim=-2)  #T5,LLAMA3 (last block)
                     txt_init_len = txt_init.shape[-2]
-
-                img_len = img.shape[-2]
-                txt_init_orig = txt_init.clone()
-                if y0_adain is not None and not HDModel.RECON_MODE:
-                    img      = torch.cat([img,      img_y0_adain], dim=0)
-                    txt_init = torch.cat([txt_init, txt_init_orig], dim=0)
                     
-                if y0_attninj is not None and not IDENTICAL_ADAIN_ATTNINJ and not HDModel.RECON_MODE:
-                    img      = torch.cat([img,      img_y0_attninj], dim=0)
-                    txt_init = torch.cat([txt_init, txt_init_orig], dim=0)
-                del txt_init_orig
+                img = StyleMMDiT(img, "proj_in")
                 
-                for bid, block in enumerate(self.double_stream_blocks):                                                              # len == 16
+                img = img.to(x) if img is not None else None
+                
+                # DOUBLE STREAM
+                for bid, (block, style_block) in enumerate(zip(self.double_stream_blocks, StyleMMDiT.double_blocks)):
                     txt_llama = contexts[bid]
-                    if y0_adain is not None and not HDModel.RECON_MODE:
-                        txt_llama = torch.cat([txt_llama, contexts[bid]], dim=0)
-                    if y0_attninj is not None and not HDModel.RECON_MODE and not IDENTICAL_ADAIN_ATTNINJ:
-                        txt_llama = torch.cat([txt_llama, contexts[bid]], dim=0)
                     txt = torch.cat([txt_init, txt_llama], dim=-2)        # 1,384,2560       # cur_contexts = T5, LLAMA3 (last block), LLAMA3 (current block)
 
                     if   weight > 0 and mask is not None and     weight  <      bid/48:
@@ -1370,11 +997,12 @@ class HDModel(nn.Module):
                         img, txt_init = block(img, img_masks, txt, clip, rope, mask, update_cross_attn=update_cross_attn)
                         
                     else:
-                        img, txt_init = block(img, img_masks, txt, clip, rope, mask, update_cross_attn=update_cross_attn, attninj_opts=blocks_attninj_qkv)
+                        img, txt_init = block(img, img_masks, txt, clip, rope, mask, update_cross_attn=update_cross_attn, style_block=style_block)
 
                     txt_init = txt_init[..., :txt_init_len, :]
+                # END DOUBLE STREAM
 
-                img_len = img.shape[-2]
+                
                 img     = torch.cat([img, txt_init], dim=-2)   # 4032 + 271 -> 4303     # txt embed from double stream block
 
                 joint_len = img.shape[-2]
@@ -1384,12 +1012,8 @@ class HDModel(nn.Module):
                     img_masks      = torch.cat([img_masks, img_masks_ones], dim=-2)
                 
                 # SINGLE STREAM
-                for bid, block in enumerate(self.single_stream_blocks): # len == 32
+                for bid, (block, style_block) in enumerate(zip(self.single_stream_blocks, StyleMMDiT.single_blocks)):
                     txt_llama = contexts[bid+16]                        # T5 pre-embedded for single stream blocks
-                    if y0_adain is not None and not HDModel.RECON_MODE:
-                        txt_llama = torch.cat([txt_llama, contexts[bid+16]], dim=0)
-                    if y0_attninj is not None and not HDModel.RECON_MODE and not IDENTICAL_ADAIN_ATTNINJ:
-                        txt_llama = torch.cat([txt_llama, contexts[bid+16]], dim=0)
                     img = torch.cat([img, txt_llama], dim=-2)            # cat img,txt     opposite of flux which is txt,img       4303 + 143 -> 4446
 
                     if   weight > 0 and mask is not None and     weight  <      (bid+16)/48:
@@ -1409,32 +1033,50 @@ class HDModel(nn.Module):
                         img = block(img, img_masks, None, clip, rope, mask_tmp)
                         
                     else:
-                        img = block(img, img_masks, None, clip, rope, mask, attninj_opts=blocks_attninj_qkv)
-
+                        img = block(img, img_masks, None, clip, rope, mask, style_block=style_block)
+                        
                     img = img[..., :joint_len, :]   # slice off txt_llama
+                # END SINGLE STREAM
                     
                 img = img[..., :img_len, :]
-                
-                if y0_adain is not None and not HDModel.RECON_MODE:
+                #img = self.final_layer(img, clip)   # 4096,2560 -> 4096,64
+                shift, scale = self.final_layer.adaLN_modulation(clip).chunk(2,dim=1)
+                img = (1 + scale[:, None, :]) * self.final_layer.norm_final(img) + shift[:, None, :]
+                img = StyleMMDiT(img, "proj_out")
+
+                if y0_style_active and not HDModel.RECON_MODE:
                     img = img[0].unsqueeze(0)
                 
-                img = self.final_layer(img, clip)   # 4096,2560 -> 4096,64
-                img = self.unpatchify (img, img_sizes)
-                
+                img = self.final_layer.linear(img)
+                img = self.unpatchify(img, img_sizes)
                 out_list.append(img)
                 
-            #output = torch.stack(out_list, dim=0).squeeze(dim=-2)
             output = torch.cat(out_list, dim=0)
-
             eps = -output[:, :, :h, :w]
             
-
-
-
+            if recon_iter == 1:
+                denoised = new_x - SIGMA.to(new_x) * eps.to(new_x)
+                if x_tmp is not None:
+                    eps = (x_tmp - denoised.to(x_tmp)) / SIGMA.to(x_tmp)
+                else:
+                    eps = (x_orig - denoised.to(x_orig)) / SIGMA.to(x_orig)
         
+            
+        freqsep_lowpass_method = transformer_options.get("freqsep_lowpass_method")
+        freqsep_sigma          = transformer_options.get("freqsep_sigma")
+        freqsep_kernel_size    = transformer_options.get("freqsep_kernel_size")
+        freqsep_inner_kernel_size    = transformer_options.get("freqsep_inner_kernel_size")
+        freqsep_stride    = transformer_options.get("freqsep_stride")
+        
+        freqsep_lowpass_weight = transformer_options.get("freqsep_lowpass_weight")
+        freqsep_highpass_weight= transformer_options.get("freqsep_highpass_weight")
+        freqsep_mask           = transformer_options.get("freqsep_mask")
+
+        y0_style_pos = transformer_options.get("y0_style_pos")
+        y0_style_neg = transformer_options.get("y0_style_neg")
         
         # end recon loop
-        
+        self.style_dtype = torch.float32 if self.style_dtype is None else self.style_dtype
         dtype = eps.dtype if self.style_dtype is None else self.style_dtype
         
         if y0_style_pos is not None:
@@ -1594,6 +1236,24 @@ class HDModel(nn.Module):
                     f_cs = self.StyleWCT.get(y0_inv_standard_guide_embed)
                     self.y0_inv_standard_guide = self.Retrojector.unembed(f_cs)
 
+            elif transformer_options['y0_style_method'] == "WCT2":
+                self.WaveletStyleWCT.set(y0_adain_embed, h_len, w_len)
+                denoised_embed = self.WaveletStyleWCT.get(denoised_embed, h_len, w_len)
+                
+                if transformer_options.get('y0_standard_guide') is not None:
+                    y0_standard_guide = transformer_options.get('y0_standard_guide')
+                    
+                    y0_standard_guide_embed = self.Retrojector.embed(y0_standard_guide)
+                    f_cs = self.WaveletStyleWCT.get(y0_standard_guide_embed, h_len, w_len)
+                    self.y0_standard_guide = self.Retrojector.unembed(f_cs)
+
+                if transformer_options.get('y0_inv_standard_guide') is not None:
+                    y0_inv_standard_guide = transformer_options.get('y0_inv_standard_guide')
+
+                    y0_inv_standard_guide_embed = self.Retrojector.embed(y0_inv_standard_guide)
+                    f_cs = self.WaveletStyleWCT.get(y0_inv_standard_guide_embed, h_len, w_len)
+                    self.y0_inv_standard_guide = self.Retrojector.unembed(f_cs)
+
             denoised_approx = self.Retrojector.unembed(denoised_embed)
             
             eps = (x - denoised_approx) / sigma
@@ -1653,6 +1313,10 @@ class HDModel(nn.Module):
             elif transformer_options['y0_style_method'] == "WCT":
                 self.StyleWCT.set(y0_adain_embed)
                 denoised_embed = self.StyleWCT.get(denoised_embed)
+
+            elif transformer_options['y0_style_method'] == "WCT2":
+                self.WaveletStyleWCT.set(y0_adain_embed, h_len, w_len)
+                denoised_embed = self.WaveletStyleWCT.get(denoised_embed, h_len, w_len)
 
             denoised_approx = self.Retrojector.unembed(denoised_embed)
 
@@ -1735,8 +1399,6 @@ def clone_inputs(*args, index: int=None):
 
 
 
-
-
 def attention_rescale(
     query, 
     key, 
@@ -1797,5 +1459,8 @@ def apply_mod(tensor, m_mult, m_add=None, modulation_dims=None):
             if m_add is not None:
                 tensor[:, d[0]:d[1]] += m_add[:, d[2]]
         return tensor
+
+
+
 
 
