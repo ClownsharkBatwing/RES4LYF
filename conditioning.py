@@ -38,6 +38,16 @@ def multiply_nested_tensors(structure, scalar):
 
 
 
+def pad_to_same_tokens(x1, x2, pad_value=0.0):
+    T1, T2 = x1.shape[1], x2.shape[1]
+    if T1 == T2:
+        return x1, x2
+    max_T = max(T1, T2)
+    x1_padded = F.pad(x1, (0, 0, 0, max_T - T1), value=pad_value)
+    x2_padded = F.pad(x2, (0, 0, 0, max_T - T2), value=pad_value)
+    return x1_padded, x2_padded
+
+
 
 class ConditioningOrthoCollin:
     @classmethod

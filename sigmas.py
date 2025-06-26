@@ -395,6 +395,7 @@ class sigmas_truncate:
     CATEGORY = "RES4LYF/sigmas"
     
     def main(self, sigmas, sigmas_until):
+        sigmas = sigmas.clone()
         return (sigmas[:sigmas_until],)
 
 class sigmas_start:
@@ -415,6 +416,7 @@ class sigmas_start:
     CATEGORY = "RES4LYF/sigmas"
     
     def main(self, sigmas, sigmas_until):
+        sigmas = sigmas.clone()
         return (sigmas[sigmas_until:],)
         
 class sigmas_split:
@@ -436,6 +438,7 @@ class sigmas_split:
     CATEGORY = "RES4LYF/sigmas"
     
     def main(self, sigmas, sigmas_start, sigmas_end):
+        sigmas = sigmas.clone()
         return (sigmas[sigmas_start:sigmas_end],)
 
         sigmas_stop_step = sigmas_end - sigmas_start
@@ -459,6 +462,7 @@ class sigmas_pad:
     CATEGORY = "RES4LYF/sigmas"
     
     def main(self, sigmas, value):
+        sigmas = sigmas.clone()
         return (torch.cat((sigmas, torch.tensor([value], dtype=sigmas.dtype))),)
     
 class sigmas_unpad:
@@ -478,6 +482,7 @@ class sigmas_unpad:
     CATEGORY = "RES4LYF/sigmas"
     
     def main(self, sigmas):
+        sigmas = sigmas.clone()
         return (sigmas[:-1],)
 
 class sigmas_set_floor:
@@ -500,6 +505,7 @@ class sigmas_set_floor:
     CATEGORY = "RES4LYF/sigmas"
 
     def set_floor(self, sigmas, floor, new_floor):
+        sigmas = sigmas.clone()
         sigmas[sigmas <= floor] = new_floor
         return (sigmas,)    
     
@@ -522,6 +528,7 @@ class sigmas_delete_below_floor:
     CATEGORY = "RES4LYF/sigmas"
 
     def delete_below_floor(self, sigmas, floor):
+        sigmas = sigmas.clone()
         return (sigmas[sigmas >= floor],)    
 
 class sigmas_delete_value:

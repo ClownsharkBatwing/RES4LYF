@@ -287,6 +287,11 @@ class AlwaysTrueList:
     def __contains__(self, item):
         return True
 
+    def __iter__(self):
+        while True:
+            yield True # kapow 
+
+
 def parse_range_string(s):
     if "all" in s:
         return AlwaysTrueList()

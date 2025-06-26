@@ -61,7 +61,7 @@ from .sd.openaimodel import ReUNetModel
 from .sd.attention import ReBasicTransformerBlock, ReCrossAttention
 
 from .latents import get_orthogonal, get_cosine_similarity
-from .style_transfer import StyleWCT, Retrojector
+from .style_transfer import StyleWCT, WaveletStyleWCT, Retrojector
 from .res4lyf import RESplain
 
 from .helper import parse_range_string
@@ -823,6 +823,7 @@ class ReHiDreamPatcherAdvanced:
         model.model.diffusion_model.y0_adain_embed = None
         
         model.model.diffusion_model.StyleWCT    = StyleWCT()
+        model.model.diffusion_model.WaveletStyleWCT = WaveletStyleWCT()
         model.model.diffusion_model.Retrojector = Retrojector(model.model.diffusion_model.x_embedder.proj, pinv_dtype=style_dtype, dtype=style_dtype)
         
         sort_buffer = {}
@@ -831,7 +832,6 @@ class ReHiDreamPatcherAdvanced:
             m = model.clone()
             m.model.diffusion_model.__class__     = HDModel
             m.model.diffusion_model.threshold_inv = False
-            m.model.diffusion_model.manual_mask   = None
             m.model.diffusion_model.final_layer.__class__ = HDLastLayer
             
             for i, block in enumerate(m.model.diffusion_model.double_stream_blocks):
