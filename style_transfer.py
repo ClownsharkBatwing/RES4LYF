@@ -1114,7 +1114,7 @@ class Stylizer:
         if weights_all_one and methods_all_scattersort and len(weight_list) > 1 and masks_all_none:
             buf = Stylizer.buffer
             buf['src_idx']   = x[0:1].argsort(dim=-2)
-            buf['ref_sorted'], buf['ref_idx'] = x[1:].view(1, -1, x.shape[-1]).sort(dim=-2)
+            buf['ref_sorted'], buf['ref_idx'] = x[1:].reshape(1, -1, x.shape[-1]).sort(dim=-2)
             buf['src'] = buf['ref_sorted'][:,::len(weight_list)].expand_as(buf['src_idx'])    #            interleave_stride = len(weight_list)
             
             x[0:1] = x[0:1].scatter_(dim=-2, index=buf['src_idx'], src=buf['src'],)
@@ -1406,6 +1406,10 @@ class StyleMMDiT_HiDream(Stylizer):
         
         self.noise_mode = "update"
         self.recon_lure = "none"
+        self.data_shock = "none"
+        
+        self.data_shock_start_step = 0
+        self.data_shock_end_step   = 0
         
         self.Retrojector = None
         self.Endojector  = None
@@ -1593,29 +1597,44 @@ class StyleMMDiT_HiDream(Stylizer):
         Stylizer.CLS_WCT2.set(y0_style_embed.to(denoised_embed))
         return Stylizer.CLS_WCT2.get(denoised_embed)
 
-    def apply_to_data(self, denoised, y0_style, mode="none"):
+    def apply_to_data(self, denoised, y0_style=None, mode="none"):
         if mode == "none":
             return denoised
+        
+        y0_style = self.guides if y0_style is None else y0_style
         
         y0_style_embed = self.Retrojector.embed(y0_style)
         denoised_embed = self.Retrojector.embed(denoised)
         
-        match mode:
-            case "WCT":
-                method = self.WCT_data
-            case "WCT2":
-                method = self.WCT2_data
-            case "scattersort":
-                method = Stylizer.scattersort_
-            case "AdaIN":
-                method = Stylizer.AdaIN_
+        embed = torch.cat([denoised_embed, y0_style_embed], dim=0)
         
-        denoised_embed = method(denoised_embed, y0_style_embed)
-        return self.Retrojector.unembed(denoised_embed)
+        method = getattr(self, mode)
+        
+        embed = method(embed)
+        
+        return self.Retrojector.unembed(embed[0:1])
+
+        #match mode:
+        #    case "WCT":
+        #        method = self.WCT_data
+        #    case "WCT2":
+        #        method = self.WCT2_data
+        #    case "scattersort":
+        #        method = Stylizer.scattersort_
+        #    case "AdaIN":
+        #        method = Stylizer.AdaIN_
+        #
+        #denoised_embed = method(denoised_embed, y0_style_embed)
+        #return self.Retrojector.unembed(denoised_embed)
     
     def apply_recon_lure(self, denoised, y0_style):
         if self.recon_lure == "none":
             return denoised
         return self.apply_to_data(denoised, y0_style, self.recon_lure)
+
+    def apply_data_shock(self, denoised):
+        if self.data_shock == "none":
+            return denoised
+        return self.apply_to_data(denoised, None, self.data_shock)
 
 
