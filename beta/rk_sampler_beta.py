@@ -676,12 +676,12 @@ def sample_rk_beta(
             RK.extra_args['model_options']['transformer_options']['regional_conditioning_floor']  = regional_conditioning_floors [step_sched]
         
         epsilon_scale        = float(epsilon_scales [step_sched]) if epsilon_scales        is not None else None
-        eta                  = etas                 [step_sched]  if etas                  is not None else eta
-        eta_substep          = etas_substep         [step_sched]  if etas_substep          is not None else eta_substep
-        s_noise              = s_noises             [step_sched]  if s_noises              is not None else s_noise
-        s_noise_substep      = s_noises_substep     [step_sched]  if s_noises_substep      is not None else s_noise_substep
-        noise_scaling_eta    = noise_scaling_etas   [step_sched]  if noise_scaling_etas    is not None else noise_scaling_eta
-        noise_scaling_weight = noise_scaling_weights[step_sched]  if noise_scaling_weights is not None else noise_scaling_weight
+        eta                  = etas                 [step_sched].to(x)  if etas                  is not None else eta
+        eta_substep          = etas_substep         [step_sched].to(x)  if etas_substep          is not None else eta_substep
+        s_noise              = s_noises             [step_sched].to(x)  if s_noises              is not None else s_noise
+        s_noise_substep      = s_noises_substep     [step_sched].to(x)  if s_noises_substep      is not None else s_noise_substep
+        noise_scaling_eta    = noise_scaling_etas   [step_sched].to(x)  if noise_scaling_etas    is not None else noise_scaling_eta
+        noise_scaling_weight = noise_scaling_weights[step_sched].to(x)  if noise_scaling_weights is not None else noise_scaling_weight
         
         NS.set_sde_step(sigma, sigma_next, eta, overshoot, s_noise)
         RK.set_coeff(rk_type, NS.h, c1, c2, c3, step, sigmas, NS.sigma_down)

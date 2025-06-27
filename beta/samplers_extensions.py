@@ -1150,14 +1150,14 @@ class ClownGuide_Style_Beta:
     def INPUT_TYPES(cls):
         return {"required":
                     {
-                    "apply_to":         (["positive", "negative"],                    {"default": "positive", "tooltip": "When using CFG, decides whether to apply the guide to the positive or negative conditioning."}),
-                    "method":           (["AdaIN", "WCT", "WCT2", "scattersort","none"],      {"default": "WCT"}),
-                    "weight":           ("FLOAT",                                     {"default": 1.0, "min":  -100.0, "max": 100.0, "step":0.01, "round": False, "tooltip": "Set the strength of the guide by multiplying all other weights by this value."}),
-                    "synweight":        ("FLOAT",                                     {"default": 1.0, "min":  -100.0, "max": 100.0, "step":0.01, "round": False, "tooltip": "Set the relative strength of the guide on the opposite conditioning to what was selected: i.e., negative if positive in apply_to. Recommended to avoid CFG burn."}),
-                    "weight_scheduler": (["constant"] + get_res4lyf_scheduler_list(), {"default": "constant", "tooltip": "Selecting any scheduler except constant will cause the strength to gradually decay to zero. Try beta57 vs. linear quadratic."},),
-                    "start_step":       ("INT",                                       {"default": 0,    "min":  0,      "max": 10000}),
-                    "end_step":         ("INT",                                       {"default": -1,   "min": -1,      "max": 10000}),
-                    "invert_mask":      ("BOOLEAN",                                   {"default": False}),
+                    "apply_to":         (["positive", "negative", "denoised"],           {"default": "positive", "tooltip": "When using CFG, decides whether to apply the guide to the positive or negative conditioning."}),
+                    "method":           (["AdaIN", "WCT", "WCT2", "scattersort","none"], {"default": "WCT"}),
+                    "weight":           ("FLOAT",                                        {"default": 1.0, "min":  -100.0, "max": 100.0, "step":0.01, "round": False, "tooltip": "Set the strength of the guide by multiplying all other weights by this value."}),
+                    "synweight":        ("FLOAT",                                        {"default": 1.0, "min":  -100.0, "max": 100.0, "step":0.01, "round": False, "tooltip": "Set the relative strength of the guide on the opposite conditioning to what was selected: i.e., negative if positive in apply_to. Recommended to avoid CFG burn."}),
+                    "weight_scheduler": (["constant"] + get_res4lyf_scheduler_list(),    {"default": "constant", "tooltip": "Selecting any scheduler except constant will cause the strength to gradually decay to zero. Try beta57 vs. linear quadratic."},),
+                    "start_step":       ("INT",                                          {"default": 0,    "min":  0,      "max": 10000}),
+                    "end_step":         ("INT",                                          {"default": -1,   "min": -1,      "max": 10000}),
+                    "invert_mask":      ("BOOLEAN",                                      {"default": False}),
                     },
                 "optional": 
                     {
@@ -1243,6 +1243,20 @@ class ClownGuide_Style_Beta:
             guides['start_step_style_neg']       = start_step
             guides['end_step_style_neg']         = end_step
         
+        if apply_to in {"denoised", "all"}:
+        
+            guides['weight_style_denoised']           = weight
+            guides['weights_style_denoised']          = weights
+
+            guides['synweight_style_denoised']        = synweight
+
+            guides['guide_style_denoised']            = guide
+            guides['mask_style_denoised']             = mask
+
+            guides['weight_scheduler_style_denoised'] = weight_scheduler
+            guides['start_step_style_denoised']       = start_step
+            guides['end_step_style_denoised']         = end_step
+            
         return (guides, )
 
 
@@ -3247,6 +3261,7 @@ class ClownGuide_Style_NoiseMode:
         return {"required":
                     {
                     "noise_mode":  (["direct", "update", "smart", "recon", "bonanza"], {"default": "update"},),
+                    "recon_lure":  (["none", "scattersort","AdaIN", "WCT", "WCT2"], {"default": "WCT", "tooltip": "Only used if noise_mode = recon. Can increase the strength of the style."},),
                     },
                 "optional": 
                     {
@@ -3261,10 +3276,12 @@ class ClownGuide_Style_NoiseMode:
 
     def main(self,
             noise_mode  = "update",
+            recon_lure  = "default",
             guides      = None,
             ):
         guides = copy.deepcopy(guides) if guides is not None else {}
-        guides['noise_mode_adain'] = noise_mode
+        guides['StyleMMDiT'].noise_mode = noise_mode
+        guides['StyleMMDiT'].recon_lure = recon_lure
         return (guides, )
 
 
@@ -3276,7 +3293,7 @@ class ClownGuide_Style_MMDiT:
         return {"required":
                     {
                     "mode":        (["scattersort", "AdaIN", "WCT", "WCT2", "injection"], {"default": "scattersort"},),
-                    "noise_mode":  (["direct", "update", "smart", "recon", "bonanza"], {"default": "update"},),
+                    #"noise_mode":  (["direct", "update", "smart", "recon", "bonanza"], {"default": "update"},),
                     "proj_in":     ("FLOAT",   {"default": 0.0, "min": -100.0, "max": 100.0, "step":0.01, "round": False, "tooltip": "Strength of effect on layer; skips extra calculation if set to 0.0. Skips interpolation if set to 1.0."}),
                     "proj_out":    ("FLOAT",   {"default": 0.0, "min": -100.0, "max": 100.0, "step":0.01, "round": False, "tooltip": "Strength of effect on layer; skips extra calculation if set to 0.0. Skips interpolation if set to 1.0."}),
 
@@ -3303,7 +3320,7 @@ class ClownGuide_Style_MMDiT:
 
     def main(self,
             mode        = "scattersort",
-            noise_mode  = "update",
+            #noise_mode  = "update",
             proj_in     = 0.0,
             proj_out    = 0.0,
             tile_h      = 128,
@@ -3351,7 +3368,7 @@ class ClownGuide_Style_MMDiT:
         else:
             StyleMMDiT_ = StyleMMDiT
             
-        StyleMMDiT_.noise_mode = noise_mode
+        #StyleMMDiT_.noise_mode = noise_mode
 
         guides['StyleMMDiT'] = StyleMMDiT_
 
@@ -3449,7 +3466,7 @@ class ClownGuide_Style_Block_MMDiT:
         if type(block_weights[0]) == int:
             block_weights = [float(val) for val in block_weights]
         
-        if "all" in block_list:
+        if    "all" in block_list:
             block_list = [val for val in range(100)]
             if len(block_weights) == 1:
                 block_weights = [block_weights[0]] * 100
@@ -3457,7 +3474,7 @@ class ClownGuide_Style_Block_MMDiT:
             block_list = [val for val in range(0, 100, 2)]
             if len(block_weights) == 1:
                 block_weights = [block_weights[0]] * 100
-        elif "odd" in block_list:
+        elif  "odd" in block_list:
             block_list = [val for val in range(1, 100, 2)]
             if len(block_weights) == 1:
                 block_weights = [block_weights[0]] * 100
@@ -3518,7 +3535,7 @@ class ClownGuide_Style_Block_MMDiT:
             if hasattr(block, "txt"):
                 block.txt.apply_to = [apply_to]
             
-            block.mask = mask
+            block.mask = [mask]
 
         blocks['StyleMMDiT'] = StyleMMDiT
 
@@ -3671,7 +3688,7 @@ class ClownGuide_Style_Attn_MMDiT:
             if hasattr(block, "txt"):
                 block.txt.ATTN.apply_to = [apply_to]
             
-            block.mask = mask
+            block.attn_mask = [mask]
 
         blocks['StyleMMDiT'] = StyleMMDiT
 
