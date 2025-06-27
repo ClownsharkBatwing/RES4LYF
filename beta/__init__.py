@@ -58,11 +58,10 @@ def add_beta(NODE_CLASS_MAPPINGS, NODE_DISPLAY_NAME_MAPPINGS, extra_samplers):
         "ClownOptions_Frameweights"       : samplers_extensions.ClownOptions_Frameweights,
         "ClownOptions_FlowGuide"          : samplers_extensions.ClownOptions_FlowGuide,
         
-        "ClownGuide_Style_Block_MMDiT"    : samplers_extensions.ClownGuide_Style_Block_MMDiT,
-        "ClownGuide_Style_MMDiT"          : samplers_extensions.ClownGuide_Style_MMDiT,
-        "ClownGuide_Style_Attn_MMDiT"     : samplers_extensions.ClownGuide_Style_Attn_MMDiT,
-        
-        "ClownGuide_Style_NoiseMode"      : samplers_extensions.ClownGuide_Style_NoiseMode,
+        "ClownStyle_Block_MMDiT"          : samplers_extensions.ClownStyle_Block_MMDiT,
+        "ClownStyle_MMDiT"                : samplers_extensions.ClownStyle_MMDiT,
+        "ClownStyle_Attn_MMDiT"           : samplers_extensions.ClownStyle_Attn_MMDiT,
+        "ClownStyle_Boost"                : samplers_extensions.ClownStyle_Boost,
 
 
         "ClownSamplerSelector_Beta"       : samplers_extensions.ClownSamplerSelector_Beta,

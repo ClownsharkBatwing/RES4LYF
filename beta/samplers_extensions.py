@@ -3254,14 +3254,17 @@ from ..style_transfer import StyleMMDiT_HiDream
 
 
 
-class ClownGuide_Style_NoiseMode:
+class ClownStyle_Boost:
 
     @classmethod
     def INPUT_TYPES(cls):
         return {"required":
                     {
-                    "noise_mode":  (["direct", "update", "smart", "recon", "bonanza"], {"default": "update"},),
-                    "recon_lure":  (["none", "scattersort","AdaIN", "WCT", "WCT2"], {"default": "WCT", "tooltip": "Only used if noise_mode = recon. Can increase the strength of the style."},),
+                    "noise_mode": (["direct", "update", "smart", "recon", "bonanza"], {"default": "update"},),
+                    "recon_lure": (["none", "scattersort","AdaIN", "WCT", "WCT2"], {"default": "WCT", "tooltip": "Only used if noise_mode = recon. Can increase the strength of the style."},),
+                    "datashock": (["none", "scattersort","AdaIN", "WCT", "WCT2"], {"default": "scattersort", "tooltip": "Will drastically increase the strength at low denoise levels. Use with img2img workflows."},),
+                    "datashock_start_step": ("INT", {"default": 0, "min": 0, "max": 10000, "step": 1, "tooltip": "Start step for data shock."}),
+                    "datashock_end_step"  : ("INT", {"default": 1, "min": 1, "max": 10000, "step": 1, "tooltip": "End step for data shock."}),
                     },
                 "optional": 
                     {
@@ -3277,16 +3280,22 @@ class ClownGuide_Style_NoiseMode:
     def main(self,
             noise_mode  = "update",
             recon_lure  = "default",
+            datashock  = None,
+            datashock_start_step  = None,
+            datashock_end_step    = None,
             guides      = None,
             ):
         guides = copy.deepcopy(guides) if guides is not None else {}
         guides['StyleMMDiT'].noise_mode = noise_mode
         guides['StyleMMDiT'].recon_lure = recon_lure
+        guides['StyleMMDiT'].data_shock = datashock
+        guides['StyleMMDiT'].data_shock_start_step = datashock_start_step
+        guides['StyleMMDiT'].data_shock_end_step   = datashock_end_step
         return (guides, )
 
 
 
-class ClownGuide_Style_MMDiT:
+class ClownStyle_MMDiT:
 
     @classmethod
     def INPUT_TYPES(cls):
@@ -3299,6 +3308,9 @@ class ClownGuide_Style_MMDiT:
 
                     "tile_h" : ("INT", {"default": 128, "min": 16, "max": 10000, "step": 16, "tooltip": "Tile size for tiled modes. Lower values will transfer composition more effectively. Dimensions of image must be divisible by this value."}),
                     "tile_w" : ("INT", {"default": 128, "min": 16, "max": 10000, "step": 16, "tooltip": "Tile size for tiled modes. Lower values will transfer composition more effectively. Dimensions of image must be divisible by this value."}),
+
+                    #"start_step": ("INT", {"default": 0, "min": 16, "max": 10000, "step": 1, "tooltip": "Start step for data shock."}),
+                    #"end_step"  : ("INT", {"default": 1, "min": 16, "max": 10000, "step": 1, "tooltip": "End step for data shock."}),
 
                     "invert_mask": ("BOOLEAN", {"default": False}),
                     },
@@ -3378,7 +3390,7 @@ class ClownGuide_Style_MMDiT:
 
 
 
-class ClownGuide_Style_Block_MMDiT:
+class ClownStyle_Block_MMDiT:
 
     @classmethod
     def INPUT_TYPES(cls):
@@ -3547,7 +3559,7 @@ class ClownGuide_Style_Block_MMDiT:
 
 
 
-class ClownGuide_Style_Attn_MMDiT:
+class ClownStyle_Attn_MMDiT:
 
     @classmethod
     def INPUT_TYPES(cls):

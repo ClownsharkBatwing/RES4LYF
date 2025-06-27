@@ -1765,24 +1765,16 @@ def sample_rk_beta(
                         elif LG.guide_mode.startswith("flow"):
                             pass
 
-
-
                     if not LG.guide_mode.startswith("lure"):
                         x_[row+RK.row_offset] = LG.process_guides_data_substep(x_[row+RK.row_offset], data_[row], step_sched, NS.s_[row])
-                        
-                    if EO("wct_data_refresh"):
-                        if step < EO("wct_data_refresh", 15):
-                            y0_adain_embed = model.inner_model.inner_model.diffusion_model.Retrojector.embed(LG.y0_adain)
-                            data_embed = model.inner_model.inner_model.diffusion_model.Retrojector.embed(data_[row])
-                            model.inner_model.inner_model.diffusion_model.StyleWCT.set(y0_adain_embed)
-                            
-                            data_wct_embed = model.inner_model.inner_model.diffusion_model.StyleWCT.get(data_embed)
-                            data_wct = model.inner_model.inner_model.diffusion_model.Retrojector.unembed(data_wct_embed)
-                            
-                            if VE_MODEL:
-                                x_[row+RK.row_offset] = x_[row+RK.row_offset] + (data_wct - data_[row])
-                            else:
-                                x_[row+RK.row_offset] = x_[row+RK.row_offset] + (NS.sigma_max-NS.s_[row]) * (data_wct - data_[row])
+                    
+                    if StyleMMDiT is not None and StyleMMDiT.data_shock_start_step < step_sched < StyleMMDiT.data_shock_end_step:
+                        data_wct = StyleMMDiT.apply_data_shock(data_[row])
+                        if VE_MODEL:
+                            x_[row+RK.row_offset] = x_[row+RK.row_offset] + (data_wct - data_[row])
+                        else:
+                            x_[row+RK.row_offset] = x_[row+RK.row_offset] + (NS.sigma_max-NS.s_[row]) * (data_wct - data_[row])
+                    
 
                     if SYNC_GUIDE_ACTIVE: # # # # ## # # ## # YIIIIKES ---------------------------------------------------------------------------------------------------------
                         if VE_MODEL:
