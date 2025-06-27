@@ -735,13 +735,16 @@ class HDModel(nn.Module):
         t       :          Tensor,
         y       : Optional[Tensor]   = None,
         context : Optional[Tensor]   = None,
-        encoder_hidden_states_llama3 = None,    # 1,32,143,4096
+        encoder_hidden_states_llama3 = None,  # 1,32,143,4096
+        image_cond                   = None,  # HiDream E1
         control                      = None,
         transformer_options          = {},
         mask    : Optional[Tensor]   = None,
     ) -> Tensor:
         x_orig      = x.clone()
         b, c, h, w  = x.shape
+        if image_cond is not None: # HiDream E1
+            x = torch.cat([x, image_cond], dim=-1)
         h_len = ((h + (self.patch_size // 2)) // self.patch_size) # h_len 96
         w_len = ((w + (self.patch_size // 2)) // self.patch_size) # w_len 96
         
@@ -750,10 +753,10 @@ class HDModel(nn.Module):
         if EO is not None:
             EO.mute = True
 
-        StyleMMDiT = transformer_options.get('StyleMMDiT', StyleMMDiT_HiDream())
-        transformer_options['StyleMMDiT'] = None
-        
+        StyleMMDiT = transformer_options.get('StyleMMDiT', StyleMMDiT_HiDream())        
         StyleMMDiT.set_len(h_len, w_len)
+        StyleMMDiT.Retrojector = self.Retrojector if hasattr(self, "Retrojector") else None
+        transformer_options['StyleMMDiT'] = None
         
         x_tmp = transformer_options.get("x_tmp")
         if x_tmp is not None:
@@ -787,27 +790,8 @@ class HDModel(nn.Module):
                 noise_prediction = x_recon + (1-SIGMA.to(x_recon)) * eps.to(x_recon)
                 denoised = x_recon - SIGMA.to(x_recon) * eps.to(x_recon)
                 
-                if EO("recon_WCT2"):
-                    y0_style_embed = self.Retrojector.embed(y0_style)
-                    denoised_embed = self.Retrojector.embed(denoised)
-                    self.WaveletStyleWCT.set(y0_style_embed.to(denoised_embed), h_len, w_len)
-                    denoised_embed = self.WaveletStyleWCT.get(denoised_embed, h_len, w_len)
-                    y0_style = self.Retrojector.unembed(y0_style_embed)
-                    denoised = self.Retrojector.unembed(denoised_embed)
-                elif EO("recon_WCT"):
-                    y0_style_embed = self.Retrojector.embed(y0_style)
-                    denoised_embed = self.Retrojector.embed(denoised)
-                    self.StyleWCT.set(y0_style_embed.to(denoised_embed))
-                    denoised_embed = self.StyleWCT.get(denoised_embed)
-                    y0_style = self.Retrojector.unembed(y0_style_embed)
-                    denoised = self.Retrojector.unembed(denoised_embed)
-                elif EO("recon_scattersort"):
-                    y0_style_embed = self.Retrojector.embed(y0_style)
-                    denoised_embed = self.Retrojector.embed(denoised)
-                    denoised_embed = ScatterSort.apply(denoised_embed, y0_style_embed)
-                    y0_style = self.Retrojector.unembed(y0_style_embed)
-                    denoised = self.Retrojector.unembed(denoised_embed)
-                
+                denoised = StyleMMDiT.apply_recon_lure(denoised, y0_style)
+
                 new_x = (1-SIGMA.to(denoised)) * denoised + SIGMA.to(denoised) * noise_prediction
                 img_orig = img = comfy.ldm.common_dit.pad_to_patch_size(new_x, (self.patch_size, self.patch_size))
                 
@@ -817,8 +801,8 @@ class HDModel(nn.Module):
 
             if y0_style_active:
                 SIGMA_ADAIN         = (SIGMA * EO("eps_adain_sigma_factor", 1.0)).to(y0_style)
-                y0_style            = (1-SIGMA_ADAIN) * y0_style + SIGMA_ADAIN * x_init[0].unsqueeze(0).to(y0_style)   #always only use first batch of noise to avoid broadcasting
-                img_y0_style_orig   = comfy.ldm.common_dit.pad_to_patch_size(y0_style, (self.patch_size, self.patch_size))
+                y0_style_noised     = (1-SIGMA_ADAIN) * y0_style + SIGMA_ADAIN * x_init[0:1].to(y0_style)   #always only use first batch of noise to avoid broadcasting
+                img_y0_style_orig   = comfy.ldm.common_dit.pad_to_patch_size(y0_style_noised, (self.patch_size, self.patch_size))
 
             weight    = -1 * transformer_options.get("regional_conditioning_weight", 0.0)
             floor     = -1 * transformer_options.get("regional_conditioning_floor",  0.0)
@@ -837,15 +821,6 @@ class HDModel(nn.Module):
                 bsz       = 1 if HDModel.RECON_MODE else bsz_style + 1
 
                 img, t, y, context, llama3 = clone_inputs(img_orig, t_orig, y_orig, context_orig, llama3_orig, index=cond_iter)
-
-                if y0_style_active and not HDModel.RECON_MODE:
-                    context, y, llama3 = StyleMMDiT.apply_style_conditioning(
-                        UNCOND = UNCOND,
-                        base_context       = context,
-                        base_y             = y,
-                        base_llama3        = llama3,
-                    )
-                    img_y0_style = img_y0_style_orig.clone()
                 
                 mask = None
                 if not UNCOND and 'AttnMask' in transformer_options: # and weight != 0:
@@ -904,6 +879,20 @@ class HDModel(nn.Module):
                         A       = llama3
                         B       = transformer_options['RegContext'].llama3
                         llama3  = A.repeat(1, 1, (B.shape[2] // A.shape[2]) + 1, 1)[:,:, :B.shape[2], :]
+
+                if y0_style_active and not HDModel.RECON_MODE:
+                    if mask is None:
+                        context, y, llama3 = StyleMMDiT.apply_style_conditioning(
+                            UNCOND = UNCOND,
+                            base_context       = context,
+                            base_y             = y,
+                            base_llama3        = llama3,
+                        )
+                    else:
+                        context = context.repeat(bsz_style + 1, 1, 1)
+                        y = y.repeat(bsz_style + 1, 1)                   if y      is not None else None
+                        llama3  =  llama3.repeat(bsz_style + 1, 1, 1, 1) if llama3 is not None else None
+                    img_y0_style = img_y0_style_orig.clone()
 
                 if mask is not None and not type(mask[0][0].item()) == bool:
                     mask = mask.to(x.dtype)
@@ -974,24 +963,24 @@ class HDModel(nn.Module):
                     txt = torch.cat([txt_init, txt_llama], dim=-2)        # 1,384,2560       # cur_contexts = T5, LLAMA3 (last block), LLAMA3 (current block)
 
                     if   weight > 0 and mask is not None and     weight  <      bid/48:
-                        img, txt_init = block(img, img_masks, txt, clip, rope, mask_zero)
+                        img, txt_init = block(img, img_masks, txt, clip, rope, mask_zero, style_block=style_block)
                         
                     elif (weight < 0 and mask is not None and abs(weight) < (1 - bid/48)):
                         img_tmpZ, txt_tmpZ = img.clone(), txt.clone()
 
                         # more efficient than the commented lines below being used instead in the loop?
-                        img_tmpZ, txt_init = block(img_tmpZ, img_masks, txt_tmpZ, clip, rope, mask)
-                        img     , txt_tmpZ = block(img     , img_masks, txt     , clip, rope, mask_zero)
+                        img_tmpZ, txt_init = block(img_tmpZ, img_masks, txt_tmpZ, clip, rope, mask, style_block=style_block)
+                        img     , txt_tmpZ = block(img     , img_masks, txt     , clip, rope, mask_zero, style_block=style_block)
                         
                     elif floor > 0 and mask is not None and     floor  >      bid/48:
                         mask_tmp = mask.clone()
                         mask_tmp[:img_len,:img_len] = 1.0
-                        img, txt_init = block(img, img_masks, txt, clip, rope, mask_tmp)
+                        img, txt_init = block(img, img_masks, txt, clip, rope, mask_tmp, style_block=style_block)
                         
                     elif floor < 0 and mask is not None and abs(floor) > (1 - bid/48):
                         mask_tmp = mask.clone()
                         mask_tmp[:img_len,:img_len] = 1.0
-                        img, txt_init = block(img, img_masks, txt, clip, rope, mask_tmp)
+                        img, txt_init = block(img, img_masks, txt, clip, rope, mask_tmp, style_block=style_block)
                         
                     elif update_cross_attn is not None and update_cross_attn['skip_cross_attn']:
                         img, txt_init = block(img, img_masks, txt, clip, rope, mask, update_cross_attn=update_cross_attn)
@@ -1017,20 +1006,20 @@ class HDModel(nn.Module):
                     img = torch.cat([img, txt_llama], dim=-2)            # cat img,txt     opposite of flux which is txt,img       4303 + 143 -> 4446
 
                     if   weight > 0 and mask is not None and     weight  <      (bid+16)/48:
-                        img = block(img, img_masks, None, clip, rope, mask_zero)
+                        img = block(img, img_masks, None, clip, rope, mask_zero, style_block=style_block)
                         
                     elif weight < 0 and mask is not None and abs(weight) < (1 - (bid+16)/48):
-                        img = block(img, img_masks, None, clip, rope, mask_zero)
+                        img = block(img, img_masks, None, clip, rope, mask_zero, style_block=style_block)
                     
                     elif floor > 0 and mask is not None and     floor  >      (bid+16)/48:
                         mask_tmp = mask.clone()
                         mask_tmp[:img_len,:img_len] = 1.0
-                        img = block(img, img_masks, None, clip, rope, mask_tmp)
+                        img = block(img, img_masks, None, clip, rope, mask_tmp, style_block=style_block)
                         
                     elif floor < 0 and mask is not None and abs(floor) > (1 - (bid+16)/48):
                         mask_tmp = mask.clone()
                         mask_tmp[:img_len,:img_len] = 1.0
-                        img = block(img, img_masks, None, clip, rope, mask_tmp)
+                        img = block(img, img_masks, None, clip, rope, mask_tmp, style_block=style_block)
                         
                     else:
                         img = block(img, img_masks, None, clip, rope, mask, style_block=style_block)
@@ -1042,12 +1031,22 @@ class HDModel(nn.Module):
                 #img = self.final_layer(img, clip)   # 4096,2560 -> 4096,64
                 shift, scale = self.final_layer.adaLN_modulation(clip).chunk(2,dim=1)
                 img = (1 + scale[:, None, :]) * self.final_layer.norm_final(img) + shift[:, None, :]
-                img = StyleMMDiT(img, "proj_out")
+                if not EO("endojector"):
+                    img = StyleMMDiT(img, "proj_out")
 
                 if y0_style_active and not HDModel.RECON_MODE:
                     img = img[0].unsqueeze(0)
                 
-                img = self.final_layer.linear(img)
+                if EO("endojector"):
+                    if EO("dumb"):
+                        eps_style = x_init[0:1].to(y0_style) - y0_style
+                    else:
+                        eps_style = (x_tmp[0:1].to(y0_style) - y0_style) / SIGMA.to(y0_style)
+                    eps_embed = self.Endojector.embed(eps_style)
+                    img = StyleMMDiT.scattersort_(img.to(eps_embed), eps_embed)
+                
+                img = self.final_layer.linear(img.to(self.final_layer.linear.weight.data))
+
                 img = self.unpatchify(img, img_sizes)
                 out_list.append(img)
                 
@@ -1060,8 +1059,19 @@ class HDModel(nn.Module):
                     eps = (x_tmp - denoised.to(x_tmp)) / SIGMA.to(x_tmp)
                 else:
                     eps = (x_orig - denoised.to(x_orig)) / SIGMA.to(x_orig)
-        
-            
+                    
+
+
+
+
+
+
+
+
+
+
+
+
         freqsep_lowpass_method = transformer_options.get("freqsep_lowpass_method")
         freqsep_sigma          = transformer_options.get("freqsep_sigma")
         freqsep_kernel_size    = transformer_options.get("freqsep_kernel_size")
