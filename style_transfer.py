@@ -415,7 +415,7 @@ class StyleFeatures:
 
 
 class Retrojector:  
-    def __init__(self, proj=None, patch_size=2, pinv_dtype=torch.float64, dtype=torch.float64,):
+    def __init__(self, proj=None, patch_size=2, pinv_dtype=torch.float64, dtype=torch.float64, ENDO=False):
         self.proj       = proj
         self.patch_size = patch_size
         self.pinv_dtype = pinv_dtype
@@ -424,7 +424,7 @@ class Retrojector:
         self.LINEAR     = isinstance(proj, nn.Linear)
         self.CONV2D     = isinstance(proj, nn.Conv2d)
         self.CONV3D     = isinstance(proj, nn.Conv3d)
-        
+        self.ENDO       = ENDO
         self.W          = proj.weight.data.to(dtype=pinv_dtype).cuda()
         
         if self.LINEAR:
@@ -464,7 +464,10 @@ class Retrojector:
         elif self.LINEAR:
             if img.ndim == 4:
                 img = rearrange(img, "b c (h ph) (w pw) -> b (h w) (c ph pw)", ph=self.patch_size, pw=self.patch_size) 
-            img_embed = F.linear(img.to(self.W), self.W, self.b)
+            if self.ENDO:
+                img_embed = F.linear(img.to(self.b) - self.b, self.W_inv)
+            else:
+                img_embed = F.linear(img.to(self.W), self.W, self.b)
         
         return img_embed.to(img)
     
@@ -475,7 +478,10 @@ class Retrojector:
             img = self.invert_conv2d(img_embed)
         
         elif self.LINEAR:
-            img = F.linear(img_embed.to(self.b) - self.b, self.W_inv)
+            if self.ENDO:
+                img = F.linear(img_embed.to(self.W), self.W, self.b)
+            else:
+                img = F.linear(img_embed.to(self.b) - self.b, self.W_inv)
             if img.ndim == 3:
                 img = rearrange(img, "b (h w) (c ph pw) -> b c (h ph) (w pw)", h=self.h, w=self.w, ph=self.patch_size, pw=self.patch_size)
         
@@ -1070,6 +1076,12 @@ class Stylizer:
         self.method = ["passthrough"] #[Stylizer.passthrough]
         self.h_tile = [-1]
         self.w_tile = [-1]
+        
+        self.w_len   = 0
+        self.h_len   = 0
+        self.img_len = 0
+        
+        self.IMG_1ST = True
 
     def set_mode(self, mode):
         self.method = [mode] #[getattr(self, mode)]
@@ -1084,32 +1096,54 @@ class Stylizer:
         self.w_len  = w_len
         self.img_len = h_len * w_len
     
+    
+    
     def __call__(self, x, attr):
         if x.shape[0] == 1:
             return x
+        
         weight_list = getattr(self, attr)
-        for i, weight in enumerate(weight_list):
-            method = getattr(self, self.method[i])
-            apply_to = self.apply_to[i]
-            if   weight == 0.0:
-                continue
-            elif weight == 1.0:
-                if self.img_len == x.shape[-2] or apply_to == "img+txt" or self.h_len < 0:
-                    return method(x, idx=i+1)
-                if self.img_len < x.shape[-2] and apply_to == "img":
-                    x[:,:self.img_len,:] = method(x[:,:self.img_len,:], idx=i+1)
-                if self.img_len < x.shape[-2] and apply_to == "txt":
-                    x[:,self.img_len:,:] = method(x[:,self.img_len:,:], idx=i+1)
-            elif all(m in {"scattersort"} for m in self.method):
-                buf = Stylizer.buffer
-                buf['src_idx']   = x[0:1].argsort(dim=-2)
-                buf['ref_sorted'], buf['ref_idx'] = x[1:].view(1, -1, x.shape[-1]).sort(dim=-2)
-                buf['src'] = buf['ref_sorted'][:,::2].expand_as(buf['src_idx'])
+        weights_all_zero = all(weight == 0.0 for weight in weight_list)
+        if weights_all_zero:
+            return x
+        
+        weights_all_one         = all(weight == 1.0           for weight in weight_list)
+        methods_all_scattersort = all(name   == "scattersort" for name   in self.method)
+        masks_all_none = all(mask is None for mask in self.mask)
+        
+        if weights_all_one and methods_all_scattersort and len(weight_list) > 1 and masks_all_none:
+            buf = Stylizer.buffer
+            buf['src_idx']   = x[0:1].argsort(dim=-2)
+            buf['ref_sorted'], buf['ref_idx'] = x[1:].view(1, -1, x.shape[-1]).sort(dim=-2)
+            buf['src'] = buf['ref_sorted'][:,::len(weight_list)].expand_as(buf['src_idx'])    #            interleave_stride = len(weight_list)
+            
+            x[0:1] = x[0:1].scatter_(dim=-2, index=buf['src_idx'], src=buf['src'],)
+        
+        else:
+            for i, (weight, mask) in enumerate(zip(weight_list, self.mask)):
+                if mask is not None:
+                    x01 = x[0:1].clone()
                 
-                x[0:1] = x[0:1].scatter_(dim=-2, index=buf['src_idx'], src=buf['src'],)
-            else:
-                x = torch.lerp(x, method(x.clone(), idx=i+1), weight)
+                method = getattr(self, self.method[i])
+                apply_to = self.apply_to[i]
+                if   weight == 0.0:
+                    continue
+                elif weight == 1.0:
+                    if self.img_len == x.shape[-2] or apply_to == "img+txt" or self.h_len < 0:
+                        x = method(x, idx=i+1)
+                    if self.img_len < x.shape[-2] and apply_to == "img":
+                        x[:,:self.img_len,:] = method(x[:,:self.img_len,:], idx=i+1)
+                    if self.img_len < x.shape[-2] and apply_to == "txt":
+                        x[:,self.img_len:,:] = method(x[:,self.img_len:,:], idx=i+1)
+                else:
+                    x = torch.lerp(x, method(x.clone(), idx=i+1), weight)
+                
+                if mask is not None:
+                    x[0:1,:self.img_len] = torch.lerp(x01[:,:self.img_len], x[0:1,:self.img_len], mask.view(1, -1, 1))
+                
+        
         return x
+
 
 
     def WCT(self, x, idx=1):
@@ -1120,6 +1154,15 @@ class Stylizer:
     def WCT2(self, x, idx=1):
         Stylizer.CLS_WCT2.set(x[idx:idx+1], self.h_len, self.w_len)
         x[0:1] = Stylizer.CLS_WCT2.get(x[0:1], self.h_len, self.w_len)
+        return x
+
+    @staticmethod
+    def AdaIN_(x, y, eps: float = 1e-7) -> torch.Tensor:
+        mean_c = x.mean(-2, keepdim=True)
+        std_c  = x.std (-2, keepdim=True).add_(eps)  # in-place add
+        mean_s = y.mean  (-2, keepdim=True)
+        std_s  = y.std   (-2, keepdim=True).add_(eps)
+        x.sub_(mean_c).div_(std_c).mul_(std_s).add_(mean_s)  # in-place chain
         return x
 
     def AdaIN(self, x, idx=1, eps: float = 1e-7) -> torch.Tensor:
@@ -1133,6 +1176,10 @@ class Stylizer:
     def injection(self, x:torch.Tensor, idx=1) -> torch.Tensor:
         x[0:1] = x[idx:idx+1]
         return x
+    
+    @staticmethod
+    def injection_(x:torch.Tensor, y:torch.Tensor) -> torch.Tensor:
+        return y
     
     @staticmethod
     def passthrough(x:torch.Tensor, idx=1) -> torch.Tensor:
@@ -1264,6 +1311,7 @@ class StyleMMDiT_IMG_Block(StyleMMDiT_Block):  # img or joint
     def __init__(self, mode):
         super().__init__(mode)
         self.FF = StyleMMDiT_MoE(mode)  # options for MoE if img or joint
+        self.mask = [None]
         
     def set_len(self, h_len, w_len):
         super().set_len(h_len, w_len)
@@ -1273,6 +1321,7 @@ class StyleMMDiT_TXT_Block(StyleMMDiT_Block):   # txt only
     def __init__(self, mode):
         super().__init__(mode)
         self.FF  = StyleMMDiT_FF(mode)   # options for FF within MoE for img or joint; or for txt alone
+        self.mask = [None]
         
     def set_len(self, h_len, w_len):
         super().set_len(h_len, w_len)
@@ -1286,6 +1335,9 @@ class StyleMMDiT_DoubleBlock_HiDream:
         self.img = StyleMMDiT_IMG_Block(mode)
         self.txt = StyleMMDiT_TXT_Block(mode)
         
+        self.mask      = [None]
+        self.attn_mask = [None]
+    
     def set_len(self, h_len, w_len):
         self.h_len  = h_len
         self.w_len  = w_len
@@ -1294,18 +1346,39 @@ class StyleMMDiT_DoubleBlock_HiDream:
         self.img.set_len(h_len, w_len)
         self.txt.set_len(-1, -1)
         
+        for i, mask in enumerate(self.mask):
+            if mask is not None and mask.ndim > 1:
+                self.mask[i] = F.interpolate(mask.unsqueeze(0), size=(h_len, w_len)).flatten().to(torch.bfloat16).cuda()
+            self.img.mask = self.mask
+        for i, mask in enumerate(self.attn_mask):
+            if mask is not None and mask.ndim > 1:
+                self.attn_mask[i] = F.interpolate(mask.unsqueeze(0), size=(h_len, w_len)).flatten().to(torch.bfloat16).cuda()
+            self.img.ATTN.mask = self.attn_mask        
+        
+        
 class StyleMMDiT_SingleBlock_HiDream:
     def __init__(self, mode="passthrough"):
         self.img = StyleMMDiT_IMG_Block(mode)
         
+        self.mask      = [None]
+        self.attn_mask = [None]
+    
     def set_len(self, h_len, w_len):
         self.h_len  = h_len
         self.w_len  = w_len
         self.img_len = h_len * w_len
         
         self.img.set_len(h_len, w_len)
-
-
+        
+        for i, mask in enumerate(self.mask):
+            if mask is not None and mask.ndim > 1:
+                self.mask[i] = F.interpolate(mask.unsqueeze(0), size=(h_len, w_len)).flatten().to(torch.bfloat16).cuda()
+            self.img.mask = self.mask
+        for i, mask in enumerate(self.attn_mask):
+            if mask is not None and mask.ndim > 1:
+                self.attn_mask[i] = F.interpolate(mask.unsqueeze(0), size=(h_len, w_len)).flatten().to(torch.bfloat16).cuda()
+            self.img.ATTN.mask = self.attn_mask
+        
 
 class StyleMMDiT_HiDream(Stylizer):
     num_double_blocks = 16
@@ -1331,9 +1404,18 @@ class StyleMMDiT_HiDream(Stylizer):
         self.cond_pos = [None]
         self.cond_neg = [None]
         
-        self.noise_mode = ""
+        self.noise_mode = "update"
+        self.recon_lure = "none"
+        
+        self.Retrojector = None
+        self.Endojector  = None
+        
+        self.IMG_1ST = True
         
     def __call__(self, x, attr):
+        if x.shape[0] == 1:
+            return x
+        
         weight_list = getattr(self, attr)
         for i, weight in enumerate(weight_list):
             method = getattr(self, self.method[i])
@@ -1431,7 +1513,6 @@ class StyleMMDiT_HiDream(Stylizer):
     def set_conditioning(self, positive, negative):
         self.cond_pos = [positive]
         self.cond_neg = [negative] 
-        
 
     def apply_style_conditioning(self, UNCOND, base_context, base_y=None, base_llama3=None):
 
@@ -1451,25 +1532,25 @@ class StyleMMDiT_HiDream(Stylizer):
             Returns:
                 (context_max_len, llama3_max_len, y_max_len)
             """
-            context_max_len = base_context.shape[1]
-            llama3_max_len  = base_llama3.shape[1]  if base_llama3 is not None else -1
-            y_max_len       = base_y.shape[1]       if base_y      is not None else -1
+            context_max_len = base_context.shape[-2]
+            llama3_max_len  = base_llama3.shape[-2]  if base_llama3 is not None else -1
+            y_max_len       = base_y.shape[-1]       if base_y      is not None else -1
 
             for style_cond in style_conditioning:
                 if style_cond is None:
                     continue
-                context_max_len = max(context_max_len, style_cond[0][0].shape[1])
+                context_max_len = max(context_max_len, style_cond[0][0].shape[-2])
                 if base_llama3 is not None:
-                    llama3_max_len  = max(llama3_max_len,  style_cond[0][1]['conditioning_llama3'].shape[1])
+                    llama3_max_len  = max(llama3_max_len,  style_cond[0][1]['conditioning_llama3'].shape[-2])
                 if base_y is not None:
-                    y_max_len       = max(y_max_len,       style_cond[0][1]['pooled_output'].shape[1])
+                    y_max_len       = max(y_max_len,       style_cond[0][1]['pooled_output'].shape[-1])
 
             return context_max_len, llama3_max_len, y_max_len
 
-        def pad_to_len(x, target_len, pad_value=0.0):
+        def pad_to_len(x, target_len, pad_value=0.0, dim=1):
             if target_len < 0:
                 return x
-            cur_len = x.shape[1]
+            cur_len = x.shape[dim]
             if cur_len == target_len:
                 return x
             return F.pad(x, (0, 0, 0, target_len - cur_len), value=pad_value)
@@ -1489,30 +1570,52 @@ class StyleMMDiT_HiDream(Stylizer):
         y = base_y.repeat(bsz_style + 1, 1)                   if base_y      is not None else None
         llama3  =  base_llama3.repeat(bsz_style + 1, 1, 1, 1) if base_llama3 is not None else None
 
-        context = pad_to_len(context, context_max_len)
-        llama3  = pad_to_len(llama3, llama3_max_len)   if base_llama3 is not None else None
-        y       = pad_to_len(y,      y_max_len)        if base_y      is not None else None
+        context = pad_to_len(context, context_max_len, dim=-2)
+        llama3  = pad_to_len(llama3, llama3_max_len, dim=-2)   if base_llama3 is not None else None
+        y       = pad_to_len(y,      y_max_len, dim=-1)        if base_y      is not None else None
         
         for ci, style_cond in enumerate(style_conditioning):
             if style_cond is None:
                 continue
-            context[ci+1:ci+2] = pad_to_len(style_cond[0][0], context_max_len).to(context)
+            context[ci+1:ci+2] = pad_to_len(style_cond[0][0], context_max_len, dim=-2).to(context)
             if llama3 is not None:
-                llama3 [ci+1:ci+2] = pad_to_len(style_cond[0][1]['conditioning_llama3'], llama3_max_len).to(llama3)
+                llama3 [ci+1:ci+2] = pad_to_len(style_cond[0][1]['conditioning_llama3'], llama3_max_len, dim=-2).to(llama3)
             if y is not None:
-                y      [ci+1:ci+2] = pad_to_len(style_cond[0][1]['pooled_output'],       y_max_len).to(y)
+                y      [ci+1:ci+2] = pad_to_len(style_cond[0][1]['pooled_output'],       y_max_len, dim=-1).to(y)
         
         return context, y, llama3
+    
+    def WCT_data(self, denoised_embed, y0_style_embed):
+        Stylizer.CLS_WCT.set(y0_style_embed.to(denoised_embed))
+        return Stylizer.CLS_WCT.get(denoised_embed)
 
+    def WCT2_data(self, denoised_embed, y0_style_embed):
+        Stylizer.CLS_WCT2.set(y0_style_embed.to(denoised_embed))
+        return Stylizer.CLS_WCT2.get(denoised_embed)
 
-
-
-
-
-
-
-
-
-
+    def apply_to_data(self, denoised, y0_style, mode="none"):
+        if mode == "none":
+            return denoised
+        
+        y0_style_embed = self.Retrojector.embed(y0_style)
+        denoised_embed = self.Retrojector.embed(denoised)
+        
+        match mode:
+            case "WCT":
+                method = self.WCT_data
+            case "WCT2":
+                method = self.WCT2_data
+            case "scattersort":
+                method = Stylizer.scattersort_
+            case "AdaIN":
+                method = Stylizer.AdaIN_
+        
+        denoised_embed = method(denoised_embed, y0_style_embed)
+        return self.Retrojector.unembed(denoised_embed)
+    
+    def apply_recon_lure(self, denoised, y0_style):
+        if self.recon_lure == "none":
+            return denoised
+        return self.apply_to_data(denoised, y0_style, self.recon_lure)
 
 
