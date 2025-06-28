@@ -250,6 +250,7 @@ NODE_CLASS_MAPPINGS = {
     "Sigmas2 Add"                         : sigmas.sigmas2_add,
     
     "Sigmas Rescale"                      : sigmas.sigmas_rescale,
+    "Sigmas Count"                        : sigmas.sigmas_count,
 
     "Sigmas Math1"                        : sigmas.sigmas_math1,
     "Sigmas Math3"                        : sigmas.sigmas_math3,

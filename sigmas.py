@@ -794,6 +794,25 @@ class sigmas_rescale:
         return (s_out_1,)
 
 
+class sigmas_count:
+    def __init__(self):
+        pass
+    @classmethod
+    def INPUT_TYPES(s):
+        return {
+            "required": {
+                "sigmas": ("SIGMAS", ),
+            }
+        }
+    FUNCTION = "main"
+    RETURN_TYPES = ("INT",)
+    RETURN_NAMES = ("count",)
+    CATEGORY = "RES4LYF/sigmas"
+    
+    def main(self, sigmas=None):
+        return (len(sigmas),)
+
+
 class sigmas_math1:
     def __init__(self):
         pass
@@ -1193,6 +1212,7 @@ class linear_quadratic_advanced:
                 "steps": ("INT", {"default": 40, "min": 0,"max": 100000,"step": 1}),
                 "denoise": ("FLOAT", {"default": 1.0, "min": -100000,"max": 100000,"step": 0.01}),
                 "inflection_percent": ("FLOAT", {"default": 0.5, "min": 0,"max": 1,"step": 0.01}),
+                "threshold_noise": ("FLOAT", {"default": 0.025, "min": 0.001,"max": 1.000,"step": 0.001}),
             },
             # "optional": {
             # }
@@ -1203,8 +1223,8 @@ class linear_quadratic_advanced:
     RETURN_NAMES = ("sigmas",)
     CATEGORY = "RES4LYF/schedulers"
 
-    def main(self, steps, denoise, inflection_percent, model=None):
-        sigmas = get_sigmas(model, "linear_quadratic", steps, denoise, inflection_percent)
+    def main(self, steps, denoise, inflection_percent, threshold_noise, model=None):
+        sigmas = get_sigmas(model, "linear_quadratic", steps, denoise, 0.0, inflection_percent, threshold_noise)
 
         return (sigmas, )
 
@@ -1369,7 +1389,7 @@ extra_schedulers = {
 
 
 
-def get_sigmas(model, scheduler, steps, denoise, shift=0.0, lq_inflection_percent=0.5): #adapted from comfyui
+def get_sigmas(model, scheduler, steps, denoise, shift=0.0, lq_inflection_percent=0.5, lq_threshold_noise=0.025): #adapted from comfyui
     total_steps = steps
     if denoise < 1.0:
         if denoise <= 0.0:
@@ -1396,7 +1416,7 @@ def get_sigmas(model, scheduler, steps, denoise, shift=0.0, lq_inflection_percen
         sigmas = comfy.samplers.beta_scheduler(model_sampling, total_steps, alpha=0.5, beta=0.7).cpu()
     elif scheduler == "linear_quadratic":
         linear_steps = int(total_steps * lq_inflection_percent)
-        sigmas = comfy.samplers.linear_quadratic_schedule(model_sampling, total_steps, threshold_noise=0.025, linear_steps=linear_steps).cpu()
+        sigmas = comfy.samplers.linear_quadratic_schedule(model_sampling, total_steps, threshold_noise=lq_threshold_noise, linear_steps=linear_steps).cpu()
     else:
         sigmas = comfy.samplers.calculate_sigmas(model_sampling, scheduler, total_steps).cpu()
     
