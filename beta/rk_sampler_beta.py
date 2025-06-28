@@ -402,7 +402,12 @@ def sample_rk_beta(
     data_prev_x_        = state_info.get('data_prev_x_')
     data_prev_x2y_      = state_info.get('data_prev_x2y_')
 
-    # BEGIN SAMPLING LOOP    
+    # BEGIN SAMPLING LOOP
+    try:
+        RESplain("Starting sampling loop. Model type: ", model.inner_model.model_patcher.model.diffusion_model._get_name(), debug=True)
+    except:
+        RESplain("Starting sampling loop.", debug=True)
+
     num_steps = len(sigmas[start_step:])-2 if sigmas[-1] == 0 else len(sigmas[start_step:])-1
     
     if steps_to_run >= 0:
@@ -2058,7 +2063,10 @@ def sample_rk_beta(
 
     if not (UNSAMPLE and sigmas[1] > sigmas[0]) and not EO("preview_last_step_always") and sigma is not None   and   not (FLOW_STARTED and not FLOW_STOPPED):
         callback_step = len(sigmas)-1 - step if sampler_mode == "unsample" else step
-        preview_callback(x, eps, denoised, x_, eps_, data_, callback_step, sigma, sigma_next, callback, EO, preview_override=data_cached, FLOW_STOPPED=FLOW_STOPPED)
+        preview_callback(x, eps, denoised, x_, eps_, data_, callback_step, sigma, sigma_next, callback, EO)
+        
+    if UNSAMPLE and sigmas[0] != 0:
+        sigmas = torch.cat((torch.zeros(1, dtype=sigmas.dtype, device=sigmas.device), sigmas.clone()), dim=0)
 
     if INIT_SAMPLE_LOOP:
         state_info_out = state_info

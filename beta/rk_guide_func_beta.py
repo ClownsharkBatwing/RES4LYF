@@ -1723,17 +1723,24 @@ class LatentGuide:
                             ):
         
         avg, avg_inv = 0, 0
+        lgw_mask_channels = lgw_mask.shape[1]
+        lgw_mask_inv_channels = lgw_mask_inv.shape[1]
+        
         for b, c in itertools.product(range(x_0.shape[0]), range(x_0.shape[1])):
-            avg     += torch.norm(lgw_mask    [b][0] * data_[row][b][c]   -   lgw_mask    [b][0] * y0    [b][c])
-            avg_inv += torch.norm(lgw_mask_inv[b][0] * data_[row][b][c]   -   lgw_mask_inv[b][0] * y0_inv[b][c])
+            if self.EO("lgw_cw_test") and (lgw_mask_channels > 1 or lgw_mask_inv_channels > 1):
+                c_ = c % (lgw_mask_channels if lgw_mask_channels > 1 else lgw_mask_inv_channels)
+            else:
+                c_ = 0
+            avg     += torch.norm(lgw_mask    [b][c_] * data_[row][b][c]   -   lgw_mask    [b][c_] * y0    [b][c])
+            avg_inv += torch.norm(lgw_mask_inv[b][c_] * data_[row][b][c]   -   lgw_mask_inv[b][c_] * y0_inv[b][c])
             
         avg     /= x_0.shape[1]
         avg_inv /= x_0.shape[1]
         
         for b, c in itertools.product(range(x_0.shape[0]), range(x_0.shape[1])):
             if channelwise:
-                ratio     = torch.nan_to_num(torch.norm(lgw_mask    [b][0] * data_[row][b][c] - lgw_mask    [b][0] * y0    [b][c])   /   avg,     0)
-                ratio_inv = torch.nan_to_num(torch.norm(lgw_mask_inv[b][0] * data_[row][b][c] - lgw_mask_inv[b][0] * y0_inv[b][c])   /   avg_inv, 0)
+                ratio     = torch.nan_to_num(torch.norm(lgw_mask    [b][c_] * data_[row][b][c] - lgw_mask    [b][c_] * y0    [b][c])   /   avg,     0)
+                ratio_inv = torch.nan_to_num(torch.norm(lgw_mask_inv[b][c_] * data_[row][b][c] - lgw_mask_inv[b][c_] * y0_inv[b][c])   /   avg_inv, 0)
             else:
                 ratio     = 1.
                 ratio_inv = 1.

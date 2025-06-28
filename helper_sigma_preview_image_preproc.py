@@ -172,6 +172,8 @@ class VAEEncodeAdvanced:
                 "mask_channel":    (["red", "green", "blue", "alpha"],),
                 "invert_mask":     ("BOOLEAN",                                         {"default": False}),
                 "latent_type":     (["4_channels", "16_channels"],                     {"default": "16_channels",}),
+                "interpolation":   (["nearest", "bilinear", "bicubic", "area", "nearest-exact", "lanczos"], {"default": "lanczos"}),
+                "method":          (["stretch", "keep proportion", "fill / crop", "pad"], {"default": "fill / crop"}),
             },
             
             "optional": {

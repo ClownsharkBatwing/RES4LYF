@@ -319,7 +319,7 @@ class SharkSampler:
                 sigmas = torch.flip(sigmas, dims=[0])
                 sigmas = torch.cat([sigmas, null])
                 
-            elif sampler_mode.startswith("resample"):
+            elif sampler_mode.startswith("resample") and not EO("disable_resample_sigmas_padding"):
                 null   = torch.tensor([0.0], device=sigmas.device, dtype=sigmas.dtype)
                 sigmas = torch.cat([null, sigmas])
                 sigmas = torch.cat([sigmas, null])
