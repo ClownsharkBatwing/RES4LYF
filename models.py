@@ -61,7 +61,7 @@ from .sd.openaimodel import ReUNetModel
 from .sd.attention import ReBasicTransformerBlock, ReCrossAttention
 
 from .latents import get_orthogonal, get_cosine_similarity
-from .style_transfer import StyleWCT, WaveletStyleWCT, Retrojector, StyleMMDiT_HiDream
+from .style_transfer import StyleWCT, WaveletStyleWCT, Retrojector, StyleMMDiT_Model
 from .res4lyf import RESplain
 
 from .helper import parse_range_string

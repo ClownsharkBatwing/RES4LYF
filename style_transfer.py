@@ -1061,6 +1061,44 @@ def weighted_mix_n(tensor_list, weight_list, dim=-1, offset=0):
 
 from torch import vmap
 
+BLOCK_NAMES = {"double_blocks", "single_blocks", "up_blocks", "middle_blocks", "down_blocks"}
+
+DEFAULT_BLOCK_WEIGHTS_MMDIT = {
+    "attn_norm"    : 0.0,
+    "attn_norm_mod": 0.0,
+    "attn"         : 1.0,
+    "attn_gated"   : 0.0,
+    "attn_res"     : 1.0,
+    "ff_norm"      : 0.0,
+    "ff_norm_mod"  : 0.0,
+    "ff"           : 1.0,
+    "ff_gated"     : 0.0,
+    "ff_res"       : 1.0,
+    
+    "h_tile"       : 8,
+    "w_tile"       : 8,
+}
+
+DEFAULT_ATTN_WEIGHTS_MMDIT = {
+    "q_proj": 0.0,
+    "k_proj": 0.0,
+    "v_proj": 1.0,
+    "q_norm": 0.0,
+    "k_norm": 0.0,
+    "out"   : 1.0,
+    
+    "h_tile": 8,
+    "w_tile": 8,
+}
+
+DEFAULT_BASE_WEIGHTS_MMDIT = {
+    "proj_in" : 1.0,
+    "proj_out": 1.0,
+    
+    "h_tile"  : 8,
+    "w_tile"  : 8,
+}
+
 class Stylizer:
     buffer = {}
     
@@ -1073,7 +1111,7 @@ class Stylizer:
         self.device = device
         self.mask  = [None]
         self.apply_to = [""]
-        self.method = ["passthrough"] #[Stylizer.passthrough]
+        self.method = ["passthrough"]
         self.h_tile = [-1]
         self.w_tile = [-1]
         
@@ -1082,6 +1120,7 @@ class Stylizer:
         self.img_len = 0
         
         self.IMG_1ST = True
+        self.HEADS = 0
 
     def set_mode(self, mode):
         self.method = [mode] #[getattr(self, mode)]
@@ -1091,13 +1130,75 @@ class Stylizer:
             if hasattr(self, k):
                 setattr(self, k, [v])
     
-    def set_len(self, h_len, w_len):
+    def set_weights_recursive(self, **kwargs):
+        for name, val in kwargs.items():
+            if hasattr(self, name):
+                setattr(self, name, [val])
+
+        for attr_name, attr_val in vars(self).items():
+            if isinstance(attr_val, Stylizer):
+                attr_val.set_weights_recursive(**kwargs)
+
+        for list_name in BLOCK_NAMES:
+            lst = getattr(self, list_name, None)
+            if isinstance(lst, list):
+                for element in lst:
+                    if isinstance(element, Stylizer):
+                        element.set_weights_recursive(**kwargs)
+    
+    def merge_weights(self, other):
+        def recursive_merge(a, b, path):
+            if isinstance(a, list) and isinstance(b, list):
+                if path in BLOCK_NAMES:
+                    out = []
+                    for i in range(max(len(a), len(b))):
+                        if i < len(a) and i < len(b):
+                            out.append(recursive_merge(a[i], b[i], path=None))
+                        elif i < len(a):
+                            out.append(a[i])
+                        else:
+                            out.append(b[i])
+                    return out
+                return a + b
+
+            if isinstance(a, dict) and isinstance(b, dict):
+                merged = dict(a)
+                for k, v_b in b.items():
+                    if k in merged:
+                        merged[k] = recursive_merge(merged[k], v_b, path=None)
+                    else:
+                        merged[k] = v_b
+                return merged
+
+            if hasattr(a, "__dict__") and hasattr(b, "__dict__"):
+                for attr, val_b in vars(b).items():
+                    val_a = getattr(a, attr, None)
+                    if val_a is not None:
+                        setattr(a, attr, recursive_merge(val_a, val_b, path=attr))
+                    else:
+                        setattr(a, attr, val_b)
+                return a
+            return b
+
+        for attr in vars(self):
+            if attr in BLOCK_NAMES:
+                merged = recursive_merge(getattr(self, attr), getattr(other, attr, []), path=attr)
+            elif hasattr(other, attr):
+                merged = recursive_merge(getattr(self, attr), getattr(other, attr), path=attr)
+            else:
+                continue
+            setattr(self, attr, merged)
+    
+    def set_len(self, h_len, w_len, img_slice, txt_slice, HEADS):
         self.h_len  = h_len
         self.w_len  = w_len
+        self.img_slice = img_slice
+        self.txt_slice = txt_slice
         self.img_len = h_len * w_len
-    
-    
-    
+        self.HEADS = HEADS
+
+
+
     def __call__(self, x, attr):
         if x.shape[0] == 1:
             return x
@@ -1106,6 +1207,17 @@ class Stylizer:
         weights_all_zero = all(weight == 0.0 for weight in weight_list)
         if weights_all_zero:
             return x
+        #self.HEADS=24
+        #x_ndim = x.ndim
+        #if x_ndim == 3:
+        #    B, HW, C = x.shape
+        #    if x.shape[-2] != self.HEADS and self.HEADS != 0:
+        #        x = x.reshape(B,self.HEADS,HW,-1)
+                
+        HEAD_DIM = x.shape[1]
+        if HEAD_DIM == self.HEADS:
+            B, HEAD_DIM, HW, C = x.shape
+            x = x.reshape(B, HW, C*HEAD_DIM)
         
         weights_all_one         = all(weight == 1.0           for weight in weight_list)
         methods_all_scattersort = all(name   == "scattersort" for name   in self.method)
@@ -1123,26 +1235,39 @@ class Stylizer:
             for i, (weight, mask) in enumerate(zip(weight_list, self.mask)):
                 if mask is not None:
                     x01 = x[0:1].clone()
+                txt_method_name = self.method[i].removeprefix("tiled_")
+                txt_method = getattr(self, txt_method_name)
                 
-                method = getattr(self, self.method[i])
+                method_name = self.method[i].removeprefix("tiled_") if self.img_len > x.shape[-2] or self.h_len < 0 else self.method[i]
+                method = getattr(self, method_name)
                 apply_to = self.apply_to[i]
                 if   weight == 0.0:
                     continue
                 elif weight == 1.0:
-                    if self.img_len == x.shape[-2] or apply_to == "img+txt" or self.h_len < 0:
+                    if   self.img_len == x.shape[-2]  or apply_to == "img+txt" or self.h_len < 0:
                         x = method(x, idx=i+1)
-                    if self.img_len < x.shape[-2] and apply_to == "img":
-                        x[:,:self.img_len,:] = method(x[:,:self.img_len,:], idx=i+1)
-                    if self.img_len < x.shape[-2] and apply_to == "txt":
-                        x[:,self.img_len:,:] = method(x[:,self.img_len:,:], idx=i+1)
+                    elif   self.img_len < x.shape[-2]:
+                        if "img" in apply_to:
+                            x[...,self.img_slice,:] = method(x[...,self.img_slice,:], idx=i+1)
+                            #x[:,:self.img_len,:] = method(x[:,:self.img_len,:], idx=i+1)
+                        if "txt" in apply_to:
+                            x[...,self.txt_slice,:] = txt_method(x[...,self.txt_slice,:], idx=i+1)
+                            #x[:,self.img_len:,:] = method(x[:,self.img_len:,:], idx=i+1)
+
                 else:
                     x = torch.lerp(x, method(x.clone(), idx=i+1), weight)
                 
                 if mask is not None:
-                    x[0:1,:self.img_len] = torch.lerp(x01[:,:self.img_len], x[0:1,:self.img_len], mask.view(1, -1, 1))
-                
+                    x[0:1,...,self.img_slice,:] = torch.lerp(x01[...,self.img_slice,:], x[0:1,...,self.img_slice,:], mask.view(1, -1, 1))
+                    #x[0:1,:self.img_len] = torch.lerp(x01[:,:self.img_len], x[0:1,:self.img_len], mask.view(1, -1, 1))
         
-        return x
+        #if x_ndim == 3:
+        #    return x.view(B,HW,C)
+        
+        if HEAD_DIM == self.HEADS:
+            return x.reshape(B, HEAD_DIM, HW, C)
+        else:
+            return x
 
 
 
@@ -1199,8 +1324,11 @@ class Stylizer:
     def tiled_scattersort(self, x, idx=1):
         #if HDModel.RECON_MODE:
         #    return denoised_embed
-        den   = x[0:1]      [:,:self.img_len,:].view(-1, 2560, self.h_len, self.w_len)
-        style = x[idx:idx+1][:,:self.img_len,:].view(-1, 2560, self.h_len, self.w_len)
+        #den   = x[0:1]      [:,:self.img_len,:].view(-1, 2560, self.h_len, self.w_len)
+        #style = x[idx:idx+1][:,:self.img_len,:].view(-1, 2560, self.h_len, self.w_len)
+        C = x.shape[-1]
+        den   = x[0:1]      [:,self.img_slice,:].reshape(-1, C, self.h_len, self.w_len)
+        style = x[idx:idx+1][:,self.img_slice,:].reshape(-1, C, self.h_len, self.w_len)
         
         tiles     = Stylizer.get_tiles_as_strided(den,   self.h_tile[idx-1], self.w_tile[idx-1])
         ref_tile  = Stylizer.get_tiles_as_strided(style, self.h_tile[idx-1], self.w_tile[idx-1])
@@ -1220,6 +1348,36 @@ class Stylizer:
         tiles.copy_(result)
 
         return x
+    
+    
+    def tiled_AdaIN(self, x, idx=1):
+        #if HDModel.RECON_MODE:
+        #    return denoised_embed
+        #den   = x[0:1]      [:,:self.img_len,:].view(-1, 2560, self.h_len, self.w_len)
+        #style = x[idx:idx+1][:,:self.img_len,:].view(-1, 2560, self.h_len, self.w_len)
+        C = x.shape[-1]
+        den   = x[0:1]      [:,self.img_slice,:].reshape(-1, C, self.h_len, self.w_len)
+        style = x[idx:idx+1][:,self.img_slice,:].reshape(-1, C, self.h_len, self.w_len)
+        
+        tiles     = Stylizer.get_tiles_as_strided(den,   self.h_tile[idx-1], self.w_tile[idx-1])
+        ref_tile  = Stylizer.get_tiles_as_strided(style, self.h_tile[idx-1], self.w_tile[idx-1])
+
+        # rearrange for vmap to run on (nH, nW) ( as outer axes)
+        tiles_v    = tiles   .permute(2, 3, 0, 1, 4, 5) # (nH, nW, B, C, tile_h, tile_w)
+        ref_tile_v = ref_tile.permute(2, 3, 0, 1, 4, 5) # (nH, nW, B, C, tile_h, tile_w)
+
+        # vmap over spatial dimms (nH, nW)... num of tiles high, num tiles wide
+        vmap2   = torch.vmap(torch.vmap(Stylizer.apply_AdaIN_per_tile, in_dims=0), in_dims=0)
+        result  = vmap2(tiles_v, ref_tile_v)  # (nH, nW, B, C, tile_h, tile_w)
+
+        # --> (B, C, nH, nW, tile_h, tile_w)
+        result = result.permute(2, 3, 0, 1, 4, 5)  #( B, C, nH, nW, tile_h, tile_w)
+
+        # in-place copy, werx if result has same shape/strides as tiles... overwrites same mem location "content" is using
+        tiles.copy_(result)
+
+        return x
+    
     
     @staticmethod
     def get_tiles_as_strided(x, tile_h, tile_w):
@@ -1245,6 +1403,14 @@ class Stylizer:
         out = flat.scatter(dim=-1, index=src_idx, src=sorted_ref)
         return out.view_as(tile)
 
+    @staticmethod
+    def apply_AdaIN_per_tile(tile, ref_tile, eps: float = 1e-7):
+        mean_c = tile.mean(-2, keepdim=True)
+        std_c  = tile.std (-2, keepdim=True).add_(eps)  # in-place add
+        mean_s = ref_tile.mean  (-2, keepdim=True)
+        std_s  = ref_tile.std   (-2, keepdim=True).add_(eps)
+        tile.sub_(mean_c).div_(std_c).mul_(std_s).add_(mean_s)  # in-place chain
+        return tile
 
 class StyleMMDiT_Attn(Stylizer):
     def __init__(self, mode):
@@ -1283,8 +1449,12 @@ class StyleMMDiT_MoE(Stylizer): # these hit img or joint only, never txt
         self.separate    = [0.0]
         self.sum         = [0.0]
         self.out         = [0.0]
-        
-class StyleMMDiT_Block(Stylizer):
+
+
+
+
+
+class StyleMMDiT_SubBlock(Stylizer):
     def __init__(self, mode):
         super().__init__()
         
@@ -1302,34 +1472,35 @@ class StyleMMDiT_Block(Stylizer):
         self.ff_gated      = [0.0]
         self.ff_res        = [0.0]
         
-    def set_len(self, h_len, w_len):
-        super().set_len(h_len, w_len)
-        self.ATTN.set_len(h_len, w_len)
+        self.mask = [None]
+        
+    def set_len(self, h_len, w_len, img_slice, txt_slice, HEADS):
+        super().set_len(h_len, w_len, img_slice, txt_slice, HEADS)
+        self.ATTN.set_len(h_len, w_len, img_slice, txt_slice, HEADS)
 
-
-class StyleMMDiT_IMG_Block(StyleMMDiT_Block):  # img or joint
+class StyleMMDiT_IMG_Block(StyleMMDiT_SubBlock):  # img or joint
     def __init__(self, mode):
         super().__init__(mode)
         self.FF = StyleMMDiT_MoE(mode)  # options for MoE if img or joint
-        self.mask = [None]
+    
+    def set_len(self, h_len, w_len, img_slice, txt_slice, HEADS):
+        super().set_len(h_len, w_len, img_slice, txt_slice, HEADS)
+        self.FF.set_len(h_len, w_len, img_slice, txt_slice, HEADS)
         
-    def set_len(self, h_len, w_len):
-        super().set_len(h_len, w_len)
-        self.FF.set_len(h_len, w_len)
-        
-class StyleMMDiT_TXT_Block(StyleMMDiT_Block):   # txt only
+class StyleMMDiT_TXT_Block(StyleMMDiT_SubBlock):   # txt only
     def __init__(self, mode):
         super().__init__(mode)
         self.FF  = StyleMMDiT_FF(mode)   # options for FF within MoE for img or joint; or for txt alone
-        self.mask = [None]
-        
-    def set_len(self, h_len, w_len):
-        super().set_len(h_len, w_len)
-        self.FF.set_len(h_len, w_len)
+    
+    def set_len(self, h_len, w_len, img_slice, txt_slice, HEADS):
+        super().set_len(h_len, w_len, img_slice, txt_slice, HEADS)
+        self.FF.set_len(h_len, w_len, img_slice, txt_slice, HEADS)
 
 
 
-class StyleMMDiT_DoubleBlock_HiDream:
+
+
+class StyleMMDiT_BaseBlock:
     def __init__(self, mode="passthrough"):
 
         self.img = StyleMMDiT_IMG_Block(mode)
@@ -1338,13 +1509,17 @@ class StyleMMDiT_DoubleBlock_HiDream:
         self.mask      = [None]
         self.attn_mask = [None]
     
-    def set_len(self, h_len, w_len):
+    def set_len(self, h_len, w_len, img_slice, txt_slice, HEADS):
         self.h_len  = h_len
         self.w_len  = w_len
         self.img_len = h_len * w_len
         
-        self.img.set_len(h_len, w_len)
-        self.txt.set_len(-1, -1)
+        self.img_slice = img_slice
+        self.txt_slice = txt_slice
+        self.HEADS = HEADS
+        
+        self.img.set_len(h_len, w_len, img_slice, txt_slice, HEADS)
+        self.txt.set_len(-1, -1, None, None, HEADS)
         
         for i, mask in enumerate(self.mask):
             if mask is not None and mask.ndim > 1:
@@ -1353,44 +1528,35 @@ class StyleMMDiT_DoubleBlock_HiDream:
         for i, mask in enumerate(self.attn_mask):
             if mask is not None and mask.ndim > 1:
                 self.attn_mask[i] = F.interpolate(mask.unsqueeze(0), size=(h_len, w_len)).flatten().to(torch.bfloat16).cuda()
-            self.img.ATTN.mask = self.attn_mask        
-        
-        
-class StyleMMDiT_SingleBlock_HiDream:
-    def __init__(self, mode="passthrough"):
-        self.img = StyleMMDiT_IMG_Block(mode)
-        
-        self.mask      = [None]
-        self.attn_mask = [None]
-    
-    def set_len(self, h_len, w_len):
-        self.h_len  = h_len
-        self.w_len  = w_len
-        self.img_len = h_len * w_len
-        
-        self.img.set_len(h_len, w_len)
-        
-        for i, mask in enumerate(self.mask):
-            if mask is not None and mask.ndim > 1:
-                self.mask[i] = F.interpolate(mask.unsqueeze(0), size=(h_len, w_len)).flatten().to(torch.bfloat16).cuda()
-            self.img.mask = self.mask
-        for i, mask in enumerate(self.attn_mask):
-            if mask is not None and mask.ndim > 1:
-                self.attn_mask[i] = F.interpolate(mask.unsqueeze(0), size=(h_len, w_len)).flatten().to(torch.bfloat16).cuda()
-            self.img.ATTN.mask = self.attn_mask
-        
+            self.img.ATTN.mask = self.attn_mask      
 
-class StyleMMDiT_HiDream(Stylizer):
-    num_double_blocks = 16
-    num_single_blocks = 32
+class StyleMMDiT_DoubleBlock(StyleMMDiT_BaseBlock):
+    def __init__(self, mode="passthrough"):
+        super().__init__(mode)
+        self.txt = StyleMMDiT_TXT_Block(mode)
     
+    def set_len(self, h_len, w_len, img_slice, txt_slice, HEADS):
+        super().set_len(h_len, w_len, img_slice, txt_slice, HEADS)
+        self.txt.set_len(-1, -1, None, None, HEADS)
+
+class StyleMMDiT_SingleBlock(StyleMMDiT_BaseBlock):
+    def __init__(self, mode="passthrough"):
+        super().__init__(mode)
+
+
+
+
+
+
+class StyleMMDiT_Model(Stylizer):
+
     def __init__(self, dtype=torch.float64, device=torch.device("cuda")):
         super().__init__(dtype, device)
         self.guides = []
         self.GUIDES_INITIALIZED = False
         
-        self.double_blocks = [StyleMMDiT_DoubleBlock_HiDream() for _ in range(100)]
-        self.single_blocks = [StyleMMDiT_SingleBlock_HiDream() for _ in range(100)]
+        self.double_blocks = [StyleMMDiT_DoubleBlock() for _ in range(100)]
+        self.single_blocks = [StyleMMDiT_SingleBlock() for _ in range(100)]
         
         self.h_len   = -1
         self.w_len   = -1
@@ -1415,85 +1581,83 @@ class StyleMMDiT_HiDream(Stylizer):
         self.Endojector  = None
         
         self.IMG_1ST = True
+        self.HEADS = 0
         
     def __call__(self, x, attr):
         if x.shape[0] == 1:
             return x
         
         weight_list = getattr(self, attr)
-        for i, weight in enumerate(weight_list):
-            method = getattr(self, self.method[i])
-            if   weight == 0.0:
-                continue
-            elif weight == 1.0:
-                x = method(x, idx=i+1)
-            else:
-                x = torch.lerp(x, method(x.clone(), idx=i), weight)
-        return x
+        weights_all_zero = all(weight == 0.0 for weight in weight_list)
+        if weights_all_zero:
+            return x
         
-    def merge_weights(self, other):
-        def recursive_merge(a, b, path):
-            # 1) both are lists
-            if isinstance(a, list) and isinstance(b, list):
-                # if we're at top-level blocks, zip-merge instead of concat
-                if path in ("double_blocks", "single_blocks"):
-                    out = []
-                    for i in range(max(len(a), len(b))):
-                        if i < len(a) and i < len(b):
-                            out.append(recursive_merge(a[i], b[i], path=None))
-                        elif i < len(a):
-                            out.append(a[i])
-                        else:
-                            out.append(b[i])
-                    return out
+        """x_ndim = x.ndim
+        if x_ndim == 4:
+            B, HEAD, HW, C = x.shape
+            
+        if x_ndim == 3:
+            B, HW, C = x.shape
+            if x.shape[-2] != self.HEADS and self.HEADS != 0:
+                x = x.reshape(B,self.HEADS,HW,-1)"""
+        
+        HEAD_DIM = x.shape[1]
+        if HEAD_DIM == self.HEADS:
+            B, HEAD_DIM, HW, C = x.shape
+            x = x.reshape(B, HW, C*HEAD_DIM)
+            
+        weights_all_one         = all(weight == 1.0           for weight in weight_list)
+        methods_all_scattersort = all(name   == "scattersort" for name   in self.method)
+        masks_all_none = all(mask is None for mask in self.mask)
+        
+        if weights_all_one and methods_all_scattersort and len(weight_list) > 1 and masks_all_none:
+            buf = Stylizer.buffer
+            buf['src_idx']   = x[0:1].argsort(dim=-2)
+            buf['ref_sorted'], buf['ref_idx'] = x[1:].reshape(1, -1, x.shape[-1]).sort(dim=-2)
+            buf['src'] = buf['ref_sorted'][:,::len(weight_list)].expand_as(buf['src_idx'])    #            interleave_stride = len(weight_list)
+            
+            x[0:1] = x[0:1].scatter_(dim=-2, index=buf['src_idx'], src=buf['src'],)
+        else:
+            for i, (weight, mask) in enumerate(zip(weight_list, self.mask)):
+                if mask is not None:
+                    x01 = x[0:1].clone()
+                method = getattr(self, self.method[i])
+                if   weight == 0.0:
+                    continue
+                elif weight == 1.0:
+                    x = method(x, idx=i+1)
+                else:
+                    x = torch.lerp(x, method(x.clone(), idx=i), weight)
+                
+                if mask is not None:
+                    x[0:1] = torch.lerp(x01, x[0:1], mask.view(1, -1, 1))
+        
+        #if x_ndim == 3:
+        #    return x.view(B,HW,C)
+        
+        if HEAD_DIM == self.HEADS:
+            return x.reshape(B, HEAD_DIM, HW, C)
+        else:
+            return x
 
-                # otherwise: pure-lists of primitives/Tensors/dicts → concatenate
-                return a + b
-
-            # 2) dicts → merge per key
-            if isinstance(a, dict) and isinstance(b, dict):
-                merged = dict(a)
-                for k, v_b in b.items():
-                    if k in merged:
-                        merged[k] = recursive_merge(merged[k], v_b, path=None)
-                    else:
-                        merged[k] = v_b
-                return merged
-
-            # 3) objects with __dict__ → recurse into each attr
-            if hasattr(a, "__dict__") and hasattr(b, "__dict__"):
-                for attr, val_b in vars(b).items():
-                    val_a = getattr(a, attr, None)
-                    if val_a is not None:
-                        setattr(a, attr, recursive_merge(val_a, val_b, path=attr))
-                    else:
-                        setattr(a, attr, val_b)
-                return a
-
-            # 4) fallback: overwrite a with b
-            return b
-
-        # merge every matching attribute on self
-        for attr in vars(self):
-            if attr in ("double_blocks", "single_blocks"):
-                # pass the list itself down with a marker so recursive_merge knows to zip-merge
-                merged = recursive_merge(getattr(self, attr), getattr(other, attr, []), path=attr)
-            elif hasattr(other, attr):
-                merged = recursive_merge(getattr(self, attr), getattr(other, attr), path=attr)
-            else:
-                continue
-            setattr(self, attr, merged)
-    
-    def set_len(self, h_len, w_len):
+    def set_len(self, h_len, w_len, img_slice, txt_slice, HEADS):
         self.h_len  = h_len
         self.w_len  = w_len
         self.img_len = h_len * w_len
         
+        self.img_slice = img_slice
+        self.txt_slice = txt_slice
+        self.HEADS = HEADS
+        
         for block in self.double_blocks:
-            block.set_len(h_len, w_len)
+            block.set_len(h_len, w_len, img_slice, txt_slice, HEADS)
         for block in self.single_blocks:
-            block.set_len(h_len, w_len)
-    
+            block.set_len(h_len, w_len, img_slice, txt_slice, HEADS)
+        
+        for i, mask in enumerate(self.mask):
+            if mask is not None and mask.ndim > 1:
+                self.mask[i] = F.interpolate(mask.unsqueeze(0), size=(h_len, w_len)).flatten().to(torch.bfloat16).cuda()
+
     def init_guides(self, model):
         if not self.GUIDES_INITIALIZED:
             if self.guides == []:
@@ -1521,21 +1685,6 @@ class StyleMMDiT_HiDream(Stylizer):
     def apply_style_conditioning(self, UNCOND, base_context, base_y=None, base_llama3=None):
 
         def get_max_token_lengths(style_conditioning, base_context, base_y=None, base_llama3=None):
-            """
-            Returns max token lengths for context, llama3, and y across base and style_conditioning.
-
-            Parameters:
-                base_context: Tensor of shape [1, T, C]
-                base_llama3:  Tensor of shape [1, T, C]
-                base_y:       Tensor of shape [1, T, C]
-                style_conditioning: list of optional tuples with structure:
-                    style_cond[0][0] = context-style embedding (Tensor)
-                    style_cond[0][1]['conditioning_llama3'] = llama-style embedding (Tensor)
-                    style_cond[0][1]['pooled_output'] = y-style embedding (Tensor)
-
-            Returns:
-                (context_max_len, llama3_max_len, y_max_len)
-            """
             context_max_len = base_context.shape[-2]
             llama3_max_len  = base_llama3.shape[-2]  if base_llama3 is not None else -1
             y_max_len       = base_y.shape[-1]       if base_y      is not None else -1
@@ -1600,33 +1749,16 @@ class StyleMMDiT_HiDream(Stylizer):
     def apply_to_data(self, denoised, y0_style=None, mode="none"):
         if mode == "none":
             return denoised
-        
         y0_style = self.guides if y0_style is None else y0_style
         
         y0_style_embed = self.Retrojector.embed(y0_style)
         denoised_embed = self.Retrojector.embed(denoised)
         
-        embed = torch.cat([denoised_embed, y0_style_embed], dim=0)
-        
+        embed  = torch.cat([denoised_embed, y0_style_embed], dim=0)
         method = getattr(self, mode)
-        
-        embed = method(embed)
-        
+        embed  = method(embed)
         return self.Retrojector.unembed(embed[0:1])
 
-        #match mode:
-        #    case "WCT":
-        #        method = self.WCT_data
-        #    case "WCT2":
-        #        method = self.WCT2_data
-        #    case "scattersort":
-        #        method = Stylizer.scattersort_
-        #    case "AdaIN":
-        #        method = Stylizer.AdaIN_
-        #
-        #denoised_embed = method(denoised_embed, y0_style_embed)
-        #return self.Retrojector.unembed(denoised_embed)
-    
     def apply_recon_lure(self, denoised, y0_style):
         if self.recon_lure == "none":
             return denoised
