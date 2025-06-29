@@ -9,7 +9,7 @@ import copy
 from nodes import MAX_RESOLUTION
 
 from ..latents               import get_edge_mask
-from ..helper                import OptionsManager, FrameWeightsManager, initialize_or_scale, get_res4lyf_scheduler_list, parse_range_string, parse_tile_sizes
+from ..helper                import OptionsManager, FrameWeightsManager, initialize_or_scale, get_res4lyf_scheduler_list, parse_range_string, parse_tile_sizes, parse_range_string_int
 
 from .rk_coefficients_beta   import RK_SAMPLER_NAMES_BETA_FOLDERS, get_default_sampler_name, get_sampler_name_list, process_sampler_name
 
@@ -3250,7 +3250,7 @@ class ClownGuide_StyleNorm_Advanced_HiDream:
 
 
 
-from ..style_transfer import StyleMMDiT_HiDream
+from ..style_transfer import StyleMMDiT_Model, DEFAULT_BLOCK_WEIGHTS_MMDIT, DEFAULT_ATTN_WEIGHTS_MMDIT, DEFAULT_BASE_WEIGHTS_MMDIT
 
 
 
@@ -3260,15 +3260,18 @@ class ClownStyle_Boost:
     def INPUT_TYPES(cls):
         return {"required":
                     {
-                    "noise_mode": (["direct", "update", "smart", "recon", "bonanza"], {"default": "update"},),
-                    "recon_lure": (["none", "scattersort","AdaIN", "WCT", "WCT2"], {"default": "WCT", "tooltip": "Only used if noise_mode = recon. Can increase the strength of the style."},),
-                    "datashock": (["none", "scattersort","AdaIN", "WCT", "WCT2"], {"default": "scattersort", "tooltip": "Will drastically increase the strength at low denoise levels. Use with img2img workflows."},),
-                    "datashock_start_step": ("INT", {"default": 0, "min": 0, "max": 10000, "step": 1, "tooltip": "Start step for data shock."}),
-                    "datashock_end_step"  : ("INT", {"default": 1, "min": 1, "max": 10000, "step": 1, "tooltip": "End step for data shock."}),
+                    "noise_mode":           (["direct", "update", "smart", "recon", "bonanza"], {"default": "update"},),
+                    "recon_lure":           (["none", "scattersort", "tiled_scattersort", "AdaIN", "tiled_AdaIN", "WCT", "WCT2"],    {"default": "WCT", "tooltip": "Only used if noise_mode = recon. Can increase the strength of the style."},),
+                    "datashock":            (["none", "scattersort", "tiled_scattersort", "AdaIN", "tiled_AdaIN", "WCT", "WCT2"],    {"default": "scattersort", "tooltip": "Will drastically increase the strength at low denoise levels. Use with img2img workflows."},),
+                    "datashock_start_step": ("INT",                                             {"default": 0, "min": 0, "max": 10000, "step": 1, "tooltip": "Start step for data shock."}),
+                    "datashock_end_step"  : ("INT",                                             {"default": 1, "min": 1, "max": 10000, "step": 1, "tooltip": "End step for data shock."}),
+
+                    "tile_h" :     ("INT",   {"default": 128, "min": 16, "max": 10000, "step": 16, "tooltip": "Tile size for tiled modes. Lower values will transfer composition more effectively. Dimensions of image must be divisible by this value."}),
+                    "tile_w" :     ("INT",   {"default": 128, "min": 16, "max": 10000, "step": 16, "tooltip": "Tile size for tiled modes. Lower values will transfer composition more effectively. Dimensions of image must be divisible by this value."}),
                     },
                 "optional": 
                     {
-                    "guides":      ("GUIDES", ),
+                    "guides": ("GUIDES", ),
                     }  
                 }
     
@@ -3283,6 +3286,8 @@ class ClownStyle_Boost:
             datashock  = None,
             datashock_start_step  = None,
             datashock_end_step    = None,
+            tile_h = 0,
+            tile_w = 0,
             guides      = None,
             ):
         guides = copy.deepcopy(guides) if guides is not None else {}
@@ -3295,19 +3300,22 @@ class ClownStyle_Boost:
 
 
 
+
+
+
 class ClownStyle_MMDiT:
 
     @classmethod
     def INPUT_TYPES(cls):
         return {"required":
                     {
-                    "mode":        (["scattersort", "AdaIN", "WCT", "WCT2", "injection"], {"default": "scattersort"},),
-                    #"noise_mode":  (["direct", "update", "smart", "recon", "bonanza"], {"default": "update"},),
-                    "proj_in":     ("FLOAT",   {"default": 0.0, "min": -100.0, "max": 100.0, "step":0.01, "round": False, "tooltip": "Strength of effect on layer; skips extra calculation if set to 0.0. Skips interpolation if set to 1.0."}),
-                    "proj_out":    ("FLOAT",   {"default": 0.0, "min": -100.0, "max": 100.0, "step":0.01, "round": False, "tooltip": "Strength of effect on layer; skips extra calculation if set to 0.0. Skips interpolation if set to 1.0."}),
+                    "mode":        (["scattersort", "tiled_scattersort", "AdaIN", "tiled_AdaIN", "WCT", "WCT2", "injection"], {"default": "scattersort"},),
 
-                    "tile_h" : ("INT", {"default": 128, "min": 16, "max": 10000, "step": 16, "tooltip": "Tile size for tiled modes. Lower values will transfer composition more effectively. Dimensions of image must be divisible by this value."}),
-                    "tile_w" : ("INT", {"default": 128, "min": 16, "max": 10000, "step": 16, "tooltip": "Tile size for tiled modes. Lower values will transfer composition more effectively. Dimensions of image must be divisible by this value."}),
+                    "proj_in":     ("FLOAT", {"default": 0.0, "min": -100.0, "max": 100.0, "step":0.01, "round": False, "tooltip": "Strength of effect on layer; skips extra calculation if set to 0.0. Skips interpolation if set to 1.0."}),
+                    "proj_out":    ("FLOAT", {"default": 0.0, "min": -100.0, "max": 100.0, "step":0.01, "round": False, "tooltip": "Strength of effect on layer; skips extra calculation if set to 0.0. Skips interpolation if set to 1.0."}),
+
+                    "tile_h" :     ("INT",   {"default": 128, "min": 16, "max": 10000, "step": 16, "tooltip": "Tile size for tiled modes. Lower values will transfer composition more effectively. Dimensions of image must be divisible by this value."}),
+                    "tile_w" :     ("INT",   {"default": 128, "min": 16, "max": 10000, "step": 16, "tooltip": "Tile size for tiled modes. Lower values will transfer composition more effectively. Dimensions of image must be divisible by this value."}),
 
                     #"start_step": ("INT", {"default": 0, "min": 16, "max": 10000, "step": 1, "tooltip": "Start step for data shock."}),
                     #"end_step"  : ("INT", {"default": 1, "min": 16, "max": 10000, "step": 1, "tooltip": "End step for data shock."}),
@@ -3316,9 +3324,9 @@ class ClownStyle_MMDiT:
                     },
                 "optional": 
                     {
-                    "positive" : ("CONDITIONING", ),
-                    "negative" : ("CONDITIONING", ),
-                    "guide":     ("LATENT", ),
+                    "positive" :   ("CONDITIONING", ),
+                    "negative" :   ("CONDITIONING", ),
+                    "guide":       ("LATENT", ),
                     "mask":        ("MASK", ),
                     "blocks":      ("BLOCKS", ),
                     "guides":      ("GUIDES", ),
@@ -3332,7 +3340,7 @@ class ClownStyle_MMDiT:
 
     def main(self,
             mode        = "scattersort",
-            #noise_mode  = "update",
+
             proj_in     = 0.0,
             proj_out    = 0.0,
             tile_h      = 128,
@@ -3346,7 +3354,7 @@ class ClownStyle_MMDiT:
             guides      = None,
             ):
         
-        mask = 1-mask if mask is not None else None
+        #mask = 1-mask if mask is not None else None
 
         if guide is not None:
             raw_x = guide.get('state_info', {}).get('raw_x', None)
@@ -3358,7 +3366,10 @@ class ClownStyle_MMDiT:
         guides = copy.deepcopy(guides) if guides is not None else {}
         blocks = copy.deepcopy(blocks) if blocks is not None else {}
 
-        StyleMMDiT = blocks.get('StyleMMDiT', StyleMMDiT_HiDream())
+        StyleMMDiT = blocks.get('StyleMMDiT')
+        
+        if StyleMMDiT is None:
+            StyleMMDiT = StyleMMDiT_Model()
         
         weights = {
             "proj_in" : proj_in,
@@ -3379,14 +3390,10 @@ class ClownStyle_MMDiT:
             StyleMMDiT_.merge_weights(StyleMMDiT)
         else:
             StyleMMDiT_ = StyleMMDiT
-            
-        #StyleMMDiT_.noise_mode = noise_mode
 
         guides['StyleMMDiT'] = StyleMMDiT_
 
         return (guides, )
-
-
 
 
 
@@ -3396,28 +3403,28 @@ class ClownStyle_Block_MMDiT:
     def INPUT_TYPES(cls):
         return {"required":
                     {
-                    "mode":     (["scattersort", "tiled_scattersort", "AdaIN", "WCT", "WCT2", "injection"], {"default": "scattersort"},),
-                    "apply_to": (["img", "img+txt", "txt",], {"default": "img+txt"},),
-                    "block_type" : (["double", "single"], {"default": "single"},),
-                    "block_list"   : ("STRING", {"default": "all", "multiline": True}),
-                    "block_weights" :("STRING", {"default": "1.0", "multiline": True}),
+                    "mode":          (["scattersort", "tiled_scattersort", "AdaIN", "tiled_AdaIN", "WCT", "WCT2", "injection"], {"default": "scattersort"},),
+                    "apply_to":      (["img", "img+txt","img,txt", "txt",], {"default": "img+txt"},),
+                    "block_type":    (["double", "double,single", "single"], {"default": "single"},),
+                    "block_list":    ("STRING", {"default": "all", "multiline": True}),
+                    "block_weights": ("STRING", {"default": "1.0", "multiline": True}),
                     
-                    "attn_norm":     ("FLOAT", {"default": 0.0, "min": -100.0, "max": 100.0, "step":0.01, "round": False, "tooltip": "Strength of effect on layer; skips extra calculation if set to 0.0. Skips interpolation if set to 1.0."}),
-                    "attn_norm_mod": ("FLOAT", {"default": 0.0, "min": -100.0, "max": 100.0, "step":0.01, "round": False, "tooltip": "Strength of effect on layer; skips extra calculation if set to 0.0. Skips interpolation if set to 1.0."}),
-                    "attn":          ("FLOAT", {"default": 0.0, "min": -100.0, "max": 100.0, "step":0.01, "round": False, "tooltip": "Strength of effect on layer; skips extra calculation if set to 0.0. Skips interpolation if set to 1.0."}),
-                    "attn_gated":    ("FLOAT", {"default": 0.0, "min": -100.0, "max": 100.0, "step":0.01, "round": False, "tooltip": "Strength of effect on layer; skips extra calculation if set to 0.0. Skips interpolation if set to 1.0."}),
-                    "attn_res":      ("FLOAT", {"default": 0.0, "min": -100.0, "max": 100.0, "step":0.01, "round": False, "tooltip": "Strength of effect on layer; skips extra calculation if set to 0.0. Skips interpolation if set to 1.0."}),
+                    "attn_norm":     ("FLOAT",  {"default": 0.0, "min": -100.0, "max": 100.0, "step":0.01, "round": False, "tooltip": "Strength of effect on layer; skips extra calculation if set to 0.0. Skips interpolation if set to 1.0."}),
+                    "attn_norm_mod": ("FLOAT",  {"default": 0.0, "min": -100.0, "max": 100.0, "step":0.01, "round": False, "tooltip": "Strength of effect on layer; skips extra calculation if set to 0.0. Skips interpolation if set to 1.0."}),
+                    "attn":          ("FLOAT",  {"default": 0.0, "min": -100.0, "max": 100.0, "step":0.01, "round": False, "tooltip": "Strength of effect on layer; skips extra calculation if set to 0.0. Skips interpolation if set to 1.0."}),
+                    "attn_gated":    ("FLOAT",  {"default": 0.0, "min": -100.0, "max": 100.0, "step":0.01, "round": False, "tooltip": "Strength of effect on layer; skips extra calculation if set to 0.0. Skips interpolation if set to 1.0."}),
+                    "attn_res":      ("FLOAT",  {"default": 0.0, "min": -100.0, "max": 100.0, "step":0.01, "round": False, "tooltip": "Strength of effect on layer; skips extra calculation if set to 0.0. Skips interpolation if set to 1.0."}),
 
-                    "ff_norm":       ("FLOAT", {"default": 0.0, "min": -100.0, "max": 100.0, "step":0.01, "round": False, "tooltip": "Strength of effect on layer; skips extra calculation if set to 0.0. Skips interpolation if set to 1.0."}),
-                    "ff_norm_mod":   ("FLOAT", {"default": 0.0, "min": -100.0, "max": 100.0, "step":0.01, "round": False, "tooltip": "Strength of effect on layer; skips extra calculation if set to 0.0. Skips interpolation if set to 1.0."}),
-                    "ff":            ("FLOAT", {"default": 0.0, "min": -100.0, "max": 100.0, "step":0.01, "round": False, "tooltip": "Strength of effect on layer; skips extra calculation if set to 0.0. Skips interpolation if set to 1.0."}),
-                    "ff_gated":      ("FLOAT", {"default": 0.0, "min": -100.0, "max": 100.0, "step":0.01, "round": False, "tooltip": "Strength of effect on layer; skips extra calculation if set to 0.0. Skips interpolation if set to 1.0."}),
-                    "ff_res":        ("FLOAT", {"default": 0.0, "min": -100.0, "max": 100.0, "step":0.01, "round": False, "tooltip": "Strength of effect on layer; skips extra calculation if set to 0.0. Skips interpolation if set to 1.0."}),
+                    "ff_norm":       ("FLOAT",  {"default": 0.0, "min": -100.0, "max": 100.0, "step":0.01, "round": False, "tooltip": "Strength of effect on layer; skips extra calculation if set to 0.0. Skips interpolation if set to 1.0."}),
+                    "ff_norm_mod":   ("FLOAT",  {"default": 0.0, "min": -100.0, "max": 100.0, "step":0.01, "round": False, "tooltip": "Strength of effect on layer; skips extra calculation if set to 0.0. Skips interpolation if set to 1.0."}),
+                    "ff":            ("FLOAT",  {"default": 0.0, "min": -100.0, "max": 100.0, "step":0.01, "round": False, "tooltip": "Strength of effect on layer; skips extra calculation if set to 0.0. Skips interpolation if set to 1.0."}),
+                    "ff_gated":      ("FLOAT",  {"default": 0.0, "min": -100.0, "max": 100.0, "step":0.01, "round": False, "tooltip": "Strength of effect on layer; skips extra calculation if set to 0.0. Skips interpolation if set to 1.0."}),
+                    "ff_res":        ("FLOAT",  {"default": 0.0, "min": -100.0, "max": 100.0, "step":0.01, "round": False, "tooltip": "Strength of effect on layer; skips extra calculation if set to 0.0. Skips interpolation if set to 1.0."}),
 
-                    "tile_h" : ("INT", {"default": 128, "min": 16, "max": 10000, "step": 16, "tooltip": "Tile size for tiled modes. Lower values will transfer composition more effectively. Dimensions of image must be divisible by this value."}),
-                    "tile_w" : ("INT", {"default": 128, "min": 16, "max": 10000, "step": 16, "tooltip": "Tile size for tiled modes. Lower values will transfer composition more effectively. Dimensions of image must be divisible by this value."}),
+                    "tile_h":        ("INT",    {"default": 128, "min": 16, "max": 10000, "step": 16, "tooltip": "Tile size for tiled modes. Lower values will transfer composition more effectively. Dimensions of image must be divisible by this value."}),
+                    "tile_w":        ("INT",    {"default": 128, "min": 16, "max": 10000, "step": 16, "tooltip": "Tile size for tiled modes. Lower values will transfer composition more effectively. Dimensions of image must be divisible by this value."}),
 
-                    "invert_mask":   ("BOOLEAN", {"default": False}),
+                    "invert_mask":   ("BOOLEAN",{"default": False}),
                     },
                 "optional": 
                     {
@@ -3463,7 +3470,7 @@ class ClownStyle_Block_MMDiT:
             blocks      = None,
             ):
         
-        mask = 1-mask if mask is not None else None
+        #mask = 1-mask if mask is not None else None
 
         blocks = copy.deepcopy(blocks) if blocks is not None else {}
         
@@ -3491,23 +3498,17 @@ class ClownStyle_Block_MMDiT:
             if len(block_weights) == 1:
                 block_weights = [block_weights[0]] * 100
         else:
-            block_list  = parse_range_string(block_list)
+            block_list  = parse_range_string_int(block_list)
             
             weights_expanded = [0.0] * 100
             for b, w in zip(block_list, block_weights):
                 weights_expanded[b] = w
             block_weights = weights_expanded
         
-
         StyleMMDiT = blocks.get('StyleMMDiT')
         if StyleMMDiT is None:
-            StyleMMDiT = StyleMMDiT_HiDream()
+            StyleMMDiT = StyleMMDiT_Model()
         
-        if   block_type == "double":
-            style_blocks = StyleMMDiT.double_blocks
-        elif block_type == "single":
-            style_blocks = StyleMMDiT.single_blocks
-            
         weights = {
             "attn_norm"    : attn_norm,
             "attn_norm_mod": attn_norm_mod,
@@ -3524,38 +3525,43 @@ class ClownStyle_Block_MMDiT:
             "w_tile"       : tile_w // 16,
         }
         
-        for bid in block_list:
-            block = style_blocks[bid]
-            scaled_weights = {
-                k: (v * block_weights[bid]) if isinstance(v, float) else v
-                for k, v in weights.items()
-            }
-            #scaled_weights = {k: v * block_weights[bid] for k, v in weights.items()}
+        block_types = block_type.split(",")
+        
+        for block_type in block_types:
+        
+            if   block_type == "double":
+                style_blocks = StyleMMDiT.double_blocks
+            elif block_type == "single":
+                style_blocks = StyleMMDiT.single_blocks
+                
+            for bid in block_list:
+                block = style_blocks[bid]
+                scaled_weights = {
+                    k: (v * block_weights[bid]) if isinstance(v, float) else v
+                    for k, v in weights.items()
+                }
 
-            if "img" in apply_to  or block_type == "single":
-                block.img.set_mode(mode)
-                block.img.set_weights(**scaled_weights)
+                if "img" in apply_to  or block_type == "single":
+                    block.img.set_mode(mode)
+                    block.img.set_weights(**scaled_weights)
+                    block.img.apply_to = [apply_to]
+
+                if "txt" in apply_to and block_type == "double":
+                    mode = "scattersort" if mode == "tiled_scattersort" else mode
+                    mode = "AdaIN" if mode == "tiled_AdaIN" else mode
+                    block.txt.set_mode(mode)
+                    block.txt.set_weights(**scaled_weights)
+                    block.txt.apply_to = [apply_to]
+                
                 block.img.apply_to = [apply_to]
-
-            if "txt" in apply_to and block_type == "double":
-                mode = "scattersort" if mode == "tiled_scattersort" else mode
-                block.txt.set_mode(mode)
-                block.txt.set_weights(**scaled_weights)
-                block.txt.apply_to = [apply_to]
-            
-            block.img.apply_to = [apply_to]
-            if hasattr(block, "txt"):
-                block.txt.apply_to = [apply_to]
-            
-            block.mask = [mask]
+                if hasattr(block, "txt"):
+                    block.txt.apply_to = [apply_to]
+                
+                block.mask = [mask]
 
         blocks['StyleMMDiT'] = StyleMMDiT
 
         return (blocks, )
-
-
-
-
 
 
 
@@ -3565,11 +3571,11 @@ class ClownStyle_Attn_MMDiT:
     def INPUT_TYPES(cls):
         return {"required":
                     {
-                    "mode":     (["scattersort", "tiled_scattersort", "AdaIN", "WCT", "WCT2", "injection"], {"default": "scattersort"},),
-                    "apply_to": (["img","img+txt","txt"], {"default": "img+txt"},),
-                    "block_type" : (["double", "single", "double+single"], {"default": "single"},),
-                    "block_list"   : ("STRING", {"default": "all", "multiline": True}),
-                    "block_weights" :("STRING", {"default": "1.0", "multiline": True}),
+                    "mode":          (["scattersort", "tiled_scattersort", "AdaIN", "tiled_AdaIN", "WCT", "WCT2", "injection"], {"default": "scattersort"},),
+                    "apply_to":      (["img","img+txt","img,txt","txt"], {"default": "img+txt"},),
+                    "block_type":    (["double", "double,single", "single"], {"default": "single"},),
+                    "block_list":    ("STRING", {"default": "all", "multiline": True}),
+                    "block_weights": ("STRING", {"default": "1.0", "multiline": True}),
                     
                     "q_proj": ("FLOAT", {"default": 0.0, "min": -100.0, "max": 100.0, "step":0.01, "round": False, "tooltip": "Strength of effect on layer; skips extra calculation if set to 0.0. Skips interpolation if set to 1.0."}),
                     "k_proj": ("FLOAT", {"default": 0.0, "min": -100.0, "max": 100.0, "step":0.01, "round": False, "tooltip": "Strength of effect on layer; skips extra calculation if set to 0.0. Skips interpolation if set to 1.0."}),
@@ -3578,15 +3584,15 @@ class ClownStyle_Attn_MMDiT:
                     "k_norm": ("FLOAT", {"default": 0.0, "min": -100.0, "max": 100.0, "step":0.01, "round": False, "tooltip": "Strength of effect on layer; skips extra calculation if set to 0.0. Skips interpolation if set to 1.0."}),
                     "out":    ("FLOAT", {"default": 0.0, "min": -100.0, "max": 100.0, "step":0.01, "round": False, "tooltip": "Strength of effect on layer; skips extra calculation if set to 0.0. Skips interpolation if set to 1.0."}),
 
-                    "tile_h" : ("INT", {"default": 128, "min": 16, "max": 10000, "step": 16, "tooltip": "Tile size for tiled modes. Lower values will transfer composition more effectively. Dimensions of image must be divisible by this value."}),
-                    "tile_w" : ("INT", {"default": 128, "min": 16, "max": 10000, "step": 16, "tooltip": "Tile size for tiled modes. Lower values will transfer composition more effectively. Dimensions of image must be divisible by this value."}),
+                    "tile_h": ("INT",   {"default": 128, "min": 16, "max": 10000, "step": 16, "tooltip": "Tile size for tiled modes. Lower values will transfer composition more effectively. Dimensions of image must be divisible by this value."}),
+                    "tile_w": ("INT",   {"default": 128, "min": 16, "max": 10000, "step": 16, "tooltip": "Tile size for tiled modes. Lower values will transfer composition more effectively. Dimensions of image must be divisible by this value."}),
 
                     "invert_mask":   ("BOOLEAN", {"default": False}),
                     },
                 "optional": 
                     {
-                    "mask":        ("MASK", ),
-                    "blocks":      ("BLOCKS", ),
+                    "mask":   ("MASK", ),
+                    "blocks": ("BLOCKS", ),
                     }  
                 }
     
@@ -3619,7 +3625,7 @@ class ClownStyle_Attn_MMDiT:
             blocks      = None,
             ):
         
-        mask = 1-mask if mask is not None else None
+        #mask = 1-mask if mask is not None else None
 
         blocks = copy.deepcopy(blocks) if blocks is not None else {}
         
@@ -3647,22 +3653,16 @@ class ClownStyle_Attn_MMDiT:
             if len(block_weights) == 1:
                 block_weights = [block_weights[0]] * 100
         else:
-            block_list  = parse_range_string(block_list)
+            block_list  = parse_range_string_int(block_list)
             
             weights_expanded = [0.0] * 100
             for b, w in zip(block_list, block_weights):
                 weights_expanded[b] = w
             block_weights = weights_expanded
         
-
         StyleMMDiT = blocks.get('StyleMMDiT')
         if StyleMMDiT is None:
-            StyleMMDiT = StyleMMDiT_HiDream()
-        
-        if   block_type == "double":
-            style_blocks = StyleMMDiT.double_blocks
-        elif block_type == "single":
-            style_blocks = StyleMMDiT.single_blocks
+            StyleMMDiT = StyleMMDiT_Model()
         
         weights = {
             "q_proj": q_proj,
@@ -3674,33 +3674,41 @@ class ClownStyle_Attn_MMDiT:
             
             "h_tile": tile_h // 16,
             "w_tile": tile_w // 16,
-            
         }
+        
+        block_types = block_type.split(",")
+        
+        for block_type in block_types:
+            
+            if   block_type == "double":
+                style_blocks = StyleMMDiT.double_blocks
+            elif block_type == "single":
+                style_blocks = StyleMMDiT.single_blocks
+            
+            for bid in block_list:
+                block = style_blocks[bid]
+                scaled_weights = {
+                    k: (v * block_weights[bid]) if isinstance(v, float) else v
+                    for k, v in weights.items()
+                }
+
+                if "img" in apply_to  or block_type == "single":
+                    block.img.ATTN.set_mode(mode)
+                    block.img.ATTN.set_weights(**scaled_weights)
+                    block.img.ATTN.apply_to = [apply_to]
+
+                if "txt" in apply_to and block_type == "double":
+                    mode = "scattersort" if mode == "tiled_scattersort" else mode
+                    mode = "AdaIN" if mode == "tiled_AdaIN" else mode
+                    block.txt.ATTN.set_mode(mode)
+                    block.txt.ATTN.set_weights(**scaled_weights)
+                    block.txt.ATTN.apply_to = [apply_to]
                 
-        for bid in block_list:
-            block = style_blocks[bid]
-            scaled_weights = {
-                k: (v * block_weights[bid]) if isinstance(v, float) else v
-                for k, v in weights.items()
-            }
-            #scaled_weights = {k: v * block_weights[bid] for k, v in weights.items()}
-
-            if "img" in apply_to  or block_type == "single":
-                block.img.ATTN.set_mode(mode)
-                block.img.ATTN.set_weights(**scaled_weights)
                 block.img.ATTN.apply_to = [apply_to]
-
-            if "txt" in apply_to and block_type == "double":
-                mode = "scattersort" if mode == "tiled_scattersort" else mode
-                block.txt.ATTN.set_mode(mode)
-                block.txt.ATTN.set_weights(**scaled_weights)
-                block.txt.ATTN.apply_to = [apply_to]
-            
-            block.img.ATTN.apply_to = [apply_to]
-            if hasattr(block, "txt"):
-                block.txt.ATTN.apply_to = [apply_to]
-            
-            block.attn_mask = [mask]
+                if hasattr(block, "txt"):
+                    block.txt.ATTN.apply_to = [apply_to]
+                
+                block.attn_mask = [mask]
 
         blocks['StyleMMDiT'] = StyleMMDiT
 
