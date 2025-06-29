@@ -145,67 +145,116 @@ class DoubleStreamBlock(nn.Module):
             nn.GELU(approximate="tanh"),
             operations.Linear(mlp_hidden_dim, hidden_size, bias=True, dtype=dtype, device=device),
         ) # 3072->12288, 12288->3072  (3072*4)
-    
-    def img_attn_preproc(self, img, img_mod1, cross_self_mask=None):
-        img_modulated = self.img_norm1(img)
-        img_modulated = (1 + img_mod1.scale) * img_modulated + img_mod1.shift
-        img_qkv       = self.img_attn.qkv(img_modulated)
-        
-        img_q, img_k, img_v = rearrange(img_qkv, "B L (K H D) -> K B H L D", K=3, H=self.num_heads)
 
-        img_q, img_k        = self.img_attn.norm(img_q, img_k, img_v)
+    def forward(self, img: Tensor, txt: Tensor, vec: Tensor, pe: Tensor, mask=None, idx=0, update_cross_attn=None, style_block=None) -> Tuple[Tensor, Tensor]: # vec 1,3072  # vec 1,3072    #mask.shape 4608,4608  #img_attn.shape 1,4096,3072    txt_attn.shape 1,512,3072
 
-        
-        if False: #cross_self_mask is not None and cross_self_mask.sum() != 0.0:
-            derp_mask = torch.ones_like(img_q)
-            derp_mask_inv = torch.ones_like(img_q)
-            
-            derp_mask    [:,:,:,:] = (cross_self_mask)   * 0.25 + 1
-            derp_mask_inv[:,:,:,:] = (1-cross_self_mask) * 0.25 + 1
-            #derp_mask_inv[:,:,:,:] = 1 - 0.25 * cross_self_mask
-            
-            #img_q *= derp_mask#_inv
-            #img_k *= derp_mask_inv
-            img_v *= derp_mask_inv
-        
-        
-        
-        return img_q, img_k, img_v
-    
-    def txt_attn_preproc(self, txt, txt_mod1):
-        txt_modulated = self.txt_norm1(txt)
-        txt_modulated = (1 + txt_mod1.scale) * txt_modulated + txt_mod1.shift
-        txt_qkv       = self.txt_attn.qkv(txt_modulated)
-        
-        txt_q, txt_k, txt_v = rearrange(txt_qkv, "B L (K H D) -> K B H L D", K=3, H=self.num_heads)    # Batch SeqLen (9216==3*3072) -> 3*1 24 SeqLen 128
-        txt_q, txt_k        = self.txt_attn.norm(txt_q, txt_k, txt_v)
-        return txt_q, txt_k, txt_v
-
-
-    def forward(self, img: Tensor, txt: Tensor, vec: Tensor, pe: Tensor, mask=None, cross_self_mask=None, idx=0, update_cross_attn=None, sigma=None, lamb_t_factor=0.1) -> Tuple[Tensor, Tensor]: # vec 1,3072  # vec 1,3072    #mask.shape 4608,4608  #img_attn.shape 1,4096,3072    txt_attn.shape 1,512,3072
+        img_len = img.shape[-2]
+        txt_len = txt.shape[-2]
 
         img_mod1, img_mod2  = self.img_mod(vec) # -> 3072, 3072
         txt_mod1, txt_mod2  = self.txt_mod(vec)
         
-        img_q, img_k, img_v = self.img_attn_preproc(img, img_mod1, cross_self_mask=cross_self_mask)
-        txt_q, txt_k, txt_v = self.txt_attn_preproc(txt, txt_mod1)
+        img_norm = self.img_norm1(img)
+        txt_norm = self.txt_norm1(txt)
+        
+        img_norm = style_block.img(img_norm, "attn_norm")
+        txt_norm = style_block.txt(txt_norm, "attn_norm")
+
+        img_norm = img_norm * (1+img_mod1.scale) + img_mod1.shift
+        txt_norm = txt_norm * (1+txt_mod1.scale) + txt_mod1.shift
+
+        img_norm = style_block.img(img_norm, "attn_norm_mod")
+        txt_norm = style_block.txt(txt_norm, "attn_norm_mod")
+        
+        
+        
+        ### ATTN ###
+        img_qkv             = self.img_attn.qkv(img_norm)
+        img_q, img_k, img_v = img_qkv.view(img_qkv.shape[0], img_qkv.shape[1], 3, self.num_heads, -1).permute(2, 0, 3, 1, 4)
+        
+        img_q = style_block.img.ATTN(img_q, "q_proj")
+        img_k = style_block.img.ATTN(img_k, "k_proj")
+        img_v = style_block.img.ATTN(img_v, "v_proj")
+        
+        img_q, img_k        = self.img_attn.norm(img_q, img_k, img_v)
+        
+        img_q = style_block.img.ATTN(img_q, "q_norm")
+        img_k = style_block.img.ATTN(img_k, "k_norm")
+        
+        txt_qkv             = self.txt_attn.qkv(txt_norm)
+        txt_q, txt_k, txt_v = txt_qkv.view(txt_qkv.shape[0], txt_qkv.shape[1], 3, self.num_heads, -1).permute(2, 0, 3, 1, 4)
+        
+        txt_q = style_block.txt.ATTN(txt_q, "q_proj")
+        txt_k = style_block.txt.ATTN(txt_k, "k_proj")
+        txt_v = style_block.txt.ATTN(txt_v, "v_proj")
+        
+        txt_q, txt_k        = self.txt_attn.norm(txt_q, txt_k, txt_v)
+        
+        txt_q = style_block.txt.ATTN(txt_q, "q_norm")
+        txt_k = style_block.txt.ATTN(txt_k, "k_norm")
 
         q, k, v = torch.cat((txt_q, img_q), dim=2), torch.cat((txt_k, img_k), dim=2), torch.cat((txt_v, img_v), dim=2)
+        attn = attention(q, k, v, pe=pe, mask=mask)
+        
+        txt_attn = attn[:,:txt_len]                         # 1, 768,3072
+        img_attn = attn[:,txt_len:]  
+        
+        img_attn = style_block.img.ATTN(img_attn, "out")
+        txt_attn = style_block.txt.ATTN(txt_attn, "out")
+        
+        img_attn = self.img_attn.proj(img_attn)    #to_out
+        txt_attn = self.txt_attn.proj(txt_attn)
+        ### ATTN ###
 
-        #attn = attention(q, k, v, pe=pe, mask=mask, cross_self_mask=None)
-        attn = attention(q, k, v, pe=pe, mask=mask, cross_self_mask=cross_self_mask, sigma=sigma, lamb_t_factor=lamb_t_factor)
+
+
+        img_attn = style_block.img(img_attn, "attn")
+        txt_attn = style_block.txt(txt_attn, "attn")
         
-        txt_attn = attn[:, : txt.shape[1]   ]                         # 1, 768,3072
-        img_attn = attn[:,   txt.shape[1] : ]  
+        img_attn *= img_mod1.gate
+        txt_attn *= txt_mod1.gate
         
-        img += img_mod1.gate * self.img_attn.proj(img_attn)
-        txt += txt_mod1.gate * self.txt_attn.proj(txt_attn)
+        img_attn = style_block.img(img_attn, "attn_gated")
+        txt_attn = style_block.txt(txt_attn, "attn_gated")
         
-        img += img_mod2.gate * self.img_mlp((1 + img_mod2.scale) * self.img_norm2(img) + img_mod2.shift)
-        txt += txt_mod2.gate * self.txt_mlp((1 + txt_mod2.scale) * self.txt_norm2(txt) + txt_mod2.shift)
+        img += img_attn
+        txt += txt_attn
         
-        #return img, txt
+        img = style_block.img(img, "attn_res")
+        txt = style_block.txt(txt, "attn_res")
         
+        
+        
+        img_norm = self.img_norm2(img)
+        txt_norm = self.txt_norm2(txt)
+        
+        img_norm = style_block.img(img_norm, "ff_norm")
+        txt_norm = style_block.txt(txt_norm, "ff_norm")
+        
+        img_norm = img_norm * (1+img_mod2.scale) + img_mod2.shift
+        txt_norm = txt_norm * (1+txt_mod2.scale) + txt_mod2.shift
+        
+        img_norm = style_block.img(img_norm, "ff_norm_mod")
+        txt_norm = style_block.txt(txt_norm, "ff_norm_mod")
+        
+        img_mlp = self.img_mlp(img_norm)
+        txt_mlp = self.txt_mlp(txt_norm)
+        
+        img_mlp = style_block.img(img_mlp, "ff")
+        txt_mlp = style_block.txt(txt_mlp, "ff")
+        
+        img_mlp *= img_mod2.gate
+        txt_mlp *= txt_mod2.gate
+        
+        img_mlp = style_block.img(img_mlp, "ff_gated")
+        txt_mlp = style_block.txt(txt_mlp, "ff_gated")
+        
+        img += img_mlp
+        txt += txt_mlp
+        
+        img = style_block.img(img, "ff_res")
+        txt = style_block.txt(txt, "ff_res")
+
         if update_cross_attn is not None:
             if not update_cross_attn['skip_cross_attn']:
                 UNCOND      = update_cross_attn['UNCOND']
@@ -306,43 +355,54 @@ class SingleStreamBlock(nn.Module):      #attn.shape = 1,4608,3072       mlp.sha
 
         self.mlp_act        = nn.GELU(approximate="tanh")
         self.modulation     = Modulation(hidden_size, double=False,                                 dtype=dtype, device=device, operations=operations)
-        
-    def img_attn(self, img, mod, pe, mask, cross_self_mask=None, sigma=None, lamb_t_factor=0.1):
-        img_mod  = (1 + mod.scale) * self.pre_norm(img) + mod.shift   # mod => vec
-        qkv, mlp = torch.split(self.linear1(img_mod), [3*self.hidden_size, self.mlp_hidden_dim], dim=-1)
 
-        q, k, v  = rearrange(qkv, "B L (K H D) -> K B H L D", K=3, H=self.num_heads)
-        
 
+    # vec 1,3072    x 1,9984,3072
+    def forward(self, img: Tensor, vec: Tensor, pe: Tensor, mask=None, idx=0, style_block=None) -> Tensor:   # x 1,9984,3072 if 2 reg embeds, 1,9472,3072 if none    # 9216x4096 = 16x1536x1536
+        mod, _    = self.modulation(vec)
+        
+        img_norm = self.pre_norm(img)
+        img_norm = style_block.img(img_norm, "attn_norm")
+        
+        img_norm  = (1 + mod.scale) * img_norm + mod.shift   # mod => vec
+        img_norm = style_block.img(img_norm, "attn_norm_mod")
+        
+        
+        
+        ### ATTN ###
+        qkv, mlp = torch.split(self.linear1(img_norm), [3*self.hidden_size, self.mlp_hidden_dim], dim=-1)
+
+        q, k, v  = qkv.view(qkv.shape[0], qkv.shape[1], 3, self.num_heads, -1).permute(2, 0, 3, 1, 4)     #q, k, v  = rearrange(qkv, "B L (K H D) -> K B H L D", K=3, H=self.num_heads)
+        
+        q = style_block.img.ATTN(q, "q_proj")
+        k = style_block.img.ATTN(k, "k_proj")
+        v = style_block.img.ATTN(v, "v_proj")
         
         q, k     = self.norm(q, k, v)
         
-        if False: # cross_self_mask is not None and cross_self_mask.sum() != 0.0:
-            derp_mask = torch.ones_like(q)
-            derp_mask_inv = torch.ones_like(q)
-            
-            txt_len = q.shape[-2] - cross_self_mask.shape[0]
-            
-            derp_mask    [:,:,txt_len:,:] = (cross_self_mask)   * 0.25 + 1
-            derp_mask_inv[:,:,txt_len:,:] = (1-cross_self_mask) * 0.25 + 1
-            #derp_mask_inv[:,:,txt_len:,:] = 1 - 0.25 * cross_self_mask
-            #q *= derp_mask_inv
-            #k *= derp_mask#_inv
-            v *= derp_mask_inv
-
-        #attn     = attention(q, k, v, pe=pe, mask=mask, cross_self_mask=None)
-        attn     = attention(q, k, v, pe=pe, mask=mask, cross_self_mask=cross_self_mask, sigma=sigma, lamb_t_factor=0.1)
+        q = style_block.img.ATTN(q, "q_norm")
+        k = style_block.img.ATTN(k, "k_norm")
         
-        return attn, mlp
+        attn = attention(q, k, v, pe=pe, mask=mask)
+        attn = style_block.img.ATTN(attn, "out")
+        ### ATTN ###
 
-    # vec 1,3072    x 1,9984,3072
-    def forward(self, img: Tensor, vec: Tensor, pe: Tensor, mask=None, cross_self_mask=None, idx=0, sigma=None, lamb_t_factor=0.1) -> Tensor:   # x 1,9984,3072 if 2 reg embeds, 1,9472,3072 if none    # 9216x4096 = 16x1536x1536
-        mod, _    = self.modulation(vec)
+
+
+        mlp = style_block.img(mlp, "ff_norm")
+
+        mlp_act = self.mlp_act(mlp)
+        mlp_act = style_block.img(mlp_act, "ff_norm_mod")
+
+        img_ff_i  = self.linear2(torch.cat((attn, mlp_act), 2))   # effectively FF smooshed into one line
+        img_ff_i = style_block.img(img_ff_i, "ff")
+
+        img_ff_i *= mod.gate
+        img_ff_i = style_block.img(img_ff_i, "ff_gated")
+
+        img      += img_ff_i
+        img = style_block.img(img, "ff_res")
         
-        attn, mlp = self.img_attn(img, mod, pe, mask, cross_self_mask, sigma, lamb_t_factor)
-        output    = self.linear2(torch.cat((attn, self.mlp_act(mlp)), 2))
-
-        img      += mod.gate * output
         return img
 
 

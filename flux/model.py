@@ -25,11 +25,12 @@ from . import layers
 from comfy.ldm.flux.model import Flux as Flux
 
 import math
+import einops
 from einops import rearrange, repeat
 import comfy.ldm.common_dit
 
 from ..latents import tile_latent, untile_latent, gaussian_blur_2d, median_blur_2d
-from ..style_transfer import apply_scattersort_masked, apply_scattersort_tiled, adain_seq_inplace, adain_patchwise_row_batch_med, adain_patchwise_row_batch
+from ..style_transfer import apply_scattersort_masked, apply_scattersort_tiled, adain_seq_inplace, adain_patchwise_row_batch_med, adain_patchwise_row_batch, StyleMMDiT_Model
 #from ..latents import interpolate_spd
 
 @dataclass
@@ -101,7 +102,8 @@ class ReFlux(Flux):
                         transformer_options = {},
                         UNCOND : bool = False,
                         SIGMA = None,
-                        lamb_t_factor = 0.1,
+                        StyleMMDiT_Model = None,
+                        RECON_MODE=False,
                         ) -> Tensor:
         
         if img.ndim != 3 or txt.ndim != 3:
@@ -124,20 +126,17 @@ class ReFlux(Flux):
         ids = torch.cat((txt_ids, img_ids), dim=1) # img_ids.shape=1,8192,3    txt_ids.shape=1,512,3    #ids.shape=1,8704,3
         pe  = self.pe_embedder(ids)                 # pe.shape 1,1,8704,64,2,2
         
-        lamb_t_factor = transformer_options.get("regional_conditioning_weight", 0.0)
         
         weight    = -1 * transformer_options.get("regional_conditioning_weight", 0.0)
         floor     = -1 * transformer_options.get("regional_conditioning_floor",  0.0)
         mask_zero = None
         mask = None
-        cross_self_mask = None
         
         text_len = txt.shape[1] 
         
         if not UNCOND and 'AttnMask' in transformer_options: 
             AttnMask = transformer_options['AttnMask']
             mask = transformer_options['AttnMask'].attn_mask.mask.to('cuda')
-            cross_self_mask = transformer_options['AttnMask'].cross_self_mask.mask.to('cuda')
             if mask_zero is None:
                 mask_zero = torch.ones_like(mask)
                 img_len = transformer_options['AttnMask'].img_len
@@ -149,7 +148,6 @@ class ReFlux(Flux):
         if UNCOND and 'AttnMask_neg' in transformer_options: 
             AttnMask = transformer_options['AttnMask_neg']
             mask = transformer_options['AttnMask_neg'].attn_mask.mask.to('cuda')
-            cross_self_mask = transformer_options['AttnMask_neg'].cross_self_mask.mask.to('cuda')
             if mask_zero is None:
                 mask_zero = torch.ones_like(mask)
                 img_len = transformer_options['AttnMask_neg'].img_len
@@ -161,7 +159,6 @@ class ReFlux(Flux):
         elif UNCOND and 'AttnMask' in transformer_options:
             AttnMask = transformer_options['AttnMask']
             mask = transformer_options['AttnMask'].attn_mask.mask.to('cuda')
-            cross_self_mask = transformer_options['AttnMask'].cross_self_mask.mask.to('cuda')
             if mask_zero is None:
                 mask_zero = torch.ones_like(mask)
                 img_len = transformer_options['AttnMask'].img_len
@@ -169,9 +166,6 @@ class ReFlux(Flux):
                 mask_zero[:, :text_len] = mask[:, :text_len]
             if weight == 0:
                 mask = None
-        
-        if not hasattr(self, "cross_self_weight"):
-            self.cross_self_weight = 1.0
 
         if mask is not None and not type(mask[0][0].item()) == bool:
             mask = mask.to(img.dtype)
@@ -184,25 +178,25 @@ class ReFlux(Flux):
         for i, block in enumerate(self.double_blocks):
 
             if   weight > 0 and mask is not None and     weight  <=      i/total_layers:
-                img, txt = block(img=img, txt=txt, vec=vec, pe=pe, mask=mask_zero, cross_self_mask=cross_self_mask, idx=i, update_cross_attn=update_cross_attn, sigma=SIGMA, lamb_t_factor=lamb_t_factor)
+                img, txt = block(img=img, txt=txt, vec=vec, pe=pe, mask=mask_zero, idx=i, update_cross_attn=update_cross_attn)
                 
             elif (weight < 0 and mask is not None and abs(weight) <= (1 - i/total_layers)):
                 img_tmpZ, txt_tmpZ = img.clone(), txt.clone()
-                img_tmpZ, txt = block(img=img_tmpZ, txt=txt_tmpZ, vec=vec, pe=pe, mask=mask, cross_self_mask=cross_self_mask, idx=i, update_cross_attn=update_cross_attn, sigma=SIGMA, lamb_t_factor=lamb_t_factor)
-                img, txt_tmpZ = block(img=img     , txt=txt     , vec=vec, pe=pe, mask=mask_zero, cross_self_mask=cross_self_mask, idx=i, update_cross_attn=update_cross_attn, sigma=SIGMA, lamb_t_factor=lamb_t_factor)
+                img_tmpZ, txt = block(img=img_tmpZ, txt=txt_tmpZ, vec=vec, pe=pe, mask=mask, idx=i, update_cross_attn=update_cross_attn)
+                img, txt_tmpZ = block(img=img     , txt=txt     , vec=vec, pe=pe, mask=mask_zero, idx=i, update_cross_attn=update_cross_attn)
                 
             elif floor > 0 and mask is not None and     floor  >=      i/total_layers:
                 mask_tmp = mask.clone()
                 mask_tmp[text_len:, text_len:] = 1.0
-                img, txt = block(img=img, txt=txt, vec=vec, pe=pe, mask=mask_tmp, cross_self_mask=cross_self_mask, idx=i, update_cross_attn=update_cross_attn, sigma=SIGMA, lamb_t_factor=lamb_t_factor)
+                img, txt = block(img=img, txt=txt, vec=vec, pe=pe, mask=mask_tmp, idx=i, update_cross_attn=update_cross_attn)
                 
             elif floor < 0 and mask is not None and abs(floor) >= (1 - i/total_layers):
                 mask_tmp = mask.clone()
                 mask_tmp[text_len:, text_len:] = 1.0
-                img, txt = block(img=img, txt=txt, vec=vec, pe=pe, mask=mask_tmp, cross_self_mask=cross_self_mask, idx=i, update_cross_attn=update_cross_attn, sigma=SIGMA, lamb_t_factor=lamb_t_factor)
+                img, txt = block(img=img, txt=txt, vec=vec, pe=pe, mask=mask_tmp, idx=i, update_cross_attn=update_cross_attn)
 
             else:
-                img, txt = block(img=img, txt=txt, vec=vec, pe=pe, mask=mask, cross_self_mask=cross_self_mask, idx=i, update_cross_attn=update_cross_attn, sigma=SIGMA, lamb_t_factor=lamb_t_factor)
+                img, txt = block(img=img, txt=txt, vec=vec, pe=pe, mask=mask, idx=i, update_cross_attn=update_cross_attn)
 
 
             if control is not None: 
@@ -224,23 +218,23 @@ class ReFlux(Flux):
         for i, block in enumerate(self.single_blocks):
 
             if   weight > 0 and mask is not None and     weight  <=      (i+len(self.double_blocks))/total_layers:
-                img = block(img, vec=vec, pe=pe, mask=mask_zero, cross_self_mask=cross_self_mask, sigma=SIGMA, lamb_t_factor=lamb_t_factor)
+                img = block(img, vec=vec, pe=pe, mask=mask_zero)
                 
             elif weight < 0 and mask is not None and abs(weight) <= (1 - (i+len(self.double_blocks))/total_layers):
-                img = block(img, vec=vec, pe=pe, mask=mask_zero, cross_self_mask=cross_self_mask, sigma=SIGMA, lamb_t_factor=lamb_t_factor)
+                img = block(img, vec=vec, pe=pe, mask=mask_zero)
                 
             elif floor > 0 and mask is not None and     floor  >=      (i+len(self.double_blocks))/total_layers:
                 mask_tmp = mask.clone()
                 mask_tmp[text_len:, text_len:] = 1.0
-                img = block(img, vec=vec, pe=pe, mask=mask_tmp, cross_self_mask=cross_self_mask, sigma=SIGMA, lamb_t_factor=lamb_t_factor)
+                img = block(img, vec=vec, pe=pe, mask=mask_tmp)
                 
             elif floor < 0 and mask is not None and abs(floor) >= (1 - (i+len(self.double_blocks))/total_layers):
                 mask_tmp = mask.clone()
                 mask_tmp[text_len:, text_len:] = 1.0
-                img = block(img, vec=vec, pe=pe, mask=mask_tmp, cross_self_mask=cross_self_mask, sigma=SIGMA, lamb_t_factor=lamb_t_factor)
+                img = block(img, vec=vec, pe=pe, mask=mask_tmp)
                 
             else:
-                img = block(img, vec=vec, pe=pe, mask=mask, cross_self_mask=cross_self_mask, sigma=SIGMA, lamb_t_factor=lamb_t_factor)
+                img = block(img, vec=vec, pe=pe, mask=mask)
 
 
 
@@ -267,7 +261,24 @@ class ReFlux(Flux):
         img = self.final_layer(img, vec)  # (N, T, patch_size ** 2 * out_channels)     1,8192,3072 -> 1,8192,64 
         return img
     
-    
+    def process_img(self, x, index=0, h_offset=0, w_offset=0):
+        bs, c, h, w = x.shape
+        patch_size = self.patch_size
+        x = comfy.ldm.common_dit.pad_to_patch_size(x, (patch_size, patch_size))
+
+        img = rearrange(x, "b c (h ph) (w pw) -> b (h w) (c ph pw)", ph=patch_size, pw=patch_size)
+        h_len = ((h + (patch_size // 2)) // patch_size)
+        w_len = ((w + (patch_size // 2)) // patch_size)
+
+        h_offset = ((h_offset + (patch_size // 2)) // patch_size)
+        w_offset = ((w_offset + (patch_size // 2)) // patch_size)
+
+        img_ids = torch.zeros((h_len, w_len, 3), device=x.device, dtype=x.dtype)
+        img_ids[:, :, 0] = img_ids[:, :, 1] + index
+        img_ids[:, :, 1] = img_ids[:, :, 1] + torch.linspace(h_offset, h_len - 1 + h_offset, steps=h_len, device=x.device, dtype=x.dtype).unsqueeze(1)
+        img_ids[:, :, 2] = img_ids[:, :, 2] + torch.linspace(w_offset, w_len - 1 + w_offset, steps=w_len, device=x.device, dtype=x.dtype).unsqueeze(0)
+        return img, repeat(img_ids, "h w c -> b (h w) c", b=bs)
+
     
     def _get_img_ids(self, x, bs, h_len, w_len, h_start, h_end, w_start, w_end):
         img_ids          = torch.zeros(  (h_len,   w_len, 3),              device=x.device, dtype=x.dtype)
@@ -282,32 +293,354 @@ class ReFlux(Flux):
                 context,
                 y,
                 guidance,
+                ref_latents=None, 
                 control             = None,
                 transformer_options = {},
+                mask                = None,
                 **kwargs
                 ):
-        x_orig       = x.clone()
-        SIGMA = timestep[0].unsqueeze(0)
-        update_cross_attn = transformer_options.get("update_cross_attn")
+        t = timestep
+        self.max_seq = (128 * 128) // (2 * 2)
+        x_orig      = x.clone()
+        b, c, h, w  = x.shape
+        h_len = ((h + (self.patch_size // 2)) // self.patch_size) # h_len 96
+        w_len = ((w + (self.patch_size // 2)) // self.patch_size) # w_len 96
+        img_len = h_len * w_len
+        img_slice = slice(-img_len, None) #slice(None, img_len)
+        txt_slice = slice(None, -img_len)
+        SIGMA = t[0].clone() #/ 1000
         EO = transformer_options.get("ExtraOptions", ExtraOptions(""))
         if EO is not None:
             EO.mute = True
-        
-        if EO("adain_tile"):
-            self.adain_tile = (EO("adain_tile", 4), EO("adain_tile", 4))
-            self.adain_flag = False
+
+        if EO("zero_heads"):
+            HEADS = 0
         else:
-            if hasattr(self, "adain_tile"):
-                del self.adain_tile
+            HEADS = 24
+
+        StyleMMDiT = transformer_options.get('StyleMMDiT', StyleMMDiT_Model())        
+        StyleMMDiT.set_len(h_len, w_len, img_slice, txt_slice, HEADS=HEADS)
+        StyleMMDiT.Retrojector = self.Retrojector if hasattr(self, "Retrojector") else None
+        transformer_options['StyleMMDiT'] = None
         
-        lamb_t_factor = EO("lamb_t_factor", 0.1)
+        x_tmp = transformer_options.get("x_tmp")
+        if x_tmp is not None:
+            x_tmp = x_tmp.expand(x.shape[0], -1, -1, -1).clone()
+            img = comfy.ldm.common_dit.pad_to_patch_size(x_tmp, (self.patch_size, self.patch_size))
+        else:
+            img = comfy.ldm.common_dit.pad_to_patch_size(x, (self.patch_size, self.patch_size))
+        
+        y0_style, img_y0_style = None, None
 
-        y0_style_pos        = transformer_options.get("y0_style_pos")
-        y0_style_neg        = transformer_options.get("y0_style_neg")
-
+        img_orig, t_orig, y_orig, context_orig = clone_inputs(img, t, y, context)
+    
         weight    = -1 * transformer_options.get("regional_conditioning_weight", 0.0)
         floor     = -1 * transformer_options.get("regional_conditioning_floor",  0.0)
+        update_cross_attn = transformer_options.get("update_cross_attn")
+    
+        z_ = transformer_options.get("z_")   # initial noise and/or image+noise from start of rk_sampler_beta() 
+        rk_row = transformer_options.get("row") # for "smart noise"
+        if z_ is not None:
+            x_init = z_[rk_row].to(x)
+        elif 'x_init' in transformer_options:
+            x_init = transformer_options.get('x_init').to(x)
+
+        # recon loop to extract exact noise pred for scattersort guide assembly
+        RECON_MODE = StyleMMDiT.noise_mode == "recon"
+        recon_iterations = 2 if StyleMMDiT.noise_mode == "recon" else 1
+        for recon_iter in range(recon_iterations):
+            y0_style = StyleMMDiT.guides
+            y0_style_active = True if type(y0_style) == torch.Tensor else False
+            
+            RECON_MODE = True     if StyleMMDiT.noise_mode == "recon" and recon_iter == 0     else False
+            
+            if StyleMMDiT.noise_mode == "recon" and recon_iter == 1:
+                x_recon = x_tmp if x_tmp is not None else x_orig
+                noise_prediction = x_recon + (1-SIGMA.to(x_recon)) * eps.to(x_recon)
+                denoised = x_recon - SIGMA.to(x_recon) * eps.to(x_recon)
+                
+                denoised = StyleMMDiT.apply_recon_lure(denoised, y0_style)
+
+                new_x = (1-SIGMA.to(denoised)) * denoised + SIGMA.to(denoised) * noise_prediction
+                img_orig = img = comfy.ldm.common_dit.pad_to_patch_size(new_x, (self.patch_size, self.patch_size))
+                
+                x_init = noise_prediction
+            elif StyleMMDiT.noise_mode == "bonanza":
+                x_init = torch.randn_like(x_init)
+
+            if y0_style_active:
+                SIGMA_ADAIN         = (SIGMA * EO("eps_adain_sigma_factor", 1.0)).to(y0_style)
+                y0_style_noised     = (1-SIGMA_ADAIN) * y0_style + SIGMA_ADAIN * x_init[0:1].to(y0_style)   #always only use first batch of noise to avoid broadcasting
+                img_y0_style_orig   = comfy.ldm.common_dit.pad_to_patch_size(y0_style_noised, (self.patch_size, self.patch_size))
+
+            mask_zero = None
+            
+            out_list = []
+            for cond_iter in range(len(transformer_options['cond_or_uncond'])):
+                UNCOND = transformer_options['cond_or_uncond'][cond_iter] == 1
+                
+                if update_cross_attn is not None:
+                    update_cross_attn['UNCOND'] = UNCOND
+
+                bsz_style = y0_style.shape[0] if y0_style_active else 0
+                bsz       = 1 if RECON_MODE else bsz_style + 1
+
+                img, t, y, context = clone_inputs(img_orig, t_orig, y_orig, context_orig, index=cond_iter)
+                
+                mask = None
+                if not UNCOND and 'AttnMask' in transformer_options: # and weight != 0:
+                    AttnMask = transformer_options['AttnMask']
+                    mask = transformer_options['AttnMask'].attn_mask.mask.to('cuda')
+                    if mask_zero is None:
+                        mask_zero = torch.ones_like(mask)
+                        mask_zero[txt_slice, txt_slice] = mask[txt_slice, txt_slice]
+
+                    if weight == 0:
+                        context = transformer_options['RegContext'].context.to(context.dtype).to(context.device)
+                        mask = None
+                    else:
+                        context = transformer_options['RegContext'].context.to(context.dtype).to(context.device)
+
+                if UNCOND and 'AttnMask_neg' in transformer_options: # and weight != 0:
+                    AttnMask = transformer_options['AttnMask_neg']
+                    mask = transformer_options['AttnMask_neg'].attn_mask.mask.to('cuda')
+                    if mask_zero is None:
+                        mask_zero = torch.ones_like(mask)
+                        mask_zero[txt_slice, txt_slice] = mask[txt_slice, txt_slice]
+
+                    if weight == 0:
+                        context = transformer_options['RegContext_neg'].context.to(context.dtype).to(context.device)
+                        mask = None
+                    else:
+                        context = transformer_options['RegContext_neg'].context.to(context.dtype).to(context.device)
+
+                elif UNCOND and 'AttnMask' in transformer_options:
+                    AttnMask = transformer_options['AttnMask']
+                    mask = transformer_options['AttnMask'].attn_mask.mask.to('cuda')
+                    
+                    if mask_zero is None:
+                        mask_zero = torch.ones_like(mask)
+
+                        mask_zero[txt_slice, txt_slice] = mask[txt_slice, txt_slice]
+                    if weight == 0:                                                                             # ADDED 5/23/2025
+                        context = transformer_options['RegContext'].context.to(context.dtype).to(context.device)  # ADDED 5/26/2025 14:53
+                        mask = None
+                    else:
+                        A       = context
+                        B       = transformer_options['RegContext'].context
+                        context = A.repeat(1,    (B.shape[1] // A.shape[1]) + 1, 1)[:,   :B.shape[1], :]
+
+
+                if y0_style_active and not RECON_MODE:
+                    if mask is None:
+                        context, y, _ = StyleMMDiT.apply_style_conditioning(
+                            UNCOND = UNCOND,
+                            base_context       = context,
+                            base_y             = y,
+                            base_llama3        = None,
+                        )
+                    else:
+                        context = context.repeat(bsz_style + 1, 1, 1)
+                        y = y.repeat(bsz_style + 1, 1)                   if y      is not None else None
+                    img_y0_style = img_y0_style_orig.clone()
+
+                if mask is not None and not type(mask[0][0].item()) == bool:
+                    mask = mask.to(x.dtype)
+                if mask_zero is not None and not type(mask_zero[0][0].item()) == bool:
+                    mask_zero = mask_zero.to(x.dtype)
+
+                clip = self.time_in(timestep_embedding(t, 256).to(x.dtype)) # 1 -> 1,3072
+                if self.params.guidance_embed:
+                    if guidance is None:
+                        print("Guidance strength is none, not using distilled guidance.")
+                    else:
+                        clip = clip + self.guidance_in(timestep_embedding(guidance, 256).to(x.dtype))
+                clip = clip + self.vector_in(y[:,:self.params.vec_in_dim])  #y.shape=1,768  y==all 0s
+                clip = clip.to(x)
         
+                img_in_dtype = self.img_in.weight.data.dtype
+                if img_in_dtype not in {torch.bfloat16, torch.float16, torch.float32, torch.float64}:
+                    img_in_dtype = x.dtype
+                
+                img = rearrange(x, "b c (h ph) (w pw) -> b (h w) (c ph pw)", ph=self.patch_size, pw=self.patch_size)
+                img = self.img_in(img.to(img_in_dtype))
+                img_ids = self._get_img_ids(img, bsz, h_len, w_len, 0, h_len, 0, w_len)
+
+
+                if y0_style_active and not RECON_MODE:
+                    img_y0_style = rearrange(img_y0_style_orig, "b c (h ph) (w pw) -> b (h w) (c ph pw)", ph=self.patch_size, pw=self.patch_size)
+                    img_y0_style = self.img_in(img_y0_style.to(img_in_dtype))  # hidden_states 1,4032,2560         for 1024x1024: -> 1,4096,2560      ,64 -> ,2560 (x40)
+                    img = torch.cat([img, img_y0_style], dim=0)
+                    
+                    
+                if ref_latents is not None:
+                    h = 0
+                    w = 0
+                    for ref in ref_latents:
+                        h_offset = 0
+                        w_offset = 0
+                        if ref.shape[-2] + h > ref.shape[-1] + w:
+                            w_offset = w
+                        else:
+                            h_offset = h
+
+                        kontext, kontext_ids = self.process_img(ref, index=1, h_offset=h_offset, w_offset=w_offset)
+                        kontext = self.img_in(kontext.to(img_in_dtype))
+                        img = torch.cat([img, kontext], dim=1)
+                        img_ids = torch.cat([img_ids, kontext_ids], dim=1)
+                        h = max(h, ref.shape[-2] + h_offset)
+                        w = max(w, ref.shape[-1] + w_offset)
+
+                # txt_ids -> 1,414,3
+                txt_ids = torch.zeros((bsz, context.shape[-2], 3), device=img.device, dtype=x.dtype) 
+                ids     = torch.cat((txt_ids, img_ids), dim=-2)   # ids -> 1,4446,3       # flipped from hidream
+                rope    = self.pe_embedder(ids)                  # rope -> 1, 4446, 1, 64, 2, 2
+
+                txt_init = self.txt_in(context)
+                txt_init_len = txt_init.shape[-2]                                       # 271
+
+                img = StyleMMDiT(img, "proj_in")
+                
+                img = img.to(x) if img is not None else None
+                
+                total_layers = len(self.double_blocks) + len(self.single_blocks)
+                
+                # DOUBLE STREAM
+                ca_idx = 0
+                for bid, (block, style_block) in enumerate(zip(self.double_blocks, StyleMMDiT.double_blocks)):
+                    txt = txt_init
+                    if   weight > 0 and mask is not None and     weight  <      bid/total_layers:
+                        img, txt_init = block(img, txt, clip, rope, mask_zero, style_block=style_block)
+                        
+                    elif (weight < 0 and mask is not None and abs(weight) < (1 - bid/total_layers)):
+                        img_tmpZ, txt_tmpZ = img.clone(), txt.clone()
+
+                        # more efficient than the commented lines below being used instead in the loop?
+                        img_tmpZ, txt_init = block(img_tmpZ, txt_tmpZ, clip, rope, mask, style_block=style_block)
+                        img     , txt_tmpZ = block(img     , txt     , clip, rope, mask_zero, style_block=style_block)
+                        
+                    elif floor > 0 and mask is not None and     floor  >      bid/total_layers:
+                        mask_tmp = mask.clone()
+                        mask_tmp[img_slice,img_slice] = 1.0
+                        img, txt_init = block(img, txt, clip, rope, mask_tmp, style_block=style_block)
+                        
+                    elif floor < 0 and mask is not None and abs(floor) > (1 - bid/total_layers):
+                        mask_tmp = mask.clone()
+                        mask_tmp[img_slice,img_slice] = 1.0
+                        img, txt_init = block(img, txt, clip, rope, mask_tmp, style_block=style_block)
+                        
+                    elif update_cross_attn is not None and update_cross_attn['skip_cross_attn']:
+                        img, txt_init = block(img, txt, clip, rope, mask, update_cross_attn=update_cross_attn)
+                        
+                    else:
+                        img, txt_init = block(img, txt, clip, rope, mask, update_cross_attn=update_cross_attn, style_block=style_block)
+
+                    if control is not None: 
+                        control_i = control.get("input")
+                        if bid < len(control_i):
+                            add = control_i[bid]
+                            if add is not None:
+                                img[:1] += add
+                    
+                    if hasattr(self, "pulid_data"):
+                        if self.pulid_data:
+                            if bid % self.pulid_double_interval == 0:
+                                for _, node_data in self.pulid_data.items():
+                                    if torch.any((node_data['sigma_start'] >= timestep) & (timestep >= node_data['sigma_end'])):
+                                        img = img + node_data['weight'] * self.pulid_ca[ca_idx](node_data['embedding'], img)
+                                ca_idx += 1
+
+                # END DOUBLE STREAM
+
+                #img = img[0:1]
+                #txt_init = txt_init[0:1]
+                img       = torch.cat([txt_init, img], dim=-2)   # 4032 + 271 -> 4303     # txt embed from double stream block   # flipped from hidream
+
+                double_layers = len(self.double_blocks)
+
+                # SINGLE STREAM
+                for bid, (block, style_block) in enumerate(zip(self.single_blocks, StyleMMDiT.single_blocks)):
+
+                    if   weight > 0 and mask is not None and     weight  <      (bid+double_layers)/total_layers:
+                        img = block(img, clip, rope, mask_zero, style_block=style_block)
+                    
+                    elif weight < 0 and mask is not None and abs(weight) < (1 - (bid+double_layers)/total_layers):
+                        img = block(img, clip, rope, mask_zero, style_block=style_block)
+                    
+                    elif floor > 0 and mask is not None and     floor  >      (bid+double_layers)/total_layers:
+                        mask_tmp = mask.clone()
+                        mask_tmp[img_slice,img_slice] = 1.0
+                        img = block(img, clip, rope, mask_tmp, style_block=style_block)
+                    
+                    elif floor < 0 and mask is not None and abs(floor) > (1 - (bid+double_layers)/total_layers):
+                        mask_tmp = mask.clone()
+                        mask_tmp[img_slice,img_slice] = 1.0
+                        img = block(img, clip, rope, mask_tmp, style_block=style_block)
+                    
+                    else:
+                        img = block(img, clip, rope, mask, style_block=style_block)
+                    
+                    if control is not None: # Controlnet
+                        control_o = control.get("output")
+                        if bid < len(control_o):
+                            add = control_o[bid]
+                            if add is not None:
+                                img[:1, txt_slice, ...] += add
+                                
+                    if hasattr(self, "pulid_data"):
+                        # PuLID attention
+                        if self.pulid_data:
+                            real_img, txt = img[:, img_slice, ...], img[:, txt_slice, ...]
+                            if bid % self.pulid_single_interval == 0:
+                                # Will calculate influence of all nodes at once
+                                for _, node_data in self.pulid_data.items():
+                                    if torch.any((node_data['sigma_start'] >= timestep) & (timestep >= node_data['sigma_end'])):
+                                        real_img = real_img + node_data['weight'] * self.pulid_ca[ca_idx](node_data['embedding'], real_img)
+                                ca_idx += 1
+                            img = torch.cat((txt, real_img), 1)
+                            
+                # END SINGLE STREAM
+                
+                img = img[..., img_slice, :]
+                #img = self.final_layer(img, clip)   # 4096,2560 -> 4096,64
+                shift, scale = self.final_layer.adaLN_modulation(clip).chunk(2,dim=1)
+                img = (1 + scale[:, None, :]) * self.final_layer.norm_final(img) + shift[:, None, :]
+                
+                img = StyleMMDiT(img, "proj_out")
+
+                if y0_style_active and not RECON_MODE:
+                    img = img[0:1]
+                    #img = img[1:2]
+                
+                #img = self.final_layer.linear(img.to(self.final_layer.linear.weight.data))
+                img = self.final_layer.linear(img)
+
+                #img = self.unpatchify(img, img_sizes)
+                img = rearrange(img, "b (h w) (c ph pw) -> b c (h ph) (w pw)", h=h_len, w=w_len, ph=self.patch_size, pw=self.patch_size)
+                out_list.append(img)
+                
+            output = torch.cat(out_list, dim=0)
+            eps = output[:, :, :h, :w]
+            
+            if recon_iter == 1:
+                denoised = new_x - SIGMA.to(new_x) * eps.to(new_x)
+                if x_tmp is not None:
+                    eps = (x_tmp - denoised.to(x_tmp)) / SIGMA.to(x_tmp)
+                else:
+                    eps = (x_orig - denoised.to(x_orig)) / SIGMA.to(x_orig)
+                    
+
+
+
+
+
+
+
+
+
+
+
+
         freqsep_lowpass_method = transformer_options.get("freqsep_lowpass_method")
         freqsep_sigma          = transformer_options.get("freqsep_sigma")
         freqsep_kernel_size    = transformer_options.get("freqsep_kernel_size")
@@ -318,93 +651,11 @@ class ReFlux(Flux):
         freqsep_highpass_weight= transformer_options.get("freqsep_highpass_weight")
         freqsep_mask           = transformer_options.get("freqsep_mask")
 
-        out_list = []
-        for i in range(len(transformer_options['cond_or_uncond'])):
-            UNCOND = transformer_options['cond_or_uncond'][i] == 1
-            
-            if update_cross_attn is not None:
-                update_cross_attn['UNCOND'] = UNCOND
-                
-            img = x
-            bs, c, h, w = x.shape
-            patch_size  = 2
-            img           = comfy.ldm.common_dit.pad_to_patch_size(img, (patch_size, patch_size))    # 1,16,192,192
-            
-            transformer_options['original_shape'] = img.shape
-            transformer_options['patch_size']     = patch_size
-
-            h_len = ((h + (patch_size // 2)) // patch_size) # h_len 96
-            w_len = ((w + (patch_size // 2)) // patch_size) # w_len 96
-
-            img = rearrange(img, "b c (h ph) (w pw) -> b (h w) (c ph pw)", ph=patch_size, pw=patch_size) # img 1,9216,64     1,16,128,128 -> 1,4096,64
-
-            
-            if EO("cross_self"):
-                AttnMask = transformer_options.get('AttnMask')
-                if AttnMask is not None:
-                    AttnMask.cross_self_mask.mask *= EO("cross_self", 1.0)
-            
-            
-            context_tmp = None
-            
-            if not UNCOND and 'AttnMask' in transformer_options: # and weight != 0:
-                AttnMask = transformer_options['AttnMask']
-                mask = transformer_options['AttnMask'].attn_mask.mask.to('cuda')
-
-                if weight == 0:
-                    context_tmp = transformer_options['RegContext'].context.to(context.dtype).to(context.device)
-                    mask = None
-                else:
-                    context_tmp = transformer_options['RegContext'].context.to(context.dtype).to(context.device)
-                
-            if UNCOND and 'AttnMask_neg' in transformer_options: # and weight != 0:
-                AttnMask = transformer_options['AttnMask_neg']
-                mask = transformer_options['AttnMask_neg'].attn_mask.mask.to('cuda')
-
-                if weight == 0:
-                    context_tmp = transformer_options['RegContext_neg'].context.to(context.dtype).to(context.device)
-                    mask = None
-                else:
-                    context_tmp = transformer_options['RegContext_neg'].context.to(context.dtype).to(context.device)
-
-            elif UNCOND and 'AttnMask' in transformer_options:
-                AttnMask = transformer_options['AttnMask']
-                mask = transformer_options['AttnMask'].attn_mask.mask.to('cuda')
-                A       = context
-                B       = transformer_options['RegContext'].context
-                context_tmp = A.repeat(1,    (B.shape[1] // A.shape[1]) + 1, 1)[:,   :B.shape[1], :]
-
-            if context_tmp is None:
-                context_tmp = context[i][None,...].clone()
-
-            
-            
-            
-            
-            txt_ids      = torch.zeros((bs, context_tmp.shape[1], 3), device=img.device, dtype=img.dtype)      # txt_ids        1, 256,3
-            img_ids_orig = self._get_img_ids(img, bs, h_len, w_len, 0, h_len, 0, w_len)                  # img_ids_orig = 1,9216,3
-
-
-            out_tmp = self.forward_blocks(img       [i][None,...].clone(), 
-                                        img_ids_orig[i][None,...].clone(), 
-                                        context_tmp,
-                                        txt_ids     [i][None,...].clone(), 
-                                        timestep    [i][None,...].clone(), 
-                                        y           [i][None,...].clone(),
-                                        guidance    [i][None,...].clone(),
-                                        control, 
-                                        update_cross_attn=update_cross_attn,
-                                        transformer_options=transformer_options,
-                                        UNCOND=UNCOND,
-                                        SIGMA=SIGMA,
-                                        lamb_t_factor=lamb_t_factor,
-                                        )  # context 1,256,4096   y 1,768
-            out_list.append(out_tmp)
-            
-        out = torch.stack(out_list, dim=0).squeeze(dim=1)
-        eps = rearrange(out, "b (h w) (c ph pw) -> b c (h ph) (w pw)", h=h_len, w=w_len, ph=2, pw=2)[:,:,:h,:w]
+        y0_style_pos = transformer_options.get("y0_style_pos")
+        y0_style_neg = transformer_options.get("y0_style_neg")
         
-        
+        # end recon loop
+        self.style_dtype = torch.float32 if self.style_dtype is None else self.style_dtype
         dtype = eps.dtype if self.style_dtype is None else self.style_dtype
         
         if y0_style_pos is not None:
@@ -564,6 +815,24 @@ class ReFlux(Flux):
                     f_cs = self.StyleWCT.get(y0_inv_standard_guide_embed)
                     self.y0_inv_standard_guide = self.Retrojector.unembed(f_cs)
 
+            elif transformer_options['y0_style_method'] == "WCT2":
+                self.WaveletStyleWCT.set(y0_adain_embed, h_len, w_len)
+                denoised_embed = self.WaveletStyleWCT.get(denoised_embed, h_len, w_len)
+                
+                if transformer_options.get('y0_standard_guide') is not None:
+                    y0_standard_guide = transformer_options.get('y0_standard_guide')
+                    
+                    y0_standard_guide_embed = self.Retrojector.embed(y0_standard_guide)
+                    f_cs = self.WaveletStyleWCT.get(y0_standard_guide_embed, h_len, w_len)
+                    self.y0_standard_guide = self.Retrojector.unembed(f_cs)
+
+                if transformer_options.get('y0_inv_standard_guide') is not None:
+                    y0_inv_standard_guide = transformer_options.get('y0_inv_standard_guide')
+
+                    y0_inv_standard_guide_embed = self.Retrojector.embed(y0_inv_standard_guide)
+                    f_cs = self.WaveletStyleWCT.get(y0_inv_standard_guide_embed, h_len, w_len)
+                    self.y0_inv_standard_guide = self.Retrojector.unembed(f_cs)
+
             denoised_approx = self.Retrojector.unembed(denoised_embed)
             
             eps = (x - denoised_approx) / sigma
@@ -577,7 +846,7 @@ class ReFlux(Flux):
             elif eps.shape[0] == 1 and UNCOND:
                 eps[0] = eps_orig[0] + y0_style_pos_synweight * (eps[0] - eps_orig[0])
             
-            eps = eps.float()
+            #eps = eps.float()
         
         if y0_style_neg is not None:
             y0_style_neg_weight    = transformer_options.get("y0_style_neg_weight")
@@ -624,6 +893,10 @@ class ReFlux(Flux):
                 self.StyleWCT.set(y0_adain_embed)
                 denoised_embed = self.StyleWCT.get(denoised_embed)
 
+            elif transformer_options['y0_style_method'] == "WCT2":
+                self.WaveletStyleWCT.set(y0_adain_embed, h_len, w_len)
+                denoised_embed = self.WaveletStyleWCT.get(denoised_embed, h_len, w_len)
+
             denoised_approx = self.Retrojector.unembed(denoised_embed)
 
             if UNCOND:
@@ -634,8 +907,32 @@ class ReFlux(Flux):
             elif eps.shape[0] == 1 and not UNCOND:
                 eps[0] = eps_orig[0] + y0_style_neg_synweight * (eps[0] - eps_orig[0])
             
-            eps = eps.float()
-            
+            #eps = eps.float()
+        
+        self.eps_out = eps.clone()
         return eps
+    
+
+    def expand_timesteps(self, t, batch_size, device):
+        if not torch.is_tensor(t):
+            is_mps = device.type == "mps"
+            if isinstance(t, float):
+                dtype = torch.float32 if is_mps else torch.float64
+            else:
+                dtype = torch.int32   if is_mps else torch.int64
+            t = Tensor([t], dtype=dtype, device=device)
+        elif len(t.shape) == 0:
+            t = t[None].to(device)
+        # broadcast to batch dimension in a way that's compatible with ONNX/Core ML
+        t = t.expand(batch_size)
+        return t
+
+def clone_inputs(*args, index: int=None):
+
+    if index is None:
+        return tuple(x.clone() for x in args)
+    else:
+        return tuple(x[index].unsqueeze(0).clone() for x in args)
+
 
 
