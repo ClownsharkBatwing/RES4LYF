@@ -1352,8 +1352,8 @@ class HDModel(nn.Module):
                 eps[0] = eps_orig[0] + y0_style_neg_synweight * (eps[0] - eps_orig[0])
             
             #eps = eps.float()
-        
-        self.eps_out = eps.clone()
+        if EO("model_eps_out"):
+            self.eps_out = eps.clone()
         return eps
     
 
