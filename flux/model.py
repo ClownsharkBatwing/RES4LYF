@@ -482,12 +482,12 @@ class ReFlux(Flux):
                     img = self.img_in(img.to(img_in_dtype))
                     
                     img_slice = slice(-2*img_len, None)
-                    StyleMMDiT.KONTEXT = True
+                    StyleMMDiT.KONTEXT = 1
                     for style_block in StyleMMDiT.double_blocks + StyleMMDiT.single_blocks:
-                        style_block.KONTEXT = True
+                        style_block.KONTEXT = 1
                         for style_block_imgtxt in [style_block.img, getattr(style_block, "txt")]:
-                            style_block_imgtxt.KONTEXT = True
-                            style_block_imgtxt.ATTN.KONTEXT = True
+                            style_block_imgtxt.KONTEXT = 1
+                            style_block_imgtxt.ATTN.KONTEXT = 1
                     StyleMMDiT.datashock_ref = ref_latents[0]
                 else:
                     
@@ -498,6 +498,23 @@ class ReFlux(Flux):
                 if y0_style_active and not RECON_MODE:
                     img_y0_style = rearrange(img_y0_style_orig, "b c (h ph) (w pw) -> b (h w) (c ph pw)", ph=self.patch_size, pw=self.patch_size)
                     img_y0_style = self.img_in(img_y0_style.to(img_in_dtype))  # hidden_states 1,4032,2560         for 1024x1024: -> 1,4096,2560      ,64 -> ,2560 (x40)
+                    img_kontext  = self.img_in(kontext.to(img_in_dtype))
+                    if ref_latents is not None:
+                        #img_base = rearrange(x, "b c (h ph) (w pw) -> b (h w) (c ph pw)", ph=self.patch_size, pw=self.patch_size)
+                        #img_base = self.img_in(img_base.to(img_in_dtype))
+                        #img_ids = self._get_img_ids(img, bsz, h_len, w_len, 0, h_len, 0, w_len)
+                        img_ids      = img_ids     .repeat(bsz,1,1)
+                        #img_y0_style = img_y0_style.repeat(1,bsz,1) # torch.cat([img, img_y0_style], dim=0)
+                        img_y0_style = torch.cat([img_y0_style, img_kontext], dim=1)
+                        
+                        StyleMMDiT.KONTEXT = 2
+                        for style_block in StyleMMDiT.double_blocks + StyleMMDiT.single_blocks:
+                            style_block.KONTEXT = 2
+                            for style_block_imgtxt in [style_block.img, getattr(style_block, "txt")]:
+                                style_block_imgtxt.KONTEXT = 2
+                                style_block_imgtxt.ATTN.KONTEXT = 2
+                        StyleMMDiT.datashock_ref = None
+                        
                     img = torch.cat([img, img_y0_style], dim=0)
 
 
