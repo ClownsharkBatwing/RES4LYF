@@ -1121,7 +1121,7 @@ class Stylizer:
         
         self.IMG_1ST = True
         self.HEADS = 0
-
+        self.KONTEXT = False
     def set_mode(self, mode):
         self.method = [mode] #[getattr(self, mode)]
     
@@ -1200,13 +1200,14 @@ class Stylizer:
 
 
     def __call__(self, x, attr):
-        if x.shape[0] == 1:
+        if x.shape[0] == 1 and not self.KONTEXT:
             return x
         
         weight_list = getattr(self, attr)
         weights_all_zero = all(weight == 0.0 for weight in weight_list)
         if weights_all_zero:
             return x
+        
         #self.HEADS=24
         #x_ndim = x.ndim
         #if x_ndim == 3:
@@ -1218,6 +1219,9 @@ class Stylizer:
         if HEAD_DIM == self.HEADS:
             B, HEAD_DIM, HW, C = x.shape
             x = x.reshape(B, HW, C*HEAD_DIM)
+            
+        if self.KONTEXT:
+            x = x.reshape(2, x.shape[1] // 2, x.shape[2])
         
         weights_all_one         = all(weight == 1.0           for weight in weight_list)
         methods_all_scattersort = all(name   == "scattersort" for name   in self.method)
@@ -1263,6 +1267,8 @@ class Stylizer:
         
         #if x_ndim == 3:
         #    return x.view(B,HW,C)
+        if self.KONTEXT:
+            x = x.reshape(1, x.shape[1] * 2, x.shape[2])
         
         if HEAD_DIM == self.HEADS:
             return x.reshape(B, HEAD_DIM, HW, C)
@@ -1321,11 +1327,14 @@ class Stylizer:
         x[0:1] = Stylizer.scattersort_(x[0:1], x[idx:idx+1])
         return x
     
-    def tiled_scattersort(self, x, idx=1):
+    def tiled_scattersort(self, x, idx=1): #, h_tile=None, w_tile=None):
         #if HDModel.RECON_MODE:
         #    return denoised_embed
         #den   = x[0:1]      [:,:self.img_len,:].view(-1, 2560, self.h_len, self.w_len)
         #style = x[idx:idx+1][:,:self.img_len,:].view(-1, 2560, self.h_len, self.w_len)
+        #h_tile = self.h_tile[idx-1] if h_tile is None else h_tile
+        #w_tile = self.w_tile[idx-1] if w_tile is None else w_tile
+        
         C = x.shape[-1]
         den   = x[0:1]      [:,self.img_slice,:].reshape(-1, C, self.h_len, self.w_len)
         style = x[idx:idx+1][:,self.img_slice,:].reshape(-1, C, self.h_len, self.w_len)
@@ -1582,9 +1591,9 @@ class StyleMMDiT_Model(Stylizer):
         
         self.IMG_1ST = True
         self.HEADS = 0
-        
+        self.KONTEXT = False
     def __call__(self, x, attr):
-        if x.shape[0] == 1:
+        if x.shape[0] == 1 and not self.KONTEXT:
             return x
         
         weight_list = getattr(self, attr)
@@ -1605,6 +1614,9 @@ class StyleMMDiT_Model(Stylizer):
         if HEAD_DIM == self.HEADS:
             B, HEAD_DIM, HW, C = x.shape
             x = x.reshape(B, HW, C*HEAD_DIM)
+            
+        if self.KONTEXT:
+            x = x.reshape(2, x.shape[1] // 2, x.shape[2])
             
         weights_all_one         = all(weight == 1.0           for weight in weight_list)
         methods_all_scattersort = all(name   == "scattersort" for name   in self.method)
@@ -1634,7 +1646,9 @@ class StyleMMDiT_Model(Stylizer):
         
         #if x_ndim == 3:
         #    return x.view(B,HW,C)
-        
+        if self.KONTEXT:
+            x = x.reshape(1, x.shape[1] * 2, x.shape[2])
+            
         if HEAD_DIM == self.HEADS:
             return x.reshape(B, HEAD_DIM, HW, C)
         else:
@@ -1669,13 +1683,18 @@ class StyleMMDiT_Model(Stylizer):
                     elif type(latent) is torch.Tensor:
                         latent = latent.to(dtype=self.dtype, device=self.device)
                     else:
-                        raise ValueError(f"Invalid latent type: {type(latent)}")
+                        latent = None
+                        #raise ValueError(f"Invalid latent type: {type(latent)}")
 
                     #if self.VIDEO and latent.shape[2] == 1:
                     #    latent = latent.repeat(1, 1, x.shape[2], 1, 1)
 
                     self.guides[i] = latent
-                self.guides = torch.cat(self.guides, dim=0)
+                if any(g is None for g in self.guides):
+                    self.guides = None
+                    print("Style guide nonetype set for Kontext.")
+                else:
+                    self.guides = torch.cat(self.guides, dim=0)
             self.GUIDES_INITIALIZED = True
     
     def set_conditioning(self, positive, negative):
@@ -1767,6 +1786,7 @@ class StyleMMDiT_Model(Stylizer):
     def apply_data_shock(self, denoised):
         if self.data_shock == "none":
             return denoised
-        return self.apply_to_data(denoised, None, self.data_shock)
+        datashock_ref = getattr(self, "datashock_ref", None)
+        return self.apply_to_data(denoised, datashock_ref, self.data_shock)
 
 
