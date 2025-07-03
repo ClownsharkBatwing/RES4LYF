@@ -1225,8 +1225,8 @@ class Stylizer:
         
         txt_slice, img_slice, ktx_slice = self.txt_slice, self.img_slice, None
         if self.KONTEXT == 2:
-            img_slice = self.img_slice # slice(2 * self.img_slice.start, None)
-            ktx_slice = slice(2 * self.img_slice.start, self.img_slice.start)
+            ktx_slice = self.img_slice # slice(2 * self.img_slice.start, None)
+            img_slice = slice(2 * self.img_slice.start, self.img_slice.start)
             txt_slice = slice(None, 2 * self.txt_slice.stop)
         
         weights_all_one         = all(weight == 1.0           for weight in weight_list)
@@ -1253,7 +1253,8 @@ class Stylizer:
                 apply_to = self.apply_to[i]
                 if   weight == 0.0:
                     continue
-                elif weight == 1.0:
+                else: # if weight == 1.0:
+                    x_clone = x.clone()
                     if   self.img_len == x.shape[-2]  or apply_to == "img+txt" or self.h_len < 0:
                         x = method(x, idx=i+1)
                     elif   self.img_len < x.shape[-2]:
@@ -1265,9 +1266,9 @@ class Stylizer:
                         if "txt" in apply_to:
                             x[...,txt_slice,:] = txt_method(x[...,txt_slice,:], idx=i+1)
                             #x[:,self.img_len:,:] = method(x[:,self.img_len:,:], idx=i+1)
-
-                else:
-                    x = torch.lerp(x, method(x.clone(), idx=i+1), weight)
+                    x = torch.lerp(x_clone, x, weight)
+                #else:
+                #    x = torch.lerp(x, method(x.clone(), idx=i+1), weight)
                 
                 if mask is not None:
                     x[0:1,...,img_slice,:] = torch.lerp(x01[...,img_slice,:], x[0:1,...,img_slice,:], mask.view(1, -1, 1))  
