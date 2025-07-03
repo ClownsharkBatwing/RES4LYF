@@ -462,20 +462,8 @@ class ReFlux(Flux):
                 if img_in_dtype not in {torch.bfloat16, torch.float16, torch.float32, torch.float64}:
                     img_in_dtype = x.dtype
                 
-                img = rearrange(x, "b c (h ph) (w pw) -> b (h w) (c ph pw)", ph=self.patch_size, pw=self.patch_size)
-                img = self.img_in(img.to(img_in_dtype))
-                img_ids = self._get_img_ids(img, bsz, h_len, w_len, 0, h_len, 0, w_len)
-
-
-                if y0_style_active and not RECON_MODE:
-                    img_y0_style = rearrange(img_y0_style_orig, "b c (h ph) (w pw) -> b (h w) (c ph pw)", ph=self.patch_size, pw=self.patch_size)
-                    img_y0_style = self.img_in(img_y0_style.to(img_in_dtype))  # hidden_states 1,4032,2560         for 1024x1024: -> 1,4096,2560      ,64 -> ,2560 (x40)
-                    img = torch.cat([img, img_y0_style], dim=0)
-                    
-                    
                 if ref_latents is not None:
-                    h = 0
-                    w = 0
+                    h, w = 0, 0
                     for ref in ref_latents:
                         h_offset = 0
                         w_offset = 0
@@ -485,11 +473,33 @@ class ReFlux(Flux):
                             h_offset = h
 
                         kontext, kontext_ids = self.process_img(ref, index=1, h_offset=h_offset, w_offset=w_offset)
-                        kontext = self.img_in(kontext.to(img_in_dtype))
+                        #kontext = self.img_in(kontext.to(img_in_dtype))
+                        img, img_ids = self.process_img(x)
                         img = torch.cat([img, kontext], dim=1)
                         img_ids = torch.cat([img_ids, kontext_ids], dim=1)
                         h = max(h, ref.shape[-2] + h_offset)
                         w = max(w, ref.shape[-1] + w_offset)
+                    img = self.img_in(img.to(img_in_dtype))
+                    
+                    img_slice = slice(-2*img_len, None)
+                    StyleMMDiT.KONTEXT = True
+                    for style_block in StyleMMDiT.double_blocks + StyleMMDiT.single_blocks:
+                        style_block.KONTEXT = True
+                        for style_block_imgtxt in [style_block.img, getattr(style_block, "txt")]:
+                            style_block_imgtxt.KONTEXT = True
+                            style_block_imgtxt.ATTN.KONTEXT = True
+                    StyleMMDiT.datashock_ref = ref_latents[0]
+                else:
+                    
+                    img = rearrange(x, "b c (h ph) (w pw) -> b (h w) (c ph pw)", ph=self.patch_size, pw=self.patch_size)
+                    img = self.img_in(img.to(img_in_dtype))
+                    img_ids = self._get_img_ids(img, bsz, h_len, w_len, 0, h_len, 0, w_len)
+
+                if y0_style_active and not RECON_MODE:
+                    img_y0_style = rearrange(img_y0_style_orig, "b c (h ph) (w pw) -> b (h w) (c ph pw)", ph=self.patch_size, pw=self.patch_size)
+                    img_y0_style = self.img_in(img_y0_style.to(img_in_dtype))  # hidden_states 1,4032,2560         for 1024x1024: -> 1,4096,2560      ,64 -> ,2560 (x40)
+                    img = torch.cat([img, img_y0_style], dim=0)
+
 
                 # txt_ids -> 1,414,3
                 txt_ids = torch.zeros((bsz, context.shape[-2], 3), device=img.device, dtype=x.dtype) 
@@ -616,6 +626,7 @@ class ReFlux(Flux):
                 img = self.final_layer.linear(img)
 
                 #img = self.unpatchify(img, img_sizes)
+                img = img[:,:img_len]  # accomodate kontext
                 img = rearrange(img, "b (h w) (c ph pw) -> b c (h ph) (w pw)", h=h_len, w=w_len, ph=self.patch_size, pw=self.patch_size)
                 out_list.append(img)
                 
