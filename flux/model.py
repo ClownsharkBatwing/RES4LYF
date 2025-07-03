@@ -505,7 +505,7 @@ class ReFlux(Flux):
                         #img_ids = self._get_img_ids(img, bsz, h_len, w_len, 0, h_len, 0, w_len)
                         img_ids      = img_ids     .repeat(bsz,1,1)
                         #img_y0_style = img_y0_style.repeat(1,bsz,1) # torch.cat([img, img_y0_style], dim=0)
-                        img_y0_style = torch.cat([img_y0_style, img_kontext], dim=1)
+                        img_y0_style = torch.cat([img_y0_style, img_kontext.repeat(bsz-1,1,1)], dim=1)
                         
                         StyleMMDiT.KONTEXT = 2
                         for style_block in StyleMMDiT.double_blocks + StyleMMDiT.single_blocks:
