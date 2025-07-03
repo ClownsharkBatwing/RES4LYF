@@ -1249,7 +1249,8 @@ class ReWanModel(torch.nn.Module):
                 if AttnMask is not None and transformer_options['reg_cond_weight'] != 0.0:
                     AttnMask.attn_mask_recast(x.dtype)
                     context_tmp  = RegContext.get()
-                    clip_fea     = RegContext.get_clip_fea().to(x.dtype)
+                    clip_fea     = RegContext.get_clip_fea()
+                    clip_fea     = clip_fea.to(x.dtype) if clip_fea else None
                 else:
                     context_tmp = context[i][None,...].clone()
 
