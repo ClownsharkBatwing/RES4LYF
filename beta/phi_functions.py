@@ -71,15 +71,41 @@ def phi(j: int, neg_h: float, ):
 
 
 
+from mpmath import mp, mpf, factorial, exp
+
+
+mp.dps = 80   # e.g. 80 decimal digits (~ float256)
+
+def phi_mpmath_series(j: int, neg_h: float) -> float:
+    """
+    Arbitrary‐precision phi_j(-h) via the remainder‐series definition,
+    using mpmath’s mpf and factorial.
+    """
+    j = int(j)
+    z = mpf(float(neg_h))    
+    S = mp.mpf('0')    # S = sum_{k=0..j-1} z^k / k!
+    for k in range(j):
+        S += (z**k) / factorial(k)
+    phi_val = (exp(z) - S) / (z**j)
+    return float(phi_val)
+
+
+
 class Phi:
     def __init__(self, h, c, analytic_solution=False): 
         self.h = h
         self.c = c
         self.cache = {}  
         if analytic_solution:
-            self.phi_f = phi
+            #self.phi_f = superphi
+            self.phi_f = phi_mpmath_series
+            self.h = mpf(float(h))
+            self.c = [mpf(c_val) for c_val in c]
+            #self.c = c
+            #self.phi_f = phi
         else:
-            self.phi_f = _phi  # remainder method
+            self.phi_f = phi
+            #self.phi_f = _phi  # remainder method
 
     def __call__(self, j, i=-1):
         if (j, i) in self.cache:
@@ -93,11 +119,22 @@ class Phi:
                 self.cache[(j, i)] = 0
                 return 0
 
-        if j == 0:
-            result = torch.exp(-self.h * c)
+        if j == 0 and type(c) in {float, torch.Tensor}:
+            result = math.exp(float(-self.h * c))
         else:
             result = self.phi_f(j, -self.h * c)
 
         self.cache[(j, i)] = result
 
         return result
+
+
+
+from mpmath import mp, mpf, gamma, gammainc
+
+def superphi(j: int, neg_h: float, ):
+    gamma_: float = gamma(j)
+    incomp_gamma_: float = gamma_ - gammainc(j, 0, float(neg_h))
+    phi_: float = float(math.exp(float(neg_h)) * neg_h**-j) * (1-incomp_gamma_/gamma_)
+    return float(phi_)
+

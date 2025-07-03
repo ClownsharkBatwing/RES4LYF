@@ -218,7 +218,7 @@ class RK_Method_Beta:
             
             for i in range(tiles.shape[0]):
                 tile = tiles[i].unsqueeze(0)
-                
+                self.extra_args['model_options']['transformer_options']['x_tmp'] = tile
                 if control_tiles is not None:
                     positive_control.cond_hint = control_tiles[i].unsqueeze(0).to(positive_control.cond_hint)
                     if negative_control is not None:
@@ -871,14 +871,17 @@ class RK_Method_Exponential(RK_Method_Beta):
 
     @staticmethod
     def sigma_fn(t:Tensor) -> Tensor:
+        #return 1/(torch.exp(-t)+1)
         return t.neg().exp()
 
     @staticmethod
     def t_fn(sigma:Tensor) -> Tensor:
+        #return -torch.log((1.-sigma)/sigma)
         return sigma.log().neg()
     
     @staticmethod
     def h_fn(sigma_down:Tensor, sigma:Tensor) -> Tensor:
+        #return (-torch.log((1.-sigma_down)/sigma_down)) - (-torch.log((1.-sigma)/sigma))
         return -torch.log(sigma_down/sigma)
 
     def __call__(self,
@@ -905,6 +908,8 @@ class RK_Method_Exponential(RK_Method_Beta):
         denoised = x_0 - sigma * eps
         
         epsilon  = denoised - x_0
+        
+        #epsilon = denoised - x
         
         if self.EO("exp2lin_override"):
             epsilon = (x_0 - denoised) / sigma

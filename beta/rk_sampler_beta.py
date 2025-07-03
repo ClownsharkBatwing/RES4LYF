@@ -201,6 +201,7 @@ def sample_rk_beta(
 
         noise_seed                    : int                = -1,
         noise_initial                 : Optional[Tensor]   = None,
+        image_initial                 : Optional[Tensor]   = None,
 
         cfgpp                         : float              = 0.0,
         cfg_cw                        : float              = 1.0,
@@ -565,6 +566,14 @@ def sample_rk_beta(
         if StyleMMDiT is not None:
             StyleMMDiT.init_guides(model)
             LG.ADAIN_NOISE_MODE = StyleMMDiT.noise_mode
+            
+            if EO("mycoshock"):
+                StyleMMDiT.Retrojector = model.inner_model.inner_model.diffusion_model.Retrojector
+                image_initial_shock = StyleMMDiT.apply_data_shock(image_initial.to(x))
+                if VE_MODEL:
+                    x = image_initial_shock.to(x) + sigmas[0] * noise_initial.to(x)
+                else:
+                    x = (1 - sigmas[0]) * image_initial_shock.to(x) + sigmas[0] * noise_initial.to(x)
 
 
     # BEGIN SAMPLING LOOP
@@ -1322,7 +1331,7 @@ def sample_rk_beta(
                                     data_y_[row] = y0_bongflow
                                     
 
-                                
+                            
                             
                             elif LG.guide_mode.startswith("flow") and (LG.lgw[step_sched] > 0 or LG.lgw_inv[step_sched] > 0) and not FLOW_STOPPED and not EO("flow_sync") :
                                 lgw_mask_, lgw_mask_inv_ = LG.get_masks_for_step(step)
@@ -1631,7 +1640,46 @@ def sample_rk_beta(
                                 eps_[row], data_[row] = RK(x_tmp, s_tmp, x_0, sigma, transformer_options={'latent_type': 'yt'})
                                 
                             else:
+                                if EO("protoshock") and StyleMMDiT is not None and StyleMMDiT.data_shock_start_step <= step_sched < StyleMMDiT.data_shock_end_step:
+                                    eps_[row], data_[row] = RK(x_tmp, s_tmp, x_0, sigma, transformer_options={'row': row, 'x_tmp': x_tmp, 'sigma_next': sigma_next})
+                                    data_wct = StyleMMDiT.apply_data_shock(data_[row])
+                                    if VE_MODEL:
+                                        x_tmp = x_tmp + (data_wct - data_[row])
+                                    else:
+                                        x_tmp = x_tmp + (NS.sigma_max-NS.s_[row]) * (data_wct - data_[row])
+                                    #x_[row+RK.row_offset] = x_tmp
+                                    x_[row] = x_tmp
+                                    if row == 0:
+                                        x_0 = x_tmp
+                                        
+                                if EO("preshock"):
+                                    eps_[row], data_[row] = RK(x_tmp, s_tmp, x_0, sigma, transformer_options={'row': row, 'x_tmp': x_tmp, 'sigma_next': sigma_next})
+                                    if VE_MODEL:
+                                        x_tmp = x_tmp + (data_wct - data_[row])
+                                    else:
+                                        x_tmp = x_tmp + (NS.sigma_max-NS.s_[row]) * (data_wct - data_[row])
+                                    x_[row] = x_tmp
+                                    if row == 0:
+                                        x_0 = x_tmp
+                                
                                 eps_[row], data_[row] = RK(x_tmp, s_tmp, x_0, sigma, transformer_options={'row': row, 'x_tmp': x_tmp, 'sigma_next': sigma_next})
+                                
+                                if EO("yoloshock") and StyleMMDiT is not None and StyleMMDiT.data_shock_start_step <= step_sched < StyleMMDiT.data_shock_end_step:
+                                    data_wct = StyleMMDiT.apply_data_shock(data_[row])
+                                    if VE_MODEL:
+                                        x_tmp = x_tmp + (data_wct - data_[row])
+                                    else:
+                                        x_tmp = x_tmp + (NS.sigma_max-NS.s_[row]) * (data_wct - data_[row])
+                                    #x_[row+RK.row_offset] = x_tmp
+                                    x_[row] = x_tmp
+                                    if row == 0:
+                                        x_0 = x_tmp
+                                    data_[row] = data_wct
+                                    if RK.EXPONENTIAL:
+                                        eps_[row] = data_[row] - x_0
+                                    else:
+                                        eps_[row] = (x_0 - data_[row]) / sigma
+                                        
                                 
                                 if hasattr(model.inner_model.inner_model.diffusion_model, "eps_out"):  # fp64 model out override, for testing only
                                     eps_out = model.inner_model.inner_model.diffusion_model.eps_out
@@ -1768,7 +1816,7 @@ def sample_rk_beta(
                     if not LG.guide_mode.startswith("lure"):
                         x_[row+RK.row_offset] = LG.process_guides_data_substep(x_[row+RK.row_offset], data_[row], step_sched, NS.s_[row])
                     
-                    if StyleMMDiT is not None and StyleMMDiT.data_shock_start_step < step_sched < StyleMMDiT.data_shock_end_step:
+                    if not EO("protoshock") and not EO("yoloshock") and StyleMMDiT is not None and StyleMMDiT.data_shock_start_step <= step_sched < StyleMMDiT.data_shock_end_step:
                         data_wct = StyleMMDiT.apply_data_shock(data_[row])
                         if VE_MODEL:
                             x_[row+RK.row_offset] = x_[row+RK.row_offset] + (data_wct - data_[row])
@@ -1855,6 +1903,15 @@ def sample_rk_beta(
             eps = (x_0 - x_next) / (sigma - sigma_next)
             denoised = x_0 - sigma * eps
             
+            if EO("postshock") and step < EO("postshock", 10):
+                eps_row, data_row = RK(x_next, sigma_next, x_next, sigma_next, transformer_options={'row': row, 'x_tmp': x_next, 'sigma_next': sigma_next})
+                if VE_MODEL:
+                    x_next = x_next + (data_row - denoised)
+                else:
+                    x_next = x_next + (NS.sigma_max-sigma_next) * (data_row - denoised)
+                eps = (x_0 - x_next) / (sigma - sigma_next)
+                denoised = x_0 - sigma * eps
+
             if EO("data_sampler") and step > EO("data_sampler_start_step", 0) and step < EO("data_sampler_end_step", 5):
                 data_sampler_weight = EO("data_sampler_weight", 1.0)
                 denoised_step = RK.zum(row+RK.row_offset+RK.multistep_stages, data_, data_prev_) 

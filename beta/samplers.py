@@ -566,6 +566,7 @@ class SharkSampler:
                     
                     if 'BONGMATH' in sampler.extra_options:
                         sampler.extra_options['noise_initial'] = noise
+                        sampler.extra_options['image_initial'] = x
 
                     noise_mask = latent_unbatch["noise_mask"] if "noise_mask" in latent_unbatch else None
 

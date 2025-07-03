@@ -3291,12 +3291,33 @@ class ClownStyle_Boost:
             guides      = None,
             ):
         guides = copy.deepcopy(guides) if guides is not None else {}
-        guides['StyleMMDiT'].noise_mode = noise_mode
-        guides['StyleMMDiT'].recon_lure = recon_lure
-        guides['StyleMMDiT'].data_shock = datashock
-        guides['StyleMMDiT'].data_shock_start_step = datashock_start_step
-        guides['StyleMMDiT'].data_shock_end_step   = datashock_end_step
-        return (guides, )
+        
+        StyleMMDiT = guides.get('StyleMMDiT')
+        
+        if StyleMMDiT is None:
+            StyleMMDiT = StyleMMDiT_Model()
+            
+            weights = {
+                "h_tile"  : tile_h // 16,
+                "w_tile"  : tile_w // 16,
+            }
+            StyleMMDiT.set_weights(**weights)
+        
+        StyleMMDiT.noise_mode = noise_mode
+        StyleMMDiT.recon_lure = recon_lure
+        StyleMMDiT.data_shock = datashock
+        StyleMMDiT.data_shock_start_step = datashock_start_step
+        StyleMMDiT.data_shock_end_step   = datashock_end_step
+        
+        guides['StyleMMDiT'] = StyleMMDiT
+        return (guides,)
+        
+        #guides['StyleMMDiT'].noise_mode = noise_mode
+        #guides['StyleMMDiT'].recon_lure = recon_lure
+        #guides['StyleMMDiT'].data_shock = datashock
+        #guides['StyleMMDiT'].data_shock_start_step = datashock_start_step
+        #guides['StyleMMDiT'].data_shock_end_step   = datashock_end_step
+        #return (guides, )
 
 
 

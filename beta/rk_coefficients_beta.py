@@ -3,7 +3,8 @@ from torch import Tensor
 
 import copy
 import math
-
+from mpmath import mp, mpf, factorial, exp
+mp.dps = 80
 from typing          import Optional, Callable, Tuple, Dict, Any, Union, TYPE_CHECKING, TypeVar
 
 from .deis_coefficients import get_deis_coeff_list
@@ -2810,7 +2811,12 @@ def get_rk_methods_beta(rk_type       : str,
                 
             c1, c2, c3, c4, c5, c6, c7, c8 = 0, 1/2, 1/2, 1/4,    1/2, 1/5, 2/3, 1
             ci = [c1, c2, c3, c4, c5, c6, c7, c8]
-            φ = Phi(h, ci, analytic_solution=use_analytic_solution)
+            #φ = Phi(h, ci, analytic_solution=use_analytic_solution)
+            
+            ci = [mpf(c_val) for c_val in ci]
+            c1, c2, c3, c4, c5, c6, c7, c8 = [c_val for c_val in ci]
+
+            φ = Phi(mpf(h.item()), ci, analytic_solution=use_analytic_solution)
             
             a3_2 = (1/2) * φ(2,3)
             
@@ -2857,12 +2863,22 @@ def get_rk_methods_beta(rk_type       : str,
             
             a, b = gen_first_col_exp(a,b,ci,φ)
 
+            a = [[float(val) for val in row] for row in a]
+            b = [[float(val) for val in row] for row in b]
+            ci = [c1, c2, c3, c4, c5, c6, c7, c8]
+
+
 
         case "res_8s_alt": # this is EXPRK5S8 https://ora.ox.ac.uk/objects/uuid:cc001282-4285-4ca2-ad06-31787b540c61/files/m611df1a355ca243beb09824b70e5e774
                 
             c1, c2, c3, c4, c5, c6, c7, c8 = 0, 1/2, 1/2, 1/4,    1/2, 1/5, 2/3, 1
-            ci = [c1, c2, c3, c4, c5, c6, c7, c8]
-            φ = Phi(h, ci, analytic_solution=use_analytic_solution)
+            #ci = [c1, c2, c3, c4, c5, c6, c7, c8]
+            #φ = Phi(h, ci, analytic_solution=use_analytic_solution)
+            
+            ci = [mpf(c_val) for c_val in ci]
+            c1, c2, c3, c4, c5, c6, c7, c8 = [c_val for c_val in ci]
+
+            φ = Phi(mpf(h.item()), ci, analytic_solution=use_analytic_solution)
             
             a3_2 = 2*φ(2,2)
             
@@ -2907,14 +2923,22 @@ def get_rk_methods_beta(rk_type       : str,
 
             a, b = gen_first_col_exp(a,b,ci,φ)
 
+            a = [[float(val) for val in row] for row in a]
+            b = [[float(val) for val in row] for row in b]
+            ci = [c1, c2, c3, c4, c5, c6, c7, c8]
 
 
         case "res_10s":
                 
             c1, c2, c3, c4, c5, c6, c7, c8, c9, c10 = 0, 1/2, 1/2, 1/3, 1/2,     1/3, 1/4, 3/10, 3/4, 1
             ci = [c1, c2, c3, c4, c5, c6, c7, c8, c9, c10]
-            φ = Phi(h, ci, analytic_solution=use_analytic_solution)
-                
+            #φ = Phi(h, ci, analytic_solution=use_analytic_solution)
+            
+            ci = [mpf(c_val) for c_val in ci]
+            c1, c2, c3, c4, c5, c6, c7, c8, c9, c10 = [c_val for c_val in ci]
+
+            φ = Phi(mpf(h.item()), ci, analytic_solution=use_analytic_solution)
+
             a3_2 = (c3**2 / c2) * φ(2,3)
             a4_2 = (c4**2 / c2) * φ(2,4)
                         
@@ -2955,8 +2979,12 @@ def get_rk_methods_beta(rk_type       : str,
                     a[i-1][j-1] = (ci[i-1]**2 * ci[k-1] * ci[l-1] * φ(2,i)   -   2*ci[i-1]**3 * (ci[k-1] + ci[l-1]) * φ(3,i)   +   6*ci[i-1]**4 * φ(4,i))    /    (ci[j-1] * (ci[j-1] - ci[k-1]) * (ci[j-1] - ci[l-1]))
             
             gen_first_col_exp(a, b, ci, φ)
-
-
+            
+            a = [[float(val) for val in row] for row in a]
+            b = [[float(val) for val in row] for row in b]
+            c1, c2, c3, c4, c5, c6, c7, c8, c9, c10 = 0, 1/2, 1/2, 1/3, 1/2,     1/3, 1/4, 3/10, 3/4, 1
+            ci = [c1, c2, c3, c4, c5, c6, c7, c8, c9, c10]
+            
 
         case "res_15s":
                 
@@ -2972,10 +3000,12 @@ def get_rk_methods_beta(rk_type       : str,
             c12 = 90/103
             c15 = 1/5
             ci = [c1, c2, c3, c4, c5, c6, c7, c8, c9, c10, c11, c12, c13, c14, c15]
-            φ = Phi(h, ci, analytic_solution=use_analytic_solution)
-            
-            a = [[0 for _ in range(15)] for _ in range(15)]
-            b = [[0 for _ in range(15)]]
+            ci = [mpf(c_val) for c_val in ci]
+
+            φ = Phi(mpf(h.item()), ci, analytic_solution=use_analytic_solution)
+
+            a = [[mpf(0) for _ in range(15)] for _ in range(15)]
+            b = [[mpf(0) for _ in range(15)]]
 
             for i in range(3, 5): # i=3,4     j=2
                 j=2
@@ -3055,6 +3085,9 @@ def get_rk_methods_beta(rk_type       : str,
             
             gen_first_col_exp(a, b, ci, φ)
 
+            a = [[float(val) for val in row] for row in a]
+            b = [[float(val) for val in row] for row in b]
+            ci = [c1, c2, c3, c4, c5, c6, c7, c8, c9, c10, c11, c12, c13, c14, c15]
             
 
         case "res_16s": # 6th order without weakened order conditions
@@ -3066,12 +3099,13 @@ def get_rk_methods_beta(rk_type       : str,
             c7 = c10 = c14 = 1/4
             c16 = 1
             ci = [c1, c2, c3, c4, c5, c6, c7, c8, c9, c10, c11, c12, c13, c14, c15, c16]
-            φ = Phi(h, ci, analytic_solution=use_analytic_solution)
+            ci = [mpf(c_val) for c_val in ci]
+            φ = Phi(mpf(h.item()), ci, analytic_solution=use_analytic_solution)
             
             a3_2 = (1/2) * φ(2,3)
 
-            a = [[0 for _ in range(16)] for _ in range(16)]
-            b = [[0 for _ in range(16)]]
+            a = [[mpf(0) for _ in range(16)] for _ in range(16)]
+            b = [[mpf(0) for _ in range(16)]]
 
             for i in range(3, 5): # i=3,4     j=2
                 j=2
@@ -3119,7 +3153,9 @@ def get_rk_methods_beta(rk_type       : str,
 
             gen_first_col_exp(a, b, ci, φ)
 
-
+            a = [[float(val) for val in row] for row in a]
+            b = [[float(val) for val in row] for row in b]
+            ci = [c1, c2, c3, c4, c5, c6, c7, c8, c9, c10, c11, c12, c13, c14, c15, c16]
             
         case "irk_exp_diag_2s":
             c1 = 1/3
@@ -3240,7 +3276,7 @@ def theta(j, cd, ci, ck, cj, cl):
     return numerator / denominator(ci, cj, ck, cl, cd)
 
 
-def prod_diff(cj, ck, cl=None, cd=None, cblah=None):
+def prod_diff(cj, ck, cl=None, cd=None):
     if cl is None and cd is None:
         return cj * (cj - ck)
     if cd is None:
