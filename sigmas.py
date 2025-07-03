@@ -4030,3 +4030,4 @@ def bong_tangent_scheduler(model_sampling, steps, start=1.0, middle=0.5, end=0.0
     tan_sigmas = torch.tensor(tan_sigmas_1 + tan_sigmas_2)
 
     return tan_sigmas
+

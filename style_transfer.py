@@ -1121,7 +1121,7 @@ class Stylizer:
         
         self.IMG_1ST = True
         self.HEADS = 0
-        self.KONTEXT = False
+        self.KONTEXT = 0
     def set_mode(self, mode):
         self.method = [mode] #[getattr(self, mode)]
     
@@ -1220,8 +1220,14 @@ class Stylizer:
             B, HEAD_DIM, HW, C = x.shape
             x = x.reshape(B, HW, C*HEAD_DIM)
             
-        if self.KONTEXT:
+        if self.KONTEXT == 1:
             x = x.reshape(2, x.shape[1] // 2, x.shape[2])
+        
+        txt_slice, img_slice, ktx_slice = self.txt_slice, self.img_slice, None
+        if self.KONTEXT == 2:
+            img_slice = self.img_slice # slice(2 * self.img_slice.start, None)
+            ktx_slice = slice(2 * self.img_slice.start, self.img_slice.start)
+            txt_slice = slice(None, 2 * self.txt_slice.stop)
         
         weights_all_one         = all(weight == 1.0           for weight in weight_list)
         methods_all_scattersort = all(name   == "scattersort" for name   in self.method)
@@ -1252,22 +1258,26 @@ class Stylizer:
                         x = method(x, idx=i+1)
                     elif   self.img_len < x.shape[-2]:
                         if "img" in apply_to:
-                            x[...,self.img_slice,:] = method(x[...,self.img_slice,:], idx=i+1)
+                            x[...,img_slice,:] = method(x[...,img_slice,:], idx=i+1)
+                            if ktx_slice is not None:
+                                x[...,ktx_slice,:] = method(x[...,ktx_slice,:], idx=i+1)
                             #x[:,:self.img_len,:] = method(x[:,:self.img_len,:], idx=i+1)
                         if "txt" in apply_to:
-                            x[...,self.txt_slice,:] = txt_method(x[...,self.txt_slice,:], idx=i+1)
+                            x[...,txt_slice,:] = txt_method(x[...,txt_slice,:], idx=i+1)
                             #x[:,self.img_len:,:] = method(x[:,self.img_len:,:], idx=i+1)
 
                 else:
                     x = torch.lerp(x, method(x.clone(), idx=i+1), weight)
                 
                 if mask is not None:
-                    x[0:1,...,self.img_slice,:] = torch.lerp(x01[...,self.img_slice,:], x[0:1,...,self.img_slice,:], mask.view(1, -1, 1))
+                    x[0:1,...,img_slice,:] = torch.lerp(x01[...,img_slice,:], x[0:1,...,img_slice,:], mask.view(1, -1, 1))  
+                    if ktx_slice is not None:
+                        x[0:1,...,ktx_slice,:] = torch.lerp(x01[...,ktx_slice,:], x[0:1,...,ktx_slice,:], mask.view(1, -1, 1))  
                     #x[0:1,:self.img_len] = torch.lerp(x01[:,:self.img_len], x[0:1,:self.img_len], mask.view(1, -1, 1))
         
         #if x_ndim == 3:
         #    return x.view(B,HW,C)
-        if self.KONTEXT:
+        if self.KONTEXT == 1:
             x = x.reshape(1, x.shape[1] * 2, x.shape[2])
         
         if HEAD_DIM == self.HEADS:
@@ -1528,7 +1538,7 @@ class StyleMMDiT_BaseBlock:
         self.HEADS = HEADS
         
         self.img.set_len(h_len, w_len, img_slice, txt_slice, HEADS)
-        self.txt.set_len(-1, -1, None, None, HEADS)
+        self.txt.set_len(-1, -1, img_slice, txt_slice, HEADS)
         
         for i, mask in enumerate(self.mask):
             if mask is not None and mask.ndim > 1:
@@ -1546,7 +1556,7 @@ class StyleMMDiT_DoubleBlock(StyleMMDiT_BaseBlock):
     
     def set_len(self, h_len, w_len, img_slice, txt_slice, HEADS):
         super().set_len(h_len, w_len, img_slice, txt_slice, HEADS)
-        self.txt.set_len(-1, -1, None, None, HEADS)
+        self.txt.set_len(-1, -1, img_slice, txt_slice, HEADS)
 
 class StyleMMDiT_SingleBlock(StyleMMDiT_BaseBlock):
     def __init__(self, mode="passthrough"):
@@ -1591,7 +1601,7 @@ class StyleMMDiT_Model(Stylizer):
         
         self.IMG_1ST = True
         self.HEADS = 0
-        self.KONTEXT = False
+        self.KONTEXT = 0
     def __call__(self, x, attr):
         if x.shape[0] == 1 and not self.KONTEXT:
             return x
@@ -1615,7 +1625,7 @@ class StyleMMDiT_Model(Stylizer):
             B, HEAD_DIM, HW, C = x.shape
             x = x.reshape(B, HW, C*HEAD_DIM)
             
-        if self.KONTEXT:
+        if self.KONTEXT == 1:
             x = x.reshape(2, x.shape[1] // 2, x.shape[2])
             
         weights_all_one         = all(weight == 1.0           for weight in weight_list)
@@ -1646,7 +1656,7 @@ class StyleMMDiT_Model(Stylizer):
         
         #if x_ndim == 3:
         #    return x.view(B,HW,C)
-        if self.KONTEXT:
+        if self.KONTEXT == 1:
             x = x.reshape(1, x.shape[1] * 2, x.shape[2])
             
         if HEAD_DIM == self.HEADS:
