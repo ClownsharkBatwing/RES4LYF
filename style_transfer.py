@@ -1782,8 +1782,8 @@ class StyleMMDiT_Model(Stylizer):
         
         y0_style_embed = self.Retrojector.embed(y0_style)
         denoised_embed = self.Retrojector.embed(denoised)
-        
-        embed  = torch.cat([denoised_embed, y0_style_embed], dim=0)
+        B,HW,C = y0_style_embed.shape
+        embed  = torch.cat([denoised_embed, y0_style_embed.view(1,B*HW,C)[:,::B,:]], dim=0)
         method = getattr(self, mode)
         embed  = method(embed)
         return self.Retrojector.unembed(embed[0:1])
