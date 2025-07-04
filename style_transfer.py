@@ -1260,8 +1260,8 @@ class Stylizer:
                     elif   self.img_len < x.shape[-2]:
                         if "img" in apply_to:
                             x[...,img_slice,:] = method(x[...,img_slice,:], idx=i+1)
-                            if ktx_slice is not None:
-                                x[...,ktx_slice,:] = method(x[...,ktx_slice,:], idx=i+1)
+                            #if ktx_slice is not None:
+                            #    x[...,ktx_slice,:] = method(x[...,ktx_slice,:], idx=i+1)
                             #x[:,:self.img_len,:] = method(x[:,:self.img_len,:], idx=i+1)
                         if "txt" in apply_to:
                             x[...,txt_slice,:] = txt_method(x[...,txt_slice,:], idx=i+1)
@@ -1326,6 +1326,83 @@ class Stylizer:
     @staticmethod
     def passthrough(x:torch.Tensor, idx=1) -> torch.Tensor:
         return x
+    
+    @staticmethod
+    def decompose_magnitude_direction(x, dim=-1, eps=1e-8):
+        magnitude = x.norm(p=2, dim=dim, keepdim=True)
+        direction = x / (magnitude + eps)
+        return magnitude, direction
+
+    @staticmethod
+    def scattersort_dir_(x, y, dim=-2):
+        #buf = Stylizer.buffer
+        #buf['src_sorted'], buf['src_idx'] = x.sort(dim=-2)
+        #buf['ref_sorted'], buf['ref_idx'] = y.sort(dim=-2)
+        #mag, _ = Stylizer.decompose_magnitude_direction(buf['src_sorted'], dim)
+        #_, dir = Stylizer.decompose_magnitude_direction(buf['ref_sorted'], dim)
+        mag, _ = Stylizer.decompose_magnitude_direction(x.to(torch.float64), dim)
+        
+        buf = Stylizer.buffer
+        buf['src_idx']                    = x.argsort(dim=-2)
+        buf['ref_sorted'], buf['ref_idx'] = y   .sort(dim=-2)
+        x.scatter_(dim=-2, index=buf['src_idx'], src=buf['ref_sorted'].expand_as(buf['src_idx']))
+        
+        
+        _, dir = Stylizer.decompose_magnitude_direction(x.to(torch.float64), dim)
+        
+        return (mag * dir).to(x)
+
+
+    @staticmethod
+    def scattersort_dir2_(x, y, dim=-2):
+        #buf = Stylizer.buffer
+        #buf['src_sorted'], buf['src_idx'] = x.sort(dim=-2)
+        #buf['ref_sorted'], buf['ref_idx'] = y.sort(dim=-2)
+        #mag, _ = Stylizer.decompose_magnitude_direction(buf['src_sorted'], dim)
+        #_, dir = Stylizer.decompose_magnitude_direction(buf['ref_sorted'], dim)
+        
+        
+        buf = Stylizer.buffer
+        buf['src_sorted'], buf['src_idx'] = x.sort(dim=dim)
+        buf['ref_sorted'], buf['ref_idx'] = y.sort(dim=dim)
+        
+
+
+
+        buf['x_sub'], buf['x_sub_idx'] = buf['src_sorted'].sort(dim=-1)
+        buf['y_sub'], buf['y_sub_idx'] = buf['ref_sorted'].sort(dim=-1)
+        
+        mag, _ = Stylizer.decompose_magnitude_direction(buf['x_sub'].to(torch.float64), -1)
+        _, dir = Stylizer.decompose_magnitude_direction(buf['y_sub'].to(torch.float64), -1)
+        
+        buf['y_sub'] = (mag * dir).to(x)
+        
+        buf['ref_sorted'].scatter_(dim=-1, index=buf['y_sub_idx'], src=buf['y_sub'].expand_as(buf['y_sub_idx']))
+
+
+
+        mag, _ = Stylizer.decompose_magnitude_direction(buf['src_sorted'].to(torch.float64), dim)
+        _, dir = Stylizer.decompose_magnitude_direction(buf['ref_sorted'].to(torch.float64), dim)
+        
+        buf['ref_sorted'] = (mag * dir).to(x)
+        
+        x.scatter_(dim=dim, index=buf['src_idx'], src=buf['ref_sorted'].expand_as(buf['src_idx']))
+
+
+        return x
+
+
+
+    @staticmethod
+    def scattersort_dir(x, idx=1):
+        x[0:1] = Stylizer.scattersort_dir_(x[0:1], x[idx:idx+1])
+        return x
+    
+
+    @staticmethod
+    def scattersort_dir2(x, idx=1):
+        x[0:1] = Stylizer.scattersort_dir2_(x[0:1], x[idx:idx+1])
+        return x
 
     @staticmethod
     def scattersort_(x, y):
@@ -1333,6 +1410,20 @@ class Stylizer:
         buf['src_idx']                    = x.argsort(dim=-2)
         buf['ref_sorted'], buf['ref_idx'] = y   .sort(dim=-2)
         return x.scatter_(dim=-2, index=buf['src_idx'], src=buf['ref_sorted'].expand_as(buf['src_idx']))
+    
+    @staticmethod
+    def scattersort_double(x, y):
+        buf = Stylizer.buffer
+        buf['src_sorted'], buf['src_idx'] = x.sort(dim=-2)
+        buf['ref_sorted'], buf['ref_idx'] = y.sort(dim=-2)
+        
+        buf['x_sub_idx']               = buf['src_sorted'].argsort(dim=-1)
+        buf['y_sub'], buf['y_sub_idx'] = buf['ref_sorted'].sort(dim=-1)
+        
+        x.scatter_(dim=-1, index=buf['x_sub_idx'], src=buf['y_sub'].expand_as(buf['x_sub_idx']))
+
+        return x.scatter_(dim=-2, index=buf['src_idx'], src=buf['ref_sorted'].expand_as(buf['src_idx']))
+    
     
     def scattersort(self, x, idx=1):
         x[0:1] = Stylizer.scattersort_(x[0:1], x[idx:idx+1])
