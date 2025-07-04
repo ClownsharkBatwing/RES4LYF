@@ -369,9 +369,12 @@ class ReFlux(Flux):
                 x_init = torch.randn_like(x_init)
 
             if y0_style_active:
-                SIGMA_ADAIN         = (SIGMA * EO("eps_adain_sigma_factor", 1.0)).to(y0_style)
-                y0_style_noised     = (1-SIGMA_ADAIN) * y0_style + SIGMA_ADAIN * x_init[0:1].to(y0_style)   #always only use first batch of noise to avoid broadcasting
-                img_y0_style_orig   = comfy.ldm.common_dit.pad_to_patch_size(y0_style_noised, (self.patch_size, self.patch_size))
+                if y0_style.sum() == 0.0 and y0_style.std() == 0.0:
+                    y0_style = img_orig.clone()
+                else:
+                    SIGMA_ADAIN         = (SIGMA * EO("eps_adain_sigma_factor", 1.0)).to(y0_style)
+                    y0_style_noised     = (1-SIGMA_ADAIN) * y0_style + SIGMA_ADAIN * x_init[0:1].to(y0_style)   #always only use first batch of noise to avoid broadcasting
+                    img_y0_style_orig   = comfy.ldm.common_dit.pad_to_patch_size(y0_style_noised, (self.patch_size, self.patch_size))
 
             mask_zero = None
             
