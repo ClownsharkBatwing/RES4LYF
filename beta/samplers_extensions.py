@@ -3252,7 +3252,18 @@ class ClownGuide_StyleNorm_Advanced_HiDream:
 
 from ..style_transfer import StyleMMDiT_Model, DEFAULT_BLOCK_WEIGHTS_MMDIT, DEFAULT_ATTN_WEIGHTS_MMDIT, DEFAULT_BASE_WEIGHTS_MMDIT
 
-
+STYLE_MODES = [
+    "none", 
+    "scattersort_dir", 
+    "scattersort_dir2",
+    "scattersort", 
+    "tiled_scattersort",
+    "AdaIN", 
+    "tiled_AdaIN", 
+    "WCT",
+    "WCT2",
+    "injection",
+]
 
 class ClownStyle_Boost:
 
@@ -3261,8 +3272,8 @@ class ClownStyle_Boost:
         return {"required":
                     {
                     "noise_mode":           (["direct", "update", "smart", "recon", "bonanza"], {"default": "update"},),
-                    "recon_lure":           (["none", "scattersort", "tiled_scattersort", "AdaIN", "tiled_AdaIN", "WCT", "WCT2"],    {"default": "WCT", "tooltip": "Only used if noise_mode = recon. Can increase the strength of the style."},),
-                    "datashock":            (["none", "scattersort", "tiled_scattersort", "AdaIN", "tiled_AdaIN", "WCT", "WCT2"],    {"default": "scattersort", "tooltip": "Will drastically increase the strength at low denoise levels. Use with img2img workflows."},),
+                    "recon_lure":           (STYLE_MODES,    {"default": "WCT", "tooltip": "Only used if noise_mode = recon. Can increase the strength of the style."},),
+                    "datashock":            (STYLE_MODES,    {"default": "scattersort", "tooltip": "Will drastically increase the strength at low denoise levels. Use with img2img workflows."},),
                     "datashock_start_step": ("INT",                                             {"default": 0, "min": 0, "max": 10000, "step": 1, "tooltip": "Start step for data shock."}),
                     "datashock_end_step"  : ("INT",                                             {"default": 1, "min": 1, "max": 10000, "step": 1, "tooltip": "End step for data shock."}),
 
@@ -3330,7 +3341,7 @@ class ClownStyle_MMDiT:
     def INPUT_TYPES(cls):
         return {"required":
                     {
-                    "mode":        (["scattersort", "tiled_scattersort", "AdaIN", "tiled_AdaIN", "WCT", "WCT2", "injection"], {"default": "scattersort"},),
+                    "mode":        (STYLE_MODES, {"default": "scattersort"},),
 
                     "proj_in":     ("FLOAT", {"default": 0.0, "min": -100.0, "max": 100.0, "step":0.01, "round": False, "tooltip": "Strength of effect on layer; skips extra calculation if set to 0.0. Skips interpolation if set to 1.0."}),
                     "proj_out":    ("FLOAT", {"default": 0.0, "min": -100.0, "max": 100.0, "step":0.01, "round": False, "tooltip": "Strength of effect on layer; skips extra calculation if set to 0.0. Skips interpolation if set to 1.0."}),
@@ -3424,7 +3435,7 @@ class ClownStyle_Block_MMDiT:
     def INPUT_TYPES(cls):
         return {"required":
                     {
-                    "mode":          (["scattersort", "tiled_scattersort", "AdaIN", "tiled_AdaIN", "WCT", "WCT2", "injection"], {"default": "scattersort"},),
+                    "mode":          (STYLE_MODES, {"default": "scattersort"},),
                     "apply_to":      (["img", "img+txt","img,txt", "txt",], {"default": "img+txt"},),
                     "block_type":    (["double", "double,single", "single"], {"default": "single"},),
                     "block_list":    ("STRING", {"default": "all", "multiline": True}),
@@ -3592,7 +3603,7 @@ class ClownStyle_Attn_MMDiT:
     def INPUT_TYPES(cls):
         return {"required":
                     {
-                    "mode":          (["scattersort", "tiled_scattersort", "AdaIN", "tiled_AdaIN", "WCT", "WCT2", "injection"], {"default": "scattersort"},),
+                    "mode":          (STYLE_MODES, {"default": "scattersort"},),
                     "apply_to":      (["img","img+txt","img,txt","txt"], {"default": "img+txt"},),
                     "block_type":    (["double", "double,single", "single"], {"default": "single"},),
                     "block_list":    ("STRING", {"default": "all", "multiline": True}),
