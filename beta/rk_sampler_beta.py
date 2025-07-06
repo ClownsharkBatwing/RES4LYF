@@ -1664,7 +1664,8 @@ def sample_rk_beta(
                                 
                                 eps_[row], data_[row] = RK(x_tmp, s_tmp, x_0, sigma, transformer_options={'row': row, 'x_tmp': x_tmp, 'sigma_next': sigma_next})
                                 
-                                if EO("yoloshock") and StyleMMDiT is not None and StyleMMDiT.data_shock_start_step <= step_sched < StyleMMDiT.data_shock_end_step:
+                                #if EO("yoloshock") and StyleMMDiT is not None and StyleMMDiT.data_shock_start_step <= step_sched < StyleMMDiT.data_shock_end_step:
+                                if not EO("disable_yoloshock") and StyleMMDiT is not None and StyleMMDiT.data_shock_start_step <= step_sched < StyleMMDiT.data_shock_end_step:
                                     data_wct = StyleMMDiT.apply_data_shock(data_[row])
                                     if VE_MODEL:
                                         x_tmp = x_tmp + (data_wct - data_[row])
@@ -1679,7 +1680,7 @@ def sample_rk_beta(
                                         eps_[row] = data_[row] - x_0
                                     else:
                                         eps_[row] = (x_0 - data_[row]) / sigma
-                                        
+                                    
                                 
                                 if hasattr(model.inner_model.inner_model.diffusion_model, "eps_out"):  # fp64 model out override, for testing only
                                     eps_out = model.inner_model.inner_model.diffusion_model.eps_out
@@ -1816,7 +1817,7 @@ def sample_rk_beta(
                     if not LG.guide_mode.startswith("lure"):
                         x_[row+RK.row_offset] = LG.process_guides_data_substep(x_[row+RK.row_offset], data_[row], step_sched, NS.s_[row])
                     
-                    if not EO("protoshock") and not EO("yoloshock") and StyleMMDiT is not None and StyleMMDiT.data_shock_start_step <= step_sched < StyleMMDiT.data_shock_end_step:
+                    if ((not EO("protoshock") and not EO("yoloshock"))  or EO("fuckitshock")) and StyleMMDiT is not None and StyleMMDiT.data_shock_start_step <= step_sched < StyleMMDiT.data_shock_end_step:
                         data_wct = StyleMMDiT.apply_data_shock(data_[row])
                         if VE_MODEL:
                             x_[row+RK.row_offset] = x_[row+RK.row_offset] + (data_wct - data_[row])

@@ -3254,6 +3254,7 @@ from ..style_transfer import StyleMMDiT_Model, StyleUNet_Model, DEFAULT_BLOCK_WE
 
 STYLE_MODES = [
     "none", 
+    #"sinkhornsort",
     "scattersort_dir", 
     "scattersort_dir2",
     "scattersort", 
