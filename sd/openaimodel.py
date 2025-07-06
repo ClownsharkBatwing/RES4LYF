@@ -16,6 +16,7 @@ from comfy.ldm.modules.diffusionmodules.util import (
     AlphaBlender,
 )
 from comfy.ldm.modules.attention import SpatialTransformer, SpatialVideoTransformer, default
+from .attention import ReSpatialTransformer, ReBasicTransformerBlock
 from comfy.ldm.util import exists
 import comfy.patcher_extension
 import comfy.ops
@@ -24,25 +25,31 @@ ops = comfy.ops.disable_weight_init
 from comfy.ldm.modules.diffusionmodules.openaimodel import TimestepBlock, TimestepEmbedSequential, Upsample, Downsample, ResBlock, VideoResBlock
 from ..latents import slerp_tensor, interpolate_spd, tile_latent, untile_latent, gaussian_blur_2d, median_blur_2d
 
-from ..style_transfer import apply_scattersort_masked, apply_scattersort_tiled, adain_seq_inplace, adain_patchwise_row_batch_med, adain_patchwise_row_batch, apply_scattersort, apply_scattersort_spatial
+from ..style_transfer import apply_scattersort_masked, apply_scattersort_tiled, adain_seq_inplace, adain_patchwise_row_batch_med, adain_patchwise_row_batch, apply_scattersort, apply_scattersort_spatial, StyleMMDiT_Model, StyleUNet_Model
 
 #This is needed because accelerate makes a copy of transformer_options which breaks "transformer_index"
-def forward_timestep_embed(ts, x, emb, context=None, transformer_options={}, output_shape=None, time_context=None, num_video_frames=None, image_only_indicator=None):
+def forward_timestep_embed(ts, x, emb, context=None, transformer_options={}, output_shape=None, time_context=None, num_video_frames=None, image_only_indicator=None, style_block=None):
     for layer in ts:
         if isinstance(layer, VideoResBlock): # UNUSED
             x = layer(x, emb, num_video_frames, image_only_indicator)
-        elif isinstance(layer, TimestepBlock):
-            x = layer(x, emb)
+        elif isinstance(layer, TimestepBlock):  # ResBlock(TimestepBlock)
+            x = layer(x, emb, style_block.res_block)
+            x = style_block(x, "res")
         elif isinstance(layer, SpatialVideoTransformer):   # UNUSED
             x = layer(x, context, time_context, num_video_frames, image_only_indicator, transformer_options)
             if "transformer_index" in transformer_options:
                 transformer_options["transformer_index"] += 1
-        elif isinstance(layer, SpatialTransformer):          # USED
-            x = layer(x, context, transformer_options)
+        elif isinstance(layer, ReSpatialTransformer):          # USED
+            x = layer(x, context, style_block.spatial_block, transformer_options,)
+            x = style_block(x, "spatial")
             if "transformer_index" in transformer_options:
                 transformer_options["transformer_index"] += 1
         elif isinstance(layer, Upsample):
             x = layer(x, output_shape=output_shape)
+            x = style_block(x, "resample")
+        elif isinstance(layer, Downsample):
+            x = layer(x)
+            x = style_block(x, "resample")
         else:
             if "patches" in transformer_options and "forward_timestep_embed_patch" in transformer_options["patches"]:
                 found_patched = False
@@ -55,6 +62,179 @@ def forward_timestep_embed(ts, x, emb, context=None, transformer_options={}, out
                     continue
             x = layer(x)
     return x
+
+
+
+
+class ReResBlock(TimestepBlock):
+    """
+    A residual block that can optionally change the number of channels.
+    :param channels: the number of input channels.
+    :param emb_channels: the number of timestep embedding channels.
+    :param dropout: the rate of dropout.
+    :param out_channels: if specified, the number of out channels.
+    :param use_conv: if True and out_channels is specified, use a spatial
+        convolution instead of a smaller 1x1 convolution to change the
+        channels in the skip connection.
+    :param dims: determines if the signal is 1D, 2D, or 3D.
+    :param use_checkpoint: if True, use gradient checkpointing on this module.
+    :param up: if True, use this block for upsampling.
+    :param down: if True, use this block for downsampling.
+    """
+
+    def __init__(
+        self,
+        channels,
+        emb_channels,
+        dropout,
+        out_channels=None,
+        use_conv=False,
+        use_scale_shift_norm=False,
+        dims=2,
+        use_checkpoint=False,
+        up=False,
+        down=False,
+        kernel_size=3,
+        exchange_temb_dims=False,
+        skip_t_emb=False,
+        dtype=None,
+        device=None,
+        operations=ops
+    ):
+        super().__init__()
+        self.channels = channels
+        self.emb_channels = emb_channels
+        self.dropout = dropout
+        self.out_channels = out_channels or channels
+        self.use_conv = use_conv
+        self.use_checkpoint = use_checkpoint
+        self.use_scale_shift_norm = use_scale_shift_norm
+        self.exchange_temb_dims = exchange_temb_dims
+
+        if isinstance(kernel_size, list):
+            padding = [k // 2 for k in kernel_size]
+        else:
+            padding = kernel_size // 2
+
+        self.in_layers = nn.Sequential(
+            operations.GroupNorm(32, channels, dtype=dtype, device=device),
+            nn.SiLU(),
+            operations.conv_nd(dims, channels, self.out_channels, kernel_size, padding=padding, dtype=dtype, device=device),
+        )
+
+        self.updown = up or down
+
+        if up:
+            self.h_upd = Upsample(channels, False, dims, dtype=dtype, device=device)
+            self.x_upd = Upsample(channels, False, dims, dtype=dtype, device=device)
+        elif down:
+            self.h_upd = Downsample(channels, False, dims, dtype=dtype, device=device)
+            self.x_upd = Downsample(channels, False, dims, dtype=dtype, device=device)
+        else:
+            self.h_upd = self.x_upd = nn.Identity()
+
+        self.skip_t_emb = skip_t_emb
+        if self.skip_t_emb:
+            self.emb_layers = None
+            self.exchange_temb_dims = False
+        else:
+            self.emb_layers = nn.Sequential(
+                nn.SiLU(),
+                operations.Linear(
+                    emb_channels,
+                    2 * self.out_channels if use_scale_shift_norm else self.out_channels, dtype=dtype, device=device
+                ),
+            )
+        self.out_layers = nn.Sequential(
+            operations.GroupNorm(32, self.out_channels, dtype=dtype, device=device),
+            nn.SiLU(),
+            nn.Dropout(p=dropout),
+            operations.conv_nd(dims, self.out_channels, self.out_channels, kernel_size, padding=padding, dtype=dtype, device=device)
+            ,
+        )
+
+        if self.out_channels == channels:
+            self.skip_connection = nn.Identity()
+        elif use_conv:
+            self.skip_connection = operations.conv_nd(
+                dims, channels, self.out_channels, kernel_size, padding=padding, dtype=dtype, device=device
+            )
+        else:
+            self.skip_connection = operations.conv_nd(dims, channels, self.out_channels, 1, dtype=dtype, device=device)
+
+    def forward(self, x, emb, style_block=None):
+        """
+        Apply the block to a Tensor, conditioned on a timestep embedding.
+        :param x: an [N x C x ...] Tensor of features.
+        :param emb: an [N x emb_channels] Tensor of timestep embeddings.
+        :return: an [N x C x ...] Tensor of outputs.
+        """
+        return checkpoint(
+            self._forward, (x, emb, style_block), self.parameters(), self.use_checkpoint
+        )
+
+
+    def _forward(self, x, emb, style_block=None):
+        #if self.updown: # not used with sdxl?
+        #    in_rest, in_conv = self.in_layers[:-1], self.in_layers[-1]
+        #    h = in_rest(x)
+        #    h = self.h_upd(h)
+        #    x = self.x_upd(x)
+        #    h = in_conv(h)
+        #else:
+        #    h = self.in_layers(x)
+        
+        h = self.in_layers[0](x)
+        h = style_block(h, "in_norm")
+        
+        h = self.in_layers[1](h)
+        h = style_block(h, "in_silu")
+        
+        h = self.in_layers[2](h)
+        h = style_block(h, "in_conv")
+        
+
+        emb_out = None
+        if not self.skip_t_emb:
+            #emb_out = self.emb_layers(emb).type(h.dtype)
+            emb_out = self.emb_layers[0](emb).type(h.dtype)
+            emb_out = style_block(emb_out, "emb_silu")
+            
+            emb_out = self.emb_layers[1](emb_out)
+            emb_out = style_block(emb_out, "emb_linear")
+            
+            while len(emb_out.shape) < len(h.shape):
+                emb_out = emb_out[..., None]
+                
+        if self.use_scale_shift_norm: # not used with sdxl?
+            out_norm, out_rest = self.out_layers[0], self.out_layers[1:]
+            h = out_norm(h)
+            if emb_out is not None:
+                scale, shift = th.chunk(emb_out, 2, dim=1)
+                h *= (1 + scale)
+                h += shift
+            h = out_rest(h)
+        else:
+            if emb_out is not None:
+                if self.exchange_temb_dims:
+                    emb_out = emb_out.movedim(1, 2)
+                h = h + emb_out
+                h = style_block(h, "emb_res")
+            #h = self.out_layers(h)
+            h = self.out_layers[0](h)
+            h = style_block(h, "out_norm")
+            
+            h = self.out_layers[1](h)
+            h = style_block(h, "out_silu")
+            
+            h = self.out_layers[3](h) # [2] is dropout
+            h = style_block(h, "out_conv")
+            
+        res_out = self.skip_connection(x) + h
+        res_out = style_block(res_out, "residual")
+        return res_out   
+        #return self.skip_connection(x) + h
+
 
 
 
@@ -75,6 +255,7 @@ def apply_control(h, control, name):
             except:
                 logging.warning("warning control could not be applied {} {}".format(h.shape, ctrl.shape))
     return h
+
 
 class ReUNetModel(nn.Module):
     """
@@ -109,44 +290,44 @@ class ReUNetModel(nn.Module):
         model_channels,
         out_channels,
         num_res_blocks,
-        dropout=0,
-        channel_mult=(1, 2, 4, 8),
-        conv_resample=True,
-        dims=2,
-        num_classes=None,
-        use_checkpoint=False,
-        dtype=th.float32,
-        num_heads=-1,
-        num_head_channels=-1,
-        num_heads_upsample=-1,
-        use_scale_shift_norm=False,
-        resblock_updown=False,
-        use_new_attention_order=False,
-        use_spatial_transformer=False,    # custom transformer support
-        transformer_depth=1,              # custom transformer support
-        context_dim=None,                 # custom transformer support
-        n_embed=None,                     # custom support for prediction of discrete ids into codebook of first stage vq model
-        legacy=True,
-        disable_self_attentions=None,
-        num_attention_blocks=None,
-        disable_middle_self_attn=False,
-        use_linear_in_transformer=False,
-        adm_in_channels=None,
-        transformer_depth_middle=None,
-        transformer_depth_output=None,
-        use_temporal_resblock=False,
-        use_temporal_attention=False,
-        time_context_dim=None,
-        extra_ff_mix_layer=False,
-        use_spatial_context=False,
-        merge_strategy=None,
-        merge_factor=0.0,
-        video_kernel_size=None,
-        disable_temporal_crossattention=False,
-        max_ddpm_temb_period=10000,
-        attn_precision=None,
-        device=None,
-        operations=ops,
+        dropout                         = 0,
+        channel_mult                    = (1, 2, 4, 8),
+        conv_resample                   = True,
+        dims                            = 2,
+        num_classes                     = None,
+        use_checkpoint                  = False,
+        dtype                           = th.float32,
+        num_heads                       = -1,
+        num_head_channels               = -1,
+        num_heads_upsample              = -1,
+        use_scale_shift_norm            = False,
+        resblock_updown                 = False,
+        use_new_attention_order         = False,
+        use_spatial_transformer         = False,    # custom transformer support
+        transformer_depth               = 1,              # custom transformer support
+        context_dim                     = None,                 # custom transformer support
+        n_embed                         = None,                     # custom support for prediction of discrete ids into codebook of first stage vq model
+        legacy                          = True,
+        disable_self_attentions         = None,
+        num_attention_blocks            = None,
+        disable_middle_self_attn        = False,
+        use_linear_in_transformer       = False,
+        adm_in_channels                 = None,
+        transformer_depth_middle        = None,
+        transformer_depth_output        = None,
+        use_temporal_resblock           = False,
+        use_temporal_attention          = False,
+        time_context_dim                = None,
+        extra_ff_mix_layer              = False,
+        use_spatial_context             = False,
+        merge_strategy                  = None,
+        merge_factor                    = 0.0,
+        video_kernel_size               = None,
+        disable_temporal_crossattention = False,
+        max_ddpm_temb_period            = 10000,
+        attn_precision                  = None,
+        device                          = None,
+        operations                      = ops,
     ):
         super().__init__()
 
@@ -186,17 +367,17 @@ class ReUNetModel(nn.Module):
         transformer_depth = transformer_depth[:]
         transformer_depth_output = transformer_depth_output[:]
 
-        self.dropout = dropout
-        self.channel_mult = channel_mult
-        self.conv_resample = conv_resample
-        self.num_classes = num_classes
-        self.use_checkpoint = use_checkpoint
-        self.dtype = dtype
-        self.num_heads = num_heads
-        self.num_head_channels = num_head_channels
-        self.num_heads_upsample = num_heads_upsample
+        self.dropout                = dropout
+        self.channel_mult           = channel_mult
+        self.conv_resample          = conv_resample
+        self.num_classes            = num_classes
+        self.use_checkpoint         = use_checkpoint
+        self.dtype                  = dtype
+        self.num_heads              = num_heads
+        self.num_head_channels      = num_head_channels
+        self.num_heads_upsample     = num_heads_upsample
         self.use_temporal_resblocks = use_temporal_resblock
-        self.predict_codebook_ids = n_embed is not None
+        self.predict_codebook_ids   = n_embed is not None
 
         self.default_num_video_frames = None
 
@@ -251,21 +432,21 @@ class ReUNetModel(nn.Module):
                     ch,
                     num_heads,
                     dim_head,
-                    depth=depth,
-                    context_dim=context_dim,
-                    time_context_dim=time_context_dim,
-                    dropout=dropout,
-                    ff_in=extra_ff_mix_layer,
-                    use_spatial_context=use_spatial_context,
-                    merge_strategy=merge_strategy,
-                    merge_factor=merge_factor,
-                    checkpoint=use_checkpoint,
-                    use_linear=use_linear_in_transformer,
-                    disable_self_attn=disable_self_attn,
-                    disable_temporal_crossattention=disable_temporal_crossattention,
-                    max_time_embed_period=max_ddpm_temb_period,
-                    attn_precision=attn_precision,
-                    dtype=self.dtype, device=device, operations=operations
+                    depth                           = depth,
+                    context_dim                     = context_dim,
+                    time_context_dim                = time_context_dim,
+                    dropout                         = dropout,
+                    ff_in                           = extra_ff_mix_layer,
+                    use_spatial_context             = use_spatial_context,
+                    merge_strategy                  = merge_strategy,
+                    merge_factor                    = merge_factor,
+                    checkpoint                      = use_checkpoint,
+                    use_linear                      = use_linear_in_transformer,
+                    disable_self_attn               = disable_self_attn,
+                    disable_temporal_crossattention = disable_temporal_crossattention,
+                    max_time_embed_period           = max_ddpm_temb_period,
+                    attn_precision                  = attn_precision,
+                    dtype=self.dtype, device=device, operations=operations,
                 )
             else:
                 return SpatialTransformer(
@@ -285,63 +466,57 @@ class ReUNetModel(nn.Module):
             dims,
             use_checkpoint,
             use_scale_shift_norm,
-            down=False,
-            up=False,
-            dtype=None,
-            device=None,
-            operations=ops
+            down       = False,
+            up         = False,
+            dtype      = None,
+            device     = None,
+            operations = ops
         ):
             if self.use_temporal_resblocks:
                 return VideoResBlock(
-                    merge_factor=merge_factor,
-                    merge_strategy=merge_strategy,
-                    video_kernel_size=video_kernel_size,
-                    channels=ch,
-                    emb_channels=time_embed_dim,
-                    dropout=dropout,
-                    out_channels=out_channels,
-                    dims=dims,
-                    use_checkpoint=use_checkpoint,
-                    use_scale_shift_norm=use_scale_shift_norm,
-                    down=down,
-                    up=up,
-                    dtype=dtype,
-                    device=device,
-                    operations=operations
+                    merge_factor         = merge_factor,
+                    merge_strategy       = merge_strategy,
+                    video_kernel_size    = video_kernel_size,
+                    channels             = ch,
+                    emb_channels         = time_embed_dim,
+                    dropout              = dropout,
+                    out_channels         = out_channels,
+                    dims                 = dims,
+                    use_checkpoint       = use_checkpoint,
+                    use_scale_shift_norm = use_scale_shift_norm,
+                    down                 = down,
+                    up                   = up,
+                    dtype=dtype, device=device, operations=operations,
                 )
             else:
                 return ResBlock(
-                    channels=ch,
-                    emb_channels=time_embed_dim,
-                    dropout=dropout,
-                    out_channels=out_channels,
-                    use_checkpoint=use_checkpoint,
-                    dims=dims,
-                    use_scale_shift_norm=use_scale_shift_norm,
-                    down=down,
-                    up=up,
-                    dtype=dtype,
-                    device=device,
-                    operations=operations
+                    channels             = ch,
+                    emb_channels         = time_embed_dim,
+                    dropout              = dropout,
+                    out_channels         = out_channels,
+                    use_checkpoint       = use_checkpoint,
+                    dims                 = dims,
+                    use_scale_shift_norm = use_scale_shift_norm,
+                    down                 = down,
+                    up                   = up,
+                    dtype=dtype, device=device, operations=operations,
                 )
 
         for level, mult in enumerate(channel_mult):
             for nr in range(self.num_res_blocks[level]):
                 layers = [
                     get_resblock(
-                        merge_factor=merge_factor,
-                        merge_strategy=merge_strategy,
-                        video_kernel_size=video_kernel_size,
-                        ch=ch,
-                        time_embed_dim=time_embed_dim,
-                        dropout=dropout,
-                        out_channels=mult * model_channels,
-                        dims=dims,
-                        use_checkpoint=use_checkpoint,
-                        use_scale_shift_norm=use_scale_shift_norm,
-                        dtype=self.dtype,
-                        device=device,
-                        operations=operations,
+                        merge_factor         = merge_factor,
+                        merge_strategy       = merge_strategy,
+                        video_kernel_size    = video_kernel_size,
+                        ch                   = ch,
+                        time_embed_dim       = time_embed_dim,
+                        dropout              = dropout,
+                        out_channels         = mult * model_channels,
+                        dims                 = dims,
+                        use_checkpoint       = use_checkpoint,
+                        use_scale_shift_norm = use_scale_shift_norm,
+                        dtype=self.dtype, device=device, operations=operations,
                     )
                 ]
                 ch = mult * model_channels
@@ -373,25 +548,21 @@ class ReUNetModel(nn.Module):
                 self.input_blocks.append(
                     TimestepEmbedSequential(
                         get_resblock(
-                            merge_factor=merge_factor,
-                            merge_strategy=merge_strategy,
-                            video_kernel_size=video_kernel_size,
-                            ch=ch,
-                            time_embed_dim=time_embed_dim,
-                            dropout=dropout,
-                            out_channels=out_ch,
-                            dims=dims,
-                            use_checkpoint=use_checkpoint,
-                            use_scale_shift_norm=use_scale_shift_norm,
-                            down=True,
-                            dtype=self.dtype,
-                            device=device,
-                            operations=operations
+                            merge_factor         = merge_factor,
+                            merge_strategy       = merge_strategy,
+                            video_kernel_size    = video_kernel_size,
+                            ch                   = ch,
+                            time_embed_dim       = time_embed_dim,
+                            dropout              = dropout,
+                            out_channels         = out_ch,
+                            dims                 = dims,
+                            use_checkpoint       = use_checkpoint,
+                            use_scale_shift_norm = use_scale_shift_norm,
+                            down                 = True,
+                            dtype=self.dtype, device=device, operations=operations,
                         )
                         if resblock_updown
-                        else Downsample(
-                            ch, conv_resample, dims=dims, out_channels=out_ch, dtype=self.dtype, device=device, operations=operations
-                        )
+                        else Downsample(ch, conv_resample, dims=dims, out_channels=out_ch, dtype=self.dtype, device=device, operations=operations)
                     )
                 )
                 ch = out_ch
@@ -409,19 +580,17 @@ class ReUNetModel(nn.Module):
             dim_head = ch // num_heads if use_spatial_transformer else num_head_channels
         mid_block = [
             get_resblock(
-                merge_factor=merge_factor,
-                merge_strategy=merge_strategy,
-                video_kernel_size=video_kernel_size,
-                ch=ch,
-                time_embed_dim=time_embed_dim,
-                dropout=dropout,
-                out_channels=None,
-                dims=dims,
-                use_checkpoint=use_checkpoint,
-                use_scale_shift_norm=use_scale_shift_norm,
-                dtype=self.dtype,
-                device=device,
-                operations=operations
+                merge_factor         = merge_factor,
+                merge_strategy       = merge_strategy,
+                video_kernel_size    = video_kernel_size,
+                ch                   = ch,
+                time_embed_dim       = time_embed_dim,
+                dropout              = dropout,
+                out_channels         = None,
+                dims                 = dims,
+                use_checkpoint       = use_checkpoint,
+                use_scale_shift_norm = use_scale_shift_norm,
+                dtype=self.dtype, device=device, operations=operations,
             )]
 
         self.middle_block = None
@@ -432,19 +601,17 @@ class ReUNetModel(nn.Module):
                                 disable_self_attn=disable_middle_self_attn, use_checkpoint=use_checkpoint
                             ),
                 get_resblock(
-                    merge_factor=merge_factor,
-                    merge_strategy=merge_strategy,
-                    video_kernel_size=video_kernel_size,
-                    ch=ch,
-                    time_embed_dim=time_embed_dim,
-                    dropout=dropout,
-                    out_channels=None,
-                    dims=dims,
-                    use_checkpoint=use_checkpoint,
-                    use_scale_shift_norm=use_scale_shift_norm,
-                    dtype=self.dtype,
-                    device=device,
-                    operations=operations
+                    merge_factor         = merge_factor,
+                    merge_strategy       = merge_strategy,
+                    video_kernel_size    = video_kernel_size,
+                    ch                   = ch,
+                    time_embed_dim       = time_embed_dim,
+                    dropout              = dropout,
+                    out_channels         = None,
+                    dims                 = dims,
+                    use_checkpoint       = use_checkpoint,
+                    use_scale_shift_norm = use_scale_shift_norm,
+                    dtype=self.dtype, device=device, operations=operations,
                 )]
             self.middle_block = TimestepEmbedSequential(*mid_block)
         self._feature_size += ch
@@ -455,19 +622,17 @@ class ReUNetModel(nn.Module):
                 ich = input_block_chans.pop()
                 layers = [
                     get_resblock(
-                        merge_factor=merge_factor,
-                        merge_strategy=merge_strategy,
-                        video_kernel_size=video_kernel_size,
-                        ch=ch + ich,
-                        time_embed_dim=time_embed_dim,
-                        dropout=dropout,
-                        out_channels=model_channels * mult,
-                        dims=dims,
-                        use_checkpoint=use_checkpoint,
-                        use_scale_shift_norm=use_scale_shift_norm,
-                        dtype=self.dtype,
-                        device=device,
-                        operations=operations
+                        merge_factor         = merge_factor,
+                        merge_strategy       = merge_strategy,
+                        video_kernel_size    = video_kernel_size,
+                        ch                   = ch + ich,
+                        time_embed_dim       = time_embed_dim,
+                        dropout              = dropout,
+                        out_channels         = model_channels * mult,
+                        dims                 = dims,
+                        use_checkpoint       = use_checkpoint,
+                        use_scale_shift_norm = use_scale_shift_norm,
+                        dtype=self.dtype, device=device, operations=operations,
                     )
                 ]
                 ch = model_channels * mult
@@ -497,20 +662,18 @@ class ReUNetModel(nn.Module):
                     out_ch = ch
                     layers.append(
                         get_resblock(
-                            merge_factor=merge_factor,
-                            merge_strategy=merge_strategy,
-                            video_kernel_size=video_kernel_size,
-                            ch=ch,
-                            time_embed_dim=time_embed_dim,
-                            dropout=dropout,
-                            out_channels=out_ch,
-                            dims=dims,
-                            use_checkpoint=use_checkpoint,
-                            use_scale_shift_norm=use_scale_shift_norm,
-                            up=True,
-                            dtype=self.dtype,
-                            device=device,
-                            operations=operations
+                            merge_factor         = merge_factor,
+                            merge_strategy       = merge_strategy,
+                            video_kernel_size    = video_kernel_size,
+                            ch                   = ch,
+                            time_embed_dim       = time_embed_dim,
+                            dropout              = dropout,
+                            out_channels         = out_ch,
+                            dims                 = dims,
+                            use_checkpoint       = use_checkpoint,
+                            use_scale_shift_norm = use_scale_shift_norm,
+                            up                   = True,
+                            dtype=self.dtype, device=device, operations=operations,
                         )
                         if resblock_updown
                         else Upsample(ch, conv_resample, dims=dims, out_channels=out_ch, dtype=self.dtype, device=device, operations=operations)
@@ -531,48 +694,6 @@ class ReUNetModel(nn.Module):
             #nn.LogSoftmax(dim=1)  # change to cross_entropy and produce non-normalized logits
         )
 
-    def invert_conv2d(
-        self,
-        conv: torch.nn.Conv2d,
-        z:    torch.Tensor,
-        original_shape: torch.Size,
-    ) -> torch.Tensor:
-
-        B, C_in, H, W = original_shape
-        C_out, _, kH, kW = conv.weight.shape
-        stride_h, stride_w = conv.stride
-        pad_h,    pad_w    = conv.padding
-
-        b = conv.bias.view(1, C_out, 1, 1).to(z)
-        z_nobias = z - b
-
-        W_flat = conv.weight.view(C_out, -1).to(z)  
-        W_pinv = torch.linalg.pinv(W_flat)    
-
-        Bz, Co, Hp, Wp = z_nobias.shape
-        z_flat = z_nobias.reshape(Bz, Co, -1)  
-
-        x_patches = W_pinv @ z_flat   
-
-        x_sum = F.fold(
-            x_patches,
-            output_size=(H + 2*pad_h, W + 2*pad_w),
-            kernel_size=(kH, kW),
-            stride=(stride_h, stride_w),
-        )
-        ones = torch.ones_like(x_patches)
-        count = F.fold(
-            ones,
-            output_size=(H + 2*pad_h, W + 2*pad_w),
-            kernel_size=(kH, kW),
-            stride=(stride_h, stride_w),
-        )  
-
-        x_recon = x_sum / count.clamp(min=1e-6)
-        if pad_h > 0 or pad_w > 0:
-            x_recon = x_recon[..., pad_h:pad_h+H, pad_w:pad_w+W]
-
-        return x_recon
 
 
     def forward(self, x, timesteps=None, context=None, y=None, control=None, transformer_options={}, **kwargs):
@@ -592,16 +713,460 @@ class ReUNetModel(nn.Module):
         :return: an [N x C x ...] Tensor of outputs.
         """
         h_len, w_len = x.shape[-2:]
+        img_len = h_len * w_len
         transformer_options["original_shape"] = list(x.shape)
         transformer_options["transformer_index"] = 0
         transformer_patches = transformer_options.get("patches", {})
+        
+        img_slice = slice(None, -1) #slice(None, img_len)   # for the sake of cross attn... :-1
+        txt_slice = slice(None, -1)
         
         EO = transformer_options.get("ExtraOptions", ExtraOptions(""))
         if EO is not None:
             EO.mute = True
 
+        if EO("zero_heads"):
+            HEADS = 0
+        else:
+            HEADS = 10 # self.input_blocks[4][1].transformer_blocks[0].attn2.heads # HEADS = 10
+
+        StyleMMDiT = transformer_options.get('StyleMMDiT', StyleUNet_Model())        
+        StyleMMDiT.set_len(h_len, w_len, img_slice, txt_slice, HEADS=HEADS)
+        StyleMMDiT.Retrojector = self.Retrojector if hasattr(self, "Retrojector") else None
+        transformer_options['StyleMMDiT'] = None
+
+        x_tmp = transformer_options.get("x_tmp")
+        if x_tmp is not None:
+            x_tmp = x_tmp.expand(x.shape[0], -1, -1, -1).clone().to(x)
+        
+        y0_style, img_y0_style = None, None
+
         SIGMA = transformer_options['sigmas'].to(x) # timestep[0].unsqueeze(0) #/ 1000
         
+        x_orig = x.clone()
+
+        x_orig, timesteps_orig, y_orig, context_orig = clone_inputs(x, timesteps, y, context)
+
+        weight    = -1 * transformer_options.get("regional_conditioning_weight", 0.0)
+        floor     = -1 * transformer_options.get("regional_conditioning_floor",  0.0)
+        
+        #floor     = min(floor, weight)
+        mask_zero, mask_up_zero, mask_down_zero, mask_down2_zero = None, None, None, None
+        txt_len = context.shape[1] # mask_obj[0].text_len
+        
+
+        z_ = transformer_options.get("z_")   # initial noise and/or image+noise from start of rk_sampler_beta() 
+        rk_row = transformer_options.get("row") # for "smart noise"
+        if z_ is not None:
+            x_init = z_[rk_row].to(x)
+        elif 'x_init' in transformer_options:
+            x_init = transformer_options.get('x_init').to(x)
+
+        # recon loop to extract exact noise pred for scattersort guide assembly
+        RECON_MODE = StyleMMDiT.noise_mode == "recon"
+        recon_iterations = 2 if StyleMMDiT.noise_mode == "recon" else 1
+        for recon_iter in range(recon_iterations):
+            y0_style = StyleMMDiT.guides
+            y0_style_active = True if type(y0_style) == torch.Tensor else False
+            
+            RECON_MODE = True     if StyleMMDiT.noise_mode == "recon" and recon_iter == 0     else False
+            
+            if StyleMMDiT.noise_mode == "recon" and recon_iter == 1:   # TODO: MAKE VARIANCE EXPLODING
+                x_recon = x_tmp if x_tmp is not None else x_orig
+                #noise_prediction = x_recon + (1-SIGMA.to(x_recon)) * eps.to(x_recon)
+                noise_prediction = eps.to(x_recon)
+                denoised = x_recon * ((SIGMA ** 2 + 1) ** 0.5)   -   SIGMA.to(x_recon) * eps.to(x_recon)
+                
+                denoised = StyleMMDiT.apply_recon_lure(denoised, y0_style)
+
+                new_x = (denoised + SIGMA.to(denoised) * noise_prediction) / ((SIGMA ** 2 + 1) ** 0.5)
+                
+                x_init = noise_prediction
+            elif StyleMMDiT.noise_mode == "bonanza":
+                x_init = torch.randn_like(x_init)
+
+            if y0_style_active:
+                if y0_style.sum() == 0.0 and y0_style.std() == 0.0:
+                    y0_style = x.clone()
+                else:
+                    y0_style_noised = ((y0_style + SIGMA * x_init[0:1].to(y0_style)) / ((SIGMA ** 2 + 1) ** 0.5))    #x_init.expand(x.shape[0],-1,-1,-1).to(y0_style)) 
+
+
+
+            out_list = []
+            for cond_iter in range(len(transformer_options['cond_or_uncond'])):
+                UNCOND = transformer_options['cond_or_uncond'][cond_iter] == 1
+                
+                bsz_style = y0_style.shape[0] if y0_style_active else 0
+                bsz       = 1 if RECON_MODE else bsz_style + 1
+                
+                x, timesteps, context = clone_inputs(x_orig[cond_iter].unsqueeze(0), timesteps_orig[cond_iter].unsqueeze(0), context_orig[cond_iter].unsqueeze(0))
+                y = y_orig[cond_iter].unsqueeze(0).clone() if y_orig is not None else None
+                
+
+                mask, mask_up, mask_down, mask_down2 = None, None, None, None
+                if not UNCOND and 'AttnMask' in transformer_options: # and weight != 0:
+                    AttnMask = transformer_options['AttnMask']
+                    mask = transformer_options['AttnMask'].attn_mask.mask.to('cuda')
+                    mask_up   = transformer_options['AttnMask'].mask_up.to('cuda')
+                    mask_down = transformer_options['AttnMask'].mask_down.to('cuda')
+                    if hasattr(transformer_options['AttnMask'], "mask_down2"):
+                        mask_down2 = transformer_options['AttnMask'].mask_down2.to('cuda')
+                    if weight == 0:
+                        context = transformer_options['RegContext'].context.to(context.dtype).to(context.device)
+                        mask, mask_up, mask_down, mask_down2 = None, None, None, None
+                    else:
+                        context = transformer_options['RegContext'].context.to(context.dtype).to(context.device)
+                    
+                    txt_len = context.shape[1]
+                    if mask_zero is None:
+                        mask_zero = torch.ones_like(mask)
+                        mask_zero[:, :txt_len] = mask[:, :txt_len]
+                    if mask_up_zero is None:
+                        mask_up_zero = torch.ones_like(mask_up)
+                        mask_up_zero[:, :txt_len] = mask_up[:, :txt_len]
+                    if mask_down_zero is None:
+                        mask_down_zero = torch.ones_like(mask_down)
+                        mask_down_zero[:, :txt_len] = mask_down[:, :txt_len]
+                    if mask_down2_zero is None and mask_down2 is not None:
+                        mask_down2_zero = torch.ones_like(mask_down2)
+                        mask_down2_zero[:, :txt_len] = mask_down2[:, :txt_len]
+
+
+                if UNCOND and 'AttnMask_neg' in transformer_options: # and weight != 0:
+                    AttnMask = transformer_options['AttnMask_neg']
+                    mask = transformer_options['AttnMask_neg'].attn_mask.mask.to('cuda')
+                    mask_up   = transformer_options['AttnMask_neg'].mask_up.to('cuda')
+                    mask_down = transformer_options['AttnMask_neg'].mask_down.to('cuda')
+                    if hasattr(transformer_options['AttnMask_neg'], "mask_down2"):
+                        mask_down2 = transformer_options['AttnMask_neg'].mask_down2.to('cuda')
+                    if weight == 0:
+                        context = transformer_options['RegContext_neg'].context.to(context.dtype).to(context.device)
+                        mask, mask_up, mask_down, mask_down2 = None, None, None, None
+                    else:
+                        context = transformer_options['RegContext_neg'].context.to(context.dtype).to(context.device)
+                        
+                    txt_len = context.shape[1]
+                    if mask_zero is None:
+                        mask_zero = torch.ones_like(mask)
+                        mask_zero[:, :txt_len] = mask[:, :txt_len]
+                    if mask_up_zero is None:
+                        mask_up_zero = torch.ones_like(mask_up)
+                        mask_up_zero[:, :txt_len] = mask_up[:, :txt_len]
+                    if mask_down_zero is None:
+                        mask_down_zero = torch.ones_like(mask_down)
+                        mask_down_zero[:, :txt_len] = mask_down[:, :txt_len]
+                    if mask_down2_zero is None and mask_down2 is not None:
+                        mask_down2_zero = torch.ones_like(mask_down2)
+                        mask_down2_zero[:, :txt_len] = mask_down2[:, :txt_len]
+
+                elif UNCOND and 'AttnMask' in transformer_options:
+                    AttnMask = transformer_options['AttnMask']
+                    mask = transformer_options['AttnMask'].attn_mask.mask.to('cuda')
+                    mask_up   = transformer_options['AttnMask'].mask_up.to('cuda')
+                    mask_down = transformer_options['AttnMask'].mask_down.to('cuda')
+                    if hasattr(transformer_options['AttnMask'], "mask_down2"):
+                        mask_down2 = transformer_options['AttnMask'].mask_down2.to('cuda')
+                    A       = context
+                    B       = transformer_options['RegContext'].context
+                    context = A.repeat(1,    (B.shape[1] // A.shape[1]) + 1, 1)[:,   :B.shape[1], :]
+                    
+                    txt_len = context.shape[1]
+                    if mask_zero is None:
+                        mask_zero = torch.ones_like(mask)
+                        mask_zero[:, :txt_len] = mask[:, :txt_len]
+                    if mask_up_zero is None:
+                        mask_up_zero = torch.ones_like(mask_up)
+                        mask_up_zero[:, :txt_len] = mask_up[:, :txt_len]
+                    if mask_down_zero is None:
+                        mask_down_zero = torch.ones_like(mask_down)
+                        mask_down_zero[:, :txt_len] = mask_down[:, :txt_len]
+                    if mask_down2_zero is None and mask_down2 is not None:
+                        mask_down2_zero = torch.ones_like(mask_down2)
+                        mask_down2_zero[:, :txt_len] = mask_down2[:, :txt_len]
+                    if weight == 0:                                                                             # ADDED 5/23/2025
+                        mask, mask_up, mask_down, mask_down2 = None, None, None, None
+
+
+                if mask is not None:
+                    if mask            is not None and not type(mask[0][0]           .item()) == bool:
+                        mask            = mask           .to(x.dtype)
+                    if mask_up         is not None and not type(mask_up[0][0]        .item()) == bool:
+                        mask_up         = mask_up        .to(x.dtype)
+                    if mask_down       is not None and not type(mask_down[0][0]      .item()) == bool:
+                        mask_down       = mask_down      .to(x.dtype)
+                    if mask_down2      is not None and not type(mask_down2[0][0]     .item()) == bool:
+                        mask_down2      = mask_down2     .to(x.dtype)
+                        
+                    if mask_zero       is not None and not type(mask_zero[0][0]      .item()) == bool:
+                        mask_zero       = mask_zero      .to(x.dtype)
+                    if mask_up_zero    is not None and not type(mask_up_zero[0][0]   .item()) == bool:
+                        mask_up_zero    = mask_up_zero   .to(x.dtype)
+                    if mask_down_zero  is not None and not type(mask_down_zero[0][0] .item()) == bool:
+                        mask_down_zero  = mask_down_zero .to(x.dtype)
+                    if mask_down2_zero is not None and not type(mask_down2_zero[0][0].item()) == bool:
+                        mask_down2_zero = mask_down2_zero.to(x.dtype)
+                        
+                    transformer_options['cross_mask']       = mask      [:,:txt_len]
+                    transformer_options['self_mask']        = mask      [:,txt_len:]
+                    transformer_options['cross_mask_up']    = mask_up   [:,:txt_len]
+                    transformer_options['self_mask_up']     = mask_up   [:,txt_len:]
+                    transformer_options['cross_mask_down']  = mask_down [:,:txt_len]
+                    transformer_options['self_mask_down']   = mask_down [:,txt_len:]
+                    transformer_options['cross_mask_down2'] = mask_down2[:,:txt_len] if mask_down2 is not None else None
+                    transformer_options['self_mask_down2']  = mask_down2[:,txt_len:] if mask_down2 is not None else None
+                
+                h = x
+                if y0_style_active and not RECON_MODE:
+                    if mask is None:
+                        context, y, _ = StyleMMDiT.apply_style_conditioning(
+                            UNCOND       = UNCOND,
+                            base_context = context,
+                            base_y       = y,
+                            base_llama3  = None,
+                        )
+                    else:
+                        context = context.repeat(bsz_style + 1, 1, 1)
+                        y = y.repeat(bsz_style + 1, 1)                   if y      is not None else None
+                    h = torch.cat([h, y0_style_noised], dim=0).to(h)
+
+
+
+                total_layers = len(self.input_blocks) + len(self.middle_block) + len(self.output_blocks)
+
+                num_video_frames = kwargs.get("num_video_frames", self.default_num_video_frames)
+                image_only_indicator = kwargs.get("image_only_indicator", None)
+                time_context = kwargs.get("time_context", None)
+
+                assert (y is not None) == (
+                    self.num_classes is not None
+                ), "must specify y if and only if the model is class-conditional"
+                hs, hs_adain = [], []
+                t_emb = timestep_embedding(timesteps, self.model_channels, repeat_only=False).to(x.dtype)
+                emb = self.time_embed(t_emb)
+
+                if "emb_patch" in transformer_patches:
+                    patch = transformer_patches["emb_patch"]
+                    for p in patch:
+                        emb = p(emb, self.model_channels, transformer_options)
+
+                if self.num_classes is not None:
+                    assert y.shape[0] == h.shape[0]
+                    emb = emb + self.label_emb(y)
+
+                #for id, module in enumerate(self.input_blocks):
+                for id, (module, style_block) in enumerate(zip(self.input_blocks, StyleMMDiT.input_blocks)):
+                    transformer_options["block"] = ("input", id)
+
+                    if mask is not None:
+                        transformer_options['cross_mask']       = mask      [:,:txt_len]
+                        transformer_options['self_mask']        = mask      [:,txt_len:]
+                        transformer_options['cross_mask_up']    = mask_up   [:,:txt_len]
+                        transformer_options['self_mask_up']     = mask_up   [:,txt_len:]
+                        transformer_options['cross_mask_down']  = mask_down [:,:txt_len]
+                        transformer_options['self_mask_down']   = mask_down [:,txt_len:]
+                        transformer_options['cross_mask_down2'] = mask_down2[:,:txt_len] if mask_down2 is not None else None
+                        transformer_options['self_mask_down2']  = mask_down2[:,txt_len:] if mask_down2 is not None else None
+                        
+                    if   weight > 0 and mask is not None and     weight  <      id/total_layers:
+                        transformer_options['cross_mask'] = None
+                        transformer_options['self_mask']  = None
+                    
+                    elif weight < 0 and mask is not None and abs(weight) < (1 - id/total_layers):
+                        transformer_options['cross_mask'] = None
+                        transformer_options['self_mask']  = None
+                        
+                    elif floor > 0 and mask is not None and       floor  >      id/total_layers:
+                        transformer_options['cross_mask']       = mask_zero      [:,:txt_len]
+                        transformer_options['self_mask']        = mask_zero      [:,txt_len:]
+                        transformer_options['cross_mask_up']    = mask_up_zero   [:,:txt_len]
+                        transformer_options['self_mask_up']     = mask_up_zero   [:,txt_len:]
+                        transformer_options['cross_mask_down']  = mask_down_zero [:,:txt_len]
+                        transformer_options['self_mask_down']   = mask_down_zero [:,txt_len:]
+                        transformer_options['cross_mask_down2'] = mask_down2_zero[:,:txt_len] if mask_down2_zero is not None else None
+                        transformer_options['self_mask_down2']  = mask_down2_zero[:,txt_len:] if mask_down2_zero is not None else None
+                    
+                    elif floor < 0 and mask is not None and   abs(floor) > (1 - id/total_layers):
+                        transformer_options['cross_mask']       = mask_zero      [:,:txt_len]
+                        transformer_options['self_mask']        = mask_zero      [:,txt_len:]
+                        transformer_options['cross_mask_up']    = mask_up_zero   [:,:txt_len]
+                        transformer_options['self_mask_up']     = mask_up_zero   [:,txt_len:]
+                        transformer_options['cross_mask_down']  = mask_down_zero [:,:txt_len]
+                        transformer_options['self_mask_down']   = mask_down_zero [:,txt_len:]
+                        transformer_options['cross_mask_down2'] = mask_down2_zero[:,:txt_len] if mask_down2_zero is not None else None
+                        transformer_options['self_mask_down2']  = mask_down2_zero[:,txt_len:] if mask_down2_zero is not None else None
+
+                    h = forward_timestep_embed(module, h, emb, context, transformer_options, time_context=time_context, num_video_frames=num_video_frames, image_only_indicator=image_only_indicator, style_block=style_block)
+                    if id == 0:
+                        h = StyleMMDiT(h, "proj_in")
+                    h = apply_control(h, control, 'input')
+                    if "input_block_patch" in transformer_patches:
+                        patch = transformer_patches["input_block_patch"]
+                        for p in patch:
+                            h = p(h, transformer_options)
+                    
+                    hs.append(h)
+                    
+                    if "input_block_patch_after_skip" in transformer_patches:
+                        patch = transformer_patches["input_block_patch_after_skip"]
+                        for p in patch:
+                            h = p(h, transformer_options)
+
+                transformer_options["block"] = ("middle", 0)
+                if self.middle_block is not None:
+                    style_block = StyleMMDiT.middle_blocks[0]
+
+                    if mask is not None:
+                        transformer_options['cross_mask']       = mask      [:,:txt_len]
+                        transformer_options['self_mask']        = mask      [:,txt_len:]
+                        transformer_options['cross_mask_up']    = mask_up   [:,:txt_len]
+                        transformer_options['self_mask_up']     = mask_up   [:,txt_len:]
+                        transformer_options['cross_mask_down']  = mask_down [:,:txt_len]
+                        transformer_options['self_mask_down']   = mask_down [:,txt_len:]
+                        transformer_options['cross_mask_down2'] = mask_down2[:,:txt_len] if mask_down2 is not None else None
+                        transformer_options['self_mask_down2']  = mask_down2[:,txt_len:] if mask_down2 is not None else None
+                        
+                    if   weight > 0 and mask is not None and     weight  <      (len(self.input_blocks) + 1)/total_layers:
+                        transformer_options['cross_mask'] = None
+                        transformer_options['self_mask']  = None
+                    
+                    elif weight < 0 and mask is not None and abs(weight) < (1 - (len(self.input_blocks) + 1)/total_layers):
+                        transformer_options['cross_mask'] = None
+                        transformer_options['self_mask']  = None
+                        
+                    elif floor > 0 and mask is not None and       floor  >      (len(self.input_blocks) + 1)/total_layers:
+                        transformer_options['cross_mask']       = mask_zero      [:,:txt_len]
+                        transformer_options['self_mask']        = mask_zero      [:,txt_len:]
+                        transformer_options['cross_mask_up']    = mask_up_zero   [:,:txt_len]
+                        transformer_options['self_mask_up']     = mask_up_zero   [:,txt_len:]
+                        transformer_options['cross_mask_down']  = mask_down_zero [:,:txt_len]
+                        transformer_options['self_mask_down']   = mask_down_zero [:,txt_len:]
+                        transformer_options['cross_mask_down2'] = mask_down2_zero[:,:txt_len] if mask_down2_zero is not None else None
+                        transformer_options['self_mask_down2']  = mask_down2_zero[:,txt_len:] if mask_down2_zero is not None else None
+                    
+                    elif floor < 0 and mask is not None and   abs(floor) > (1 - (len(self.input_blocks) + 1)/total_layers):
+                        transformer_options['cross_mask']       = mask_zero      [:,:txt_len]
+                        transformer_options['self_mask']        = mask_zero      [:,txt_len:]
+                        transformer_options['cross_mask_up']    = mask_up_zero   [:,:txt_len]
+                        transformer_options['self_mask_up']     = mask_up_zero   [:,txt_len:]
+                        transformer_options['cross_mask_down']  = mask_down_zero [:,:txt_len]
+                        transformer_options['self_mask_down']   = mask_down_zero [:,txt_len:]
+                        transformer_options['cross_mask_down2'] = mask_down2_zero[:,:txt_len] if mask_down2_zero is not None else None
+                        transformer_options['self_mask_down2']  = mask_down2_zero[:,txt_len:] if mask_down2_zero is not None else None
+
+                    h = forward_timestep_embed(self.middle_block, h, emb, context, transformer_options, time_context=time_context, num_video_frames=num_video_frames, image_only_indicator=image_only_indicator, style_block=style_block)
+                
+                h = apply_control(h, control, 'middle')
+
+                #for id, module in enumerate(self.output_blocks):
+                for id, (module, style_block) in enumerate(zip(self.output_blocks, StyleMMDiT.output_blocks)):
+                    transformer_options["block"] = ("output", id)
+                    
+                    hsp = hs.pop()
+                    hsp = apply_control(hsp, control, 'output')
+
+                    if "output_block_patch" in transformer_patches:
+                        patch = transformer_patches["output_block_patch"]
+                        for p in patch:
+                            h, hsp = p(h, hsp, transformer_options)
+
+                    h = th.cat([h, hsp], dim=1)
+                    del hsp
+                    if len(hs) > 0:
+                        output_shape = hs[-1].shape
+                    else:
+                        output_shape = None
+                        
+
+                    
+                    if mask is not None:
+                        transformer_options['cross_mask']       = mask      [:,:txt_len]
+                        transformer_options['self_mask']        = mask      [:,txt_len:]
+                        transformer_options['cross_mask_up']    = mask_up   [:,:txt_len]
+                        transformer_options['self_mask_up']     = mask_up   [:,txt_len:]
+                        transformer_options['cross_mask_down']  = mask_down [:,:txt_len]
+                        transformer_options['self_mask_down']   = mask_down [:,txt_len:]
+                        transformer_options['cross_mask_down2'] = mask_down2[:,:txt_len] if mask_down2 is not None else None
+                        transformer_options['self_mask_down2']  = mask_down2[:,txt_len:] if mask_down2 is not None else None
+                        
+                    if   weight > 0 and mask is not None and     weight  <      (len(self.input_blocks) + 1 + id)/total_layers:
+                        transformer_options['cross_mask'] = None
+                        transformer_options['self_mask']  = None
+                    
+                    elif weight < 0 and mask is not None and abs(weight) < (1 - (len(self.input_blocks) + 1 + id)/total_layers):
+                        transformer_options['cross_mask'] = None
+                        transformer_options['self_mask']  = None
+                        
+                    elif floor > 0 and mask is not None and       floor  >      (len(self.input_blocks) + 1 + id)/total_layers:
+                        transformer_options['cross_mask']       = mask_zero      [:,:txt_len]
+                        transformer_options['self_mask']        = mask_zero      [:,txt_len:]
+                        transformer_options['cross_mask_up']    = mask_up_zero   [:,:txt_len]
+                        transformer_options['self_mask_up']     = mask_up_zero   [:,txt_len:]
+                        transformer_options['cross_mask_down']  = mask_down_zero [:,:txt_len]
+                        transformer_options['self_mask_down']   = mask_down_zero [:,txt_len:]
+                        transformer_options['cross_mask_down2'] = mask_down2_zero[:,:txt_len] if mask_down2_zero is not None else None
+                        transformer_options['self_mask_down2']  = mask_down2_zero[:,txt_len:] if mask_down2_zero is not None else None
+                    
+                    elif floor < 0 and mask is not None and   abs(floor) > (1 - (len(self.input_blocks) + 1 + id)/total_layers):
+                        transformer_options['cross_mask']       = mask_zero      [:,:txt_len]
+                        transformer_options['self_mask']        = mask_zero      [:,txt_len:]
+                        transformer_options['cross_mask_up']    = mask_up_zero   [:,:txt_len]
+                        transformer_options['self_mask_up']     = mask_up_zero   [:,txt_len:]
+                        transformer_options['cross_mask_down']  = mask_down_zero [:,:txt_len]
+                        transformer_options['self_mask_down']   = mask_down_zero [:,txt_len:]
+                        transformer_options['cross_mask_down2'] = mask_down2_zero[:,:txt_len] if mask_down2_zero is not None else None
+                        transformer_options['self_mask_down2']  = mask_down2_zero[:,txt_len:] if mask_down2_zero is not None else None
+
+                    h = forward_timestep_embed(module, h, emb, context, transformer_options, output_shape, time_context=time_context, num_video_frames=num_video_frames, image_only_indicator=image_only_indicator, style_block=style_block)
+                
+                h = h.type(x.dtype)
+                
+                if self.predict_codebook_ids:
+                    eps = self.id_predictor(h)
+                else:
+                    eps = self.out(h)
+                    eps = StyleMMDiT(eps, "proj_out")
+                    
+                out_list.append(eps[0:1])
+                
+            eps = torch.stack(out_list, dim=0).squeeze(dim=1)
+
+            if recon_iter == 1:
+                denoised = new_x - SIGMA.to(new_x) * eps.to(new_x)
+                if x_tmp is not None:
+                    eps = (x_tmp - denoised.to(x_tmp)) / SIGMA.to(x_tmp)
+                else:
+                    eps = (x_orig - denoised.to(x_orig)) / SIGMA.to(x_orig)
+            
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
         y0_style_pos        = transformer_options.get("y0_style_pos")
         y0_style_neg        = transformer_options.get("y0_style_neg")
 
@@ -613,13 +1178,7 @@ class ReUNetModel(nn.Module):
         y0_style_neg_synweight = transformer_options.get("y0_style_neg_synweight", 0.0)
         y0_style_neg_synweight *= y0_style_neg_weight
         
-        x_orig = x.clone()
 
-        x_orig, timesteps_orig, y_orig, context_orig = clone_inputs(x, timesteps, y, context)
-
-        weight    = -1 * transformer_options.get("regional_conditioning_weight", 0.0)
-        floor     = -1 * transformer_options.get("regional_conditioning_floor",  0.0)
-        
         freqsep_lowpass_method = transformer_options.get("freqsep_lowpass_method")
         freqsep_sigma          = transformer_options.get("freqsep_sigma")
         freqsep_kernel_size    = transformer_options.get("freqsep_kernel_size")
@@ -630,375 +1189,6 @@ class ReUNetModel(nn.Module):
         freqsep_highpass_weight= transformer_options.get("freqsep_highpass_weight")
         freqsep_mask           = transformer_options.get("freqsep_mask")
         
-        #floor     = min(floor, weight)
-        mask_zero, mask_up_zero, mask_down_zero, mask_down2_zero = None, None, None, None
-        txt_len = context.shape[1] # mask_obj[0].text_len
-        
-        y0_adain = transformer_options.get("y0_adain")
-        if EO("eps_adain") and y0_adain is not None:
-            x_init   = transformer_options.get("x_init").to(x)   # initial noise and/or image+noise from start of rk_sampler_beta() 
-            y0_adain = y0_adain.to(x)
-            #h_adain  = y0_adain + ((SIGMA ** 2 + 1) ** 0.5) * x_init
-            #h_adain = (y0_adain + SIGMA * x_init) / 14.6172 #/ 14.58802395209580838323353293413173653
-            #siggy = SIGMA / 14.6172
-            #h_adain = ((0.13025*y0_adain + SIGMA * x_init) / ((SIGMA ** 2 + 1) ** 0.5))
-            #if SIGMA > 14.61:
-            #    h_adain = x_init.clone()
-            h_adain = ((y0_adain + SIGMA * x_init) / ((SIGMA ** 2 + 1) ** 0.5))
-            #h_adain = (1-siggy) * y0_adain + siggy * x_init
-            h_adain = h_adain.expand(x.shape)
-            h_adain_orig = h_adain.clone()
-            #h = h_adain
-
-        out_list = []
-        for cond_iter in range(len(transformer_options['cond_or_uncond'])):
-            UNCOND = transformer_options['cond_or_uncond'][cond_iter] == 1
-            
-            x, timesteps, context = clone_inputs(x_orig[cond_iter].unsqueeze(0), timesteps_orig[cond_iter].unsqueeze(0), context_orig[cond_iter].unsqueeze(0))
-            y = y_orig[cond_iter].unsqueeze(0).clone() if y_orig is not None else None
-            if EO("eps_adain") and y0_adain is not None:
-                h_adain = h_adain_orig.clone()[cond_iter].unsqueeze(0)
-            
-            mask, mask_up, mask_down, mask_down2 = None, None, None, None
-            if not UNCOND and 'AttnMask' in transformer_options: # and weight != 0:
-                AttnMask = transformer_options['AttnMask']
-                mask = transformer_options['AttnMask'].attn_mask.mask.to('cuda')
-                mask_up   = transformer_options['AttnMask'].mask_up.to('cuda')
-                mask_down = transformer_options['AttnMask'].mask_down.to('cuda')
-                if hasattr(transformer_options['AttnMask'], "mask_down2"):
-                    mask_down2 = transformer_options['AttnMask'].mask_down2.to('cuda')
-                if weight == 0:
-                    context = transformer_options['RegContext'].context.to(context.dtype).to(context.device)
-                    mask, mask_up, mask_down, mask_down2 = None, None, None, None
-                else:
-                    context = transformer_options['RegContext'].context.to(context.dtype).to(context.device)
-                    
-                txt_len = context.shape[1]
-                if mask_zero is None:
-                    mask_zero = torch.ones_like(mask)
-                    mask_zero[:, :txt_len] = mask[:, :txt_len]
-                if mask_up_zero is None:
-                    mask_up_zero = torch.ones_like(mask_up)
-                    mask_up_zero[:, :txt_len] = mask_up[:, :txt_len]
-                if mask_down_zero is None:
-                    mask_down_zero = torch.ones_like(mask_down)
-                    mask_down_zero[:, :txt_len] = mask_down[:, :txt_len]
-                if mask_down2_zero is None and mask_down2 is not None:
-                    mask_down2_zero = torch.ones_like(mask_down2)
-                    mask_down2_zero[:, :txt_len] = mask_down2[:, :txt_len]
-
-
-            if UNCOND and 'AttnMask_neg' in transformer_options: # and weight != 0:
-                AttnMask = transformer_options['AttnMask_neg']
-                mask = transformer_options['AttnMask_neg'].attn_mask.mask.to('cuda')
-                mask_up   = transformer_options['AttnMask_neg'].mask_up.to('cuda')
-                mask_down = transformer_options['AttnMask_neg'].mask_down.to('cuda')
-                if hasattr(transformer_options['AttnMask_neg'], "mask_down2"):
-                    mask_down2 = transformer_options['AttnMask_neg'].mask_down2.to('cuda')
-                if weight == 0:
-                    context = transformer_options['RegContext_neg'].context.to(context.dtype).to(context.device)
-                    mask, mask_up, mask_down, mask_down2 = None, None, None, None
-                else:
-                    context = transformer_options['RegContext_neg'].context.to(context.dtype).to(context.device)
-                    
-                txt_len = context.shape[1]
-                if mask_zero is None:
-                    mask_zero = torch.ones_like(mask)
-                    mask_zero[:, :txt_len] = mask[:, :txt_len]
-                if mask_up_zero is None:
-                    mask_up_zero = torch.ones_like(mask_up)
-                    mask_up_zero[:, :txt_len] = mask_up[:, :txt_len]
-                if mask_down_zero is None:
-                    mask_down_zero = torch.ones_like(mask_down)
-                    mask_down_zero[:, :txt_len] = mask_down[:, :txt_len]
-                if mask_down2_zero is None and mask_down2 is not None:
-                    mask_down2_zero = torch.ones_like(mask_down2)
-                    mask_down2_zero[:, :txt_len] = mask_down2[:, :txt_len]
-
-            elif UNCOND and 'AttnMask' in transformer_options:
-                AttnMask = transformer_options['AttnMask']
-                mask = transformer_options['AttnMask'].attn_mask.mask.to('cuda')
-                mask_up   = transformer_options['AttnMask'].mask_up.to('cuda')
-                mask_down = transformer_options['AttnMask'].mask_down.to('cuda')
-                if hasattr(transformer_options['AttnMask'], "mask_down2"):
-                    mask_down2 = transformer_options['AttnMask'].mask_down2.to('cuda')
-                A       = context
-                B       = transformer_options['RegContext'].context
-                context = A.repeat(1,    (B.shape[1] // A.shape[1]) + 1, 1)[:,   :B.shape[1], :]
-                
-                txt_len = context.shape[1]
-                if mask_zero is None:
-                    mask_zero = torch.ones_like(mask)
-                    mask_zero[:, :txt_len] = mask[:, :txt_len]
-                if mask_up_zero is None:
-                    mask_up_zero = torch.ones_like(mask_up)
-                    mask_up_zero[:, :txt_len] = mask_up[:, :txt_len]
-                if mask_down_zero is None:
-                    mask_down_zero = torch.ones_like(mask_down)
-                    mask_down_zero[:, :txt_len] = mask_down[:, :txt_len]
-                if mask_down2_zero is None and mask_down2 is not None:
-                    mask_down2_zero = torch.ones_like(mask_down2)
-                    mask_down2_zero[:, :txt_len] = mask_down2[:, :txt_len]
-                if weight == 0:                                                                             # ADDED 5/23/2025
-                    mask, mask_up, mask_down, mask_down2 = None, None, None, None
-
-
-            if mask is not None:
-                if mask is not None and not type(mask[0][0].item()) == bool:
-                    mask = mask.to(x.dtype)
-                if mask_up is not None and not type(mask_up[0][0].item()) == bool:
-                    mask_up = mask_up.to(x.dtype)
-                if mask_down is not None and not type(mask_down[0][0].item()) == bool:
-                    mask_down = mask_down.to(x.dtype)
-                if mask_down2 is not None and not type(mask_down2[0][0].item()) == bool:
-                    mask_down2 = mask_down2.to(x.dtype)
-                    
-                if mask_zero is not None and not type(mask_zero[0][0].item()) == bool:
-                    mask_zero = mask_zero.to(x.dtype)
-                if mask_up_zero is not None and not type(mask_up_zero[0][0].item()) == bool:
-                    mask_up_zero = mask_up_zero.to(x.dtype)
-                if mask_down_zero is not None and not type(mask_down_zero[0][0].item()) == bool:
-                    mask_down_zero = mask_down_zero.to(x.dtype)
-                if mask_down2_zero is not None and not type(mask_down2_zero[0][0].item()) == bool:
-                    mask_down2_zero = mask_down2_zero.to(x.dtype)
-                    
-                transformer_options['cross_mask'] = mask[:,:txt_len]
-                transformer_options['self_mask']  = mask[:,txt_len:]
-                transformer_options['cross_mask_up'] = mask_up[:,:txt_len]
-                transformer_options['self_mask_up']  = mask_up[:,txt_len:]
-                transformer_options['cross_mask_down'] = mask_down[:,:txt_len]
-                transformer_options['self_mask_down']  = mask_down[:,txt_len:]
-                transformer_options['cross_mask_down2'] = mask_down2[:,:txt_len] if mask_down2 is not None else None
-                transformer_options['self_mask_down2']  = mask_down2[:,txt_len:] if mask_down2 is not None else None
-            
-
-            total_layers = len(self.input_blocks) + len(self.middle_block) + len(self.output_blocks)
-
-            num_video_frames = kwargs.get("num_video_frames", self.default_num_video_frames)
-            image_only_indicator = kwargs.get("image_only_indicator", None)
-            time_context = kwargs.get("time_context", None)
-
-            assert (y is not None) == (
-                self.num_classes is not None
-            ), "must specify y if and only if the model is class-conditional"
-            hs, hs_adain = [], []
-            t_emb = timestep_embedding(timesteps, self.model_channels, repeat_only=False).to(x.dtype)
-            emb = self.time_embed(t_emb)
-
-            if "emb_patch" in transformer_patches:
-                patch = transformer_patches["emb_patch"]
-                for p in patch:
-                    emb = p(emb, self.model_channels, transformer_options)
-
-            if self.num_classes is not None:
-                assert y.shape[0] == x.shape[0]
-                emb = emb + self.label_emb(y)
-
-            h = x
-            for id, module in enumerate(self.input_blocks):
-                transformer_options["block"] = ("input", id)
-
-                if mask is not None:
-                    transformer_options['cross_mask'] = mask[:,:txt_len]
-                    transformer_options['self_mask']  = mask[:,txt_len:]
-                    transformer_options['cross_mask_up'] = mask_up[:,:txt_len]
-                    transformer_options['self_mask_up']  = mask_up[:,txt_len:]
-                    transformer_options['cross_mask_down'] = mask_down[:,:txt_len]
-                    transformer_options['self_mask_down']  = mask_down[:,txt_len:]
-                    transformer_options['cross_mask_down2'] = mask_down2[:,:txt_len] if mask_down2 is not None else None
-                    transformer_options['self_mask_down2']  = mask_down2[:,txt_len:] if mask_down2 is not None else None
-                    
-                if   weight > 0 and mask is not None and     weight  <      id/total_layers:
-                    transformer_options['cross_mask'] = None
-                    transformer_options['self_mask']  = None
-                
-                elif weight < 0 and mask is not None and abs(weight) < (1 - id/total_layers):
-                    transformer_options['cross_mask'] = None
-                    transformer_options['self_mask']  = None
-                    
-                elif floor > 0 and mask is not None and       floor  >      id/total_layers:
-                    transformer_options['cross_mask'] = mask_zero[:,:txt_len]
-                    transformer_options['self_mask']  = mask_zero[:,txt_len:]
-                    transformer_options['cross_mask_up'] = mask_up_zero[:,:txt_len]
-                    transformer_options['self_mask_up']  = mask_up_zero[:,txt_len:]
-                    transformer_options['cross_mask_down'] = mask_down_zero[:,:txt_len]
-                    transformer_options['self_mask_down']  = mask_down_zero[:,txt_len:]
-                    transformer_options['cross_mask_down2'] = mask_down2_zero[:,:txt_len] if mask_down2_zero is not None else None
-                    transformer_options['self_mask_down2']  = mask_down2_zero[:,txt_len:] if mask_down2_zero is not None else None
-                
-                elif floor < 0 and mask is not None and   abs(floor) > (1 - id/total_layers):
-                    transformer_options['cross_mask'] = mask_zero[:,:txt_len]
-                    transformer_options['self_mask']  = mask_zero[:,txt_len:]
-                    transformer_options['cross_mask_up'] = mask_up_zero[:,:txt_len]
-                    transformer_options['self_mask_up']  = mask_up_zero[:,txt_len:]
-                    transformer_options['cross_mask_down'] = mask_down_zero[:,:txt_len]
-                    transformer_options['self_mask_down']  = mask_down_zero[:,txt_len:]
-                    transformer_options['cross_mask_down2'] = mask_down2_zero[:,:txt_len] if mask_down2_zero is not None else None
-                    transformer_options['self_mask_down2']  = mask_down2_zero[:,txt_len:] if mask_down2_zero is not None else None
-                
-                
-                h = forward_timestep_embed(module, h, emb, context, transformer_options, time_context=time_context, num_video_frames=num_video_frames, image_only_indicator=image_only_indicator)
-                h = apply_control(h, control, 'input')
-                if "input_block_patch" in transformer_patches:
-                    patch = transformer_patches["input_block_patch"]
-                    for p in patch:
-                        h = p(h, transformer_options)
-                
-                if EO("eps_adain") and y0_adain is not None:
-                    h_adain = forward_timestep_embed(module, h_adain, emb, context, transformer_options, time_context=time_context, num_video_frames=num_video_frames, image_only_indicator=image_only_indicator)
-                    h_adain = apply_control(h_adain, control, 'input')
-                    if "input_block_patch" in transformer_patches:
-                        patch = transformer_patches["input_block_patch"]
-                        for p in patch:
-                            h_adain = p(h_adain, transformer_options)
-                    hs_adain.append(h_adain)
-                    h = apply_scattersort_spatial(h, h_adain)
-                
-                hs.append(h)
-                
-                if "input_block_patch_after_skip" in transformer_patches:
-                    patch = transformer_patches["input_block_patch_after_skip"]
-                    for p in patch:
-                        h = p(h, transformer_options)
-
-            transformer_options["block"] = ("middle", 0)
-            if self.middle_block is not None:
-
-                if mask is not None:
-                    transformer_options['cross_mask'] = mask[:,:txt_len]
-                    transformer_options['self_mask']  = mask[:,txt_len:]
-                    transformer_options['cross_mask_up'] = mask_up[:,:txt_len]
-                    transformer_options['self_mask_up']  = mask_up[:,txt_len:]
-                    transformer_options['cross_mask_down'] = mask_down[:,:txt_len]
-                    transformer_options['self_mask_down']  = mask_down[:,txt_len:]
-                    transformer_options['cross_mask_down2'] = mask_down2[:,:txt_len] if mask_down2 is not None else None
-                    transformer_options['self_mask_down2']  = mask_down2[:,txt_len:] if mask_down2 is not None else None
-                    
-                if   weight > 0 and mask is not None and     weight  <      (len(self.input_blocks) + 1)/total_layers:
-                    transformer_options['cross_mask'] = None
-                    transformer_options['self_mask']  = None
-                
-                elif weight < 0 and mask is not None and abs(weight) < (1 - (len(self.input_blocks) + 1)/total_layers):
-                    transformer_options['cross_mask'] = None
-                    transformer_options['self_mask']  = None
-                    
-                elif floor > 0 and mask is not None and       floor  >      (len(self.input_blocks) + 1)/total_layers:
-                    transformer_options['cross_mask'] = mask_zero[:,:txt_len]
-                    transformer_options['self_mask']  = mask_zero[:,txt_len:]
-                    transformer_options['cross_mask_up'] = mask_up_zero[:,:txt_len]
-                    transformer_options['self_mask_up']  = mask_up_zero[:,txt_len:]
-                    transformer_options['cross_mask_down'] = mask_down_zero[:,:txt_len]
-                    transformer_options['self_mask_down']  = mask_down_zero[:,txt_len:]
-                    transformer_options['cross_mask_down2'] = mask_down2_zero[:,:txt_len] if mask_down2_zero is not None else None
-                    transformer_options['self_mask_down2']  = mask_down2_zero[:,txt_len:] if mask_down2_zero is not None else None
-                
-                elif floor < 0 and mask is not None and   abs(floor) > (1 - (len(self.input_blocks) + 1)/total_layers):
-                    transformer_options['cross_mask'] = mask_zero[:,:txt_len]
-                    transformer_options['self_mask']  = mask_zero[:,txt_len:]
-                    transformer_options['cross_mask_up'] = mask_up_zero[:,:txt_len]
-                    transformer_options['self_mask_up']  = mask_up_zero[:,txt_len:]
-                    transformer_options['cross_mask_down'] = mask_down_zero[:,:txt_len]
-                    transformer_options['self_mask_down']  = mask_down_zero[:,txt_len:]
-                    transformer_options['cross_mask_down2'] = mask_down2_zero[:,:txt_len] if mask_down2_zero is not None else None
-                    transformer_options['self_mask_down2']  = mask_down2_zero[:,txt_len:] if mask_down2_zero is not None else None
-
-                h = forward_timestep_embed(self.middle_block, h, emb, context, transformer_options, time_context=time_context, num_video_frames=num_video_frames, image_only_indicator=image_only_indicator)
-                if EO("eps_adain") and y0_adain is not None:
-                    h_adain = forward_timestep_embed(self.middle_block, h_adain, emb, context, transformer_options, time_context=time_context, num_video_frames=num_video_frames, image_only_indicator=image_only_indicator)
-                    #h = apply_scattersort_spatial(h, h_adain)
-            
-            h       = apply_control(h,       control, 'middle')
-            if EO("eps_adain") and y0_adain is not None:
-                h_adain = apply_control(h_adain, control, 'middle')
-                h = apply_scattersort_spatial(h, h_adain)
-
-            for id, module in enumerate(self.output_blocks):
-                transformer_options["block"] = ("output", id)
-                hsp = hs.pop()
-                hsp = apply_control(hsp, control, 'output')
-
-                if "output_block_patch" in transformer_patches:
-                    patch = transformer_patches["output_block_patch"]
-                    for p in patch:
-                        h, hsp = p(h, hsp, transformer_options)
-
-                h = th.cat([h, hsp], dim=1)
-                del hsp
-                if len(hs) > 0:
-                    output_shape = hs[-1].shape
-                else:
-                    output_shape = None
-                    
-                if EO("eps_adain_out") and y0_adain is not None:
-                    hsp_adain = hs_adain.pop()
-                    hsp_adain = apply_control(hsp_adain, control, 'output')
-
-                    if "output_block_patch" in transformer_patches:
-                        patch = transformer_patches["output_block_patch"]
-                        for p in patch:
-                            h_adain, hsp_adain = p(h_adain, hsp_adain, transformer_options)
-
-                    h_adain = th.cat([h_adain, hsp_adain], dim=1)
-                    del hsp_adain
-                    h = apply_scattersort_spatial(h, h_adain)
-                
-                if mask is not None:
-                    transformer_options['cross_mask'] = mask[:,:txt_len]
-                    transformer_options['self_mask']  = mask[:,txt_len:]
-                    transformer_options['cross_mask_up'] = mask_up[:,:txt_len]
-                    transformer_options['self_mask_up']  = mask_up[:,txt_len:]
-                    transformer_options['cross_mask_down'] = mask_down[:,:txt_len]
-                    transformer_options['self_mask_down']  = mask_down[:,txt_len:]
-                    transformer_options['cross_mask_down2'] = mask_down2[:,:txt_len] if mask_down2 is not None else None
-                    transformer_options['self_mask_down2']  = mask_down2[:,txt_len:] if mask_down2 is not None else None
-                    
-                if   weight > 0 and mask is not None and     weight  <      (len(self.input_blocks) + 1 + id)/total_layers:
-                    transformer_options['cross_mask'] = None
-                    transformer_options['self_mask']  = None
-                
-                elif weight < 0 and mask is not None and abs(weight) < (1 - (len(self.input_blocks) + 1 + id)/total_layers):
-                    transformer_options['cross_mask'] = None
-                    transformer_options['self_mask']  = None
-                    
-                elif floor > 0 and mask is not None and       floor  >      (len(self.input_blocks) + 1 + id)/total_layers:
-                    transformer_options['cross_mask'] = mask_zero[:,:txt_len]
-                    transformer_options['self_mask']  = mask_zero[:,txt_len:]
-                    transformer_options['cross_mask_up'] = mask_up_zero[:,:txt_len]
-                    transformer_options['self_mask_up']  = mask_up_zero[:,txt_len:]
-                    transformer_options['cross_mask_down'] = mask_down_zero[:,:txt_len]
-                    transformer_options['self_mask_down']  = mask_down_zero[:,txt_len:]
-                    transformer_options['cross_mask_down2'] = mask_down2_zero[:,:txt_len] if mask_down2_zero is not None else None
-                    transformer_options['self_mask_down2']  = mask_down2_zero[:,txt_len:] if mask_down2_zero is not None else None
-                
-                elif floor < 0 and mask is not None and   abs(floor) > (1 - (len(self.input_blocks) + 1 + id)/total_layers):
-                    transformer_options['cross_mask'] = mask_zero[:,:txt_len]
-                    transformer_options['self_mask']  = mask_zero[:,txt_len:]
-                    transformer_options['cross_mask_up'] = mask_up_zero[:,:txt_len]
-                    transformer_options['self_mask_up']  = mask_up_zero[:,txt_len:]
-                    transformer_options['cross_mask_down'] = mask_down_zero[:,:txt_len]
-                    transformer_options['self_mask_down']  = mask_down_zero[:,txt_len:]
-                    transformer_options['cross_mask_down2'] = mask_down2_zero[:,:txt_len] if mask_down2_zero is not None else None
-                    transformer_options['self_mask_down2']  = mask_down2_zero[:,txt_len:] if mask_down2_zero is not None else None
-
-                    
-                h = forward_timestep_embed(module, h, emb, context, transformer_options, output_shape, time_context=time_context, num_video_frames=num_video_frames, image_only_indicator=image_only_indicator)
-                if EO("eps_adain_out") and y0_adain is not None:
-                    h_adain = forward_timestep_embed(module, h_adain, emb, context, transformer_options, output_shape, time_context=time_context, num_video_frames=num_video_frames, image_only_indicator=image_only_indicator)
-                    h = apply_scattersort_spatial(h, h_adain)
-            
-            h = h.type(x.dtype)
-            #if EO("eps_adain_out") and y0_adain is not None:
-            #    h_adain = h_adain.type(x.dtype)
-            
-            if self.predict_codebook_ids:
-                eps = self.id_predictor(h)
-            else:
-                eps = self.out(h)
-                
-            out_list.append(eps)
-            
-        eps = torch.stack(out_list, dim=0).squeeze(dim=1)
-
 
 
         dtype = eps.dtype if self.style_dtype is None else self.style_dtype

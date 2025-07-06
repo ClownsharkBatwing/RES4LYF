@@ -35,6 +35,8 @@ from comfy.cli_args import args
 import comfy.ops
 ops = comfy.ops.disable_weight_init
 
+from ..style_transfer import apply_scattersort, apply_scattersort_spatial
+
 FORCE_UPCAST_ATTENTION_DTYPE = model_management.force_upcast_attention_dtype()
 
 def get_attn_precision(attn_precision, current_dtype):
@@ -626,16 +628,19 @@ class ReCrossAttention(nn.Module):
 
         self.to_out = nn.Sequential(operations.Linear(inner_dim, query_dim, dtype=dtype, device=device), nn.Dropout(dropout))
 
-    def forward(self, x, context=None, value=None, mask=None):
+    def forward(self, x, context=None, value=None, mask=None, style_block=None):
         q = self.to_q(x)
+        q = style_block(q, "q_proj")
         #SELF_ATTN = True if context is None else False
         context = default(context, x)    # if context is None, return x
         k = self.to_k(context)
+        k = style_block(k, "k_proj")
         if value is not None:
             v = self.to_v(value)
             del value
         else:
             v = self.to_v(context)
+        v = style_block(v, "v_proj")
 
         if mask is None:
             out = optimized_attention(q, k, v, self.heads, attn_precision=self.attn_precision)
@@ -646,6 +651,7 @@ class ReCrossAttention(nn.Module):
             #    mask = F.interpolate(mask[None, None].float(), size=(q.shape[-2], mask.shape[-1]), mode='nearest')[0,0].to(mask)
             out = attention_pytorch(q, k, v, self.heads, mask=mask)
             #out = optimized_attention_masked(q, k, v, self.heads, mask, attn_precision=self.attn_precision)
+        out = style_block(out, "out")
         return self.to_out(out)
 
 
@@ -690,7 +696,7 @@ class ReBasicTransformerBlock(nn.Module):
         self.d_head = d_head
         self.switch_temporal_ca_to_sa = switch_temporal_ca_to_sa
 
-    def forward(self, x, context=None, transformer_options={}):
+    def forward(self, x, context=None, transformer_options={}, style_block=None):
         extra_options = {}
         block = transformer_options.get("block", None)
         block_index = transformer_options.get("block_index", 0)
@@ -726,13 +732,14 @@ class ReBasicTransformerBlock(nn.Module):
         extra_options["dim_head"] = self.d_head
         extra_options["attn_precision"] = self.attn_precision
 
-        if self.ff_in:
+        if self.ff_in: # never true for sdxl?
             x_skip = x
             x = self.ff_in(self.norm_in(x))
             if self.is_res:
                 x += x_skip
-
+                
         n = self.norm1(x)
+        n = style_block(n, "norm1")
         if self.disable_self_attn:
             context_attn1 = context
         else:
@@ -766,14 +773,16 @@ class ReBasicTransformerBlock(nn.Module):
             n = attn1_replace_patch[block_attn1](n, context_attn1, value_attn1, extra_options)
             n = self.attn1.to_out(n)
         else:
-            n = self.attn1(n, context=context_attn1, value=value_attn1, mask=self_mask)         # self attention
+            n = self.attn1(n, context=context_attn1, value=value_attn1, mask=self_mask, style_block=style_block.ATTN1)         # self attention                                             #####
+            n = style_block(n, "self_attn")
 
         if "attn1_output_patch" in transformer_patches:
             patch = transformer_patches["attn1_output_patch"]
             for p in patch:
                 n = p(n, extra_options)
 
-        x += n
+        x += n ###########
+        x = style_block(x, "self_attn_res")
         if "middle_patch" in transformer_patches:
             patch = transformer_patches["middle_patch"]
             for p in patch:
@@ -781,6 +790,8 @@ class ReBasicTransformerBlock(nn.Module):
 
         if self.attn2 is not None:
             n = self.norm2(x)
+            n = style_block(n, "norm2")
+            
             if self.switch_temporal_ca_to_sa:
                 context_attn2 = n
             else:
@@ -806,24 +817,38 @@ class ReBasicTransformerBlock(nn.Module):
                 n = attn2_replace_patch[block_attn2](n, context_attn2, value_attn2, extra_options)
                 n = self.attn2.to_out(n)
             else:
-                n = self.attn2(n, context=context_attn2, value=value_attn2, mask=cross_mask)       # real cross attention
+                n = self.attn2(n, context=context_attn2, value=value_attn2, mask=cross_mask, style_block=style_block.ATTN2)       # real cross attention                                ##### b (h w) c
+                n = style_block(n, "cross_attn")
+
 
         if "attn2_output_patch" in transformer_patches:
             patch = transformer_patches["attn2_output_patch"]
             for p in patch:
                 n = p(n, extra_options)
 
-        x += n
-        if self.is_res:
+        x += n ###########
+        x = style_block(x, "cross_attn_res")
+
+        if self.is_res: # always true with sdxl?
             x_skip = x
-        x = self.ff(self.norm3(x))
+            
+        if not self.is_res:
+            pass
+        
+        x = self.norm3(x)
+        x = style_block(x, "norm3")
+        x = self.ff(x)
+        x = style_block(x, "ff")
+
         if self.is_res:
             x += x_skip
+            
+        x = style_block(x, "ff_res")
 
         return x
 
 
-class SpatialTransformer(nn.Module):
+class ReSpatialTransformer(nn.Module):
     """
     Transformer block for image-like data.
     First, project the input (aka embedding)
@@ -865,7 +890,7 @@ class SpatialTransformer(nn.Module):
             self.proj_out = operations.Linear(in_channels, inner_dim, dtype=dtype, device=device)
         self.use_linear = use_linear
 
-    def forward(self, x, context=None, transformer_options={}):
+    def forward(self, x, context=None, style_block=None, transformer_options={}):
         # note: if no context is given, cross-attention defaults to self-attention
         if not isinstance(context, list):
             context = [context] * len(self.transformer_blocks)
@@ -880,7 +905,7 @@ class SpatialTransformer(nn.Module):
             x = self.proj_in(x)
         for i, block in enumerate(self.transformer_blocks):
             transformer_options["block_index"] = i
-            x = block(x, context=context[i], transformer_options=transformer_options)
+            x = block(x, context=context[i], style_block=style_block.TFMR, transformer_options=transformer_options)
         if self.use_linear:
             x = self.proj_out(x)
         x = x.reshape(x.shape[0], h, w, x.shape[-1]).movedim(3, 1).contiguous()
@@ -889,7 +914,7 @@ class SpatialTransformer(nn.Module):
         return x + x_in
 
 
-class SpatialVideoTransformer(SpatialTransformer):
+class SpatialVideoTransformer(ReSpatialTransformer):
     def __init__(
         self,
         in_channels,
