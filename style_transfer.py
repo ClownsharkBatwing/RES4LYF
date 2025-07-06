@@ -1061,7 +1061,7 @@ def weighted_mix_n(tensor_list, weight_list, dim=-1, offset=0):
 
 from torch import vmap
 
-BLOCK_NAMES = {"double_blocks", "single_blocks", "up_blocks", "middle_blocks", "down_blocks"}
+BLOCK_NAMES = {"double_blocks", "single_blocks", "up_blocks", "middle_blocks", "down_blocks", "input_blocks", "output_blocks"}
 
 DEFAULT_BLOCK_WEIGHTS_MMDIT = {
     "attn_norm"    : 0.0,
@@ -1220,11 +1220,11 @@ class Stylizer:
             B, HEAD_DIM, HW, C = x.shape
             x = x.reshape(B, HW, C*HEAD_DIM)
             
-        if self.KONTEXT == 1:
+        if hasattr(self, "KONTEXT") and self.KONTEXT == 1:
             x = x.reshape(2, x.shape[1] // 2, x.shape[2])
         
         txt_slice, img_slice, ktx_slice = self.txt_slice, self.img_slice, None
-        if self.KONTEXT == 2:
+        if hasattr(self, "KONTEXT") and self.KONTEXT == 2:
             ktx_slice = self.img_slice # slice(2 * self.img_slice.start, None)
             img_slice = slice(2 * self.img_slice.start, self.img_slice.start)
             txt_slice = slice(None, 2 * self.txt_slice.stop)
@@ -1266,6 +1266,8 @@ class Stylizer:
                         if "txt" in apply_to:
                             x[...,txt_slice,:] = txt_method(x[...,txt_slice,:], idx=i+1)
                             #x[:,self.img_len:,:] = method(x[:,self.img_len:,:], idx=i+1)
+                    else:
+                        x = method(x, idx=i+1)
                     x = torch.lerp(x_clone, x, weight)
                 #else:
                 #    x = torch.lerp(x, method(x.clone(), idx=i+1), weight)
@@ -1278,7 +1280,7 @@ class Stylizer:
         
         #if x_ndim == 3:
         #    return x.view(B,HW,C)
-        if self.KONTEXT == 1:
+        if hasattr(self, "KONTEXT") and  self.KONTEXT == 1:
             x = x.reshape(1, x.shape[1] * 2, x.shape[2])
         
         if HEAD_DIM == self.HEADS:
@@ -1659,15 +1661,192 @@ class StyleMMDiT_SingleBlock(StyleMMDiT_BaseBlock):
 
 
 
-class StyleMMDiT_Model(Stylizer):
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+class StyleUNet_Resample(Stylizer):
+    def __init__(self, mode):
+        super().__init__()
+        self.conv = [0.0]
+
+class StyleUNet_Attn(Stylizer):
+    def __init__(self, mode):
+        super().__init__()
+        self.q_proj = [0.0]
+        self.k_proj = [0.0]
+        self.v_proj = [0.0]
+        self.out    = [0.0]
+
+class StyleUNet_FF(Stylizer):
+    def __init__(self, mode):
+        super().__init__()
+        self.proj   = [0.0]
+        self.geglu  = [0.0]
+        self.linear = [0.0]
+        
+class StyleUNet_TransformerBlock(Stylizer): 
+    def __init__(self, mode):
+        super().__init__()
+        
+        self.ATTN1 = StyleUNet_Attn(mode)  # self-attn
+        self.FF    = StyleUNet_FF  (mode)  
+        self.ATTN2 = StyleUNet_Attn(mode)  # cross-attn
+
+        self.self_attn  = [0.0]
+        self.ff         = [0.0]
+        self.cross_attn = [0.0]
+        
+        self.self_attn_res  = [0.0]
+        self.cross_attn_res = [0.0]
+        self.ff_res = [0.0]
+        
+        self.norm1 = [0.0]
+        self.norm2 = [0.0]
+        self.norm3 = [0.0]
+        
+    def set_len(self, h_len, w_len, img_slice, txt_slice, HEADS):
+        super().set_len(h_len, w_len, img_slice, txt_slice, HEADS)
+        self.ATTN1.set_len(h_len, w_len, img_slice, txt_slice, HEADS)
+        self.ATTN2.set_len(h_len, w_len, img_slice, txt_slice, HEADS)
+
+class StyleUNet_SpatialTransformer(Stylizer): 
+    def __init__(self, mode):
+        super().__init__()
+        
+        self.TFMR = StyleUNet_TransformerBlock(mode)
+
+        self.spatial_norm_in     = [0.0]
+        self.spatial_proj_in     = [0.0]
+        self.spatial_transformer = [0.0]
+        self.spatial_proj_out    = [0.0]
+        
+    def set_len(self, h_len, w_len, img_slice, txt_slice, HEADS):
+        super().set_len(h_len, w_len, img_slice, txt_slice, HEADS)
+        self.TFMR.set_len(h_len, w_len, img_slice, txt_slice, HEADS)
+
+class StyleUNet_ResBlock(Stylizer):
+    def __init__(self, mode):
+        super().__init__()
+
+        self.in_norm    = [0.0]
+        self.in_silu    = [0.0]
+        self.in_conv    = [0.0]
+
+        self.emb_silu   = [0.0]
+        self.emb_linear = [0.0]
+        self.emb_res    = [0.0]
+
+        self.out_norm   = [0.0]
+        self.out_silu   = [0.0]
+        self.out_conv   = [0.0]
+        
+        self.residual   = [0.0]
+
+
+class StyleUNet_BaseBlock(Stylizer):
+    def __init__(self, mode="passthrough"):
+
+        self.resample_block = StyleUNet_Resample(mode)
+        self.res_block      = StyleUNet_ResBlock(mode)
+        self.spatial_block  = StyleUNet_SpatialTransformer(mode)
+        
+        self.resample = [0.0]
+        self.res      = [0.0]
+        self.spatial  = [0.0]
+        
+        self.mask      = [None]
+        self.attn_mask = [None]
+        
+        self.KONTEXT = 0
+
+    
+    def set_len(self, h_len, w_len, img_slice, txt_slice, HEADS):
+        self.h_len  = h_len
+        self.w_len  = w_len
+        self.img_len = h_len * w_len
+        
+        self.img_slice = img_slice
+        self.txt_slice = txt_slice
+        self.HEADS = HEADS
+        
+        self.resample_block.set_len(h_len, w_len, img_slice, txt_slice, HEADS)
+        self.res_block     .set_len(h_len, w_len, img_slice, txt_slice, HEADS)
+        self.spatial_block .set_len(h_len, w_len, img_slice, txt_slice, HEADS)
+        
+        for i, mask in enumerate(self.mask):
+            if mask is not None and mask.ndim > 1:
+                self.mask[i] = F.interpolate(mask.unsqueeze(0), size=(h_len, w_len)).flatten().to(torch.bfloat16).cuda()
+            self.resample_block.mask = self.mask
+            self.res_block.mask      = self.mask
+            self.spatial_block.mask  = self.mask
+            self.spatial_block.TFMR.mask  = self.mask
+            
+        for i, mask in enumerate(self.attn_mask):
+            if mask is not None and mask.ndim > 1:
+                self.attn_mask[i] = F.interpolate(mask.unsqueeze(0), size=(h_len, w_len)).flatten().to(torch.bfloat16).cuda()
+            self.spatial_block.TFMR.ATTN1.mask = self.attn_mask     
+            
+    def __call__(self, x, attr):
+        B, C, H, W = x.shape
+        x = super().__call__(x.reshape(B, H*W, C), attr)
+        return x.reshape(B,C,H,W)
+        
+
+class StyleUNet_InputBlock(StyleUNet_BaseBlock):
+    def __init__(self, mode="passthrough"):
+        super().__init__(mode)    
+
+class StyleUNet_MiddleBlock(StyleUNet_BaseBlock):
+    def __init__(self, mode="passthrough"):
+        super().__init__(mode)
+
+class StyleUNet_OutputBlock(StyleUNet_BaseBlock):
+    def __init__(self, mode="passthrough"):
+        super().__init__(mode)
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+class Style_Model(Stylizer):
 
     def __init__(self, dtype=torch.float64, device=torch.device("cuda")):
         super().__init__(dtype, device)
         self.guides = []
         self.GUIDES_INITIALIZED = False
         
-        self.double_blocks = [StyleMMDiT_DoubleBlock() for _ in range(100)]
-        self.single_blocks = [StyleMMDiT_SingleBlock() for _ in range(100)]
+        #self.double_blocks = [StyleMMDiT_DoubleBlock() for _ in range(100)]
+        #self.single_blocks = [StyleMMDiT_SingleBlock() for _ in range(100)]
         
         self.h_len   = -1
         self.w_len   = -1
@@ -1765,10 +1944,10 @@ class StyleMMDiT_Model(Stylizer):
         self.txt_slice = txt_slice
         self.HEADS = HEADS
         
-        for block in self.double_blocks:
-            block.set_len(h_len, w_len, img_slice, txt_slice, HEADS)
-        for block in self.single_blocks:
-            block.set_len(h_len, w_len, img_slice, txt_slice, HEADS)
+        #for block in self.double_blocks:
+        #    block.set_len(h_len, w_len, img_slice, txt_slice, HEADS)
+        #for block in self.single_blocks:
+        #    block.set_len(h_len, w_len, img_slice, txt_slice, HEADS)
         
         for i, mask in enumerate(self.mask):
             if mask is not None and mask.ndim > 1:
@@ -1889,6 +2068,46 @@ class StyleMMDiT_Model(Stylizer):
         if self.data_shock == "none":
             return denoised
         datashock_ref = getattr(self, "datashock_ref", None)
-        return self.apply_to_data(denoised, datashock_ref, self.data_shock)
+        return torch.lerp(denoised, self.apply_to_data(denoised, datashock_ref, self.data_shock), torch.Tensor([self.data_shock_weight]).double().cuda())
 
 
+
+
+
+class StyleMMDiT_Model(Style_Model):
+
+    def __init__(self, dtype=torch.float64, device=torch.device("cuda")):
+        super().__init__(dtype, device)
+        self.double_blocks = [StyleMMDiT_DoubleBlock() for _ in range(100)]
+        self.single_blocks = [StyleMMDiT_SingleBlock() for _ in range(100)]
+
+    def set_len(self, h_len, w_len, img_slice, txt_slice, HEADS):
+        super().set_len(h_len, w_len, img_slice, txt_slice, HEADS)
+        for block in self.double_blocks:
+            block.set_len(h_len, w_len, img_slice, txt_slice, HEADS)
+        for block in self.single_blocks:
+            block.set_len(h_len, w_len, img_slice, txt_slice, HEADS)
+
+
+class StyleUNet_Model(Style_Model):
+
+    def __init__(self, dtype=torch.float64, device=torch.device("cuda")):
+        super().__init__(dtype, device)
+        self.input_blocks  = [StyleUNet_InputBlock()  for _ in range(100)]
+        self.middle_blocks = [StyleUNet_MiddleBlock() for _ in range(100)]
+        self.output_blocks = [StyleUNet_OutputBlock() for _ in range(100)]
+
+    def set_len(self, h_len, w_len, img_slice, txt_slice, HEADS):
+        super().set_len(h_len, w_len, img_slice, txt_slice, HEADS)
+        for block in self.input_blocks:
+            block.set_len(h_len, w_len, img_slice, txt_slice, HEADS)
+        for block in self.middle_blocks:
+            block.set_len(h_len, w_len, img_slice, txt_slice, HEADS)
+        for block in self.output_blocks:
+            block.set_len(h_len, w_len, img_slice, txt_slice, HEADS)
+
+    def __call__(self, x, attr):
+        B, C, H, W = x.shape
+        x = super().__call__(x.reshape(B, H*W, C), attr)
+        return x.reshape(B,C,H,W)
+        

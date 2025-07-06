@@ -55,10 +55,10 @@ from comfy.ldm.lightricks.model import LTXVModel
 from .lightricks.model import ReLTXVModel
 #from .chroma.layers import ReChromaSingleStreamBlock, ReChromaDoubleStreamBlock
 
-from comfy.ldm.modules.diffusionmodules.openaimodel import UNetModel
+from comfy.ldm.modules.diffusionmodules.openaimodel import UNetModel, ResBlock
 from comfy.ldm.modules.attention import SpatialTransformer, BasicTransformerBlock, CrossAttention
-from .sd.openaimodel import ReUNetModel
-from .sd.attention import ReBasicTransformerBlock, ReCrossAttention
+from .sd.openaimodel import ReUNetModel, ReResBlock
+from .sd.attention import ReBasicTransformerBlock, ReCrossAttention, ReSpatialTransformer
 
 from .latents import get_orthogonal, get_cosine_similarity
 from .style_transfer import StyleWCT, WaveletStyleWCT, Retrojector, StyleMMDiT_Model
@@ -700,7 +700,10 @@ class ReSDPatcherAdvanced:
                 
             for i in range(len(m.model.diffusion_model.input_blocks)):
                 for j in range(len(m.model.diffusion_model.input_blocks[i])):
+                    if isinstance(m.model.diffusion_model.input_blocks[i][j], ResBlock):
+                        m.model.diffusion_model.input_blocks[i][j].__class__ = ReResBlock
                     if isinstance(m.model.diffusion_model.input_blocks[i][j], SpatialTransformer):
+                        m.model.diffusion_model.input_blocks[i][j].__class__ = ReSpatialTransformer
                         for k in range(len(m.model.diffusion_model.input_blocks[i][j].transformer_blocks)):
                             m.model.diffusion_model.input_blocks[i][j].transformer_blocks[k].__class__ = ReBasicTransformerBlock
                             m.model.diffusion_model.input_blocks[i][j].transformer_blocks[k].attn1.__class__ = ReCrossAttention
@@ -708,7 +711,10 @@ class ReSDPatcherAdvanced:
         
             #m.model.diffusion_model.middle_block[1].transformer_blocks[0].__class__ = ReBasicTransformerBlock
             for i in range(len(m.model.diffusion_model.middle_block)):
+                if isinstance(m.model.diffusion_model.middle_block[i], ResBlock):
+                    m.model.diffusion_model.middle_block[i].__class__ = ReResBlock
                 if isinstance(m.model.diffusion_model.middle_block[i], SpatialTransformer):
+                    m.model.diffusion_model.middle_block[i].__class__ = ReSpatialTransformer
                     for k in range(len(m.model.diffusion_model.middle_block[i].transformer_blocks)):
                         m.model.diffusion_model.middle_block[i].transformer_blocks[k].__class__ = ReBasicTransformerBlock
                         m.model.diffusion_model.middle_block[i].transformer_blocks[k].attn1.__class__ = ReCrossAttention
@@ -716,7 +722,10 @@ class ReSDPatcherAdvanced:
 
             for i in range(len(m.model.diffusion_model.output_blocks)):
                 for j in range(len(m.model.diffusion_model.output_blocks[i])):
+                    if isinstance(m.model.diffusion_model.output_blocks[i][j], ResBlock):
+                        m.model.diffusion_model.output_blocks[i][j].__class__ = ReResBlock
                     if isinstance(m.model.diffusion_model.output_blocks[i][j], SpatialTransformer):
+                        m.model.diffusion_model.output_blocks[i][j].__class__ = ReSpatialTransformer
                         for k in range(len(m.model.diffusion_model.output_blocks[i][j].transformer_blocks)):
                             m.model.diffusion_model.output_blocks[i][j].transformer_blocks[k].__class__ = ReBasicTransformerBlock
                             m.model.diffusion_model.output_blocks[i][j].transformer_blocks[k].attn1.__class__ = ReCrossAttention
@@ -728,7 +737,10 @@ class ReSDPatcherAdvanced:
             
             for i in range(len(m.model.diffusion_model.input_blocks)):
                 for j in range(len(m.model.diffusion_model.input_blocks[i])):
-                    if isinstance(m.model.diffusion_model.input_blocks[i][j], SpatialTransformer):
+                    if isinstance(m.model.diffusion_model.input_blocks[i][j], ReResBlock):
+                        m.model.diffusion_model.input_blocks[i][j].__class__ = ResBlock
+                    if isinstance(m.model.diffusion_model.input_blocks[i][j], ReSpatialTransformer):
+                        m.model.diffusion_model.input_blocks[i][j].__class__ = SpatialTransformer
                         for k in range(len(m.model.diffusion_model.input_blocks[i][j].transformer_blocks)):
                             m.model.diffusion_model.input_blocks[i][j].transformer_blocks[k].__class__ = BasicTransformerBlock
                             m.model.diffusion_model.input_blocks[i][j].transformer_blocks[k].attn1.__class__ = CrossAttention
@@ -736,7 +748,10 @@ class ReSDPatcherAdvanced:
         
             #m.model.diffusion_model.middle_block[1].transformer_blocks[0].__class__ = BasicTransformerBlock
             for i in range(len(m.model.diffusion_model.middle_block)):
-                if isinstance(m.model.diffusion_model.middle_block[i], SpatialTransformer):
+                if isinstance(m.model.diffusion_model.middle_block[i], ReResBlock):
+                    m.model.diffusion_model.middle_block[i].__class__ = ResBlock
+                if isinstance(m.model.diffusion_model.middle_block[i], ReSpatialTransformer):
+                    m.model.diffusion_model.middle_block[i].__class__ = SpatialTransformer
                     for k in range(len(m.model.diffusion_model.middle_block[i].transformer_blocks)):
                         m.model.diffusion_model.middle_block[i].transformer_blocks[k].__class__ = BasicTransformerBlock
                         m.model.diffusion_model.middle_block[i].transformer_blocks[k].attn1.__class__ = CrossAttention
@@ -744,7 +759,10 @@ class ReSDPatcherAdvanced:
 
             for i in range(len(m.model.diffusion_model.output_blocks)):
                 for j in range(len(m.model.diffusion_model.output_blocks[i])):
-                    if isinstance(m.model.diffusion_model.output_blocks[i][j], SpatialTransformer):
+                    if isinstance(m.model.diffusion_model.output_blocks[i][j], ReResBlock):
+                        m.model.diffusion_model.output_blocks[i[j]].__class__ = ResBlock
+                    if isinstance(m.model.diffusion_model.output_blocks[i][j], ReSpatialTransformer):
+                        m.model.diffusion_model.output_blocks[i[j]].__class__ = SpatialTransformer
                         for k in range(len(m.model.diffusion_model.output_blocks[i][j].transformer_blocks)):
                             m.model.diffusion_model.output_blocks[i][j].transformer_blocks[k].__class__ = BasicTransformerBlock
                             m.model.diffusion_model.output_blocks[i][j].transformer_blocks[k].attn1.__class__ = CrossAttention
@@ -837,6 +855,9 @@ class ReHiDreamPatcherAdvanced:
             m.model.diffusion_model.__class__     = HDModel
             m.model.diffusion_model.threshold_inv = False
             m.model.diffusion_model.final_layer.__class__ = HDLastLayer
+            
+            m.model.diffusion_model.final_layer.linear.weight.data = m.model.diffusion_model.final_layer.linear.weight.data.to(torch.bfloat16)
+            m.model.diffusion_model.final_layer.linear.bias.data = m.model.diffusion_model.final_layer.linear.bias.data.to(torch.bfloat16)
             
             for i, block in enumerate(m.model.diffusion_model.double_stream_blocks):
                 block.__class__             = HDBlock
