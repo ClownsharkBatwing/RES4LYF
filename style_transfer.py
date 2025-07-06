@@ -1197,7 +1197,36 @@ class Stylizer:
         self.img_len = h_len * w_len
         self.HEADS = HEADS
 
+    @staticmethod
+    def middle_slice(length, weight):
+        """
+        Returns a slice object that selects the middle `weight` fraction of a dimension.
+        Example: weight=1.0 → full slice; weight=0.5 → middle 50%
+        """
+        if weight >= 1.0:
+            return slice(None)
+        wr = int((length * (1 - weight)) // 2)
+        return slice(wr, -wr if wr > 0 else None)
 
+    @staticmethod
+    def get_outer_slice(x, weight):
+        if weight >= 0.0:
+            return x
+        length = x.shape[-2]
+        wr = int((length * (1 - (-weight))) // 2)
+        
+        return torch.cat([x[...,:wr,:], x[...,-wr:,:]], dim=-2)
+
+    @staticmethod
+    def restore_outer_slice(x, x_outer, weight):
+        if weight >= 0.0:
+            return x
+        length = x.shape[-2]
+        wr = int((length * (1 - (-weight))) // 2)
+        
+        x[...,:wr,:]  = x_outer[...,:wr,:]
+        x[...,-wr:,:] = x_outer[...,-wr:,:]
+        return x
 
     def __call__(self, x, attr):
         if x.shape[0] == 1 and not self.KONTEXT:
@@ -1214,7 +1243,7 @@ class Stylizer:
         #    B, HW, C = x.shape
         #    if x.shape[-2] != self.HEADS and self.HEADS != 0:
         #        x = x.reshape(B,self.HEADS,HW,-1)
-                
+        
         HEAD_DIM = x.shape[1]
         if HEAD_DIM == self.HEADS:
             B, HEAD_DIM, HW, C = x.shape
@@ -1245,6 +1274,9 @@ class Stylizer:
             for i, (weight, mask) in enumerate(zip(weight_list, self.mask)):
                 if mask is not None:
                     x01 = x[0:1].clone()
+                slc = Stylizer.middle_slice(x.shape[-2], weight)
+                #slc = slice(None)
+                    
                 txt_method_name = self.method[i].removeprefix("tiled_")
                 txt_method = getattr(self, txt_method_name)
                 
@@ -1254,21 +1286,25 @@ class Stylizer:
                 if   weight == 0.0:
                     continue
                 else: # if weight == 1.0:
-                    x_clone = x.clone()
+                    if weight > 0 and weight < 1:
+                        x_clone = x.clone()
                     if   self.img_len == x.shape[-2]  or apply_to == "img+txt" or self.h_len < 0:
-                        x = method(x, idx=i+1)
+                        x = method(x, idx=i+1, slc=slc)
                     elif   self.img_len < x.shape[-2]:
                         if "img" in apply_to:
-                            x[...,img_slice,:] = method(x[...,img_slice,:], idx=i+1)
+                            x[...,img_slice,:] = method(x[...,img_slice,:], idx=i+1, slc=slc)
                             #if ktx_slice is not None:
                             #    x[...,ktx_slice,:] = method(x[...,ktx_slice,:], idx=i+1)
                             #x[:,:self.img_len,:] = method(x[:,:self.img_len,:], idx=i+1)
                         if "txt" in apply_to:
-                            x[...,txt_slice,:] = txt_method(x[...,txt_slice,:], idx=i+1)
+                            x[...,txt_slice,:] = txt_method(x[...,txt_slice,:], idx=i+1, slc=slc)
                             #x[:,self.img_len:,:] = method(x[:,self.img_len:,:], idx=i+1)
+                        if not "img" in apply_to and not "txt" in apply_to:
+                            pass
                     else:
-                        x = method(x, idx=i+1)
-                    x = torch.lerp(x_clone, x, weight)
+                        x = method(x, idx=i+1, slc=slc)
+                    if weight > 0 and weight < 1 and txt_method_name != "scattersort":
+                        x = torch.lerp(x_clone, x, weight)
                 #else:
                 #    x = torch.lerp(x, method(x.clone(), idx=i+1), weight)
                 
@@ -1394,7 +1430,6 @@ class Stylizer:
         return x
 
 
-
     @staticmethod
     def scattersort_dir(x, idx=1):
         x[0:1] = Stylizer.scattersort_dir_(x[0:1], x[idx:idx+1])
@@ -1407,12 +1442,14 @@ class Stylizer:
         return x
 
     @staticmethod
-    def scattersort_(x, y):
+    def scattersort_(x, y, slc=slice(None)):
         buf = Stylizer.buffer
         buf['src_idx']                    = x.argsort(dim=-2)
         buf['ref_sorted'], buf['ref_idx'] = y   .sort(dim=-2)
-        return x.scatter_(dim=-2, index=buf['src_idx'], src=buf['ref_sorted'].expand_as(buf['src_idx']))
+
+        return x.scatter_(dim=-2, index=buf['src_idx'][...,slc,:], src=buf['ref_sorted'][...,slc,:].expand_as(buf['src_idx'][...,slc,:]))
     
+
     @staticmethod
     def scattersort_double(x, y):
         buf = Stylizer.buffer
@@ -1427,9 +1464,22 @@ class Stylizer:
         return x.scatter_(dim=-2, index=buf['src_idx'], src=buf['ref_sorted'].expand_as(buf['src_idx']))
     
     
-    def scattersort(self, x, idx=1):
-        x[0:1] = Stylizer.scattersort_(x[0:1], x[idx:idx+1])
+    def scattersort_aoeu(self, x, idx=1, slc=slice(None)):
+        x[0:1] = Stylizer.scattersort_(x[0:1], x[idx:idx+1], slc)
         return x
+    
+    def scattersort(self, x, idx=1, slc=slice(None)):
+        if x.shape[0] != 2:
+            x[0:1] = Stylizer.scattersort_(x[0:1], x[idx:idx+1], slc)
+            return x
+        
+        buf = Stylizer.buffer
+        buf['sorted'], buf['idx'] = x.sort(dim=-2)
+
+        return x.scatter_(dim=-2, index=buf['idx'][0:1][...,slc,:], src=buf['sorted'][1:2][...,slc,:].expand_as(buf['idx'][0:1][...,slc,:]))
+    
+
+    
     
     def tiled_scattersort(self, x, idx=1): #, h_tile=None, w_tile=None):
         #if HDModel.RECON_MODE:
@@ -1912,15 +1962,24 @@ class Style_Model(Stylizer):
             x[0:1] = x[0:1].scatter_(dim=-2, index=buf['src_idx'], src=buf['src'],)
         else:
             for i, (weight, mask) in enumerate(zip(weight_list, self.mask)):
+                if weight > 0 and weight < 1:
+                    x_clone = x.clone()
                 if mask is not None:
                     x01 = x[0:1].clone()
+                slc = Stylizer.middle_slice(x.shape[-2], weight)
+                
                 method = getattr(self, self.method[i])
                 if   weight == 0.0:
                     continue
                 elif weight == 1.0:
                     x = method(x, idx=i+1)
                 else:
-                    x = torch.lerp(x, method(x.clone(), idx=i), weight)
+                    x = method(x, idx=i+1, slc=slc)
+                if weight > 0 and weight < 1 and self.method[i] != "scattersort":
+                    x = torch.lerp(x_clone, x, weight)
+                    
+                #else:
+                #    x = torch.lerp(x, method(x.clone(), idx=i), weight)
                 
                 if mask is not None:
                     x[0:1] = torch.lerp(x01, x[0:1], mask.view(1, -1, 1))
