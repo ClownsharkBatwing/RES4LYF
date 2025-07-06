@@ -428,11 +428,13 @@ class Conditioning_Recast64:
     @precision_tool.cast_tensor
     def main(self, cond_0, cond_1 = None):
         cond_0[0][0] = cond_0[0][0].to(torch.float64)
-        cond_0[0][1]["pooled_output"] = cond_0[0][1]["pooled_output"].to(torch.float64)
+        if 'pooled_output' in cond_0[0][1]:
+            cond_0[0][1]["pooled_output"] = cond_0[0][1]["pooled_output"].to(torch.float64)
         
         if cond_1 is not None:
             cond_1[0][0] = cond_1[0][0].to(torch.float64)
-            cond_1[0][1]["pooled_output"] = cond_1[0][1]["pooled_output"].to(torch.float64)
+            if 'pooled_output' in cond_0[0][1]:
+                cond_1[0][1]["pooled_output"] = cond_1[0][1]["pooled_output"].to(torch.float64)
 
         return (cond_0, cond_1,)
 
