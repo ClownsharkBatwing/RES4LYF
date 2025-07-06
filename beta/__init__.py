@@ -63,6 +63,13 @@ def add_beta(NODE_CLASS_MAPPINGS, NODE_DISPLAY_NAME_MAPPINGS, extra_samplers):
         "ClownStyle_Attn_MMDiT"           : samplers_extensions.ClownStyle_Attn_MMDiT,
         "ClownStyle_Boost"                : samplers_extensions.ClownStyle_Boost,
 
+        "ClownStyle_UNet"                 : samplers_extensions.ClownStyle_UNet,
+        "ClownStyle_Block_UNet"           : samplers_extensions.ClownStyle_Block_UNet,
+        "ClownStyle_Attn_UNet"            : samplers_extensions.ClownStyle_Attn_UNet,
+        "ClownStyle_ResBlock_UNet"        : samplers_extensions.ClownStyle_ResBlock_UNet,
+        "ClownStyle_SpatialBlock_UNet"    : samplers_extensions.ClownStyle_SpatialBlock_UNet,
+        "ClownStyle_TransformerBlock_UNet": samplers_extensions.ClownStyle_TransformerBlock_UNet,
+
 
         "ClownSamplerSelector_Beta"       : samplers_extensions.ClownSamplerSelector_Beta,
 
