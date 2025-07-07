@@ -717,7 +717,8 @@ class ReUNetModel(nn.Module):
         transformer_options["original_shape"] = list(x.shape)
         transformer_options["transformer_index"] = 0
         transformer_patches = transformer_options.get("patches", {})
-        
+        SIGMA = transformer_options['sigmas'].to(x) # timestep[0].unsqueeze(0) #/ 1000
+
         img_slice = slice(None, -1) #slice(None, img_len)   # for the sake of cross attn... :-1
         txt_slice = slice(None, -1)
         
@@ -734,18 +735,17 @@ class ReUNetModel(nn.Module):
         StyleMMDiT.set_len(h_len, w_len, img_slice, txt_slice, HEADS=HEADS)
         StyleMMDiT.Retrojector = self.Retrojector if hasattr(self, "Retrojector") else None
         transformer_options['StyleMMDiT'] = None
-
+        
         x_tmp = transformer_options.get("x_tmp")
         if x_tmp is not None:
-            x_tmp = x_tmp.expand(x.shape[0], -1, -1, -1).clone().to(x)
+            x_tmp = x_tmp.clone() / ((SIGMA ** 2 + 1) ** 0.5)
+            x_tmp = x_tmp.expand_as(x) # (x.shape[0], -1, -1, -1) # .clone().to(x)
         
         y0_style, img_y0_style = None, None
 
-        SIGMA = transformer_options['sigmas'].to(x) # timestep[0].unsqueeze(0) #/ 1000
         
-        x_orig = x.clone()
-
         x_orig, timesteps_orig, y_orig, context_orig = clone_inputs(x, timesteps, y, context)
+        h_orig = x_orig.clone()
 
         weight    = -1 * transformer_options.get("regional_conditioning_weight", 0.0)
         floor     = -1 * transformer_options.get("regional_conditioning_floor",  0.0)
@@ -771,27 +771,31 @@ class ReUNetModel(nn.Module):
             
             RECON_MODE = True     if StyleMMDiT.noise_mode == "recon" and recon_iter == 0     else False
             
-            if StyleMMDiT.noise_mode == "recon" and recon_iter == 1:   # TODO: MAKE VARIANCE EXPLODING
+            ISIGMA = SIGMA
+            if StyleMMDiT.noise_mode == "recon" and recon_iter == 1: 
+                ISIGMA = SIGMA * EO("ISIGMA_FACTOR", 1.0)
+                
+                model_sampling = transformer_options.get('model_sampling')     
+                timesteps_orig = model_sampling.timestep(ISIGMA).expand_as(timesteps_orig)
+                
                 x_recon = x_tmp if x_tmp is not None else x_orig
                 #noise_prediction = x_recon + (1-SIGMA.to(x_recon)) * eps.to(x_recon)
                 noise_prediction = eps.to(x_recon)
-                denoised = x_recon * ((SIGMA ** 2 + 1) ** 0.5)   -   SIGMA.to(x_recon) * eps.to(x_recon)
+                denoised = x_recon * ((SIGMA.to(x_recon) ** 2 + 1) ** 0.5)   -   SIGMA.to(x_recon) * eps.to(x_recon)
                 
-                denoised = StyleMMDiT.apply_recon_lure(denoised, y0_style)
+                denoised = StyleMMDiT.apply_recon_lure(denoised, y0_style.to(x_recon))   # .to(denoised)
 
-                new_x = (denoised + SIGMA.to(denoised) * noise_prediction) / ((SIGMA ** 2 + 1) ** 0.5)
-                
+                new_x = (denoised + ISIGMA.to(x_recon) * noise_prediction) / ((ISIGMA.to(x_recon) ** 2 + 1) ** 0.5)
+                h_orig = new_x.clone().to(x)
                 x_init = noise_prediction
             elif StyleMMDiT.noise_mode == "bonanza":
                 x_init = torch.randn_like(x_init)
 
             if y0_style_active:
                 if y0_style.sum() == 0.0 and y0_style.std() == 0.0:
-                    y0_style = x.clone()
+                    y0_style_noised = x.clone()
                 else:
-                    y0_style_noised = ((y0_style + SIGMA * x_init[0:1].to(y0_style)) / ((SIGMA ** 2 + 1) ** 0.5))    #x_init.expand(x.shape[0],-1,-1,-1).to(y0_style)) 
-
-
+                    y0_style_noised = (y0_style + ISIGMA.to(y0_style) * x_init.expand_as(x).to(y0_style)) / ((ISIGMA.to(y0_style) ** 2 + 1) ** 0.5)    #x_init.expand(x.shape[0],-1,-1,-1).to(y0_style)) 
 
             out_list = []
             for cond_iter in range(len(transformer_options['cond_or_uncond'])):
@@ -800,7 +804,7 @@ class ReUNetModel(nn.Module):
                 bsz_style = y0_style.shape[0] if y0_style_active else 0
                 bsz       = 1 if RECON_MODE else bsz_style + 1
                 
-                x, timesteps, context = clone_inputs(x_orig[cond_iter].unsqueeze(0), timesteps_orig[cond_iter].unsqueeze(0), context_orig[cond_iter].unsqueeze(0))
+                h, timesteps, context = clone_inputs(h_orig[cond_iter].unsqueeze(0), timesteps_orig[cond_iter].unsqueeze(0), context_orig[cond_iter].unsqueeze(0))
                 y = y_orig[cond_iter].unsqueeze(0).clone() if y_orig is not None else None
                 
 
@@ -916,7 +920,7 @@ class ReUNetModel(nn.Module):
                     transformer_options['cross_mask_down2'] = mask_down2[:,:txt_len] if mask_down2 is not None else None
                     transformer_options['self_mask_down2']  = mask_down2[:,txt_len:] if mask_down2 is not None else None
                 
-                h = x
+                #h = x
                 if y0_style_active and not RECON_MODE:
                     if mask is None:
                         context, y, _ = StyleMMDiT.apply_style_conditioning(
@@ -928,7 +932,7 @@ class ReUNetModel(nn.Module):
                     else:
                         context = context.repeat(bsz_style + 1, 1, 1)
                         y = y.repeat(bsz_style + 1, 1)                   if y      is not None else None
-                    h = torch.cat([h, y0_style_noised], dim=0).to(h)
+                    h = torch.cat([h, y0_style_noised[cond_iter:cond_iter+1]], dim=0).to(h)
 
 
 
@@ -1132,11 +1136,11 @@ class ReUNetModel(nn.Module):
             eps = torch.stack(out_list, dim=0).squeeze(dim=1)
 
             if recon_iter == 1:
-                denoised = new_x - SIGMA.to(new_x) * eps.to(new_x)
+                denoised = new_x * ((ISIGMA ** 2 + 1) ** 0.5)  - ISIGMA.to(new_x) * eps.to(new_x)
                 if x_tmp is not None:
-                    eps = (x_tmp - denoised.to(x_tmp)) / SIGMA.to(x_tmp)
+                    eps = (x_tmp * ((SIGMA ** 2 + 1) ** 0.5) - denoised.to(x_tmp)) / SIGMA.to(x_tmp)
                 else:
-                    eps = (x_orig - denoised.to(x_orig)) / SIGMA.to(x_orig)
+                    eps = (x_orig * ((SIGMA ** 2 + 1) ** 0.5) - denoised.to(x_orig)) / SIGMA.to(x_orig)
             
 
 
