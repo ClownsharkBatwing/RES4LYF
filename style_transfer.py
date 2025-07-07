@@ -1786,8 +1786,10 @@ class StyleUNet_SpatialTransformer(Stylizer):
 
         self.spatial_norm_in     = [0.0]
         self.spatial_proj_in     = [0.0]
+        self.spatial_transformer_block = [0.0]
         self.spatial_transformer = [0.0]
         self.spatial_proj_out    = [0.0]
+        self.spatial_res         = [0.0]
         
     def set_len(self, h_len, w_len, img_slice, txt_slice, HEADS):
         super().set_len(h_len, w_len, img_slice, txt_slice, HEADS)
@@ -2115,20 +2117,28 @@ class Style_Model(Stylizer):
         B,HW,C = y0_style_embed.shape
         embed  = torch.cat([denoised_embed, y0_style_embed.view(1,B*HW,C)[:,::B,:]], dim=0)
         method = getattr(self, mode)
-        embed  = method(embed)
+        if mode == "scattersort":
+            slc = Stylizer.middle_slice(embed.shape[-2], self.data_shock_weight)
+            embed = method(embed, slc=slc)
+        else:
+            embed  = method(embed)
         return self.Retrojector.unembed(embed[0:1])
 
     def apply_recon_lure(self, denoised, y0_style):
         if self.recon_lure == "none":
             return denoised
-        return self.apply_to_data(denoised, y0_style, self.recon_lure)
+        for i in range(denoised.shape[0]):
+            denoised[i:i+1] = self.apply_to_data(denoised[i:i+1], y0_style, self.recon_lure)
+        return denoised
 
     def apply_data_shock(self, denoised):
         if self.data_shock == "none":
             return denoised
         datashock_ref = getattr(self, "datashock_ref", None)
-        return torch.lerp(denoised, self.apply_to_data(denoised, datashock_ref, self.data_shock), torch.Tensor([self.data_shock_weight]).double().cuda())
-
+        if self.data_shock == "scattersort":
+            return self.apply_to_data(denoised, datashock_ref, self.data_shock)
+        else:
+            return torch.lerp(denoised, self.apply_to_data(denoised, datashock_ref, self.data_shock), torch.Tensor([self.data_shock_weight]).double().cuda())
 
 
 
