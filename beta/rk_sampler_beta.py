@@ -575,7 +575,7 @@ def sample_rk_beta(
                 else:
                     x = (1 - sigmas[0]) * image_initial_shock.to(x) + sigmas[0] * noise_initial.to(x)
 
-
+    RK.update_transformer_options({"model_sampling": model.inner_model.inner_model.model_sampling})
     # BEGIN SAMPLING LOOP
     
     while step < num_steps:

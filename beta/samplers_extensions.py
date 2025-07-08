@@ -4340,15 +4340,17 @@ class ClownStyle_SpatialBlock_UNet:
                     "block_list":    ("STRING", {"default": "all", "multiline": True}),
                     "block_weights": ("STRING", {"default": "1.0", "multiline": True}),
                     
-                    "norm_in": ("FLOAT",  {"default": 0.0, "min": -100.0, "max": 100.0, "step":0.01, "round": False, "tooltip": "Strength of effect on layer; skips extra calculation if set to 0.0. Skips interpolation if set to 1.0."}),
-                    "proj_in": ("FLOAT",  {"default": 0.0, "min": -100.0, "max": 100.0, "step":0.01, "round": False, "tooltip": "Strength of effect on layer; skips extra calculation if set to 0.0. Skips interpolation if set to 1.0."}),
+                    "norm_in":     ("FLOAT",  {"default": 0.0, "min": -100.0, "max": 100.0, "step":0.01, "round": False, "tooltip": "Strength of effect on layer; skips extra calculation if set to 0.0. Skips interpolation if set to 1.0."}),
+                    "proj_in":     ("FLOAT",  {"default": 0.0, "min": -100.0, "max": 100.0, "step":0.01, "round": False, "tooltip": "Strength of effect on layer; skips extra calculation if set to 0.0. Skips interpolation if set to 1.0."}),
+                    "transformer_block": ("FLOAT",  {"default": 0.0, "min": -100.0, "max": 100.0, "step":0.01, "round": False, "tooltip": "Strength of effect on layer; skips extra calculation if set to 0.0. Skips interpolation if set to 1.0."}),
                     "transformer": ("FLOAT",  {"default": 0.0, "min": -100.0, "max": 100.0, "step":0.01, "round": False, "tooltip": "Strength of effect on layer; skips extra calculation if set to 0.0. Skips interpolation if set to 1.0."}),
-                    "proj_out": ("FLOAT",  {"default": 0.0, "min": -100.0, "max": 100.0, "step":0.01, "round": False, "tooltip": "Strength of effect on layer; skips extra calculation if set to 0.0. Skips interpolation if set to 1.0."}),
+                    "proj_out":    ("FLOAT",  {"default": 0.0, "min": -100.0, "max": 100.0, "step":0.01, "round": False, "tooltip": "Strength of effect on layer; skips extra calculation if set to 0.0. Skips interpolation if set to 1.0."}),
+                    "res":         ("FLOAT",  {"default": 0.0, "min": -100.0, "max": 100.0, "step":0.01, "round": False, "tooltip": "Strength of effect on layer; skips extra calculation if set to 0.0. Skips interpolation if set to 1.0."}),
 
-                    "tile_h":        ("INT",    {"default": 128, "min": 16, "max": 10000, "step": 16, "tooltip": "Tile size for tiled modes. Lower values will transfer composition more effectively. Dimensions of image must be divisible by this value."}),
-                    "tile_w":        ("INT",    {"default": 128, "min": 16, "max": 10000, "step": 16, "tooltip": "Tile size for tiled modes. Lower values will transfer composition more effectively. Dimensions of image must be divisible by this value."}),
+                    "tile_h":      ("INT",    {"default": 128, "min": 16, "max": 10000, "step": 16, "tooltip": "Tile size for tiled modes. Lower values will transfer composition more effectively. Dimensions of image must be divisible by this value."}),
+                    "tile_w":      ("INT",    {"default": 128, "min": 16, "max": 10000, "step": 16, "tooltip": "Tile size for tiled modes. Lower values will transfer composition more effectively. Dimensions of image must be divisible by this value."}),
 
-                    "invert_mask":   ("BOOLEAN",{"default": False}),
+                    "invert_mask": ("BOOLEAN",{"default": False}),
                     },
                 "optional": 
                     {
@@ -4372,8 +4374,10 @@ class ClownStyle_SpatialBlock_UNet:
             
             norm_in     = 0.0,
             proj_in     = 0.0,
+            transformer_block = 0.0,
             transformer = 0.0,
             proj_out    = 0.0,
+            res         = 0.0,
 
             tile_h      = 128,
             tile_w      = 128,
@@ -4386,8 +4390,10 @@ class ClownStyle_SpatialBlock_UNet:
         
         spatial_norm_in     = norm_in
         spatial_proj_in     = proj_in
+        spatial_transformer_block = transformer_block
         spatial_transformer = transformer
         spatial_proj_out    = proj_out
+        spatial_res         = res
         
         #mask = 1-mask if mask is not None else None
 
@@ -4431,8 +4437,10 @@ class ClownStyle_SpatialBlock_UNet:
         weights = {
             "spatial_norm_in"    : spatial_norm_in,
             "spatial_proj_in"    : spatial_proj_in,
+            "spatial_transformer_block": spatial_transformer_block,
             "spatial_transformer": spatial_transformer,
             "spatial_proj_out"   : spatial_proj_out,
+            "spatial_res"        : spatial_res,
 
             "h_tile": tile_h // 8,
             "w_tile": tile_w // 8,
