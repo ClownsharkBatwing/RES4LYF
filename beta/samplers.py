@@ -618,7 +618,7 @@ class SharkSampler:
                             sampler.extra_options['RegContext'] = pos_cond_tmp[0][1]['RegContext']
                             sampler.extra_options['RegParam']   = pos_cond_tmp[0][1]['RegParam']
                             
-                            if isinstance(model.model.model_config, comfy.supported_models.SDXL) or isinstance(model.model.model_config, comfy.supported_models.SD15):
+                            if isinstance(model.model.model_config, (comfy.supported_models.SDXL, comfy.supported_models.SD15)):
                                 latent_up_dummy = F.interpolate(latent_image['samples'].to(torch.float16), size=(latent_image['samples'].shape[-2] * 2, latent_image['samples'].shape[-1] * 2), mode="nearest")
                                 sampler.extra_options['AttnMask'].set_latent(latent_up_dummy)
                                 sampler.extra_options['AttnMask'].generate()
@@ -634,8 +634,15 @@ class SharkSampler:
                                     sampler.extra_options['AttnMask'].set_latent(latent_down_dummy)
                                     sampler.extra_options['AttnMask'].generate()
                                     sampler.extra_options['AttnMask'].mask_down2 = sampler.extra_options['AttnMask'].attn_mask.mask
-                                
-                            sampler.extra_options['AttnMask'].set_latent(latent_image['samples'])
+                                    
+                            if isinstance(model.model.model_config, (comfy.supported_models.Stable_Cascade_C)):
+                                latent_up_dummy = F.interpolate(latent_image['samples'].to(torch.float16), size=(latent_image['samples'].shape[-2] * 2, latent_image['samples'].shape[-1] * 2), mode="nearest")
+                                sampler.extra_options['AttnMask'].set_latent(latent_up_dummy)
+                                # cascade concats 4 + 4 tokens (clip_text_pooled, clip_img)
+                                sampler.extra_options['AttnMask'].context_lens = [context_len + 8 for context_len in sampler.extra_options['AttnMask'].context_lens] 
+                                sampler.extra_options['AttnMask'].text_len = sum(sampler.extra_options['AttnMask'].context_lens)
+                            else:
+                                sampler.extra_options['AttnMask'].set_latent(latent_image['samples'])
                             sampler.extra_options['AttnMask'].generate()
                             
                     if neg_cond[0][1] is not None: 
@@ -647,7 +654,7 @@ class SharkSampler:
                             sampler.extra_options['RegContext_neg'] = neg_cond[0][1]['RegContext']
                             sampler.extra_options['RegParam_neg']   = neg_cond[0][1]['RegParam']
                             
-                            if isinstance(model.model.model_config, comfy.supported_models.SDXL) or isinstance(model.model.model_config, comfy.supported_models.SD15):
+                            if isinstance(model.model.model_config, (comfy.supported_models.SDXL, comfy.supported_models.SD15)):
                                 latent_up_dummy = F.interpolate(latent_image['samples'].to(torch.float16), size=(latent_image['samples'].shape[-2] * 2, latent_image['samples'].shape[-1] * 2), mode="nearest")
                                 sampler.extra_options['AttnMask_neg'].set_latent(latent_up_dummy)
                                 sampler.extra_options['AttnMask_neg'].generate()
@@ -664,7 +671,14 @@ class SharkSampler:
                                     sampler.extra_options['AttnMask_neg'].generate()
                                     sampler.extra_options['AttnMask_neg'].mask_down2 = sampler.extra_options['AttnMask_neg'].attn_mask.mask
                             
-                            sampler.extra_options['AttnMask_neg'].set_latent(latent_image['samples'])
+                            if isinstance(model.model.model_config, (comfy.supported_models.Stable_Cascade_C)):
+                                latent_up_dummy = F.interpolate(latent_image['samples'].to(torch.float16), size=(latent_image['samples'].shape[-2] * 2, latent_image['samples'].shape[-1] * 2), mode="nearest")
+                                sampler.extra_options['AttnMask'].set_latent(latent_up_dummy)
+                                # cascade concats 4 + 4 tokens (clip_text_pooled, clip_img)
+                                sampler.extra_options['AttnMask'].context_lens = [context_len + 8 for context_len in sampler.extra_options['AttnMask'].context_lens] 
+                                sampler.extra_options['AttnMask'].text_len = sum(sampler.extra_options['AttnMask'].context_lens)
+                            else:
+                                sampler.extra_options['AttnMask_neg'].set_latent(latent_image['samples'])
                             sampler.extra_options['AttnMask_neg'].generate()
                     
                     
