@@ -130,7 +130,7 @@ class BaseAttentionMask:
         #if not isinstance(self.model_config, comfy.supported_models.Stable_Cascade_C):
         self.h //= 2  # 16x16 PE      patch_size = 2  1024x1024 rgb -> 128x128 16ch latent -> 64x64 img
         self.w //= 2
-            
+        
         self.img_len = self.h * self.w        
 
     def add_region(self, context, mask):
@@ -516,29 +516,40 @@ class RegionalContext:
         self.context  = None
         self.clip_fea = None
         self.llama3   = None
+        self.context_list = []
+        self.clip_fea_list = []
+        self.clip_pooled_list = []
         self.llama3_list = []
         self.t5_list     = []
         self.pooled_output = None
         self.idle_device = idle_device
         self.work_device = work_device
     
-    def add_region(self, context, clip_fea=None):
+    def add_region(self, context, pooled_output=None, clip_fea=None):
         if self.context is not None:
             self.context = torch.cat([self.context, context], dim=1)
         else:
             self.context = context
+        self.context_list.append(context)
             
+        if pooled_output is not None:
+            self.clip_pooled_list.append(pooled_output)
+        
         if clip_fea is not None:
             if self.clip_fea is not None:
                 self.clip_fea = torch.cat([self.clip_fea, clip_fea], dim=1)
             else:
                 self.clip_fea = clip_fea
+            self.clip_fea_list.append(clip_fea)
+        
+
 
     def add_region_clip_fea(self, clip_fea):
         if self.clip_fea is not None:
             self.clip_fea = torch.cat([self.clip_fea, clip_fea], dim=1)
         else:
             self.clip_fea = clip_fea
+        self.clip_fea_list.append(clip_fea)
 
     def add_region_llama3(self, llama3):
         if self.llama3 is not None:

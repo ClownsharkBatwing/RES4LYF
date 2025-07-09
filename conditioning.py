@@ -1186,14 +1186,14 @@ class ClownRegionalConditioning_AB:
             
             cond = copy.deepcopy(conditioning_A)
             
-            if isinstance(model.model.model_config, comfy.supported_models.WAN21_T2V) or isinstance(model.model.model_config, comfy.supported_models.WAN21_I2V):
+            if isinstance(model.model.model_config, (comfy.supported_models.WAN21_T2V, comfy.supported_models.WAN21_I2V)):
                 if model.model.diffusion_model.blocks[0].self_attn.winderz_type != "false":
                     AttnMask = CrossAttentionMask(mask_type, edge_width)
                 else:
                     AttnMask = SplitAttentionMask(mask_type, edge_width)
             elif isinstance(model.model.model_config, comfy.supported_models.HiDream):
                 AttnMask = FullAttentionMaskHiDream(mask_type, edge_width)
-            elif isinstance(model.model.model_config, comfy.supported_models.SDXL) or isinstance(model.model.model_config, comfy.supported_models.SD15):
+            elif isinstance(model.model.model_config, (comfy.supported_models.SDXL, comfy.supported_models.SD15, comfy.supported_models.Stable_Cascade_C)):
                 AttnMask = SplitAttentionMask(mask_type, edge_width)
             else:
                 AttnMask = FullAttentionMask(mask_type, edge_width)
@@ -1223,13 +1223,17 @@ class ClownRegionalConditioning_AB:
                 AttnMask.add_region(conditioning_A[0][0],   mask)
                 AttnMask.add_region(conditioning_B[0][0], unmask)
             
-            RegContext.add_region(conditioning_A[0][0])
-            RegContext.add_region(conditioning_B[0][0])
+            RegContext.add_region(conditioning_A[0][0], conditioning_A[0][1].get('pooled_output'))
+            RegContext.add_region(conditioning_B[0][0], conditioning_B[0][1].get('pooled_output'))
             
             if 'clip_vision_output' in conditioning_A[0][1]: # For WAN... dicey results
                 RegContext.add_region_clip_fea(conditioning_A[0][1]['clip_vision_output'].penultimate_hidden_states)
                 RegContext.add_region_clip_fea(conditioning_B[0][1]['clip_vision_output'].penultimate_hidden_states)
-            
+            if 'unclip_conditioning' in conditioning_A[0][1]:
+                RegContext.add_region_clip_fea(conditioning_A[0][1]['unclip_conditioning'][0]['clip_vision_output'].image_embeds) #['penultimate_hidden_states'])
+            if 'unclip_conditioning' in conditioning_B[0][1]:
+                RegContext.add_region_clip_fea(conditioning_B[0][1]['unclip_conditioning'][0]['clip_vision_output'].image_embeds) #['penultimate_hidden_states'])
+                
             cond[0][1]['AttnMask'] = AttnMask
             cond[0][1]['RegContext'] = RegContext
             
@@ -1416,14 +1420,14 @@ class ClownRegionalConditioning_ABC:
 
             conditioning = copy.deepcopy(conditioning_A)
             
-            if isinstance(model.model.model_config, comfy.supported_models.WAN21_T2V) or isinstance(model.model.model_config, comfy.supported_models.WAN21_I2V):
+            if isinstance(model.model.model_config, (comfy.supported_models.WAN21_T2V, comfy.supported_models.WAN21_I2V)):
                 if model.model.diffusion_model.blocks[0].self_attn.winderz_type != "false":
                     AttnMask = CrossAttentionMask(mask_type, edge_width)
                 else:
                     AttnMask = SplitAttentionMask(mask_type, edge_width)
             elif isinstance(model.model.model_config, comfy.supported_models.HiDream):
                 AttnMask = FullAttentionMaskHiDream(mask_type, edge_width)
-            elif isinstance(model.model.model_config, comfy.supported_models.SDXL) or isinstance(model.model.model_config, comfy.supported_models.SD15):
+            elif isinstance(model.model.model_config, (comfy.supported_models.SDXL, comfy.supported_models.SD15, comfy.supported_models.Stable_Cascade_C)):
                 AttnMask = SplitAttentionMask(mask_type, edge_width)
             else:
                 AttnMask = FullAttentionMask(mask_type, edge_width)
@@ -1461,9 +1465,9 @@ class ClownRegionalConditioning_ABC:
                 AttnMask.add_region(conditioning_B[0][0], mask_B)
                 AttnMask.add_region(conditioning_C[0][0], mask_AB_inv)
             
-            RegContext.add_region(conditioning_A[0][0])
-            RegContext.add_region(conditioning_B[0][0])
-            RegContext.add_region(conditioning_C[0][0])
+            RegContext.add_region(conditioning_A[0][0], conditioning_A[0][1].get('pooled_output'))
+            RegContext.add_region(conditioning_B[0][0], conditioning_B[0][1].get('pooled_output'))
+            RegContext.add_region(conditioning_C[0][0], conditioning_C[0][1].get('pooled_output'))
             
             #if 'pooled_output' in conditioning_A[0][1]:
             #    RegContext.pooled_output = conditioning_A[0][1]['pooled_output'] + conditioning_B[0][1]['pooled_output'] + conditioning_C[0][1]['pooled_output']
