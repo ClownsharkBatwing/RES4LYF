@@ -4,6 +4,8 @@ import folder_paths
 import os
 import random
 
+def round_to_nearest(n, m):
+    return int((n + (m / 2)) // m) * m
 
 class SetImageSize:
     @classmethod
