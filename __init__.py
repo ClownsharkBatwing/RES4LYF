@@ -251,6 +251,7 @@ NODE_CLASS_MAPPINGS = {
     
     "Sigmas Rescale"                      : sigmas.sigmas_rescale,
     "Sigmas Count"                        : sigmas.sigmas_count,
+    "Sigmas Resample"                     : sigmas.sigmas_interpolate,
 
     "Sigmas Math1"                        : sigmas.sigmas_math1,
     "Sigmas Math3"                        : sigmas.sigmas_math3,

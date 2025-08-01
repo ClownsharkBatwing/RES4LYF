@@ -126,20 +126,19 @@ class sigmas_interpolate:
     def INPUT_TYPES(s):
         return {
             "required": {
-                "sigmas_0": ("SIGMAS", {"forceInput": True}),
-                "sigmas_1": ("SIGMAS", {"forceInput": True}),
+                "sigmas_in": ("SIGMAS", {"forceInput": True}),
+                "output_length": ("INT", {"default": 0, "min": 0,"max": 10000,"step": 1}),
                 "mode": (["linear", "nearest", "polynomial", "exponential", "power", "model"],),
                 "order": ("INT", {"default": 8, "min": 1,"max": 64,"step": 1}),
+                "rescale_after": ("BOOLEAN", {"default": True, "tooltip": "Rescale the output to the original min/max range after interpolation."}),
             }
         }
 
     FUNCTION = "main"
-    RETURN_TYPES = ("SIGMAS","SIGMAS",)
-    RETURN_NAMES = ("sigmas_0", "sigmas_1")
+    RETURN_TYPES = ("SIGMAS",)
+    RETURN_NAMES = ("sigmas",)
     CATEGORY = "RES4LYF/sigmas"
-    
-
-
+    DESCRIPTION = "Interpolate the sigmas schedule to a new length clamping the start and end values."
 
     def interpolate_sigma_schedule_poly(self, sigma_schedule, target_steps):
         order = self.order
@@ -242,9 +241,13 @@ class sigmas_interpolate:
         return interpolated_sigma
 
 
-    def main(self, sigmas_0, sigmas_1, mode, order):
+    def main(self, sigmas_in, output_length, mode, order, rescale_after=True):
 
         self.order = order
+
+        sigmas_in = sigmas_in.clone().to(torch.float64)
+        start = sigmas_in[0]
+        end = sigmas_in[-1]
 
         if   mode == "linear": 
             interpolate = self.interpolate_sigma_schedule_linear
@@ -259,10 +262,12 @@ class sigmas_interpolate:
         elif mode == "model":
             with torch.inference_mode(False):
                 interpolate = interpolate_sigma_schedule_model
-        
-        sigmas_0 = interpolate(sigmas_0, len(sigmas_1))
-        return (sigmas_0, sigmas_1,)
-    
+
+        sigmas_interp = interpolate(sigmas_in, output_length)
+        if rescale_after:
+            sigmas_interp = ((sigmas_interp - sigmas_interp.min()) * (start - end)) / (sigmas_interp.max() - sigmas_interp.min()) + end
+        return (sigmas_interp,)
+
 class sigmas_noise_inversion:
     # flip sigmas for unsampling, and pad both fwd/rev directions with null bytes to disable noise scaling, etc from the model.
     # will cause model to return epsilon prediction instead of calculated denoised latent image.
