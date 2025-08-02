@@ -230,6 +230,7 @@ NODE_CLASS_MAPPINGS = {
     "Sigmas Truncate"                     : sigmas.sigmas_truncate,
     "Sigmas Start"                        : sigmas.sigmas_start,
     "Sigmas Split"                        : sigmas.sigmas_split,
+    "Sigmas Split Value"                  : sigmas.sigmas_split_value,
     "Sigmas Concat"                       : sigmas.sigmas_concatenate,
     "Sigmas Pad"                          : sigmas.sigmas_pad,
     "Sigmas Unpad"                        : sigmas.sigmas_unpad,

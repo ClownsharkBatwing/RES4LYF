@@ -245,7 +245,7 @@ class sigmas_interpolate:
 
         self.order = order
 
-        sigmas_in = sigmas_in.clone().to(torch.float64)
+        sigmas_in = sigmas_in.clone().to(sigmas_in.dtype)
         start = sigmas_in[0]
         end = sigmas_in[-1]
 
@@ -289,8 +289,8 @@ class sigmas_noise_inversion:
     DESCRIPTION = "For use with unsampling. Connect sigmas_fwd to the unsampling (first) node, and sigmas_rev to the sampling (second) node."
     
     def main(self, sigmas):
-        sigmas = sigmas.clone().to(torch.float64)
-        
+        sigmas = sigmas.clone().to(sigmas.dtype)
+
         null = torch.tensor([0.0], device=sigmas.device, dtype=sigmas.dtype)
         sigmas_fwd = torch.flip(sigmas, dims=[0])
         sigmas_fwd = torch.cat([sigmas_fwd, null])
@@ -325,7 +325,7 @@ class sigmas_variance_floor:
     
     def main(self, sigmas):
         dtype = sigmas.dtype
-        sigmas = sigmas.clone().to(torch.float64)
+        sigmas = sigmas.clone().to(sigmas.dtype)
         for i in range(len(sigmas) - 1):
             sigma_next = (-1 + torch.sqrt(1 + 4 * sigmas[i])) / 2
             
@@ -3993,6 +3993,67 @@ class sigmas_normalizing_flows:
         
         return (result,)
 
+
+class sigmas_split_value:
+    def __init__(self):
+        pass
+    
+    @classmethod
+    def INPUT_TYPES(s):
+        return {
+            "required": {
+                "sigmas": ("SIGMAS",),
+                "split_value": ("FLOAT", {"default": 0.875, "min": 0.0, "max": 80085.0, "step": 0.001}),
+                "bias_split_up": ("BOOLEAN", {"default": False, "tooltip": "If True, split happens above the split value, so high_sigmas includes the split point."}),
+            }
+        }
+
+    FUNCTION = "main"
+    RETURN_TYPES = ("SIGMAS", "SIGMAS")
+    RETURN_NAMES = ("high_sigmas", "low_sigmas")
+    CATEGORY = "RES4LYF/sigmas"
+    DESCRIPTION = ("Splits sigma schedule at a specific sigma value.")
+
+    def main(self, sigmas, split_value, bias_split_up):
+        if len(sigmas) == 0:
+            return (sigmas, sigmas)
+        
+        # Find the split index
+        if bias_split_up:
+            # Find first sigma <= split_value
+            split_idx = None
+            for i, sigma in enumerate(sigmas):
+                if sigma <= split_value:
+                    split_idx = i
+                    break
+            
+            if split_idx is None:
+                # All sigmas are above split_value
+                return (sigmas, torch.tensor([], device=sigmas.device, dtype=sigmas.dtype))
+            
+            # high_sigmas: from start to split_idx (inclusive)
+            # low_sigmas: from split_idx to end
+            high_sigmas = sigmas[:split_idx + 1]
+            low_sigmas = sigmas[split_idx:]
+            
+        else:
+            # Find first sigma < split_value
+            split_idx = None
+            for i, sigma in enumerate(sigmas):
+                if sigma < split_value:
+                    split_idx = i
+                    break
+            
+            if split_idx is None:
+                # All sigmas are >= split_value
+                return (torch.tensor([], device=sigmas.device, dtype=sigmas.dtype), sigmas)
+            
+            # high_sigmas: from start to split_idx (exclusive)
+            # low_sigmas: from split_idx-1 to end (includes the boundary point)
+            high_sigmas = sigmas[:split_idx]
+            low_sigmas = sigmas[split_idx - 1:]
+        
+        return (high_sigmas, low_sigmas)
 
 
 
