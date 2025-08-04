@@ -126,20 +126,19 @@ class sigmas_interpolate:
     def INPUT_TYPES(s):
         return {
             "required": {
-                "sigmas_0": ("SIGMAS", {"forceInput": True}),
-                "sigmas_1": ("SIGMAS", {"forceInput": True}),
+                "sigmas_in": ("SIGMAS", {"forceInput": True}),
+                "output_length": ("INT", {"default": 0, "min": 0,"max": 10000,"step": 1}),
                 "mode": (["linear", "nearest", "polynomial", "exponential", "power", "model"],),
                 "order": ("INT", {"default": 8, "min": 1,"max": 64,"step": 1}),
+                "rescale_after": ("BOOLEAN", {"default": True, "tooltip": "Rescale the output to the original min/max range after interpolation."}),
             }
         }
 
     FUNCTION = "main"
-    RETURN_TYPES = ("SIGMAS","SIGMAS",)
-    RETURN_NAMES = ("sigmas_0", "sigmas_1")
+    RETURN_TYPES = ("SIGMAS",)
+    RETURN_NAMES = ("sigmas",)
     CATEGORY = "RES4LYF/sigmas"
-    
-
-
+    DESCRIPTION = "Interpolate the sigmas schedule to a new length clamping the start and end values."
 
     def interpolate_sigma_schedule_poly(self, sigma_schedule, target_steps):
         order = self.order
@@ -242,9 +241,13 @@ class sigmas_interpolate:
         return interpolated_sigma
 
 
-    def main(self, sigmas_0, sigmas_1, mode, order):
+    def main(self, sigmas_in, output_length, mode, order, rescale_after=True):
 
         self.order = order
+
+        sigmas_in = sigmas_in.clone().to(sigmas_in.dtype)
+        start = sigmas_in[0]
+        end = sigmas_in[-1]
 
         if   mode == "linear": 
             interpolate = self.interpolate_sigma_schedule_linear
@@ -259,10 +262,12 @@ class sigmas_interpolate:
         elif mode == "model":
             with torch.inference_mode(False):
                 interpolate = interpolate_sigma_schedule_model
-        
-        sigmas_0 = interpolate(sigmas_0, len(sigmas_1))
-        return (sigmas_0, sigmas_1,)
-    
+
+        sigmas_interp = interpolate(sigmas_in, output_length)
+        if rescale_after:
+            sigmas_interp = ((sigmas_interp - sigmas_interp.min()) * (start - end)) / (sigmas_interp.max() - sigmas_interp.min()) + end
+        return (sigmas_interp,)
+
 class sigmas_noise_inversion:
     # flip sigmas for unsampling, and pad both fwd/rev directions with null bytes to disable noise scaling, etc from the model.
     # will cause model to return epsilon prediction instead of calculated denoised latent image.
@@ -284,8 +289,8 @@ class sigmas_noise_inversion:
     DESCRIPTION = "For use with unsampling. Connect sigmas_fwd to the unsampling (first) node, and sigmas_rev to the sampling (second) node."
     
     def main(self, sigmas):
-        sigmas = sigmas.clone().to(torch.float64)
-        
+        sigmas = sigmas.clone().to(sigmas.dtype)
+
         null = torch.tensor([0.0], device=sigmas.device, dtype=sigmas.dtype)
         sigmas_fwd = torch.flip(sigmas, dims=[0])
         sigmas_fwd = torch.cat([sigmas_fwd, null])
@@ -320,7 +325,7 @@ class sigmas_variance_floor:
     
     def main(self, sigmas):
         dtype = sigmas.dtype
-        sigmas = sigmas.clone().to(torch.float64)
+        sigmas = sigmas.clone().to(sigmas.dtype)
         for i in range(len(sigmas) - 1):
             sigma_next = (-1 + torch.sqrt(1 + 4 * sigmas[i])) / 2
             
@@ -3988,6 +3993,67 @@ class sigmas_normalizing_flows:
         
         return (result,)
 
+
+class sigmas_split_value:
+    def __init__(self):
+        pass
+    
+    @classmethod
+    def INPUT_TYPES(s):
+        return {
+            "required": {
+                "sigmas": ("SIGMAS",),
+                "split_value": ("FLOAT", {"default": 0.875, "min": 0.0, "max": 80085.0, "step": 0.001}),
+                "bias_split_up": ("BOOLEAN", {"default": False, "tooltip": "If True, split happens above the split value, so high_sigmas includes the split point."}),
+            }
+        }
+
+    FUNCTION = "main"
+    RETURN_TYPES = ("SIGMAS", "SIGMAS")
+    RETURN_NAMES = ("high_sigmas", "low_sigmas")
+    CATEGORY = "RES4LYF/sigmas"
+    DESCRIPTION = ("Splits sigma schedule at a specific sigma value.")
+
+    def main(self, sigmas, split_value, bias_split_up):
+        if len(sigmas) == 0:
+            return (sigmas, sigmas)
+        
+        # Find the split index
+        if bias_split_up:
+            # Find first sigma <= split_value
+            split_idx = None
+            for i, sigma in enumerate(sigmas):
+                if sigma <= split_value:
+                    split_idx = i
+                    break
+            
+            if split_idx is None:
+                # All sigmas are above split_value
+                return (sigmas, torch.tensor([], device=sigmas.device, dtype=sigmas.dtype))
+            
+            # high_sigmas: from start to split_idx (inclusive)
+            # low_sigmas: from split_idx to end
+            high_sigmas = sigmas[:split_idx + 1]
+            low_sigmas = sigmas[split_idx:]
+            
+        else:
+            # Find first sigma < split_value
+            split_idx = None
+            for i, sigma in enumerate(sigmas):
+                if sigma < split_value:
+                    split_idx = i
+                    break
+            
+            if split_idx is None:
+                # All sigmas are >= split_value
+                return (torch.tensor([], device=sigmas.device, dtype=sigmas.dtype), sigmas)
+            
+            # high_sigmas: from start to split_idx (exclusive)
+            # low_sigmas: from split_idx-1 to end (includes the boundary point)
+            high_sigmas = sigmas[:split_idx]
+            low_sigmas = sigmas[split_idx - 1:]
+        
+        return (high_sigmas, low_sigmas)
 
 
 

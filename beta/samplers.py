@@ -219,8 +219,6 @@ class SharkSampler:
                 
             is_chained = False
             if latent_image is not None:
-                latent_image['samples'] = comfy.sample.fix_empty_latent_channels(model, latent_image['samples'])
-
                 if 'positive' in latent_image and positive is None:
                     positive = copy_cond(latent_image['positive'])
                     if positive is not None and 'control' in positive[0][1]:
@@ -267,6 +265,9 @@ class SharkSampler:
             else:
                 guider = None
                 work_model   = model#.clone()
+            
+            if latent_image is not None:
+                latent_image['samples'] = comfy.sample.fix_empty_latent_channels(work_model, latent_image['samples'])
                 
             if positive is None or negative is None:
                 from ..conditioning import EmptyConditioningGenerator

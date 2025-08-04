@@ -111,6 +111,7 @@ class SigmasPreview(SaveImage):
             "required": {
                 "sigmas":         ("SIGMAS",),
                 "print_as_list" : ("BOOLEAN", {"default": False}),
+                "line_color":     ("STRING", {"default": "blue"}),
             },
         }
 
@@ -121,10 +122,10 @@ class SigmasPreview(SaveImage):
     CATEGORY = 'RES4LYF/sigmas'
 
     @staticmethod
-    def tensor_to_graph_image(tensor):
+    def tensor_to_graph_image(tensor, color='blue'):
         
         plt.figure()
-        plt.plot(tensor.numpy(), marker='o', linestyle='-', color='blue')
+        plt.plot(tensor.numpy(), marker='o', linestyle='-', color=color)
         plt.title("Graph from Tensor")
         plt.xlabel("Step Number")
         plt.ylabel("Sigma Value")
@@ -137,7 +138,7 @@ class SigmasPreview(SaveImage):
         plt.close()
         return image
 
-    def sigmas_preview(self, sigmas, print_as_list):
+    def sigmas_preview(self, sigmas, print_as_list, line_color):
         
         if print_as_list:
             print(sigmas.tolist())
@@ -147,7 +148,7 @@ class SigmasPreview(SaveImage):
             
             print(sigmas_percentages_w_steps)
             
-        sigmas_graph = self.tensor_to_graph_image(sigmas.cpu())
+        sigmas_graph = self.tensor_to_graph_image(sigmas.cpu(), line_color)
         numpy_image = np.array(sigmas_graph)
         numpy_image = numpy_image / 255.0
         tensor_image = torch.from_numpy(numpy_image)
