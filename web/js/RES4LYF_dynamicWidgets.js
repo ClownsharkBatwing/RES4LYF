@@ -222,7 +222,7 @@ function setupExpandableOptions(node) {
         processedNodeMap.set(node, ++nodeCounter);
         //debugLog(`Assigned ID ${nodeCounter} to node ${node.comfyClass}`);
     } else {
-        debugLog(`Node ${node.comfyClass} already processed with ID ${processedNodeMap.get(node)} - skipping`);
+        //debugLog(`Node ${node.comfyClass} already processed with ID ${processedNodeMap.get(node)} - skipping`);
         return;
     }
         
@@ -230,7 +230,7 @@ function setupExpandableOptions(node) {
     
     const hasOptionsInput = node.inputs.some(input => input.name === "options");
     if (!hasOptionsInput) {
-        debugLog(`Node ${node.comfyClass} doesn't have an options input - skipping`);
+        //debugLog(`Node ${node.comfyClass} doesn't have an options input - skipping`);
         return;
     }
     
@@ -245,7 +245,7 @@ function setupExpandableOptions(node) {
                 return;
             }
             
-            debugLog(`Options input disconnected: ${input.name}`);
+            //debugLog(`Options input disconnected: ${input.name}`);
             
             // setTimeout to let the graph update first
             setTimeout(() => {
@@ -270,7 +270,7 @@ function setupExpandableOptions(node) {
             }
             
             if (!hasEmptyOptions) {
-                debugLog(`All options inputs are connected, adding a new one`);
+                //debugLog(`All options inputs are connected, adding a new one`);
                 
                 // Find the highest index number in existing options inputs
                 let maxIndex = 0;
@@ -289,7 +289,7 @@ function setupExpandableOptions(node) {
                 
                 const newName = maxIndex === 0 ? "options 2" : `options ${maxIndex + 2}`;
                 this.addInput(newName, "OPTIONS");
-                debugLog(`Created new options input: ${newName}`);
+                //debugLog(`Created new options input: ${newName}`);
                 
                 this.setDirtyCanvas(true, true);
             }
@@ -367,7 +367,7 @@ function setupExpandableOptions(node) {
             nonBaseInputs.sort((a, b) => b.index - a.index);
             
             for (const inputInfo of nonBaseInputs) {
-                debugLog(`Removing unnecessary options input: ${inputInfo.name} (index ${inputInfo.index})`);
+                //debugLog(`Removing unnecessary options input: ${inputInfo.name} (index ${inputInfo.index})`);
                 node.removeInput(inputInfo.index);
                 needsRenumbering = true;
             }
@@ -382,7 +382,7 @@ function setupExpandableOptions(node) {
             disconnectedInputs.sort((a, b) => b.index - a.index);
             
             for (let i = 1; i < disconnectedInputs.length; i++) {
-                debugLog(`Removing unnecessary options input: ${disconnectedInputs[i].name} (index ${disconnectedInputs[i].index})`);
+                //debugLog(`Removing unnecessary options input: ${disconnectedInputs[i].name} (index ${disconnectedInputs[i].index})`);
                 node.removeInput(disconnectedInputs[i].index);
                 needsRenumbering = true;
             }
@@ -393,7 +393,7 @@ function setupExpandableOptions(node) {
         
         if (hasConnectedOptions && !hasEmptyOptions) {
             node.addInput("options temp", "OPTIONS");
-            debugLog(`Added new empty options input`);
+            //debugLog(`Added new empty options input`);
             needsRenumbering = true;
         }
         
@@ -432,7 +432,7 @@ function setupExpandableOptions(node) {
             const newName = `options ${i + 2}`;
             
             if (inputInfo.name !== newName) {
-                debugLog(`Renaming ${inputInfo.name} to ${newName}`);
+                //debugLog(`Renaming ${inputInfo.name} to ${newName}`);
                 node.inputs[inputInfo.index].name = newName;
             }
         }

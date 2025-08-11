@@ -1336,7 +1336,7 @@ def get_rk_methods_beta(rk_type       : str,
     
     EO                            = ExtraOptions(extra_options)
     use_analytic_solution         = not EO("disable_analytic_solution")
-    multistep_initial_sampler     = EO("multistep_initial_sampler", "")
+    multistep_initial_sampler     = EO("multistep_initial_sampler", "", debugMode=1)
     multistep_fallback_sampler    = EO("multistep_fallback_sampler", "")
     multistep_extra_initial_steps = EO("multistep_extra_initial_steps", 1)
     
