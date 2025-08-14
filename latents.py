@@ -861,3 +861,55 @@ def median_blur_2d(img: torch.Tensor, kernel_size: int = 3) -> torch.Tensor:
     median = patches.median(dim=-1).values
     return median
 
+def apply_to_state_info_tensors(obj, ref_shape, modify_func, *args, **kwargs):
+    """
+    Recursively traverse obj and apply modify_func to tensors whose last 5 dimensions
+    match ref_shape's last 5 dimensions.
+    Used to apply function to all relevant tensors in latent state_info.
+    
+    Args:
+        obj: The object to traverse (dict, list, tuple, tensor, etc.)
+        ref_shape: Reference tensor shape to match against
+        modify_func: Function to apply to matching tensors. Should accept (tensor, *args, **kwargs)
+        *args, **kwargs: Additional arguments passed to modify_func
+    
+    Returns:
+        Modified structure with applicable tensors transformed
+    """
+    import torch
+
+    if isinstance(obj, torch.Tensor):
+        if obj.ndim >= 5:
+            # Check if last 5 dims match reference
+            obj_last5 = obj.shape[-5:]
+            ref_last5 = ref_shape[-5:] if len(ref_shape) >= 5 else ref_shape
+            if obj_last5 == ref_last5:
+                return modify_func(obj, *args, **kwargs)
+        return obj
+
+    if isinstance(obj, dict):
+        changed = False
+        out = {}
+        for k, v in obj.items():
+            nv = apply_to_state_info_tensors(v, ref_shape, modify_func, *args, **kwargs)
+            changed |= (nv is not v)
+            out[k] = nv
+        return out if changed else obj
+
+    if isinstance(obj, list):
+        changed = False
+        out = []
+        for v in obj:
+            nv = apply_to_state_info_tensors(v, ref_shape, modify_func, *args, **kwargs)
+            changed |= (nv is not v)
+            out.append(nv)
+        return out if changed else obj
+
+    if isinstance(obj, tuple):
+        new_t = tuple(apply_to_state_info_tensors(v, ref_shape, modify_func, *args, **kwargs) for v in obj)
+        if all(ov is nv for ov, nv in zip(obj, new_t)):
+            return obj
+        return new_t
+
+    return obj
+
