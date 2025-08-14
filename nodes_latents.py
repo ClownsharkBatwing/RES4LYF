@@ -16,7 +16,7 @@ from nodes import MAX_RESOLUTION
 #MAX_RESOLUTION=8192
 
 from .helper             import ExtraOptions, initialize_or_scale, extra_options_flag, get_extra_options_list
-from .latents            import latent_meancenter_channels, latent_stdize_channels, get_edge_mask
+from .latents            import latent_meancenter_channels, latent_stdize_channels, get_edge_mask, apply_to_state_info_tensors
 from .beta.noise_classes import NOISE_GENERATOR_NAMES, NOISE_GENERATOR_CLASSES, prepare_noise
 
 def fp_or(tensor1, tensor2):
@@ -262,6 +262,55 @@ class latent_to_raw_x:
         return (latent,)
 
 
+# Adapted from https://github.com/comfyanonymous/ComfyUI/blob/5ee381c058d606209dcafb568af20196e7884fc8/comfy_extras/nodes_wan.py
+class TrimVideoLatent_state_info:
+    @classmethod
+    def INPUT_TYPES(s):
+        return {"required": {"samples": ("LATENT",),
+                             "trim_amount": ("INT", {"default": 0, "min": 0, "max": 99999}),
+                            }}
+
+    RETURN_TYPES = ("LATENT",)
+    FUNCTION = "op"
+    CATEGORY = "RES4LYF/latents"
+    EXPERIMENTAL = True
+
+    @staticmethod
+    def _trim_tensor(tensor, trim_amount):
+        """Trim frames from beginning of tensor along temporal dimension (-3)"""
+        if tensor.shape[-3] > trim_amount:
+            return tensor.narrow(-3, trim_amount, tensor.shape[-3] - trim_amount)
+        return tensor
+    
+    def op(self, samples, trim_amount):
+        ref_shape = samples["samples"].shape
+        samples_out = apply_to_state_info_tensors(samples, ref_shape, self._trim_tensor, trim_amount)
+        return (samples_out,)
+
+# Adapted from https://github.com/comfyanonymous/ComfyUI/blob/05df2df489f6b237f63c5f7d42a943ae2be417e9/nodes.py
+class LatentUpscaleBy_state_info:
+    upscale_methods = ["nearest-exact", "bilinear", "area", "bicubic", "bislerp"]
+
+    @classmethod
+    def INPUT_TYPES(s):
+        return {"required": { "samples": ("LATENT",), "upscale_method": (s.upscale_methods,),
+                              "scale_by": ("FLOAT", {"default": 1.5, "min": 0.01, "max": 8.0, "step": 0.01}),}}
+    RETURN_TYPES = ("LATENT",)
+    FUNCTION = "op"
+
+    CATEGORY = "latent"
+
+    def _upscale_tensor(tensor, upscale_method, scale_by):
+        width = round(tensor.shape[-1] * scale_by)
+        height = round(tensor.shape[-2] * scale_by)
+        tensor = comfy.utils.common_upscale(tensor, width, height, upscale_method, "disabled")
+        return tensor
+    
+    def op(self, samples, upscale_method, scale_by):
+        ref_shape = samples["samples"].shape
+        samples_out = apply_to_state_info_tensors(samples, ref_shape, self._upscale_tensor, upscale_method, scale_by)
+        return (samples_out,)
+
 class latent_clear_state_info:
     def __init__(self):
         pass
@@ -279,8 +328,9 @@ class latent_clear_state_info:
     CATEGORY     = "RES4LYF/latents"
 
     def main(self, latent,):
-        latent_out = copy.deepcopy(latent)
-        latent_out['state_info'] = {}
+        latent_out = {}
+        if 'samples' in latent:
+            latent_out['samples'] = latent['samples']
         return (latent_out,)
 
 

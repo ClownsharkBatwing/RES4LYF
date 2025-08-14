@@ -31,6 +31,7 @@ from .beta.rk_noise_sampler_beta import RK_NoiseSampler, NOISE_MODE_NAMES
 from .helper                     import get_res4lyf_scheduler_list
 from .sigmas                     import get_sigmas
 from .images                     import image_resize
+from .res4lyf                    import RESplain
 
 
 
@@ -141,12 +142,47 @@ class SigmasPreview(SaveImage):
     def sigmas_preview(self, sigmas, print_as_list, line_color):
         
         if print_as_list:
-            print(sigmas.tolist())
+            # Convert to list with 4 decimal places
+            sigmas_list = [round(float(s), 4) for s in sigmas.tolist()]
             
+            # Print header using RESplain
+            RESplain("\n" + "="*60)
+            RESplain("SIGMAS PREVIEW - PRINT LIST")
+            RESplain("="*60)
+            
+            # Print basic stats
+            RESplain(f"Total steps: {len(sigmas_list)}")
+            RESplain(f"Min sigma:   {min(sigmas_list):.4f}")
+            RESplain(f"Max sigma:   {max(sigmas_list):.4f}")
+          
+            # Print the clean sigma values
+            RESplain(f"\nSigma values ({len(sigmas_list)} steps):")
+            RESplain("-" * 40)
+            
+            # Print in rows of 5 for readability
+            for i in range(0, len(sigmas_list), 5):
+                row = sigmas_list[i:i+5]
+                row_str = "  ".join(f"{val:8.4f}" for val in row)
+                RESplain(f"Step {i:2d}-{min(i+4, len(sigmas_list)-1):2d}: {row_str}")
+            
+            # Calculate and print percentages (normalized 0-1)
             sigmas_percentages = ((sigmas-sigmas.min())/(sigmas.max()-sigmas.min())).tolist()
-            sigmas_percentages_w_steps = [(i,round(s,4)) for i,s in enumerate(sigmas_percentages)]
+            sigmas_percentages = [round(p, 4) for p in sigmas_percentages]
             
-            print(sigmas_percentages_w_steps)
+            RESplain(f"\nNormalized percentages (0.0-1.0):")
+            RESplain("-" * 40)
+            
+            # Print step-by-step breakdown
+            RESplain("Step | Sigma    | Normalized | Step Size")
+            RESplain("-----|----------|------------|----------")
+            for i, (sigma, pct) in enumerate(zip(sigmas_list, sigmas_percentages)):
+                if i > 0:
+                    step_size = sigmas_list[i-1] - sigma
+                    RESplain(f"{i:4d} | {sigma:8.4f} | {pct:10.4f} | {step_size:8.4f}")
+                else:
+                    RESplain(f"{i:4d} | {sigma:8.4f} | {pct:10.4f} | {'--':>8}")
+            
+            RESplain("="*60 + "\n")
             
         sigmas_graph = self.tensor_to_graph_image(sigmas.cpu(), line_color)
         numpy_image = np.array(sigmas_graph)

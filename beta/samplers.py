@@ -181,6 +181,7 @@ class SharkSampler:
             extra_options  += "\n" + options_mgr.get('extra_options', "")
             EO              = ExtraOptions(extra_options)
             default_dtype   = EO("default_dtype", torch.float64)
+            default_device  = EO("work_device", "cuda" if torch.cuda.is_available() else "cpu")
             
             noise_stdev     = options_mgr.get('noise_init_stdev', noise_stdev)
             noise_mean      = options_mgr.get('noise_init_mean',  noise_mean)
@@ -308,10 +309,10 @@ class SharkSampler:
         
             # INIT SIGMAS
             if sigmas is not None:
-                sigmas = sigmas.clone().to(default_dtype) # does this type carry into clown after passing through comfy?
+                sigmas = sigmas.clone().to(dtype=default_dtype, device=default_device) # does this type carry into clown after passing through comfy?
                 sigmas *= denoise   # ... otherwise we have to interpolate and that might not be ideal for tiny custom schedules...
             else: 
-                sigmas = get_sigmas(work_model, scheduler, steps, abs(denoise)).to(default_dtype)
+                sigmas = get_sigmas(work_model, scheduler, steps, abs(denoise)).to(dtype=default_dtype, device=default_device)
             sigmas *= denoise_alt
 
             # USE NULL FLOATS AS "FLAGS" TO PREVENT COMFY NOISE ADDITION

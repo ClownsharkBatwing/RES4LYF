@@ -19,8 +19,11 @@ class ExtraOptions():
     def __init__(self, extra_options):
         self.extra_options = extra_options
         self.mute          = False
-        
-    def __call__(self, option, default=None, ret_type=None, match_all_flags=False):
+    
+    # debugMode 0: Follow self.mute only
+    # debugMode 1: Print with debug flag if not muted
+    # debugMode 2: Never print
+    def __call__(self, option, default=None, ret_type=None, match_all_flags=False, debugMode=0):
         if isinstance(option, (tuple, list)):
             if match_all_flags:
                 return all(self(single_option, default, ret_type) for single_option in option)
@@ -43,8 +46,11 @@ class ExtraOptions():
             
             if match:
                 value = match.group(1)
-                if not self.mute:
-                    RESplain("Set extra_option: ", option, "=", value)
+                if not self.mute and debugMode != 2:
+                    if debugMode == 1:
+                        RESplain("Set extra_option: ", option, "=", value, debug=True)
+                    else:
+                        RESplain("Set extra_option: ", option, "=", value)
             else:
                 value = default
                 
@@ -67,8 +73,11 @@ class ExtraOptions():
                     value = value_str in ("true", "1", "yes", "on")
                 else:
                     value = ret_type(match.group(1))
-                if not self.mute:
-                    RESplain("Set extra_option: ", option, "=", value)
+                if not self.mute and debugMode != 2:
+                    if debugMode == 1:
+                        RESplain("Set extra_option: ", option, "=", value, debug=True)
+                    else:
+                        RESplain("Set extra_option: ", option, "=", value)
             else:
                 value = default
         
