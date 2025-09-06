@@ -760,9 +760,9 @@ class ReSDPatcherAdvanced:
             for i in range(len(m.model.diffusion_model.output_blocks)):
                 for j in range(len(m.model.diffusion_model.output_blocks[i])):
                     if isinstance(m.model.diffusion_model.output_blocks[i][j], ReResBlock):
-                        m.model.diffusion_model.output_blocks[i[j]].__class__ = ResBlock
+                        m.model.diffusion_model.output_blocks[i][j].__class__ = ResBlock
                     if isinstance(m.model.diffusion_model.output_blocks[i][j], ReSpatialTransformer):
-                        m.model.diffusion_model.output_blocks[i[j]].__class__ = SpatialTransformer
+                        m.model.diffusion_model.output_blocks[i][j].__class__ = SpatialTransformer
                         for k in range(len(m.model.diffusion_model.output_blocks[i][j].transformer_blocks)):
                             m.model.diffusion_model.output_blocks[i][j].transformer_blocks[k].__class__ = BasicTransformerBlock
                             m.model.diffusion_model.output_blocks[i][j].transformer_blocks[k].attn1.__class__ = CrossAttention
