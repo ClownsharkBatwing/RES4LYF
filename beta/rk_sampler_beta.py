@@ -358,7 +358,7 @@ def sample_rk_beta(
                 sigma_up_total += sigmas[i+1]
             etas = torch.full_like(sigmas, eta / sigma_up_total)
     
-    if 'last_rng' in state_info and sampler_mode in {"resample", "unsample"} and noise_seed < 0:
+    if 'last_rng' in state_info and sampler_mode in {"resample", "unsample"}:
         last_rng         = state_info['last_rng'].clone()
         last_rng_substep = state_info['last_rng_substep'].clone()
     else:
