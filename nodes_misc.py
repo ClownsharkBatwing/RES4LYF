@@ -4,6 +4,8 @@ import folder_paths
 import os
 import random
 
+def round_to_nearest(n, m):
+    return int((n + (m / 2)) // m) * m
 
 class SetImageSize:
     @classmethod
@@ -39,6 +41,8 @@ class SetImageSizeWithScale:
                     },
                     "optional": 
                     {
+                    "enable_nearest": ("BOOLEAN", {"default": False}),
+                    "multiple": (["4", "8", "16", "32", "64"], ),
                     }  
                 }
     RETURN_TYPES = ("INT", "INT", "INT", "INT",)
@@ -46,10 +50,17 @@ class SetImageSizeWithScale:
     FUNCTION = "main"
     
     CATEGORY = "RES4LYF/images"
-    DESCRIPTION = "Generate a pair of integers for image sizes."
+    DESCRIPTION = "Generate a pair of integers for image sizes. Optional rounding of image size."
 
-    def main(self, width, height, scale_by):
-        return (width, height, int(width*scale_by), int(height*scale_by))
+    def main(self, width, height, scale_by, enable_nearest, multiple):
+        if enable_nearest is True:
+            width = round_to_nearest(width, int(multiple))
+            height = round_to_nearest(height, int(multiple))
+            upscaled_width = round_to_nearest(int(width*scale_by), int(multiple))
+            upscaled_height = round_to_nearest(int(height*scale_by), int(multiple))
+            return (width, height, upscaled_width, upscaled_height)
+        else:
+            return (width, height, int(width*scale_by), int(height*scale_by))
 
 
 class TextBox1:
