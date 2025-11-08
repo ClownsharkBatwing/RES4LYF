@@ -1,4 +1,5 @@
 import torch
+import random
 from torch import Tensor
 import torch.nn.functional as F
 
@@ -45,7 +46,97 @@ class ClownSamplerSelector_Beta:
         
         return (sampler_name,)
 
+class ClownOptions_SDE_Beta_Randomized:
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {"required":
+                    {
+                    "lock_types":             ("BOOLEAN",                    {"default": True,                                                          "tooltip": "Whether to use manual selection for noise types or not"}), 
+                    "lock_modes":             ("BOOLEAN",                    {"default": True,                                                          "tooltip": "Whether to use manual selection for noise mode or not"}), 
+                    "noise_type_sde":         (NOISE_GENERATOR_NAMES_SIMPLE, {"default": "gaussian",                                                    "tooltip": "The distribution as to which the noise will be generated from"}), 
+                    "noise_type_sde_substep": (NOISE_GENERATOR_NAMES_SIMPLE, {"default": "gaussian",                                                    "tooltip": "The distribution as to which the noise will be generated from"}), 
+                    "noise_mode_sde":         (NOISE_MODE_NAMES,             {"default": 'hard',                                                        "tooltip": "How noise scales with the sigma schedule. Hard is the most aggressive, the others start strong and drop rapidly."}),
+                    "noise_mode_sde_substep": (NOISE_MODE_NAMES,             {"default": 'hard',                                                        "tooltip": "How noise scales with the sigma schedule. Hard is the most aggressive, the others start strong and drop rapidly."}),
+                    "eta_min":                ("FLOAT",                      {"default": 0.3, "min": -100.0, "max": 100.0, "step":0.01, "round": False, "tooltip": "Calculated noise amount to be added, then removed, after each step. DEFAULT ETA = 0.5"}),
+                    "eta_max":                ("FLOAT",                      {"default": 0.7, "min": -100.0, "max": 100.0, "step":0.01, "round": False, "tooltip": "Calculated noise amount to be added, then removed, after each step. DEFAULT ETA = 0.5"}),
+                    "eta_substep_min":        ("FLOAT",                      {"default": 0.3, "min": -100.0, "max": 100.0, "step":0.01, "round": False, "tooltip": "Calculated noise amount to be added, then removed, after each step. DEFAULT ETA = 0.5"}),
+                    "eta_substep_max":        ("FLOAT",                      {"default": 0.7, "min": -100.0, "max": 100.0, "step":0.01, "round": False, "tooltip": "Calculated noise amount to be added, then removed, after each step. DEFAULT ETA = 0.5"}),
+                    "seed":                   ("INT",                        {"default": -1, "min": -1, "max": 0xffffffffffffffff}),
+                    },
+                "optional": 
+                    {
+                    "etas":                   ("SIGMAS", ),
+                    "etas_substep":           ("SIGMAS", ),
+                    "options":                ("OPTIONS", ),   
+                    }
+                }
 
+    RETURN_TYPES = ("OPTIONS",)
+    RETURN_NAMES = ("options",)
+    FUNCTION     = "main"
+    CATEGORY     = "RES4LYF/sampler_options"
+    
+    def main(self,
+            lock_types             = True,
+            lock_modes             = True,
+            noise_type_sde         = "gaussian",
+            noise_type_sde_substep = "gaussian",
+            noise_mode_sde         = "hard",
+            noise_mode_sde_substep = "hard",
+            eta_min                = 0.0,
+            eta_max                = 1.0,
+            eta_substep_min        = 0.0,
+            eta_substep_max        = 1.0,
+            seed             : int = -1,
+            etas             : Optional[Tensor] = None,
+            etas_substep     : Optional[Tensor] = None,
+            options                = None,
+            ): 
+        
+        options = options if options is not None else {}
+
+        rng = random.Random(seed if seed != -1 else None)
+        
+        if noise_mode_sde == "none":
+            noise_mode_sde = "hard"
+            eta = 0.0
+            
+        if noise_mode_sde_substep == "none":
+            noise_mode_sde_substep = "hard"
+            eta_substep = 0.0
+            
+        if noise_type_sde == "none":
+            noise_type_sde = "gaussian"
+            eta = 0.0
+            
+        if noise_type_sde_substep == "none":
+            noise_type_sde_substep = "gaussian"
+            eta_substep = 0.0
+        
+        if lock_types:
+            options['noise_type_sde']         = noise_type_sde
+            options['noise_type_sde_substep'] = noise_type_sde_substep
+            
+        else:
+            options['noise_type_sde']         = rng.choice(NOISE_GENERATOR_NAMES_SIMPLE)
+            options['noise_type_sde_substep'] = rng.choice(NOISE_GENERATOR_NAMES_SIMPLE)
+            
+        if lock_modes:
+            options['noise_mode_sde']         = noise_mode_sde
+            options['noise_mode_sde_substep'] = noise_mode_sde_substep
+        
+        else:
+            options['noise_mode_sde']         = rng.choice(NOISE_MODE_NAMES)
+            options['noise_mode_sde_substep'] = rng.choice(NOISE_MODE_NAMES)
+        
+        options['eta']                    = rng.uniform(eta_min, eta_max).__round__(2)
+        options['eta_substep']            = rng.uniform(eta_substep_min, eta_substep_max).__round__(2)
+        options['noise_seed_sde']         = seed
+        
+        options['etas']                   = etas
+        options['etas_substep']           = etas_substep
+
+        return (options,)
 
 class ClownOptions_SDE_Beta:
     @classmethod
@@ -155,8 +246,7 @@ class ClownOptions_StepSize_Beta:
         options['overshoot']              = overshoot
         options['overshoot_substep']      = overshoot_substep
 
-        return (options,
-            )
+        return (options,)
 
 
 @dataclass
@@ -178,6 +268,119 @@ DETAIL_BOOST_METHODS = [
     'model_alpha',
     ]
 
+class ClownOptions_DetailBoost_Beta_Randomized:
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {"required":
+                    {
+                    "lock_methods":  ("BOOLEAN", {"default": True,  "tooltip": "Lock detail boost method selection"}),
+                    "lock_modes":    ("BOOLEAN", {"default": True,  "tooltip": "Lock noise scaling mode selection"}),
+                    "method":        (DETAIL_BOOST_METHODS, {"default": "model", "tooltip": "Determines whether the sampler or model underestimates noise"}),
+                    "mode":          (NOISE_MODE_NAMES, {"default": 'hard', "tooltip": "Changes steps where effect is greatest. Most affect early steps"}),
+                    "weight_min":    ("FLOAT", {"default": 0.5, "min": -100.0, "max": 100.0, "step":0.01, "round": False, "tooltip":"Set to positive values to create a sharper, grittier, more detailed image. Set to negative values to soften and deepen the colors. DEFAULT = 1.0"}),
+                    "weight_max":    ("FLOAT", {"default": 1.5, "min": -100.0, "max": 100.0, "step":0.01, "round": False, "tooltip":"Set to positive values to create a sharper, grittier, more detailed image. Set to negative values to soften and deepen the colors. DEFAULT = 1.0"}),
+                    "eta_min":       ("FLOAT", {"default": 0.3, "min": -100.0, "max": 100.0, "step":0.01, "round": False, "tooltip":"Determines whether the sampler or the model underestimates the noise level. DEFAULT = 0.5"}),
+                    "eta_max":       ("FLOAT", {"default": 0.7, "min": -100.0, "max": 100.0, "step":0.01, "round": False, "tooltip":"Determines whether the sampler or the model underestimates the noise level. DEFAULT = 0.5"}),
+                    "start_step":    ("INT", {"default": 3, "min": 0, "max": MAX_STEPS}),
+                    "end_step":      ("INT", {"default": 10, "min": -1, "max": MAX_STEPS}),
+                    "seed":          ("INT", {"default": -1, "min": -1, "max": 0xffffffffffffffff}),
+                    },
+                "optional": 
+                    {
+                    "weights": ("SIGMAS", ),
+                    "etas":    ("SIGMAS", ),
+                    "options": ("OPTIONS", ),   
+                    }
+                }
+
+    RETURN_TYPES = ("OPTIONS",)
+    RETURN_NAMES = ("options",)
+    FUNCTION = "main"
+    CATEGORY = "RES4LYF/sampler_options"
+    
+    def main(self,
+            lock_methods: bool = True,
+            lock_modes: bool = True,
+            method: str = "model",
+            mode: str = "hard",
+            weight_min: float = 0.5,
+            weight_max: float = 1.5,
+            eta_min: float = 0.3,
+            eta_max: float = 0.7,
+            start_step: int = 3,
+            end_step: int = 10,
+            noise_boost_step          : float = 0.0,
+            noise_boost_substep       : float = 0.0,
+            sampler_scaling_normalize : bool  = False,
+            noise_scaling_cycles      : int   = 1,
+            seed: int = -1,
+            weights: Optional[Tensor] = None,
+            etas: Optional[Tensor] = None,
+            options = None
+            ):
+        
+        options = options if options is not None else {}
+        rng = random.Random(seed if seed != -1 else None)
+        
+        if lock_methods:
+            selected_method = method
+        else:
+            selected_method = rng.choice(DETAIL_BOOST_METHODS)
+        
+        if lock_modes:
+            selected_mode = mode
+        else:
+            selected_mode = rng.choice(NOISE_MODE_NAMES)
+        
+        weight = round(rng.uniform(weight_min, weight_max), 2)
+        eta = round(rng.uniform(eta_min, eta_max), 2)
+        
+        if selected_method.endswith("_normal"):
+            sampler_scaling_normalize = True
+            selected_method = selected_method[:-7]
+        else:
+            sampler_scaling_normalize = False
+        
+        if end_step == -1:
+            end_step = MAX_STEPS
+        
+        default_dtype = torch.float64
+        default_device = torch.device('cuda')
+        
+        if weights is None: 
+            weights = initialize_or_scale(None, weight, MAX_STEPS).to(default_dtype).to(default_device)
+        
+        if etas is None: 
+            etas = initialize_or_scale(None, eta, MAX_STEPS).to(default_dtype).to(default_device)
+        
+        prepend = torch.zeros((start_step,), dtype=default_dtype, device=default_device)
+        weights = torch.cat((prepend, weights), dim=0)
+        etas = torch.cat((prepend, etas), dim=0)
+
+        if weights.shape[-1] > end_step:
+            weights = weights[:end_step]
+        if etas.shape[-1] > end_step:
+            etas = etas[:end_step]
+        
+        weights = F.pad(weights, (0, MAX_STEPS), value=0.0)
+        etas = F.pad(etas, (0, MAX_STEPS), value=0.0)
+        
+        # Populate options
+        options.update({
+            'noise_scaling_weight': weight,
+            'noise_scaling_type': selected_method,
+            'noise_scaling_mode': selected_mode,
+            'noise_scaling_eta': eta,
+            'noise_scaling_cycles': noise_scaling_cycles,
+            'noise_scaling_weights': weights,
+            'noise_scaling_etas': etas,
+            'noise_boost_step': noise_boost_step,
+            'noise_boost_substep': noise_boost_substep,
+            'noise_boost_normalize': sampler_scaling_normalize
+        })
+
+        return (options,)
+    
 class ClownOptions_DetailBoost_Beta:
     @classmethod
     def INPUT_TYPES(cls):
@@ -201,7 +404,7 @@ class ClownOptions_DetailBoost_Beta:
                     {
                     "weights": ("SIGMAS", ),
                     "etas":    ("SIGMAS", ),
-                    "options":               ("OPTIONS", ),   
+                    "options": ("OPTIONS", ),   
                     }
                 }
 
@@ -307,7 +510,81 @@ class ClownOptions_DetailBoost_Beta:
         return (options,)
 
 
+class ClownOptions_SigmaScaling_Beta_Randomized:
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {"required":
+                    {
+                    "s_noise_min":           ("FLOAT", {"default": 0.95, "min": -10000, "max": 10000, "step":0.01, "tooltip": "Adds extra SDE noise. Values around 1.03-1.07 can lead to a moderate boost in detail and paint textures. DEFAULT = 1"}),
+                    "s_noise_max":           ("FLOAT", {"default": 1.05, "min": -10000, "max": 10000, "step":0.01, "tooltip": "Adds extra SDE noise. Values around 1.03-1.07 can lead to a moderate boost in detail and paint textures. DEFAULT = 1"}),
+                    "s_noise_substep_min":   ("FLOAT", {"default": 0.95, "min": -10000, "max": 10000, "step":0.01, "tooltip": "Adds extra SDE noise. Values around 1.03-1.07 can lead to a moderate boost in detail and paint textures. DEFAULT = 1"}),
+                    "s_noise_substep_max":   ("FLOAT", {"default": 1.05, "min": -10000, "max": 10000, "step":0.01, "tooltip": "Adds extra SDE noise. Values around 1.03-1.07 can lead to a moderate boost in detail and paint textures. DEFAULT = 1"}),
+                    "noise_anchor_min":      ("FLOAT", {"default": 0.8, "min": -100.0, "max": 100.0, "step":0.01, "round": False, "tooltip": "Typically set to between 1.0 and 0.0. Lower values cerate a grittier, more detailed image. DEFAULT = 1"}),
+                    "noise_anchor_max":      ("FLOAT", {"default": 1.0, "min": -100.0, "max": 100.0, "step":0.01, "round": False, "tooltip": "Typically set to between 1.0 and 0.0. Lower values cerate a grittier, more detailed image. DEFAULT = 1"}),
+                    "lying_min":             ("FLOAT", {"default": 0.95, "min": -10000, "max": 10000, "step":0.01, "tooltip": "Downscales the sigma schedule. Values around 0.98-0.95 can lead to a large boost in detail and paint textures. DEFAULT = 1"}),
+                    "lying_max":             ("FLOAT", {"default": 1.0, "min": -10000, "max": 10000, "step":0.01, "tooltip": "Downscales the sigma schedule. Values around 0.98-0.95 can lead to a large boost in detail and paint textures. DEFAULT = 1"}),
+                    "lying_inv_min":         ("FLOAT", {"default": 1.0, "min": -10000, "max": 10000, "step":0.01, "tooltip": "Upscales the sigma schedule. Will soften the image and deepen colors. Use after d_noise to counteract desaturation. DEFAULT = 1"}),
+                    "lying_inv_max":         ("FLOAT", {"default": 1.05, "min": -10000, "max": 10000, "step":0.01, "tooltip": "Upscales the sigma schedule. Will soften the image and deepen colors. Use after d_noise to counteract desaturation. DEFAULT = 1"}),
+                    "lying_start_step":      ("INT", {"default": 0, "min": 0, "max": MAX_STEPS}),
+                    "lying_inv_start_step":  ("INT", {"default": 1, "min": 0, "max": MAX_STEPS}),
+                    "seed":                  ("INT", {"default": -1, "min": -1, "max": 0xffffffffffffffff}),
+                    },
+                "optional": 
+                    {
+                    "s_noises":             ("SIGMAS", ),
+                    "s_noises_substep":     ("SIGMAS", ),
+                    "options":              ("OPTIONS", ),
+                    }
+                }
 
+    RETURN_TYPES = ("OPTIONS",)
+    RETURN_NAMES = ("options",)
+    FUNCTION = "main"
+    CATEGORY = "RES4LYF/sampler_options"
+    
+    def main(self,
+            s_noise_min: float = 0.95,
+            s_noise_max: float = 1.05,
+            s_noise_substep_min: float = 0.95,
+            s_noise_substep_max: float = 1.05,
+            noise_anchor_min: float = 0.8,
+            noise_anchor_max: float = 1.0,
+            lying_min: float = 0.95,
+            lying_max: float = 1.0,
+            lying_inv_min: float = 1.0,
+            lying_inv_max: float = 1.05,
+            lying_start_step: int = 0,
+            lying_inv_start_step: int = 1,
+            seed: int = -1,
+            s_noises: Optional[Tensor] = None,
+            s_noises_substep: Optional[Tensor] = None,
+            options = None
+            ):
+        
+        options = options if options is not None else {}
+        rng = random.Random(seed if seed != -1 else None)
+        
+        # Randomize all continuous parameters
+        s_noise = round(rng.uniform(s_noise_min, s_noise_max), 2)
+        s_noise_substep = round(rng.uniform(s_noise_substep_min, s_noise_substep_max), 2)
+        noise_anchor = round(rng.uniform(noise_anchor_min, noise_anchor_max), 2)
+        lying = round(rng.uniform(lying_min, lying_max), 2)
+        lying_inv = round(rng.uniform(lying_inv_min, lying_inv_max), 2)
+        
+        # Populate options
+        options.update({
+            'noise_anchor': noise_anchor,
+            's_noise': s_noise,
+            's_noise_substep': s_noise_substep,
+            'd_noise': lying,
+            'd_noise_start_step': lying_start_step,
+            'd_noise_inv': lying_inv,
+            'd_noise_inv_start_step': lying_inv_start_step,
+            's_noises': s_noises,
+            's_noises_substep': s_noises_substep
+        })
+
+        return (options,)
 
 class ClownOptions_SigmaScaling_Beta:
     @classmethod
