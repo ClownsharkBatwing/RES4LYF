@@ -24,6 +24,9 @@ if new_scheduler_name not in SCHEDULER_HANDLERS:
     SCHEDULER_HANDLERS[new_scheduler_name] = bong_tangent_handler
     SCHEDULER_NAMES.append(new_scheduler_name)
 
+new_scheduler_name = "beta57"
+if new_scheduler_name not in SCHEDULER_NAMES:
+    SCHEDULER_NAMES.append(new_scheduler_name)
 
 from .res4lyf import RESplain
 
@@ -464,6 +467,7 @@ add_samplers()
 
 
 __all__ = ["NODE_CLASS_MAPPINGS", "NODE_DISPLAY_NAME_MAPPINGS", "WEB_DIRECTORY"]
+
 
 
 
