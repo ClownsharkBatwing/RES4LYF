@@ -13,6 +13,7 @@ from ..helper              import ExtraOptions
 from ..latents             import get_orthogonal, get_collinear, get_cosine_similarity, tile_latent, untile_latent
 
 from ..res4lyf             import RESplain
+import comfy.model_management
 
 MAX_STEPS = 10000
 
@@ -892,29 +893,37 @@ class RK_Method_Exponential(RK_Method_Beta):
                 transformer_options : Optional[dict] = None,
                 ) -> Tuple[Tensor, Tensor]:
         
-        x_0   = x         if x_0   is None else x_0
-        sigma = sub_sigma if sigma is None else sigma
-        
+        # --- 核心修复开始: 统一设备环境 ---
+        device = comfy.model_management.get_torch_device()
+
+
+        x_d         = x.to(device)
+        sub_sigma_d = sub_sigma.to(device)
+
+        x_0_d       = x_0.to(device) if x_0 is not None else x_d
+        sigma_d     = sigma.to(device) if sigma is not None else sub_sigma_d
+
+
         if transformer_options is not None:
             self.extra_args.setdefault("model_options", {}).setdefault("transformer_options", {}).update(transformer_options)
 
-        denoised = self.model_denoised(x.to(self.model_device), sub_sigma.to(self.model_device), **self.extra_args).to(sigma.device)
+        denoised = self.model_denoised(x_d, sub_sigma_d, **self.extra_args)
         
-        eps_anchored = (x_0 - denoised) / sigma
-        eps_unmoored = (x   - denoised) / sub_sigma
+
+        eps_anchored = (x_0_d - denoised) / sigma_d
+        eps_unmoored = (x_d   - denoised) / sub_sigma_d
         
         eps      = eps_unmoored + self.LINEAR_ANCHOR_X_0 * (eps_anchored - eps_unmoored)
         
-        denoised = x_0 - sigma * eps
+        denoised_out = x_0_d - sigma_d * eps
         
-        epsilon  = denoised - x_0
-        
-        #epsilon = denoised - x
+        epsilon_out  = denoised_out - x_0_d
         
         if self.EO("exp2lin_override"):
-            epsilon = (x_0 - denoised) / sigma
+            epsilon_out = (x_0_d - denoised_out) / sigma_d
         
-        return epsilon, denoised
+
+        return epsilon_out, denoised_out
     
     def get_eps(self, *args):
         if   len(args) == 3:
@@ -1038,16 +1047,24 @@ class RK_Method_Linear(RK_Method_Beta):
                 transformer_options : Optional[dict] = None,
                 ) -> Tuple[Tensor, Tensor]:
         
-        x_0   = x         if x_0   is None else x_0
-        sigma = sub_sigma if sigma is None else sigma
+
+        device = comfy.model_management.get_torch_device()
+
+        x_d         = x.to(device)
+        sub_sigma_d = sub_sigma.to(device)
+        x_0_d       = x_0.to(device) if x_0 is not None else x_d
+        sigma_d     = sigma.to(device) if sigma is not None else sub_sigma_d
+        # ---------------------------
         
         if transformer_options is not None:
             self.extra_args.setdefault("model_options", {}).setdefault("transformer_options", {}).update(transformer_options)     
         
-        denoised = self.model_denoised(x.to(self.model_device), sub_sigma.to(self.model_device), **self.extra_args).to(sigma.device)
 
-        epsilon_anchor   = (x_0 - denoised) / sigma
-        epsilon_unmoored =   (x - denoised) / sub_sigma
+        denoised = self.model_denoised(x_d, sub_sigma_d, **self.extra_args)
+
+
+        epsilon_anchor   = (x_0_d - denoised) / sigma_d
+        epsilon_unmoored = (x_d   - denoised) / sub_sigma_d
         
         epsilon = epsilon_unmoored + self.LINEAR_ANCHOR_X_0 * (epsilon_anchor - epsilon_unmoored)
 
