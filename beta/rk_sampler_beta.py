@@ -1095,7 +1095,10 @@ def sample_rk_beta(
                             if noise_scaling_type == "model"       and noise_scaling_weight != 0 and noise_scaling_eta > 0:
                                 s_tmp = lying_s_[row]
                                 if RK.multistep_stages > 0:
-                                    s_tmp = lying_sd
+                                    try:
+                                        s_tmp = lying_sd
+                                    except NameError:
+                                        s_tmp = NS.s_[row]
 
                             # SYNC GUIDE ---------------------------
                             if LG.guide_mode.startswith("sync") and (LG.lgw[step_sched] == 0 and LG.lgw_inv[step_sched] == 0 and LG.lgw_sync[step_sched] == 0 and LG.lgw_sync_inv[step_sched] == 0):
@@ -1727,9 +1730,13 @@ def sample_rk_beta(
                                     for _ in range(noise_scaling_cycles-1):
                                         sub_lying_su, sub_lying_sigma, sub_lying_sd, sub_lying_alpha_ratio = NS.get_sde_substep(NS.s_[row], sub_lying_sd, noise_scaling_eta, noise_scaling_mode)
                                     lying_s_[row+1] = sub_lying_sd
+                                    lying_sd = sub_lying_sd
                                 substep_noise_scaling_ratio = NS.s_[row+1]/lying_s_[row+1]
-                                if RK.multistep_stages > 0:
-                                    substep_noise_scaling_ratio = sigma_next/lying_sd                   #fails with resample?
+                                if RK.multistep_stages > 0 and noise_scaling_type == "sampler_substep":
+                                    try:
+                                        substep_noise_scaling_ratio = sigma_next/lying_sd                   #fails with resample?
+                                    except NameError:
+                                        pass
                                 
                                 lying_eps_row_factor = (1 - noise_scaling_weight*(substep_noise_scaling_ratio-1))
 
