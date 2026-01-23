@@ -723,75 +723,97 @@ class SharkSampler:
                     sampler.extra_options['etas_substep'] = etas_substep_cached
                     sampler.extra_options['etas']         = etas_cached
 
-                if noise_mask is not None:
-                    if hasattr(samples, "is_nested") and samples.is_nested:
-                        blended = []
-                        blended_masks = []
-                        x_initial_list = x_initial.unbind() if hasattr(x_initial, "is_nested") and x_initial.is_nested else list(x_initial.unbind(0))
-                
-                        if hasattr(noise_mask, "is_nested") and noise_mask.is_nested:
-                            mask_list = noise_mask.unbind()
-                        else:
-                            mask_list = list(noise_mask.unbind(0)) if noise_mask.ndim == 4 else [noise_mask]
-                
-                        for idx, s in enumerate(samples.unbind()):
-                            xi = x_initial_list[idx] if idx < len(x_initial_list) else x_initial_list[0]
-                            xi = xi.to(s.device)
-                            m = mask_list[idx] if idx < len(mask_list) else mask_list[0]
-                
-                            if xi.shape != s.shape:
-                                if s.ndim == 5:
-                                    xi = F.interpolate(xi, size=s.shape[2:], mode="trilinear", align_corners=False)
-                                elif s.ndim == 4:
-                                    xi = F.interpolate(xi, size=s.shape[-2:], mode="bilinear", align_corners=False)
-                                elif s.ndim == 3:
-                                    xi = F.interpolate(xi.unsqueeze(0), size=s.shape[-2:], mode="bilinear", align_corners=False).squeeze(0)
-                
-                            if s.ndim == m.ndim:
-                                reshaped_mask = comfy.utils.reshape_mask(m, s.shape).to(s.device)
-                                if reshaped_mask.shape != s.shape:
-                                    if s.ndim == 5:
-                                        reshaped_mask = F.interpolate(reshaped_mask, size=s.shape[2:], mode="trilinear", align_corners=False)
-                                    elif s.ndim == 4:
-                                        reshaped_mask = F.interpolate(reshaped_mask, size=s.shape[-2:], mode="bilinear", align_corners=False)
-                                    elif s.ndim == 3:
-                                        reshaped_mask = F.interpolate(reshaped_mask.unsqueeze(0), size=s.shape[-2:], mode="bilinear", align_corners=False).squeeze(0)
-                
-                                blended.append(s * reshaped_mask + xi * (1.0 - reshaped_mask))
-                                blended_masks.append(reshaped_mask)
-                            else:
-                                blended.append(s)
+                    if noise_mask is not None:
+                        # Helper function for safe resizing (aligned with comfy.samplers logic)
+                        def resize_to_match(tensor, target_tensor, is_mask=False):
+                            # If dimensions already match, do nothing
+                            if tensor.shape[-2:] == target_tensor.shape[-2:] and tensor.shape[:-2] == target_tensor.shape[:-2]:
+                                return tensor
+    
+                            # Determine dimensionality: 3D (Video) or 2D (Image)
+                            # If target is 5D (B,C,T,H,W) -> 3D
+                            # If target is 4D (C,T,H,W) and it is a nested tensor item -> 3D
+                            spatial_ndim = 3 if target_tensor.ndim == 5 or (target_tensor.ndim == 4 and target_tensor.shape[0] > 4) else 2
+                            mode = "trilinear" if spatial_ndim == 3 else "bilinear"
+    
+                            # Target size (T, H, W) or (H, W)
+                            target_size = target_tensor.shape[-spatial_ndim:]
+    
+                            t_in = tensor
+    
+                            # 1. Handle Channel Dimension for Masks
+                            # Masks often come as (B, H, W) or (B, T, H, W). Interpolator needs (B, C, ...).
+                            # Reference: samplers.py resolve_areas_and_cond_masks_multidim
+                            added_channel = False
+                            if is_mask:
+                                # If tensor rank is 1 less than target (missing Channel)
+                                if t_in.ndim == target_tensor.ndim - 1:
+                                    t_in = t_in.unsqueeze(1)
+                                    added_channel = True
+    
+                            # 2. Handle Batch Dimension
+                            # F.interpolate requires Batch. In NestedTensor loop we work with (C, ...), so add dummy Batch.
+                            added_batch = False
+                            if t_in.ndim == target_tensor.ndim - 1:  # If still missing a dimension (Batch)
+                                t_in = t_in.unsqueeze(0)
+                                added_batch = True
+    
+                            # 3. Interpolation
+                            # Check if we have enough dimensions for the selected mode
+                            try:
+                                if (spatial_ndim == 3 and t_in.ndim == 5) or (spatial_ndim == 2 and t_in.ndim == 4):
+                                    t_out = F.interpolate(t_in, size=target_size, mode=mode, align_corners=False)
+                                else:
+                                    t_out = t_in  # Fallback if dimensions are very strange
+                            except Exception:
+                                return tensor  # If interpolation fails, return as is (let it fail later or broadcast)
+    
+                            # 4. Restore dimensions
+                            if added_batch:
+                                t_out = t_out.squeeze(0)
+                            if added_channel:
+                                t_out = t_out.squeeze(1)
+    
+                            return t_out
+    
+                        if hasattr(samples, "is_nested") and samples.is_nested:
+                            blended, blended_masks = [], []
+                            x_initial_list = x_initial.unbind() if hasattr(x_initial, "is_nested") and x_initial.is_nested else list(x_initial.unbind(0))
+                            mask_list = noise_mask.unbind() if hasattr(noise_mask, "is_nested") and noise_mask.is_nested else (list(noise_mask.unbind(0)) if noise_mask.ndim == 4 else [noise_mask])
+    
+                            for idx, s in enumerate(samples.unbind()):
+                                # Get corresponding xi and mask
+                                xi = (x_initial_list[idx] if idx < len(x_initial_list) else x_initial_list[0]).to(s.device)
+                                m = (mask_list[idx] if idx < len(mask_list) else mask_list[0]).to(s.device)
+    
+                                # Resize xi and m to match current sample s
+                                xi = resize_to_match(xi, s, is_mask=False)
+                                m = resize_to_match(m, s, is_mask=True)
+    
+                                # Use standard Comfy utility for final mask broadcasting
+                                mask_math = comfy.utils.reshape_mask(m, s.shape)
+                                blended.append(s * mask_math + xi * (1.0 - mask_math))
                                 blended_masks.append(m)
-                
-                        samples = comfy.nested_tensor.NestedTensor(blended)
-                        latent_x["noise_mask"] = comfy.nested_tensor.NestedTensor(blended_masks)
-                    else:
-                        if hasattr(noise_mask, "is_nested") and noise_mask.is_nested:
-                            noise_mask = noise_mask.unbind()[0]
-                        reshaped_mask = comfy.utils.reshape_mask(noise_mask, samples.shape).to(samples.device)
-                
-                        if reshaped_mask.shape != samples.shape:
-                            if samples.ndim == 5:
-                                reshaped_mask = F.interpolate(reshaped_mask, size=samples.shape[2:], mode="trilinear", align_corners=False)
-                            elif samples.ndim == 4:
-                                reshaped_mask = F.interpolate(reshaped_mask, size=samples.shape[-2:], mode="bilinear", align_corners=False)
-                            elif samples.ndim == 3:
-                                reshaped_mask = F.interpolate(reshaped_mask.unsqueeze(0), size=samples.shape[-2:], mode="bilinear", align_corners=False).squeeze(0)
-                
-                        x_initial = x_initial.to(samples.device)
-                        if x_initial.shape != samples.shape:
-                            if samples.ndim == 5:
-                                x_initial = F.interpolate(x_initial, size=samples.shape[2:], mode="trilinear", align_corners=False)
-                            elif samples.ndim == 4:
-                                x_initial = F.interpolate(x_initial, size=samples.shape[-2:], mode="bilinear", align_corners=False)
-                            elif samples.ndim == 3:
-                                x_initial = F.interpolate(x_initial.unsqueeze(0), size=samples.shape[-2:], mode="bilinear", align_corners=False).squeeze(0)
-                
-                        samples = samples * reshaped_mask + x_initial * (1.0 - reshaped_mask)
-                        latent_x["noise_mask"] = reshaped_mask
+    
+                            samples = comfy.nested_tensor.NestedTensor(blended)
+                            latent_x["noise_mask"] = comfy.nested_tensor.NestedTensor(blended_masks)
+    
+                        else:
+                            # Standard Tensor (Batched)
+                            if hasattr(noise_mask, "is_nested") and noise_mask.is_nested:
+                                noise_mask = noise_mask.unbind()[0]
+    
+                            m, xi = noise_mask.to(samples.device), x_initial.to(samples.device)
+    
+                            # Resize xi and m to match samples
+                            xi = resize_to_match(xi, samples, is_mask=False)
+                            m = resize_to_match(m, samples, is_mask=True)
+    
+                            mask_math = comfy.utils.reshape_mask(m, samples.shape)
+                            samples = samples * mask_math + xi * (1.0 - mask_math)
+                            latent_x["noise_mask"] = m
+    
                 samples = samples.to(comfy.model_management.intermediate_device())
-
-
                 out = latent_x.copy()
                 out["samples"] = samples
 
