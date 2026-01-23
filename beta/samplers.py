@@ -724,29 +724,73 @@ class SharkSampler:
                     sampler.extra_options['etas']         = etas_cached
 
                 if noise_mask is not None:
-                    if hasattr(samples, 'is_nested') and samples.is_nested:
+                    if hasattr(samples, "is_nested") and samples.is_nested:
                         blended = []
-                        x_initial_list = x_initial.unbind() if hasattr(x_initial, 'is_nested') and x_initial.is_nested else [x_initial]
-                        if hasattr(noise_mask, 'is_nested') and noise_mask.is_nested:
+                        blended_masks = []
+                        x_initial_list = x_initial.unbind() if hasattr(x_initial, "is_nested") and x_initial.is_nested else list(x_initial.unbind(0))
+                
+                        if hasattr(noise_mask, "is_nested") and noise_mask.is_nested:
                             mask_list = noise_mask.unbind()
                         else:
-                            mask_list = [noise_mask]
+                            mask_list = list(noise_mask.unbind(0)) if noise_mask.ndim == 4 else [noise_mask]
+                
                         for idx, s in enumerate(samples.unbind()):
                             xi = x_initial_list[idx] if idx < len(x_initial_list) else x_initial_list[0]
+                            xi = xi.to(s.device)
                             m = mask_list[idx] if idx < len(mask_list) else mask_list[0]
+                
+                            if xi.shape != s.shape:
+                                if s.ndim == 5:
+                                    xi = F.interpolate(xi, size=s.shape[2:], mode="trilinear", align_corners=False)
+                                elif s.ndim == 4:
+                                    xi = F.interpolate(xi, size=s.shape[-2:], mode="bilinear", align_corners=False)
+                                elif s.ndim == 3:
+                                    xi = F.interpolate(xi.unsqueeze(0), size=s.shape[-2:], mode="bilinear", align_corners=False).squeeze(0)
+                
                             if s.ndim == m.ndim:
                                 reshaped_mask = comfy.utils.reshape_mask(m, s.shape).to(s.device)
-                                blended.append(s * reshaped_mask + xi.to(s.device) * (1.0 - reshaped_mask))
+                                if reshaped_mask.shape != s.shape:
+                                    if s.ndim == 5:
+                                        reshaped_mask = F.interpolate(reshaped_mask, size=s.shape[2:], mode="trilinear", align_corners=False)
+                                    elif s.ndim == 4:
+                                        reshaped_mask = F.interpolate(reshaped_mask, size=s.shape[-2:], mode="bilinear", align_corners=False)
+                                    elif s.ndim == 3:
+                                        reshaped_mask = F.interpolate(reshaped_mask.unsqueeze(0), size=s.shape[-2:], mode="bilinear", align_corners=False).squeeze(0)
+                
+                                blended.append(s * reshaped_mask + xi * (1.0 - reshaped_mask))
+                                blended_masks.append(reshaped_mask)
                             else:
                                 blended.append(s)
+                                blended_masks.append(m)
+                
                         samples = comfy.nested_tensor.NestedTensor(blended)
+                        latent_x["noise_mask"] = comfy.nested_tensor.NestedTensor(blended_masks)
                     else:
-                        if hasattr(noise_mask, 'is_nested') and noise_mask.is_nested:
+                        if hasattr(noise_mask, "is_nested") and noise_mask.is_nested:
                             noise_mask = noise_mask.unbind()[0]
                         reshaped_mask = comfy.utils.reshape_mask(noise_mask, samples.shape).to(samples.device)
-                        samples = samples * reshaped_mask + x_initial.to(samples.device) * (1.0 - reshaped_mask)
-
+                
+                        if reshaped_mask.shape != samples.shape:
+                            if samples.ndim == 5:
+                                reshaped_mask = F.interpolate(reshaped_mask, size=samples.shape[2:], mode="trilinear", align_corners=False)
+                            elif samples.ndim == 4:
+                                reshaped_mask = F.interpolate(reshaped_mask, size=samples.shape[-2:], mode="bilinear", align_corners=False)
+                            elif samples.ndim == 3:
+                                reshaped_mask = F.interpolate(reshaped_mask.unsqueeze(0), size=samples.shape[-2:], mode="bilinear", align_corners=False).squeeze(0)
+                
+                        x_initial = x_initial.to(samples.device)
+                        if x_initial.shape != samples.shape:
+                            if samples.ndim == 5:
+                                x_initial = F.interpolate(x_initial, size=samples.shape[2:], mode="trilinear", align_corners=False)
+                            elif samples.ndim == 4:
+                                x_initial = F.interpolate(x_initial, size=samples.shape[-2:], mode="bilinear", align_corners=False)
+                            elif samples.ndim == 3:
+                                x_initial = F.interpolate(x_initial.unsqueeze(0), size=samples.shape[-2:], mode="bilinear", align_corners=False).squeeze(0)
+                
+                        samples = samples * reshaped_mask + x_initial * (1.0 - reshaped_mask)
+                        latent_x["noise_mask"] = reshaped_mask
                 samples = samples.to(comfy.model_management.intermediate_device())
+
 
                 out = latent_x.copy()
                 out["samples"] = samples
