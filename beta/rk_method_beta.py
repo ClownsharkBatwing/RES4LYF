@@ -12,7 +12,7 @@ from .rk_coefficients_beta import get_implicit_sampler_name_list, get_rk_methods
 from ..helper              import ExtraOptions
 from ..latents             import get_orthogonal, get_collinear, get_cosine_similarity, tile_latent, untile_latent
 
-from ..res4lyf             import RESplain
+from ..res4lyf             import RESplain, is_debug_logging_enabled
 
 MAX_STEPS = 10000
 
@@ -92,6 +92,10 @@ class RK_Method_Beta:
         self.tile_sizes                  : Optional[List[Tuple[int,int]]] = None
         self.tile_cnt                    : int                      = 0
         self.latent_compression_ratio    : int                      = 8
+        # track model calls
+        self.model_calls_total    : int = 0
+        self.model_calls_denoised : int = 0
+        self.model_calls_epsilon  : int = 0
 
     @staticmethod
     def is_exponential(rk_type:str) -> bool:
@@ -130,6 +134,9 @@ class RK_Method_Beta:
     def model_epsilon(self, x:Tensor, sigma:Tensor, **extra_args) -> Tuple[Tensor, Tensor]:
         s_in     = x.new_ones([x.shape[0]])
         denoised = self.model(x, sigma * s_in, **extra_args)
+        # increment counters (single call path)
+        self.model_calls_total    += 1
+        self.model_calls_epsilon  += 1
         denoised = self.calc_cfg_channelwise(denoised)
         eps      = (x - denoised) / (sigma * s_in).view(x.shape[0], 1, 1, 1)       #return x0 ###################################THIS WORKS ONLY WITH THE MODEL SAMPLING PATCH
         return eps, denoised
@@ -153,7 +160,9 @@ class RK_Method_Beta:
                 tile = tiles[i].unsqueeze(0)
                 
                 denoised_tile = self.model(tile, sigma * s_in, **extra_args)
-                
+                # increment counters per tile
+                self.model_calls_total    += 1
+                self.model_calls_denoised += 1
                 denoised_tiles.append(denoised_tile)
                 
             denoised_tiles = torch.cat(denoised_tiles, dim=0)
@@ -230,7 +239,9 @@ class RK_Method_Beta:
                     self.extra_args['model_options']['transformer_options']['y0_style_neg'] = y0_style_neg_tiles[i].unsqueeze(0)
                 
                 denoised_tile = self.model(tile, sigma * s_in, **extra_args)
-                
+                # increment counters per tile
+                self.model_calls_total    += 1
+                self.model_calls_denoised += 1
                 denoised_tiles.append(denoised_tile)
                 
             denoised_tiles = torch.cat(denoised_tiles, dim=0)
@@ -239,6 +250,9 @@ class RK_Method_Beta:
             
         else:
             denoised = self.model(x, sigma * s_in, **extra_args)
+            # increment counters (single call path)
+            self.model_calls_total    += 1
+            self.model_calls_denoised += 1
         
         if control_tiles is not None:
             positive_control.cond_hint = positive_cond_hint_init
@@ -259,6 +273,19 @@ class RK_Method_Beta:
 
         self.extra_args.setdefault("model_options", {}).setdefault("transformer_options", {}).update(transformer_options)
         return
+
+    # helper API to reset/read counters
+    def reset_model_call_counters(self) -> None:
+        self.model_calls_total    = 0
+        self.model_calls_denoised = 0
+        self.model_calls_epsilon  = 0
+
+    def get_model_call_counters(self) -> Dict[str, int]:
+        return {
+            "total":    self.model_calls_total,
+            "denoised": self.model_calls_denoised,
+            "epsilon":  self.model_calls_epsilon,
+        }
 
     def set_coeff(self,
                 rk_type    : str,
@@ -552,7 +579,11 @@ class RK_Method_Beta:
                 rk_swap_type = "deis_3m"
             
         if step > rk_swap_step and self.rk_type != rk_swap_type:
-            RESplain("Switching rk_type to:", rk_swap_type)
+            if is_debug_logging_enabled():
+                RESplain("Switching rk_type to:", rk_swap_type, "at step:", step, debug=True)
+            elif rk_swap_print:
+                RESplain("Switching rk_type to:", rk_swap_type, "at step:", step)
+
             self.rk_type = rk_swap_type
             
             if RK_Method_Beta.is_exponential(rk_swap_type):
@@ -581,7 +612,8 @@ class RK_Method_Beta:
                 if rk_swap_print:
                     RESplain("res_3m - res_2m:", torch.norm(denoised_res_3m - denoised_res_2m).item())
                 if rk_swap_threshold > torch.norm(denoised_res_2m - denoised_res_3m):
-                    RESplain("Switching rk_type to:", rk_swap_type, "at step:", step)
+                    if rk_swap_print:
+                        RESplain("Switching rk_type to:", rk_swap_type, "at step:", step)
                     self.rk_type = rk_swap_type
             
                     if RK_Method_Beta.is_exponential(rk_swap_type):

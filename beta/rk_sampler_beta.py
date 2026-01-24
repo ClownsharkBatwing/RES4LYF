@@ -323,6 +323,7 @@ def sample_rk_beta(
     RK            = RK_Method_Beta.create(model, rk_type, VE_MODEL, noise_anchor, noise_boost_normalize, model_device=model_device, work_device=work_device, dtype=default_dtype, extra_options=extra_options)
     RK.extra_args = RK.init_cfg_channelwise(x, cfg_cw, **extra_args)
     RK.tile_sizes = tile_sizes
+    RK.reset_model_call_counters()
     RK.extra_args['model_options']['transformer_options']['regional_conditioning_weight'] = 0.0
     RK.extra_args['model_options']['transformer_options']['regional_conditioning_floor']  = 0.0
     
@@ -2118,6 +2119,9 @@ def sample_rk_beta(
     x        = x       .to(model_device)
     
     progress_bar.close()
+
+    state_info_out['model_call_counts'] = RK.get_model_call_counters()
+    RESplain("Model calls (total/denoised/epsilon):", state_info_out['model_call_counts'], debug=True)
 
     if not (UNSAMPLE and sigmas[1] > sigmas[0]) and not EO("preview_last_step_always") and sigma is not None   and   not (FLOW_STARTED and not FLOW_STOPPED):
         callback_step = len(sigmas)-1 - step if sampler_mode == "unsample" else step
