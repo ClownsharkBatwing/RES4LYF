@@ -724,29 +724,31 @@ class SharkSampler:
                     sampler.extra_options['etas']         = etas_cached
 
                 if noise_mask is not None:
-                    if hasattr(samples, 'is_nested') and samples.is_nested:
+                    if hasattr(samples, "is_nested") and samples.is_nested:
                         blended = []
-                        x_initial_list = x_initial.unbind() if hasattr(x_initial, 'is_nested') and x_initial.is_nested else [x_initial]
-                        if hasattr(noise_mask, 'is_nested') and noise_mask.is_nested:
-                            mask_list = noise_mask.unbind()
-                        else:
-                            mask_list = [noise_mask]
+                        x_src_list = x.unbind() if hasattr(x, "is_nested") and x.is_nested else [x]
+                        mask_list = noise_mask.unbind() if hasattr(noise_mask, "is_nested") and noise_mask.is_nested else [noise_mask]
                         for idx, s in enumerate(samples.unbind()):
-                            xi = x_initial_list[idx] if idx < len(x_initial_list) else x_initial_list[0]
+                            xi = x_src_list[idx] if idx < len(x_src_list) else x_src_list[0]
                             m = mask_list[idx] if idx < len(mask_list) else mask_list[0]
-                            if s.ndim == m.ndim:
-                                reshaped_mask = comfy.utils.reshape_mask(m, s.shape).to(s.device)
-                                blended.append(s * reshaped_mask + xi.to(s.device) * (1.0 - reshaped_mask))
-                            else:
-                                blended.append(s)
+    
+                            m_in = m.to(s.device).to(s.dtype)
+                            while m_in.ndim < 5:
+                                m_in = m_in.unsqueeze(0)
+                            m_math = F.interpolate(m_in, size=s.shape[-3:], mode="nearest").squeeze(0)
+    
+                            blended.append((s * m_math + xi.to(s.device).to(s.dtype) * (1.0 - m_math)).float())
                         samples = comfy.nested_tensor.NestedTensor(blended)
                     else:
-                        if hasattr(noise_mask, 'is_nested') and noise_mask.is_nested:
+                        if hasattr(noise_mask, "is_nested") and noise_mask.is_nested:
                             noise_mask = noise_mask.unbind()[0]
-                        reshaped_mask = comfy.utils.reshape_mask(noise_mask, samples.shape).to(samples.device)
-                        samples = samples * reshaped_mask + x_initial.to(samples.device) * (1.0 - reshaped_mask)
+                        m_in = noise_mask.to(samples.device).to(samples.dtype)
+                        while m_in.ndim < 5:
+                            m_in = m_in.unsqueeze(0)
+                        m_math = F.interpolate(m_in, size=samples.shape[-3:], mode="nearest").squeeze(0)
+                        samples = (samples * m_math + x.to(samples.device).to(samples.dtype) * (1.0 - m_math)).float()
 
-                samples = samples.to(comfy.model_management.intermediate_device())
+                samples = samples.to(comfy.model_management.intermediate_device()).float()
 
                 out = latent_x.copy()
                 out["samples"] = samples
