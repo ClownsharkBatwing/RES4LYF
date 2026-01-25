@@ -7,6 +7,7 @@ import shutil
 import inspect
 import aiohttp
 import math
+import logging
 import comfy.model_sampling
 import comfy.samplers
 from aiohttp import web
@@ -17,6 +18,31 @@ from tqdm import tqdm
 CONFIG_FILE_NAME = "res4lyf.config.json"
 DEFAULT_CONFIG_FILE_NAME = "web/js/res4lyf.default.json"
 config = None
+
+# Logging setup
+_extension_name = None
+
+def _get_extension_name():
+    global _extension_name
+    if _extension_name is None:
+        _extension_name = get_extension_config().get("name", "RES4LYF")
+    return _extension_name
+
+class _RES4LYFFormatter(logging.Formatter):
+    def format(self, record):
+        name = _get_extension_name()
+        if record.levelno >= logging.WARNING:
+            return f"({name} {record.levelname.lower()}) {record.getMessage()}"
+        elif record.levelno == logging.DEBUG:
+            return f"({name} debug) {record.getMessage()}"
+        return f"({name}) {record.getMessage()}"
+
+logger = logging.getLogger("RES4LYF")
+_handler = logging.StreamHandler()
+_handler.setFormatter(_RES4LYFFormatter())
+logger.addHandler(_handler)
+logger.propagate = False  # Don't duplicate to root logger
+logger.setLevel(logging.INFO)
 
 using_RES4LYF_time_snr_shift = False
 original_time_snr_shift = comfy.model_sampling.time_snr_shift
@@ -79,6 +105,7 @@ async def log_message(request):
         return web.Response(status=500, text=str(e))
     
 def init(check_imports=None):
+    init_logging()
     RESplain("Init")
 
     # initialize display category
@@ -126,30 +153,41 @@ def get_config_value(key, default=None, throw=False):
     return d.get(keys[-1], default)
 
 
-def is_debug_logging_enabled():
-    logging_enabled = get_config_value("enableDebugLogs", False)
-    return logging_enabled
-
-def RESplain(*args, debug='info'):
-    if isinstance(debug, bool):
-        type = 'debug' if debug else 'info'
+def init_logging():
+    if get_config_value("enableDebugLogs", False):
+        logger.setLevel(logging.DEBUG)
     else:
-        type = debug
+        logger.setLevel(logging.INFO)
 
-    if type == 'debug' and not is_debug_logging_enabled():
-        return
-    
+def is_debug_logging_enabled():
+    return logger.isEnabledFor(logging.DEBUG)
+
+def RESplain(*args, level='info', debug=None):
+    # Don't use debug parameter in the future, it is just there for backward compatibility. Use level='debug' instead.
+    if debug is not None:
+        if isinstance(debug, bool):
+            level = 'debug' if debug else 'info'
+        else:
+            level = str(debug).lower()
+    elif isinstance(level, bool):
+        level = 'debug' if level else 'info'
+    else:
+        level = str(level).lower()
+
     if not args:
         return
 
-    name = get_extension_config()["name"]
+    log_level = {
+        'debug': logging.DEBUG,
+        'info': logging.INFO,
+        'warning': logging.WARNING,
+        'error': logging.ERROR,
+        'critical': logging.CRITICAL,
+    }.get(level, logging.INFO)
 
-    message = " ".join(map(str, args))
-
-    if type != 'debug' and type != 'warning':
-        print(f"({name}) {message}")
-    else:
-        print(f"({name} {type}) {message}")
+    if logger.isEnabledFor(log_level):
+        message = " ".join(map(str, args))
+        logger.log(log_level, message)
 
 def get_ext_dir(subpath=None, mkdir=False):
     dir = os.path.dirname(__file__)
@@ -234,8 +272,7 @@ def link_js(src, dst):
         os.symlink(src, dst)
         return True
     except:
-        import logging
-        logging.exception('')
+        logger.exception("Failed to create symlink")
         return False
 
 
@@ -256,7 +293,7 @@ def install_js():
 
     should_install = should_install_js()
     if should_install:
-        RESplain("it looks like you're running an old version of ComfyUI that requires manual setup of web files, it is recommended you update your installation.", "warning", True)
+        RESplain("it looks like you're running an old version of ComfyUI that requires manual setup of web files, it is recommended you update your installation.", level='warning')
     dst_dir = get_web_ext_dir()
     linked = os.path.islink(dst_dir) or is_junction(dst_dir)
     if linked or os.path.exists(dst_dir):
@@ -380,20 +417,6 @@ async def update_node_status_async(client_id, node, text, progress=None):
         "progress": progress,
         "text": text
     }, client_id)
-
-
-def get_config_value(key, default=None, throw=False):
-    split = key.split(".")
-    obj = get_extension_config()
-    for s in split:
-        if s in obj:
-            obj = obj[s]
-        else:
-            if throw:
-                raise KeyError("Configuration key missing: " + key)
-            else:
-                return default
-    return obj
 
 
 def is_inside_dir(root_dir, check_path):

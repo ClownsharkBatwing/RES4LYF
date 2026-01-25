@@ -151,20 +151,10 @@ class SigmasPreview(SaveImage):
             RESplain("="*60)
             
             # Print basic stats
-            RESplain(f"Total steps: {len(sigmas_list)}")
+            RESplain(f"Total sigma values: {len(sigmas_list)}")
             RESplain(f"Min sigma:   {min(sigmas_list):.4f}")
             RESplain(f"Max sigma:   {max(sigmas_list):.4f}")
-          
-            # Print the clean sigma values
-            RESplain(f"\nSigma values ({len(sigmas_list)} steps):")
-            RESplain("-" * 40)
-            
-            # Print in rows of 5 for readability
-            for i in range(0, len(sigmas_list), 5):
-                row = sigmas_list[i:i+5]
-                row_str = "  ".join(f"{val:8.4f}" for val in row)
-                RESplain(f"Step {i:2d}-{min(i+4, len(sigmas_list)-1):2d}: {row_str}")
-            
+                      
             # Calculate and print percentages (normalized 0-1)
             sigmas_percentages = ((sigmas-sigmas.min())/(sigmas.max()-sigmas.min())).tolist()
             sigmas_percentages = [round(p, 4) for p in sigmas_percentages]

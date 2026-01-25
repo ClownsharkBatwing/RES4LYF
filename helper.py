@@ -47,10 +47,7 @@ class ExtraOptions():
             if match:
                 value = match.group(1)
                 if not self.mute and debugMode != 2:
-                    if debugMode == 1:
-                        RESplain("Set extra_option: ", option, "=", value, debug=True)
-                    else:
-                        RESplain("Set extra_option: ", option, "=", value)
+                    RESplain("Set extra_option: ", option, "=", value, debug=True)
             else:
                 value = default
                 
@@ -74,15 +71,19 @@ class ExtraOptions():
                 else:
                     value = ret_type(match.group(1))
                 if not self.mute and debugMode != 2:
-                    if debugMode == 1:
-                        RESplain("Set extra_option: ", option, "=", value, debug=True)
-                    else:
-                        RESplain("Set extra_option: ", option, "=", value)
+                    RESplain("Set extra_option: ", option, "=", value, debug=True)
             else:
                 value = default
+
+        # if "mute_EO" is in extra_options, set mute to True
+        if "mute_EO" in self.extra_options:
+            self.set_mute(True)
         
         return value
-
+    
+    def set_mute(self, mute=True):
+        self.mute = mute
+        return self
 
 
 
