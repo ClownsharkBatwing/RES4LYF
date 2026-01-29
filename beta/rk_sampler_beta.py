@@ -242,7 +242,7 @@ def sample_rk_beta(
         return x
     
     EO             = ExtraOptions(extra_options)
-    default_dtype  = EO("default_dtype", torch.float64)
+    default_dtype  = EO("default_dtype", torch.float32)
     
     extra_args     = {} if extra_args     is None else extra_args
     model_device   = model.inner_model.inner_model.device #x.device
