@@ -296,7 +296,12 @@ class SharkSampler:
                 work_model   = model#.clone()
             
             if latent_image is not None:
-                latent_image['samples'] = comfy.sample.fix_empty_latent_channels(work_model, latent_image['samples'])
+                latent_image = latent_image.copy()
+                samples_fixed = comfy.sample.fix_empty_latent_channels(work_model, latent_image['samples'])
+                if isinstance(samples_fixed, comfy.nested_tensor.NestedTensor):
+                    latent_image['samples'] = comfy.nested_tensor.NestedTensor([t.clone() for t in samples_fixed.unbind()])
+                else:
+                    latent_image['samples'] = samples_fixed.clone()
                 
             if positive is None or negative is None:
                 from ..conditioning import EmptyConditioningGenerator
@@ -364,7 +369,10 @@ class SharkSampler:
                 latent_x['samples'] = samples._copy() if isinstance(samples, comfy.nested_tensor.NestedTensor) else samples.clone()
                 if 'noise_mask' in latent_image:
                     noise_mask = latent_image['noise_mask']
-                    latent_x['noise_mask'] = noise_mask._copy() if isinstance(noise_mask, comfy.nested_tensor.NestedTensor) else noise_mask.clone()
+                    if isinstance(noise_mask, comfy.nested_tensor.NestedTensor):
+                        latent_x['noise_mask'] = comfy.nested_tensor.NestedTensor([t.clone() for t in noise_mask.unbind()])
+                    else:
+                        latent_x['noise_mask'] = noise_mask.clone()
                 state_info = copy.deepcopy(latent_image['state_info']) if 'state_info' in latent_image else {}
             else:
                 state_info = {}
