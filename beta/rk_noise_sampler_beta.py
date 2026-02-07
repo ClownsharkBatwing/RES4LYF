@@ -133,9 +133,9 @@ class RK_NoiseSampler:
         self.s_in                   = x.new_ones([1], dtype=self.dtype, device=self.device)
         
         if noise_seed < 0 and last_rng is None:
-            seed = torch.initial_seed()+1 
+            seed = torch.initial_seed()+1
             RESplain("SDE noise seed: ", seed, " (set via torch.initial_seed()+1)", debug=True)
-        if noise_seed < 0 and last_rng is not None:
+        elif noise_seed < 0 and last_rng is not None:
             seed = torch.initial_seed() 
             RESplain("SDE noise seed: ", seed, " (set via torch.initial_seed())", debug=True)
         else:
@@ -150,13 +150,15 @@ class RK_NoiseSampler:
             self.noise_sampler.alpha  = alpha
             self.noise_sampler.k      = k
             self.noise_sampler.scale  = scale
+        else:
+            self.noise_sampler  = NOISE_GENERATOR_CLASSES_SIMPLE.get(noise_sampler_type )(x=x, seed=seed,               sigma_min=self.sigma_min, sigma_max=self.sigma_max)
+
         if noise_sampler_type2 == "fractal":
             self.noise_sampler2       = NOISE_GENERATOR_CLASSES.get(noise_sampler_type2)(x=x, seed=noise_seed_substep, sigma_min=self.sigma_min, sigma_max=self.sigma_max)
             self.noise_sampler2.alpha = alpha2
             self.noise_sampler2.k     = k2
             self.noise_sampler2.scale = scale2
         else:
-            self.noise_sampler  = NOISE_GENERATOR_CLASSES_SIMPLE.get(noise_sampler_type )(x=x, seed=seed,               sigma_min=self.sigma_min, sigma_max=self.sigma_max)
             self.noise_sampler2 = NOISE_GENERATOR_CLASSES_SIMPLE.get(noise_sampler_type2)(x=x, seed=noise_seed_substep, sigma_min=self.sigma_min, sigma_max=self.sigma_max)
             
         if last_rng is not None:
