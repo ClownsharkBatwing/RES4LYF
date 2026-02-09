@@ -2128,7 +2128,7 @@ def sample_rk_beta(
         preview_callback(x, eps, denoised, x_, eps_, data_, callback_step, sigma, sigma_next, callback, EO, preview_override=data_cached, FLOW_STOPPED=FLOW_STOPPED)
 
     if INIT_SAMPLE_LOOP:
-        state_info_out = state_info
+        state_info_out.update(state_info)
     else:
         if guides is not None and guides.get('guide_mode', "") == 'inversion':
             guide_inversion_y0     = state_info.get('guide_inversion_y0')
