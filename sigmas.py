@@ -12,6 +12,7 @@ import math
 
 from comfy.k_diffusion.sampling import get_sigmas_polyexponential, get_sigmas_karras
 import comfy.samplers
+import comfy.model_management
 
 from torch import Tensor, nn
 from typing import Optional, Callable, Tuple, Dict, Any, Union, TYPE_CHECKING, TypeVar
@@ -1325,8 +1326,8 @@ class ClownScheduler:
                                             )
         else:
             default_dtype  = torch.float64
-            default_device = torch.device("cuda") 
-            
+            default_device = comfy.model_management.get_torch_device()
+
             if scheduler_end_step == -1:
                 scheduler_total_steps = total_steps - scheduler_start_step
             else:
@@ -1370,8 +1371,8 @@ class ClownScheduler:
                                 ) -> Tuple[Tensor]:
 
         default_dtype  = torch.float64
-        default_device = torch.device("cuda") 
-        
+        default_device = comfy.model_management.get_torch_device()
+
         return (None,)
 
 
