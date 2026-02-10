@@ -1325,8 +1325,8 @@ class ClownScheduler:
                                             flip_schedule   = flip_schedule,
                                             )
         else:
-            default_dtype  = torch.float64
             default_device = comfy.model_management.get_torch_device()
+            default_dtype  = torch.float32 if default_device.type == "mps" else torch.float64
 
             if scheduler_end_step == -1:
                 scheduler_total_steps = total_steps - scheduler_start_step
@@ -1370,8 +1370,8 @@ class ClownScheduler:
                                 flip_schedule            = False,
                                 ) -> Tuple[Tensor]:
 
-        default_dtype  = torch.float64
         default_device = comfy.model_management.get_torch_device()
+        default_dtype  = torch.float32 if default_device.type == "mps" else torch.float64
 
         return (None,)
 
