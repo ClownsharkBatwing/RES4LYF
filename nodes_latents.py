@@ -300,6 +300,7 @@ class LatentUpscaleBy_state_info:
 
     CATEGORY = "latent"
 
+    @staticmethod
     def _upscale_tensor(tensor, upscale_method, scale_by):
         width = round(tensor.shape[-1] * scale_by)
         height = round(tensor.shape[-2] * scale_by)
@@ -342,24 +343,49 @@ class latent_replace_state_info:
         return {
             "required": {
                     "latent": ("LATENT", ),
-                    "clear_raw_x": ("BOOLEAN", {"default": False}),
-                    "replace_end_step": ("INT", {"default": 0, "min": -10000, "max": 10000}),
+                    "replace_start_step": ("BOOLEAN", {"default": False}),
+                    "replace_end_step": ("BOOLEAN", {"default": False}),
+                    "replace_raw_x": ("BOOLEAN", {"default": False}),
+                    "replace_sigmas": ("BOOLEAN", {"default": False}),
                      },
+            "optional": {
+                    "start_step": ("INT", {"default": 0, "min": -10000, "max": 10000}),
+                    "end_step": ("INT", {"default": 0, "min": -10000, "max": 10000}),
+                    "raw_x": ("LATENT", {"default": None}),
+                    "sigmas": ("SIGMAS", {"default": None}),
                 }
+        }
 
     RETURN_TYPES = ("LATENT",)
     RETURN_NAMES = ("latent",)
     FUNCTION     = "main"
     CATEGORY     = "RES4LYF/latents"
 
-    def main(self, latent, clear_raw_x, replace_end_step):
-        latent_out = copy.deepcopy(latent)
+    def main(self, latent, replace_start_step, replace_end_step, replace_raw_x, replace_sigmas,
+              start_step=None, end_step=None, raw_x=None, sigmas=None):
+        latent_out = latent.copy()
         if 'state_info' not in latent_out:
             latent_out['state_info'] = {}
-        if clear_raw_x:
-            latent_out['state_info']['raw_x'] = None
-        if replace_end_step != 0:
-            latent_out['state_info']['end_step'] = replace_end_step
+        if replace_start_step:
+            if start_step is None and 'start_step' in latent_out['state_info']:
+                latent_out['state_info'].pop('start_step', None)
+            else:
+                latent_out['state_info']['start_step'] = start_step
+        if replace_end_step:
+            if end_step is None and 'end_step' in latent_out['state_info']:
+                latent_out['state_info'].pop('end_step', None)
+            else:
+                latent_out['state_info']['end_step'] = end_step
+        if replace_raw_x:
+            if raw_x is None and 'raw_x' in latent_out['state_info']:
+                latent_out['state_info'].pop('raw_x', None)
+            else:
+                latent_out['state_info']['raw_x'] = raw_x
+        if replace_sigmas:
+            if sigmas is None and 'sigmas' in latent_out['state_info']:
+                latent_out['state_info'].pop('sigmas', None)
+            else:
+                latent_out['state_info']['sigmas'] = sigmas
         return (latent_out,)
 
 
@@ -416,6 +442,48 @@ class latent_display_state_info:
         return {"ui": {"text": text}, "result": (text,)}
 
 
+class latent_extract_state_info:
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {"required": {"latent": ("LATENT",)}}
+
+    RETURN_TYPES  = ("SIGMAS", "SIGMAS", "SIGMAS", "INT", "STRING", "BOOLEAN")
+    RETURN_NAMES  = ("sigmas", "sigmas_remaining", "sigma_next", "end_step", "sampler_mode", "completed")
+    FUNCTION      = "main"
+    CATEGORY      = "RES4LYF/latents"
+
+    @staticmethod
+    def _strip_padding_zeros(sigmas):
+        """Strip leading/trailing zero-padding flags added by samplers.py for unsample/resample modes."""
+        if sigmas.numel() == 0:
+            return sigmas
+        # strip leading zeros
+        first_nonzero = (sigmas != 0).nonzero(as_tuple=True)[0]
+        if first_nonzero.numel() > 0:
+            sigmas = sigmas[first_nonzero[0]:]
+        # strip duplicate trailing zeros (keep at most one)
+        while sigmas.numel() >= 2 and sigmas[-1] == 0 and sigmas[-2] == 0:
+            sigmas = sigmas[:-1]
+        return sigmas
+
+    def main(self, latent):
+        si = latent.get('state_info', {})
+        sigmas_raw = si.get('sigmas', torch.empty(0))
+        sigmas     = self._strip_padding_zeros(sigmas_raw.clone())
+        end_step   = int(si.get('end_step', 0))
+
+        # compute remaining sigmas: from end_step+1 onward in the raw schedule, then strip padding
+        if sigmas_raw.numel() > 0 and end_step + 1 < sigmas_raw.numel():
+            sigmas_remaining = self._strip_padding_zeros(sigmas_raw[end_step + 1:].clone())
+        else:
+            sigmas_remaining = torch.empty(0)
+
+        sigma_next = si.get('sigma_next', torch.empty(0))
+        if sigma_next.dim() == 0:
+            sigma_next = sigma_next.unsqueeze(0)
+        sampler_mode = str(si.get('sampler_mode', ''))
+        completed    = bool(si.get('completed', False))
+        return (sigmas, sigmas_remaining, sigma_next, end_step, sampler_mode, completed)
 
 
 
