@@ -6,3 +6,6 @@ __pycache__/
 tests/
 /*.json
 *.config.json
+*.local.json
+.claude/
+CLAUDE.md
