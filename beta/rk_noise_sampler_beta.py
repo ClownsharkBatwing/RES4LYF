@@ -806,16 +806,22 @@ class RK_NoiseSampler:
                 UNSAMPLE_FROM_ZERO = True
             #sigmas   = sigmas[1:-1]   # was cleaving off 1.0 at the end when restart looping
             sigmas   = sigmas[1:]
-            if sigmas[-1] == 0.0:
+            if sigmas.numel() > 0 and sigmas[-1] == 0.0:
                 sigmas = sigmas[:-1]
         else:
             UNSAMPLE = False
+        
+        if sigmas.numel() == 0:
+            sigmas = torch.full((1,), SIGMA_MIN, dtype=sigmas.dtype, device=sigmas.device)
         
         if hasattr(self.model, "sigmas"):
             self.model.sigmas = sigmas
             
         if sampler_mode == "standard":
             UNSAMPLE = False
+        
+        if sigmas.numel() == 0:
+            sigmas = torch.full((1,), SIGMA_MIN, dtype=sigmas.dtype, device=sigmas.device)
         
         consecutive_duplicate_mask = torch.cat((torch.tensor([True], device=sigmas.device), torch.diff(sigmas) != 0))
         sigmas = sigmas[consecutive_duplicate_mask]
