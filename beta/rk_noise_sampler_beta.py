@@ -802,7 +802,7 @@ class RK_NoiseSampler:
         UNSAMPLE_FROM_ZERO = False
         if sigmas[0] == 0.0:      #remove padding used to prevent comfy from adding noise to the latent (for unsampling, etc.)
             UNSAMPLE = True
-            if sigmas[-1] == 0.0:
+            if sigmas.numel() > 0 and sigmas[-1] == 0.0:
                 UNSAMPLE_FROM_ZERO = True
             #sigmas   = sigmas[1:-1]   # was cleaving off 1.0 at the end when restart looping
             sigmas   = sigmas[1:]
