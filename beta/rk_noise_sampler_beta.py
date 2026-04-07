@@ -795,10 +795,10 @@ class RK_NoiseSampler:
             
         if d_noise_start_step == 0:
             sigmas = sigmas.clone() * d_noise
-        
+
         if sigmas.numel() == 0:
             sigmas = torch.full((1,), SIGMA_MIN, dtype=sigmas.dtype, device=sigmas.device)
-        
+
         UNSAMPLE_FROM_ZERO = False
         if sigmas[0] == 0.0:      #remove padding used to prevent comfy from adding noise to the latent (for unsampling, etc.)
             UNSAMPLE = True
@@ -810,7 +810,7 @@ class RK_NoiseSampler:
                 sigmas = sigmas[:-1]
         else:
             UNSAMPLE = False
-        
+
         if sigmas.numel() == 0:
             sigmas = torch.full((1,), SIGMA_MIN, dtype=sigmas.dtype, device=sigmas.device)
         
@@ -819,19 +819,19 @@ class RK_NoiseSampler:
             
         if sampler_mode == "standard":
             UNSAMPLE = False
-        
+
         if sigmas.numel() == 0:
             sigmas = torch.full((1,), SIGMA_MIN, dtype=sigmas.dtype, device=sigmas.device)
-        
+
         consecutive_duplicate_mask = torch.cat((torch.tensor([True], device=sigmas.device), torch.diff(sigmas) != 0))
         sigmas = sigmas[consecutive_duplicate_mask]
-                
+
         if sigmas.numel() > 1 and sigmas[-1] == 0:
             if sigmas[-2] < SIGMA_MIN:
                 sigmas[-2] = SIGMA_MIN
             elif (sigmas[-2] - SIGMA_MIN).abs() > 1e-4:
                 sigmas = torch.cat((sigmas[:-1], SIGMA_MIN.unsqueeze(0), sigmas[-1:]))
-                
+
         elif UNSAMPLE_FROM_ZERO and not torch.isclose(sigmas[0], SIGMA_MIN):
             sigmas = torch.cat([SIGMA_MIN.unsqueeze(0), sigmas])
         
