@@ -1,6 +1,4 @@
 import torch
-import base64
-import pickle # used strictly for serializing conditioning in the ConditioningToBase64 and Base64ToConditioning nodes for API use. (Offloading T5 processing to another machine to avoid model shuffling.)
 
 import comfy.samplers
 import comfy.sample
@@ -402,76 +400,6 @@ class Conditioning_Recast64:
             cond_1[0][1]["pooled_output"] = cond_1[0][1]["pooled_output"].to(torch.float64)
 
         return (cond_0, cond_1,)
-
-
-class ConditioningToBase64:
-    @classmethod
-    def INPUT_TYPES(s):
-        return {
-            "required": {
-                "conditioning": ("CONDITIONING",),
-            },
-            "hidden": {
-                "unique_id": "UNIQUE_ID",
-                "extra_pnginfo": "EXTRA_PNGINFO",
-            },
-        }
-
-    RETURN_TYPES = ("STRING",)
-    FUNCTION = "notify"
-    OUTPUT_NODE = True
-    OUTPUT_IS_LIST = (True,)
-
-    CATEGORY = "RES4LYF/utilities"
-
-    def notify(self, unique_id=None, extra_pnginfo=None, conditioning=None):
-        conditioning_pickle = pickle.dumps(conditioning)
-        conditioning_base64 = base64.b64encode(conditioning_pickle).decode('utf-8')
-        text = [conditioning_base64]
-        
-        if unique_id is not None and extra_pnginfo is not None:
-            if not isinstance(extra_pnginfo, list):
-                RESplain("Error: extra_pnginfo is not a list")
-            elif (
-                not isinstance(extra_pnginfo[0], dict)
-                or "workflow" not in extra_pnginfo[0]
-            ):
-                RESplain("Error: extra_pnginfo[0] is not a dict or missing 'workflow' key")
-            else:
-                workflow = extra_pnginfo[0]["workflow"]
-                node = next(
-                    (x for x in workflow["nodes"] if str(x["id"]) == str(unique_id[0])),
-                    None,
-                )
-                if node:
-                    node["widgets_values"] = [text]
-
-        return {"ui": {"text": text}, "result": (text,)}
-
-class Base64ToConditioning:
-    @classmethod
-    def INPUT_TYPES(s):
-        return {
-            "required": {
-                "data": ("STRING", {"default": ""}),
-            }
-        }
-    RETURN_TYPES = ("CONDITIONING",)
-    RETURN_NAMES = ("conditioning",)
-    FUNCTION = "main"
-
-    CATEGORY = "RES4LYF/utilities"
-
-    def main(self, data):
-        conditioning_pickle = base64.b64decode(data)
-        conditioning = pickle.loads(conditioning_pickle)
-        return (conditioning,)
-
-
-
-
-
-
 
 
 class RegionalMask(torch.nn.Module):
