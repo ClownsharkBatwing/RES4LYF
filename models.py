@@ -334,58 +334,41 @@ class ReFluxPatcherAdvanced:
     FUNCTION     = "main"
 
     def main(self, model, doublestream_blocks, singlestream_blocks, style_dtype, enable=True, force=False):
-        
+
         doublestream_blocks = parse_range_string(doublestream_blocks)
         singlestream_blocks = parse_range_string(singlestream_blocks)
-        
+
         style_dtype = getattr(torch, style_dtype) if style_dtype != "default" else None
-        
-        model.model.diffusion_model.style_dtype = style_dtype
-        model.model.diffusion_model.proj_weights = None
-        model.model.diffusion_model.y0_adain_embed = None
-        model.model.diffusion_model.adain_pw_cache = None
-        
-        model.model.diffusion_model.StyleWCT = StyleWCT()
-        model.model.diffusion_model.Retrojector = Retrojector(model.model.diffusion_model.img_in, pinv_dtype=style_dtype, dtype=style_dtype)
-        
-        if (enable or force) and model.model.diffusion_model.__class__ == Flux:
-            m = model.clone()
-            m.model.diffusion_model.__class__     = ReFlux
-            m.model.diffusion_model.threshold_inv = False
-            
-            for i, block in enumerate(m.model.diffusion_model.double_blocks):
-                if i in doublestream_blocks:
-                    block.__class__ = ReDoubleStreamBlock
-                else:
-                    block.__class__ = ReDoubleStreamBlockNoMask
-                block.idx       = i
 
-            for i, block in enumerate(m.model.diffusion_model.single_blocks):
-                if i in singlestream_blocks:
-                    block.__class__ = ReSingleStreamBlock
-                else:
-                    block.__class__ = ReSingleStreamBlockNoMask
-                block.idx       = i
-                
-        
-        elif not enable and model.model.diffusion_model.__class__ == ReFlux:
-            m = model.clone()
-            m.model.diffusion_model.__class__ = Flux
-            
-            for i, block in enumerate(m.model.diffusion_model.double_blocks):
-                block.__class__ = DoubleStreamBlock
-                block.idx       = i
-
-            for i, block in enumerate(m.model.diffusion_model.single_blocks):
-                block.__class__ = SingleStreamBlock
-                block.idx       = i
-                
-        #elif model.model.diffusion_model.__class__ != Flux and model.model.diffusion_model.__class__ != ReFlux:
-        elif model.model.diffusion_model.__class__ not in {ReFlux, Flux}:
+        dm = model.model.diffusion_model
+        if dm.__class__ not in {ReFlux, Flux}:
             raise ValueError("This node is for enabling regional conditioning for Flux only!")
-        else:
-            m = model
-        
+
+        m = model.clone()
+
+        if not (enable or force):
+            return (m,)
+
+        m.add_object_patch("diffusion_model.style_dtype",     style_dtype)
+        m.add_object_patch("diffusion_model.proj_weights",    None)
+        m.add_object_patch("diffusion_model.y0_adain_embed",  None)
+        m.add_object_patch("diffusion_model.adain_pw_cache",  None)
+        m.add_object_patch("diffusion_model.StyleWCT",        StyleWCT())
+        m.add_object_patch("diffusion_model.Retrojector",     Retrojector(dm.img_in, pinv_dtype=style_dtype, dtype=style_dtype))
+        m.add_object_patch("diffusion_model.threshold_inv",   False)
+
+        for i in range(len(dm.double_blocks)):
+            m.add_object_patch(f"diffusion_model.double_blocks.{i}.idx", i)
+            block_cls = ReDoubleStreamBlock if i in doublestream_blocks else ReDoubleStreamBlockNoMask
+            m.add_object_patch(f"diffusion_model.double_blocks.{i}.__class__", block_cls)
+
+        for i in range(len(dm.single_blocks)):
+            m.add_object_patch(f"diffusion_model.single_blocks.{i}.idx", i)
+            block_cls = ReSingleStreamBlock if i in singlestream_blocks else ReSingleStreamBlockNoMask
+            m.add_object_patch(f"diffusion_model.single_blocks.{i}.__class__", block_cls)
+
+        m.add_object_patch("diffusion_model.__class__", ReFlux)
+
         return (m,)
     
 class ReFluxPatcher(ReFluxPatcherAdvanced):
