@@ -1232,7 +1232,7 @@ class ClownRegionalConditioning_AB:
             cond = copy.deepcopy(conditioning_A)
             
             if isinstance(model.model.model_config, (comfy.supported_models.WAN21_T2V, comfy.supported_models.WAN21_I2V)):
-                if model.model.diffusion_model.blocks[0].self_attn.winderz_type != "false":
+                if getattr(model.model.diffusion_model.blocks[0].self_attn, "winderz_type", "false") != "false":
                     AttnMask = CrossAttentionMask(mask_type, edge_width)
                 else:
                     AttnMask = SplitAttentionMask(mask_type, edge_width)
@@ -1244,7 +1244,7 @@ class ClownRegionalConditioning_AB:
                 AttnMask = FullAttentionMask(mask_type, edge_width)
 
             RegContext = RegionalContext()
-            
+
             if isinstance(model.model.model_config, comfy.supported_models.HiDream):
 
                 AttnMask.add_region_sizes(
@@ -1466,7 +1466,7 @@ class ClownRegionalConditioning_ABC:
             conditioning = copy.deepcopy(conditioning_A)
             
             if isinstance(model.model.model_config, (comfy.supported_models.WAN21_T2V, comfy.supported_models.WAN21_I2V)):
-                if model.model.diffusion_model.blocks[0].self_attn.winderz_type != "false":
+                if getattr(model.model.diffusion_model.blocks[0].self_attn, "winderz_type", "false") != "false":
                     AttnMask = CrossAttentionMask(mask_type, edge_width)
                 else:
                     AttnMask = SplitAttentionMask(mask_type, edge_width)
@@ -1798,7 +1798,7 @@ class ClownRegionalConditionings:
         conditioning = copy.deepcopy(cond_list[0])
         
         if isinstance(model.model.model_config, comfy.supported_models.WAN21_T2V) or isinstance(model.model.model_config, comfy.supported_models.WAN21_I2V):
-            if model.model.diffusion_model.blocks[0].self_attn.winderz_type != "false":
+            if getattr(model.model.diffusion_model.blocks[0].self_attn, "winderz_type", "false") != "false":
                 AttnMask = CrossAttentionMask  (mask_type, edge_width_list=edge_width_list, use_self_attn_mask_list=use_self_attn_mask_list)
             else:
                 AttnMask = SplitAttentionMask  (mask_type, edge_width_list=edge_width_list, use_self_attn_mask_list=use_self_attn_mask_list)

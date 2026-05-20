@@ -1058,7 +1058,7 @@ class HDModel(nn.Module):
                     eps_embed = self.Endojector.embed(eps_style)
                     img = StyleMMDiT.scattersort_(img.to(eps_embed), eps_embed)
                 
-                img = self.final_layer.linear(img.to(self.final_layer.linear.weight.data))
+                img = self.final_layer.linear(img.to(dtype=self.final_layer.linear.weight.dtype))
 
                 img = self.unpatchify(img, img_sizes)
                 out_list.append(img)
