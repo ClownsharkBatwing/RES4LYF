@@ -463,56 +463,40 @@ class ReChromaPatcherAdvanced:
     FUNCTION     = "main"
 
     def main(self, model, doublestream_blocks, singlestream_blocks, style_dtype, enable=True, force=False):
-        
+
         doublestream_blocks = parse_range_string(doublestream_blocks)
         singlestream_blocks = parse_range_string(singlestream_blocks)
-        
+
         style_dtype = getattr(torch, style_dtype) if style_dtype != "default" else None
-        model.model.diffusion_model.style_dtype = style_dtype
-        model.model.diffusion_model.proj_weights = None
-        model.model.diffusion_model.y0_adain_embed = None
-        
-        model.model.diffusion_model.StyleWCT = StyleWCT()
-        model.model.diffusion_model.Retrojector = Retrojector(model.model.diffusion_model.img_in, pinv_dtype=style_dtype, dtype=style_dtype)
-        
-        if (enable or force) and model.model.diffusion_model.__class__ == Chroma:
-            m = model.clone()
-            m.model.diffusion_model.__class__     = ReChroma
-            m.model.diffusion_model.threshold_inv = False
-            
-            for i, block in enumerate(m.model.diffusion_model.double_blocks):
-                if i in doublestream_blocks:
-                    block.__class__ = ReChromaDoubleStreamBlock
-                else:
-                    block.__class__ = ReChromaDoubleStreamBlockNoMask
-                block.idx       = i
 
-            for i, block in enumerate(m.model.diffusion_model.single_blocks):
-                if i in singlestream_blocks:
-                    block.__class__ = ReChromaSingleStreamBlock
-                else:
-                    block.__class__ = ReChromaSingleStreamBlockNoMask
-                block.idx       = i
-                
-        
-        elif not enable and model.model.diffusion_model.__class__ == ReChroma:
-            m = model.clone()
-            m.model.diffusion_model.__class__ = Chroma
-            
-            for i, block in enumerate(m.model.diffusion_model.double_blocks):
-                block.__class__ = DoubleStreamBlock
-                block.idx       = i
-
-            for i, block in enumerate(m.model.diffusion_model.single_blocks):
-                block.__class__ = SingleStreamBlock
-                block.idx       = i
-                
-        #elif model.model.diffusion_model.__class__ != Chroma and model.model.diffusion_model.__class__ != ReChroma:
-        elif model.model.diffusion_model.__class__ not in {ReChroma, Chroma}:
+        dm = model.model.diffusion_model
+        if dm.__class__ not in {ReChroma, Chroma}:
             raise ValueError("This node is for enabling regional conditioning for Chroma only!")
-        else:
-            m = model
-        
+
+        m = model.clone()
+
+        if not (enable or force):
+            return (m,)
+
+        m.add_object_patch("diffusion_model.style_dtype",     style_dtype)
+        m.add_object_patch("diffusion_model.proj_weights",    None)
+        m.add_object_patch("diffusion_model.y0_adain_embed",  None)
+        m.add_object_patch("diffusion_model.StyleWCT",        StyleWCT())
+        m.add_object_patch("diffusion_model.Retrojector",     Retrojector(dm.img_in, pinv_dtype=style_dtype, dtype=style_dtype))
+        m.add_object_patch("diffusion_model.threshold_inv",   False)
+
+        for i in range(len(dm.double_blocks)):
+            m.add_object_patch(f"diffusion_model.double_blocks.{i}.idx", i)
+            block_cls = ReChromaDoubleStreamBlock if i in doublestream_blocks else ReChromaDoubleStreamBlockNoMask
+            m.add_object_patch(f"diffusion_model.double_blocks.{i}.__class__", block_cls)
+
+        for i in range(len(dm.single_blocks)):
+            m.add_object_patch(f"diffusion_model.single_blocks.{i}.idx", i)
+            block_cls = ReChromaSingleStreamBlock if i in singlestream_blocks else ReChromaSingleStreamBlockNoMask
+            m.add_object_patch(f"diffusion_model.single_blocks.{i}.__class__", block_cls)
+
+        m.add_object_patch("diffusion_model.__class__", ReChroma)
+
         return (m,)
     
 class ReChromaPatcher(ReChromaPatcherAdvanced):
@@ -568,56 +552,30 @@ class ReLTXVPatcherAdvanced:
     FUNCTION     = "main"
 
     def main(self, model, doublestream_blocks, singlestream_blocks, style_dtype, enable=True, force=False):
-        
+
         doublestream_blocks = parse_range_string(doublestream_blocks)
         singlestream_blocks = parse_range_string(singlestream_blocks)
-        
+
         style_dtype = getattr(torch, style_dtype) if style_dtype != "default" else None
-        model.model.diffusion_model.style_dtype = style_dtype
-        model.model.diffusion_model.proj_weights = None
-        model.model.diffusion_model.y0_adain_embed = None
-        
-        model.model.diffusion_model.StyleWCT = StyleWCT()
-        model.model.diffusion_model.Retrojector = Retrojector(model.model.diffusion_model.patchify_proj, pinv_dtype=style_dtype, dtype=style_dtype)
-        
-        if (enable or force) and model.model.diffusion_model.__class__ == LTXVModel:
-            m = model.clone()
-            m.model.diffusion_model.__class__     = ReLTXVModel
-            m.model.diffusion_model.threshold_inv = False
-            
-            """for i, block in enumerate(m.model.diffusion_model.double_blocks):
-                if i in doublestream_blocks:
-                    block.__class__ = ReChromaDoubleStreamBlock
-                else:
-                    block.__class__ = ReChromaDoubleStreamBlockNoMask
-                block.idx       = i
 
-            for i, block in enumerate(m.model.diffusion_model.single_blocks):
-                if i in singlestream_blocks:
-                    block.__class__ = ReChromaSingleStreamBlock
-                else:
-                    block.__class__ = ReChromaSingleStreamBlockNoMask
-                block.idx       = i"""
-                
-        
-        elif not enable and model.model.diffusion_model.__class__ == ReLTXVModel:
-            m = model.clone()
-            m.model.diffusion_model.__class__ = LTXVModel
-            
-            """for i, block in enumerate(m.model.diffusion_model.double_blocks):
-                block.__class__ = DoubleStreamBlock
-                block.idx       = i
-
-            for i, block in enumerate(m.model.diffusion_model.single_blocks):
-                block.__class__ = SingleStreamBlock
-                block.idx       = i"""
-                
-        #elif model.model.diffusion_model.__class__ != LTXVModel and model.model.diffusion_model.__class__ != ReLTXVModel:
-        elif model.model.diffusion_model.__class__ not in {ReLTXVModel, LTXVModel}:
+        dm = model.model.diffusion_model
+        if dm.__class__ not in {ReLTXVModel, LTXVModel}:
             raise ValueError("This node is for enabling regional conditioning for LTXV only!")
-        else:
-            m = model
-        
+
+        m = model.clone()
+
+        if not (enable or force):
+            return (m,)
+
+        m.add_object_patch("diffusion_model.style_dtype",     style_dtype)
+        m.add_object_patch("diffusion_model.proj_weights",    None)
+        m.add_object_patch("diffusion_model.y0_adain_embed",  None)
+        m.add_object_patch("diffusion_model.StyleWCT",        StyleWCT())
+        m.add_object_patch("diffusion_model.Retrojector",     Retrojector(dm.patchify_proj, pinv_dtype=style_dtype, dtype=style_dtype))
+        m.add_object_patch("diffusion_model.threshold_inv",   False)
+
+        m.add_object_patch("diffusion_model.__class__", ReLTXVModel)
+
         return (m,)
     
 class ReLTXVPatcher(ReLTXVPatcherAdvanced):
@@ -964,41 +922,35 @@ class ReSD35PatcherAdvanced:
     FUNCTION     = "main"
 
     def main(self, model, joint_blocks, style_dtype, enable=True, force=False):
-        
+
         style_dtype = getattr(torch, style_dtype) if style_dtype != "default" else None
-        model.model.diffusion_model.style_dtype = style_dtype
-        model.model.diffusion_model.proj_weights = None
-        model.model.diffusion_model.y0_adain_embed = None
-        
-        model.model.diffusion_model.StyleWCT    = StyleWCT()
-        model.model.diffusion_model.Retrojector = Retrojector(model.model.diffusion_model.x_embedder.proj, pinv_dtype=style_dtype, dtype=style_dtype)
-        
+
         joint_blocks = parse_range_string(joint_blocks)
-        
-        if (enable or force) and model.model.diffusion_model.__class__ == OpenAISignatureMMDITWrapper:
-            m = model.clone()
-            m.model.diffusion_model.__class__     = ReOpenAISignatureMMDITWrapper
-            m.model.diffusion_model.threshold_inv = False
-            
-            for i, block in enumerate(m.model.diffusion_model.joint_blocks):
-                if i in joint_blocks:
-                    block.__class__ = ReJointBlock
-                else:
-                    ReJointBlockNoMask
-                block.idx       = i
 
-        elif not enable and model.model.diffusion_model.__class__ == ReOpenAISignatureMMDITWrapper:
-            m = model.clone()
-            m.model.diffusion_model.__class__ = OpenAISignatureMMDITWrapper
-            
-            for i, block in enumerate(m.model.diffusion_model.joint_blocks):
-                block.__class__ = JointBlock
-                block.idx       = i
-
-        elif model.model.diffusion_model.__class__ not in {ReOpenAISignatureMMDITWrapper, OpenAISignatureMMDITWrapper}:
+        dm = model.model.diffusion_model
+        if dm.__class__ not in {ReOpenAISignatureMMDITWrapper, OpenAISignatureMMDITWrapper}:
             raise ValueError("This node is for enabling regional conditioning for SD3.5 only!")
-            m = model
-        
+
+        m = model.clone()
+
+        if not (enable or force):
+            return (m,)
+
+        m.add_object_patch("diffusion_model.style_dtype",     style_dtype)
+        m.add_object_patch("diffusion_model.proj_weights",    None)
+        m.add_object_patch("diffusion_model.y0_adain_embed",  None)
+        m.add_object_patch("diffusion_model.StyleWCT",        StyleWCT())
+        m.add_object_patch("diffusion_model.Retrojector",     Retrojector(dm.x_embedder.proj, pinv_dtype=style_dtype, dtype=style_dtype))
+        m.add_object_patch("diffusion_model.threshold_inv",   False)
+
+        for i in range(len(dm.joint_blocks)):
+            m.add_object_patch(f"diffusion_model.joint_blocks.{i}.idx", i)
+            if i in joint_blocks:
+                m.add_object_patch(f"diffusion_model.joint_blocks.{i}.__class__", ReJointBlock)
+            # else: preserve as JointBlock
+    
+        m.add_object_patch("diffusion_model.__class__", ReOpenAISignatureMMDITWrapper)
+
         return (m,)
     
 class ReSD35Patcher(ReSD35PatcherAdvanced):
@@ -1047,57 +999,42 @@ class ReAuraPatcherAdvanced:
     FUNCTION     = "main"
 
     def main(self, model, doublelayer_blocks, singlelayer_blocks, style_dtype, enable=True, force=False):
-        
+
         doublelayer_blocks = parse_range_string(doublelayer_blocks)
         singlelayer_blocks = parse_range_string(singlelayer_blocks)
-        
+
         style_dtype = getattr(torch, style_dtype) if style_dtype != "default" else None
-        model.model.diffusion_model.style_dtype = style_dtype
-        model.model.diffusion_model.proj_weights = None
-        model.model.diffusion_model.y0_adain_embed = None
-        
-        model.model.diffusion_model.StyleWCT    = StyleWCT()
-        model.model.diffusion_model.Retrojector = Retrojector(model.model.diffusion_model.init_x_linear, pinv_dtype=style_dtype, dtype=style_dtype)
-        
-        if (enable or force) and model.model.diffusion_model.__class__ == MMDiT:
-            m = model.clone()
-            m.model.diffusion_model.__class__     = ReMMDiT
-            m.model.diffusion_model.threshold_inv = False
-            
-            for i, block in enumerate(m.model.diffusion_model.double_layers):
-                block.__class__ = ReMMDiTBlock
-                if i in doublelayer_blocks:
-                    block.attn.__class__ = ReDoubleAttention
-                else:
-                    block.attn.__class__ = ReDoubleAttentionNoMask
-                block.idx       = i
-                
-            for i, block in enumerate(m.model.diffusion_model.single_layers):
-                block.__class__ = ReDiTBlock
-                if i in singlelayer_blocks:
-                    block.attn.__class__ = ReSingleAttention
-                else:
-                    block.attn.__class__ = ReSingleAttentionNoMask
-                block.idx       = i
 
-        elif not enable and model.model.diffusion_model.__class__ == ReMMDiT:
-            m = model.clone()
-            m.model.diffusion_model.__class__ = MMDiT
-            
-            for i, block in enumerate(m.model.diffusion_model.double_layers):
-                block.__class__ = MMDiTBlock
-                block.attn.__class__ = DoubleAttention
-                block.idx       = i
-                
-            for i, block in enumerate(m.model.diffusion_model.single_layers):
-                block.__class__ = DiTBlock
-                block.attn.__class__ = SingleAttention
-                block.idx       = i
-
-        elif model.model.diffusion_model.__class__ not in {ReMMDiT, MMDiT}:
+        dm = model.model.diffusion_model
+        if dm.__class__ not in {ReMMDiT, MMDiT}:
             raise ValueError("This node is for enabling regional conditioning for AuraFlow only!")
-            m = model
-        
+
+        m = model.clone()
+
+        if not (enable or force):
+            return (m,)
+
+        m.add_object_patch("diffusion_model.style_dtype",     style_dtype)
+        m.add_object_patch("diffusion_model.proj_weights",    None)
+        m.add_object_patch("diffusion_model.y0_adain_embed",  None)
+        m.add_object_patch("diffusion_model.StyleWCT",        StyleWCT())
+        m.add_object_patch("diffusion_model.Retrojector",     Retrojector(dm.init_x_linear, pinv_dtype=style_dtype, dtype=style_dtype))
+        m.add_object_patch("diffusion_model.threshold_inv",   False)
+
+        for i in range(len(dm.double_layers)):
+            m.add_object_patch(f"diffusion_model.double_layers.{i}.idx", i)
+            attn_cls = ReDoubleAttention if i in doublelayer_blocks else ReDoubleAttentionNoMask
+            m.add_object_patch(f"diffusion_model.double_layers.{i}.attn.__class__", attn_cls)
+            m.add_object_patch(f"diffusion_model.double_layers.{i}.__class__", ReMMDiTBlock)
+
+        for i in range(len(dm.single_layers)):
+            m.add_object_patch(f"diffusion_model.single_layers.{i}.idx", i)
+            attn_cls = ReSingleAttention if i in singlelayer_blocks else ReSingleAttentionNoMask
+            m.add_object_patch(f"diffusion_model.single_layers.{i}.attn.__class__", attn_cls)
+            m.add_object_patch(f"diffusion_model.single_layers.{i}.__class__", ReDiTBlock)
+
+        m.add_object_patch("diffusion_model.__class__", ReMMDiT)
+
         return (m,)
 
 class ReAuraPatcher(ReAuraPatcherAdvanced):
