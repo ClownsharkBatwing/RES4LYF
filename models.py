@@ -681,110 +681,99 @@ class ReHiDreamPatcherAdvanced:
     FUNCTION     = "main"
 
     def main(self, model, double_stream_blocks, single_stream_blocks, style_dtype, enable=True, force=False):
-        
+
         double_stream_blocks = parse_range_string(double_stream_blocks)
         single_stream_blocks = parse_range_string(single_stream_blocks)
-        
+
         style_dtype = getattr(torch, style_dtype) if style_dtype != "default" else None
-        model.model.diffusion_model.style_dtype = style_dtype
-        model.model.diffusion_model.proj_weights = None
-        model.model.diffusion_model.y0_adain_embed = None
-        
-        model.model.diffusion_model.StyleWCT    = StyleWCT()
-        model.model.diffusion_model.WaveletStyleWCT = WaveletStyleWCT()
-        model.model.diffusion_model.Retrojector = Retrojector(model.model.diffusion_model.x_embedder.proj, pinv_dtype=style_dtype, dtype=style_dtype)
-        #model.model.diffusion_model.Endojector  = Retrojector(model.model.diffusion_model.final_layer.linear, pinv_dtype=style_dtype, dtype=style_dtype, ENDO=True)
-        
-        #model.model.diffusion_model.Style = StyleMMDiT_HiDream()
-        #model.model.diffusion_model.Style.Retrojector = Retrojector(model.model.diffusion_model.x_embedder.proj, pinv_dtype=style_dtype, dtype=style_dtype)
-        
-        sort_buffer = {}
-        
-        if (enable or force) and model.model.diffusion_model.__class__ == HiDreamImageTransformer2DModel:
-            m = model.clone()
-            m.model.diffusion_model.__class__     = HDModel
-            m.model.diffusion_model.threshold_inv = False
-            m.model.diffusion_model.final_layer.__class__ = HDLastLayer
-            
-            m.model.diffusion_model.final_layer.linear.weight.data = m.model.diffusion_model.final_layer.linear.weight.data.to(torch.bfloat16)
-            m.model.diffusion_model.final_layer.linear.bias.data = m.model.diffusion_model.final_layer.linear.bias.data.to(torch.bfloat16)
-            
-            for i, block in enumerate(m.model.diffusion_model.double_stream_blocks):
-                block.__class__             = HDBlock
 
-                if i in double_stream_blocks:
-                    block.block.__class__   = HDBlockDouble
-                else:
-                    block.block.__class__   = HDBlockDoubleNoMask
-                    
-                block.block.attn1.__class__ = HDAttention
-                    
-                block.block.ff_i.__class__  = HDMOEFeedForwardSwiGLU
-                block.block.ff_i.shared_experts.__class__ = HDFeedForwardSwiGLU
-                for j in range(len(block.block.ff_i.experts)):
-                    block.block.ff_i.experts[j].__class__ = HDFeedForwardSwiGLU
-                block.block.ff_i.gate.__class__ = HDMoEGate
-                block.block.ff_t.__class__  = HDFeedForwardSwiGLU
-                    
-                block.block.attn1.single_stream = False
-                block.block.attn1.double_stream = True
-                
-                block.block.sort_buffer       = sort_buffer
-                block.block.attn1.sort_buffer = sort_buffer
-                
-                block.idx             = i
-                block.block.idx       = i
-                block.block.attn1.idx = i
-
-            for i, block in enumerate(m.model.diffusion_model.single_stream_blocks):
-                block.__class__             = HDBlock
-
-                if i in single_stream_blocks:
-                    block.block.__class__       = HDBlockSingle
-                else:
-                    block.block.__class__       = HDBlockSingleNoMask
-
-                block.block.attn1.__class__ = HDAttention
-                block.block.ff_i.__class__  = HDMOEFeedForwardSwiGLU
-                block.block.ff_i.shared_experts.__class__ = HDFeedForwardSwiGLU
-                for j in range(len(block.block.ff_i.experts)):
-                    block.block.ff_i.experts[j].__class__ = HDFeedForwardSwiGLU
-                block.block.ff_i.gate.__class__ = HDMoEGate
-                
-                block.block.attn1.single_stream = True
-                block.block.attn1.double_stream = False
-                
-                block.block.sort_buffer       = sort_buffer
-                block.block.attn1.sort_buffer = sort_buffer
-                
-                block.idx             = i
-                block.block.idx       = i
-                block.block.attn1.idx = i
-
-        elif not enable and model.model.diffusion_model.__class__ == HDModel:
-            m = model.clone()
-            m.model.diffusion_model.__class__ = HiDreamImageTransformer2DModel
-            
-            for i, block in enumerate(m.model.diffusion_model.double_stream_blocks):
-                if i in double_stream_blocks:
-                    block.__class__             = HiDreamImageBlock
-                    block.block.__class__       = HiDreamImageTransformerBlock
-                    block.block.attn1.__class__ = HiDreamAttention
-                block.idx       = i
-            
-            for i, block in enumerate(m.model.diffusion_model.single_stream_blocks):
-                if i in single_stream_blocks:
-                    block.__class__             = HiDreamImageBlock
-                    block.block.__class__       = HiDreamImageSingleTransformerBlock
-                    block.block.attn1.__class__ = HiDreamAttention
-                block.idx       = i
-                
-        #elif model.model.diffusion_model.__class__ != HDModel and model.model.diffusion_model.__class__ != HiDreamImageTransformer2DModel:
-        elif model.model.diffusion_model.__class__ not in {HDModel, HiDreamImageTransformer2DModel}:
+        dm = model.model.diffusion_model
+        if dm.__class__ not in {HDModel, HiDreamImageTransformer2DModel}:
             raise ValueError("This node is for enabling regional conditioning for HiDream only!")
-        else:
-            m = model
-        
+
+        m = model.clone()
+
+        if not (enable or force):
+            return (m,)
+
+        sort_buffer = {}  # shared across every patched block and attn
+
+        m.add_object_patch("diffusion_model.style_dtype",      style_dtype)
+        m.add_object_patch("diffusion_model.proj_weights",     None)
+        m.add_object_patch("diffusion_model.y0_adain_embed",   None)
+        m.add_object_patch("diffusion_model.StyleWCT",         StyleWCT())
+        m.add_object_patch("diffusion_model.WaveletStyleWCT",  WaveletStyleWCT())
+        m.add_object_patch("diffusion_model.Retrojector",      Retrojector(dm.x_embedder.proj, pinv_dtype=style_dtype, dtype=style_dtype))
+        m.add_object_patch("diffusion_model.threshold_inv",    False)
+
+        # final_layer needs both a class swap AND a bfloat16 conversion of its
+        # linear weight/bias. Patching the whole nn.Parameter (not .data) lets
+        # unpatch_model restore the original dtype cleanly.
+        fl_weight = dm.final_layer.linear.weight
+        fl_bias   = dm.final_layer.linear.bias
+        new_weight = torch.nn.Parameter(fl_weight.data.to(torch.bfloat16).clone(), requires_grad=fl_weight.requires_grad)
+        new_bias   = torch.nn.Parameter(fl_bias.data.to(torch.bfloat16).clone(),   requires_grad=fl_bias.requires_grad)
+        m.add_object_patch("diffusion_model.final_layer.linear.weight", new_weight)
+        m.add_object_patch("diffusion_model.final_layer.linear.bias",   new_bias)
+        m.add_object_patch("diffusion_model.final_layer.__class__",     HDLastLayer)
+
+        def patch_ff_i(base, ff_i):
+            m.add_object_patch(f"{base}.ff_i.shared_experts.__class__", HDFeedForwardSwiGLU)
+            for j in range(len(ff_i.experts)):
+                m.add_object_patch(f"{base}.ff_i.experts.{j}.__class__", HDFeedForwardSwiGLU)
+            m.add_object_patch(f"{base}.ff_i.gate.__class__", HDMoEGate)
+            m.add_object_patch(f"{base}.ff_i.__class__",      HDMOEFeedForwardSwiGLU)
+
+        for i in range(len(dm.double_stream_blocks)):
+            base       = f"diffusion_model.double_stream_blocks.{i}"
+            block_base = f"{base}.block"
+            block      = dm.double_stream_blocks[i]
+
+            m.add_object_patch(f"{base}.idx",             i)
+            m.add_object_patch(f"{block_base}.idx",       i)
+            m.add_object_patch(f"{block_base}.attn1.idx", i)
+
+            m.add_object_patch(f"{block_base}.sort_buffer",       sort_buffer)
+            m.add_object_patch(f"{block_base}.attn1.sort_buffer", sort_buffer)
+
+            m.add_object_patch(f"{block_base}.attn1.single_stream", False)
+            m.add_object_patch(f"{block_base}.attn1.double_stream", True)
+
+            m.add_object_patch(f"{block_base}.attn1.__class__", HDAttention)
+
+            patch_ff_i(block_base, block.block.ff_i)
+            m.add_object_patch(f"{block_base}.ff_t.__class__", HDFeedForwardSwiGLU)
+
+            block_cls = HDBlockDouble if i in double_stream_blocks else HDBlockDoubleNoMask
+            m.add_object_patch(f"{block_base}.__class__", block_cls)
+            m.add_object_patch(f"{base}.__class__",       HDBlock)
+
+        for i in range(len(dm.single_stream_blocks)):
+            base       = f"diffusion_model.single_stream_blocks.{i}"
+            block_base = f"{base}.block"
+            block      = dm.single_stream_blocks[i]
+
+            m.add_object_patch(f"{base}.idx",             i)
+            m.add_object_patch(f"{block_base}.idx",       i)
+            m.add_object_patch(f"{block_base}.attn1.idx", i)
+
+            m.add_object_patch(f"{block_base}.sort_buffer",       sort_buffer)
+            m.add_object_patch(f"{block_base}.attn1.sort_buffer", sort_buffer)
+
+            m.add_object_patch(f"{block_base}.attn1.single_stream", True)
+            m.add_object_patch(f"{block_base}.attn1.double_stream", False)
+
+            m.add_object_patch(f"{block_base}.attn1.__class__", HDAttention)
+
+            patch_ff_i(block_base, block.block.ff_i)
+            # Note: single_stream blocks have no ff_t (only ff_i).
+
+            block_cls = HDBlockSingle if i in single_stream_blocks else HDBlockSingleNoMask
+            m.add_object_patch(f"{block_base}.__class__", block_cls)
+            m.add_object_patch(f"{base}.__class__",       HDBlock)
+
+        m.add_object_patch("diffusion_model.__class__", HDModel)
+
         return (m,)
     
 class ReHiDreamPatcher(ReHiDreamPatcherAdvanced):
