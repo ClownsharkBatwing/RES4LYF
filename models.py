@@ -220,73 +220,56 @@ class ReWanPatcherAdvanced:
     FUNCTION     = "main"
 
     def main(self, model, self_attn_blocks, cross_attn_blocks, sliding_window_self_attn="false", sliding_window_frames=60, style_dtype="float32", enable=True, force=False):
-        
+
         style_dtype = getattr(torch, style_dtype) if style_dtype != "default" else None
-        model.model.diffusion_model.style_dtype = style_dtype
-        model.model.diffusion_model.proj_weights = None
-        model.model.diffusion_model.y0_adain_embed = None
-        
+
         sliding_window_size = sliding_window_frames // 4
-        
+
         self_attn_blocks  = parse_range_string(self_attn_blocks)
         cross_attn_blocks = parse_range_string(cross_attn_blocks)
-        
-        T2V = type(model.model.model_config) is comfy.supported_models.WAN21_T2V
-        
-        if (enable or force) and model.model.diffusion_model.__class__ == WanModel:
-            m = model.clone()
-            m.model.diffusion_model.__class__     = ReWanModel
-            m.model.diffusion_model.threshold_inv = False
-            
-            for i, block in enumerate(m.model.diffusion_model.blocks):
-                block.__class__            = ReWanAttentionBlock
-                if i in self_attn_blocks:
-                    if sliding_window_self_attn != "false":
-                        block.self_attn.__class__ = ReWanSlidingSelfAttention
-                        block.self_attn.winderz = sliding_window_size
-                        block.self_attn.winderz_type = sliding_window_self_attn
-                    else:
-                        block.self_attn.__class__  = ReWanSelfAttention
-                        block.self_attn.winderz_type = "false"
-                else:
-                    block.self_attn.__class__  = ReWanRawSelfAttention
-                if i in cross_attn_blocks:
-                    if T2V:
-                        if False: #sliding_window_self_attn != "false":
-                            block.cross_attn.__class__ = ReWanT2VSlidingCrossAttention
-                            block.cross_attn.winderz = sliding_window_size
-                            block.cross_attn.winderz_type = sliding_window_self_attn
-                        else:
-                            block.cross_attn.__class__ = ReWanT2VCrossAttention
 
-                    else:
-                        block.cross_attn.__class__ = ReWanI2VCrossAttention
-                block.idx            = i
-                block.self_attn.idx  = i
-                block.cross_attn.idx = i # 40 total blocks (i == 39)
-                
-        elif enable and (sliding_window_self_attn != self.sliding_window_self_attn or sliding_window_size != self.sliding_window_size) and model.model.diffusion_model.__class__ == ReWanModel:
-            m = model.clone()
-            
-            for i, block in enumerate(m.model.diffusion_model.blocks):
-                if i in self_attn_blocks:
-                    block.self_attn.winderz = sliding_window_size
-                    block.self_attn.winderz_type = sliding_window_self_attn
-        
-        elif not enable and model.model.diffusion_model.__class__ == ReWanModel:
-            m = model.clone()
-            m.model.diffusion_model.__class__ = WanModel
-            
-            for i, block in enumerate(m.model.diffusion_model.blocks):
-                block.__class__            = WanAttentionBlock
-                block.self_attn.__class__  = WanSelfAttention
-                block.cross_attn.__class__ = WanT2VCrossAttention
-                block.idx       = i
-
-        elif model.model.diffusion_model.__class__ not in {ReWanModel, WanModel}:
+        dm = model.model.diffusion_model
+        if dm.__class__ not in {ReWanModel, WanModel}:
             raise ValueError("This node is for enabling regional conditioning for WAN only!")
-            m = model
-        
+
+        m = model.clone()
+
+        if not (enable or force):
+            return (m,)
+
+        T2V = type(model.model.model_config) is comfy.supported_models.WAN21_T2V
+
+        m.add_object_patch("diffusion_model.style_dtype",    style_dtype)
+        m.add_object_patch("diffusion_model.proj_weights",   None)
+        m.add_object_patch("diffusion_model.y0_adain_embed", None)
+        m.add_object_patch("diffusion_model.threshold_inv",  False)
+
+        for i in range(len(dm.blocks)):
+            base = f"diffusion_model.blocks.{i}"
+
+            m.add_object_patch(f"{base}.idx",            i)
+            m.add_object_patch(f"{base}.self_attn.idx",  i)
+            m.add_object_patch(f"{base}.cross_attn.idx", i)
+
+            if i in self_attn_blocks:
+                if sliding_window_self_attn != "false":
+                    m.add_object_patch(f"{base}.self_attn.__class__",    ReWanSlidingSelfAttention)
+                    m.add_object_patch(f"{base}.self_attn.winderz",      sliding_window_size)
+                    m.add_object_patch(f"{base}.self_attn.winderz_type", sliding_window_self_attn)
+                else:
+                    m.add_object_patch(f"{base}.self_attn.__class__",    ReWanSelfAttention)
+                    m.add_object_patch(f"{base}.self_attn.winderz_type", "false")
+            else:
+                m.add_object_patch(f"{base}.self_attn.__class__", ReWanRawSelfAttention)
+
+            if i in cross_attn_blocks:
+                cross_cls = ReWanT2VCrossAttention if T2V else ReWanI2VCrossAttention
+                m.add_object_patch(f"{base}.cross_attn.__class__", cross_cls)
+
+            m.add_object_patch(f"{base}.__class__", ReWanAttentionBlock)
+
+        m.add_object_patch("diffusion_model.__class__", ReWanModel)
+
         return (m,)
     
 class ReWanPatcher(ReWanPatcherAdvanced):
