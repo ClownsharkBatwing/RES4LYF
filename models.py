@@ -586,123 +586,9 @@ class ReLTXVPatcher(ReLTXVPatcherAdvanced):
 
 
 
-class ReSDPatcherAdvanced:
+class ReSDPatcher:
     @classmethod
     def INPUT_TYPES(s):
-        return {
-            "required": { 
-                "model"               : ("MODEL",),
-                "doublestream_blocks" : ("STRING",  {"default": "all", "multiline": True}),
-                "singlestream_blocks" : ("STRING",  {"default": "all", "multiline": True}),
-                "style_dtype"         : (["default", "bfloat16", "float16", "float32", "float64"],  {"default": "float64"}),
-                "enable"              : ("BOOLEAN", {"default": True}),
-            }
-        }
-    RETURN_TYPES = ("MODEL",)
-    RETURN_NAMES = ("model",)
-    CATEGORY     = "RES4LYF/model_patches"
-    FUNCTION     = "main"
-    #EXPERIMENTAL = True
-
-    def main(self, model, doublestream_blocks, singlestream_blocks, style_dtype, enable=True, force=False):
-        
-        doublestream_blocks = parse_range_string(doublestream_blocks)
-        singlestream_blocks = parse_range_string(singlestream_blocks)
-        
-        style_dtype = getattr(torch, style_dtype) if style_dtype != "default" else None
-        model.model.diffusion_model.style_dtype = style_dtype
-        model.model.diffusion_model.proj_weights = None
-        model.model.diffusion_model.y0_adain_embed = None
-        
-        model.model.diffusion_model.StyleWCT    = StyleWCT()
-        model.model.diffusion_model.Retrojector = Retrojector(model.model.diffusion_model.input_blocks[0][0], pinv_dtype=style_dtype, dtype=style_dtype, patch_size=1)
-        
-        if (enable or force) and model.model.diffusion_model.__class__ == UNetModel:
-            m = model.clone()
-            m.model.diffusion_model.__class__     = ReUNetModel
-            m.model.diffusion_model.threshold_inv = False
-                
-            for i in range(len(m.model.diffusion_model.input_blocks)):
-                for j in range(len(m.model.diffusion_model.input_blocks[i])):
-                    if isinstance(m.model.diffusion_model.input_blocks[i][j], ResBlock):
-                        m.model.diffusion_model.input_blocks[i][j].__class__ = ReResBlock
-                    if isinstance(m.model.diffusion_model.input_blocks[i][j], SpatialTransformer):
-                        m.model.diffusion_model.input_blocks[i][j].__class__ = ReSpatialTransformer
-                        for k in range(len(m.model.diffusion_model.input_blocks[i][j].transformer_blocks)):
-                            m.model.diffusion_model.input_blocks[i][j].transformer_blocks[k].__class__ = ReBasicTransformerBlock
-                            m.model.diffusion_model.input_blocks[i][j].transformer_blocks[k].attn1.__class__ = ReCrossAttention
-                            m.model.diffusion_model.input_blocks[i][j].transformer_blocks[k].attn2.__class__ = ReCrossAttention
-        
-            #m.model.diffusion_model.middle_block[1].transformer_blocks[0].__class__ = ReBasicTransformerBlock
-            for i in range(len(m.model.diffusion_model.middle_block)):
-                if isinstance(m.model.diffusion_model.middle_block[i], ResBlock):
-                    m.model.diffusion_model.middle_block[i].__class__ = ReResBlock
-                if isinstance(m.model.diffusion_model.middle_block[i], SpatialTransformer):
-                    m.model.diffusion_model.middle_block[i].__class__ = ReSpatialTransformer
-                    for k in range(len(m.model.diffusion_model.middle_block[i].transformer_blocks)):
-                        m.model.diffusion_model.middle_block[i].transformer_blocks[k].__class__ = ReBasicTransformerBlock
-                        m.model.diffusion_model.middle_block[i].transformer_blocks[k].attn1.__class__ = ReCrossAttention
-                        m.model.diffusion_model.middle_block[i].transformer_blocks[k].attn2.__class__ = ReCrossAttention
-
-            for i in range(len(m.model.diffusion_model.output_blocks)):
-                for j in range(len(m.model.diffusion_model.output_blocks[i])):
-                    if isinstance(m.model.diffusion_model.output_blocks[i][j], ResBlock):
-                        m.model.diffusion_model.output_blocks[i][j].__class__ = ReResBlock
-                    if isinstance(m.model.diffusion_model.output_blocks[i][j], SpatialTransformer):
-                        m.model.diffusion_model.output_blocks[i][j].__class__ = ReSpatialTransformer
-                        for k in range(len(m.model.diffusion_model.output_blocks[i][j].transformer_blocks)):
-                            m.model.diffusion_model.output_blocks[i][j].transformer_blocks[k].__class__ = ReBasicTransformerBlock
-                            m.model.diffusion_model.output_blocks[i][j].transformer_blocks[k].attn1.__class__ = ReCrossAttention
-                            m.model.diffusion_model.output_blocks[i][j].transformer_blocks[k].attn2.__class__ = ReCrossAttention
-
-        elif not enable and model.model.diffusion_model.__class__ == ReUNetModel:
-            m = model.clone()
-            m.model.diffusion_model.__class__ = UNetModel
-            
-            for i in range(len(m.model.diffusion_model.input_blocks)):
-                for j in range(len(m.model.diffusion_model.input_blocks[i])):
-                    if isinstance(m.model.diffusion_model.input_blocks[i][j], ReResBlock):
-                        m.model.diffusion_model.input_blocks[i][j].__class__ = ResBlock
-                    if isinstance(m.model.diffusion_model.input_blocks[i][j], ReSpatialTransformer):
-                        m.model.diffusion_model.input_blocks[i][j].__class__ = SpatialTransformer
-                        for k in range(len(m.model.diffusion_model.input_blocks[i][j].transformer_blocks)):
-                            m.model.diffusion_model.input_blocks[i][j].transformer_blocks[k].__class__ = BasicTransformerBlock
-                            m.model.diffusion_model.input_blocks[i][j].transformer_blocks[k].attn1.__class__ = CrossAttention
-                            m.model.diffusion_model.input_blocks[i][j].transformer_blocks[k].attn2.__class__ = CrossAttention
-        
-            #m.model.diffusion_model.middle_block[1].transformer_blocks[0].__class__ = BasicTransformerBlock
-            for i in range(len(m.model.diffusion_model.middle_block)):
-                if isinstance(m.model.diffusion_model.middle_block[i], ReResBlock):
-                    m.model.diffusion_model.middle_block[i].__class__ = ResBlock
-                if isinstance(m.model.diffusion_model.middle_block[i], ReSpatialTransformer):
-                    m.model.diffusion_model.middle_block[i].__class__ = SpatialTransformer
-                    for k in range(len(m.model.diffusion_model.middle_block[i].transformer_blocks)):
-                        m.model.diffusion_model.middle_block[i].transformer_blocks[k].__class__ = BasicTransformerBlock
-                        m.model.diffusion_model.middle_block[i].transformer_blocks[k].attn1.__class__ = CrossAttention
-                        m.model.diffusion_model.middle_block[i].transformer_blocks[k].attn2.__class__ = CrossAttention
-
-            for i in range(len(m.model.diffusion_model.output_blocks)):
-                for j in range(len(m.model.diffusion_model.output_blocks[i])):
-                    if isinstance(m.model.diffusion_model.output_blocks[i][j], ReResBlock):
-                        m.model.diffusion_model.output_blocks[i[j]].__class__ = ResBlock
-                    if isinstance(m.model.diffusion_model.output_blocks[i][j], ReSpatialTransformer):
-                        m.model.diffusion_model.output_blocks[i[j]].__class__ = SpatialTransformer
-                        for k in range(len(m.model.diffusion_model.output_blocks[i][j].transformer_blocks)):
-                            m.model.diffusion_model.output_blocks[i][j].transformer_blocks[k].__class__ = BasicTransformerBlock
-                            m.model.diffusion_model.output_blocks[i][j].transformer_blocks[k].attn1.__class__ = CrossAttention
-                            m.model.diffusion_model.output_blocks[i][j].transformer_blocks[k].attn2.__class__ = CrossAttention
-
-        #elif model.model.diffusion_model.__class__ != UNetModel and model.model.diffusion_model.__class__ != ReUNetModel:
-        elif model.model.diffusion_model.__class__ not in {ReUNetModel, UNetModel}:
-            raise ValueError("This node is for enabling regional conditioning for SD1.5 and SDXL only!")
-        else:
-            m = model
-        
-        return (m,)
-    
-class ReSDPatcher(ReSDPatcherAdvanced):
-    @classmethod
-    def INPUT_TYPES(cls):
         return {
             "required": {
                 "model"       : ("MODEL",),
@@ -710,16 +596,56 @@ class ReSDPatcher(ReSDPatcherAdvanced):
                 "enable"      : ("BOOLEAN", {"default": True}),
             }
         }
+    RETURN_TYPES = ("MODEL",)
+    RETURN_NAMES = ("model",)
+    CATEGORY     = "RES4LYF/model_patches"
+    FUNCTION     = "main"
 
-    def main(self, model, style_dtype="float32", enable=True, force=False):
-        return super().main(
-            model               = model,
-            doublestream_blocks = "all",
-            singlestream_blocks = "all",
-            style_dtype         = style_dtype,
-            enable              = enable,
-            force               = force
-        )    
+    def main(self, model, style_dtype, enable=True, force=False):
+
+        style_dtype = getattr(torch, style_dtype) if style_dtype != "default" else None
+
+        dm = model.model.diffusion_model
+        if dm.__class__ not in {ReUNetModel, UNetModel}:
+            raise ValueError("This node is for enabling regional conditioning for SD1.5 and SDXL only!")
+
+        m = model.clone()
+
+        if not (enable or force):
+            return (m,)
+
+        m.add_object_patch("diffusion_model.style_dtype",     style_dtype)
+        m.add_object_patch("diffusion_model.proj_weights",    None)
+        m.add_object_patch("diffusion_model.y0_adain_embed",  None)
+        m.add_object_patch("diffusion_model.StyleWCT",        StyleWCT())
+        m.add_object_patch("diffusion_model.Retrojector",     Retrojector(dm.input_blocks[0][0], pinv_dtype=style_dtype, dtype=style_dtype, patch_size=1))
+        m.add_object_patch("diffusion_model.threshold_inv",   False)
+
+        def patch_child(child, child_path):
+            if isinstance(child, SpatialTransformer):
+                for k in range(len(child.transformer_blocks)):
+                    tx_base = f"{child_path}.transformer_blocks.{k}"
+                    m.add_object_patch(f"{tx_base}.attn1.__class__", ReCrossAttention)
+                    m.add_object_patch(f"{tx_base}.attn2.__class__", ReCrossAttention)
+                    m.add_object_patch(f"{tx_base}.__class__",       ReBasicTransformerBlock)
+                m.add_object_patch(f"{child_path}.__class__", ReSpatialTransformer)
+            elif isinstance(child, ResBlock):
+                m.add_object_patch(f"{child_path}.__class__", ReResBlock)
+
+        for i in range(len(dm.input_blocks)):
+            for j in range(len(dm.input_blocks[i])):
+                patch_child(dm.input_blocks[i][j], f"diffusion_model.input_blocks.{i}.{j}")
+
+        for i in range(len(dm.middle_block)):
+            patch_child(dm.middle_block[i], f"diffusion_model.middle_block.{i}")
+
+        for i in range(len(dm.output_blocks)):
+            for j in range(len(dm.output_blocks[i])):
+                patch_child(dm.output_blocks[i][j], f"diffusion_model.output_blocks.{i}.{j}")
+
+        m.add_object_patch("diffusion_model.__class__", ReUNetModel)
+
+        return (m,)
 
 
 
