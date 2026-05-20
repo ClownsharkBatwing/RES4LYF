@@ -221,7 +221,7 @@ class ReWanPatcherAdvanced:
 
     def main(self, model, self_attn_blocks, cross_attn_blocks, sliding_window_self_attn="false", sliding_window_frames=60, style_dtype="float32", enable=True, force=False):
 
-        style_dtype = getattr(torch, style_dtype) if style_dtype != "default" else None
+        style_dtype = getattr(torch, style_dtype) if style_dtype != "default" else torch.float64
 
         sliding_window_size = sliding_window_frames // 4
 
@@ -321,7 +321,7 @@ class ReFluxPatcherAdvanced:
         doublestream_blocks = parse_range_string(doublestream_blocks)
         singlestream_blocks = parse_range_string(singlestream_blocks)
 
-        style_dtype = getattr(torch, style_dtype) if style_dtype != "default" else None
+        style_dtype = getattr(torch, style_dtype) if style_dtype != "default" else torch.float64
 
         dm = model.model.diffusion_model
         if dm.__class__ not in {ReFlux, Flux}:
@@ -398,7 +398,7 @@ class ReReduxPatcher:
 
     def main(self, style_model, style_dtype, enable=True, force=False):
         
-        style_model.model.style_dtype = getattr(torch, style_dtype) if style_dtype != "default" else None
+        style_model.model.style_dtype = getattr(torch, style_dtype) if style_dtype != "default" else torch.float64
         style_model.model.proj_weights = None
         style_model.model.y0_adain_embed = None
                 
@@ -450,7 +450,7 @@ class ReChromaPatcherAdvanced:
         doublestream_blocks = parse_range_string(doublestream_blocks)
         singlestream_blocks = parse_range_string(singlestream_blocks)
 
-        style_dtype = getattr(torch, style_dtype) if style_dtype != "default" else None
+        style_dtype = getattr(torch, style_dtype) if style_dtype != "default" else torch.float64
 
         dm = model.model.diffusion_model
         if dm.__class__ not in {ReChroma, Chroma}:
@@ -539,7 +539,7 @@ class ReLTXVPatcherAdvanced:
         doublestream_blocks = parse_range_string(doublestream_blocks)
         singlestream_blocks = parse_range_string(singlestream_blocks)
 
-        style_dtype = getattr(torch, style_dtype) if style_dtype != "default" else None
+        style_dtype = getattr(torch, style_dtype) if style_dtype != "default" else torch.float64
 
         dm = model.model.diffusion_model
         if dm.__class__ not in {ReLTXVModel, LTXVModel}:
@@ -603,7 +603,7 @@ class ReSDPatcher:
 
     def main(self, model, style_dtype, enable=True, force=False):
 
-        style_dtype = getattr(torch, style_dtype) if style_dtype != "default" else None
+        style_dtype = getattr(torch, style_dtype) if style_dtype != "default" else torch.float64
 
         dm = model.model.diffusion_model
         if dm.__class__ not in {ReUNetModel, UNetModel}:
@@ -685,7 +685,7 @@ class ReHiDreamPatcherAdvanced:
         double_stream_blocks = parse_range_string(double_stream_blocks)
         single_stream_blocks = parse_range_string(single_stream_blocks)
 
-        style_dtype = getattr(torch, style_dtype) if style_dtype != "default" else None
+        style_dtype = getattr(torch, style_dtype) if style_dtype != "default" else torch.float64
 
         dm = model.model.diffusion_model
         if dm.__class__ not in {HDModel, HiDreamImageTransformer2DModel}:
@@ -821,7 +821,7 @@ class ReSD35PatcherAdvanced:
 
     def main(self, model, joint_blocks, style_dtype, enable=True, force=False):
 
-        style_dtype = getattr(torch, style_dtype) if style_dtype != "default" else None
+        style_dtype = getattr(torch, style_dtype) if style_dtype != "default" else torch.float64
 
         joint_blocks = parse_range_string(joint_blocks)
 
@@ -901,7 +901,7 @@ class ReAuraPatcherAdvanced:
         doublelayer_blocks = parse_range_string(doublelayer_blocks)
         singlelayer_blocks = parse_range_string(singlelayer_blocks)
 
-        style_dtype = getattr(torch, style_dtype) if style_dtype != "default" else None
+        style_dtype = getattr(torch, style_dtype) if style_dtype != "default" else torch.float64
 
         dm = model.model.diffusion_model
         if dm.__class__ not in {ReMMDiT, MMDiT}:
