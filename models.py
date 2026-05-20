@@ -1142,7 +1142,7 @@ class ReAuraPatcher(ReAuraPatcherAdvanced):
 class FluxOrthoCFGPatcher:
     @classmethod
     def INPUT_TYPES(s):
-        return {"required": { 
+        return {"required": {
             "model":        ("MODEL",),
             "enable":       ("BOOLEAN", {"default": True}),
             "ortho_T5":     ("BOOLEAN", {"default": True}),
@@ -1150,43 +1150,38 @@ class FluxOrthoCFGPatcher:
             "zero_clip_L":  ("BOOLEAN", {"default": True}),
             }
         }
-        
+
     RETURN_TYPES = ("MODEL",)
     RETURN_NAMES = ("model",)
     CATEGORY     = "RES4LYF/model_patches"
     FUNCTION     = "main"
     EXPERIMENTAL = True
-    
-    original_forward = Flux.forward
-
-    @staticmethod
-    def new_forward(self, x, timestep, context, y, guidance, control=None, transformer_options={}, **kwargs):
-
-        for _ in range(500):
-            if self.ortho_T5 and get_cosine_similarity(context[0], context[1]) != 0:
-                context[0] = get_orthogonal(context[0], context[1])
-            if self.ortho_clip_L and get_cosine_similarity(y[0], y[1]) != 0:
-                y[0] = get_orthogonal(y[0].unsqueeze(0), y[1].unsqueeze(0)).squeeze(0)
-                
-        RESplain("postcossim1: ", get_cosine_similarity(context[0], context[1]))
-        RESplain("postcossim2: ", get_cosine_similarity(y[0], y[1]))
-        
-        if self.zero_clip_L:
-            y[0] = torch.zeros_like(y[0])
-        
-        return FluxOrthoCFGPatcher.original_forward(self, x, timestep, context, y, guidance, control, transformer_options, **kwargs)
 
     def main(self, model, enable=True, ortho_T5=True, ortho_clip_L=True, zero_clip_L=True):
         m = model.clone()
+        if not enable:
+            return (m,)
 
-        if enable:
-            m.model.diffusion_model.ortho_T5     = ortho_T5
-            m.model.diffusion_model.ortho_clip_L = ortho_clip_L
-            m.model.diffusion_model.zero_clip_L  = zero_clip_L
-            Flux.forward = types.MethodType(FluxOrthoCFGPatcher.new_forward, m.model.diffusion_model)
-        else:
-            Flux.forward = FluxOrthoCFGPatcher.original_forward
+        diffusion_model  = m.get_model_object("diffusion_model")
+        original_forward = type(diffusion_model).forward
 
+        def patched_forward(x, timestep, context, y, guidance, control=None, transformer_options={}, **kwargs):
+            for _ in range(500):
+                if ortho_T5 and get_cosine_similarity(context[0], context[1]) != 0:
+                    context[0] = get_orthogonal(context[0], context[1])
+                if ortho_clip_L and get_cosine_similarity(y[0], y[1]) != 0:
+                    y[0] = get_orthogonal(y[0].unsqueeze(0), y[1].unsqueeze(0)).squeeze(0)
+
+            RESplain("postcossim1: ", get_cosine_similarity(context[0], context[1]))
+            RESplain("postcossim2: ", get_cosine_similarity(y[0], y[1]))
+
+            if zero_clip_L:
+                y[0] = torch.zeros_like(y[0])
+
+            return original_forward(diffusion_model, x, timestep, context, y, guidance,
+                                    control, transformer_options, **kwargs)
+
+        m.add_object_patch("diffusion_model.forward", patched_forward)
         return (m,)
     
     
@@ -1196,37 +1191,33 @@ class FluxGuidanceDisable:
     @classmethod
     def INPUT_TYPES(s):
         return {
-            "required": { 
+            "required": {
                 "model":       ("MODEL",),
                 "disable":     ("BOOLEAN", {"default": True}),
                 "zero_clip_L": ("BOOLEAN", {"default": True}),
             }
         }
-        
+
     RETURN_TYPES = ("MODEL",)
     RETURN_NAMES = ("model",)
     FUNCTION     = "main"
     CATEGORY     = "RES4LYF/model_patches"
 
-    original_forward = Flux.forward
-
-    @staticmethod
-    def new_forward(self, x, timestep, context, y, guidance, control=None, transformer_options={}, **kwargs):
-
-        y = torch.zeros_like(y)
-        
-        return FluxGuidanceDisable.original_forward(self, x, timestep, context, y, guidance, control, transformer_options, **kwargs)
-
     def main(self, model, disable=True, zero_clip_L=True):
         m = model.clone()
-        if disable:
-            m.model.diffusion_model.params.guidance_embed = False
-        else:
-            m.model.diffusion_model.params.guidance_embed = True
-            
-        #m.model.diffusion_model.zero_clip_L = zero_clip_L
+
+        m.add_object_patch("diffusion_model.params.guidance_embed", not disable)
+
         if zero_clip_L:
-            Flux.forward = types.MethodType(FluxGuidanceDisable.new_forward, m.model.diffusion_model)
+            diffusion_model  = m.get_model_object("diffusion_model")
+            original_forward = type(diffusion_model).forward
+
+            def patched_forward(x, timestep, context, y, guidance, control=None, transformer_options={}, **kwargs):
+                y = torch.zeros_like(y)
+                return original_forward(diffusion_model, x, timestep, context, y, guidance,
+                                        control, transformer_options, **kwargs)
+
+            m.add_object_patch("diffusion_model.forward", patched_forward)
 
         return (m,)
 
