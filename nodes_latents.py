@@ -15,7 +15,7 @@ import math
 from nodes import MAX_RESOLUTION
 #MAX_RESOLUTION=8192
 
-from .helper             import ExtraOptions, initialize_or_scale, extra_options_flag, get_extra_options_list
+from .helper             import ExtraOptions, initialize_or_scale, extra_options_flag, get_extra_options_list, extract_cond_from_guider
 from .latents            import latent_meancenter_channels, latent_stdize_channels, get_edge_mask, apply_to_state_info_tensors
 from .beta.noise_classes import NOISE_GENERATOR_NAMES, NOISE_GENERATOR_CLASSES, prepare_noise
 
@@ -286,6 +286,127 @@ class TrimVideoLatent_state_info:
         ref_shape = samples["samples"].shape
         samples_out = apply_to_state_info_tensors(samples, ref_shape, self._trim_tensor, trim_amount)
         return (samples_out,)
+
+
+class LTXVCropGuides_state_info:
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "latent": ("LATENT",),
+            },
+            "optional": {
+                "positive": ("CONDITIONING",),
+                "negative": ("CONDITIONING",),
+            },
+        }
+
+    RETURN_TYPES = ("LATENT", "CONDITIONING", "CONDITIONING")
+    RETURN_NAMES = ("latent", "positive", "negative")
+    FUNCTION = "crop"
+    CATEGORY = "RES4LYF/latents"
+    EXPERIMENTAL = True
+
+    @staticmethod
+    def _guider_with_keyframes_cleared(guider):
+        if guider is None or not hasattr(guider, 'original_conds') or guider.original_conds is None:
+            return guider
+        STRIP = ('keyframe_idxs', 'guide_attention_entries')
+        new_guider = copy.copy(guider)
+        new_guider.original_conds = {
+            key: [{k: v for k, v in cond.items() if k not in STRIP} for cond in cond_list]
+            for key, cond_list in guider.original_conds.items()
+        }
+        return new_guider
+
+    @staticmethod
+    def _crop_temporal(tensor, num_keyframes):
+        if tensor.shape[-3] > num_keyframes:
+            return tensor.narrow(-3, 0, tensor.shape[-3] - num_keyframes).contiguous()
+        return tensor
+
+    def crop(self, latent, positive=None, negative=None):
+        from comfy_extras.nodes_lt import get_keyframe_idxs
+        from comfy.nested_tensor import NestedTensor
+        import node_helpers
+
+        guider = latent.get('guider')
+        if positive is None:
+            positive = extract_cond_from_guider(guider, 'positive')
+        if negative is None:
+            negative = extract_cond_from_guider(guider, 'negative')
+
+        latent_out = latent.copy()
+
+        if positive is None:
+            return (latent_out, positive, negative)
+
+        _, num_keyframes = get_keyframe_idxs(positive)
+
+        samples = latent["samples"]
+        if isinstance(samples, NestedTensor):
+            components = samples.unbind()
+            video_tensor = components[0]
+            latent_shapes = [t.shape for t in components]
+            is_multimodal = True
+        else:
+            video_tensor = samples
+            latent_shapes = [samples.shape]
+            is_multimodal = False
+
+        noise_mask = latent.get("noise_mask", None)
+        if noise_mask is None:
+            B, _, T, _, _ = video_tensor.shape
+            video_mask = torch.ones((B, 1, T, 1, 1), dtype=torch.float32, device=video_tensor.device)
+            if is_multimodal:
+                noise_mask = NestedTensor([video_mask] + [torch.ones_like(c) for c in components[1:]])
+            else:
+                noise_mask = video_mask
+        elif isinstance(noise_mask, NestedTensor):
+            noise_mask = NestedTensor([t.clone() for t in noise_mask.unbind()])
+        else:
+            noise_mask = noise_mask.clone()
+
+        if num_keyframes == 0:
+            latent_out["samples"] = samples
+            latent_out["noise_mask"] = noise_mask
+            return (latent_out, positive, negative)
+
+        ref_shape = video_tensor.shape
+
+        cropped_video = self._crop_temporal(video_tensor, num_keyframes)
+        if is_multimodal:
+            latent_out["samples"] = NestedTensor([cropped_video] + list(components[1:]))
+        else:
+            latent_out["samples"] = cropped_video
+
+        if isinstance(noise_mask, NestedTensor):
+            mask_components = noise_mask.unbind()
+            latent_out["noise_mask"] = NestedTensor([self._crop_temporal(mask_components[0], num_keyframes)] + list(mask_components[1:]))
+        else:
+            latent_out["noise_mask"] = self._crop_temporal(noise_mask, num_keyframes)
+
+        state_info = latent_out.get("state_info")
+        if state_info:
+            latent_out["state_info"] = apply_to_state_info_tensors(
+                state_info, ref_shape, self._crop_temporal, num_keyframes,
+                latent_shapes=latent_shapes,
+            )
+
+        positive = node_helpers.conditioning_set_values(positive, {
+            "keyframe_idxs": None,
+            "guide_attention_entries": None,
+        })
+        negative = node_helpers.conditioning_set_values(negative, {
+            "keyframe_idxs": None,
+            "guide_attention_entries": None,
+        })
+
+        if 'guider' in latent_out:
+            latent_out['guider'] = self._guider_with_keyframes_cleared(latent_out['guider'])
+
+        return (latent_out, positive, negative)
+
 
 # Adapted from https://github.com/comfyanonymous/ComfyUI/blob/05df2df489f6b237f63c5f7d42a943ae2be417e9/nodes.py
 class LatentUpscaleBy_state_info:
@@ -572,20 +693,60 @@ class latent_to_cuda:
                     "latent": ("LATENT", ),      
                     "to_cuda": ("BOOLEAN", {"default": True}),
                      },
+            "optional": {
+                    "full_latent": ("BOOLEAN", {"default": True}),
+                    },
                 }
 
     RETURN_TYPES = ("LATENT",)
-    RETURN_NAMES = ("passthrough",)
+    RETURN_NAMES = ("LATENT",)
     FUNCTION     = "main"
     CATEGORY     = "RES4LYF/latents"
 
-    def main(self, latent, to_cuda):
-        match to_cuda:
-            case "True":
-                latent = latent.to('cuda')
-            case "False":
-                latent = latent.to('cpu')
-        return (latent,)
+    def main(self, latent, to_cuda, full_latent=True):
+        device = self._resolve_device(to_cuda)
+
+        if full_latent:
+            if not isinstance(latent, dict):
+                raise TypeError("full_latent=True requires a latent dictionary.")
+            latent_out = self._move_structure(latent, device)
+        else:
+            latent_out = self._move_samples_only(latent, device)
+
+        return (latent_out,)
+
+    def _resolve_device(self, to_cuda):
+        if isinstance(to_cuda, bool):
+            return "cuda" if to_cuda else "cpu"
+        if isinstance(to_cuda, str):
+            normalized = to_cuda.strip().lower()
+            if normalized in {"true", "cuda", "gpu"}:
+                return "cuda"
+            if normalized in {"false", "cpu"}:
+                return "cpu"
+        raise ValueError("to_cuda must be a boolean or one of ['cuda', 'cpu']")
+
+    def _move_structure(self, value, device):
+        if torch.is_tensor(value):
+            return value.to(device)
+        if isinstance(value, dict):
+            return {k: self._move_structure(v, device) for k, v in value.items()}
+        if isinstance(value, list):
+            return [self._move_structure(v, device) for v in value]
+        if isinstance(value, tuple):
+            return tuple(self._move_structure(v, device) for v in value)
+        return copy.deepcopy(value)
+
+    def _move_samples_only(self, latent, device):
+        if isinstance(latent, dict):
+            if "samples" not in latent:
+                raise KeyError("Latent dictionary missing 'samples' key.")
+            latent_out = latent.copy()
+            latent_out["samples"] = latent["samples"].to(device)
+            return latent_out
+        if torch.is_tensor(latent):
+            return latent.to(device)
+        raise TypeError("Latent must be a dict with 'samples' or a tensor when full_latent=False.")
 
 
 

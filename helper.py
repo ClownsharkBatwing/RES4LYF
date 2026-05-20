@@ -130,11 +130,16 @@ def get_extra_options_list(key, default, extra_options, ret_type=None):
 class OptionsManager:
     APPEND_OPTIONS = {"extra_options"}
 
-    def __init__(self, options, **kwargs):
+    def __init__(self, options=None, options_group=None, **kwargs):
         self.options_list = []
         if options is not None:
             self.options_list.append(options)
-
+        # v3 Autogrow delivers chained options as {"options0": dict, "options1": dict, ...}.
+        if options_group:
+            self.options_list.extend(
+                v for v in options_group.values() if v is not None
+            )
+        # Legacy-named chain inputs ("options", "options 2", ...) land here via **kwargs.
         for key, value in kwargs.items():
             if key.startswith('options') and value is not None:
                 self.options_list.append(value)
@@ -380,6 +385,24 @@ def conditioning_set_values(conditioning, values={}):
             n[1][k] = values[k]
         c.append(n)
     return c
+
+
+def extract_cond_from_guider(guider, cond_type):
+    """Extract `cond_type` (e.g. 'positive' or 'negative') conditioning from a guider's
+    original_conds, converting from the guider's internal {cross_attn: tensor, ...} per-cond
+    dict format into the standard [[tensor, dict], ...] conditioning list format. Returns
+    None if guider is None / has no original_conds / doesn't contain cond_type."""
+    if guider is None:
+        return None
+    if not hasattr(guider, 'original_conds') or guider.original_conds is None:
+        return None
+    cond_list = guider.original_conds.get(cond_type)
+    if cond_list is None:
+        return None
+    return [
+        [cond.get('cross_attn'), {k: v for k, v in cond.items() if k != 'cross_attn'}]
+        for cond in cond_list
+    ]
 
 
 

@@ -23,6 +23,8 @@ def add_beta(NODE_CLASS_MAPPINGS, NODE_DISPLAY_NAME_MAPPINGS, extra_samplers):
         "ClownGuides_Sync"                : samplers_extensions.ClownGuides_Sync,
         "ClownGuides_Sync_Advanced"       : samplers_extensions.ClownGuides_Sync_Advanced,
         "ClownGuide_FrequencySeparation"  : samplers_extensions.ClownGuide_FrequencySeparation,
+        "ClownGuide_SelfRefine"           : samplers_extensions.ClownGuide_SelfRefine,
+        "ClownGuides_VideoAudioMask"       : samplers_extensions.ClownGuides_VideoAudioMask,
 
         
         "SharkOptions_GuiderInput"        : samplers_extensions.SharkOptions_GuiderInput,
@@ -44,6 +46,7 @@ def add_beta(NODE_CLASS_MAPPINGS, NODE_DISPLAY_NAME_MAPPINGS, extra_samplers):
         "ClownOptions_SDE_Mask_Beta"      : samplers_extensions.ClownOptions_SDE_Mask_Beta,
         
         "ClownOptions_StepSize_Beta"      : samplers_extensions.ClownOptions_StepSize_Beta,
+        "ClownOptions_LatentNormalize"    : samplers_extensions.ClownOptions_LatentNormalize,
         "ClownOptions_SigmaScaling_Beta"  : samplers_extensions.ClownOptions_SigmaScaling_Beta,
 
         "ClownOptions_Momentum_Beta"      : samplers_extensions.ClownOptions_Momentum_Beta,
@@ -124,16 +127,19 @@ def add_beta(NODE_CLASS_MAPPINGS, NODE_DISPLAY_NAME_MAPPINGS, extra_samplers):
             "ClownGuide_StyleNorm_Advanced_HiDream" : "ClownGuide_StyleNorm_Advanced_HiDream",
             "ClownGuide_Style_Beta"                 : "ClownGuide Style",
             "ClownGuide_Beta"                       : "ClownGuide",
+            "ClownGuide_SelfRefine"                 : "ClownGuide SelfRefine",
             "ClownGuides_Beta"                      : "ClownGuides",
             "ClownGuides_Sync"                      : "ClownGuides Sync",
             "ClownGuides_Sync_Advanced"             : "ClownGuides Sync_Advanced",
 
 
             "ClownGuidesAB_Beta"                    : "ClownGuidesAB",
+            "ClownGuides_VideoAudioMask"            : "ClownGuides VideoAudio Mask",
             "ClownSamplerSelector_Beta"             : "ClownSamplerSelector",
             "ClownOptions_SDE_Mask_Beta"            : "ClownOptions SDE Mask",
             "ClownOptions_SDE_Beta"                 : "ClownOptions SDE",
             "ClownOptions_StepSize_Beta"            : "ClownOptions Step Size",
+            "ClownOptions_LatentNormalize"          : "ClownOptions Latent Normalize",
             "ClownOptions_DetailBoost_Beta"         : "ClownOptions Detail Boost",
             "ClownOptions_SigmaScaling_Beta"        : "ClownOptions Sigma Scaling",
             "ClownOptions_Momentum_Beta"            : "ClownOptions Momentum",
