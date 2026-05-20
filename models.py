@@ -1,3 +1,4 @@
+import copy
 import torch
 import types
 from typing import Optional, Callable, Tuple, Dict, Any, Union, TYPE_CHECKING, TypeVar
@@ -397,25 +398,25 @@ class ReReduxPatcher:
     EXPERIMENTAL = True
 
     def main(self, style_model, style_dtype, enable=True, force=False):
-        
-        style_model.model.style_dtype = getattr(torch, style_dtype) if style_dtype != "default" else torch.float64
-        style_model.model.proj_weights = None
-        style_model.model.y0_adain_embed = None
-                
-        if (enable or force) and style_model.model.__class__ == ReduxImageEncoder:
-            m = style_model#.clone()
-            m.model.__class__     = ReReduxImageEncoder
-            m.model.threshold_inv = False
-        
-        elif not enable and style_model.model.__class__ == ReReduxImageEncoder:
-            m = style_model#.clone()
-            m.model.__class__ = ReduxImageEncoder
-            
-        elif style_model.model.__class__ not in {ReReduxImageEncoder, ReduxImageEncoder}:
+
+        if style_model.model.__class__ not in {ReReduxImageEncoder, ReduxImageEncoder}:
             raise ValueError("This node is for enabling style conditioning for Redux only!")
-        else:
-            m = style_model
-        
+
+        # comfy.sd.StyleModel has no object patching interface so deep-copy the underlying nn.Module
+        # Redux is small (~25MB), so the copy cost is negligible...
+        # The StyleModel wrapper is shallow-copied.
+        m = copy.copy(style_model)
+        m.model = copy.deepcopy(style_model.model)
+
+        if not (enable or force):
+            return (m,)
+
+        m.model.__class__      = ReReduxImageEncoder
+        m.model.threshold_inv  = False
+        m.model.style_dtype    = getattr(torch, style_dtype) if style_dtype != "default" else torch.float64
+        m.model.proj_weights   = None
+        m.model.y0_adain_embed = None
+
         return (m,)
 
 
