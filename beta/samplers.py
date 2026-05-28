@@ -1471,7 +1471,7 @@ class SharkSampler_Beta(io.ComfyNode):
                     template=io.Autogrow.TemplatePrefix(
                         io.Custom("OPTIONS").Input("options", optional=True),
                         prefix="options",
-                        min=1,
+                        min=0,
                         max=20,
                     ),
                 ),
@@ -1566,7 +1566,7 @@ class SharkChainsampler_Beta(io.ComfyNode):
                     template=io.Autogrow.TemplatePrefix(
                         io.Custom("OPTIONS").Input("options", optional=True),
                         prefix="options",
-                        min=1,
+                        min=0,
                         max=20,
                     ),
                 ),
@@ -1676,7 +1676,7 @@ class ClownSamplerAdvanced_Beta(io.ComfyNode):
                     template=io.Autogrow.TemplatePrefix(
                         io.Custom("OPTIONS").Input("options", optional=True),
                         prefix="options",
-                        min=1,
+                        min=0,
                         max=20,
                     ),
                 ),
@@ -2003,7 +2003,7 @@ class ClownsharKSampler_Beta(io.ComfyNode):
                     template=io.Autogrow.TemplatePrefix(
                         io.Custom("OPTIONS").Input("options", optional=True),
                         prefix="options",
-                        min=1,
+                        min=0,
                         max=20,
                     ),
                 ),
@@ -2434,7 +2434,7 @@ class ClownsharkChainsampler_Beta(io.ComfyNode):
                     template=io.Autogrow.TemplatePrefix(
                         io.Custom("OPTIONS").Input("options", optional=True),
                         prefix="options",
-                        min=1,
+                        min=0,
                         max=20,
                     ),
                 ),
@@ -2512,7 +2512,7 @@ class ClownSampler_Beta(io.ComfyNode):
                     template=io.Autogrow.TemplatePrefix(
                         io.Custom("OPTIONS").Input("options", optional=True),
                         prefix="options",
-                        min=1,
+                        min=0,
                         max=20,
                     ),
                 ),
