@@ -596,850 +596,405 @@ class SharkSampler:
                 noise_mask = latent_x['noise_mask']
                 latent_image_batch['noise_mask'] = noise_mask
 
-            if not EO("use_batch_loop"):
-                x = latent_image_batch['samples'].to(default_dtype)
+            x = latent_image_batch['samples'].to(default_dtype)
 
-                if isinstance(x, comfy.nested_tensor.NestedTensor):
-                    noise = comfy.nested_tensor.NestedTensor([
-                        generate_init_noise(
-                            x=t.clone(), seed=noise_seed + idx,
-                            noise_type_init=noise_type_init, noise_stdev=noise_stdev,
-                            noise_mean=noise_mean, noise_normalize=noise_normalize,
-                            sigma_max=sigma_max, sigma_min=sigma_min,
-                            alpha_init=alpha_init, k_init=k_init, EO=EO
-                        )
-                        for idx, t in enumerate(x.unbind())
-                    ])
-                else:
-                    noise = generate_init_noise(
-                        x=x.clone(), seed=noise_seed,
+            if isinstance(x, comfy.nested_tensor.NestedTensor):
+                noise = comfy.nested_tensor.NestedTensor([
+                    generate_init_noise(
+                        x=t.clone(), seed=noise_seed + idx,
                         noise_type_init=noise_type_init, noise_stdev=noise_stdev,
                         noise_mean=noise_mean, noise_normalize=noise_normalize,
                         sigma_max=sigma_max, sigma_min=sigma_min,
                         alpha_init=alpha_init, k_init=k_init, EO=EO
                     )
+                    for idx, t in enumerate(x.unbind())
+                ])
+            else:
+                noise = generate_init_noise(
+                    x=x.clone(), seed=noise_seed,
+                    noise_type_init=noise_type_init, noise_stdev=noise_stdev,
+                    noise_mean=noise_mean, noise_normalize=noise_normalize,
+                    sigma_max=sigma_max, sigma_min=sigma_min,
+                    alpha_init=alpha_init, k_init=k_init, EO=EO
+                )
 
-                # SETUP REGIONAL COND
-                if pos_cond[0][1] is not None:
-                    if 'callback_regional' in pos_cond[0][1]:
-                        pos_cond = pos_cond[0][1]['callback_regional'](work_model)
+            # SETUP REGIONAL COND
+            if pos_cond[0][1] is not None:
+                if 'callback_regional' in pos_cond[0][1]:
+                    pos_cond = pos_cond[0][1]['callback_regional'](work_model)
 
-                    if 'AttnMask' in pos_cond[0][1]:
-                        sampler.extra_options['AttnMask']   = pos_cond[0][1]['AttnMask']
-                        sampler.extra_options['RegContext'] = pos_cond[0][1]['RegContext']
-                        sampler.extra_options['RegParam']   = pos_cond[0][1]['RegParam']
+                if 'AttnMask' in pos_cond[0][1]:
+                    sampler.extra_options['AttnMask']   = pos_cond[0][1]['AttnMask']
+                    sampler.extra_options['RegContext'] = pos_cond[0][1]['RegContext']
+                    sampler.extra_options['RegParam']   = pos_cond[0][1]['RegParam']
 
-                        if isinstance(model.model.model_config, (comfy.supported_models.SDXL, comfy.supported_models.SD15)):
-                            latent_up_dummy = F.interpolate(latent_image_batch['samples'].to(torch.float16), size=(latent_image_batch['samples'].shape[-2] * 2, latent_image_batch['samples'].shape[-1] * 2), mode="nearest")
-                            sampler.extra_options['AttnMask'].set_latent(latent_up_dummy)
-                            sampler.extra_options['AttnMask'].generate()
-                            sampler.extra_options['AttnMask'].mask_up = sampler.extra_options['AttnMask'].attn_mask.mask
+                    if isinstance(model.model.model_config, (comfy.supported_models.SDXL, comfy.supported_models.SD15)):
+                        latent_up_dummy = F.interpolate(latent_image_batch['samples'].to(torch.float16), size=(latent_image_batch['samples'].shape[-2] * 2, latent_image_batch['samples'].shape[-1] * 2), mode="nearest")
+                        sampler.extra_options['AttnMask'].set_latent(latent_up_dummy)
+                        sampler.extra_options['AttnMask'].generate()
+                        sampler.extra_options['AttnMask'].mask_up = sampler.extra_options['AttnMask'].attn_mask.mask
 
-                            latent_down_dummy = F.interpolate(latent_image_batch['samples'].to(torch.float16), size=(latent_image_batch['samples'].shape[-2] // 2, latent_image_batch['samples'].shape[-1] // 2), mode="nearest")
+                        latent_down_dummy = F.interpolate(latent_image_batch['samples'].to(torch.float16), size=(latent_image_batch['samples'].shape[-2] // 2, latent_image_batch['samples'].shape[-1] // 2), mode="nearest")
+                        sampler.extra_options['AttnMask'].set_latent(latent_down_dummy)
+                        sampler.extra_options['AttnMask'].generate()
+                        sampler.extra_options['AttnMask'].mask_down = sampler.extra_options['AttnMask'].attn_mask.mask
+
+                        if isinstance(model.model.model_config, comfy.supported_models.SD15):
+                            latent_down_dummy = F.interpolate(latent_image_batch['samples'].to(torch.float16), size=(latent_image_batch['samples'].shape[-2] // 4, latent_image_batch['samples'].shape[-1] // 4), mode="nearest")
                             sampler.extra_options['AttnMask'].set_latent(latent_down_dummy)
                             sampler.extra_options['AttnMask'].generate()
-                            sampler.extra_options['AttnMask'].mask_down = sampler.extra_options['AttnMask'].attn_mask.mask
+                            sampler.extra_options['AttnMask'].mask_down2 = sampler.extra_options['AttnMask'].attn_mask.mask
 
-                            if isinstance(model.model.model_config, comfy.supported_models.SD15):
-                                latent_down_dummy = F.interpolate(latent_image_batch['samples'].to(torch.float16), size=(latent_image_batch['samples'].shape[-2] // 4, latent_image_batch['samples'].shape[-1] // 4), mode="nearest")
-                                sampler.extra_options['AttnMask'].set_latent(latent_down_dummy)
-                                sampler.extra_options['AttnMask'].generate()
-                                sampler.extra_options['AttnMask'].mask_down2 = sampler.extra_options['AttnMask'].attn_mask.mask
+                    if isinstance(model.model.model_config, comfy.supported_models.Stable_Cascade_C):
+                        latent_up_dummy = F.interpolate(latent_image_batch['samples'].to(torch.float16), size=(latent_image_batch['samples'].shape[-2] * 2, latent_image_batch['samples'].shape[-1] * 2), mode="nearest")
+                        sampler.extra_options['AttnMask'].set_latent(latent_up_dummy)
+                        sampler.extra_options['AttnMask'].context_lens = [context_len + 8 for context_len in sampler.extra_options['AttnMask'].context_lens]
+                        sampler.extra_options['AttnMask'].text_len = sum(sampler.extra_options['AttnMask'].context_lens)
+                    else:
+                        sampler.extra_options['AttnMask'].set_latent(latent_image_batch['samples'])
+                    sampler.extra_options['AttnMask'].generate()
 
-                        if isinstance(model.model.model_config, comfy.supported_models.Stable_Cascade_C):
-                            latent_up_dummy = F.interpolate(latent_image_batch['samples'].to(torch.float16), size=(latent_image_batch['samples'].shape[-2] * 2, latent_image_batch['samples'].shape[-1] * 2), mode="nearest")
-                            sampler.extra_options['AttnMask'].set_latent(latent_up_dummy)
-                            sampler.extra_options['AttnMask'].context_lens = [context_len + 8 for context_len in sampler.extra_options['AttnMask'].context_lens]
-                            sampler.extra_options['AttnMask'].text_len = sum(sampler.extra_options['AttnMask'].context_lens)
-                        else:
-                            sampler.extra_options['AttnMask'].set_latent(latent_image_batch['samples'])
-                        sampler.extra_options['AttnMask'].generate()
+            if neg_cond[0][1] is not None:
+                if 'callback_regional' in neg_cond[0][1]:
+                    neg_cond = neg_cond[0][1]['callback_regional'](work_model)
 
-                if neg_cond[0][1] is not None:
-                    if 'callback_regional' in neg_cond[0][1]:
-                        neg_cond = neg_cond[0][1]['callback_regional'](work_model)
+                if 'AttnMask' in neg_cond[0][1]:
+                    sampler.extra_options['AttnMask_neg']   = neg_cond[0][1]['AttnMask']
+                    sampler.extra_options['RegContext_neg'] = neg_cond[0][1]['RegContext']
+                    sampler.extra_options['RegParam_neg']   = neg_cond[0][1]['RegParam']
 
-                    if 'AttnMask' in neg_cond[0][1]:
-                        sampler.extra_options['AttnMask_neg']   = neg_cond[0][1]['AttnMask']
-                        sampler.extra_options['RegContext_neg'] = neg_cond[0][1]['RegContext']
-                        sampler.extra_options['RegParam_neg']   = neg_cond[0][1]['RegParam']
+                    if isinstance(model.model.model_config, (comfy.supported_models.SDXL, comfy.supported_models.SD15)):
+                        latent_up_dummy = F.interpolate(latent_image_batch['samples'].to(torch.float16), size=(latent_image_batch['samples'].shape[-2] * 2, latent_image_batch['samples'].shape[-1] * 2), mode="nearest")
+                        sampler.extra_options['AttnMask_neg'].set_latent(latent_up_dummy)
+                        sampler.extra_options['AttnMask_neg'].generate()
+                        sampler.extra_options['AttnMask_neg'].mask_up = sampler.extra_options['AttnMask_neg'].attn_mask.mask
 
-                        if isinstance(model.model.model_config, (comfy.supported_models.SDXL, comfy.supported_models.SD15)):
-                            latent_up_dummy = F.interpolate(latent_image_batch['samples'].to(torch.float16), size=(latent_image_batch['samples'].shape[-2] * 2, latent_image_batch['samples'].shape[-1] * 2), mode="nearest")
-                            sampler.extra_options['AttnMask_neg'].set_latent(latent_up_dummy)
-                            sampler.extra_options['AttnMask_neg'].generate()
-                            sampler.extra_options['AttnMask_neg'].mask_up = sampler.extra_options['AttnMask_neg'].attn_mask.mask
+                        latent_down_dummy = F.interpolate(latent_image_batch['samples'].to(torch.float16), size=(latent_image_batch['samples'].shape[-2] // 2, latent_image_batch['samples'].shape[-1] // 2), mode="nearest")
+                        sampler.extra_options['AttnMask_neg'].set_latent(latent_down_dummy)
+                        sampler.extra_options['AttnMask_neg'].generate()
+                        sampler.extra_options['AttnMask_neg'].mask_down = sampler.extra_options['AttnMask_neg'].attn_mask.mask
 
-                            latent_down_dummy = F.interpolate(latent_image_batch['samples'].to(torch.float16), size=(latent_image_batch['samples'].shape[-2] // 2, latent_image_batch['samples'].shape[-1] // 2), mode="nearest")
+                        if isinstance(model.model.model_config, comfy.supported_models.SD15):
+                            latent_down_dummy = F.interpolate(latent_image_batch['samples'].to(torch.float16), size=(latent_image_batch['samples'].shape[-2] // 4, latent_image_batch['samples'].shape[-1] // 4), mode="nearest")
                             sampler.extra_options['AttnMask_neg'].set_latent(latent_down_dummy)
                             sampler.extra_options['AttnMask_neg'].generate()
-                            sampler.extra_options['AttnMask_neg'].mask_down = sampler.extra_options['AttnMask_neg'].attn_mask.mask
+                            sampler.extra_options['AttnMask_neg'].mask_down2 = sampler.extra_options['AttnMask_neg'].attn_mask.mask
 
-                            if isinstance(model.model.model_config, comfy.supported_models.SD15):
-                                latent_down_dummy = F.interpolate(latent_image_batch['samples'].to(torch.float16), size=(latent_image_batch['samples'].shape[-2] // 4, latent_image_batch['samples'].shape[-1] // 4), mode="nearest")
-                                sampler.extra_options['AttnMask_neg'].set_latent(latent_down_dummy)
-                                sampler.extra_options['AttnMask_neg'].generate()
-                                sampler.extra_options['AttnMask_neg'].mask_down2 = sampler.extra_options['AttnMask_neg'].attn_mask.mask
-
-                        if isinstance(model.model.model_config, comfy.supported_models.Stable_Cascade_C):
-                            latent_up_dummy = F.interpolate(latent_image_batch['samples'].to(torch.float16), size=(latent_image_batch['samples'].shape[-2] * 2, latent_image_batch['samples'].shape[-1] * 2), mode="nearest")
-                            sampler.extra_options['AttnMask_neg'].set_latent(latent_up_dummy)
-                            sampler.extra_options['AttnMask_neg'].context_lens = [context_len + 8 for context_len in sampler.extra_options['AttnMask_neg'].context_lens]
-                            sampler.extra_options['AttnMask_neg'].text_len = sum(sampler.extra_options['AttnMask_neg'].context_lens)
-                        else:
-                            sampler.extra_options['AttnMask_neg'].set_latent(latent_image_batch['samples'])
-                        sampler.extra_options['AttnMask_neg'].generate()
-
-                if guider is None:
-                    guider = SharkGuider(work_model)
-                    flow_cond = options_mgr.get('flow_cond', {})
-                    if flow_cond and 'yt_positive' in flow_cond:
-                        if 'yt_inv_positive' not in flow_cond:
-                            guider.set_conds(yt_positive=flow_cond.get('yt_positive'),
-                                             yt_negative=flow_cond.get('yt_negative'))
-                            guider.set_cfgs(yt=flow_cond.get('yt_cfg'), xt=cfg)
-                        else:
-                            guider.set_conds(yt_positive=flow_cond.get('yt_positive'),
-                                             yt_negative=flow_cond.get('yt_negative'),
-                                             yt_inv_positive=flow_cond.get('yt_inv_positive'),
-                                             yt_inv_negative=flow_cond.get('yt_inv_negative'))
-                            guider.set_cfgs(yt=flow_cond.get('yt_cfg'),
-                                           yt_inv=flow_cond.get('yt_inv_cfg'), xt=cfg)
+                    if isinstance(model.model.model_config, comfy.supported_models.Stable_Cascade_C):
+                        latent_up_dummy = F.interpolate(latent_image_batch['samples'].to(torch.float16), size=(latent_image_batch['samples'].shape[-2] * 2, latent_image_batch['samples'].shape[-1] * 2), mode="nearest")
+                        sampler.extra_options['AttnMask_neg'].set_latent(latent_up_dummy)
+                        sampler.extra_options['AttnMask_neg'].context_lens = [context_len + 8 for context_len in sampler.extra_options['AttnMask_neg'].context_lens]
+                        sampler.extra_options['AttnMask_neg'].text_len = sum(sampler.extra_options['AttnMask_neg'].context_lens)
                     else:
-                        guider.set_cfgs(xt=cfg)
-                    guider.set_conds(positive=pos_cond, negative=neg_cond)
-                elif type(guider) == SharkGuider:
-                    guider.cfgs['xt'] = cfg
-                    guider.cfg = cfg
-                    guider.set_conds(positive=pos_cond, negative=neg_cond)
-                    RESplain(f"Shark: Applied CFG ({cfg}) to SharkGuider", debug=True)
+                        sampler.extra_options['AttnMask_neg'].set_latent(latent_image_batch['samples'])
+                    sampler.extra_options['AttnMask_neg'].generate()
+
+            if guider is None:
+                guider = SharkGuider(work_model)
+                flow_cond = options_mgr.get('flow_cond', {})
+                if flow_cond and 'yt_positive' in flow_cond:
+                    if 'yt_inv_positive' not in flow_cond:
+                        guider.set_conds(yt_positive=flow_cond.get('yt_positive'),
+                                         yt_negative=flow_cond.get('yt_negative'))
+                        guider.set_cfgs(yt=flow_cond.get('yt_cfg'), xt=cfg)
+                    else:
+                        guider.set_conds(yt_positive=flow_cond.get('yt_positive'),
+                                         yt_negative=flow_cond.get('yt_negative'),
+                                         yt_inv_positive=flow_cond.get('yt_inv_positive'),
+                                         yt_inv_negative=flow_cond.get('yt_inv_negative'))
+                        guider.set_cfgs(yt=flow_cond.get('yt_cfg'),
+                                       yt_inv=flow_cond.get('yt_inv_cfg'), xt=cfg)
                 else:
-                    if has_custom_cfg_handling(guider):
-                        # Guider has its own CFG handling - set_cfg would succeed but be ignored
-                        RESplain(f"Shark: Guider ({guider.__class__.__name__}) has custom CFG - using guider's internal settings", debug=True)
-                        try:
-                            guider.set_conds(pos_cond, neg_cond)
-                        except:
-                            pass
-                    else:
-                        try:
-                            guider.set_cfg(cfg)
-                            guider.set_conds(pos_cond, neg_cond)
-                            RESplain(f"Shark: Applied CFG ({cfg}) to guider", debug=True)
-                        except:
-                            RESplain(f"SharkWarning: guider.set_cfg failed - guider will use its original CFG settings (node CFG {cfg} ignored)")
-                            pass
-
-                if latent_image is not None and 'state_info' in latent_image and 'sigmas' in latent_image['state_info']:
-                    steps_len = max(sigmas.shape[-1] - 1, latent_image['state_info']['sigmas'].shape[-1] - 1)
+                    guider.set_cfgs(xt=cfg)
+                guider.set_conds(positive=pos_cond, negative=neg_cond)
+            elif type(guider) == SharkGuider:
+                guider.cfgs['xt'] = cfg
+                guider.cfg = cfg
+                guider.set_conds(positive=pos_cond, negative=neg_cond)
+                RESplain(f"Shark: Applied CFG ({cfg}) to SharkGuider", debug=True)
+            else:
+                if has_custom_cfg_handling(guider):
+                    # Guider has its own CFG handling - set_cfg would succeed but be ignored
+                    RESplain(f"Shark: Guider ({guider.__class__.__name__}) has custom CFG - using guider's internal settings", debug=True)
+                    try:
+                        guider.set_conds(pos_cond, neg_cond)
+                    except:
+                        pass
                 else:
-                    steps_len = sigmas.shape[-1] - 1
+                    try:
+                        guider.set_cfg(cfg)
+                        guider.set_conds(pos_cond, neg_cond)
+                        RESplain(f"Shark: Applied CFG ({cfg}) to guider", debug=True)
+                    except:
+                        RESplain(f"SharkWarning: guider.set_cfg failed - guider will use its original CFG settings (node CFG {cfg} ignored)")
+                        pass
 
-                x0_output = {}
-                try:
-                    callback = latent_preview.prepare_callback(work_model, steps_len, x0_output,
-                        shape=x.shape if hasattr(x, 'is_nested') and x.is_nested else None)
-                except TypeError:
-                    callback = latent_preview.prepare_callback(work_model, steps_len, x0_output)
+            if latent_image is not None and 'state_info' in latent_image and 'sigmas' in latent_image['state_info']:
+                steps_len = max(sigmas.shape[-1] - 1, latent_image['state_info']['sigmas'].shape[-1] - 1)
+            else:
+                steps_len = sigmas.shape[-1] - 1
 
-                noise_mask = latent_image_batch.get("noise_mask", None)
+            x0_output = {}
+            try:
+                callback = latent_preview.prepare_callback(work_model, steps_len, x0_output,
+                    shape=x.shape if hasattr(x, 'is_nested') and x.is_nested else None)
+            except TypeError:
+                callback = latent_preview.prepare_callback(work_model, steps_len, x0_output)
 
-                if noise_mask is not None and sampler_mode in {"resample", "unsample"}:
-                    stored_image = state_info.get('image_initial')
-                    if stored_image is not None and stored_image.shape == x.shape:
-                        x_initial = stored_image
-                    else:
-                        x_initial = x
-                    stored_noise = state_info.get('noise_initial')
-                    if stored_noise is not None and stored_noise.shape == noise.shape:
-                        noise_initial = stored_noise
-                    else:
-                        noise_initial = noise
+            noise_mask = latent_image_batch.get("noise_mask", None)
+
+            if noise_mask is not None and sampler_mode in {"resample", "unsample"}:
+                stored_image = state_info.get('image_initial')
+                if stored_image is not None and stored_image.shape == x.shape:
+                    x_initial = stored_image
                 else:
                     x_initial = x
+                stored_noise = state_info.get('noise_initial')
+                if stored_noise is not None and stored_noise.shape == noise.shape:
+                    noise_initial = stored_noise
+                else:
                     noise_initial = noise
+            else:
+                x_initial = x
+                noise_initial = noise
 
-                state_info_out = {}
-                if 'BONGMATH' in sampler.extra_options:
-                    sampler.extra_options['state_info'] = state_info
-                    sampler.extra_options['state_info_out'] = state_info_out
-                    sampler.extra_options['image_initial'] = x_initial
-                    sampler.extra_options['noise_initial'] = noise_initial
+            state_info_out = {}
+            if 'BONGMATH' in sampler.extra_options:
+                sampler.extra_options['state_info'] = state_info
+                sampler.extra_options['state_info_out'] = state_info_out
+                sampler.extra_options['image_initial'] = x_initial
+                sampler.extra_options['noise_initial'] = noise_initial
 
-                if rebounds > 0:
-                    if has_custom_cfg_handling(guider):
-                        RESplain(f"SharkWarning: Rebounds with guider ({guider.__class__.__name__}) that has custom CFG - unsample_cfg will be ignored")
-                    has_cfgs = hasattr(guider, 'cfgs')
-                    cfgs_cached = guider.cfgs if has_cfgs else None
-                    cfg_cached = guider.cfg
-                    steps_to_run_cached = sampler.extra_options['steps_to_run']
-                    eta_cached         = sampler.extra_options['eta']
-                    eta_substep_cached = sampler.extra_options['eta_substep']
+            if rebounds > 0:
+                if has_custom_cfg_handling(guider):
+                    RESplain(f"SharkWarning: Rebounds with guider ({guider.__class__.__name__}) that has custom CFG - unsample_cfg will be ignored")
+                has_cfgs = hasattr(guider, 'cfgs')
+                cfgs_cached = guider.cfgs if has_cfgs else None
+                cfg_cached = guider.cfg
+                steps_to_run_cached = sampler.extra_options['steps_to_run']
+                eta_cached         = sampler.extra_options['eta']
+                eta_substep_cached = sampler.extra_options['eta_substep']
 
-                    etas_cached         = sampler.extra_options['etas'].clone()
-                    etas_substep_cached = sampler.extra_options['etas_substep'].clone()
+                etas_cached         = sampler.extra_options['etas'].clone()
+                etas_substep_cached = sampler.extra_options['etas_substep'].clone()
 
-                    unsample_etas = torch.full_like(etas_cached, unsample_eta)
-                    rk_type_cached = sampler.extra_options['rk_type']
+                unsample_etas = torch.full_like(etas_cached, unsample_eta)
+                rk_type_cached = sampler.extra_options['rk_type']
+
+                if sampler.extra_options['sampler_mode'] == "unsample":
+                    if has_cfgs:
+                        guider.cfgs = {'xt': unsample_cfg, 'yt': unsample_cfg}
+                        RESplain(f"Shark: Rebounds init - setting unsample CFG (cfgs): xt={unsample_cfg}, yt={unsample_cfg}", debug=True)
+                    else:
+                        guider.cfg = unsample_cfg
+                        RESplain(f"Shark: Rebounds init - setting unsample CFG: {unsample_cfg}", debug=True)
+                    if unsample_eta != -1.0:
+                        sampler.extra_options['eta_substep']  = unsample_eta
+                        sampler.extra_options['eta']          = unsample_eta
+                        sampler.extra_options['etas_substep'] = unsample_etas
+                        sampler.extra_options['etas']         = unsample_etas
+                    if unsampler_name != "none":
+                        sampler.extra_options['rk_type']      = unsampler_name
+                    if unsample_steps_to_run > -1:
+                        sampler.extra_options['steps_to_run'] = unsample_steps_to_run
+                else:
+                    if has_cfgs:
+                        guider.cfgs = cfgs_cached
+                    else:
+                        guider.cfg = cfg_cached
+
+                if has_cfgs:
+                    guider.cfgs = cfgs_cached
+                else:
+                    guider.cfg = cfg_cached
+                sampler.extra_options['steps_to_run'] = steps_to_run_cached
+
+                eta_decay           = eta_cached
+                eta_substep_decay   = eta_substep_cached
+                unsample_eta_decay  = unsample_eta
+
+                etas_decay          = etas_cached
+                etas_substep_decay  = etas_substep_cached
+                unsample_etas_decay = unsample_etas
+
+            # Apply pre-sampling latent normalization for NestedTensors
+            idx_0_factor = options_mgr.get('latent_normalize_idx_0', 1.0)
+            idx_1_factor = options_mgr.get('latent_normalize_idx_1', 1.0)
+            factors_0_steps = options_mgr.get('latent_normalize_idx_0_steps', [1.0])
+            factors_1_steps = options_mgr.get('latent_normalize_idx_1_steps', [1.0])
+
+            # Per-step normalization: pass shapes and factors to inner sampler
+            has_per_step_factors = len(factors_0_steps) > 1 or len(factors_1_steps) > 1
+            if isinstance(x, comfy.nested_tensor.NestedTensor) and 'rk_type' in sampler.extra_options:
+                sampler.extra_options['latent_shapes'] = [t.shape for t in x.unbind()]
+                sampler.extra_options['latent_normalize_idx_0_steps'] = factors_0_steps
+                sampler.extra_options['latent_normalize_idx_1_steps'] = factors_1_steps
+
+            # Node-level normalization only for single-value factors (backward compat)
+            # Per-step factors are applied in the inner loop instead
+            if not has_per_step_factors and (idx_0_factor != 1.0 or idx_1_factor != 1.0):
+                # Normalize x for standard sampling
+                x = apply_nested_normalization(x, idx_0_factor, idx_1_factor)
+                # Also normalize raw_x for chainsampling (rk_sampler_beta replaces x with raw_x)
+                # raw_x is a packed tensor, so we need to unpack, normalize, repack
+                if 'raw_x' in state_info and hasattr(x, 'is_nested') and x.is_nested:
+                    raw_x = state_info['raw_x']
+                    latent_shapes = [t.shape for t in x.unbind()]
+                    tensors = comfy.utils.unpack_latents(raw_x, latent_shapes)
+                    factors = [idx_0_factor, idx_1_factor]
+                    for idx, t in enumerate(tensors):
+                        factor = factors[idx] if idx < len(factors) else 1.0
+                        if factor != 1.0:
+                            tensors[idx] = t * factor
+                    state_info['raw_x'], _ = comfy.utils.pack_latents(tensors)
+                    RESplain(f"Latent normalize: applied to raw_x (packed), idx_0={idx_0_factor}, idx_1={idx_1_factor}", debug=True)
+
+            sampler.extra_options['outer_sigmas_len'] = sigmas.shape[-1]
+            samples = guider.sample(noise, x_initial, sampler, sigmas, denoise_mask=noise_mask, callback=callback, disable_pbar=disable_pbar, seed=noise_seed)
+
+            if rebounds > 0:
+                noise_seed_cached   = sampler.extra_options['noise_seed']
+                cfgs_cached         = guider.cfgs if has_cfgs else None
+                cfg_cached          = guider.cfg
+                sampler_mode_cached = sampler.extra_options['sampler_mode']
+
+                for restarts_iter in range(rebounds):
+                    sampler.extra_options['state_info'] = sampler.extra_options['state_info_out']
+
+                    sigmas = sampler.extra_options['state_info_out']['sigmas'] if sigmas is None else sigmas
+
+                    if   sampler.extra_options['sampler_mode'] == "standard":
+                        sampler.extra_options['sampler_mode'] = "unsample"
+                    elif sampler.extra_options['sampler_mode'] == "unsample":
+                        sampler.extra_options['sampler_mode'] = "resample"
+                    elif sampler.extra_options['sampler_mode'] == "resample":
+                        sampler.extra_options['sampler_mode'] = "unsample"
+
+                    sampler.extra_options['noise_seed'] = -1
 
                     if sampler.extra_options['sampler_mode'] == "unsample":
                         if has_cfgs:
                             guider.cfgs = {'xt': unsample_cfg, 'yt': unsample_cfg}
-                            RESplain(f"Shark: Rebounds init - setting unsample CFG (cfgs): xt={unsample_cfg}, yt={unsample_cfg}", debug=True)
+                            RESplain(f"Shark: Rebounds unsample - CFG (cfgs): xt={unsample_cfg}, yt={unsample_cfg}", debug=True)
                         else:
                             guider.cfg = unsample_cfg
-                            RESplain(f"Shark: Rebounds init - setting unsample CFG: {unsample_cfg}", debug=True)
+                            RESplain(f"Shark: Rebounds unsample - CFG: {unsample_cfg}", debug=True)
                         if unsample_eta != -1.0:
-                            sampler.extra_options['eta_substep']  = unsample_eta
-                            sampler.extra_options['eta']          = unsample_eta
+                            sampler.extra_options['eta_substep']  = unsample_eta_decay
+                            sampler.extra_options['eta']          = unsample_eta_decay
                             sampler.extra_options['etas_substep'] = unsample_etas
                             sampler.extra_options['etas']         = unsample_etas
+                        else:
+                            sampler.extra_options['eta_substep']  = eta_substep_decay
+                            sampler.extra_options['eta']          = eta_decay
+                            sampler.extra_options['etas_substep'] = etas_substep_decay
+                            sampler.extra_options['etas']         = etas_decay
                         if unsampler_name != "none":
-                            sampler.extra_options['rk_type']      = unsampler_name
+                            sampler.extra_options['rk_type']  = unsampler_name
                         if unsample_steps_to_run > -1:
                             sampler.extra_options['steps_to_run'] = unsample_steps_to_run
                     else:
                         if has_cfgs:
                             guider.cfgs = cfgs_cached
+                            RESplain(f"Shark: Rebounds resample - restored CFG (cfgs)", debug=True)
                         else:
                             guider.cfg = cfg_cached
-
-                    if has_cfgs:
-                        guider.cfgs = cfgs_cached
-                    else:
-                        guider.cfg = cfg_cached
-                    sampler.extra_options['steps_to_run'] = steps_to_run_cached
-
-                    eta_decay           = eta_cached
-                    eta_substep_decay   = eta_substep_cached
-                    unsample_eta_decay  = unsample_eta
-
-                    etas_decay          = etas_cached
-                    etas_substep_decay  = etas_substep_cached
-                    unsample_etas_decay = unsample_etas
-
-                # Apply pre-sampling latent normalization for NestedTensors
-                idx_0_factor = options_mgr.get('latent_normalize_idx_0', 1.0)
-                idx_1_factor = options_mgr.get('latent_normalize_idx_1', 1.0)
-                factors_0_steps = options_mgr.get('latent_normalize_idx_0_steps', [1.0])
-                factors_1_steps = options_mgr.get('latent_normalize_idx_1_steps', [1.0])
-
-                # Per-step normalization: pass shapes and factors to inner sampler
-                has_per_step_factors = len(factors_0_steps) > 1 or len(factors_1_steps) > 1
-                if isinstance(x, comfy.nested_tensor.NestedTensor) and 'rk_type' in sampler.extra_options:
-                    sampler.extra_options['latent_shapes'] = [t.shape for t in x.unbind()]
-                    sampler.extra_options['latent_normalize_idx_0_steps'] = factors_0_steps
-                    sampler.extra_options['latent_normalize_idx_1_steps'] = factors_1_steps
-
-                # Node-level normalization only for single-value factors (backward compat)
-                # Per-step factors are applied in the inner loop instead
-                if not has_per_step_factors and (idx_0_factor != 1.0 or idx_1_factor != 1.0):
-                    # Normalize x for standard sampling
-                    x = apply_nested_normalization(x, idx_0_factor, idx_1_factor)
-                    # Also normalize raw_x for chainsampling (rk_sampler_beta replaces x with raw_x)
-                    # raw_x is a packed tensor, so we need to unpack, normalize, repack
-                    if 'raw_x' in state_info and hasattr(x, 'is_nested') and x.is_nested:
-                        raw_x = state_info['raw_x']
-                        latent_shapes = [t.shape for t in x.unbind()]
-                        tensors = comfy.utils.unpack_latents(raw_x, latent_shapes)
-                        factors = [idx_0_factor, idx_1_factor]
-                        for idx, t in enumerate(tensors):
-                            factor = factors[idx] if idx < len(factors) else 1.0
-                            if factor != 1.0:
-                                tensors[idx] = t * factor
-                        state_info['raw_x'], _ = comfy.utils.pack_latents(tensors)
-                        RESplain(f"Latent normalize: applied to raw_x (packed), idx_0={idx_0_factor}, idx_1={idx_1_factor}", debug=True)
-
-                sampler.extra_options['outer_sigmas_len'] = sigmas.shape[-1]
-                samples = guider.sample(noise, x_initial, sampler, sigmas, denoise_mask=noise_mask, callback=callback, disable_pbar=disable_pbar, seed=noise_seed)
-
-                if rebounds > 0:
-                    noise_seed_cached   = sampler.extra_options['noise_seed']
-                    cfgs_cached         = guider.cfgs if has_cfgs else None
-                    cfg_cached          = guider.cfg
-                    sampler_mode_cached = sampler.extra_options['sampler_mode']
-
-                    for restarts_iter in range(rebounds):
-                        sampler.extra_options['state_info'] = sampler.extra_options['state_info_out']
-
-                        sigmas = sampler.extra_options['state_info_out']['sigmas'] if sigmas is None else sigmas
-
-                        if   sampler.extra_options['sampler_mode'] == "standard":
-                            sampler.extra_options['sampler_mode'] = "unsample"
-                        elif sampler.extra_options['sampler_mode'] == "unsample":
-                            sampler.extra_options['sampler_mode'] = "resample"
-                        elif sampler.extra_options['sampler_mode'] == "resample":
-                            sampler.extra_options['sampler_mode'] = "unsample"
-
-                        sampler.extra_options['noise_seed'] = -1
-
-                        if sampler.extra_options['sampler_mode'] == "unsample":
-                            if has_cfgs:
-                                guider.cfgs = {'xt': unsample_cfg, 'yt': unsample_cfg}
-                                RESplain(f"Shark: Rebounds unsample - CFG (cfgs): xt={unsample_cfg}, yt={unsample_cfg}", debug=True)
-                            else:
-                                guider.cfg = unsample_cfg
-                                RESplain(f"Shark: Rebounds unsample - CFG: {unsample_cfg}", debug=True)
-                            if unsample_eta != -1.0:
-                                sampler.extra_options['eta_substep']  = unsample_eta_decay
-                                sampler.extra_options['eta']          = unsample_eta_decay
-                                sampler.extra_options['etas_substep'] = unsample_etas
-                                sampler.extra_options['etas']         = unsample_etas
-                            else:
-                                sampler.extra_options['eta_substep']  = eta_substep_decay
-                                sampler.extra_options['eta']          = eta_decay
-                                sampler.extra_options['etas_substep'] = etas_substep_decay
-                                sampler.extra_options['etas']         = etas_decay
-                            if unsampler_name != "none":
-                                sampler.extra_options['rk_type']  = unsampler_name
-                            if unsample_steps_to_run > -1:
-                                sampler.extra_options['steps_to_run'] = unsample_steps_to_run
+                            RESplain(f"Shark: Rebounds resample - restored CFG: {cfg_cached}", debug=True)
+                        sampler.extra_options['eta_substep']  = eta_substep_decay
+                        sampler.extra_options['eta']          = eta_decay
+                        sampler.extra_options['etas_substep'] = etas_substep_decay
+                        sampler.extra_options['etas']         = etas_decay
+                        sampler.extra_options['rk_type']      = rk_type_cached
+                        if unsample_steps_to_run > -1:
+                            sampler.extra_options['steps_to_run'] = unsample_steps_to_run
                         else:
-                            if has_cfgs:
-                                guider.cfgs = cfgs_cached
-                                RESplain(f"Shark: Rebounds resample - restored CFG (cfgs)", debug=True)
-                            else:
-                                guider.cfg = cfg_cached
-                                RESplain(f"Shark: Rebounds resample - restored CFG: {cfg_cached}", debug=True)
-                            sampler.extra_options['eta_substep']  = eta_substep_decay
-                            sampler.extra_options['eta']          = eta_decay
-                            sampler.extra_options['etas_substep'] = etas_substep_decay
-                            sampler.extra_options['etas']         = etas_decay
-                            sampler.extra_options['rk_type']      = rk_type_cached
-                            if unsample_steps_to_run > -1:
-                                sampler.extra_options['steps_to_run'] = unsample_steps_to_run
-                            else:
-                                sampler.extra_options['steps_to_run'] = steps_to_run_cached
-
-                        sampler.extra_options['outer_sigmas_len'] = sigmas.shape[-1]
-                        samples = guider.sample(noise, x_initial, sampler, sigmas, denoise_mask=noise_mask, callback=callback, disable_pbar=disable_pbar, seed=-1)
-
-                        eta_substep_decay   *= eta_decay_scale
-                        eta_decay           *= eta_decay_scale
-                        unsample_eta_decay  *= eta_decay_scale
-
-                        etas_substep_decay  *= eta_decay_scale
-                        etas_decay          *= eta_decay_scale
-                        unsample_etas_decay *= eta_decay_scale
-
-                    sampler.extra_options['noise_seed'] = noise_seed_cached
-                    if has_cfgs:
-                        guider.cfgs = cfgs_cached
-                        RESplain(f"Shark: Rebounds complete - restored original CFG (cfgs)", debug=True)
-                    else:
-                        guider.cfg = cfg_cached
-                        RESplain(f"Shark: Rebounds complete - restored original CFG: {cfg_cached}", debug=True)
-                    sampler.extra_options['sampler_mode'] = sampler_mode_cached
-                    sampler.extra_options['eta_substep']  = eta_substep_cached
-                    sampler.extra_options['eta']          = eta_cached
-                    sampler.extra_options['etas_substep'] = etas_substep_cached
-                    sampler.extra_options['etas']         = etas_cached
-
-                if noise_mask is not None:
-                    if hasattr(samples, 'is_nested') and samples.is_nested:
-                        blended = []
-                        x_initial_list = x_initial.unbind() if hasattr(x_initial, 'is_nested') and x_initial.is_nested else [x_initial]
-                        if hasattr(noise_mask, 'is_nested') and noise_mask.is_nested:
-                            mask_list = noise_mask.unbind()
-                        else:
-                            mask_list = [noise_mask]
-                        for idx, s in enumerate(samples.unbind()):
-                            xi = x_initial_list[idx] if idx < len(x_initial_list) else x_initial_list[0]
-                            m = mask_list[idx] if idx < len(mask_list) else mask_list[0]
-                            reshaped_mask = comfy.utils.reshape_mask(m, s.shape).to(s.device)
-                            blended.append(s * reshaped_mask + xi.to(s.device) * (1.0 - reshaped_mask))
-                            # probably don't need to check ndim here, comfy utils handles it
-                            # if s.ndim == m.ndim:
-                            #     reshaped_mask = comfy.utils.reshape_mask(m, s.shape).to(s.device)
-                            #     blended.append(s * reshaped_mask + xi.to(s.device) * (1.0 - reshaped_mask))
-                            # else:
-                            #     blended.append(s)
-                        samples = comfy.nested_tensor.NestedTensor(blended)
-                    else:
-                        if hasattr(noise_mask, 'is_nested') and noise_mask.is_nested:
-                            noise_mask = noise_mask.unbind()[0]
-                        reshaped_mask = comfy.utils.reshape_mask(noise_mask, samples.shape).to(samples.device)
-                        samples = samples * reshaped_mask + x_initial.to(samples.device) * (1.0 - reshaped_mask)
-
-                samples = samples.to(comfy.model_management.intermediate_device())
-
-                out = latent_x.copy()
-                out["samples"] = samples
-
-                if "x0" in x0_output:
-                    x0_out = work_model.model.process_latent_out(x0_output["x0"].cpu())
-                    if hasattr(samples, 'is_nested') and samples.is_nested:
-                        latent_shapes = [t.shape for t in samples.unbind()]
-                        x0_out = comfy.nested_tensor.NestedTensor(
-                            comfy.utils.unpack_latents(x0_out, latent_shapes)
-                        )
-                    if hasattr(x0_out, 'is_nested') and x0_out.is_nested:
-                        x0_out = comfy.nested_tensor.NestedTensor([t.to(torch.float32) for t in x0_out.unbind()])
-                    else:
-                        x0_out = x0_out.to(torch.float32)
-                    out_denoised = latent_x.copy()
-                    out_denoised["samples"] = x0_out
-                else:
-                    out_denoised = latent_x.copy()
-                    if hasattr(samples, 'is_nested') and samples.is_nested:
-                        out_denoised["samples"] = comfy.nested_tensor.NestedTensor([t.to(torch.float32) for t in samples.unbind()])
-                    else:
-                        out_denoised["samples"] = samples.to(torch.float32)
-                        
-                out['sampler'] = sampler
-                out['guider'] = guider
-
-                if noise_mask is not None:
-                    state_info_out['image_initial'] = x_initial
-                    state_info_out['noise_initial'] = noise_initial
-
-                out['state_info'] = state_info_out
-
-                return (out, out_denoised, None)
-
-            # Old batch loop path, kept for reference but not supported
-            else:
-                raise NotImplementedError("The batch_loop is dead, long live no_batch_loop! Set use_batch_loop=False (or remove it) to use the supported code path.")
-            
-                out_samples          = []
-                out_denoised_samples = []
-                out_state_info       = []
-                
-                for batch_num in range(latent_image_batch['samples'].shape[0]):
-                    latent_unbatch            = copy.deepcopy(latent_x)
-                    if isinstance(latent_image_batch['samples'][batch_num], comfy.nested_tensor.NestedTensor):
-                        latent_unbatch['samples'] = latent_image_batch['samples'][batch_num]._copy()
-                    else:
-                        latent_unbatch['samples'] = latent_image_batch['samples'][batch_num].clone().unsqueeze(0)
-                    
-                    if 'BONGMATH' in sampler.extra_options:
-                        sampler.extra_options['batch_num'] = batch_num
-
-
-                    if noise_seed == -1 and sampler_mode in {"unsample", "resample"}:
-                        if latent_image.get('state_info', {}).get('last_rng', None) is not None:
-                            seed = torch.initial_seed() + batch_num
-                        else:
-                            seed = torch.initial_seed() + 1 + batch_num
-                    else:
-                        if EO("lock_batch_seed"):
-                            seed = noise_seed
-                        else:
-                            seed = noise_seed + batch_num
-                        torch     .manual_seed(seed)
-                        torch.cuda.manual_seed(seed)
-
-                    x = latent_unbatch["samples"].to(default_dtype)
-
-
-
-                    if sde_noise is None and sampler_mode.startswith("unsample"):
-                        sde_noise = []
-                    else:
-                        sde_noise_steps = 1
-
-                    for total_steps_iter in range (sde_noise_steps):
-
-                        if noise_type_init != "none" and noise_stdev != 0.0:
-                            RESplain("Initial latent noise seed: ", seed, debug=True)
-
-                        noise = generate_init_noise(
-                            x=x, seed=seed,
-                            noise_type_init=noise_type_init, noise_stdev=noise_stdev,
-                            noise_mean=noise_mean, noise_normalize=noise_normalize,
-                            sigma_max=sigma_max, sigma_min=sigma_min,
-                            alpha_init=alpha_init, k_init=k_init, EO=EO
-                        )
-
-                        noise_mask = latent_unbatch["noise_mask"] if "noise_mask" in latent_unbatch else None
-
-                        x_input = x
-                        if noise_mask is not None and 'noise_initial' in state_info:
-                            stored_noise = state_info.get('noise_initial')
-                            if stored_noise is not None:
-                                if stored_noise.dim() > 3 and stored_noise.shape[0] > batch_num:
-                                    stored_noise = stored_noise[batch_num:batch_num+1]
-                                if stored_noise.shape == noise.shape:
-                                    noise = stored_noise.to(noise.device, dtype=noise.dtype)
-                                    RESplain("Using stored noise_initial from previous sampler", debug=True)
-
-                            stored_image = state_info.get('image_initial')
-                            if stored_image is not None:
-                                if stored_image.dim() > 3 and stored_image.shape[0] > batch_num:
-                                    stored_image = stored_image[batch_num:batch_num+1]
-                                if stored_image.shape == x.shape:
-                                    x_input = stored_image.to(x.device, dtype=x.dtype)
-                                    RESplain("Using stored image_initial from previous sampler", debug=True)
-
-                        if 'BONGMATH' in sampler.extra_options:
-                            sampler.extra_options['noise_initial'] = noise
-                            sampler.extra_options['image_initial'] = x_input
-
-                        x0_output = {}
-
-                        if latent_image is not None and 'state_info' in latent_image and 'sigmas' in latent_image['state_info']:
-                            steps_len = max(sigmas.shape[-1] - 1,    latent_image['state_info']['sigmas'].shape[-1]-1)
-                        else:
-                            steps_len = sigmas.shape[-1]-1
-                        callback     = latent_preview.prepare_callback(work_model, steps_len, x0_output)
-
-                        if 'BONGMATH' in sampler.extra_options: # verify the sampler is rk_sampler_beta()
-                            sampler.extra_options['state_info']     = copy.deepcopy(state_info)         ##############################
-                            if state_info != {} and state_info != {'data_prev_': None}:  #second condition is for ultracascade
-                                sampler.extra_options['state_info']['raw_x']            = state_info['raw_x']           [batch_num:batch_num+1]
-                                sampler.extra_options['state_info']['data_prev_']       = state_info['data_prev_']      [batch_num]  # Use index, not slice - first dim is recycled_stages
-                                sampler.extra_options['state_info']['last_rng']         = state_info['last_rng']        [batch_num]
-                                sampler.extra_options['state_info']['last_rng_substep'] = state_info['last_rng_substep'][batch_num]
-                                if 'image_initial' in state_info and state_info['image_initial'].dim() > 3:
-                                    sampler.extra_options['state_info']['image_initial'] = state_info['image_initial'][batch_num:batch_num+1]
-                                if 'noise_initial' in state_info and state_info['noise_initial'].dim() > 3:
-                                    sampler.extra_options['state_info']['noise_initial'] = state_info['noise_initial'][batch_num:batch_num+1]
-                            #state_info     = copy.deepcopy(latent_image['state_info']) if 'state_info' in latent_image else {}
-                            state_info_out = {}
-                            sampler.extra_options['state_info_out'] = state_info_out
-                            
-                        if type(pos_cond[0][0]) == list:
-                            pos_cond_tmp = pos_cond[batch_num]
-                            positive_tmp = positive[batch_num]
-                        else:
-                            pos_cond_tmp = pos_cond
-                            positive_tmp = positive
-                        
-                        for i in range(len(neg_cond)): # crude fix for copy.deepcopy converting superclass into real object
-                            if 'control' in neg_cond[i][1]:
-                                neg_cond[i][1]['control']          = negative[i][1]['control']
-                                if hasattr(negative[i][1]['control'], 'base'):
-                                    neg_cond[i][1]['control'].base     = negative[i][1]['control'].base
-                        for i in range(len(pos_cond_tmp)): # crude fix for copy.deepcopy converting superclass into real object
-                            if 'control' in pos_cond_tmp[i][1]:
-                                pos_cond_tmp[i][1]['control']      = positive_tmp[i][1]['control']
-                                if hasattr(positive[i][1]['control'], 'base'):
-                                    pos_cond_tmp[i][1]['control'].base = positive_tmp[i][1]['control'].base
-                        
-                        # SETUP REGIONAL COND
-                        
-                        if pos_cond_tmp[0][1] is not None: 
-                            if 'callback_regional' in pos_cond_tmp[0][1]:
-                                pos_cond_tmp = pos_cond_tmp[0][1]['callback_regional'](work_model)
-                            
-                            if 'AttnMask' in pos_cond_tmp[0][1]:
-                                sampler.extra_options['AttnMask']   = pos_cond_tmp[0][1]['AttnMask']
-                                sampler.extra_options['RegContext'] = pos_cond_tmp[0][1]['RegContext']
-                                sampler.extra_options['RegParam']   = pos_cond_tmp[0][1]['RegParam']
-                                
-                                if isinstance(model.model.model_config, (comfy.supported_models.SDXL, comfy.supported_models.SD15)):
-                                    latent_up_dummy = F.interpolate(latent_image['samples'].to(torch.float16), size=(latent_image['samples'].shape[-2] * 2, latent_image['samples'].shape[-1] * 2), mode="nearest")
-                                    sampler.extra_options['AttnMask'].set_latent(latent_up_dummy)
-                                    sampler.extra_options['AttnMask'].generate()
-                                    sampler.extra_options['AttnMask'].mask_up   = sampler.extra_options['AttnMask'].attn_mask.mask
-                                    
-                                    latent_down_dummy = F.interpolate(latent_image['samples'].to(torch.float16), size=(latent_image['samples'].shape[-2] // 2, latent_image['samples'].shape[-1] // 2), mode="nearest")
-                                    sampler.extra_options['AttnMask'].set_latent(latent_down_dummy)
-                                    sampler.extra_options['AttnMask'].generate()
-                                    sampler.extra_options['AttnMask'].mask_down = sampler.extra_options['AttnMask'].attn_mask.mask
-                                    
-                                    if isinstance(model.model.model_config, comfy.supported_models.SD15):
-                                        latent_down_dummy = F.interpolate(latent_image['samples'].to(torch.float16), size=(latent_image['samples'].shape[-2] // 4, latent_image['samples'].shape[-1] // 4), mode="nearest")
-                                        sampler.extra_options['AttnMask'].set_latent(latent_down_dummy)
-                                        sampler.extra_options['AttnMask'].generate()
-                                        sampler.extra_options['AttnMask'].mask_down2 = sampler.extra_options['AttnMask'].attn_mask.mask
-                                        
-                                if isinstance(model.model.model_config, (comfy.supported_models.Stable_Cascade_C)):
-                                    latent_up_dummy = F.interpolate(latent_image['samples'].to(torch.float16), size=(latent_image['samples'].shape[-2] * 2, latent_image['samples'].shape[-1] * 2), mode="nearest")
-                                    sampler.extra_options['AttnMask'].set_latent(latent_up_dummy)
-                                    # cascade concats 4 + 4 tokens (clip_text_pooled, clip_img)
-                                    sampler.extra_options['AttnMask'].context_lens = [context_len + 8 for context_len in sampler.extra_options['AttnMask'].context_lens] 
-                                    sampler.extra_options['AttnMask'].text_len = sum(sampler.extra_options['AttnMask'].context_lens)
-                                else:
-                                    sampler.extra_options['AttnMask'].set_latent(latent_image['samples'])
-                                sampler.extra_options['AttnMask'].generate()
-                                
-                        if neg_cond[0][1] is not None: 
-                            if 'callback_regional' in neg_cond[0][1]:
-                                neg_cond = neg_cond[0][1]['callback_regional'](work_model)
-                            
-                            if 'AttnMask' in neg_cond[0][1]:
-                                sampler.extra_options['AttnMask_neg']   = neg_cond[0][1]['AttnMask']
-                                sampler.extra_options['RegContext_neg'] = neg_cond[0][1]['RegContext']
-                                sampler.extra_options['RegParam_neg']   = neg_cond[0][1]['RegParam']
-                                
-                                if isinstance(model.model.model_config, (comfy.supported_models.SDXL, comfy.supported_models.SD15)):
-                                    latent_up_dummy = F.interpolate(latent_image['samples'].to(torch.float16), size=(latent_image['samples'].shape[-2] * 2, latent_image['samples'].shape[-1] * 2), mode="nearest")
-                                    sampler.extra_options['AttnMask_neg'].set_latent(latent_up_dummy)
-                                    sampler.extra_options['AttnMask_neg'].generate()
-                                    sampler.extra_options['AttnMask_neg'].mask_up   = sampler.extra_options['AttnMask_neg'].attn_mask.mask
-                                    
-                                    latent_down_dummy = F.interpolate(latent_image['samples'].to(torch.float16), size=(latent_image['samples'].shape[-2] // 2, latent_image['samples'].shape[-1] // 2), mode="nearest")
-                                    sampler.extra_options['AttnMask_neg'].set_latent(latent_down_dummy)
-                                    sampler.extra_options['AttnMask_neg'].generate()
-                                    sampler.extra_options['AttnMask_neg'].mask_down = sampler.extra_options['AttnMask_neg'].attn_mask.mask
-                                    
-                                    if isinstance(model.model.model_config, comfy.supported_models.SD15):
-                                        latent_down_dummy = F.interpolate(latent_image['samples'].to(torch.float16), size=(latent_image['samples'].shape[-2] // 4, latent_image['samples'].shape[-1] // 4), mode="nearest")
-                                        sampler.extra_options['AttnMask_neg'].set_latent(latent_down_dummy)
-                                        sampler.extra_options['AttnMask_neg'].generate()
-                                        sampler.extra_options['AttnMask_neg'].mask_down2 = sampler.extra_options['AttnMask_neg'].attn_mask.mask
-                                
-                                if isinstance(model.model.model_config, (comfy.supported_models.Stable_Cascade_C)):
-                                    latent_up_dummy = F.interpolate(latent_image['samples'].to(torch.float16), size=(latent_image['samples'].shape[-2] * 2, latent_image['samples'].shape[-1] * 2), mode="nearest")
-                                    sampler.extra_options['AttnMask'].set_latent(latent_up_dummy)
-                                    # cascade concats 4 + 4 tokens (clip_text_pooled, clip_img)
-                                    sampler.extra_options['AttnMask'].context_lens = [context_len + 8 for context_len in sampler.extra_options['AttnMask'].context_lens] 
-                                    sampler.extra_options['AttnMask'].text_len = sum(sampler.extra_options['AttnMask'].context_lens)
-                                else:
-                                    sampler.extra_options['AttnMask_neg'].set_latent(latent_image['samples'])
-                                sampler.extra_options['AttnMask_neg'].generate()
-                        
-                        
-                        
-                        
-                        
-                        if guider is None:
-                            guider = SharkGuider(work_model)
-                            flow_cond = options_mgr.get('flow_cond', {})
-                            if flow_cond != {} and 'yt_positive' in flow_cond and not 'yt_inv_positive' in flow_cond:   #and not 'yt_inv;_positive' in flow_cond:   # typo???
-                                guider.set_conds(yt_positive=flow_cond.get('yt_positive'), yt_negative=flow_cond.get('yt_negative'),)
-                                guider.set_cfgs(yt=flow_cond.get('yt_cfg'), xt=cfg)
-                            elif flow_cond != {} and 'yt_positive' in flow_cond and 'yt_inv_positive' in flow_cond:
-                                guider.set_conds(yt_positive=flow_cond.get('yt_positive'), yt_negative=flow_cond.get('yt_negative'), yt_inv_positive=flow_cond.get('yt_inv_positive'), yt_inv_negative=flow_cond.get('yt_inv_negative'),)
-                                guider.set_cfgs(yt=flow_cond.get('yt_cfg'), yt_inv=flow_cond.get('yt_inv_cfg'), xt=cfg)
-                            else:
-                                guider.set_cfgs(xt=cfg)
-                            
-                            guider.set_conds(positive=pos_cond_tmp, negative=neg_cond)
-
-                        elif type(guider) == SharkGuider:
-                            guider.set_cfgs(xt=cfg)
-                            guider.set_conds(positive=pos_cond_tmp, negative=neg_cond)
-                        else:
-                            try:
-                                guider.set_cfg(cfg)
-                            except:
-                                RESplain("SharkWarning: guider.set_cfg failed but assuming cfg already set correctly.")
-                            try:
-                                guider.set_conds(pos_cond_tmp, neg_cond)
-                            except:
-                                RESplain("SharkWarning: guider.set_conds failed but assuming conds already set correctly.")
-                        
-                        if rebounds > 0:
-                            cfgs_cached = guider.cfgs
-                            steps_to_run_cached = sampler.extra_options['steps_to_run']
-                            eta_cached         = sampler.extra_options['eta']
-                            eta_substep_cached = sampler.extra_options['eta_substep']
-                            
-                            etas_cached         = sampler.extra_options['etas'].clone()
-                            etas_substep_cached = sampler.extra_options['etas_substep'].clone()
-                            
-                            unsample_etas = torch.full_like(etas_cached, unsample_eta)
-                            rk_type_cached = sampler.extra_options['rk_type']
-                            
-                            if sampler.extra_options['sampler_mode'] == "unsample":
-                                guider.cfgs = {
-                                    'xt': unsample_cfg,
-                                    'yt': unsample_cfg,
-                                }
-                                if unsample_eta != -1.0:
-                                    sampler.extra_options['eta_substep']  = unsample_eta
-                                    sampler.extra_options['eta']          = unsample_eta
-                                    sampler.extra_options['etas_substep'] = unsample_etas
-                                    sampler.extra_options['etas']         = unsample_etas
-                                if unsampler_name != "none":
-                                    sampler.extra_options['rk_type']      = unsampler_name
-                                if unsample_steps_to_run > -1:
-                                    sampler.extra_options['steps_to_run'] = unsample_steps_to_run
-                                    
-                            else:
-                                guider.cfgs = cfgs_cached
-                            
-                            guider.cfgs = cfgs_cached
                             sampler.extra_options['steps_to_run'] = steps_to_run_cached
-                            
-                            eta_decay           = eta_cached
-                            eta_substep_decay   = eta_substep_cached
-                            unsample_eta_decay  = unsample_eta
-                            
-                            etas_decay          = etas_cached
-                            etas_substep_decay  = etas_substep_cached
-                            unsample_etas_decay = unsample_etas
 
-                        # Apply pre-sampling latent normalization for NestedTensors
-                        idx_0_factor = options_mgr.get('latent_normalize_idx_0', 1.0)
-                        idx_1_factor = options_mgr.get('latent_normalize_idx_1', 1.0)
-                        factors_0_steps = options_mgr.get('latent_normalize_idx_0_steps', [1.0])
-                        factors_1_steps = options_mgr.get('latent_normalize_idx_1_steps', [1.0])
-                        RESplain(f"Latent normalize check: idx_0={idx_0_factor}, idx_1={idx_1_factor}, x_input.is_nested={hasattr(x_input, 'is_nested') and x_input.is_nested}", debug=True)
+                    sampler.extra_options['outer_sigmas_len'] = sigmas.shape[-1]
+                    samples = guider.sample(noise, x_initial, sampler, sigmas, denoise_mask=noise_mask, callback=callback, disable_pbar=disable_pbar, seed=-1)
 
-                        # Per-step normalization: pass shapes and factors to inner sampler
-                        has_per_step_factors = len(factors_0_steps) > 1 or len(factors_1_steps) > 1
-                        if isinstance(x_input, comfy.nested_tensor.NestedTensor) and 'rk_type' in sampler.extra_options:
-                            sampler.extra_options['latent_shapes'] = [t.shape for t in x_input.unbind()]
-                            sampler.extra_options['latent_normalize_idx_0_steps'] = factors_0_steps
-                            sampler.extra_options['latent_normalize_idx_1_steps'] = factors_1_steps
+                    eta_substep_decay   *= eta_decay_scale
+                    eta_decay           *= eta_decay_scale
+                    unsample_eta_decay  *= eta_decay_scale
 
-                        # Node-level normalization only for single-value factors (backward compat)
-                        # Per-step factors are applied in the inner loop instead
-                        if not has_per_step_factors and (idx_0_factor != 1.0 or idx_1_factor != 1.0):
-                            x_input = apply_nested_normalization(x_input, idx_0_factor, idx_1_factor)
+                    etas_substep_decay  *= eta_decay_scale
+                    etas_decay          *= eta_decay_scale
+                    unsample_etas_decay *= eta_decay_scale
 
-                        sampler.extra_options['outer_sigmas_len'] = sigmas.shape[-1]
-                        if isinstance(x_input, comfy.nested_tensor.NestedTensor):
-                            samples = guider.sample(noise, x_input._copy(), sampler, sigmas, denoise_mask=noise_mask, callback=callback, disable_pbar=disable_pbar, seed=noise_seed)
-                        else:
-                            samples = guider.sample(noise, x_input.clone(), sampler, sigmas, denoise_mask=noise_mask, callback=callback, disable_pbar=disable_pbar, seed=noise_seed)
-                        
-                        if rebounds > 0: 
-                            noise_seed_cached   = sampler.extra_options['noise_seed']
-                            cfgs_cached         = guider.cfgs
-                            sampler_mode_cached = sampler.extra_options['sampler_mode']
-                            
-                            for restarts_iter in range(rebounds):
-                                sampler.extra_options['state_info'] = sampler.extra_options['state_info_out']
-                                
-                                #steps = sampler.extra_options['state_info_out']['sigmas'].shape[-1] - 3
-                                sigmas = sampler.extra_options['state_info_out']['sigmas'] if sigmas is None else sigmas
-                                #if len(sigmas) > 2 and sigmas[1] < sigmas[2] and sampler.extra_options['state_info_out']['sampler_mode'] == "unsample": # and sampler_mode == "resample":
-                                #    sigmas = torch.flip(sigmas, dims=[0])
-                                    
-                                if   sampler.extra_options['sampler_mode'] == "standard":
-                                    sampler.extra_options['sampler_mode'] = "unsample"
-                                elif sampler.extra_options['sampler_mode'] == "unsample":
-                                    sampler.extra_options['sampler_mode'] = "resample"
-                                elif sampler.extra_options['sampler_mode'] == "resample":
-                                    sampler.extra_options['sampler_mode'] = "unsample"
-                                
-                                sampler.extra_options['noise_seed'] = -1
-                                
-                                if sampler.extra_options['sampler_mode'] == "unsample":
-                                    guider.cfgs = {
-                                        'xt': unsample_cfg,
-                                        'yt': unsample_cfg,
-                                    }
-                                    if unsample_eta != -1.0:
-                                        sampler.extra_options['eta_substep']  = unsample_eta_decay
-                                        sampler.extra_options['eta']          = unsample_eta_decay
-                                        sampler.extra_options['etas_substep'] = unsample_etas
-                                        sampler.extra_options['etas']         = unsample_etas
-                                    else:
-                                        sampler.extra_options['eta_substep']  = eta_substep_decay
-                                        sampler.extra_options['eta']          = eta_decay
-                                        sampler.extra_options['etas_substep'] = etas_substep_decay
-                                        sampler.extra_options['etas']         = etas_decay
-                                    if unsampler_name != "none":
-                                        sampler.extra_options['rk_type']  = unsampler_name
-                                    if unsample_steps_to_run > -1:
-                                        sampler.extra_options['steps_to_run'] = unsample_steps_to_run
-                                else:
-                                    guider.cfgs = cfgs_cached
-                                    sampler.extra_options['eta_substep']  = eta_substep_decay
-                                    sampler.extra_options['eta']          = eta_decay
-                                    sampler.extra_options['etas_substep'] = etas_substep_decay
-                                    sampler.extra_options['etas']         = etas_decay
-                                    sampler.extra_options['rk_type']      = rk_type_cached
-                                    if unsample_steps_to_run > -1:
-                                        sampler.extra_options['steps_to_run'] = unsample_steps_to_run
-                                    else:
-                                        sampler.extra_options['steps_to_run'] = steps_to_run_cached
+                sampler.extra_options['noise_seed'] = noise_seed_cached
+                if has_cfgs:
+                    guider.cfgs = cfgs_cached
+                    RESplain(f"Shark: Rebounds complete - restored original CFG (cfgs)", debug=True)
+                else:
+                    guider.cfg = cfg_cached
+                    RESplain(f"Shark: Rebounds complete - restored original CFG: {cfg_cached}", debug=True)
+                sampler.extra_options['sampler_mode'] = sampler_mode_cached
+                sampler.extra_options['eta_substep']  = eta_substep_cached
+                sampler.extra_options['eta']          = eta_cached
+                sampler.extra_options['etas_substep'] = etas_substep_cached
+                sampler.extra_options['etas']         = etas_cached
 
+            if noise_mask is not None:
+                if hasattr(samples, 'is_nested') and samples.is_nested:
+                    blended = []
+                    x_initial_list = x_initial.unbind() if hasattr(x_initial, 'is_nested') and x_initial.is_nested else [x_initial]
+                    if hasattr(noise_mask, 'is_nested') and noise_mask.is_nested:
+                        mask_list = noise_mask.unbind()
+                    else:
+                        mask_list = [noise_mask]
+                    for idx, s in enumerate(samples.unbind()):
+                        xi = x_initial_list[idx] if idx < len(x_initial_list) else x_initial_list[0]
+                        m = mask_list[idx] if idx < len(mask_list) else mask_list[0]
+                        reshaped_mask = comfy.utils.reshape_mask(m, s.shape).to(s.device)
+                        blended.append(s * reshaped_mask + xi.to(s.device) * (1.0 - reshaped_mask))
+                        # probably don't need to check ndim here, comfy utils handles it
+                        # if s.ndim == m.ndim:
+                        #     reshaped_mask = comfy.utils.reshape_mask(m, s.shape).to(s.device)
+                        #     blended.append(s * reshaped_mask + xi.to(s.device) * (1.0 - reshaped_mask))
+                        # else:
+                        #     blended.append(s)
+                    samples = comfy.nested_tensor.NestedTensor(blended)
+                else:
+                    if hasattr(noise_mask, 'is_nested') and noise_mask.is_nested:
+                        noise_mask = noise_mask.unbind()[0]
+                    reshaped_mask = comfy.utils.reshape_mask(noise_mask, samples.shape).to(samples.device)
+                    samples = samples * reshaped_mask + x_initial.to(samples.device) * (1.0 - reshaped_mask)
 
-                                sampler.extra_options['outer_sigmas_len'] = sigmas.shape[-1]
-                                samples = guider.sample(noise, samples.clone(), sampler, sigmas, denoise_mask=noise_mask, callback=callback, disable_pbar=disable_pbar, seed=-1)
+            samples = samples.to(comfy.model_management.intermediate_device())
 
-                                eta_substep_decay   *= eta_decay_scale
-                                eta_decay           *= eta_decay_scale
-                                unsample_eta_decay  *= eta_decay_scale
-                                
-                                etas_substep_decay  *= eta_decay_scale
-                                etas_decay          *= eta_decay_scale
-                                unsample_etas_decay *= eta_decay_scale                        
-                            
-                            sampler.extra_options['noise_seed'] = noise_seed_cached
-                            guider.cfgs = cfgs_cached
-                            sampler.extra_options['sampler_mode'] = sampler_mode_cached
-                            sampler.extra_options['eta_substep']  = eta_substep_cached
-                            sampler.extra_options['eta']          = eta_cached
-                            sampler.extra_options['etas_substep'] = etas_substep_cached
-                            sampler.extra_options['etas']         = etas_cached
-                            sampler.extra_options['rk_type']      = rk_type_cached
-                            sampler.extra_options['steps_to_run'] = steps_to_run_cached   # TODO: verify this is carried on
+            out = latent_x.copy()
+            out["samples"] = samples
 
-                        if noise_mask is not None:
-                            if 'BONGMATH' in sampler.extra_options:
-                                batch_state_info = sampler.extra_options.get('state_info', {})
-                                latent_for_mask = batch_state_info.get('image_initial', x)
-                            else:
-                                stored_image = state_info.get('image_initial')
-                                if stored_image is not None and stored_image.dim() > 3:
-                                    latent_for_mask = stored_image[batch_num]
-                                elif stored_image is not None:
-                                    latent_for_mask = stored_image
-                                else:
-                                    latent_for_mask = x
-                            reshaped_mask = comfy.utils.reshape_mask(noise_mask, samples.shape).to(samples.device)
-                            samples = samples * reshaped_mask + latent_for_mask.to(samples.device) * (1.0 - reshaped_mask)
+            if "x0" in x0_output:
+                x0_out = work_model.model.process_latent_out(x0_output["x0"].cpu())
+                if hasattr(samples, 'is_nested') and samples.is_nested:
+                    latent_shapes = [t.shape for t in samples.unbind()]
+                    x0_out = comfy.nested_tensor.NestedTensor(
+                        comfy.utils.unpack_latents(x0_out, latent_shapes)
+                    )
+                if hasattr(x0_out, 'is_nested') and x0_out.is_nested:
+                    x0_out = comfy.nested_tensor.NestedTensor([t.to(torch.float32) for t in x0_out.unbind()])
+                else:
+                    x0_out = x0_out.to(torch.float32)
+                out_denoised = latent_x.copy()
+                out_denoised["samples"] = x0_out
+            else:
+                out_denoised = latent_x.copy()
+                if hasattr(samples, 'is_nested') and samples.is_nested:
+                    out_denoised["samples"] = comfy.nested_tensor.NestedTensor([t.to(torch.float32) for t in samples.unbind()])
+                else:
+                    out_denoised["samples"] = samples.to(torch.float32)
 
-                        out = latent_unbatch.copy()
-                        out["samples"] = samples
-                        
-                        if "x0" in x0_output:
-                            out_denoised            = latent_unbatch.copy()
-                            out_denoised["samples"] = work_model.model.process_latent_out(x0_output["x0"].cpu())
-                        else:
-                            out_denoised            = out
+            out['sampler'] = sampler
+            out['guider'] = guider
 
-                        out_samples         .append(out         ["samples"])
-                        out_denoised_samples.append(out_denoised["samples"])
-                        
-                        
-                        
-                        # ACCUMULATE UNSAMPLED SDE NOISE
-                        if total_steps_iter > 1: 
-                            if 'raw_x' in state_info_out:
-                                sde_noise_out = state_info_out['raw_x']
-                            else:
-                                sde_noise_out = out["samples"]  
-                            sde_noise.append(normalize_zscore(sde_noise_out, channelwise=True, inplace=True))    
-                        
-                        out_state_info.append(state_info_out)
-                        
-                        # INCREMENT BATCH LOOP
-                        if not EO("lock_batch_seed"):
-                            seed += 1
-                        if latent_image is not None: #needed for ultracascade, where latent_image input is not really used for stage C/first stage
-                            if latent_image.get('state_info', {}).get('last_rng', None) is None:
-                                torch.manual_seed(seed)
+            if noise_mask is not None:
+                state_info_out['image_initial'] = x_initial
+                state_info_out['noise_initial'] = noise_initial
 
+            out['state_info'] = state_info_out
 
-                gc.collect()
-
-                # CAT SDE NOISES, SAVE STATE INFO
-                state_info_out = out_state_info[0]
-                if 'raw_x' in out_state_info[0]:
-                    state_info_out['raw_x']            = torch.cat([out_state_info[_]['raw_x']            for _ in range(len(out_state_info))], dim=0)
-                    state_info_out['data_prev_']       = torch.stack([out_state_info[_]['data_prev_']       for _ in range(len(out_state_info))])  # Keep stack - first dim is recycled_stages, not batch
-                    state_info_out['last_rng']         = torch.stack([out_state_info[_]['last_rng']         for _ in range(len(out_state_info))])  # Keep stack - 1D RNG state
-                    state_info_out['last_rng_substep'] = torch.stack([out_state_info[_]['last_rng_substep'] for _ in range(len(out_state_info))])  # Keep stack - 1D RNG state
-                    if 'image_initial' in out_state_info[0]:
-                        state_info_out['image_initial'] = torch.cat([out_state_info[_]['image_initial'] for _ in range(len(out_state_info))], dim=0)
-                    if 'noise_initial' in out_state_info[0]:
-                        state_info_out['noise_initial'] = torch.cat([out_state_info[_]['noise_initial'] for _ in range(len(out_state_info))], dim=0)
-                elif 'raw_x' in state_info:
-                    state_info_out = state_info
-
-                out_samples             = [tensor.squeeze(0) for tensor in out_samples]
-                out_denoised_samples    = [tensor.squeeze(0) for tensor in out_denoised_samples]
-
-                out         ['samples'] = torch.stack(out_samples,          dim=0)
-                out_denoised['samples'] = torch.stack(out_denoised_samples, dim=0)
-
-                out['state_info']       = copy.deepcopy(state_info_out)
-                state_info              = {}
-
-                out['sampler']  = sampler
-                out['guider']   = guider
-
-                return (out, out_denoised, sde_noise,)
-                
-
+            return (out, out_denoised, None)
 
 
 class SharkSampler_Beta(io.ComfyNode):
