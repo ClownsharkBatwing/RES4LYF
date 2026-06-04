@@ -17,12 +17,17 @@ import torch
 from math import *
 
 
+from functools import partial
+import comfy.samplers
 from comfy.samplers import SchedulerHandler, SCHEDULER_HANDLERS, SCHEDULER_NAMES
-new_scheduler_name = "bong_tangent"
-if new_scheduler_name not in SCHEDULER_HANDLERS:
-    bong_tangent_handler = SchedulerHandler(handler=sigmas.bong_tangent_scheduler, use_ms=True)
-    SCHEDULER_HANDLERS[new_scheduler_name] = bong_tangent_handler
-    SCHEDULER_NAMES.append(new_scheduler_name)
+
+if "bong_tangent" not in SCHEDULER_HANDLERS:
+    SCHEDULER_HANDLERS["bong_tangent"] = SchedulerHandler(handler=sigmas.bong_tangent_scheduler, use_ms=True)
+    SCHEDULER_NAMES.append("bong_tangent")
+
+if "beta57" not in SCHEDULER_HANDLERS:
+    SCHEDULER_HANDLERS["beta57"] = SchedulerHandler(handler=partial(comfy.samplers.beta_scheduler, alpha=0.5, beta=0.7), use_ms=True)
+    SCHEDULER_NAMES.append("beta57")
 
 
 from .res4lyf import RESplain
