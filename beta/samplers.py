@@ -73,10 +73,18 @@ def generate_init_noise(x, seed, noise_type_init, noise_stdev, noise_mean, noise
     if noise_type_init == "none" or noise_stdev == 0.0:
         return torch.zeros_like(x)
 
+    # generate and normalize at noise_dtype: a seed's realization must not depend on work_dtype
+    out_dtype = x.dtype
+    if EO is not None:
+        noise_dtype = EO("noise_dtype", EO("default_dtype", torch.float64, debugMode=2), debugMode=2)
+    else:
+        noise_dtype = torch.float64
+    x = x.to(noise_dtype)
+
     if EO is not None and EO("bypass_noise_norm") and noise_type_init == "gaussian":
         noise = comfy.sample.prepare_noise(x, seed).to(device=x.device, dtype=x.dtype)
         RESplain("bypass_noise_norm: init noise from comfy.sample.prepare_noise (bypassing RES4LYF normalization)", debug=False)
-        return noise
+        return noise.to(out_dtype)
 
     noise_sampler_init = NOISE_GENERATOR_CLASSES_SIMPLE.get(noise_type_init)(
         x=x, seed=seed, sigma_max=sigma_max, sigma_min=sigma_min
@@ -96,7 +104,7 @@ def generate_init_noise(x, seed, noise_type_init, noise_stdev, noise_mean, noise
 
     noise *= noise_stdev
     noise = (noise - noise.mean()) + noise_mean
-    return noise
+    return noise.to(out_dtype)
 
 
 def apply_nested_normalization(x, idx_0_factor, idx_1_factor):
@@ -243,6 +251,7 @@ class SharkSampler:
             extra_options  += "\n" + options_mgr.get('extra_options', "")
             EO              = ExtraOptions(extra_options)
             default_dtype   = EO("default_dtype", torch.float64)
+            work_dtype      = EO("work_dtype",    torch.float32)   # latent-sized tensors; sigmas stay at default_dtype
             default_device  = EO("work_device", "cuda" if torch.cuda.is_available() else "cpu")
             
             noise_stdev     = options_mgr.get('noise_init_stdev', noise_stdev)
@@ -596,7 +605,7 @@ class SharkSampler:
                 noise_mask = latent_x['noise_mask']
                 latent_image_batch['noise_mask'] = noise_mask
 
-            x = latent_image_batch['samples'].to(default_dtype)
+            x = latent_image_batch['samples'].to(work_dtype)
 
             if isinstance(x, comfy.nested_tensor.NestedTensor):
                 noise = comfy.nested_tensor.NestedTensor([

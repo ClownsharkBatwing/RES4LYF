@@ -131,7 +131,13 @@ class RK_NoiseSampler:
         self.noise_boost_step       = noise_boost_step
         self.noise_boost_substep    = noise_boost_substep
         self.s_in                   = x.new_ones([1], dtype=self.dtype, device=self.device)
-        
+
+        # torch's RNG stream differs per dtype, so noise_dtype — not the math precision — decides
+        # which noise realization a seed produces; the float64 default keeps seeds stable across work_dtype
+        noise_dtype = self.EO("noise_dtype", self.dtype)
+        if x.dtype != noise_dtype:
+            x = x.to(noise_dtype)
+
         if noise_seed >= 0:
             seed = noise_seed
             RESplain("SDE noise seed: ", seed, debug=True)

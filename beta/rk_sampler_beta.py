@@ -25,6 +25,8 @@ from .rk_guide_func_beta    import LatentGuide
 from .phi_functions         import Phi
 from .constants             import MAX_STEPS, GUIDE_MODE_NAMES_PSEUDOIMPLICIT
 
+_VRAM_CAP_SET = False
+
 def init_implicit_sampling(
         RK             : RK_Method_Beta,
         x_0            : Tensor,
@@ -248,9 +250,35 @@ def sample_rk_beta(
     if sampler_mode == "NULL":
         return x
     
+    # Precision contract:
+    #   default_dtype (float64): sigmas, schedules, tableau/phi coefficients, RK scalar math —
+    #       the cancellation-sensitive operations. Also the default for noise_dtype.
+    #   work_dtype (float32): x and all latent-sized buffers, and the model call boundary.
+    #       work_dtype=float64 restores the classic full-float64 behavior.
+    #   noise_dtype: the dtype noise is generated at — decides which noise realization a seed
+    #       produces (torch's RNG stream differs per dtype), independent of the math precision.
     EO             = ExtraOptions(extra_options)
     default_dtype  = EO("default_dtype", torch.float64)
-    
+    work_dtype     = EO("work_dtype",    torch.float32)
+
+    REPORT_VRAM    = EO("report_vram") and torch.cuda.is_available()
+    if REPORT_VRAM:
+        torch.cuda.reset_peak_memory_stats()
+
+    # vram_cap_gb=N caps the CUDA allocator so OOM reproduces deterministically — headroom flags
+    # like --reserve-vram get absorbed by ComfyUI's weight paging instead of failing
+    global _VRAM_CAP_SET
+    vram_cap_gb    = EO("vram_cap_gb", 0.0)
+    if torch.cuda.is_available():
+        if vram_cap_gb > 0:
+            total_vram = torch.cuda.get_device_properties(0).total_memory
+            torch.cuda.set_per_process_memory_fraction(min(1.0, vram_cap_gb * 1024**3 / total_vram))
+            RESplain(f"vram_cap_gb: capping allocator at {vram_cap_gb} GB of {total_vram / 1024**3:.1f} GB", debug=False)
+            _VRAM_CAP_SET = True
+        elif _VRAM_CAP_SET:
+            torch.cuda.set_per_process_memory_fraction(1.0)
+            _VRAM_CAP_SET = False
+
     extra_args     = {} if extra_args     is None else extra_args
     model_device   = model.inner_model.inner_model.device #x.device
     work_device    = 'cpu' if EO("work_device_cpu") else model_device
@@ -318,7 +346,7 @@ def sample_rk_beta(
     
 
 
-    x      = x     .to(dtype=default_dtype, device=work_device)
+    x      = x     .to(dtype=work_dtype,    device=work_device)
     sigmas = sigmas.to(dtype=default_dtype, device=work_device)
 
     # sync sample_sigmas in model_options to the effective (unpadded) schedule.
@@ -404,14 +432,14 @@ def sample_rk_beta(
 
     data_               = None
     eps_                = None
-    eps                 = torch.zeros_like(x, dtype=default_dtype, device=work_device)
-    denoised            = torch.zeros_like(x, dtype=default_dtype, device=work_device)
+    eps                 = torch.zeros_like(x, dtype=work_dtype, device=work_device)
+    denoised            = torch.zeros_like(x, dtype=work_dtype, device=work_device)
     state_denoised      = state_info.get('denoised')
     if state_denoised is not None and state_denoised.shape == x.shape:
-        denoised_prev   = state_denoised.to(dtype=default_dtype, device=work_device)
+        denoised_prev   = state_denoised.to(dtype=work_dtype, device=work_device)
     else:
-        denoised_prev   = torch.zeros_like(x, dtype=default_dtype, device=work_device)
-    denoised_prev2      = torch.zeros_like(x, dtype=default_dtype, device=work_device)
+        denoised_prev   = torch.zeros_like(x, dtype=work_dtype, device=work_device)
+    denoised_prev2      = torch.zeros_like(x, dtype=work_dtype, device=work_device)
     x_                  = None
     eps_prev_           = None
     denoised_data_prev  = None
@@ -476,7 +504,7 @@ def sample_rk_beta(
     
 
     # SETUP GUIDES
-    LG = LatentGuide(model, sigmas, UNSAMPLE, VE_MODEL, LGW_MASK_RESCALE_MIN, extra_options, device=work_device, dtype=default_dtype, frame_weights_mgr=frame_weights_mgr, latent_shapes=latent_shapes)
+    LG = LatentGuide(model, sigmas, UNSAMPLE, VE_MODEL, LGW_MASK_RESCALE_MIN, extra_options, device=work_device, dtype=work_dtype, frame_weights_mgr=frame_weights_mgr, latent_shapes=latent_shapes)
     RK.latent_guide = LG
 
     guide_inversion_y0     = state_info.get('guide_inversion_y0')
@@ -792,9 +820,9 @@ def sample_rk_beta(
         
         if INIT_SAMPLE_LOOP:
             INIT_SAMPLE_LOOP = False
-            x_, data_, eps_, eps_prev_ = (torch.zeros(RK.rows+2, *x.shape, dtype=default_dtype, device=work_device) for _ in range(4))
+            x_, data_, eps_, eps_prev_ = (torch.zeros(RK.rows+2, *x.shape, dtype=work_dtype, device=work_device) for _ in range(4))
             if LG.ADAIN_NOISE_MODE == "smart":
-                z_ = torch.zeros(RK.rows+2, *x.shape, dtype=default_dtype, device=work_device)
+                z_ = torch.zeros(RK.rows+2, *x.shape, dtype=work_dtype, device=work_device)
                 z_[0] = noise_initial.clone()
                 RK.update_transformer_options({'z_' : z_})
             
@@ -802,7 +830,7 @@ def sample_rk_beta(
                 data_prev_ = state_info.get('data_prev_')
                 if data_prev_ is not None:
                     if x.shape == state_info['raw_x'].shape:
-                        data_prev_ = state_info['data_prev_'].clone().to(dtype=default_dtype, device=work_device)
+                        data_prev_ = state_info['data_prev_'].clone().to(dtype=work_dtype, device=work_device)
                     else:
                         resized_items = [
                             LatentHandler(prev_item, latent_shapes)
@@ -812,22 +840,22 @@ def sample_rk_beta(
                         ]
                         data_prev_ = torch.stack(resized_items).to(x)
                 else:
-                    data_prev_ =  torch.zeros(4, *x.shape, dtype=default_dtype, device=work_device) # multistep max is 4m... so 4 needed
+                    data_prev_ =  torch.zeros(4, *x.shape, dtype=work_dtype, device=work_device) # multistep max is 4m... so 4 needed
             else:
-                data_prev_ =  torch.zeros(4, *x.shape, dtype=default_dtype, device=work_device) # multistep max is 4m... so 4 needed
+                data_prev_ =  torch.zeros(4, *x.shape, dtype=work_dtype, device=work_device) # multistep max is 4m... so 4 needed
             
             recycled_stages = len(data_prev_)-1
         
         if RK.rows+2 > x_.shape[0]:
             row_gap = RK.rows+2 - x_.shape[0]
-            x_gap_, data_gap_, eps_gap_, eps_prev_gap_ = (torch.zeros(row_gap, *x.shape, dtype=default_dtype, device=work_device) for _ in range(4))
+            x_gap_, data_gap_, eps_gap_, eps_prev_gap_ = (torch.zeros(row_gap, *x.shape, dtype=work_dtype, device=work_device) for _ in range(4))
             x_        = torch.cat((x_       ,x_gap_)       , dim=0)
             data_     = torch.cat((data_    ,data_gap_)    , dim=0)
             eps_      = torch.cat((eps_     ,eps_gap_)     , dim=0)
             eps_prev_ = torch.cat((eps_prev_,eps_prev_gap_), dim=0)
             
             if LG.ADAIN_NOISE_MODE == "smart":
-                z_gap_ = torch.zeros(row_gap, *x.shape, dtype=default_dtype, device=work_device)
+                z_gap_ = torch.zeros(row_gap, *x.shape, dtype=work_dtype, device=work_device)
                 z_    = torch.cat((z_       ,z_gap_)       , dim=0)
                 RK.update_transformer_options({'z_' : z_})
 
@@ -1189,21 +1217,21 @@ def sample_rk_beta(
                                 lure_y_mask  = lgw_mask_lure_y_  + lgw_mask_lure_y_inv_
                                 
                                 if eps_x_ is None:
-                                    eps_x_       = torch.zeros(RK.rows+2, *x.shape, dtype=default_dtype, device=work_device)
-                                    data_x_      = torch.zeros(RK.rows+2, *x.shape, dtype=default_dtype, device=work_device)
-                                    eps_y2x_     = torch.zeros(RK.rows+2, *x.shape, dtype=default_dtype, device=work_device)
-                                    eps_x2y_     = torch.zeros(RK.rows+2, *x.shape, dtype=default_dtype, device=work_device)
-                                    eps_yt_      = torch.zeros(RK.rows+2, *x.shape, dtype=default_dtype, device=work_device)
-                                    eps_y_       = torch.zeros(RK.rows+2, *x.shape, dtype=default_dtype, device=work_device)
-                                    eps_prev_y_  = torch.zeros(RK.rows+2, *x.shape, dtype=default_dtype, device=work_device)
-                                    data_y_      = torch.zeros(RK.rows+2, *x.shape, dtype=default_dtype, device=work_device)
-                                    yt_          = torch.zeros(RK.rows+2, *x.shape, dtype=default_dtype, device=work_device)
+                                    eps_x_       = torch.zeros(RK.rows+2, *x.shape, dtype=work_dtype, device=work_device)
+                                    data_x_      = torch.zeros(RK.rows+2, *x.shape, dtype=work_dtype, device=work_device)
+                                    eps_y2x_     = torch.zeros(RK.rows+2, *x.shape, dtype=work_dtype, device=work_device)
+                                    eps_x2y_     = torch.zeros(RK.rows+2, *x.shape, dtype=work_dtype, device=work_device)
+                                    eps_yt_      = torch.zeros(RK.rows+2, *x.shape, dtype=work_dtype, device=work_device)
+                                    eps_y_       = torch.zeros(RK.rows+2, *x.shape, dtype=work_dtype, device=work_device)
+                                    eps_prev_y_  = torch.zeros(RK.rows+2, *x.shape, dtype=work_dtype, device=work_device)
+                                    data_y_      = torch.zeros(RK.rows+2, *x.shape, dtype=work_dtype, device=work_device)
+                                    yt_          = torch.zeros(RK.rows+2, *x.shape, dtype=work_dtype, device=work_device)
                                     
                                     RUN_X_0_COPY = False
                                     if noise_bongflow is None:
                                         RUN_X_0_COPY = True
-                                        data_prev_x_ = torch.zeros(4, *x.shape, dtype=default_dtype, device=work_device)
-                                        data_prev_y_ = torch.zeros(4, *x.shape, dtype=default_dtype, device=work_device)
+                                        data_prev_x_ = torch.zeros(4, *x.shape, dtype=work_dtype, device=work_device)
+                                        data_prev_y_ = torch.zeros(4, *x.shape, dtype=work_dtype, device=work_device)
                                         
                                         noise_bongflow = normalize_zscore(NS.noise_sampler(sigma=sigma, sigma_next=NS.sigma_min), channelwise=True, inplace=True)
 
@@ -2263,10 +2291,14 @@ def sample_rk_beta(
             state_info_out['image_initial'] = image_initial.to('cpu')
 
         if FLOW_STARTED and not FLOW_STOPPED:
-            state_info_out['y0']           = y0.to('cpu') 
+            state_info_out['y0']           = y0.to('cpu')
             #state_info_out['y0_inv']       = y0_inv.to('cpu')       # TODO: implement this?
             state_info_out['data_cached']  = data_cached.to('cpu')
             state_info_out['data_x_prev_'] = data_x_prev_.to('cpu')
+
+    if REPORT_VRAM:
+        RESplain(f"report_vram: peak allocated {torch.cuda.max_memory_allocated() / 1024**3:.2f} GB, "
+                 f"peak reserved {torch.cuda.max_memory_reserved() / 1024**3:.2f} GB (torch allocator only; model weights under dynamic VRAM are not included)", debug=False)
 
     return x
 

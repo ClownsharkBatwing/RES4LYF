@@ -87,6 +87,10 @@ class RK_Method_Beta:
 
         self.reorder_tableau_indices     : list[int]                = self.EO("reorder_tableau_indices", [-1])
 
+        # ComfyUI casts the latent to the model's compute dtype before the network runs, so precision
+        # above work_dtype never reaches the model — it only widens ComfyUI's cond/CFG temporaries.
+        self.work_dtype                  : torch.dtype              = self.EO("work_dtype", torch.float32)
+
         self.LINEAR_ANCHOR_X_0           : float                    = noise_anchor
         
         self.tile_sizes                  : Optional[List[Tuple[int,int]]] = None
@@ -142,6 +146,9 @@ class RK_Method_Beta:
             self.latent_guide.restore()
 
     def model_epsilon(self, x:Tensor, sigma:Tensor, **extra_args) -> Tuple[Tensor, Tensor]:
+        if x.dtype != self.work_dtype:
+            x     = x    .to(self.work_dtype)
+            sigma = sigma.to(self.work_dtype)
         s_in     = x.new_ones([x.shape[0]])
         self._offload_peripherals()
         denoised = self.model(x, sigma * s_in, **extra_args)
@@ -154,6 +161,9 @@ class RK_Method_Beta:
         return eps, denoised
     
     def model_denoised(self, x:Tensor, sigma:Tensor, **extra_args) -> Tensor:
+        if x.dtype != self.work_dtype:
+            x     = x    .to(self.work_dtype)
+            sigma = sigma.to(self.work_dtype)
         s_in     = x.new_ones([x.shape[0]])
         control_tiles = None
         y0_style_pos = self.extra_args['model_options']['transformer_options'].get("y0_style_pos")
@@ -427,24 +437,25 @@ class RK_Method_Beta:
             row = row - self.rows
             return self.b_k_einsum2(row, k, h_new, sigma)
 
+    # einsum does not type-promote: the float64 tableau operands must be cast to the buffer dtype
     def a_k_einsum2(self, row:int, k:Tensor, h:Tensor, sigma:Tensor) -> Tensor:
-        return torch.einsum('i,j,k,i... -> ...', self.A[row], h.unsqueeze(0), -sigma.unsqueeze(0), k[:self.cols])
-    
-    def b_k_einsum2(self, row:int, k:Tensor, h:Tensor, sigma:Tensor) -> Tensor:
-        return torch.einsum('i,j,k,i... -> ...', self.B[row], h.unsqueeze(0), -sigma.unsqueeze(0), k[:self.cols])
+        return torch.einsum('i,j,k,i... -> ...', self.A[row].to(k.dtype), h.unsqueeze(0).to(k.dtype), -sigma.unsqueeze(0).to(k.dtype), k[:self.cols])
 
-    
+    def b_k_einsum2(self, row:int, k:Tensor, h:Tensor, sigma:Tensor) -> Tensor:
+        return torch.einsum('i,j,k,i... -> ...', self.B[row].to(k.dtype), h.unsqueeze(0).to(k.dtype), -sigma.unsqueeze(0).to(k.dtype), k[:self.cols])
+
+
     def a_k_einsum(self, row:int, k     :Tensor) -> Tensor:
-        return torch.einsum('i, i... -> ...', self.A[row], k[:self.cols])
-    
+        return torch.einsum('i, i... -> ...', self.A[row].to(k.dtype), k[:self.cols])
+
     def b_k_einsum(self, row:int, k     :Tensor) -> Tensor:
-        return torch.einsum('i, i... -> ...', self.B[row], k[:self.cols])
-    
+        return torch.einsum('i, i... -> ...', self.B[row].to(k.dtype), k[:self.cols])
+
     def u_k_einsum(self, row:int, k_prev:Tensor) -> Tensor:
-        return torch.einsum('i, i... -> ...', self.U[row], k_prev[:self.cols]) if (self.U is not None and k_prev is not None) else 0
-    
+        return torch.einsum('i, i... -> ...', self.U[row].to(k_prev.dtype), k_prev[:self.cols]) if (self.U is not None and k_prev is not None) else 0
+
     def v_k_einsum(self, row:int, k_prev:Tensor) -> Tensor:
-        return torch.einsum('i, i... -> ...', self.V[row], k_prev[:self.cols]) if (self.V is not None and k_prev is not None) else 0
+        return torch.einsum('i, i... -> ...', self.V[row].to(k_prev.dtype), k_prev[:self.cols]) if (self.V is not None and k_prev is not None) else 0
     
     
     
@@ -456,8 +467,8 @@ class RK_Method_Beta:
             return self.b_k_einsum(row, k) + self.v_k_einsum(row, k_prev)
         
     def zum_tableau(self,  k:Tensor, k_prev:Tensor=None,) -> Tensor:
-        a_k_sum = torch.einsum('ij, j... -> i...', self.A, k[:self.cols])
-        u_k_sum = torch.einsum('ij, j... -> i...', self.U, k_prev[:self.cols]) if (self.U is not None and k_prev is not None) else 0
+        a_k_sum = torch.einsum('ij, j... -> i...', self.A.to(k.dtype), k[:self.cols])
+        u_k_sum = torch.einsum('ij, j... -> i...', self.U.to(k.dtype), k_prev[:self.cols]) if (self.U is not None and k_prev is not None) else 0
         return a_k_sum + u_k_sum
         
     def get_x(self, data:Tensor, noise:Tensor, sigma:Tensor):
