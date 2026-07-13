@@ -399,13 +399,7 @@ def sample_rk_beta(
             start_step -= 1
     
     if sampler_mode in {"resample", "unsample"}:
-        state_info_sigma_next = state_info.get('sigma_next', -1)
-        if isinstance(state_info_sigma_next, torch.Tensor):
-            state_info_start_step = torch.isclose(sigmas, state_info_sigma_next.to(sigmas), rtol=1e-5, atol=1e-8).nonzero().flatten()
-        else:
-            state_info_start_step = (sigmas == state_info_sigma_next).nonzero().flatten()
-        if state_info_start_step.shape[0] > 0:
-            start_step = state_info_start_step.item()
+        start_step = resolve_start_step_from_sigma_next(sigmas, state_info.get('sigma_next', -1), start_step)
             
     start_step = start_at_step if start_at_step >= 0 else start_step
 
@@ -2081,15 +2075,9 @@ def sample_rk_beta(
                 x = x - x.mean(dim=(-2,-1), keepdim=True) + x_means_per_step
 
             
-            if sampler_mode == "unsample":
-                callback_step = len(sigmas) - 1 - step
-            elif sampler_mode == "resample" and outer_sigmas_len > len(sigmas):
-                outer_total = outer_sigmas_len - 1
-                callback_step = int(round(step / (len(sigmas) - 1) * outer_total))
-            else:
-                callback_step = step
+            callback_step = display_callback_step(step, sampler_mode, len(sigmas), outer_sigmas_len)
             self_refine_mask = getattr(LG, '_debug_certainty_mask', None)
-            preview_callback(x, eps, denoised, x_, eps_, data_, callback_step, sigma, sigma_next, callback, EO, preview_override=data_cached, FLOW_STOPPED=FLOW_STOPPED, device=model_device, self_refine_mask=self_refine_mask)
+            preview_callback(x, eps, denoised, x_, eps_, data_, callback_step, sigma, sigma_next, callback, EO, preview_override=data_cached, FLOW_STOPPED=FLOW_STOPPED, device=model_device, self_refine_mask=self_refine_mask, step_sched=step)
             
             h_prev = NS.h
             x_prev = x_0
@@ -2229,19 +2217,16 @@ def sample_rk_beta(
     state_info_out['model_call_counts'] = RK.get_model_call_counters()
     RESplain("Model calls (total/denoised/epsilon):", state_info_out['model_call_counts'], debug=True)
 
-    if not (UNSAMPLE and sigmas[1] > sigmas[0]) and not EO("preview_last_step_always") and sigma is not None   and   not (FLOW_STARTED and not FLOW_STOPPED):
-        if sampler_mode == "unsample":
-            callback_step = len(sigmas) - 1 - step
-        elif sampler_mode == "resample" and outer_sigmas_len > len(sigmas):
-            outer_total = outer_sigmas_len - 1
-            callback_step = int(round(step / (len(sigmas) - 1) * outer_total))
-        else:
-            callback_step = step
+    # re-report only at the schedule end, where it carries the progress bar to 100%;
+    # on partial runs it would just duplicate the loop's last report one step later
+    schedule_end_step = len(sigmas) - 2 if sigmas[-1] == 0 else len(sigmas) - 1
+    if step >= schedule_end_step and not (UNSAMPLE and sigmas[1] > sigmas[0]) and not EO("preview_last_step_always") and sigma is not None   and   not (FLOW_STARTED and not FLOW_STOPPED):
+        callback_step = display_callback_step(step, sampler_mode, len(sigmas), outer_sigmas_len)
         self_refine_mask = getattr(LG, '_debug_certainty_mask', None)
-        preview_callback(x, eps, denoised, x_, eps_, data_, callback_step, sigma, sigma_next, callback, EO, device=model_device, self_refine_mask=self_refine_mask)
+        preview_callback(x, eps, denoised, x_, eps_, data_, callback_step, sigma, sigma_next, callback, EO, device=model_device, self_refine_mask=self_refine_mask, step_sched=step, final=True)
         
-    if UNSAMPLE and sigmas[0] != 0:
-        sigmas = torch.cat((torch.zeros(1, dtype=sigmas.dtype, device=sigmas.device), sigmas.clone()), dim=0)
+    # judged on the schedule the loop ran on — the same axis as step/end_step
+    RUN_COMPLETED = step == len(sigmas)-2 and sigmas[-1] == 0 and sigmas[-2] == NS.sigma_min
 
     if INIT_SAMPLE_LOOP:
         state_info_out.update(state_info)
@@ -2274,7 +2259,7 @@ def sample_rk_beta(
         state_info_out['sampler_mode']      = sampler_mode
         state_info_out['last_rng']          = NS.noise_sampler .generator.get_state().clone()
         state_info_out['last_rng_substep']  = NS.noise_sampler2.generator.get_state().clone()
-        state_info_out['completed']         = step == len(sigmas)-2 and sigmas[-1] == 0 and sigmas[-2] == NS.sigma_min
+        state_info_out['completed']         = RUN_COMPLETED
         state_info_out['FLOW_STARTED']      = FLOW_STARTED
         state_info_out['FLOW_STOPPED']      = FLOW_STOPPED
         state_info_out['noise_bongflow']         = noise_bongflow.clone().cpu()      if noise_bongflow       is not None else None
@@ -2318,6 +2303,31 @@ def noise_fn(x, sigma, sigma_next, noise_sampler, cossim_iter=1):
     return noise
 
 
+def resolve_start_step_from_sigma_next(sigmas: Tensor, sigma_next, fallback: int) -> int:
+    """Resume index from matching the stored sigma_next on the schedule. Schedules can hold
+    duplicate sigmas (restarts): on multiple matches, take the closest to the fallback."""
+    if isinstance(sigma_next, torch.Tensor):
+        matches = torch.isclose(sigmas, sigma_next.to(sigmas), rtol=1e-5, atol=1e-8).nonzero().flatten()
+    else:
+        matches = (sigmas == sigma_next).nonzero().flatten()
+    if matches.shape[0] == 0:
+        return fallback
+    if matches.shape[0] == 1:
+        return int(matches.item())
+    return int(min(matches.tolist(), key=lambda idx: abs(idx - fallback)))
+
+
+def display_callback_step(step: int, sampler_mode: str, sigmas_len: int, outer_sigmas_len: int) -> int:
+    """Map a loop step onto the axis the progress bar was sized on: unsample counts
+    backwards, resample stretches onto the longer padded outer axis (lossy rounding),
+    standard passes through. Display only — 'i_sched' carries the true index."""
+    if sampler_mode == "unsample":
+        return sigmas_len - 1 - step
+    if sampler_mode == "resample" and outer_sigmas_len > sigmas_len:
+        return int(round(step / (sigmas_len - 1) * (outer_sigmas_len - 1)))
+    return step
+
+
 def preview_callback(
                     x          : Tensor,
                     eps        : Tensor,
@@ -2333,7 +2343,9 @@ def preview_callback(
                     preview_override : Optional[Tensor] = None,
                     FLOW_STOPPED : bool = False,
                     device     : Optional[torch.device] = None,
-                    self_refine_mask : Optional[Tensor] = None,):
+                    self_refine_mask : Optional[Tensor] = None,
+                    step_sched : Optional[int] = None,
+                    final      : bool = False,):
 
     if EO("eps_substep_preview"):
         row_callback = EO("eps_substep_preview", 0)
@@ -2386,7 +2398,10 @@ def preview_callback(
     if device is not None:
         denoised_callback = denoised_callback.to(device)
 
-    callback({'x': x, 'i': step, 'sigma': sigma, 'sigma_next': sigma_next, 'denoised': denoised_callback.to(torch.float32)}) if callback is not None else None
-    
+    # 'i' drives comfy's progress bar; 'i_sched' is the true schedule index (state_info axis);
+    # 'final' marks the post-loop re-report
+    if callback is not None:
+        callback({'x': x, 'i': step, 'i_sched': step if step_sched is None else step_sched, 'final': final, 'sigma': sigma, 'sigma_next': sigma_next, 'denoised': denoised_callback.to(torch.float32)})
+
     return
 

@@ -1106,6 +1106,18 @@ class SharkSampler_Beta(io.ComfyNode):
 
 
 
+def chainsampler_steps_and_sigmas(latent_image, sigmas, sampler_mode):
+    """Continuation schedule and step count from the latent's stored state. The trailing 0
+    is a pad, not a step target; unsample-to-resample flips the stored ascending schedule."""
+    state_info = latent_image['state_info']
+    state_sigmas = state_info['sigmas']
+    steps = state_sigmas.shape[-1] - 2 if state_sigmas[-1] == 0 else state_sigmas.shape[-1] - 1
+    sigmas = state_sigmas if sigmas is None else sigmas
+    if len(sigmas) > 2 and sigmas[1] < sigmas[2] and state_info['sampler_mode'] == "unsample" and sampler_mode == "resample":
+        sigmas = torch.flip(sigmas, dims=[0])
+    return steps, sigmas
+
+
 class SharkChainsampler_Beta(io.ComfyNode):
     @classmethod
     def define_schema(cls):
@@ -1156,10 +1168,7 @@ class SharkChainsampler_Beta(io.ComfyNode):
                 options_group=None,
                 **kwargs):
 
-        steps = latent_image['state_info']['sigmas'].shape[-1] - 3
-        sigmas = latent_image['state_info']['sigmas'] if sigmas is None else sigmas
-        if len(sigmas) > 2 and sigmas[1] < sigmas[2] and latent_image['state_info']['sampler_mode'] == "unsample" and sampler_mode == "resample":
-            sigmas = torch.flip(sigmas, dims=[0])
+        steps, sigmas = chainsampler_steps_and_sigmas(latent_image, sigmas, sampler_mode)
 
         return SharkSampler_Beta.execute(
             model=model,
@@ -2027,10 +2036,7 @@ class ClownsharkChainsampler_Beta(io.ComfyNode):
                 options_group=None,
                 **kwargs):
 
-        steps = latent_image['state_info']['sigmas'].shape[-1] - 3
-        sigmas = latent_image['state_info']['sigmas'] if sigmas is None else sigmas
-        if len(sigmas) > 2 and sigmas[1] < sigmas[2] and latent_image['state_info']['sampler_mode'] == "unsample" and sampler_mode == "resample":
-            sigmas = torch.flip(sigmas, dims=[0])
+        steps, sigmas = chainsampler_steps_and_sigmas(latent_image, sigmas, sampler_mode)
 
         return ClownsharKSampler_Beta.execute(
             eta=eta,
