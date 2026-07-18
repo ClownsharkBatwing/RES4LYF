@@ -358,12 +358,27 @@ def is_RF_model(model):
     modelsampling = model.inner_model.inner_model.model_sampling
     return isinstance(modelsampling, model_sampling.CONST)
 
+
 def get_res4lyf_scheduler_list():
-    scheduler_names = SCHEDULER_NAMES.copy()
+    """
+    Return a list of scheduler names suitable for node INPUT_TYPES.
+    Defensive: if comfy.samplers isn't available yet, return a list that at least contains 'beta57'.
+    """
+    try:
+        # Prefer the live comfy.samplers list if available
+        import comfy.samplers as _cs
+        try:
+            scheduler_names = _cs.SCHEDULER_NAMES.copy()
+        except Exception:
+            scheduler_names = []
+    except Exception:
+        # comfy not importable at this time
+        scheduler_names = []
+
     if "beta57" not in scheduler_names:
         scheduler_names.append("beta57")
     return scheduler_names
-
+    
 def move_to_same_device(*tensors):
     if not tensors:
         return tensors

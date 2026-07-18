@@ -126,7 +126,19 @@ def has_nested_attr(obj, attr_path):
     return True
 
 def get_res4lyf_scheduler_list():
-    scheduler_names = SCHEDULER_NAMES.copy()
+    """
+    Return a list of scheduler names suitable for node INPUT_TYPES used by legacy modules.
+    Defensive: try to read comfy.samplers.SCHEDULER_NAMES, but always include 'beta57' as fallback.
+    """
+    try:
+        import comfy.samplers as _cs
+        try:
+            scheduler_names = _cs.SCHEDULER_NAMES.copy()
+        except Exception:
+            scheduler_names = []
+    except Exception:
+        scheduler_names = []
+
     if "beta57" not in scheduler_names:
         scheduler_names.append("beta57")
     return scheduler_names

@@ -13,6 +13,31 @@ from aiohttp import web
 from server import PromptServer
 from tqdm import tqdm
 
+# --- IMPORT-TIME PATCH (inserted to ensure 'beta57' is visible to node definitions)
+# Ensure 'beta57' is visible to node definitions that run at import/class-definition time.
+# This is defensive: if comfy isn't importable during module import, we silently skip and rely on init().
+try:
+    import comfy.samplers as _comfy_samplers
+
+    try:
+        if hasattr(_comfy_samplers, "SCHEDULER_NAMES") and "beta57" not in _comfy_samplers.SCHEDULER_NAMES:
+            _comfy_samplers.SCHEDULER_NAMES = _comfy_samplers.SCHEDULER_NAMES + ["beta57"]
+    except Exception:
+        # don't fail import for odd edge-cases
+        pass
+
+    try:
+        # KSampler.SCHEDULERS is sometimes used by node type lists
+        if hasattr(_comfy_samplers, "KSampler") and hasattr(_comfy_samplers.KSampler, "SCHEDULERS") and "beta57" not in _comfy_samplers.KSampler.SCHEDULERS:
+            _comfy_samplers.KSampler.SCHEDULERS = _comfy_samplers.KSampler.SCHEDULERS + ["beta57"]
+    except Exception:
+        pass
+
+except Exception:
+    # comfy not importable at module import time — the init() function still adds the scheduler later
+    pass
+# --- end import-time patch ---
+
 
 CONFIG_FILE_NAME = "res4lyf.config.json"
 DEFAULT_CONFIG_FILE_NAME = "web/js/res4lyf.default.json"
