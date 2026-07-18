@@ -29,6 +29,9 @@ if "beta57" not in SCHEDULER_HANDLERS:
     SCHEDULER_HANDLERS["beta57"] = SchedulerHandler(handler=partial(comfy.samplers.beta_scheduler, alpha=0.5, beta=0.7), use_ms=True)
     SCHEDULER_NAMES.append("beta57")
 
+new_scheduler_name = "beta57"
+if new_scheduler_name not in SCHEDULER_NAMES:
+    SCHEDULER_NAMES.append(new_scheduler_name)
 
 from .res4lyf import RESplain
 
@@ -469,6 +472,7 @@ add_samplers()
 
 
 __all__ = ["NODE_CLASS_MAPPINGS", "NODE_DISPLAY_NAME_MAPPINGS", "WEB_DIRECTORY"]
+
 
 
 
