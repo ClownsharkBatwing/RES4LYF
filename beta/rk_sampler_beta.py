@@ -11,7 +11,7 @@ from comfy.model_sampling import EPS
 import comfy
 
 from ..res4lyf              import RESplain
-from ..helper               import ExtraOptions, FrameWeightsManager
+from ..helper               import ExtraOptions, FrameWeightsManager, clamp_dtype
 from ..latents              import lagrange_interpolation, get_collinear, get_orthogonal, get_cosine_similarity, get_pearson_similarity, \
                                    get_slerp_weight_for_cossim, get_slerp_ratio, slerp_tensor, get_edge_mask, normalize_zscore, \
                                    compute_slerp_ratio_for_target, find_slerp_ratio_grid, \
@@ -258,8 +258,10 @@ def sample_rk_beta(
     #   noise_dtype: the dtype noise is generated at — decides which noise realization a seed
     #       produces (torch's RNG stream differs per dtype), independent of the math precision.
     EO             = ExtraOptions(extra_options)
-    default_dtype  = EO("default_dtype", torch.float64)
-    work_dtype     = EO("work_dtype",    torch.float32)
+    model_device   = model.inner_model.inner_model.device #x.device
+    work_device    = 'cpu' if EO("work_device_cpu") else model_device
+    default_dtype  = clamp_dtype(EO("default_dtype", torch.float64), work_device)
+    work_dtype     = clamp_dtype(EO("work_dtype",    torch.float32), work_device)
 
     REPORT_VRAM    = EO("report_vram") and torch.cuda.is_available()
     if REPORT_VRAM:
@@ -280,8 +282,6 @@ def sample_rk_beta(
             _VRAM_CAP_SET = False
 
     extra_args     = {} if extra_args     is None else extra_args
-    model_device   = model.inner_model.inner_model.device #x.device
-    work_device    = 'cpu' if EO("work_device_cpu") else model_device
 
     state_info     = {} if state_info     is None else state_info
     state_info_out = {} if state_info_out is None else state_info_out

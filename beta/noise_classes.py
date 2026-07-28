@@ -15,6 +15,7 @@ from math   import pi
 from comfy.k_diffusion.sampling import BrownianTreeNoiseSampler
 
 from ..res4lyf import RESplain
+from ..helper  import clamp_dtype
 
 # Set this to "True" if you have installed OpenSimplex. Recommended to install without dependencies due to conflicting packages: pip3 install opensimplex --no-deps 
 OPENSIMPLEX_ENABLE = False
@@ -47,7 +48,7 @@ class PrecisionTool:
             def cast_and_move_to_device(data):
                 if torch.is_tensor(data):
                     if self.cast_type == 'fp64':
-                        return data.to(torch.float64).to(target_device)
+                        return data.to(clamp_dtype(torch.float64, target_device)).to(target_device)
                     elif self.cast_type == 'fp32':
                         return data.to(torch.float32).to(target_device)
                     elif self.cast_type == 'fp16':

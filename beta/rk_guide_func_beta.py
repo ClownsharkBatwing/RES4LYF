@@ -14,7 +14,7 @@ if TYPE_CHECKING:
 from einops          import rearrange
 
 from ..sigmas        import get_sigmas
-from ..helper        import ExtraOptions, FrameWeightsManager, initialize_or_scale, is_video_model
+from ..helper        import ExtraOptions, FrameWeightsManager, initialize_or_scale, is_video_model, clamp_dtype
 from ..latents       import normalize_zscore, get_collinear, get_orthogonal, get_cosine_similarity, get_pearson_similarity, \
                             get_slerp_weight_for_cossim, normalize_latent, hard_light_blend, slerp_tensor, get_orthogonal_noise_from_channelwise, \
                             get_edge_mask, is_packed_latent
@@ -65,12 +65,12 @@ class LatentGuide:
         for attr in self.OFFLOADABLE_ATTRS:
             val = getattr(self, attr, None)
             if isinstance(val, Tensor):
-                setattr(self, attr, val.to(device))
+                setattr(self, attr, val.to(device=device, dtype=clamp_dtype(val.dtype, device)))
         # Handle list-of-tensor attributes
         for list_attr in ('x_lying_', 's_lying_'):
             val = getattr(self, list_attr, None)
             if isinstance(val, list):
-                setattr(self, list_attr, [t.to(device) if isinstance(t, Tensor) else t for t in val])
+                setattr(self, list_attr, [t.to(device=device, dtype=clamp_dtype(t.dtype, device)) if isinstance(t, Tensor) else t for t in val])
 
     def restore(self):
         self.offload(self.device)

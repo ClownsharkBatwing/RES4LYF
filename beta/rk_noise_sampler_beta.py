@@ -13,7 +13,7 @@ import comfy.supported_models
 from .noise_classes import NOISE_GENERATOR_CLASSES, NOISE_GENERATOR_CLASSES_SIMPLE, PackedNoiseGenerator
 from .constants     import MAX_STEPS
 
-from ..helper       import ExtraOptions, has_nested_attr 
+from ..helper       import ExtraOptions, has_nested_attr, clamp_dtype
 from ..latents      import normalize_zscore, get_orthogonal, get_collinear, is_packed_latent
 from ..res4lyf      import RESplain
 
@@ -232,7 +232,7 @@ class RK_NoiseSampler:
 
         # torch's RNG stream differs per dtype, so noise_dtype — not the math precision — decides
         # which noise realization a seed produces; the float64 default keeps seeds stable across work_dtype
-        noise_dtype = self.EO("noise_dtype", self.dtype)
+        noise_dtype = clamp_dtype(self.EO("noise_dtype", self.dtype), x.device)
         if x.dtype != noise_dtype:
             x = x.to(noise_dtype)
 

@@ -19,7 +19,7 @@ from comfy_api.latest import io
 import re
 import latent_preview
 
-from ..helper               import initialize_or_scale, get_res4lyf_scheduler_list, OptionsManager, ExtraOptions, extract_cond_from_guider
+from ..helper               import initialize_or_scale, get_res4lyf_scheduler_list, OptionsManager, ExtraOptions, extract_cond_from_guider, clamp_dtype
 from ..res4lyf              import RESplain
 from ..latents              import normalize_zscore, get_orthogonal
 from ..sigmas               import get_sigmas
@@ -79,6 +79,7 @@ def generate_init_noise(x, seed, noise_type_init, noise_stdev, noise_mean, noise
         noise_dtype = EO("noise_dtype", EO("default_dtype", torch.float64, debugMode=2), debugMode=2)
     else:
         noise_dtype = torch.float64
+    noise_dtype = clamp_dtype(noise_dtype, x.device)
     x = x.to(noise_dtype)
 
     if EO is not None and EO("bypass_noise_norm") and noise_type_init == "gaussian":
@@ -250,9 +251,9 @@ class SharkSampler:
                         
             extra_options  += "\n" + options_mgr.get('extra_options', "")
             EO              = ExtraOptions(extra_options)
-            default_dtype   = EO("default_dtype", torch.float64)
-            work_dtype      = EO("work_dtype",    torch.float32)   # latent-sized tensors; sigmas stay at default_dtype
             default_device  = EO("work_device", "cuda" if torch.cuda.is_available() else "cpu")
+            default_dtype   = clamp_dtype(EO("default_dtype", torch.float64), default_device)
+            work_dtype      = clamp_dtype(EO("work_dtype",    torch.float32), default_device)   # latent-sized tensors; sigmas stay at default_dtype
             
             noise_stdev     = options_mgr.get('noise_init_stdev', noise_stdev)
             noise_mean      = options_mgr.get('noise_init_mean',  noise_mean)

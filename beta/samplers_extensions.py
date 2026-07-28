@@ -11,7 +11,7 @@ from nodes import MAX_RESOLUTION
 from comfy_api.latest import io
 
 from ..latents               import get_edge_mask
-from ..helper                import OptionsManager, FrameWeightsManager, initialize_or_scale, get_res4lyf_scheduler_list, parse_range_string, parse_tile_sizes, parse_range_string_int
+from ..helper                import OptionsManager, FrameWeightsManager, initialize_or_scale, get_res4lyf_scheduler_list, parse_range_string, parse_tile_sizes, parse_range_string_int, get_torch_device, clamp_dtype
 
 from .rk_coefficients_beta   import RK_SAMPLER_NAMES_BETA_FOLDERS, get_default_sampler_name, get_sampler_name_list, process_sampler_name
 
@@ -287,10 +287,10 @@ class ClownOptions_DetailBoost_Beta:
         
         
         options = options if options is not None else {}
-        
-        default_dtype = torch.float64
-        default_device = torch.device('cuda')
-        
+
+        default_device = get_torch_device()
+        default_dtype  = clamp_dtype(torch.float64, default_device)
+
         if noise_scaling_type.endswith("_normal"):
             sampler_scaling_normalize = True
             noise_scaling_type = noise_scaling_type[:-7]
@@ -398,12 +398,7 @@ class ClownOptions_SigmaScaling_Beta:
             ):
         
         options = options if options is not None else {}
-        
-        default_dtype = torch.float64
-        default_device = torch.device('cuda')
-        
-        
-        
+
         options['noise_anchor']           = noise_anchor_sde
         options['s_noise']                = s_noise
         options['s_noise_substep']        = s_noise_substep
