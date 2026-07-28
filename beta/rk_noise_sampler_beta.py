@@ -13,7 +13,7 @@ import comfy.supported_models
 from .noise_classes import NOISE_GENERATOR_CLASSES, NOISE_GENERATOR_CLASSES_SIMPLE, PackedNoiseGenerator
 from .constants     import MAX_STEPS
 
-from ..helper       import ExtraOptions, has_nested_attr, clamp_dtype
+from ..helper       import ExtraOptions, has_nested_attr, clamp_dtype, get_torch_device
 from ..latents      import normalize_zscore, get_orthogonal, get_collinear, is_packed_latent
 from ..res4lyf      import RESplain
 
@@ -52,12 +52,12 @@ class RK_NoiseSampler:
                 RK            : Union["RK_Method_Exponential", "RK_Method_Linear"],
                 model,
                 step          : int=0,
-                device        : str='cuda',
+                device        : str=None,
                 dtype         : torch.dtype=torch.float64,
                 extra_options : str=""
                 ):
-        
-        self.device                 = device
+
+        self.device                 = device if device is not None else get_torch_device()
         self.dtype                  = dtype
         
         self.model                  = model

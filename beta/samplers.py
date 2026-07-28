@@ -19,7 +19,7 @@ from comfy_api.latest import io
 import re
 import latent_preview
 
-from ..helper               import initialize_or_scale, get_res4lyf_scheduler_list, OptionsManager, ExtraOptions, extract_cond_from_guider, clamp_dtype
+from ..helper               import initialize_or_scale, get_res4lyf_scheduler_list, OptionsManager, ExtraOptions, extract_cond_from_guider, clamp_dtype, get_torch_device
 from ..res4lyf              import RESplain
 from ..latents              import normalize_zscore, get_orthogonal
 from ..sigmas               import get_sigmas
@@ -251,7 +251,7 @@ class SharkSampler:
                         
             extra_options  += "\n" + options_mgr.get('extra_options', "")
             EO              = ExtraOptions(extra_options)
-            default_device  = EO("work_device", "cuda" if torch.cuda.is_available() else "cpu")
+            default_device  = EO("work_device", str(get_torch_device()))
             default_dtype   = clamp_dtype(EO("default_dtype", torch.float64), default_device)
             work_dtype      = clamp_dtype(EO("work_dtype",    torch.float32), default_device)   # latent-sized tensors; sigmas stay at default_dtype
             
@@ -459,7 +459,7 @@ class SharkSampler:
                     x_lr        = latent_image['samples'].clone() if latent_image is not None else None
                     x_lr_bs     = 1                               if x_lr         is     None else x_lr.shape[-4]
                     x_lr_dtype  = default_dtype                   if x_lr         is     None else x_lr.dtype
-                    x_lr_device = 'cuda'                          if x_lr         is     None else x_lr.device
+                    x_lr_device = get_torch_device()              if x_lr         is     None else x_lr.device
                     
                     ultracascade_stage_up_upscale_align_corners = EO("ultracascade_stage_up_upscale_align_corners", False)
                     ultracascade_stage_up_upscale_mode          = EO("ultracascade_stage_up_upscale_mode",         "bicubic")

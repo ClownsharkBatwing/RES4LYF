@@ -9,7 +9,7 @@ import itertools
 
 from .phi_functions        import Phi
 from .rk_coefficients_beta import get_implicit_sampler_name_list, get_rk_methods_beta
-from ..helper              import ExtraOptions
+from ..helper              import ExtraOptions, get_torch_device
 from ..latents             import get_orthogonal, get_collinear, get_cosine_similarity, tile_latent, untile_latent
 
 from ..res4lyf             import RESplain, is_debug_logging_enabled
@@ -34,14 +34,14 @@ class RK_Method_Beta:
                 VE_MODEL              : bool,
                 noise_anchor          : float,
                 noise_boost_normalize : bool        = True,
-                model_device          : str         = 'cuda',
+                model_device          : str         = None,
                 work_device           : str         = 'cpu',
                 dtype                 : torch.dtype = torch.float64,
                 extra_options         : str         = ""
                 ):
-        
+
         self.work_device                 = work_device
-        self.model_device                = model_device
+        self.model_device                = model_device if model_device is not None else get_torch_device()
         self.dtype                       : torch.dtype = dtype
 
         self.model                       = model
@@ -123,7 +123,7 @@ class RK_Method_Beta:
             VE_MODEL      : bool,
             noise_anchor  : float       = 1.0,
             noise_boost_normalize  : bool = True,
-            model_device  : str         = 'cuda',
+            model_device  : str         = None,
             work_device   : str         = 'cpu',
             dtype         : torch.dtype = torch.float64,
             extra_options : str         = ""
@@ -234,9 +234,9 @@ class RK_Method_Beta:
             if positive_control is not None and hasattr(positive_control, 'cond_hint_original'):
                 positive_cond_hint_init = positive_control.cond_hint.clone() if positive_control.cond_hint is not None else None
                 if positive_control.cond_hint_original.shape[-1] != x.shape[-2] * self.latent_compression_ratio or positive_control.cond_hint_original.shape[-2] != x.shape[-1] * self.latent_compression_ratio:
-                    positive_control_pretile = comfy.utils.common_upscale(positive_control.cond_hint_original.clone().to(torch.float16).to('cuda'), x.shape[-1] * self.latent_compression_ratio, x.shape[-2] * self.latent_compression_ratio, "bislerp", "disabled")
+                    positive_control_pretile = comfy.utils.common_upscale(positive_control.cond_hint_original.clone().to(torch.float16).to(self.model_device), x.shape[-1] * self.latent_compression_ratio, x.shape[-2] * self.latent_compression_ratio, "bislerp", "disabled")
                     positive_control.cond_hint_original = positive_control_pretile.to(positive_control.cond_hint_original)
-                positive_control_pretile = positive_control.cond_hint_original.clone().to(torch.float16).to('cuda')
+                positive_control_pretile = positive_control.cond_hint_original.clone().to(torch.float16).to(self.model_device)
                 control_tiles, control_orig_shape, control_grid, control_strides = tile_latent(positive_control_pretile, tile_size=(tile_h_full,tile_w_full))
                 control_tiles = control_tiles
             
@@ -896,7 +896,7 @@ class RK_Method_Exponential(RK_Method_Beta):
                 noise_anchor  : float,
                 noise_boost_normalize  : bool,
 
-                model_device  : str         = 'cuda',
+                model_device  : str         = None,
                 work_device   : str         = 'cpu',
                 dtype         : torch.dtype = torch.float64,
                 extra_options : str         = "",
@@ -1045,7 +1045,7 @@ class RK_Method_Linear(RK_Method_Beta):
                 VE_MODEL      : bool,
                 noise_anchor  : float,
                 noise_boost_normalize  : bool,
-                model_device  : str         = 'cuda',
+                model_device  : str         = None,
                 work_device   : str         = 'cpu',
                 dtype         : torch.dtype = torch.float64,
                 extra_options : str         = "",
