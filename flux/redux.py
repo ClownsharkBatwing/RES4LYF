@@ -3,6 +3,8 @@ import comfy.ops
 import torch.nn
 import torch.nn.functional as F
 
+from ..helper import get_torch_device, clamp_dtype
+
 ops = comfy.ops.manual_cast
 
 class ReReduxImageEncoder(torch.nn.Module):
@@ -40,6 +42,7 @@ class ReReduxImageEncoder(torch.nn.Module):
         
         dtype = self.style_dtype if hasattr(self, "style_dtype") and self.style_dtype is not None else dense_embed.dtype
         pinv_dtype = torch.float32 if dtype != torch.float64 else dtype
+        pinv_dtype = clamp_dtype(pinv_dtype, get_torch_device())
         
         W = self.redux_down.weight.data.to(dtype)   # shape [2560, 64]
         b = self.redux_down.bias.data.to(dtype)     # shape [2560]
@@ -47,7 +50,7 @@ class ReReduxImageEncoder(torch.nn.Module):
         cond_256 = cond[0][0].clone()
         
         if not hasattr(self, "W_pinv"):
-            self.W_pinv = torch.linalg.pinv(W.to(pinv_dtype).cuda()).to(W)
+            self.W_pinv = torch.linalg.pinv(W.to(pinv_dtype).to(get_torch_device())).to(W)
         
         #cond_256_embed = (cond_256 - b) @ torch.linalg.pinv(W.to(pinv_dtype)).T.to(dtype)
         cond_embed256 = (cond_256 - b.to(cond_256)) @ self.W_pinv.T.to(cond_256)
@@ -72,9 +75,10 @@ class ReReduxImageEncoder(torch.nn.Module):
                 self.mu_s    = f_s.mean(dim=0, keepdim=True)
                 f_s_centered = f_s - self.mu_s
                 
-                cov = (f_s_centered.T.double() @ f_s_centered.double()) / (f_s_centered.size(0) - 1)
+                cov_dtype = clamp_dtype(torch.float64, f_s_centered.device)
+                cov = (f_s_centered.T.to(cov_dtype) @ f_s_centered.to(cov_dtype)) / (f_s_centered.size(0) - 1)
 
-                S_eig, U_eig = torch.linalg.eigh((cov + 1e-5 * torch.eye(cov.size(0), dtype=cov.dtype, device=cov.device)).cuda())
+                S_eig, U_eig = torch.linalg.eigh((cov + 1e-5 * torch.eye(cov.size(0), dtype=cov.dtype, device=cov.device)).to(get_torch_device()))
                 S_eig = S_eig.to(cov)
                 U_eig = U_eig.to(cov)
                 
@@ -88,9 +92,10 @@ class ReReduxImageEncoder(torch.nn.Module):
                 mu_c         = f_c.mean(dim=0, keepdim=True)
                 f_c_centered = f_c - mu_c
                 
-                cov = (f_c_centered.T.double() @ f_c_centered.double()) / (f_c_centered.size(0) - 1)
+                cov_dtype = clamp_dtype(torch.float64, f_c_centered.device)
+                cov = (f_c_centered.T.to(cov_dtype) @ f_c_centered.to(cov_dtype)) / (f_c_centered.size(0) - 1)
 
-                S_eig, U_eig  = torch.linalg.eigh((cov + 1e-5 * torch.eye(cov.size(0), dtype=cov.dtype, device=cov.device)).cuda())
+                S_eig, U_eig  = torch.linalg.eigh((cov + 1e-5 * torch.eye(cov.size(0), dtype=cov.dtype, device=cov.device)).to(get_torch_device()))
                 S_eig = S_eig.to(cov)
                 U_eig = U_eig.to(cov)
                 

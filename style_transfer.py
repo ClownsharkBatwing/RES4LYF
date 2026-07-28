@@ -12,6 +12,7 @@ import comfy
 
 
 from .latents import gaussian_blur_2d, median_blur_2d
+from .helper  import get_torch_device, clamp_dtype
 
 # WIP... not yet in use...
 class StyleTransfer:  
@@ -243,7 +244,8 @@ class StyleWCT:
         self.spatial_shape  = None
         
     def whiten(self, f_s_centered: torch.Tensor, set=False):
-        cov = (f_s_centered.T.double() @ f_s_centered.double()) / (f_s_centered.size(0) - 1)
+        cov_dtype = clamp_dtype(torch.float64, f_s_centered.device)
+        cov = (f_s_centered.T.to(cov_dtype) @ f_s_centered.to(cov_dtype)) / (f_s_centered.size(0) - 1)
 
         if self.use_svd:
             U_svd, S_svd, Vh_svd = torch.linalg.svd(cov + 1e-5 * torch.eye(cov.size(0), dtype=cov.dtype, device=cov.device))
@@ -416,23 +418,24 @@ class StyleFeatures:
 
 class Retrojector:  
     def __init__(self, proj=None, patch_size=2, pinv_dtype=torch.float64, dtype=torch.float64, ENDO=False):
+        device          = get_torch_device()
         self.proj       = proj
         self.patch_size = patch_size
-        self.pinv_dtype = pinv_dtype
-        self.dtype      = dtype
-        
+        self.pinv_dtype = pinv_dtype = clamp_dtype(pinv_dtype, device)
+        self.dtype      = clamp_dtype(dtype, device)
+
         self.LINEAR     = isinstance(proj, nn.Linear)
         self.CONV2D     = isinstance(proj, nn.Conv2d)
         self.CONV3D     = isinstance(proj, nn.Conv3d)
         self.ENDO       = ENDO
-        self.W          = proj.weight.data.to(dtype=pinv_dtype).cuda()
-        
+        self.W          = proj.weight.data.to(dtype=pinv_dtype).to(device)
+
         if self.LINEAR:
-            self.W_inv = torch.linalg.pinv(self.W.cuda())
+            self.W_inv = torch.linalg.pinv(self.W)
         elif self.CONV2D:
             C_out, _, kH, kW = proj.weight.shape
             W_flat = proj.weight.view(C_out, -1).to(dtype=pinv_dtype)
-            self.W_inv = torch.linalg.pinv(W_flat.cuda())
+            self.W_inv = torch.linalg.pinv(W_flat.to(device))
         
         if proj.bias is None:
             if self.LINEAR:
@@ -1106,9 +1109,9 @@ class Stylizer:
     
     CLS_WCT2 = WaveletStyleWCT()
     
-    def __init__(self, dtype=torch.float64, device=torch.device("cuda")):
-        self.dtype = dtype
-        self.device = device
+    def __init__(self, dtype=torch.float64, device=None):
+        self.device = device if device is not None else get_torch_device()
+        self.dtype = clamp_dtype(dtype, self.device)
         self.mask  = [None]
         self.apply_to = [""]
         self.method = ["passthrough"]
@@ -1686,11 +1689,11 @@ class StyleMMDiT_BaseBlock:
         
         for i, mask in enumerate(self.mask):
             if mask is not None and mask.ndim > 1:
-                self.mask[i] = F.interpolate(mask.unsqueeze(0), size=(h_len, w_len)).flatten().to(torch.bfloat16).cuda()
+                self.mask[i] = F.interpolate(mask.unsqueeze(0), size=(h_len, w_len)).flatten().to(torch.bfloat16).to(self.device)
             self.img.mask = self.mask
         for i, mask in enumerate(self.attn_mask):
             if mask is not None and mask.ndim > 1:
-                self.attn_mask[i] = F.interpolate(mask.unsqueeze(0), size=(h_len, w_len)).flatten().to(torch.bfloat16).cuda()
+                self.attn_mask[i] = F.interpolate(mask.unsqueeze(0), size=(h_len, w_len)).flatten().to(torch.bfloat16).to(self.device)
             self.img.ATTN.mask = self.attn_mask      
 
 class StyleMMDiT_DoubleBlock(StyleMMDiT_BaseBlock):
@@ -1846,7 +1849,7 @@ class StyleUNet_BaseBlock(Stylizer):
         
         for i, mask in enumerate(self.mask):
             if mask is not None and mask.ndim > 1:
-                self.mask[i] = F.interpolate(mask.unsqueeze(0), size=(h_len, w_len)).flatten().to(torch.bfloat16).cuda()
+                self.mask[i] = F.interpolate(mask.unsqueeze(0), size=(h_len, w_len)).flatten().to(torch.bfloat16).to(self.device)
             self.resample_block.mask = self.mask
             self.res_block.mask      = self.mask
             self.spatial_block.mask  = self.mask
@@ -1854,7 +1857,7 @@ class StyleUNet_BaseBlock(Stylizer):
             
         for i, mask in enumerate(self.attn_mask):
             if mask is not None and mask.ndim > 1:
-                self.attn_mask[i] = F.interpolate(mask.unsqueeze(0), size=(h_len, w_len)).flatten().to(torch.bfloat16).cuda()
+                self.attn_mask[i] = F.interpolate(mask.unsqueeze(0), size=(h_len, w_len)).flatten().to(torch.bfloat16).to(self.device)
             self.spatial_block.TFMR.ATTN1.mask = self.attn_mask     
             
     def __call__(self, x, attr):
@@ -1892,7 +1895,7 @@ class StyleUNet_OutputBlock(StyleUNet_BaseBlock):
 
 class Style_Model(Stylizer):
 
-    def __init__(self, dtype=torch.float64, device=torch.device("cuda")):
+    def __init__(self, dtype=torch.float64, device=None):
         super().__init__(dtype, device)
         self.guides = []
         self.GUIDES_INITIALIZED = False
@@ -2012,7 +2015,7 @@ class Style_Model(Stylizer):
         
         for i, mask in enumerate(self.mask):
             if mask is not None and mask.ndim > 1:
-                self.mask[i] = F.interpolate(mask.unsqueeze(0), size=(h_len, w_len)).flatten().to(torch.bfloat16).cuda()
+                self.mask[i] = F.interpolate(mask.unsqueeze(0), size=(h_len, w_len)).flatten().to(torch.bfloat16).to(self.device)
 
     def init_guides(self, model):
         if not self.GUIDES_INITIALIZED:
@@ -2138,14 +2141,14 @@ class Style_Model(Stylizer):
         if self.data_shock == "scattersort":
             return self.apply_to_data(denoised, datashock_ref, self.data_shock)
         else:
-            return torch.lerp(denoised, self.apply_to_data(denoised, datashock_ref, self.data_shock), torch.Tensor([self.data_shock_weight]).double().cuda())
+            return torch.lerp(denoised, self.apply_to_data(denoised, datashock_ref, self.data_shock), torch.tensor([self.data_shock_weight], dtype=clamp_dtype(torch.float64, self.device), device=self.device))
 
 
 
 
 class StyleMMDiT_Model(Style_Model):
 
-    def __init__(self, dtype=torch.float64, device=torch.device("cuda")):
+    def __init__(self, dtype=torch.float64, device=None):
         super().__init__(dtype, device)
         self.double_blocks = [StyleMMDiT_DoubleBlock() for _ in range(100)]
         self.single_blocks = [StyleMMDiT_SingleBlock() for _ in range(100)]
@@ -2160,7 +2163,7 @@ class StyleMMDiT_Model(Style_Model):
 
 class StyleUNet_Model(Style_Model):
 
-    def __init__(self, dtype=torch.float64, device=torch.device("cuda")):
+    def __init__(self, dtype=torch.float64, device=None):
         super().__init__(dtype, device)
         self.input_blocks  = [StyleUNet_InputBlock()  for _ in range(100)]
         self.middle_blocks = [StyleUNet_MiddleBlock() for _ in range(100)]

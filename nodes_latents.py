@@ -15,7 +15,7 @@ import math
 from nodes import MAX_RESOLUTION
 #MAX_RESOLUTION=8192
 
-from .helper             import ExtraOptions, initialize_or_scale, extra_options_flag, get_extra_options_list, extract_cond_from_guider
+from .helper             import ExtraOptions, initialize_or_scale, extra_options_flag, get_extra_options_list, extract_cond_from_guider, get_torch_device
 from .latents            import latent_meancenter_channels, latent_stdize_channels, get_edge_mask, apply_to_state_info_tensors
 from .beta.noise_classes import NOISE_GENERATOR_NAMES, NOISE_GENERATOR_CLASSES, prepare_noise
 
@@ -718,11 +718,11 @@ class latent_to_cuda:
 
     def _resolve_device(self, to_cuda):
         if isinstance(to_cuda, bool):
-            return "cuda" if to_cuda else "cpu"
+            return get_torch_device() if to_cuda else "cpu"
         if isinstance(to_cuda, str):
             normalized = to_cuda.strip().lower()
             if normalized in {"true", "cuda", "gpu"}:
-                return "cuda"
+                return get_torch_device()
             if normalized in {"false", "cpu"}:
                 return "cpu"
         raise ValueError("to_cuda must be a boolean or one of ['cuda', 'cpu']")

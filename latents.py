@@ -3,6 +3,7 @@ import torch.nn.functional as F
 from typing import Tuple, List, Union
 import math
 from .res4lyf import RESplain
+from .helper  import get_torch_device, clamp_dtype
 
 import comfy.utils
 
@@ -621,7 +622,7 @@ def get_edge_mask_slug(mask: torch.Tensor, dilation: int = 3) -> torch.Tensor:
 def get_edge_mask(mask: torch.Tensor, dilation: int = 3) -> torch.Tensor:
     if dilation == 0:                                                         # safeguard for zero kernel size...
         return mask
-    mask_tmp = mask.squeeze().to('cuda')
+    mask_tmp = mask.squeeze().to(get_torch_device())
     mask_tmp = mask_tmp.float()
     
     eroded = -F.max_pool2d(-mask_tmp.unsqueeze(0).unsqueeze(0), kernel_size=3, stride=1, padding=1)
@@ -668,8 +669,9 @@ def interpolate_spd(cov1, cov2, t, eps=1e-5):
     Returns:
       cov_t:     the SPD matrix at fraction t along the geodesic from cov1 to cov2.
     """
-    cov1 = cov1.double()
-    cov2 = cov2.double()
+    spd_dtype = clamp_dtype(torch.float64, cov1.device)
+    cov1 = cov1.to(spd_dtype)
+    cov2 = cov2.to(spd_dtype)
 
     M1 = cov1.clone()
     M1.diagonal().add_(eps)
