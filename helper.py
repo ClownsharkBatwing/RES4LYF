@@ -7,8 +7,31 @@ import functools
 import copy
 
 from comfy.samplers import SCHEDULER_NAMES
+import comfy.model_management
 
 from .res4lyf import RESplain
+
+
+
+
+def get_torch_device():
+    return comfy.model_management.get_torch_device()
+
+def fp64_available(device) -> bool:
+    if device is None:
+        return True
+    device = torch.device(device)
+    if device.type == 'mps':
+        return False
+    if device.type != 'cpu' and comfy.model_management.is_directml_enabled():
+        return False
+    return True
+
+def clamp_dtype(dtype, *devices):
+    if dtype == torch.float64 and not all(fp64_available(d) for d in devices):
+        RESplain("float64 unsupported on target device, clamping to float32", debug=True)
+        return torch.float32
+    return dtype
 
 
 
