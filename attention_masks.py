@@ -16,7 +16,7 @@ import gc
 
 from .sigmas  import get_sigmas
 
-from .helper  import initialize_or_scale, precision_tool, get_res4lyf_scheduler_list
+from .helper  import initialize_or_scale, precision_tool, get_res4lyf_scheduler_list, get_torch_device
 from .latents import get_orthogonal, get_collinear, get_edge_mask, checkerboard_variable
 from .res4lyf import RESplain
 from .beta.constants import MAX_STEPS
@@ -45,13 +45,13 @@ def fp_and2(tensor1, tensor2):
 
 
 class CoreAttnMask:
-    def __init__(self, mask, mask_type=None, start_sigma=None, end_sigma=None, start_block=0, end_block=-1, idle_device='cpu', work_device='cuda'):
+    def __init__(self, mask, mask_type=None, start_sigma=None, end_sigma=None, start_block=0, end_block=-1, idle_device='cpu', work_device=None):
         self.mask        = mask.to(idle_device)
         self.start_sigma = start_sigma
         self.end_sigma   = end_sigma
         self.start_block = start_block
         self.end_block   = end_block
-        self.work_device = work_device
+        self.work_device = work_device if work_device is not None else get_torch_device()
         self.idle_device = idle_device
         self.mask_type   = mask_type
     
@@ -508,11 +508,11 @@ class FullAttentionMaskHiDream(BaseAttentionMask):
             checkvar = checkerboard_variable(flat)
             attn_mask[img_len:, img_len:] = checkvar
             
-            return attn_mask.to('cuda')
+            return attn_mask.to(get_torch_device())
         
         
 class RegionalContext:
-    def __init__(self, idle_device='cpu', work_device='cuda'):
+    def __init__(self, idle_device='cpu', work_device=None):
         self.context  = None
         self.clip_fea = None
         self.llama3   = None
@@ -523,8 +523,8 @@ class RegionalContext:
         self.t5_list     = []
         self.pooled_output = None
         self.idle_device = idle_device
-        self.work_device = work_device
-    
+        self.work_device = work_device if work_device is not None else get_torch_device()
+
     def add_region(self, context, pooled_output=None, clip_fea=None):
         if self.context is not None:
             self.context = torch.cat([self.context, context], dim=1)

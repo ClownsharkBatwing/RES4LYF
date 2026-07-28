@@ -192,10 +192,10 @@ class ReChroma(nn.Module):
         mask = None
         
         text_len = txt.shape[1] # mask_obj[0].text_len
-        
+
         if not UNCOND and 'AttnMask' in transformer_options: # and weight != 0:
             AttnMask = transformer_options['AttnMask']
-            mask = transformer_options['AttnMask'].attn_mask.mask.to('cuda')
+            mask = transformer_options['AttnMask'].attn_mask.mask.to(txt.device)
             if mask_zero is None:
                 mask_zero = torch.ones_like(mask)
                 img_len = transformer_options['AttnMask'].img_len
@@ -218,7 +218,7 @@ class ReChroma(nn.Module):
             
         elif UNCOND and 'AttnMask' in transformer_options:
             AttnMask = transformer_options['AttnMask']
-            mask = transformer_options['AttnMask'].attn_mask.mask.to('cuda')
+            mask = transformer_options['AttnMask'].attn_mask.mask.to(txt.device)
             if mask_zero is None:
                 mask_zero = torch.ones_like(mask)
                 img_len = transformer_options['AttnMask'].img_len
@@ -442,10 +442,10 @@ class ReChroma(nn.Module):
             img = rearrange(img, "b c (h ph) (w pw) -> b (h w) (c ph pw)", ph=patch_size, pw=patch_size) # img 1,9216,64     1,16,128,128 -> 1,4096,64
 
             context_tmp = None
-            
+
             if not UNCOND and 'AttnMask' in transformer_options: # and weight != 0:
                 AttnMask = transformer_options['AttnMask']
-                mask = transformer_options['AttnMask'].attn_mask.mask.to('cuda')
+                mask = transformer_options['AttnMask'].attn_mask.mask.to(img.device)
 
                 if weight == 0:
                     context_tmp = transformer_options['RegContext'].context.to(context.dtype).to(context.device)
@@ -455,7 +455,7 @@ class ReChroma(nn.Module):
                 
             if UNCOND and 'AttnMask_neg' in transformer_options: # and weight != 0:
                 AttnMask = transformer_options['AttnMask_neg']
-                mask = transformer_options['AttnMask_neg'].attn_mask.mask.to('cuda')
+                mask = transformer_options['AttnMask_neg'].attn_mask.mask.to(img.device)
 
                 if weight == 0:
                     context_tmp = transformer_options['RegContext_neg'].context.to(context.dtype).to(context.device)
@@ -465,7 +465,7 @@ class ReChroma(nn.Module):
 
             elif UNCOND and 'AttnMask' in transformer_options:
                 AttnMask = transformer_options['AttnMask']
-                mask = transformer_options['AttnMask'].attn_mask.mask.to('cuda')
+                mask = transformer_options['AttnMask'].attn_mask.mask.to(img.device)
                 A       = context
                 B       = transformer_options['RegContext'].context
                 context_tmp = A.repeat(1,    (B.shape[1] // A.shape[1]) + 1, 1)[:,   :B.shape[1], :]

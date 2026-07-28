@@ -811,11 +811,11 @@ class ReUNetModel(nn.Module):
                 mask, mask_up, mask_down, mask_down2 = None, None, None, None
                 if not UNCOND and 'AttnMask' in transformer_options: # and weight != 0:
                     AttnMask = transformer_options['AttnMask']
-                    mask = transformer_options['AttnMask'].attn_mask.mask.to('cuda')
-                    mask_up   = transformer_options['AttnMask'].mask_up.to('cuda')
-                    mask_down = transformer_options['AttnMask'].mask_down.to('cuda')
+                    mask = transformer_options['AttnMask'].attn_mask.mask.to(context.device)
+                    mask_up   = transformer_options['AttnMask'].mask_up.to(context.device)
+                    mask_down = transformer_options['AttnMask'].mask_down.to(context.device)
                     if hasattr(transformer_options['AttnMask'], "mask_down2"):
-                        mask_down2 = transformer_options['AttnMask'].mask_down2.to('cuda')
+                        mask_down2 = transformer_options['AttnMask'].mask_down2.to(context.device)
                     if weight == 0:
                         context = transformer_options['RegContext'].context.to(context.dtype).to(context.device)
                         mask, mask_up, mask_down, mask_down2 = None, None, None, None
@@ -839,11 +839,11 @@ class ReUNetModel(nn.Module):
 
                 if UNCOND and 'AttnMask_neg' in transformer_options: # and weight != 0:
                     AttnMask = transformer_options['AttnMask_neg']
-                    mask = transformer_options['AttnMask_neg'].attn_mask.mask.to('cuda')
-                    mask_up   = transformer_options['AttnMask_neg'].mask_up.to('cuda')
-                    mask_down = transformer_options['AttnMask_neg'].mask_down.to('cuda')
+                    mask = transformer_options['AttnMask_neg'].attn_mask.mask.to(context.device)
+                    mask_up   = transformer_options['AttnMask_neg'].mask_up.to(context.device)
+                    mask_down = transformer_options['AttnMask_neg'].mask_down.to(context.device)
                     if hasattr(transformer_options['AttnMask_neg'], "mask_down2"):
-                        mask_down2 = transformer_options['AttnMask_neg'].mask_down2.to('cuda')
+                        mask_down2 = transformer_options['AttnMask_neg'].mask_down2.to(context.device)
                     if weight == 0:
                         context = transformer_options['RegContext_neg'].context.to(context.dtype).to(context.device)
                         mask, mask_up, mask_down, mask_down2 = None, None, None, None
@@ -866,11 +866,11 @@ class ReUNetModel(nn.Module):
 
                 elif UNCOND and 'AttnMask' in transformer_options:
                     AttnMask = transformer_options['AttnMask']
-                    mask = transformer_options['AttnMask'].attn_mask.mask.to('cuda')
-                    mask_up   = transformer_options['AttnMask'].mask_up.to('cuda')
-                    mask_down = transformer_options['AttnMask'].mask_down.to('cuda')
+                    mask = transformer_options['AttnMask'].attn_mask.mask.to(context.device)
+                    mask_up   = transformer_options['AttnMask'].mask_up.to(context.device)
+                    mask_down = transformer_options['AttnMask'].mask_down.to(context.device)
                     if hasattr(transformer_options['AttnMask'], "mask_down2"):
-                        mask_down2 = transformer_options['AttnMask'].mask_down2.to('cuda')
+                        mask_down2 = transformer_options['AttnMask'].mask_down2.to(context.device)
                     A       = context
                     B       = transformer_options['RegContext'].context
                     context = A.repeat(1,    (B.shape[1] // A.shape[1]) + 1, 1)[:,   :B.shape[1], :]

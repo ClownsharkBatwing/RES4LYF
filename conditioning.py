@@ -19,7 +19,7 @@ import gc
 
 from .sigmas  import get_sigmas
 
-from .helper  import initialize_or_scale, precision_tool, get_res4lyf_scheduler_list, pad_tensor_list_to_max_len
+from .helper  import initialize_or_scale, precision_tool, get_res4lyf_scheduler_list, pad_tensor_list_to_max_len, get_torch_device, clamp_dtype
 from .latents import get_orthogonal, get_collinear
 from .res4lyf import RESplain
 from .beta.constants import MAX_STEPS
@@ -1266,8 +1266,8 @@ class ClownRegionalConditioning_AB:
                                 invert_mask              : bool   = False,
                                 ) -> Tuple[Tensor]:
 
-        default_dtype  = torch.float64
-        default_device = torch.device("cuda") 
+        default_device = get_torch_device()
+        default_dtype  = clamp_dtype(torch.float64, default_device)
         
         if end_step == -1:
             end_step = MAX_STEPS
@@ -1493,8 +1493,8 @@ class ClownRegionalConditioning_ABC:
                                 invert_mask              : bool   = False,
                                 ) -> Tuple[Tensor]:
 
-        default_dtype  = torch.float64
-        default_device = torch.device("cuda") 
+        default_device = get_torch_device()
+        default_dtype  = clamp_dtype(torch.float64, default_device)
         
         if end_step == -1:
             end_step = MAX_STEPS
@@ -1830,8 +1830,8 @@ class ClownRegionalConditionings:
                                 invert_masks             : bool   = False,
                                 ) -> Tuple[Tensor]:
 
-        default_dtype  = torch.float64
-        default_device = torch.device("cuda") 
+        default_device = get_torch_device()
+        default_dtype  = clamp_dtype(torch.float64, default_device)
         
         cond_list               = [region['conditioning']       for region in cond_regions]
         mask_list               = [region['mask']               for region in cond_regions]
