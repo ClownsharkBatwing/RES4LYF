@@ -110,14 +110,10 @@ class RK_NoiseSampler:
 
 
     def _init_av_streams(self, model) -> None:
-        # active only for packed AV latents whose audio stream runs on its own flow shift
+        # av_shift_audio stays None when both streams share one schedule (the column split and the audio noise knob still apply there)
         guider          = getattr(model,       "inner_model", None)
         inner_model     = getattr(guider,      "inner_model", None)
         diffusion_model = getattr(inner_model, "diffusion_model", None)
-
-        shift_audio = getattr(diffusion_model, "sigma_shift_audio", None)
-        if shift_audio is None:
-            return
 
         latent_shapes = None
         conds = getattr(guider, "conds", None)
@@ -133,16 +129,19 @@ class RK_NoiseSampler:
         if latent_shapes is None or len(latent_shapes) != 2:
             return
 
-        model_options       = getattr(guider, "model_options", {})
-        transformer_options = model_options.get("transformer_options", {}) if isinstance(model_options, dict) else {}
-
-        self.av_shift_video       = float(transformer_options.get("minimax_h3_sigma_shift_video", getattr(diffusion_model, "sigma_shift_video", 12.0)))
-        self.av_shift_audio       = float(transformer_options.get("minimax_h3_sigma_shift_audio", shift_audio))
         self.av_split             = int(math.prod(latent_shapes[0][1:]))
         self.av_total             = self.av_split + int(math.prod(latent_shapes[1][1:]))
         self.av_audio_noise_scale = self.EO("av_audio_noise_scale", 1.0)
 
-        RESplain("AV per-stream SDE noise scaling active. shift_video:", self.av_shift_video, "shift_audio:", self.av_shift_audio, debug=True)
+        shift_audio = getattr(diffusion_model, "sigma_shift_audio", None)
+        if shift_audio is not None:
+            model_options       = getattr(guider, "model_options", {})
+            transformer_options = model_options.get("transformer_options", {}) if isinstance(model_options, dict) else {}
+
+            self.av_shift_video = float(transformer_options.get("minimax_h3_sigma_shift_video", getattr(diffusion_model, "sigma_shift_video", 12.0)))
+            self.av_shift_audio = float(transformer_options.get("minimax_h3_sigma_shift_audio", shift_audio))
+
+        RESplain("AV stream split active. shift_video:", self.av_shift_video, "shift_audio:", self.av_shift_audio, "audio_noise_scale:", self.av_audio_noise_scale, debug=True)
 
     def _av_sigma_audio(self, sigma:float) -> float:
         base = sigma / (self.av_shift_video + sigma * (1.0 - self.av_shift_video))
@@ -160,17 +159,19 @@ class RK_NoiseSampler:
         if self.av_split is None or noise.shape[-1] != self.av_total:
             return noise
 
-        s_from, s_to = float(sigma_from), float(sigma_to)
-        if s_to <= 0.0 or s_from <= s_to:
-            return noise
+        ratio = self.av_audio_noise_scale
 
-        video_var = self._av_renoise_var(s_from, s_to)
-        if video_var <= 0.0:
-            return noise
-        audio_var = self._av_renoise_var(self._av_sigma_audio(s_from), self._av_sigma_audio(s_to))
+        if self.av_shift_audio is not None:
+            s_from, s_to = float(sigma_from), float(sigma_to)
+            if s_to > 0.0 and s_from > s_to:
+                video_var = self._av_renoise_var(s_from, s_to)
+                if video_var > 0.0:
+                    audio_var = self._av_renoise_var(self._av_sigma_audio(s_from), self._av_sigma_audio(s_to))
+                    ratio *= (max(audio_var, 0.0) / video_var) ** 0.5
 
-        ratio = (max(audio_var, 0.0) / video_var) ** 0.5
-        noise[..., self.av_split:] *= ratio * self.av_audio_noise_scale
+        if ratio == 1.0:
+            return noise
+        noise[..., self.av_split:] *= ratio
         return noise
 
     def init_noise_samplers(self,
