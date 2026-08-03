@@ -1,3 +1,4 @@
+import math
 import torch
 
 from torch  import Tensor
@@ -94,11 +95,83 @@ class RK_NoiseSampler:
         
         self.DOWN_SUBSTEP           = self.EO("down_substep")
         self.DOWN_STEP              = self.EO("down_step")
-        
+
         self.init_noise             = None
 
+        self.av_split               = None
+        self.av_total               = None
+        self.av_shift_video         = None
+        self.av_shift_audio         = None
+        self.av_audio_noise_scale   = 1.0
+        if not self.EO("av_disable"):
+            self._init_av_streams(model)
 
 
+
+
+    def _init_av_streams(self, model) -> None:
+        # active only for packed AV latents whose audio stream runs on its own flow shift
+        guider          = getattr(model,       "inner_model", None)
+        inner_model     = getattr(guider,      "inner_model", None)
+        diffusion_model = getattr(inner_model, "diffusion_model", None)
+
+        shift_audio = getattr(diffusion_model, "sigma_shift_audio", None)
+        if shift_audio is None:
+            return
+
+        latent_shapes = None
+        conds = getattr(guider, "conds", None)
+        if isinstance(conds, dict):
+            for cond_list in conds.values():
+                for cond in cond_list or []:
+                    model_conds = cond.get('model_conds', {})
+                    if 'latent_shapes' in model_conds:
+                        latent_shapes = model_conds['latent_shapes'].cond
+                        break
+                if latent_shapes is not None:
+                    break
+        if latent_shapes is None or len(latent_shapes) != 2:
+            return
+
+        model_options       = getattr(guider, "model_options", {})
+        transformer_options = model_options.get("transformer_options", {}) if isinstance(model_options, dict) else {}
+
+        self.av_shift_video       = float(transformer_options.get("minimax_h3_sigma_shift_video", getattr(diffusion_model, "sigma_shift_video", 12.0)))
+        self.av_shift_audio       = float(transformer_options.get("minimax_h3_sigma_shift_audio", shift_audio))
+        self.av_split             = int(math.prod(latent_shapes[0][1:]))
+        self.av_total             = self.av_split + int(math.prod(latent_shapes[1][1:]))
+        self.av_audio_noise_scale = self.EO("av_audio_noise_scale", 1.0)
+
+        RESplain("AV per-stream SDE noise scaling active. shift_video:", self.av_shift_video, "shift_audio:", self.av_shift_audio, debug=True)
+
+    def _av_sigma_audio(self, sigma:float) -> float:
+        base = sigma / (self.av_shift_video + sigma * (1.0 - self.av_shift_video))
+        return self.av_shift_audio * base / (1.0 + (self.av_shift_audio - 1.0) * base)
+
+    @staticmethod
+    def _av_renoise_var(sigma_from:float, sigma_to:float) -> float:
+        # variance a full-eta RF ancestral step injects stepping from sigma_from to sigma_to on one schedule
+        sigma_down = sigma_to * sigma_to / sigma_from
+        return sigma_to ** 2 - sigma_down ** 2 * (1.0 - sigma_to) ** 2 / (1.0 - sigma_down) ** 2
+
+    def scale_av_noise(self, noise:Tensor, sigma_from, sigma_to) -> Tensor:
+        # audio columns get the noise magnitude their own shifted schedule calls for over this step
+        # apply to unit-variance noise after any normalization, before the sigma_up multiply
+        if self.av_split is None or noise.shape[-1] != self.av_total:
+            return noise
+
+        s_from, s_to = float(sigma_from), float(sigma_to)
+        if s_to <= 0.0 or s_from <= s_to:
+            return noise
+
+        video_var = self._av_renoise_var(s_from, s_to)
+        if video_var <= 0.0:
+            return noise
+        audio_var = self._av_renoise_var(self._av_sigma_audio(s_from), self._av_sigma_audio(s_to))
+
+        ratio = (max(audio_var, 0.0) / video_var) ** 0.5
+        noise[..., self.av_split:] *= ratio * self.av_audio_noise_scale
+        return noise
 
     def init_noise_samplers(self,
                             x                      : Tensor,              
@@ -520,6 +593,7 @@ class RK_NoiseSampler:
         
         noise = self.noise_sampler(sigma=brownian_sigma, sigma_next=brownian_sigma_next)
         noise = normalize_zscore(noise, channelwise=True, inplace=True)
+        noise = self.scale_av_noise(noise, self.sigma, self.sigma_next)
 
         x_noised = self.alpha_ratio_eta * (denoised_next + self.sigma_down_eta * eps_next) + self.sigma_up_eta * noise * self.s_noise
 
@@ -549,6 +623,7 @@ class RK_NoiseSampler:
         
         noise = self.noise_sampler2(sigma=brownian_sigma, sigma_next=brownian_sigma_next)
         noise = normalize_zscore(noise, channelwise=True, inplace=True)
+        noise = self.scale_av_noise(noise, self.sub_sigma, self.sub_sigma_next)
 
         x_noised = self.sub_alpha_ratio_eta * (denoised_next + self.sub_sigma_down_eta * eps_next) + self.sub_sigma_up_eta * noise * self.s_noise_substep
 
@@ -580,7 +655,8 @@ class RK_NoiseSampler:
         
         noise = self.noise_sampler2(sigma=brownian_sigma, sigma_next=brownian_sigma_next)
         noise = normalize_zscore(noise, channelwise=True, inplace=True)
-        
+        # inverted-domain (unsampling) injection: audio columns are left unscaled for reverse steps
+
         sub_sigma_up,     sub_sigma,     sub_sigma_down,     sub_alpha_ratio     = self.get_sde_substep(sigma               = 1-self.s_[row],
                                                                                                                             sigma_next          = 1-self.s_[row_offset_multistep_stages],
                                                                                                                             eta                 = eta_substep,
@@ -637,6 +713,7 @@ class RK_NoiseSampler:
             noise = self.noise_sampler2(sigma=brownian_sigma, sigma_next=brownian_sigma_next)
             
         noise = normalize_zscore(noise, channelwise=True, inplace=True)
+        noise = self.scale_av_noise(noise, sigma, sigma_next)
 
         x = alpha_ratio * (denoised_next + sigma_down * eps_next) + sigma_up * noise * s_noise
         return x
@@ -757,7 +834,8 @@ class RK_NoiseSampler:
 
             if SDE_NOISE_EXTERNAL:
                 noise = (1-s_noise) * noise + s_noise * sde_noise_t
-            
+            noise = self.scale_av_noise(noise, sigma, sigma_next)
+
             x_next = alpha_ratio * x + noise * sigma_up * s_noise
             
             return x_next
