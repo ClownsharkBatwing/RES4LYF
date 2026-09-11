@@ -162,9 +162,24 @@ class StyleModelApplyStyle:
         return (c, )
 
 
-class ConditioningZeroAndTruncate: 
-    # needs updating to ensure dims are correct for arbitrary models without hardcoding. 
-    # vanilla ConditioningZeroOut node doesn't truncate and SD3.5M degrades badly with large embeddings, even if zeroed out, as the negative conditioning
+class ConditioningZeroAndTruncate:
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {"conditioning": ("CONDITIONING", )},
+            "optional": {"model": ("MODEL", {"tooltip": "Optional. Identifies the model instead of guessing it from the conditioning shape."})},
+        }
+    RETURN_TYPES = ("CONDITIONING",)
+    RETURN_NAMES = ("conditioning",)
+    FUNCTION     = "zero_out"
+    CATEGORY     = "RES4LYF/conditioning"
+    DESCRIPTION  = "Zeroes the text embeddings and keeps every other key. SD3 conditioning is also truncated to its empty-prompt length."
+
+    def zero_out(self, conditioning, model=None):
+        return (empty_conditioning_from_sibling(conditioning, model), )
+
+
+class ConditioningTruncate:
     @classmethod
     def INPUT_TYPES(cls):
         return { "required": {"conditioning": ("CONDITIONING", )}}
@@ -172,42 +187,18 @@ class ConditioningZeroAndTruncate:
     RETURN_NAMES = ("conditioning",)
     FUNCTION     = "zero_out"
     CATEGORY     = "RES4LYF/conditioning"
-    DESCRIPTION  = "Use for negative conditioning with SD3.5. ConditioningZeroOut does not truncate the embedding, \
-                    which results in severe degradation of image quality with SD3.5 when the token limit is exceeded."
-
-    def zero_out(self, conditioning):
-        c = []
-        for t in conditioning:
-            d = t[1].copy()
-            pooled_output = d.get("pooled_output", None)
-            if pooled_output is not None:
-                d["pooled_output"] = torch.zeros((1,2048), dtype=t[0].dtype, device=t[0].device)
-                n = [torch.zeros((1,154,4096), dtype=t[0].dtype, device=t[0].device), d]
-            c.append(n)
-        return (c, )
-
-
-class ConditioningTruncate: 
-    # needs updating to ensure dims are correct for arbitrary models without hardcoding. 
-    @classmethod
-    def INPUT_TYPES(cls):
-        return { "required": {"conditioning": ("CONDITIONING", )}}
-    RETURN_TYPES = ("CONDITIONING",)
-    RETURN_NAMES = ("conditioning",)
-    FUNCTION     = "zero_out"
-    CATEGORY     = "RES4LYF/conditioning"
-    DESCRIPTION  = "Use for positive conditioning with SD3.5. Tokens beyond 77 result in degradation of image quality."
+    DESCRIPTION  = "Deprecated. Truncates SD3 positive conditioning to 154 tokens and errors on any other model."
     EXPERIMENTAL = True
+    DEPRECATED   = True
 
     def zero_out(self, conditioning):
+        if not is_sd3_conditioning(conditioning):
+            raise ValueError("ConditioningTruncate only works with SD3 conditioning and is deprecated. Remove it, or use ConditioningZeroAndTruncate for negatives.")
         c = []
         for t in conditioning:
             d = t[1].copy()
-            pooled_output = d.get("pooled_output", None)
-            if pooled_output is not None:
-                d["pooled_output"] = d["pooled_output"][:, :2048]
-                n = [t[0][:, :154, :4096], d]
-            c.append(n)
+            d["pooled_output"] = d["pooled_output"][:, :2048]
+            c.append([t[0][:, :154, :4096], d])
         return (c, )
 
 
@@ -698,65 +689,82 @@ class ConditioningBatch8:
 
 
 
+EMPTY_COND_TEXT_KEYS = (
+    "pooled_output",
+    "conditioning_llama3",
+    "conditioning_lyrics",
+    "conditioning_scale",
+    "conditioning_byt5small",
+    "conditioning_mt5xl",
+)
+
+# Joint-attention models see every zeroed token as one more copy of the context embedder bias,
+# so an empty conditioning longer than the empty prompt shifts the unconditional prediction.
+EMPTY_COND_MAX_TOKENS = {
+    comfy.supported_models.SD3: 154,
+}
+
+
+def is_sd3_conditioning(conditioning):
+    """SD3 layout: 4096-wide context with a 2048-wide pooled vector and no llama3 states."""
+    for cross_attn, extras in conditioning:
+        pooled = extras.get("pooled_output")
+        if cross_attn is None or not isinstance(pooled, torch.Tensor):
+            return False
+        if cross_attn.shape[-1] != 4096 or pooled.shape[-1] != 2048 or "conditioning_llama3" in extras:
+            return False
+    return len(conditioning) > 0
+
+
+def empty_cond_max_tokens(sibling, model=None):
+    if model is not None:
+        for config_class, n in EMPTY_COND_MAX_TOKENS.items():
+            if isinstance(model.model.model_config, config_class):
+                return n
+        return None
+    if is_sd3_conditioning(sibling):
+        return EMPTY_COND_MAX_TOKENS[comfy.supported_models.SD3]
+    return None
+
+
+def empty_conditioning_from_sibling(sibling, model=None, copy_extra_keys=True):
+    """Build an empty conditioning shaped like `sibling`: text tensors zeroed, other keys copied."""
+    max_tokens = empty_cond_max_tokens(sibling, model)
+
+    out = []
+    for cross_attn, extras in sibling:
+        d = {}
+        for k, v in extras.items():
+            if k in EMPTY_COND_TEXT_KEYS and isinstance(v, torch.Tensor):
+                d[k] = torch.zeros_like(v)
+            elif copy_extra_keys:
+                d[k] = v
+
+        if cross_attn is not None:
+            cross_attn = torch.zeros_like(cross_attn)
+            if max_tokens is not None and cross_attn.shape[-2] > max_tokens:
+                cross_attn = cross_attn[..., :max_tokens, :]
+                mask = d.get("attention_mask")
+                if isinstance(mask, torch.Tensor) and mask.shape[-1] > max_tokens:
+                    d["attention_mask"] = mask[..., :max_tokens]
+
+        out.append([cross_attn, d])
+    return out
+
+
 class EmptyConditioningGenerator:
     def __init__(self, model=None, conditioning=None, device=None, dtype=None):
         """ device, dtype currently unused """
+        self.device       = device
+        self.dtype        = dtype
+        self.model        = model
+        self.model_config = None
+        self.llama3_shape = None
+        self.pooled_len   = 0
+        self._dims_ready  = False
+
         if model is not None:
-                    
-            self.device = device
-            self.dtype  = dtype
-        
-            import comfy.supported_models
             self.model_config = model.model.model_config
-
-            self.llama3_shape = None
-            self.pooled_len    = 0
-
-            if isinstance(self.model_config, comfy.supported_models.SD3):
-                self.text_len_base = 154
-                self.text_channels = 4096
-                self.pooled_len    = 2048
-            elif isinstance(self.model_config, (comfy.supported_models.Flux, comfy.supported_models.FluxSchnell, comfy.supported_models.Chroma)):
-                self.text_len_base = 256
-                self.text_channels = 4096
-                self.pooled_len    = 768
-            elif isinstance(self.model_config, comfy.supported_models.AuraFlow):
-                self.text_len_base = 256
-                self.text_channels = 2048
-                #self.pooled_len    = 1
-            elif isinstance(self.model_config, comfy.supported_models.Stable_Cascade_C):
-                self.text_len_base = 77
-                self.text_channels = 1280
-                self.pooled_len    = 1280
-            elif isinstance(self.model_config, comfy.supported_models.WAN21_T2V) or isinstance(self.model_config, comfy.supported_models.WAN21_I2V):
-                self.text_len_base = 512
-                self.text_channels = 5120 # sometimes needs to be 4096, like when initializing in samplers_py in shark?
-                #self.pooled_len    = 1
-            elif isinstance(self.model_config, comfy.supported_models.HiDream):
-                self.text_len_base = 128
-                self.text_channels = 4096 # sometimes needs to be 4096, like when initializing in samplers_py in shark?
-                self.pooled_len    = 2048
-                self.llama3_shape  = torch.Size([1,32,128,4096])
-            elif isinstance(self.model_config, comfy.supported_models.LTXV):
-                self.text_len_base = 128
-                self.text_channels = 4096
-                #self.pooled_len    = 1
-            elif isinstance(self.model_config, comfy.supported_models.SD15):
-                self.text_len_base = 77
-                self.text_channels = 768
-                self.pooled_len    = 768
-            elif isinstance(self.model_config, comfy.supported_models.SDXL):
-                self.text_len_base = 77
-                self.text_channels = 2048
-                self.pooled_len    = 1280
-            elif isinstance(self.model_config, comfy.supported_models.HunyuanVideo) or \
-                isinstance (self.model_config, comfy.supported_models.HunyuanVideoI2V) or \
-                isinstance (self.model_config, comfy.supported_models.HunyuanVideoSkyreelsI2V):
-                self.text_len_base = 128
-                self.text_channels = 4096
-                #self.pooled_len    = 1
-            else:
-                raise ValueError(f"Unknown model config: {type(self.model_config)}")
         elif conditioning is not None:
             self.device        = conditioning[0][0].device
             self.dtype         = conditioning[0][0].dtype
@@ -766,8 +774,62 @@ class EmptyConditioningGenerator:
             else:
                 self.pooled_len = 0
             self.text_channels = conditioning[0][0].shape[-1]
-            
+            self._dims_ready   = True
+
+    def _resolve_model_dims(self):
+        if self._dims_ready:
+            return
+        if self.model_config is None:
+            raise ValueError("EmptyConditioningGenerator needs a model or a conditioning to derive empty conditioning shapes.")
+
+        if isinstance(self.model_config, comfy.supported_models.SD3):
+            self.text_len_base = 154
+            self.text_channels = 4096
+            self.pooled_len    = 2048
+        elif isinstance(self.model_config, (comfy.supported_models.Flux, comfy.supported_models.Chroma)):
+            unet_config        = self.model_config.unet_config
+            self.text_len_base = 512 if isinstance(self.model_config, comfy.supported_models.Flux2) else 256
+            self.text_channels = unet_config.get("context_in_dim", 4096)
+            self.pooled_len    = unet_config.get("vec_in_dim") or 0
+        elif isinstance(self.model_config, comfy.supported_models.AuraFlow):
+            self.text_len_base = 256
+            self.text_channels = 2048
+            #self.pooled_len    = 1
+        elif isinstance(self.model_config, comfy.supported_models.Stable_Cascade_C):
+            self.text_len_base = 77
+            self.text_channels = 1280
+            self.pooled_len    = 1280
+        elif isinstance(self.model_config, comfy.supported_models.WAN21_T2V) or isinstance(self.model_config, comfy.supported_models.WAN21_I2V):
+            self.text_len_base = 512
+            self.text_channels = 4096
+            #self.pooled_len    = 1
+        elif isinstance(self.model_config, comfy.supported_models.HiDream):
+            self.text_len_base = 128
+            self.text_channels = 4096 # sometimes needs to be 4096, like when initializing in samplers_py in shark?
+            self.pooled_len    = 2048
+            self.llama3_shape  = torch.Size([1,32,128,4096])
+        elif isinstance(self.model_config, comfy.supported_models.LTXV):
+            self.text_len_base = 1024 if isinstance(self.model_config, comfy.supported_models.LTXAV) else 128
+            self.text_channels = self.model_config.unet_config.get("cross_attention_dim", 4096)
+        elif isinstance(self.model_config, comfy.supported_models.SD15):
+            self.text_len_base = 77
+            self.text_channels = 768
+            self.pooled_len    = 768
+        elif isinstance(self.model_config, comfy.supported_models.SDXL):
+            self.text_len_base = 77
+            self.text_channels = 2048
+            self.pooled_len    = 1280
+        elif isinstance(self.model_config, comfy.supported_models.HunyuanVideo):
+            unet_config        = self.model_config.unet_config
+            self.text_len_base = 256
+            self.text_channels = unet_config.get("context_in_dim", 4096)
+            self.pooled_len    = unet_config.get("vec_in_dim") or 0
+        else:
+            raise ValueError(f"Unknown model config: {type(self.model_config)}. Connect at least one conditioning so the empty one can be derived from it.")
+        self._dims_ready = True
+
     def get_empty_conditioning(self):
+        self._resolve_model_dims()
         if self.llama3_shape is not None and self.pooled_len > 0:
             return [[
                 torch.zeros((1, self.text_len_base, self.text_channels)),
@@ -790,12 +852,20 @@ class EmptyConditioningGenerator:
 
     def get_empty_conditionings(self, count):
         return [self.get_empty_conditioning() for _ in range(count)]
-    
-    def zero_none_conditionings_(self, *conds):
+
+    def zero_none_conditionings_(self, *conds, copy_extra_keys=True):
+        """Replace each None with an empty conditioning. Shaped like the first connected
+        conditioning when one exists, otherwise built from the model table."""
         if len(conds) == 1 and isinstance(conds[0], (list, tuple)):
             conds = conds[0]
+        sibling = next((cond for cond in conds if cond is not None), None)
         for i, cond in enumerate(conds):
-            conds[i] = self.get_empty_conditioning() if cond is None else cond
+            if cond is not None:
+                continue
+            if sibling is not None:
+                conds[i] = empty_conditioning_from_sibling(sibling, self.model, copy_extra_keys)
+            else:
+                conds[i] = self.get_empty_conditioning()
         return conds
 
 """def zero_conditioning_from_list(conds):
