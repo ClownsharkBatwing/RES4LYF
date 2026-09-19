@@ -22,20 +22,47 @@ config = None
 # Logging setup
 _extension_name = None
 
+ANSI_RESET        = "\033[0m"
+ANSI_RED          = "\033[31m"
+ANSI_WHITE        = "\033[37m"
+ANSI_BRIGHT_BLACK = "\033[90m"
+TAG_RED_LETTERS = (0, 3, 6)
+
+color_log_tags = True
+
 def _get_extension_name():
     global _extension_name
     if _extension_name is None:
         _extension_name = get_extension_config().get("name", "RES4LYF")
     return _extension_name
 
+def _color_per_letter(text):
+    colored = []
+    previous_color = None
+    for index, character in enumerate(text):
+        color = ANSI_RED if index in TAG_RED_LETTERS else ANSI_WHITE
+        if color != previous_color:
+            colored.append(color)
+            previous_color = color
+        colored.append(character)
+    colored.append(ANSI_RESET)
+    return "".join(colored)
+
 class _RES4LYFFormatter(logging.Formatter):
     def format(self, record):
         name = _get_extension_name()
-        if record.levelno >= logging.WARNING:
-            return f"({name} {record.levelname.lower()}) {record.getMessage()}"
-        elif record.levelno == logging.DEBUG:
-            return f"({name} debug) {record.getMessage()}"
-        return f"({name}) {record.getMessage()}"
+        if color_log_tags:
+            name = _color_per_letter(name)
+
+        if record.levelno == logging.INFO:
+            tag = f"[{name}]"
+        else:
+            level = record.levelname.title()
+            if color_log_tags and record.levelno == logging.DEBUG:
+                level = f"{ANSI_BRIGHT_BLACK}{level}{ANSI_RESET}"
+            tag = f"[{name} {level}]"
+
+        return f"{tag} {record.getMessage()}"
 
 logger = logging.getLogger("RES4LYF")
 _handler = logging.StreamHandler()
@@ -84,6 +111,18 @@ async def update_settings(request):
                     RESplain("Displaying sampler category", debug=True)
                 else:
                     RESplain("Not displaying sampler category", debug=True)
+            elif setting == "enableDebugLogs":
+                init_logging()
+                if ( value is True ):
+                    RESplain("Enabled debug logging")
+                else:
+                    RESplain("Disabled debug logging")
+            elif setting == "colorLogTags":
+                init_logging()
+                if ( value is True ):
+                    RESplain("Enabled colored log tags")
+                else:
+                    RESplain("Disabled colored log tags")
 
 
         return web.Response(status=200)
@@ -154,6 +193,9 @@ def get_config_value(key, default=None, throw=False):
 
 
 def init_logging():
+    global color_log_tags
+    color_log_tags = get_config_value("colorLogTags", True)
+
     if get_config_value("enableDebugLogs", False):
         logger.setLevel(logging.DEBUG)
     else:

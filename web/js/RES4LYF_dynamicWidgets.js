@@ -162,6 +162,33 @@ app.registerExtension({
         });
         
         app.ui.settings.addSetting({
+            id: "RES4LYF.colorLogTags",
+            name: "RES4LYF: A dash of color in console",
+            defaultValue: true,
+            type: "boolean",
+            options: [
+                { value: true, text: "On" },
+                { value: false, text: "Off" },
+            ],
+            onChange: (value) => {
+                debugLog(`Colored log tags ${value ? "enabled" : "disabled"}`);
+
+                fetch('/reslyf/settings', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        setting: "colorLogTags",
+                        value: value
+                    })
+                }).catch(error => {
+                    debugLog(`Error updating colorLogTags setting: ${error}`);
+                });
+            },
+        });
+
+        app.ui.settings.addSetting({
             id: "RES4LYF.displayCategory",
             name: "RES4LYF: Display Category in Sampler Names (requires browser refresh)",
             defaultValue: true,
