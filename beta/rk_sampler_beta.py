@@ -422,7 +422,7 @@ def sample_rk_beta(
     
     NS.init_noise_samplers(x, noise_seed, noise_seed_substep, noise_sampler_type, noise_sampler_type_substep, noise_mode_sde, noise_mode_sde_substep, \
                             overshoot_mode, overshoot_mode_substep, noise_boost_step, noise_boost_substep, alpha, alpha_substep, k, k_substep, \
-                            last_rng=last_rng, last_rng_substep=last_rng_substep,)
+                            last_rng=last_rng, last_rng_substep=last_rng_substep, latent_shapes=latent_shapes,)
 
     data_               = None
     eps_                = None

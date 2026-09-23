@@ -10,11 +10,11 @@ if TYPE_CHECKING:
 import comfy.model_patcher
 import comfy.supported_models
 
-from .noise_classes import NOISE_GENERATOR_CLASSES, NOISE_GENERATOR_CLASSES_SIMPLE
+from .noise_classes import NOISE_GENERATOR_CLASSES, NOISE_GENERATOR_CLASSES_SIMPLE, PackedNoiseGenerator
 from .constants     import MAX_STEPS
 
 from ..helper       import ExtraOptions, has_nested_attr 
-from ..latents      import normalize_zscore, get_orthogonal, get_collinear
+from ..latents      import normalize_zscore, get_orthogonal, get_collinear, is_packed_latent
 from ..res4lyf      import RESplain
 
 
@@ -104,11 +104,24 @@ class RK_NoiseSampler:
         self.av_shift_audio         = None
         self.av_audio_noise_scale   = 1.0
         self.av_audio_eta_scale     = 1.0
+        self.latent_shapes          = self._find_latent_shapes(model)
         if not self.EO("av_disable"):
             self._init_av_streams(model)
 
 
 
+
+    @staticmethod
+    def _find_latent_shapes(model):
+        conds = getattr(getattr(model, "inner_model", None), "conds", None)
+        if not isinstance(conds, dict):
+            return None
+        for cond_list in conds.values():
+            for cond in cond_list or []:
+                model_conds = cond.get('model_conds', {})
+                if 'latent_shapes' in model_conds:
+                    return model_conds['latent_shapes'].cond
+        return None
 
     def _init_av_streams(self, model) -> None:
         # av_shift_audio stays None when both streams share one schedule (the column split and the audio noise knob still apply there)
@@ -116,17 +129,7 @@ class RK_NoiseSampler:
         inner_model     = getattr(guider,      "inner_model", None)
         diffusion_model = getattr(inner_model, "diffusion_model", None)
 
-        latent_shapes = None
-        conds = getattr(guider, "conds", None)
-        if isinstance(conds, dict):
-            for cond_list in conds.values():
-                for cond in cond_list or []:
-                    model_conds = cond.get('model_conds', {})
-                    if 'latent_shapes' in model_conds:
-                        latent_shapes = model_conds['latent_shapes'].cond
-                        break
-                if latent_shapes is not None:
-                    break
+        latent_shapes = self.latent_shapes
         if latent_shapes is None or len(latent_shapes) != 2:
             return
 
@@ -214,6 +217,7 @@ class RK_NoiseSampler:
                             scale2                 : float = 0.1,
                             last_rng                       = None,
                             last_rng_substep               = None,
+                            latent_shapes                  = None,
                             ) -> None:
         
         self.noise_sampler_type     = noise_sampler_type
@@ -245,27 +249,32 @@ class RK_NoiseSampler:
             
         #seed2 = seed + MAX_STEPS #for substep noise generation. offset needed to ensure seeds are not reused
             
+        if latent_shapes is None:
+            latent_shapes = self.latent_shapes
+
         if noise_sampler_type == "fractal":
-            self.noise_sampler        = NOISE_GENERATOR_CLASSES.get(noise_sampler_type )(x=x, seed=seed,               sigma_min=self.sigma_min, sigma_max=self.sigma_max)
-            self.noise_sampler.alpha  = alpha
-            self.noise_sampler.k      = k
-            self.noise_sampler.scale  = scale
+            self.noise_sampler  = self._build_noise_sampler(NOISE_GENERATOR_CLASSES.get(noise_sampler_type), x, seed, latent_shapes)
+            self.noise_sampler.update(alpha=alpha, k=k, scale=scale)
         else:
-            self.noise_sampler  = NOISE_GENERATOR_CLASSES_SIMPLE.get(noise_sampler_type )(x=x, seed=seed,               sigma_min=self.sigma_min, sigma_max=self.sigma_max)
+            self.noise_sampler  = self._build_noise_sampler(NOISE_GENERATOR_CLASSES_SIMPLE.get(noise_sampler_type), x, seed, latent_shapes)
 
         if noise_sampler_type2 == "fractal":
-            self.noise_sampler2       = NOISE_GENERATOR_CLASSES.get(noise_sampler_type2)(x=x, seed=noise_seed_substep, sigma_min=self.sigma_min, sigma_max=self.sigma_max)
-            self.noise_sampler2.alpha = alpha2
-            self.noise_sampler2.k     = k2
-            self.noise_sampler2.scale = scale2
+            self.noise_sampler2 = self._build_noise_sampler(NOISE_GENERATOR_CLASSES.get(noise_sampler_type2), x, noise_seed_substep, latent_shapes)
+            self.noise_sampler2.update(alpha=alpha2, k=k2, scale=scale2)
         else:
-            self.noise_sampler2 = NOISE_GENERATOR_CLASSES_SIMPLE.get(noise_sampler_type2)(x=x, seed=noise_seed_substep, sigma_min=self.sigma_min, sigma_max=self.sigma_max)
+            self.noise_sampler2 = self._build_noise_sampler(NOISE_GENERATOR_CLASSES_SIMPLE.get(noise_sampler_type2), x, noise_seed_substep, latent_shapes)
             
         if last_rng is not None:
             self.noise_sampler .generator.set_state(last_rng)
             self.noise_sampler2.generator.set_state(last_rng_substep)
             
             
+    def _build_noise_sampler(self, cls, x:Tensor, seed:int, latent_shapes):
+        # packed multi-stream latents get one generator per stream so structured noise sees each stream's real shape
+        if is_packed_latent(latent_shapes) and x.dim() == 3:
+            return PackedNoiseGenerator(cls, x=x, latent_shapes=latent_shapes, seed=seed, sigma_min=self.sigma_min, sigma_max=self.sigma_max)
+        return cls(x=x, seed=seed, sigma_min=self.sigma_min, sigma_max=self.sigma_max)
+
     def set_substep_list(self, RK:Union["RK_Method_Exponential", "RK_Method_Linear"]) -> None:
         
         self.multistep_stages = RK.multistep_stages
