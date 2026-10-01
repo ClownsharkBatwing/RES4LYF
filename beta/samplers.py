@@ -354,7 +354,7 @@ class SharkSampler:
             
             if latent_image is not None:
                 latent_image = latent_image.copy()
-                samples_fixed = comfy.sample.fix_empty_latent_channels(work_model, latent_image['samples'])
+                samples_fixed = comfy.sample.fix_empty_latent_channels(work_model, latent_image['samples'], latent_image.get("downscale_ratio_spacial", None), latent_image.get("downscale_ratio_temporal", None))
                 if isinstance(samples_fixed, comfy.nested_tensor.NestedTensor):
                     latent_image['samples'] = comfy.nested_tensor.NestedTensor([t.clone() for t in samples_fixed.unbind()])
                 else:
