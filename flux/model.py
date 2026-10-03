@@ -389,6 +389,7 @@ class ReFlux(Flux):
                 bsz       = 1 if RECON_MODE else bsz_style + 1
 
                 img, t, y, context = clone_inputs(img_orig, t_orig, y_orig, context_orig, index=cond_iter)
+                x_cond, = clone_inputs(x_orig, index=cond_iter)
                 
                 mask = None
                 if not UNCOND and 'AttnMask' in transformer_options: # and weight != 0:
@@ -448,22 +449,22 @@ class ReFlux(Flux):
                     img_y0_style = img_y0_style_orig.clone()
 
                 if mask is not None and not type(mask[0][0].item()) == bool:
-                    mask = mask.to(x.dtype)
+                    mask = mask.to(x_cond.dtype)
                 if mask_zero is not None and not type(mask_zero[0][0].item()) == bool:
-                    mask_zero = mask_zero.to(x.dtype)
+                    mask_zero = mask_zero.to(x_cond.dtype)
 
-                clip = self.time_in(timestep_embedding(t, 256).to(x.dtype)) # 1 -> 1,3072
+                clip = self.time_in(timestep_embedding(t, 256).to(x_cond.dtype)) # 1 -> 1,3072
                 if self.params.guidance_embed:
                     if guidance is None:
                         print("Guidance strength is none, not using distilled guidance.")
                     else:
-                        clip = clip + self.guidance_in(timestep_embedding(guidance, 256).to(x.dtype))
+                        clip = clip + self.guidance_in(timestep_embedding(guidance, 256).to(x_cond.dtype))
                 clip = clip + self.vector_in(y[:,:self.params.vec_in_dim])  #y.shape=1,768  y==all 0s
-                clip = clip.to(x)
+                clip = clip.to(x_cond)
         
                 img_in_dtype = self.img_in.weight.data.dtype
                 if img_in_dtype not in {torch.bfloat16, torch.float16, torch.float32, torch.float64}:
-                    img_in_dtype = x.dtype
+                    img_in_dtype = x_cond.dtype
                 
                 if ref_latents is not None:
                     h, w = 0, 0
@@ -477,7 +478,7 @@ class ReFlux(Flux):
 
                         kontext, kontext_ids = self.process_img(ref, index=1, h_offset=h_offset, w_offset=w_offset)
                         #kontext = self.img_in(kontext.to(img_in_dtype))
-                        img, img_ids = self.process_img(x)
+                        img, img_ids = self.process_img(x_cond)
                         img = torch.cat([img, kontext], dim=1)
                         img_ids = torch.cat([img_ids, kontext_ids], dim=1)
                         h = max(h, ref.shape[-2] + h_offset)
@@ -494,7 +495,7 @@ class ReFlux(Flux):
                     StyleMMDiT.datashock_ref = ref_latents[0]
                 else:
                     
-                    img = rearrange(x, "b c (h ph) (w pw) -> b (h w) (c ph pw)", ph=self.patch_size, pw=self.patch_size)
+                    img = rearrange(x_cond, "b c (h ph) (w pw) -> b (h w) (c ph pw)", ph=self.patch_size, pw=self.patch_size)
                     img = self.img_in(img.to(img_in_dtype))
                     img_ids = self._get_img_ids(img, bsz, h_len, w_len, 0, h_len, 0, w_len)
 
@@ -522,7 +523,7 @@ class ReFlux(Flux):
 
 
                 # txt_ids -> 1,414,3
-                txt_ids = torch.zeros((bsz, context.shape[-2], 3), device=img.device, dtype=x.dtype) 
+                txt_ids = torch.zeros((bsz, context.shape[-2], 3), device=img.device, dtype=x_cond.dtype) 
                 ids     = torch.cat((txt_ids, img_ids), dim=-2)   # ids -> 1,4446,3       # flipped from hidream
                 rope    = self.pe_embedder(ids)                  # rope -> 1, 4446, 1, 64, 2, 2
 
@@ -531,7 +532,7 @@ class ReFlux(Flux):
 
                 img = StyleMMDiT(img, "proj_in")
                 
-                img = img.to(x) if img is not None else None
+                img = img.to(x_cond) if img is not None else None
                 
                 total_layers = len(self.double_blocks) + len(self.single_blocks)
                 
@@ -584,7 +585,13 @@ class ReFlux(Flux):
 
                 #img = img[0:1]
                 #txt_init = txt_init[0:1]
-                img       = torch.cat([txt_init, img], dim=-2)   # 4032 + 271 -> 4303     # txt embed from double stream block   # flipped from hidream
+                
+                # Expand txt_init to match img batch size for Ultimate SD Upscale tiling
+                txt_for_concat = txt_init
+                if txt_for_concat.shape[0] != img.shape[0]:
+                    txt_for_concat = txt_for_concat.expand(img.shape[0], -1, -1).contiguous()
+                
+                img       = torch.cat([txt_for_concat, img], dim=-2)   # 4032 + 271 -> 4303     # txt embed from double stream block   # flipped from hidream
 
                 double_layers = len(self.double_blocks)
 
@@ -938,7 +945,7 @@ class ReFlux(Flux):
             elif eps.shape[0] == 1 and not UNCOND:
                 eps[0] = eps_orig[0] + y0_style_neg_synweight * (eps[0] - eps_orig[0])
             
-            #eps = eps.float()
+            eps = eps.float()
         if EO("model_eps_out"):
             self.eps_out = eps.clone()
         return eps

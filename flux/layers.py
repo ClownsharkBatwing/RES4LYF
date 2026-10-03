@@ -146,8 +146,37 @@ class DoubleStreamBlock(nn.Module):
             operations.Linear(mlp_hidden_dim, hidden_size, bias=True, dtype=dtype, device=device),
         ) # 3072->12288, 12288->3072  (3072*4)
 
-    def forward(self, img: Tensor, txt: Tensor, vec: Tensor, pe: Tensor, mask=None, idx=0, update_cross_attn=None, style_block=None) -> Tuple[Tensor, Tensor]: # vec 1,3072  # vec 1,3072    #mask.shape 4608,4608  #img_attn.shape 1,4096,3072    txt_attn.shape 1,512,3072
+    @staticmethod
+    def _broadcast_batch_dimension(txt_tensor, img_tensor):
+        """
+        Broadcast text tensor to match image tensor batch size.
+        Handles Ultimate SD Upscale tiling where image batches > 1 but text stays at 1.
+        
+        Args:
+            txt_tensor: Text tensor with shape [batch, ...]
+            img_tensor: Image tensor with shape [batch, ...]
+        
+        Returns:
+            txt_tensor with batch dimension expanded to match img_tensor
+        """
+        txt_batch = txt_tensor.shape[0]
+        img_batch = img_tensor.shape[0]
+        
+        if txt_batch != img_batch:
+            if txt_batch == 1 and img_batch > 1:
+                # Expand text batch to match image batch
+                expand_shape = list(txt_tensor.shape)
+                expand_shape[0] = img_batch
+                return txt_tensor.expand(*expand_shape).contiguous()
+            else:
+                # Unexpected case - log warning but attempt to proceed
+                print(f"WARNING: Batch mismatch - txt_batch={txt_batch}, img_batch={img_batch}")
+                return txt_tensor
+        
+        return txt_tensor
 
+    def forward(self, img: Tensor, txt: Tensor, vec: Tensor, pe: Tensor, mask=None, idx=0, update_cross_attn=None, style_block=None) -> Tuple[Tensor, Tensor]: # vec 1,3072  # vec 1,3072    #mask.shape 4608,4608  #img_attn.shape 1,4096,3072    txt_attn.shape 1,512,3072
+        
         img_len = img.shape[-2]
         txt_len = txt.shape[-2]
 
@@ -193,11 +222,24 @@ class DoubleStreamBlock(nn.Module):
         txt_q = style_block.txt.ATTN(txt_q, "q_norm")
         txt_k = style_block.txt.ATTN(txt_k, "k_norm")
 
-        q, k, v = torch.cat((txt_q, img_q), dim=2), torch.cat((txt_k, img_k), dim=2), torch.cat((txt_v, img_v), dim=2)
-        attn = attention(q, k, v, pe=pe, mask=mask)
-        
-        txt_attn = attn[:,:txt_len]                         # 1, 768,3072
-        img_attn = attn[:,txt_len:]  
+        # Expand txt q/k/v for attention computation only if batch sizes differ
+        if txt_q.shape[0] != img_q.shape[0]:
+            txt_q_expanded = self._broadcast_batch_dimension(txt_q, img_q)
+            txt_k_expanded = self._broadcast_batch_dimension(txt_k, img_k)
+            txt_v_expanded = self._broadcast_batch_dimension(txt_v, img_v)
+            
+            q, k, v = torch.cat((txt_q_expanded, img_q), dim=2), torch.cat((txt_k_expanded, img_k), dim=2), torch.cat((txt_v_expanded, img_v), dim=2)
+            attn = attention(q, k, v, pe=pe, mask=mask)
+            
+            # Split attention - txt_attn needs to stay at original batch size
+            txt_attn = attn[:txt_q.shape[0], :txt_len]
+            img_attn = attn[:, txt_len:]
+        else:
+            q, k, v = torch.cat((txt_q, img_q), dim=2), torch.cat((txt_k, img_k), dim=2), torch.cat((txt_v, img_v), dim=2)
+            attn = attention(q, k, v, pe=pe, mask=mask)
+            
+            txt_attn = attn[:,:txt_len]
+            img_attn = attn[:,txt_len:]  
         
         img_attn = style_block.img.ATTN(img_attn, "out")
         txt_attn = style_block.txt.ATTN(txt_attn, "out")
@@ -430,6 +472,7 @@ class LastLayer(nn.Module):
     def forward_linear(self, x: Tensor, vec: Tensor) -> Tensor:
         x = self.linear(x)
         return x
+
 
 
 
