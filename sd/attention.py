@@ -445,6 +445,11 @@ def attention_pytorch(q, k, v, heads, mask=None, attn_precision=None, skip_resha
         # add a heads dimension if there isn't already one
         if mask.ndim == 3:
             mask = mask.unsqueeze(1)
+        # Regional conditioning masks are sliced from a concatenated
+        # [cross|self] tensor, producing non-contiguous views.  The
+        # efficient-attention CUDA kernel requires aligned memory.
+        if not mask.is_contiguous():
+            mask = mask.contiguous()
 
     if SDP_BATCH_LIMIT >= b:
         out = torch.nn.functional.scaled_dot_product_attention(q, k, v, attn_mask=mask, dropout_p=0.0, is_causal=False)
