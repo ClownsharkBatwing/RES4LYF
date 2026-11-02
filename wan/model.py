@@ -732,11 +732,11 @@ class ReWanModel(torch.nn.Module):
             assert B2 == B, "Batch size mismatch... ya sharked it."
 
         # kncokout bias
-        b = self.patch_embedding.bias.view(1, C_out, 1, 1, 1)
+        b = self.patch_embedding.bias.view(1, C_out, 1, 1, 1).to(z.device)
         z_nobias = z - b
 
         # 2D filter -> pinv
-        w3 = self.patch_embedding.weight         # [C_out, C_in, 1, pH, pW]
+        w3 = self.patch_embedding.weight.to(z.device)  # [C_out, C_in, 1, pH, pW]
         w2 = w3.squeeze(2)                       # [C_out, C_in, pH, pW]
         out_ch, in_ch, kH, kW = w2.shape
         W_flat = w2.view(out_ch, -1)            # [C_out, in_ch*pH*pW]
