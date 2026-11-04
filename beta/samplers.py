@@ -252,8 +252,6 @@ class SharkSampler:
             extra_options  += "\n" + options_mgr.get('extra_options', "")
             EO              = ExtraOptions(extra_options)
             default_device  = EO("work_device", str(get_torch_device()))
-            default_dtype   = clamp_dtype(EO("default_dtype", torch.float64), default_device)
-            work_dtype      = clamp_dtype(EO("work_dtype",    torch.float32), default_device)   # latent-sized tensors; sigmas stay at default_dtype
             
             noise_stdev     = options_mgr.get('noise_init_stdev', noise_stdev)
             noise_mean      = options_mgr.get('noise_init_mean',  noise_mean)
@@ -352,6 +350,9 @@ class SharkSampler:
             else:
                 guider = None
                 work_model = model
+
+            default_dtype   = clamp_dtype(EO("default_dtype", torch.float64), default_device, work_model.load_device)
+            work_dtype      = clamp_dtype(EO("work_dtype",    torch.float32), default_device, work_model.load_device)   # latent-sized tensors; sigmas stay at default_dtype
             
             if latent_image is not None:
                 latent_image = latent_image.copy()

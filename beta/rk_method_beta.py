@@ -9,7 +9,7 @@ import itertools
 
 from .phi_functions        import Phi
 from .rk_coefficients_beta import get_implicit_sampler_name_list, get_rk_methods_beta
-from ..helper              import ExtraOptions, get_torch_device
+from ..helper              import ExtraOptions, get_torch_device, clamp_dtype
 from ..latents             import get_orthogonal, get_collinear, get_cosine_similarity, tile_latent, untile_latent
 
 from ..res4lyf             import RESplain, is_debug_logging_enabled
@@ -89,7 +89,7 @@ class RK_Method_Beta:
 
         # ComfyUI casts the latent to the model's compute dtype before the network runs, so precision
         # above work_dtype never reaches the model — it only widens ComfyUI's cond/CFG temporaries.
-        self.work_dtype                  : torch.dtype              = self.EO("work_dtype", torch.float32)
+        self.work_dtype                  : torch.dtype              = clamp_dtype(self.EO("work_dtype", torch.float32), work_device)
 
         self.LINEAR_ANCHOR_X_0           : float                    = noise_anchor
         

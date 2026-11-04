@@ -11,7 +11,7 @@ from nodes import MAX_RESOLUTION
 from comfy_api.latest import io
 
 from ..latents               import get_edge_mask
-from ..helper                import OptionsManager, FrameWeightsManager, initialize_or_scale, get_res4lyf_scheduler_list, parse_range_string, parse_tile_sizes, parse_range_string_int, get_torch_device, clamp_dtype
+from ..helper                import OptionsManager, FrameWeightsManager, initialize_or_scale, get_res4lyf_scheduler_list, parse_range_string, parse_tile_sizes, parse_range_string_int
 
 from .rk_coefficients_beta   import RK_SAMPLER_NAMES_BETA_FOLDERS, get_default_sampler_name, get_sampler_name_list, process_sampler_name
 
@@ -287,10 +287,10 @@ class ClownOptions_DetailBoost_Beta:
         
         
         options = options if options is not None else {}
-
-        default_device = get_torch_device()
-        default_dtype  = clamp_dtype(torch.float64, default_device)
-
+        
+        default_dtype = torch.float64
+        default_device = torch.device('cpu')
+        
         if noise_scaling_type.endswith("_normal"):
             sampler_scaling_normalize = True
             noise_scaling_type = noise_scaling_type[:-7]
@@ -298,11 +298,15 @@ class ClownOptions_DetailBoost_Beta:
         if noise_scaling_end_step == -1:
             noise_scaling_end_step = MAX_STEPS
         
-        if noise_scaling_weights == None: 
+        if noise_scaling_weights is None:
             noise_scaling_weights = initialize_or_scale(None, noise_scaling_weight, MAX_STEPS).to(default_dtype).to(default_device)
+        else:
+            noise_scaling_weights = noise_scaling_weights.to(device=default_device, dtype=default_dtype)
         
-        if noise_scaling_etas == None: 
+        if noise_scaling_etas is None:
             noise_scaling_etas = initialize_or_scale(None, noise_scaling_eta, MAX_STEPS).to(default_dtype).to(default_device)
+        else:
+            noise_scaling_etas = noise_scaling_etas.to(device=default_device, dtype=default_dtype)
         
         noise_scaling_prepend = torch.zeros((noise_scaling_start_step,), dtype=default_dtype, device=default_device)
         
