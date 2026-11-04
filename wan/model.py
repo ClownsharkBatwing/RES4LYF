@@ -772,6 +772,7 @@ class ReWanModel(torch.nn.Module):
         freqs    = None,
         transformer_options = {},
         UNCOND = False,
+        **kwargs,  # forward-compat: swallow Comfy 0.19.3+ kwargs (timestep_zero_index, etc)
     ):
         r"""
         Forward pass through the diffusion model
