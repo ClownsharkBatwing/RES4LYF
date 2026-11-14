@@ -942,9 +942,14 @@ class ReWanModel(torch.nn.Module):
             x   = x_orig.clone().to(torch.float32)
             eps = eps.to(torch.float32)
             eps_orig = eps.clone()
-            
+
             sigma = SIGMA #t_orig[0].to(torch.float32) / 1000
-            denoised = x - sigma * eps
+            if x.shape[1] != eps.shape[1]:
+                eps_padded = torch.zeros_like(x)
+                eps_padded[:, :eps.shape[1]] = eps
+                denoised = x - sigma * eps_padded
+            else:
+                denoised = x - sigma * eps
 
 
             img = comfy.ldm.common_dit.pad_to_patch_size(denoised, self.patch_size)
@@ -955,12 +960,17 @@ class ReWanModel(torch.nn.Module):
             denoised_embed          = denoised_embed.flatten(2).transpose(1, 2) 
 
 
-            img_y0_adain = comfy.ldm.common_dit.pad_to_patch_size(y0_style_pos, self.patch_size)
+            if y0_style_pos.shape[1] != x_orig.shape[1]:
+                y0_style_pos_padded = torch.zeros_like(x_orig)
+                y0_style_pos_padded[:, :y0_style_pos.shape[1]] = y0_style_pos
+            else:
+                y0_style_pos_padded = y0_style_pos
+            img_y0_adain = comfy.ldm.common_dit.pad_to_patch_size(y0_style_pos_padded, self.patch_size)
             patch_size = self.patch_size
 
             y0_adain_embed          = self.patch_embedding(img_y0_adain.float()) #.to(x.dtype)         # vram jumped from ~16-16.5 up to 17.98     gained 300mb with weights at torch.float8_e4m3fn
             grid_sizes = y0_adain_embed.shape[2:]
-            y0_adain_embed          = y0_adain_embed.flatten(2).transpose(1, 2) 
+            y0_adain_embed          = y0_adain_embed.flatten(2).transpose(1, 2)
 
 
             if transformer_options['y0_style_method'] == "AdaIN":
@@ -1014,16 +1024,17 @@ class ReWanModel(torch.nn.Module):
                     denoised_embed[wct_i] = f_cs
 
             denoised_approx = self.invert_patch_embedding(denoised_embed, x_orig.shape, grid_sizes)
-            
+
             denoised_approx = denoised_approx.to(eps)
 
-            eps = (x - denoised_approx) / sigma
+            eps_ch = eps_orig.shape[1]
+            eps = (x[:, :eps_ch] - denoised_approx[:, :eps_ch]) / sigma
             #if eps.shape[0] == 2:
             #    eps[1] = eps_orig[1] + y0_style_pos_weight * (eps[1] - eps_orig[1])
             #    eps[0] = eps_orig[0] + y0_style_pos_synweight * (eps[0] - eps_orig[0])
             #else:
             #    eps[0] = eps_orig[0] + y0_style_pos_weight * (eps[0] - eps_orig[0])
-            
+
             if not UNCOND:
                 if eps.shape[0] == 2:
                     eps[1] = eps_orig[1] + y0_style_pos_weight * (eps[1] - eps_orig[1])
@@ -1046,9 +1057,14 @@ class ReWanModel(torch.nn.Module):
             x   = x_orig.clone().to(torch.float32)
             eps = eps.to(torch.float32)
             eps_orig = eps.clone()
-            
+
             sigma = SIGMA #t_orig[0].to(torch.float32) / 1000
-            denoised = x - sigma * eps
+            if x.shape[1] != eps.shape[1]:
+                eps_padded = torch.zeros_like(x)
+                eps_padded[:, :eps.shape[1]] = eps
+                denoised = x - sigma * eps_padded
+            else:
+                denoised = x - sigma * eps
 
 
             img = comfy.ldm.common_dit.pad_to_patch_size(denoised, self.patch_size)
@@ -1059,7 +1075,12 @@ class ReWanModel(torch.nn.Module):
             denoised_embed          = denoised_embed.flatten(2).transpose(1, 2) 
 
 
-            img_y0_adain = comfy.ldm.common_dit.pad_to_patch_size(y0_style_neg, self.patch_size)
+            if y0_style_neg.shape[1] != x_orig.shape[1]:
+                y0_style_neg_padded = torch.zeros_like(x_orig)
+                y0_style_neg_padded[:, :y0_style_neg.shape[1]] = y0_style_neg
+            else:
+                y0_style_neg_padded = y0_style_neg
+            img_y0_adain = comfy.ldm.common_dit.pad_to_patch_size(y0_style_neg_padded, self.patch_size)
             patch_size = self.patch_size
 
             y0_adain_embed          = self.patch_embedding(img_y0_adain.float()) #.to(x.dtype)         # vram jumped from ~16-16.5 up to 17.98     gained 300mb with weights at torch.float8_e4m3fn
@@ -1118,16 +1139,17 @@ class ReWanModel(torch.nn.Module):
                     denoised_embed[wct_i] = f_cs
 
             denoised_approx = self.invert_patch_embedding(denoised_embed, x_orig.shape, grid_sizes)
-            
+
             denoised_approx = denoised_approx.to(eps)
 
+            eps_ch = eps_orig.shape[1]
             #eps = (x - denoised_approx) / sigma
             #eps[0] = eps_orig[0] + y0_style_neg_weight * (eps[0] - eps_orig[0])
             #if eps.shape[0] == 2:
             #    eps[1] = eps_orig[1] + y0_style_neg_synweight * (eps[1] - eps_orig[1])
-                
+
             if UNCOND:
-                eps = (x - denoised_approx) / sigma
+                eps = (x[:, :eps_ch] - denoised_approx[:, :eps_ch]) / sigma
                 eps[0] = eps_orig[0] + y0_style_neg_weight * (eps[0] - eps_orig[0])
                 if eps.shape[0] == 2:
                     eps[1] = eps_orig[1] + y0_style_neg_synweight * (eps[1] - eps_orig[1])
