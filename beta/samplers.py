@@ -2459,7 +2459,7 @@ class BongSampler:
             **kwargs
             ): 
         
-        options_mgr = OptionsManager(options, **kwargs)
+        options_mgr = OptionsManager(options_group=options_group, **kwargs)
         extra_options    += "\n" + options_mgr.get('extra_options', "")
         
         if model.model.model_config.unet_config.get('stable_cascade_stage') == 'b':
